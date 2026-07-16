@@ -1,0 +1,90 @@
+import { apiClient } from "@/core/api-client";
+import type {
+  Employee,
+  EmployeeInput,
+  EmployeeDocument,
+  MyDocument,
+  SalaryHistoryEntry,
+} from "@/modules/hr/types/employee";
+
+export async function getEmployees(search?: string): Promise<Employee[]> {
+  const res = await apiClient.get("/hr/employees", {
+    params: search ? { search } : undefined,
+  });
+  return res.data.data;
+}
+
+export async function getEmployee(id: number): Promise<Employee> {
+  const res = await apiClient.get(`/hr/employees/${id}`);
+  return res.data.data;
+}
+
+export async function createEmployee(input: EmployeeInput): Promise<Employee> {
+  const res = await apiClient.post("/hr/employees", input);
+  return res.data.data;
+}
+
+export async function updateEmployee(
+  id: number,
+  input: EmployeeInput,
+): Promise<Employee> {
+  const res = await apiClient.put(`/hr/employees/${id}`, input);
+  return res.data.data;
+}
+
+export async function getSalaryHistory(id: number): Promise<SalaryHistoryEntry[]> {
+  const res = await apiClient.get(`/hr/employees/${id}/salary-history`);
+  return res.data.data;
+}
+
+export async function activateEmployee(id: number): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/activate`);
+  return res.data.data;
+}
+
+/** Grant or revoke HR-officer access for this employee's user account. */
+export async function setHrRole(
+  id: number,
+  isHrOfficer: boolean,
+): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/hr-role`, {
+    is_hr_officer: isHrOfficer,
+  });
+  return res.data.data;
+}
+
+export async function getEmployeeDocuments(id: number): Promise<EmployeeDocument[]> {
+  const res = await apiClient.get(`/hr/employees/${id}/documents`);
+  return res.data.data;
+}
+
+/** The caller's own HR-uploaded documents (listed; download gated by an access request). */
+export async function getMyDocuments(): Promise<MyDocument[]> {
+  const res = await apiClient.get("/hr/me/documents");
+  return res.data.data;
+}
+
+export async function uploadEmployeeDocument(
+  id: number,
+  file: File,
+  label: "Uploaded" | "Signed" = "Uploaded",
+): Promise<EmployeeDocument> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("name", file.name);
+  form.append("label", label);
+  const res = await apiClient.post(`/hr/employees/${id}/documents`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data.data;
+}
+
+export async function deleteEmployeeDocument(id: number, documentId: number): Promise<void> {
+  await apiClient.delete(`/hr/employees/${id}/documents/${documentId}`);
+}
+
+/** The logged-in user's own employee record (identity from the token). */
+export async function getMyEmployee(): Promise<Employee> {
+  const res = await apiClient.get("/hr/me/employee");
+  return res.data.data;
+}

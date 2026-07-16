@@ -1,0 +1,180 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { Checkbox } from "@/modules/crm/components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/modules/crm/components/ui/table";
+import { PriorityChip } from "@/modules/crm/components/shared/status-badge/priority-chip";
+import { StatusChip } from "@/modules/crm/components/shared/status-badge/status-chip";
+import { Edit, Trash2, UserPlus } from "lucide-react";
+import { TableSkeleton } from "@/modules/crm/features/dashboard/components/table-skeleton";
+import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
+import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
+import type { Lead, OutreachStatus, CallingStatus } from "@/modules/crm/features/leads/types/lead-types";
+
+// The Website column is hidden from the Leads list for Sprint 6 (BD workflow now uses
+// Priority as the primary indicator). website_status remains in the model/API and on the
+// Lead Detail + Edit surfaces — this is a presentation-only change to the list view.
+const emailConfig: Record<OutreachStatus, { label: string; className: string }> = {
+  sent: { label: "Sent", className: "bg-gray-100 text-gray-600" },
+  opened: { label: "Opened", className: "bg-blue-500/10 text-blue-500" },
+  replied: { label: "Replied", className: "bg-green-100 text-green-700" },
+  none: { label: "\u2014", className: "text-muted-foreground" },
+};
+
+const callConfig: Record<CallingStatus, { label: string; className: string }> = {
+  called: { label: "Called", className: "bg-green-100 text-green-700" },
+  scheduled: { label: "Scheduled", className: "bg-blue-500/10 text-blue-500" },
+  "not-called": { label: "Not Called", className: "bg-gray-100 text-gray-600" },
+};
+
+const chipClass = "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium";
+
+type LeadsTableProps = {
+  leads: Lead[];
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  searchActive: boolean;
+  onEdit: (lead: Lead) => void;
+  onDelete: (lead: Lead) => void;
+  /** Assign/Reassign is Admin/SA only; BD sees the owner but can't change it. */
+  canAssign: boolean;
+  onAssign: (lead: Lead) => void;
+};
+
+export function LeadsTable({ leads, isLoading, isError, onRetry, searchActive, onEdit, onDelete, canAssign, onAssign }: LeadsTableProps) {
+  const router = useRouter();
+
+  if (isLoading) return <TableSkeleton />;
+  if (isError) return <ErrorState message="Failed to load leads" onRetry={onRetry} />;
+
+  const th = "h-10 px-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+  const td = "px-3 py-3.5 text-sm";
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-card">
+      <Table>
+        <TableHeader>
+          <TableRow className="border-b border-border-subtle bg-surface-table-header">
+            <TableHead className={th + " w-10"}>
+              <Checkbox aria-label="Select all" />
+            </TableHead>
+            <TableHead className={th}>Business</TableHead>
+            <TableHead className={th}>Contact</TableHead>
+            <TableHead className={th}>Priority</TableHead>
+            <TableHead className={th}>Email</TableHead>
+            <TableHead className={th}>Calling</TableHead>
+            <TableHead className={th}>Status</TableHead>
+            {canAssign ? <TableHead className={th}>Assigned BD</TableHead> : null}
+            <TableHead className={th}>Last Activity</TableHead>
+            <TableHead className={th + " w-24 text-center"}>Action</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {leads && leads.length > 0 ? (
+            leads.map((lead) => (
+              <TableRow
+                key={lead.id}
+                className="cursor-pointer border-b border-border-subtle transition-colors hover:bg-muted"
+                onClick={() => router.push(`/zerem/leads/${lead.id}`)}
+              >
+                <TableCell className="px-3 py-3.5">
+                  <Checkbox aria-label={`Select ${lead.business}`} />
+                </TableCell>
+                <TableCell className={td + " font-semibold text-foreground"}>
+                  {lead.business}
+                </TableCell>
+                <TableCell className={td + " text-secondary-foreground"}>
+                  {lead.contact}
+                </TableCell>
+                <TableCell className="px-3 py-3.5">
+                  <PriorityChip priority={lead.priority} />
+                </TableCell>
+                <TableCell className="px-3 py-3.5">
+                  <span className={chipClass + " " + emailConfig[lead.emailOutreach].className}>
+                    {emailConfig[lead.emailOutreach].label}
+                  </span>
+                </TableCell>
+                <TableCell className="px-3 py-3.5">
+                  <span className={chipClass + " " + callConfig[lead.coldCalling].className}>
+                    {callConfig[lead.coldCalling].label}
+                  </span>
+                </TableCell>
+                <TableCell className="px-3 py-3.5">
+                  <StatusChip status={lead.updateStatus} />
+                </TableCell>
+                {canAssign ? (
+                  <TableCell className={td}>
+                    {lead.assignedTo ? (
+                      <span className="text-secondary-foreground">{lead.assignedTo.name}</span>
+                    ) : (
+                      <span className="text-muted-foreground italic">Unassigned</span>
+                    )}
+                  </TableCell>
+                ) : null}
+                <TableCell className={td + " text-muted-foreground"}>
+                  {formatActivityTimestamp(lead.lastActivity)}
+                </TableCell>
+                <TableCell className="px-3 py-3.5">
+                  <div className="flex items-center justify-center gap-0.5">
+                    {canAssign ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onAssign(lead);
+                        }}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={`Assign ${lead.business}`}
+                      >
+                        <UserPlus className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEdit(lead);
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`Edit ${lead.business}`}
+                    >
+                      <Edit className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete(lead);
+                      }}
+                      className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`Delete ${lead.business}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))
+          ) : (
+            <TableRow>
+              <TableCell
+                colSpan={canAssign ? 10 : 9}
+                className="px-4 py-12 text-center text-sm text-muted-foreground"
+              >
+                {searchActive ? "No leads match your search." : "No leads yet"}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}

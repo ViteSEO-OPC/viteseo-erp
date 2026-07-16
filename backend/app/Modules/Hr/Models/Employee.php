@@ -1,0 +1,179 @@
+<?php
+
+namespace App\Modules\Hr\Models;
+
+use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class Employee extends Model
+{
+    use SoftDeletes;
+
+    protected $table = 'hr_employees';
+
+    protected $fillable = [
+        'user_id',
+        'department_id',
+        'manager_id',
+        'work_schedule_id',
+        'employee_no',
+        'job_title',
+        'employment_status',
+        'employment_type',
+        'work_location',
+        'employee_role',
+        'onboarding_status',
+        'hire_date',
+        'phone',
+        'address',
+        'emergency_contact_name',
+        'emergency_contact_phone',
+        'bank_name',
+        'bank_account',
+        'base_salary',
+        'is_management',
+        'pay_frequency',
+        'currency',
+        'bank_account_type',
+        'bank_account_name',
+        'sss_contribution',
+        'pagibig_contribution',
+        'philhealth_contribution',
+        'food_allowance',
+        'transportation_allowance',
+        'load_allowance',
+        'custom_workdays',
+        'custom_start_time',
+        'custom_end_time',
+        'custom_grace_minutes',
+        // Expanded personal record.
+        'first_name',
+        'middle_name',
+        'last_name',
+        'name_extension',
+        'gender',
+        'civil_status',
+        'nationality',
+        'date_of_birth',
+        'place_of_birth',
+        'current_address',
+        'mothers_maiden_name',
+        'fathers_name',
+        'siblings_name',
+        'high_school',
+        'college_course',
+        'university',
+        'emergency_contact_relationship',
+        'height',
+        'weight',
+        'health_condition',
+    ];
+
+    protected $casts = [
+        'hire_date' => 'date',
+        'date_of_birth' => 'date',
+        'base_salary' => 'decimal:2',
+        'is_management' => 'boolean',
+        'custom_workdays' => 'array',
+        'custom_grace_minutes' => 'integer',
+    ];
+
+    /** Management staff: fixed salary + exempt from attendance. */
+    public function isManagement(): bool
+    {
+        return (bool) $this->is_management;
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
+    }
+
+    public function manager(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'manager_id');
+    }
+
+    public function workSchedule(): BelongsTo
+    {
+        return $this->belongsTo(WorkSchedule::class);
+    }
+
+    public function leaveBalances(): HasMany
+    {
+        return $this->hasMany(LeaveBalance::class);
+    }
+
+    public function leaveRequests(): HasMany
+    {
+        return $this->hasMany(LeaveRequest::class);
+    }
+
+    public function attendance(): HasMany
+    {
+        return $this->hasMany(Attendance::class);
+    }
+
+    public function reimbursements(): HasMany
+    {
+        return $this->hasMany(Reimbursement::class);
+    }
+
+    public function payslips(): HasMany
+    {
+        return $this->hasMany(Payslip::class);
+    }
+
+    public function benefits(): HasMany
+    {
+        return $this->hasMany(EmployeeBenefit::class);
+    }
+
+    /** Benefit programs (HMO, retirement, …) this employee is enrolled in. */
+    public function benefitPrograms(): BelongsToMany
+    {
+        return $this->belongsToMany(
+            BenefitProgram::class,
+            'hr_benefit_enrollments',
+            'employee_id',
+            'benefit_program_id',
+        )->withTimestamps();
+    }
+
+    public function salaryHistories(): HasMany
+    {
+        return $this->hasMany(SalaryHistory::class)->orderByDesc('effective_date')->orderByDesc('id');
+    }
+
+    public function employmentHistories(): HasMany
+    {
+        // Current role (null end date) first, then most-recent past roles.
+        return $this->hasMany(EmploymentHistory::class)
+            ->orderByRaw('end_date IS NULL DESC')
+            ->orderByDesc('start_date');
+    }
+
+    public function documentRequests(): HasMany
+    {
+        return $this->hasMany(DocumentRequest::class);
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(EmployeeDocument::class)->latest();
+    }
+
+    public function changeRequests(): HasMany
+    {
+        return $this->hasMany(ChangeRequest::class);
+    }
+}

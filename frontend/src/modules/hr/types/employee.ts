@@ -1,0 +1,214 @@
+export interface DepartmentRef {
+  id: number;
+  name: string;
+  code: string;
+}
+
+export interface ManagerRef {
+  id: number;
+  name: string | null;
+}
+
+export interface Employee {
+  id: number;
+  employee_no: string;
+  name: string; // composed identity from the split-name fields (users.name)
+  email: string;
+  is_hr_officer: boolean; // account has HR-officer (admin) access
+
+  job_title: string;
+  employment_status: string;
+  employment_type: string | null;
+  work_location: string | null;
+  employee_role: string | null;
+  onboarding_status: "pending" | "complete" | null;
+  hire_date: string;
+  base_salary: string; // raw decimal from the API; format for display
+  is_management: boolean; // fixed salary + exempt from attendance
+  phone: string | null;
+  address: string | null; // home address
+  emergency_contact_name: string | null;
+  emergency_contact_relationship: string | null;
+  emergency_contact_phone: string | null;
+  bank_name: string | null;
+  bank_account: string | null; // account number
+  pay_frequency: string | null;
+  currency: string | null;
+  bank_account_type: string | null;
+  bank_account_name: string | null;
+  sss_contribution: string | null;
+  pagibig_contribution: string | null;
+  philhealth_contribution: string | null;
+  food_allowance: string | null;
+  transportation_allowance: string | null;
+  load_allowance: string | null;
+  department: DepartmentRef | null;
+  manager: ManagerRef | null;
+  created_at: string;
+  // Expanded personal record.
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
+  name_extension: string | null;
+  gender: string | null;
+  civil_status: string | null;
+  nationality: string | null;
+  date_of_birth: string | null;
+  place_of_birth: string | null;
+  current_address: string | null;
+  mothers_maiden_name: string | null;
+  fathers_name: string | null;
+  siblings_name: string | null;
+  high_school: string | null;
+  college_course: string | null;
+  university: string | null;
+  height: string | null;
+  weight: string | null;
+  health_condition: string | null;
+  employment_history: EmploymentHistoryEntry[];
+}
+
+export interface EmploymentHistoryEntry {
+  id: number;
+  title: string;
+  start_date: string;
+  end_date: string | null; // null = current
+  status: string; // current | promoted | transferred | hired
+}
+
+export interface EmployeeInput {
+  first_name: string;
+  last_name: string;
+  middle_name?: string;
+  name_extension?: string;
+  email: string;
+  department_id: number;
+  manager_id?: number | null;
+  job_title: string;
+  employment_status: string;
+  hire_date: string;
+  base_salary: number;
+  is_management?: boolean; // fixed salary + exempt from attendance
+  phone?: string;
+  address?: string;
+  current_address?: string;
+  gender?: string;
+  civil_status?: string;
+  nationality?: string;
+  date_of_birth?: string;
+  place_of_birth?: string;
+  mothers_maiden_name?: string;
+  fathers_name?: string;
+  siblings_name?: string;
+  high_school?: string;
+  college_course?: string;
+  university?: string;
+  emergency_contact_name?: string;
+  emergency_contact_relationship?: string;
+  emergency_contact_phone?: string;
+  bank_name?: string;
+  bank_account?: string;
+  height?: string;
+  weight?: string;
+  health_condition?: string;
+  employment_type?: string;
+  work_location?: string;
+  employee_role?: string;
+  pay_frequency?: string;
+  currency?: string;
+  bank_account_type?: string;
+  bank_account_name?: string;
+  sss_contribution?: string;
+  pagibig_contribution?: string;
+  philhealth_contribution?: string;
+  food_allowance?: string;
+  transportation_allowance?: string;
+  load_allowance?: string;
+  // Audit inputs (only meaningful on update when the value actually changes).
+  salary_change_reason?: string;
+  salary_change_type?: string;
+  role_change_type?: string;
+  role_change_reason?: string;
+}
+
+export const GENDERS = ["Male", "Female", "Other", "Prefer not to say"] as const;
+export const CIVIL_STATUSES = ["Single", "Married", "Widowed", "Separated", "Divorced"] as const;
+export const JOB_TYPES = [
+  "Full-time Regular",
+  "Full-time Probationary",
+  "Part-time",
+  "Contract",
+  "Project-based",
+  "Internship/OJT",
+] as const;
+
+export const PAY_FREQUENCIES = [
+  { value: "monthly", label: "Monthly" },
+  { value: "semi_monthly", label: "Semi-monthly" },
+  { value: "weekly", label: "Weekly" },
+  { value: "bi_weekly", label: "Bi-weekly" },
+] as const;
+
+export const BANK_ACCOUNT_TYPES = ["Savings", "Checking", "Payroll"] as const;
+
+export const SALARY_CHANGE_TYPES = [
+  { value: "promotion", label: "Promotion" },
+  { value: "merit", label: "Merit increase" },
+  { value: "adjustment", label: "Adjustment" },
+] as const;
+
+export function payFrequencyLabel(v: string | null): string {
+  return PAY_FREQUENCIES.find((f) => f.value === v)?.label ?? "—";
+}
+
+/** Short badge label for a compensation-history entry, e.g. "Promotion" / "Hire". */
+export function salaryChangeLabel(t: string | null): string {
+  if (!t) return "Adjustment";
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+export interface EmployeeDocument {
+  id: number;
+  name: string;
+  size_bytes: number;
+  label: string; // "Uploaded" | "Signed"
+  url: string | null;
+  created_at: string;
+}
+
+// Employee self-service view of an HR-uploaded document: listed always, but the
+// download URL is gated behind a fulfilled access request.
+export interface MyDocument {
+  id: number;
+  name: string;
+  label: string;
+  size_bytes: number;
+  created_at: string;
+  request_status: "none" | "pending" | "in_progress" | "fulfilled" | "rejected";
+  unlocked: boolean;
+  url: string | null;
+}
+
+export interface SalaryHistoryEntry {
+  id: number;
+  base_salary: number;
+  effective_date: string;
+  reason: string | null;
+  change_type: string | null; // hire | promotion | merit | adjustment
+  changed_by: string | null;
+}
+
+export const EMPLOYMENT_STATUSES = [
+  "regular",
+  "probationary",
+  "contract",
+  "part_time",
+] as const;
+
+/** Prettify an employment_status for display, e.g. part_time -> "Part Time". */
+export function statusLabel(status: string): string {
+  return status
+    .split("_")
+    .map((w) => w[0]?.toUpperCase() + w.slice(1))
+    .join(" ");
+}

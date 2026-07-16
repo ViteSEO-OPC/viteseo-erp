@@ -1,0 +1,536 @@
+/*
+ * CRM (Zerem) module theme — ADDITIVE and scoped, imported from globals.css.
+ * Only CRM-unique tokens and utilities are declared so HR and Projects theming is untouched.
+ * CRM's shadcn aliases (background, card, primary, border, chart, sidebar, radius) intentionally
+ * fall through to the PLATFORM tokens already defined in globals.css.
+ */
+
+@theme {
+  /* CRM-unique brand + semantic utility tokens (generate bg-/text-/border- utilities). */
+  --color-teal-400: #4FD8D7;
+  --color-teal-500: #2AB8B4;
+  --color-teal-700: #0F7A78;
+  --color-teal-900: #0C6260;
+  --color-cream: #FBFBEF;
+  --color-gray-150: #F0F0F0;
+  --color-priority-high: var(--priority-high);
+  --color-priority-medium: var(--priority-medium);
+  --color-priority-low: var(--priority-low);
+
+  --font-primary: "Exo", "Exo 2", sans-serif;
+  --font-secondary: "Inter", sans-serif;
+
+  --text-page-title: 36px;
+  --text-page-title--line-height: 54px;
+  --text-display: 30px;
+  --text-section: 24px;
+  --text-card-title: 20px;
+  --text-card-title--line-height: 30px;
+  --text-subheading: 16px;
+  --text-subheading--line-height: 17px;
+  --text-body: 14px;
+  --text-body-sm: 12px;
+  --text-table-head: 12px;
+}
+
+:root {
+  --teal-400: #4FD8D7;
+  --teal-500: #2AB8B4;
+  --teal-700: #0F7A78;
+  --teal-900: #0C6260;
+  --white: #FFFFFF;
+  --cream: #FBFBEF;
+  --gray-50: #F9FAFB;
+  --gray-100: #F3F4F6;
+  --gray-150: #F0F0F0;
+  --gray-200: #E5E7EB;
+  --gray-300: #B0B0B0;
+  --gray-400: #8A8C90;
+  --gray-500: #6B7280;
+  --gray-600: #525252;
+  --gray-800: #252424;
+  --gray-900: #17181A;
+  --green-700: #15803D;
+  --green-100: #DCFCE7;
+  --red-500: #EF4444;
+  --red-800: #B42318;
+  --yellow-800: #854D0E;
+  --blue-500: #3A7AD8;
+  --chart-teal: #4FD8D7;
+  --chart-coral: #F08080;
+  --chart-gold: #F9C74F;
+  --chart-lavender: #B8A9E8;
+  --chart-periwinkle: #7B9EF9;
+
+  --color-primary-default: var(--teal-400);
+  --color-primary-hover: var(--teal-500);
+  --color-primary-pressed: var(--teal-700);
+  --color-primary-accent: var(--teal-900);
+  --color-bg-page: var(--white);
+  --color-surface-card: var(--white);
+  --color-surface-sidebar: var(--white);
+  --color-surface-subtle: var(--gray-100);
+  --color-surface-table-header: var(--gray-50);
+  --color-border-default: var(--gray-200);
+  --color-border-subtle: var(--gray-150);
+  --color-text-heading: var(--gray-900);
+  --color-text-body: var(--gray-800);
+  --color-text-secondary: var(--gray-600);
+  --color-text-caption: var(--gray-500);
+  --color-text-placeholder: var(--gray-400);
+  --color-text-disabled: var(--gray-300);
+  --color-success: var(--green-700);
+  --color-success-bg: var(--green-100);
+  --color-warning: var(--yellow-800);
+  --color-danger: var(--red-500);
+  --color-danger-text: var(--red-800);
+  --color-info: var(--blue-500);
+
+  /* Copilot tokens — ⚠ sampled values, pending designer confirmation */
+  --copilot-fab-open-bg: #2F3E3E;
+  --copilot-fab-open-hover: #253333;
+  --copilot-header-gradient-from: #E3F9F2;
+  --copilot-header-gradient-to: #F5F7F2;
+  --copilot-top-accent: #DFF9F1;
+  --copilot-chip-bg: #EFFDFA;
+  --copilot-chip-border: #6BC1BA;
+
+  /* Lead Details tokens — ⚠ sampled values, pending designer confirmation */
+  --qa-icon-indigo: #9286DE;
+  --qa-icon-orange: #E08A3C;
+  --qa-tile-teal: #E3F9F8;
+  --qa-tile-indigo: #EEF2FF;
+  --qa-tile-amber: #FFF7E5;
+  --qa-tile-green: #EFFFF4;
+  --note-bg-self: #F7F7EC;
+  --note-bg-other: #EFFFFE;
+
+  /* Import Leads tokens — ⚠ sampled values, pending designer confirmation */
+  --color-warning-bg: #FBF7B9;
+  --color-success-emerald: #00B983;
+  --dropzone-icon-tint: #EBF7F8;
+
+  /* Follow-ups tokens — ⚠ sampled values, pending designer confirmation */
+  --color-ai-banner-bg: #E7F7F7;
+  --avatar-blue: #7BC7E6;
+  --avatar-orange: #E9AA7F;
+  --avatar-purple: #AC7AC8;
+  --avatar-gray: #C8C8C8;
+  --chip-purple-bg: #F0E8F5;
+  --chip-purple-text: #8B5CF6;
+  --chip-purple-dot: #AC7AC8;
+  --chip-teal-bg: #E6F7F7;
+  --chip-amber-bg: #FFF3E0;
+  --chip-blue-bg: #E3F4FD;
+  --inbox-badge-bg: #10B7B3;
+  --schedule-toggle-on: #05B0AE;
+
+  --font-primary: "Exo", "Exo 2", sans-serif;
+  --font-secondary: "Inter", sans-serif;
+
+  --fs-page-title: 36px; --lh-page-title: 54px;
+  --fs-display: 30px; --lh-display: normal;
+  --fs-section: 24px; --lh-section: normal;
+  --fs-card-title: 20px; --lh-card-title: 30px;
+  --fs-subheading: 16px; --lh-subheading: 17px;
+  --fs-body: 14px; --lh-body: normal;
+  --fs-body-sm: 12px; --lh-body-sm: normal;
+  --fs-table-head: 12px;
+
+  --fw-extrabold: 800;
+  --fw-bold: 700;
+  --fw-semibold: 600;
+  --fw-medium: 500;
+  --fw-regular: 400;
+
+  --space-0_5: 2px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 9999px;
+  --radius-circle: 50%;
+
+  --shadow-none: none;
+  --shadow-card: 0 1px 3px 0 rgba(16, 24, 40, 0.08), 0 1px 2px -1px rgba(16, 24, 40, 0.05);
+  --shadow-fab: 0 6px 16px rgba(12, 98, 96, 0.30);
+
+  --opacity-disabled: 0.5;
+  --opacity-hover-overlay: 0.08;
+  --opacity-full: 1;
+
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 300ms ease;
+
+  --z-base: 0;
+  --z-content: 10;
+  --z-sidebar: 20;
+  --z-header: 30;
+  --z-dropdown: 40;
+  --z-fab: 50;
+  --z-overlay: 60;
+  --z-drawer-dialog: 70;
+  --z-toast: 80;
+  --z-tooltip: 90;
+
+
+  --chart-teal-dark: #10B7B3;
+  --chart-teal-light: #76E9E6;
+  --chart-teal-lightest: #A9EFEE;
+  --chart-violet-strong: #8069C5;
+  --chart-gray: #C5C5C5;
+
+  --cal-today-bg: #E7FAFA;
+  --cal-othermonth-bg: #F5F5E8;
+  --cal-header-bg: #B0B0B0;
+  --event-email-bg: #E7FAFA;
+  --event-call-bg: #DAEDF9;
+  --event-meeting-bg: #FEF8EE;
+  --event-task-bg: #FFEEEE;
+  --upcoming-chip-today: #91DAD9;
+
+  /* ──────────────────────────────────────────────────────────────
+     SEMANTIC THEME TOKENS (reuse existing palette — no new hex).
+     These are the ONLY names components should reference for color.
+     Dark mode overrides these in [data-theme="dark"] / .dark below.
+     ────────────────────────────────────────────────────────────── */
+
+  /* Priority */
+  --priority-high: var(--red-500);
+  --priority-medium: var(--chart-gold);
+  --priority-low: var(--teal-400);
+
+  /* Lead status */
+  --lead-interested: var(--teal-500);
+  --lead-awaiting: var(--gray-500);
+  --lead-declined: var(--red-500);
+  --lead-callback: var(--teal-500);
+  --lead-proposal: var(--teal-400);   /* ⚠ confirm with design */
+  --lead-new: var(--blue-500);
+
+  /* Calendar event types (alias existing --chart-* / --cal-*) */
+  --calendar-email: var(--chart-teal);
+  --calendar-call: var(--chart-periwinkle);
+  --calendar-meeting: var(--chart-gold);
+  --calendar-task: var(--chart-coral);
+  --calendar-today: var(--cal-today-bg);
+  --calendar-header: var(--cal-header-bg);
+
+  /* Shell surfaces */
+  --sidebar-active: var(--color-primary-default);
+  --sidebar-hover: var(--color-surface-subtle);
+  --header: var(--color-bg-page);
+  --header-border: var(--color-border-default);
+  --input-border: var(--color-border-default);
+
+  /* Status (short aliases of existing --color-* semantics) */
+  --success: var(--color-success);
+  --warning: var(--color-warning);
+  --danger: var(--color-danger);
+  --info: var(--color-info);
+
+  /* Badges */
+  --badge-success: var(--color-success);
+  --badge-warning: var(--color-warning);
+  --badge-danger: var(--color-danger);
+  --badge-info: var(--color-info);
+
+  /* Tables */
+  --table-header: var(--color-surface-table-header);
+  --table-row: var(--color-surface-card);
+  --table-hover: var(--color-surface-subtle);
+  --table-selected: var(--chip-teal-bg);   /* ⚠ confirm with design */
+
+  /* Dashboard KPI stat card — top accent bar (teal → transparent horizontal gradient) */
+  --kpi-top-accent: var(--teal-400);
+
+  /* Copilot */
+  --copilot-bg: var(--color-surface-card);
+  --copilot-border: var(--color-border-default);
+  --copilot-text: var(--color-text-body);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   DARK MODE — single source of theme switching.
+   Applies under .dark OR [data-theme="dark"]. Overrides ONLY the
+   semantic/leaf tokens; components never change.
+
+   ⚠ BASELINE ONLY: no approved dark Figma/palette was provided. The
+   surface shades below REUSE the existing gray ramp as a placeholder.
+   Accurate dark surfaces almost certainly need new tokens — fill these
+   from an approved dark design. See Dark-Mode-Theming.md.
+
+   NOTE: components still using primitive utilities (bg-gray-100,
+   text-red-500, …) will NOT flip until refactored to semantic
+   utilities — see the de-hardcoding backlog in Dark-Mode-Theming.md.
+   ══════════════════════════════════════════════════════════════════ */
+.dark,
+[data-theme="dark"] {
+  /* Core neutrals (semantic leaf tokens — cascade into --background/--card/… ) */
+  --color-bg-page: var(--gray-900);            /* ⚠ baseline */
+  --color-surface-card: var(--gray-800);       /* ⚠ baseline */
+  --color-surface-sidebar: var(--gray-900);    /* ⚠ baseline */
+  --color-surface-subtle: var(--gray-800);     /* ⚠ baseline */
+  --color-surface-table-header: var(--gray-800); /* ⚠ baseline */
+  --color-border-default: var(--gray-600);     /* ⚠ baseline */
+  --color-border-subtle: var(--gray-800);      /* ⚠ baseline */
+  --color-text-heading: var(--gray-50);        /* ⚠ baseline */
+  --color-text-body: var(--gray-100);          /* ⚠ baseline */
+  --color-text-secondary: var(--gray-200);     /* ⚠ baseline */
+  --color-text-caption: var(--gray-300);       /* ⚠ baseline */
+  --color-text-placeholder: var(--gray-400);
+  --color-text-disabled: var(--gray-600);
+
+  /* App-layer tokens that point at primitives directly must be re-pointed */
+  --color-secondary: var(--gray-800);          /* ⚠ baseline */
+  --color-muted: var(--gray-800);              /* ⚠ baseline */
+  --color-input: var(--gray-600);              /* ⚠ baseline */
+  --color-sidebar-accent: var(--gray-800);     /* ⚠ baseline */
+  --color-primary-foreground: var(--gray-900);
+
+  /* Feature surfaces — ⚠ pending approved dark design */
+  --copilot-bg: var(--gray-800);
+  --table-row: var(--gray-800);
+  --table-hover: var(--gray-600);
+  --header: var(--gray-900);
+  --sidebar-hover: var(--gray-800);
+  /* Priority / lead / calendar / chart accents kept as-is (brand hues read on dark); ⚠ confirm */
+}
+
+
+@layer components {
+  .calendar-grid .fc {
+    font-family: var(--font-primary);
+  }
+  .calendar-grid .fc .fc-daygrid-day {
+    border: 1px solid #E5E7EB;
+    padding: 0;
+  }
+  .calendar-grid .fc .fc-daygrid-day.cal-today {
+    background-color: var(--cal-today-bg);
+    border: 2px solid var(--teal-400);
+    border-left: 3px solid var(--teal-400);
+  }
+  .calendar-grid .fc .fc-daygrid-day.cal-other-month {
+    background-color: var(--cal-othermonth-bg);
+    border: 1px solid #E5E7EB;
+  }
+  .calendar-grid .fc .fc-daygrid-day.cal-other-month {
+    background-color: var(--cal-othermonth-bg);
+  }
+  .calendar-grid .fc .fc-daygrid-day.cal-other-month .cal-date-num {
+    color: var(--gray-400);
+  }
+  .calendar-grid .fc .fc-daygrid-day-top {
+    justify-content: flex-start;
+    padding: 4px 6px;
+  }
+  .calendar-grid .fc .fc-daygrid-day-events {
+    min-height: 0;
+    padding: 0 4px 4px;
+  }
+  .calendar-grid .fc .fc-daygrid-event {
+    margin: 1px 0;
+    border-radius: 4px;
+    border: none;
+    padding: 0;
+    background: transparent;
+  }
+  .calendar-grid .fc .fc-daygrid-more-link {
+    font-size: 10px;
+    color: var(--gray-500);
+    padding: 0 4px;
+  }
+  .calendar-grid .fc .fc-scrollgrid {
+    border: 1px solid #E5E7EB;
+  }
+  .calendar-grid .fc .fc-scrollgrid-section-header td {
+    border: none;
+  }
+  .calendar-grid .fc .fc-col-header-cell {
+    background-color: var(--cal-header-bg);
+    padding: 6px 0;
+    border: none;
+  }
+  .calendar-grid .fc .fc-col-header-cell-cals {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: #17181A;
+    letter-spacing: 0.05em;
+  }
+  .calendar-grid .fc .fc-day-today .fc-daygrid-day-number {
+    background-color: var(--teal-400);
+    color: white;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0;
+  }
+  .calendar-grid .fc .fc-daygrid-day-number {
+    font-size: 12px;
+    color: var(--gray-900);
+    font-weight: 600;
+    padding: 0;
+  }
+  .cal-cell-inner {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+  }
+  .cal-date-num {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-900);
+    padding: 4px 6px;
+  }
+  .cal-event-pill {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--gray-900);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cal-event-pill-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .cal-event-pill-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Week / Day (timeGrid) */
+  .calendar-grid .fc .fc-timegrid-slot-label,
+  .calendar-grid .fc .fc-timegrid-axis {
+    font-size: 11px;
+    color: var(--gray-500);
+  }
+  .calendar-grid .fc .fc-timegrid-col.fc-day-today,
+  .calendar-grid .fc .fc-timegrid-col.cal-today {
+    background-color: var(--cal-today-bg);
+  }
+  .calendar-grid .fc .fc-timegrid-event {
+    border-radius: 6px;
+    border-left-width: 3px;
+    box-shadow: none;
+    padding: 1px 4px;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .calendar-grid .fc .fc-timegrid-now-indicator-line,
+  .calendar-grid .fc .fc-timegrid-now-indicator-arrow {
+    border-color: var(--teal-400);
+  }
+
+  /* Schedule (list / agenda) */
+  .calendar-grid .fc .fc-list {
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .calendar-grid .fc .fc-list-day-cushion {
+    background-color: var(--cal-header-bg);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--gray-900);
+  }
+  .calendar-grid .fc .fc-list-event:hover td {
+    background-color: var(--cal-today-bg);
+  }
+  .calendar-grid .fc .fc-list-event-time {
+    font-size: 12px;
+    color: var(--gray-500);
+  }
+  .calendar-grid .fc .fc-list-event-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-900);
+  }
+
+  /* Year (multiMonth) */
+  .calendar-grid .fc .fc-multimonth {
+    border: none;
+    gap: 12px;
+  }
+  .calendar-grid .fc .fc-multimonth-month {
+    border: 1px solid #E5E7EB;
+    border-radius: 8px;
+    padding: 6px;
+  }
+  .calendar-grid .fc .fc-multimonth-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--teal-600, #0d9488);
+    padding: 4px 0 8px;
+  }
+  .calendar-grid .fc .fc-multimonth-daygrid,
+  .calendar-grid .fc .fc-multimonth-daygrid .fc-daygrid-day {
+    background: transparent;
+    border: none;
+  }
+}
+
+/* Leaflet (Nearby Clients interactive map) — theme-aware surfaces for popups, controls, and
+   attribution so the map reads correctly in both light and dark mode. */
+.leaflet-container {
+  background: #e9edf2;
+  font: inherit;
+}
+[data-theme="dark"] .leaflet-container {
+  background: #1b222c;
+}
+/* Scoped under .leaflet-container so these win over Leaflet's own stylesheet (which the map
+   component imports after globals.css). */
+.leaflet-container .leaflet-popup-content-wrapper,
+.leaflet-container .leaflet-popup-tip {
+  background: var(--card);
+  color: var(--card-foreground);
+}
+.leaflet-container .leaflet-popup-content {
+  margin: 0.75rem 0.875rem;
+}
+.leaflet-container a.leaflet-popup-close-button {
+  color: var(--card-foreground);
+}
+.leaflet-container .leaflet-bar a,
+.leaflet-container .leaflet-control-attribution {
+  background: var(--card);
+  color: var(--card-foreground);
+  border-color: var(--border);
+}
+/* Leaflet's own stylesheet (injected at runtime, after globals.css) sets
+   `.leaflet-container .leaflet-control-attribution { background: rgba(255,255,255,.8) }`
+   at EQUAL specificity, so it wins by source order and the pill renders white in dark
+   mode. Force the themed surface so the intended `var(--card)` above actually applies. */
+.leaflet-container .leaflet-control-attribution {
+  background: var(--card) !important;
+}
+.leaflet-container .leaflet-control-attribution a {
+  color: #0d9488;
+}

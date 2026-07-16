@@ -1,0 +1,36 @@
+{
+  "default": "dashboard",
+  "modules": {
+    "dashboard": [
+      { "id": "qa-dash-priority", "label": "High Priority Leads", "intentId": "show-hot-leads", "requires": ["hasHighPriorityLeads"] },
+      { "id": "qa-dash-followups", "label": "Follow-ups", "intentId": "show-followups", "requires": ["hasFollowUps"] },
+      { "id": "qa-dash-new", "label": "New Leads", "intentId": "show-new-leads", "requires": ["hasNewLeads"] },
+      { "id": "qa-dash-open", "label": "Dashboard", "intentId": "show-dashboard" },
+      { "id": "qa-dash-leads", "label": "Leads", "intentId": "nav-leads" },
+      { "id": "qa-dash-activity", "label": "Activity Log", "intentId": "activity-today" }
+    ],
+    "leads": [
+      { "id": "qa-leads-score", "label": "Highest Score", "intentId": "highest-score" },
+      { "id": "qa-leads-new", "label": "New Leads", "intentId": "show-new-leads" },
+      { "id": "qa-leads-website", "label": "Needs Website", "intentId": "needs-website", "requires": ["hasLeads"] },
+      { "id": "qa-leads-redesign", "label": "Needs Redesign", "intentId": "needs-redesign", "requires": ["hasLeads"] },
+      { "id": "qa-leads-dashboard", "label": "Dashboard", "intentId": "show-dashboard" }
+    ],
+    "lead-details": [
+      { "id": "qa-lead-draft", "label": "Draft Email", "intentId": "draft-followup", "requires": ["canEmail"] },
+      { "id": "qa-lead-send", "label": "Send Email", "intentId": "send-email", "requires": ["canEmail"] },
+      { "id": "qa-lead-note", "label": "Add Note", "intentId": "add-note" },
+      { "id": "qa-lead-timeline", "label": "View Timeline", "intentId": "view-timeline" }
+    ],
+    "outreach": [
+      { "id": "qa-out-followups", "label": "Follow-ups", "intentId": "show-followups", "requires": ["hasFollowUps"] },
+      { "id": "qa-out-compose", "label": "Compose Email", "intentId": "compose-email", "requires": ["canEmail"] },
+      { "id": "qa-out-activity", "label": "Activity Log", "intentId": "activity-today" },
+      { "id": "qa-out-leads", "label": "Leads", "intentId": "nav-leads" }
+    ],
+    "performance": [
+      { "id": "qa-perf-mine", "label": "My Performance", "intentId": "my-performance" },
+      { "id": "qa-perf-assigned", "label": "Assigned Leads", "intentId": "assigned-to-me" }
+    ]
+  }
+}

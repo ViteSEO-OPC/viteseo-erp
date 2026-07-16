@@ -1,0 +1,91 @@
+<?php
+
+namespace App\Modules\Hr\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+class EmployeeResource extends JsonResource
+{
+    /**
+     * @return array<string, mixed>
+     */
+    public function toArray(Request $request): array
+    {
+        return [
+            'id' => $this->id,
+            'employee_no' => $this->employee_no,
+            // Identity comes from the linked user (relations are eager-loaded).
+            'name' => $this->user?->name,
+            'email' => $this->user?->email,
+            // Whether this person's account has HR-officer (admin) access.
+            'is_hr_officer' => (bool) $this->user?->hasRole('hr_officer'),
+            'job_title' => $this->job_title,
+            'employment_status' => $this->employment_status,
+            'employment_type' => $this->employment_type,
+            'work_location' => $this->work_location,
+            'employee_role' => $this->employee_role,
+            'onboarding_status' => $this->onboarding_status,
+            'hire_date' => $this->hire_date?->format('Y-m-d'),
+            'base_salary' => $this->base_salary,
+            // Fixed-salary + attendance-exempt management flag.
+            'is_management' => (bool) $this->is_management,
+            'phone' => $this->phone,
+            'address' => $this->address,
+            'emergency_contact_name' => $this->emergency_contact_name,
+            'emergency_contact_relationship' => $this->emergency_contact_relationship,
+            'emergency_contact_phone' => $this->emergency_contact_phone,
+            'bank_name' => $this->bank_name,
+            'bank_account' => $this->bank_account,
+            'pay_frequency' => $this->pay_frequency ?? 'semi_monthly',
+            'currency' => $this->currency ?? 'PHP',
+            'bank_account_type' => $this->bank_account_type,
+            'bank_account_name' => $this->bank_account_name,
+            'sss_contribution' => $this->sss_contribution,
+            'pagibig_contribution' => $this->pagibig_contribution,
+            'philhealth_contribution' => $this->philhealth_contribution,
+            'food_allowance' => $this->food_allowance,
+            'transportation_allowance' => $this->transportation_allowance,
+            'load_allowance' => $this->load_allowance,
+            // Expanded personal record.
+            'first_name' => $this->first_name,
+            'middle_name' => $this->middle_name,
+            'last_name' => $this->last_name,
+            'name_extension' => $this->name_extension,
+            'gender' => $this->gender,
+            'civil_status' => $this->civil_status,
+            'nationality' => $this->nationality,
+            'date_of_birth' => $this->date_of_birth?->format('Y-m-d'),
+            'place_of_birth' => $this->place_of_birth,
+            'current_address' => $this->current_address,
+            'mothers_maiden_name' => $this->mothers_maiden_name,
+            'fathers_name' => $this->fathers_name,
+            'siblings_name' => $this->siblings_name,
+            'high_school' => $this->high_school,
+            'college_course' => $this->college_course,
+            'university' => $this->university,
+            'height' => $this->height,
+            'weight' => $this->weight,
+            'health_condition' => $this->health_condition,
+            // Employment history timeline (only loaded on the single-employee view).
+            'employment_history' => $this->whenLoaded('employmentHistories', fn () => $this->employmentHistories->map(fn ($h) => [
+                'id' => $h->id,
+                'title' => $h->title,
+                'start_date' => $h->start_date?->format('Y-m-d'),
+                'end_date' => $h->end_date?->format('Y-m-d'),
+                'status' => $h->status,
+                'reason' => $h->reason,
+            ]), []),
+            'department' => $this->department ? [
+                'id' => $this->department->id,
+                'name' => $this->department->name,
+                'code' => $this->department->code,
+            ] : null,
+            'manager' => $this->manager ? [
+                'id' => $this->manager->id,
+                'name' => $this->manager->user?->name,
+            ] : null,
+            'created_at' => $this->created_at,
+        ];
+    }
+}

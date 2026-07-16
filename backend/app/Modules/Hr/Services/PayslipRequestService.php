@@ -1,0 +1,92 @@
+<?php
+
+namespace App\Modules\Hr\Services;
+
+use App\Models\User;
+use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Models\PayslipRequest;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Validation\ValidationException;
+
+class PayslipRequestService
+{
+    public function __construct(private readonly AuditService $audit) {}
+
+    public function list(User $user): Collection
+    {
+        $query = PayslipRequest::with(['employee.user', 'reviewer', 'payslip.payrollRun'])->latest();
+
+        if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
+            $query->where('employee_id', $user->employee?->id);
+        }
+
+        return $query->get();
+    }
+
+    /** @param array<string, mixed> $data */
+    public function create(Employee $employee, array $data): PayslipRequest
+    {
+        $request = PayslipRequest::create([
+            'employee_id' => $employee->id,
+            'payslip_id' => $data['payslip_id'] ?? null,
+            'reason' => $data['reason'],
+            'status' => 'pending',
+        ])->load('employee.user');
+
+        $this->audit->log('submitted', 'Payroll', 'Payslip copy request', $request);
+
+        return $request;
+    }
+
+    public function approve(PayslipRequest $request, User $reviewer): PayslipRequest
+    {
+        $this->assertPending($request, 'approve');
+
+        $request->update([
+            'status' => 'approved',
+            'reviewed_by' => $reviewer->id,
+            'reviewed_at' => now(),
+        ]);
+
+        $employeeName = $request->employee->user?->name ?? $request->employee->name;
+        $this->audit->log(
+            'approved',
+            'Payroll',
+            "Approved payslip request for {$employeeName}",
+            $request,
+        );
+
+        return $request->load(['employee.user', 'reviewer', 'payslip.payrollRun']);
+    }
+
+    public function reject(PayslipRequest $request, User $reviewer, ?string $reason = null): PayslipRequest
+    {
+        $this->assertPending($request, 'reject');
+
+        $request->update([
+            'status' => 'rejected',
+            'review_note' => $reason,
+            'reviewed_by' => $reviewer->id,
+            'reviewed_at' => now(),
+        ]);
+
+        $employeeName = $request->employee->user?->name ?? $request->employee->name;
+        $this->audit->log(
+            'declined',
+            'Payroll',
+            "Declined payslip request for {$employeeName}",
+            $request,
+        );
+
+        return $request->load(['employee.user', 'reviewer', 'payslip.payrollRun']);
+    }
+
+    private function assertPending(PayslipRequest $request, string $action): void
+    {
+        if ($request->status !== 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ["Cannot {$action} a request that is {$request->status}."],
+            ]);
+        }
+    }
+}

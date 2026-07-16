@@ -1,0 +1,245 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+/* CRM (Zerem) module theme — additive CRM-unique tokens/utilities + fullcalendar/leaflet styles.
+   Declared after the platform theme so it only ADDS; it never overrides platform/HR/Projects tokens. */
+@import "./crm-theme.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  /* Exo 2 everywhere (Style Guide: "used throughout the entire design system"). */
+  --font-sans: var(--font-exo2);
+  --font-heading: var(--font-exo2);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+
+  /* HRIS brand + status tokens (exact values from the Figma Style Guide 231:4). */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-subtle: var(--brand-subtle);
+  --color-dark-teal: var(--dark-teal);
+  --color-success: var(--success);
+  --color-success-subtle: var(--success-subtle);
+  --color-warning: var(--warning);
+  --color-warning-subtle: var(--warning-subtle);
+  --color-info: var(--info);
+  --color-info-subtle: var(--info-subtle);
+  --color-danger: var(--danger);
+  --color-danger-subtle: var(--danger-subtle);
+  --color-violet: var(--violet);
+  --color-violet-subtle: var(--violet-subtle);
+  --color-severity-orange: var(--severity-orange);
+  --color-severity-orange-subtle: var(--severity-orange-subtle);
+
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  /* Type scale (Style Guide, Exo 2). Utilities: text-h1 … text-label. */
+  --text-h1: 2.3125rem; /* 37px — page titles */
+  --text-h1--line-height: 1.15;
+  --text-h2: 1.6875rem; /* 27px — card titles, names, logo */
+  --text-h2--line-height: 1.2;
+  --text-h3: 1.3125rem; /* 21px — section/table titles */
+  --text-h3--line-height: 1.25;
+  --text-nav: 1.1875rem; /* 19px — sidebar nav */
+  --text-nav--line-height: 1.4;
+  --text-body: 1.1875rem; /* 19px — descriptions, placeholders */
+  --text-body--line-height: 1.5;
+  --text-table: 1rem; /* 16px — table cells, badges, buttons */
+  --text-table--line-height: 1.4;
+  --text-caption: 0.9375rem; /* 15px — subtitles, metadata */
+  --text-caption--line-height: 1.4;
+  --text-label: 0.8125rem; /* 13px — uppercase column headers / small labels */
+  --text-label--line-height: 1.3;
+
+  /* Radius — controls use --radius; cards use the Style Guide's 21px. */
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-card: 1.3125rem; /* 21px */
+}
+
+:root {
+  /* Surfaces — very light blue-white page, white cards, dark ink. */
+  --background: #fafafe;
+  --foreground: #111827;
+  --card: #ffffff;
+  --card-foreground: #111827;
+  --popover: #ffffff;
+  --popover-foreground: #111827;
+
+  /* Primary = brand teal, dark-teal ink for contrast (active nav / avatars). */
+  --primary: #4fdbd7;
+  --primary-foreground: #19414b;
+  --secondary: #f1f2f5;
+  --secondary-foreground: #111827;
+  --muted: #f1f2f5;
+  --muted-foreground: #6b7280; /* "Gray Text" */
+  --accent: #eafbfa;
+  --accent-foreground: #19414b;
+  --destructive: #f34444;
+  --border: #e5e7ea;
+  --input: #e5e7ea;
+  --ring: #4fdbd7;
+
+  /* Chart series (headcount bars): teal joiners, red leavers, then neutrals. */
+  --chart-1: #4fdbd7;
+  --chart-2: #f34444;
+  --chart-3: #6b7280;
+  --chart-4: #f0a608;
+  --chart-5: #19414b;
+
+  --radius: 0.625rem; /* 10px control radius */
+
+  /* Sidebar — near-black (#141414) with muted text, teal active state. */
+  --sidebar: #141414;
+  --sidebar-foreground: #a0aec0; /* "Muted" */
+  --sidebar-primary: #4fdbd7;
+  --sidebar-primary-foreground: #19414b;
+  --sidebar-accent: #262626;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #262626;
+  --sidebar-ring: #4fdbd7;
+
+  /* Brand + semantic/status palette (Style Guide exact hexes). */
+  --brand: #4fdbd7;
+  --brand-foreground: #19414b;
+  --brand-subtle: #e4faf9;
+  --dark-teal: #19414b;
+  --success: #22c554;
+  --success-subtle: #e4f8ec;
+  --warning: #f0a608;
+  --warning-subtle: #fdf1d6;
+  --info: #2563eb;
+  --info-subtle: #dce7fe;
+  --danger: #f34444;
+  --danger-subtle: #fde7e7;
+  --violet: #8b5cf6;
+  --violet-subtle: #ede9fe;
+  /* Attendance violation legend needs a distinct orange between amber and red. */
+  --severity-orange: #f97316;
+  --severity-orange-subtle: #ffedd5;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* Payslip "Download PDF" = browser print, isolated to the .print-area element
+   (no PDF library). Everything else is hidden when printing. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 24px;
+  }
+  .print-hide {
+    display: none !important;
+  }
+}
+
+/* Sidebar scrollbar — thin, overlay, branded. Only visible while scrolling. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.sidebar-scroll:hover {
+  scrollbar-color: var(--sidebar-accent) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+.sidebar-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--sidebar-accent);
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--brand);
+}
+
+/*
+  Projects (PMS) module design tokens — ported from Sprintly's style guide.
+  Only names NOT already defined by the platform are added here (brand, info and
+  radius-card already exist and are shared). This gives the Projects components
+  their surface/ink/line utilities (bg-canvas, text-ink-soft, border-line,
+  bg-sidebar-surface, …) without altering the HR/base look.
+*/
+@theme {
+  --color-brand-hover: #3ec8c4;
+  --color-brand-soft: #dcf7f6;
+
+  --color-sidebar-surface: #141414;
+  --color-sidebar-muted: #9ca3af;
+  --color-canvas: #ffffff;
+  --color-surface: #ffffff;
+
+  --color-ink: #141414;
+  --color-ink-soft: #6b7280;
+  --color-ink-faint: #9ca3af;
+  --color-offwhite: #ffffff;
+
+  --color-line: #ececec;
+  --color-line-dark: #262626;
+
+  --color-success-soft: #dcfce7;
+  --color-warning-soft: #fef3c7;
+  --color-danger-soft: #fee2e2;
+  --color-info-soft: #e0e7ff;
+}

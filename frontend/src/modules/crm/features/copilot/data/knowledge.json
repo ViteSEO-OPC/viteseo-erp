@@ -1,0 +1,124 @@
+{
+  "knowledge": [
+    {
+      "id": "lead-score",
+      "question": "What is a lead score and how is it calculated?",
+      "keywords": "lead score scoring points how scored ranking rank quality 0 100 hot",
+      "answer": "Every lead carries a **score** from 0–100 that's calculated automatically when the lead is created or imported — you don't score leads by hand, and there's no manual re-score action. A higher score means a stronger opportunity. Sort the **Leads** table by *Highest score* to see the strongest first."
+    },
+    {
+      "id": "priority-levels",
+      "question": "What do the priority levels mean?",
+      "keywords": "priority high medium low levels meaning hot warm cold filter",
+      "answer": "Leads carry a **priority** of *High*, *Medium*, or *Low*. High-priority leads — often *No Website* prospects with strong scores — have the greatest conversion potential and should be worked first. You can filter the **Leads** list by priority."
+    },
+    {
+      "id": "lead-statuses",
+      "question": "What lead statuses exist in the pipeline?",
+      "keywords": "status statuses pipeline stages new interested awaiting reply call back declined workflow update",
+      "answer": "A lead moves through **New → Interested → Awaiting Reply → Call-back Req. → Declined**. Status reflects where the conversation stands (not the lead's quality — that's the *score*). Set it from a lead's detail page, and filter the **Leads** list by status."
+    },
+    {
+      "id": "website-status",
+      "question": "What does website status mean for a lead?",
+      "keywords": "website status no website needs redesign has website site web presence filter segment",
+      "answer": "**Website status** classifies a prospect's online presence: *No Website* (highest conversion potential), *Needs Redesign* (outdated or underperforming), or *Has Website* (satisfied but receptive). It feeds the lead score, and the **Leads** list can filter by it."
+    },
+    {
+      "id": "add-lead",
+      "question": "How do I add a new lead?",
+      "keywords": "add lead new create wizard manually enter business record",
+      "answer": "On the **Leads** page, use **New Lead** (Create) to open the add-lead wizard, then enter the business, contact, website status, and other details. The lead is scored automatically once saved."
+    },
+    {
+      "id": "import-leads",
+      "question": "How do I import leads?",
+      "keywords": "import leads csv upload bulk add file mapping duplicates spreadsheet",
+      "answer": "On the **Leads** page choose **Import** to upload a **CSV**. You map each column to a CRM field, preview a summary (valid rows, duplicates, and errors), then commit. Duplicate emails are flagged so you don't create the same lead twice."
+    },
+    {
+      "id": "export-leads",
+      "question": "How do I export leads?",
+      "keywords": "export leads csv download filter current view report spreadsheet",
+      "answer": "The **Export** button on **Leads** downloads a **CSV**. It's *filter-aware* — you get exactly the leads matching your current search, priority, status, website-status, and niche filters."
+    },
+    {
+      "id": "lead-details",
+      "question": "What is on a lead's detail page?",
+      "keywords": "lead detail details page open view profile score ring header sections tabs",
+      "answer": "Open any lead from the **Leads** table to reach its detail page: the **score** ring, **priority** and **status**, **Edit**, **Assign** owner, discussion **Notes**, the **Activity Timeline**, and *Draft & send email*."
+    },
+    {
+      "id": "lead-notes",
+      "question": "How do notes on a lead work?",
+      "keywords": "notes note discussion internal comment add write team lead detail",
+      "answer": "Each lead's detail page has **Discussion Notes** — internal notes your team can add, edit, and delete. Every note change is recorded in **Activity Logs** so there's a full audit trail."
+    },
+    {
+      "id": "lead-quick-actions",
+      "question": "What do the Quick Actions on a lead do?",
+      "keywords": "quick actions lead detail card email call schedule follow up mark contacted buttons wired",
+      "answer": "On a lead's detail page, the **Quick Actions** card currently wires up only *Draft & send email*. *Log a call*, *Schedule follow-up*, and *Mark as contacted* are shown but not yet functional — they're placeholders for a later sprint."
+    },
+    {
+      "id": "lead-ownership",
+      "question": "How is lead ownership and assignment handled?",
+      "keywords": "ownership assigned assignment owner assign to me unassigned bdm reassign visibility scope",
+      "answer": "Assign or change a lead's owner from its detail page with **Assign**. Visibility follows ownership: a **BDM** sees only the leads assigned to them, while **Admins** and **Super Admins** see every lead. There's no *unassigned* list filter yet."
+    },
+    {
+      "id": "outreach",
+      "question": "How does outreach and email work?",
+      "keywords": "outreach email emails send draft compose reply thread inbox follow ups composer",
+      "answer": "**Outreach** (the follow-ups inbox) is where you compose and **send** email to a lead — sending is real and gets logged to the activity feed. Not built yet: saved **drafts**, **scheduled** send, reply tracking, and attachments. You can also send from a lead's *Draft & send email* action."
+    },
+    {
+      "id": "follow-ups",
+      "question": "What counts as a follow-up?",
+      "keywords": "follow up follow-ups due reminder next step overdue outreach reply awaiting call back",
+      "answer": "In **Outreach**, leads are grouped by where the conversation stands — *Awaiting Reply*, *Call-back Req.*, and so on. Note that an outbound email is **not** itself a follow-up, and there's no dedicated follow-up scheduler yet."
+    },
+    {
+      "id": "activities",
+      "question": "What is in the Activity Logs?",
+      "keywords": "activity activities logs feed history audit events login logout note email created updated assigned timeline",
+      "answer": "**Activity Logs** is an append-only, ownership-scoped feed: lead created/updated/deleted, emails sent and received, note changes, assignments, and sign-ins. The same feed powers the Dashboard's *Recent Activity*."
+    },
+    {
+      "id": "dashboard",
+      "question": "What is on the dashboard?",
+      "keywords": "dashboard home kpis widgets management bd role based total leads status live placeholder",
+      "answer": "The **Dashboard** is role-based. Live now: *Total Leads*, *High Priority*, *Interested*, the *Leads by Status* breakdown, and recent leads & activity (Admins also see *BD Performance* and *Lead Acquisition*). Display-only until the KPI Engine: *Follow-ups Due*, *Completed Outreach*, *Conversion Rate*, and the date-range filter."
+    },
+    {
+      "id": "performance",
+      "question": "What is on My Performance?",
+      "keywords": "performance my stats kpis assigned leads conversion revenue targets discipline demo",
+      "answer": "**My Performance** shows your live *Assigned Leads* count and *Recent Activity*. The conversion, revenue, converted-leads, targets, and follow-up-discipline cards are *Demo* (sample) placeholders until the KPI Engine ships — the range selector and Export PDF are Demo too."
+    },
+    {
+      "id": "conversion-rate",
+      "question": "What is the conversion rate and where do I see revenue?",
+      "keywords": "conversion rate win rate close converted percentage revenue money metric demo performance",
+      "answer": "**Conversion rate**, **win rate**, and **revenue** aren't computed with live data yet — they appear as *Demo* placeholders on **My Performance** (and a display-only card on the Dashboard) until the KPI Engine ships."
+    },
+    {
+      "id": "roles",
+      "question": "What user roles are there?",
+      "keywords": "roles role permissions super admin admin bdm business developer manager access rbac who can reports settings",
+      "answer": "Three roles: **Super Admin** and **Admin** (CRM Manager) with full visibility, and **Business Development Manager (BDM)** who works their assigned leads. *Reports* and *Settings* are Admin-only, and the Dashboard's content adapts to your role."
+    },
+    {
+      "id": "companies",
+      "question": "Is there a Companies section?",
+      "keywords": "companies company module section workspace business accounts organization search",
+      "answer": "There's no **Companies** module in the app today — no such page or route exists. Each company's details live on its **Lead** instead, on the **Leads** page."
+    },
+    {
+      "id": "copilot",
+      "question": "What can the Vite Copilot do?",
+      "keywords": "copilot assistant help what can you do commands capabilities ai vite rule based",
+      "answer": "The **Vite Copilot** is a rule-based assistant — no external AI. It surfaces hot leads and follow-ups and drafts outreach copy from sample data, answers questions about how the CRM works, and jumps you to any workspace. Sending an email is a real action; some figures it previews are sample data."
+    }
+  ]
+}

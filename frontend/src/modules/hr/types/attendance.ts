@@ -1,0 +1,91 @@
+export type ClockState =
+  | "not_clocked_in"
+  | "clocked_in"
+  | "on_lunch"
+  | "on_break"
+  | "clocked_out";
+
+/** A task the employee logs at time-out. */
+export interface DayTask {
+  text: string;
+  done: boolean;
+}
+
+export interface Attendance {
+  id: number;
+  work_date: string;
+  time_in: string | null;
+  time_out: string | null;
+  lunch_minutes: number;
+  break_minutes: number;
+  hours_worked: number;
+  status: string;
+  state: ClockState;
+  on_lunch: boolean;
+  on_break: boolean;
+  tasks: DayTask[];
+}
+
+export interface MyAttendance {
+  today: Attendance | null;
+  week: Attendance[];
+}
+
+export type Severity = "green" | "yellow" | "orange" | "red";
+
+export interface AttendanceTiming {
+  category: "early" | "on_time" | "late";
+  late_minutes: number;
+}
+
+export interface ViolationFlag {
+  severity: Severity;
+  count: number;
+  types: string[];
+}
+
+/** HR roster row (one per employee for a given day). */
+export interface HrAttendanceRow {
+  employee_id: number;
+  name: string | null;
+  department: string | null;
+  work_date: string;
+  time_in: string | null;
+  time_out: string | null;
+  first_in: string | null;
+  last_out: string | null;
+  hours_worked: number;
+  status: string;
+  leave_type: string | null;
+  timing: AttendanceTiming | null;
+  flag: ViolationFlag | null;
+  tasks: DayTask[];
+}
+
+export interface AttendanceSummary {
+  date: string;
+  checked_in: number;
+  not_checked_in: number;
+  on_leave: number;
+  early_arrivals: number;
+  late_arrivals: number;
+  on_time: number;
+  total_employees: number;
+  absent: number;
+}
+
+export interface Violation {
+  id: number;
+  type: string;
+  severity: Severity;
+  work_date: string;
+  details: string | null;
+  resolved: boolean;
+  employee: { id: number; name: string | null };
+}
+
+export interface DailyOverride {
+  id?: number;
+  date: string;
+  grace_minutes: number | null;
+}

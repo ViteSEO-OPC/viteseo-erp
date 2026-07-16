@@ -1,0 +1,58 @@
+<?php
+
+namespace App\Modules\Hr\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class Attendance extends Model
+{
+    use SoftDeletes;
+
+    protected $table = 'hr_attendance';
+
+    protected $fillable = [
+        'employee_id',
+        'work_date',
+        'time_in',
+        'time_out',
+        'lunch_started_at',
+        'break_started_at',
+        'lunch_minutes',
+        'break_minutes',
+        'hours_worked',
+        'status',
+        'note',
+        'tasks',
+    ];
+
+    protected $casts = [
+        'work_date' => 'date',
+        'time_in' => 'datetime',
+        'time_out' => 'datetime',
+        'lunch_started_at' => 'datetime',
+        'break_started_at' => 'datetime',
+        'lunch_minutes' => 'integer',
+        'break_minutes' => 'integer',
+        'hours_worked' => 'decimal:2',
+        'tasks' => 'array',
+    ];
+
+    public function employee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class);
+    }
+
+    /** Derived clock state the UI uses to decide which buttons to show. */
+    public function getStateAttribute(): string
+    {
+        return match (true) {
+            $this->time_out !== null => 'clocked_out',
+            $this->lunch_started_at !== null => 'on_lunch',
+            $this->break_started_at !== null => 'on_break',
+            $this->time_in !== null => 'clocked_in',
+            default => 'not_clocked_in',
+        };
+    }
+}

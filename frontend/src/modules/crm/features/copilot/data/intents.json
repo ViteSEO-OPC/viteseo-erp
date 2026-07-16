@@ -1,0 +1,281 @@
+{
+  "fallbackId": "help",
+  "intents": [
+    {
+      "id": "show-dashboard",
+      "keywords": ["show my dashboard", "open dashboard", "go to dashboard", "dashboard"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening your **Dashboard** — live lead totals, the status breakdown, and recent activity. (Admins see the Management Dashboard; BDMs see their own.)",
+        "action": { "type": "navigate", "target": "/dashboard" }
+      }
+    },
+    {
+      "id": "todays-kpis",
+      "keywords": ["todays kpis", "today kpis", "kpis", "kpi", "key metrics"],
+      "response": {
+        "type": "navigate",
+        "text": "Your live KPIs — **Total Leads**, **High Priority**, and **Interested** — are on the **Dashboard**. (Follow-ups Due and Conversion Rate are display-only placeholders until the KPI Engine ships.) Opening it…",
+        "action": { "type": "navigate", "target": "/dashboard" }
+      }
+    },
+    {
+      "id": "revenue-today",
+      "keywords": ["revenue today", "todays revenue"],
+      "response": {
+        "type": "text",
+        "text": "There's no live **revenue** metric yet. The revenue figure on My Performance is *sample (Demo)* data, pending the KPI Engine — so I can't report today's revenue."
+      }
+    },
+    {
+      "id": "pipeline-summary",
+      "keywords": ["pipeline summary", "pipeline", "summarize this week", "weekly summary", "summarize"],
+      "response": {
+        "type": "navigate",
+        "text": "Your live weekly view is on the **Dashboard** — total leads, the *Leads by Status* breakdown, and recent activity. Opening it…",
+        "action": { "type": "navigate", "target": "/dashboard" }
+      }
+    },
+    {
+      "id": "lead-summary",
+      "keywords": ["lead summary", "leads summary", "summarize leads"],
+      "response": {
+        "type": "navigate",
+        "text": "The live lead counts and *Leads by Status* breakdown live on the **Dashboard**, and the full list is on **Leads**. Opening the Dashboard…",
+        "action": { "type": "navigate", "target": "/dashboard" }
+      }
+    },
+    {
+      "id": "activity-today",
+      "keywords": ["activity today", "todays activity", "recent activity", "whats happening"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening **Activity Logs** — the live, append-only feed of lead changes, emails, notes, and sign-ins (scoped to what you can see).",
+        "action": { "type": "navigate", "target": "/activity-logs" }
+      }
+    },
+
+    {
+      "id": "show-hot-leads",
+      "keywords": ["show hot leads", "hot leads", "hottest leads", "who should i call today", "who should i call", "priority leads", "which prospect should i contact first", "which prospect should i contact", "who should i contact", "who should i contact first", "who to contact first", "who do i reach out to first", "who should i reach out to", "who to reach out to", "which lead should i prioritize", "who should i prioritize", "who should i focus on", "what should i work on first", "what should i work on", "who needs my attention today", "who needs my attention", "recommended contacts", "top priority leads", "prioritize leads"],
+      "response": {
+        "type": "lead_priority",
+        "action": { "type": "navigate", "target": "/leads?priority=high" }
+      }
+    },
+    {
+      "id": "show-new-leads",
+      "keywords": ["show new leads", "new leads"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening **Leads** filtered to the *New* status…",
+        "action": { "type": "navigate", "target": "/leads?status=new" }
+      }
+    },
+    {
+      "id": "latest-leads",
+      "keywords": ["latest leads", "most recent leads", "newest leads"],
+      "response": {
+        "type": "navigate",
+        "text": "**Leads** is sorted newest-first by default — opening it…",
+        "action": { "type": "navigate", "target": "/leads" }
+      }
+    },
+    {
+      "id": "highest-score",
+      "keywords": ["highest score", "top score", "highest scoring", "best leads", "top leads"],
+      "response": {
+        "type": "lead_priority",
+        "action": { "type": "navigate", "target": "/leads?sort=score-desc" }
+      }
+    },
+    {
+      "id": "needs-website",
+      "keywords": ["needs website", "no website", "without a website", "needs a website", "leads with no website", "leads without a website"],
+      "response": {
+        "type": "navigate",
+        "text": "Leads with *No Website* are the highest-conversion segment — opening **Leads** filtered to that website status…",
+        "action": { "type": "navigate", "target": "/leads?website_status=no-website" }
+      }
+    },
+    {
+      "id": "needs-redesign",
+      "keywords": ["needs redesign", "redesign", "outdated website", "needs improvement"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening **Leads** filtered to the *Needs Redesign* website status…",
+        "action": { "type": "navigate", "target": "/leads?website_status=needs-redesign" }
+      }
+    },
+    {
+      "id": "assigned-to-me",
+      "keywords": ["assigned to me", "my leads", "my assigned leads", "leads assigned to me"],
+      "response": {
+        "type": "navigate",
+        "text": "As a BDM, **Leads** already shows only the leads assigned to you (Admins see everyone's). There's no separate *assigned to me* filter — opening **Leads**…",
+        "action": { "type": "navigate", "target": "/leads" }
+      }
+    },
+    {
+      "id": "unassigned-leads",
+      "keywords": ["unassigned leads", "unassigned", "no owner", "leads with no owner"],
+      "response": {
+        "type": "text",
+        "text": "There isn't an *unassigned* list filter yet. You can set or change a lead's owner from its detail page using **Assign** — open a lead from the **Leads** table to do that."
+      }
+    },
+    {
+      "id": "open-lead-details",
+      "keywords": ["open lead details", "open lead", "lead details", "open top lead", "view lead"],
+      "response": {
+        "type": "navigate",
+        "text": "Open any lead from the **Leads** table to see its detail page — score, status, edit, **Assign**, discussion **Notes**, the **Activity Timeline**, and *Draft & send email*. Opening **Leads**…",
+        "action": { "type": "navigate", "target": "/leads" }
+      }
+    },
+    {
+      "id": "add-note",
+      "keywords": ["add note", "add a note", "new note", "write a note", "log a note", "leave a note"],
+      "response": {
+        "type": "text",
+        "text": "Add an internal note on a lead's detail page under **Discussion Notes** — it's saved for your team and recorded in **Activity Logs**."
+      }
+    },
+    {
+      "id": "view-timeline",
+      "keywords": ["view timeline", "lead timeline", "activity timeline", "see the timeline", "lead history"],
+      "response": {
+        "type": "navigate",
+        "text": "Each lead's detail page has its own **Activity Timeline**. For every event across the CRM, opening **Activity Logs**…",
+        "action": { "type": "navigate", "target": "/activity-logs" }
+      }
+    },
+
+    {
+      "id": "open-outreach",
+      "keywords": ["open outreach", "outreach", "go to outreach", "show outreach"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening **Outreach** — your lead inbox where you compose and send emails.",
+        "action": { "type": "navigate", "target": "/follow-ups" }
+      }
+    },
+    {
+      "id": "show-drafts",
+      "keywords": ["show drafts", "my drafts", "drafts", "email drafts"],
+      "response": {
+        "type": "navigate",
+        "text": "Saved **drafts** aren't available yet — the composer doesn't persist drafts (a future Outreach sprint). You can still write and send an email from **Outreach** — opening it…",
+        "action": { "type": "navigate", "target": "/follow-ups" }
+      }
+    },
+    {
+      "id": "show-followups",
+      "keywords": ["show follow-ups", "show followups", "follow ups", "followups", "follow-ups due", "due follow ups"],
+      "response": {
+        "type": "navigate",
+        "text": "**Outreach** groups your leads by where the conversation stands — *Awaiting Reply*, *Call-back Req.*, and so on. Opening it…",
+        "action": { "type": "navigate", "target": "/follow-ups" }
+      }
+    },
+    {
+      "id": "show-all-emails",
+      "keywords": ["show all emails", "all emails", "every email", "email list"],
+      "response": {
+        "type": "navigate",
+        "text": "There's no combined sent-email history yet — sent emails appear in **Activity Logs** and on each lead's **Activity Timeline**. To write one, open **Outreach**…",
+        "action": { "type": "navigate", "target": "/follow-ups" }
+      }
+    },
+    {
+      "id": "draft-followup",
+      "keywords": ["draft follow-up", "draft followup", "draft a follow up", "draft a follow-up email"],
+      "response": { "type": "draft_email" }
+    },
+    {
+      "id": "compose-email",
+      "keywords": ["compose email", "new email", "write an email", "write email"],
+      "response": { "type": "draft_email" }
+    },
+    {
+      "id": "send-email",
+      "keywords": ["send email", "send the email", "send this email"],
+      "response": {
+        "type": "navigate",
+        "text": "Sending is real — you send from a lead's *Draft & send email* action or the **Outreach** composer, and it's logged to the activity feed. Opening **Outreach** so you can review and send…",
+        "action": { "type": "navigate", "target": "/follow-ups" }
+      }
+    },
+
+    {
+      "id": "open-companies",
+      "keywords": ["open companies", "companies", "go to companies", "show companies"],
+      "response": {
+        "type": "text",
+        "text": "There's no **Companies** module yet — it isn't part of the current app. Each company's details live on its **Lead** instead, over on the **Leads** page."
+      }
+    },
+    {
+      "id": "search-companies",
+      "keywords": ["search companies", "find company", "company search", "look up company"],
+      "response": {
+        "type": "text",
+        "text": "Company search isn't available — there's no Companies module yet. Use the search box on **Leads** to find a business by name."
+      }
+    },
+
+    {
+      "id": "my-performance",
+      "keywords": ["my performance", "show my performance", "performance", "go to performance", "my stats"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening **My Performance**. Live today: your *Assigned Leads* count and *Recent Activity*. Conversion, revenue, targets, and follow-up discipline are *Demo* placeholders until the KPI Engine ships.",
+        "action": { "type": "navigate", "target": "/my-performance" }
+      }
+    },
+    {
+      "id": "revenue",
+      "keywords": ["revenue", "overall revenue", "my revenue"],
+      "response": {
+        "type": "text",
+        "text": "**Revenue** isn't tracked with live data yet — the figure on My Performance is *Demo/sample* data, pending the KPI Engine."
+      }
+    },
+    {
+      "id": "conversion",
+      "keywords": ["conversion", "conversion rate", "win rate", "close rate"],
+      "response": {
+        "type": "text",
+        "text": "**Conversion rate** and **win rate** aren't computed yet — they show as *Demo* placeholders on My Performance (and a display-only card on the Dashboard) until the KPI Engine ships."
+      }
+    },
+
+    {
+      "id": "nav-leads",
+      "keywords": ["go to leads", "open leads", "leads page", "show leads"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening **Leads** — search, filter by priority / status / website status / niche, and add, import, assign, or export.",
+        "action": { "type": "navigate", "target": "/leads" }
+      }
+    },
+
+    {
+      "id": "score-leads",
+      "keywords": ["score my new leads", "score leads", "score my leads", "re-score leads", "rescore leads"],
+      "response": {
+        "type": "template",
+        "template": "Every lead carries a **score** (0–100) that's calculated automatically — higher means a stronger opportunity, and *hot* leads pair a high score with *High* priority. Scoring is applied for you (there's no manual re-score action). You can sort **Leads** by score to see the strongest first."
+      }
+    },
+
+    {
+      "id": "help",
+      "keywords": ["help", "what can you do", "what can you do?", "available commands", "commands", "options"],
+      "response": {
+        "type": "text",
+        "text": "I'm the **Vite Copilot** — a rule-based assistant (no external AI).\nI can:\n*Leads* — surface hot leads, filter by *No Website* / *Needs Redesign* / status, and open the Leads list\n*Outreach* — draft an email and take you to Outreach to send it\n*Navigate* — Dashboard, Leads, Outreach, Activity Logs, or My Performance\n*Explain* — lead scores, statuses, ownership, roles, importing, and more\n\nNot built yet (I'll say so if you ask): a **Companies** module, saved email **drafts**, and live **Performance** metrics.\nTap a suggested prompt or just type your question."
+      }
+    }
+  ]
+}

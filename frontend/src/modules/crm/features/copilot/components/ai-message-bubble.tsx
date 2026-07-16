@@ -1,0 +1,22 @@
+import { AiAvatarTile } from "@/modules/crm/features/copilot/components/ai-avatar-tile";
+import { MessageRichText } from "@/modules/crm/features/copilot/components/message-rich-text";
+import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
+import type { Message } from "@/modules/crm/features/copilot/types/copilot-types";
+
+type Props = {
+  message: Message;
+};
+
+export function AiMessageBubble({ message }: Props) {
+  return (
+    <div className="flex items-start gap-3">
+      <AiAvatarTile />
+      <div className="max-w-[75%] rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+        <MessageRichText segments={message.segments} />
+        <p className="mt-1 text-xs text-gray-500">
+          {formatActivityTimestamp(message.timestamp)}
+        </p>
+      </div>
+    </div>
+  );
+}

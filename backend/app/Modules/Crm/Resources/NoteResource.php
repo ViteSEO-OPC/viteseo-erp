@@ -1,0 +1,42 @@
+<?php
+
+namespace App\Modules\Crm\Resources;
+
+use App\Modules\Crm\Models\Note;
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+/** @mixin Note */
+class NoteResource extends JsonResource
+{
+    /** @return array<string, mixed> */
+    public function toArray(Request $request): array
+    {
+        $authorName = $this->author?->name;
+
+        return [
+            'id' => (string) $this->id,
+            'leadId' => (string) $this->lead_id,
+            'authorId' => $this->user_id !== null ? (string) $this->user_id : null,
+            'author' => $authorName ?? 'Unknown user',
+            'initials' => $this->initialsFor($authorName),
+            'body' => $this->body,
+            // Whether the requesting user wrote this note (drives the self/other bubble styling).
+            'self' => $this->user_id !== null && $request->user()?->id === $this->user_id,
+            'createdAt' => $this->created_at?->toIso8601String(),
+        ];
+    }
+
+    /** First letters of the first two name parts, uppercased (e.g. "Maria Santos" → "MS"). */
+    private function initialsFor(?string $name): string
+    {
+        if ($name === null || trim($name) === '') {
+            return '?';
+        }
+
+        $parts = array_values(array_filter(preg_split('/\s+/', trim($name)) ?: []));
+        $letters = array_map(fn (string $p): string => mb_substr($p, 0, 1), array_slice($parts, 0, 2));
+
+        return mb_strtoupper(implode('', $letters)) ?: '?';
+    }
+}

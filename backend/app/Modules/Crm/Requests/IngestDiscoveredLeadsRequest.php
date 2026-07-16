@@ -1,0 +1,57 @@
+<?php
+
+namespace App\Modules\Crm\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+
+/**
+ * Programmatic enrichment ingest — a discovery provider (Python Scraper) submits a batch of
+ * normalized, discovered businesses as JSON. Route-authorized by `can('import', Lead::class)`.
+ *
+ * The accepted field set is **fit-data only** (business identity, contactability, website presence,
+ * administrative location, coordinates, provenance). It deliberately does NOT accept the engagement /
+ * CRM-decision fields — `priority`, `status`, `email_outreach`, `cold_calling`, `score`, `assigned_to`
+ * — so a data provider can never set them: those remain CRM decisions applied elsewhere. This mirrors
+ * the frozen Lead Enrichment Principle: discover / enrich only; never change CRM business decisions.
+ */
+class IngestDiscoveredLeadsRequest extends FormRequest
+{
+    public function authorize(): bool
+    {
+        return true; // Route-level `can('import', Lead::class)` gate authorizes.
+    }
+
+    /** @return array<string, array<int, mixed>> */
+    public function rules(): array
+    {
+        return [
+            'dry_run' => ['sometimes', 'boolean'],
+
+            'businesses' => ['required', 'array', 'min:1', 'max:500'],
+
+            'businesses.*.business_name' => ['required', 'string', 'max:255'],
+            // Discovered businesses rarely expose a named contact person; when absent the ingest
+            // service defaults contact_name to the business name (a documented normalization, not
+            // fabricated data). Never required from the provider.
+            'businesses.*.contact_name' => ['nullable', 'string', 'max:255'],
+            'businesses.*.email' => ['nullable', 'email', 'max:255'],
+            'businesses.*.phone' => ['nullable', 'string', 'max:50'],
+            'businesses.*.industry' => ['nullable', 'string', 'max:255'],
+            // Real website detection is a legitimate enrichment output (unlike the human CSV import,
+            // which repurposes its "Website" column as Priority and never sets website_status).
+            'businesses.*.website_status' => ['nullable', Rule::in(['has-website', 'no-website', 'needs-redesign'])],
+
+            'businesses.*.region' => ['nullable', 'string', 'max:255'],
+            'businesses.*.province' => ['nullable', 'string', 'max:255'],
+            'businesses.*.city' => ['nullable', 'string', 'max:255'],
+
+            'businesses.*.latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'businesses.*.longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'businesses.*.place_id' => ['nullable', 'string', 'max:255'],
+            'businesses.*.source' => ['required', 'string', 'max:255'],
+            // The website URL (fit-data) — the input the Website Intelligence service later audits.
+            'businesses.*.website' => ['nullable', 'string', 'max:2048'],
+        ];
+    }
+}

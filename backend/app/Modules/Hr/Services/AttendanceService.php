@@ -1,0 +1,545 @@
+<?php
+
+namespace App\Modules\Hr\Services;
+
+use App\Modules\Hr\Models\Attendance;
+use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Models\HalfDayRequest;
+use App\Modules\Hr\Models\LeaveRequest;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
+
+class AttendanceService
+{
+    /** Fallback shift start if an employee has no schedule at all. */
+    private const FALLBACK_START = '09:00';
+
+    public function __construct(
+        private readonly ScheduleService $schedule,
+        private readonly ViolationService $violations,
+        private readonly AttendancePolicyService $policy,
+    ) {}
+
+    private function localNow(): Carbon
+    {
+        return now(config('app.timezone_local'));
+    }
+
+    /** Today's Manila calendar date (the work_date key). */
+    private function today(): string
+    {
+        return $this->localNow()->toDateString();
+    }
+
+    private function todayRow(Employee $employee): ?Attendance
+    {
+        return Attendance::where('employee_id', $employee->id)
+            ->where('work_date', $this->today())
+            ->first();
+    }
+
+    /** Management staff are exempt from attendance — they never clock in/out. */
+    private function assertNotManagement(Employee $employee): void
+    {
+        if ($employee->isManagement()) {
+            throw ValidationException::withMessages([
+                'attendance' => ['Management employees are exempt from attendance.'],
+            ]);
+        }
+    }
+
+    public function clockIn(Employee $employee): Attendance
+    {
+        $this->assertNotManagement($employee);
+
+        $att = Attendance::firstOrNew([
+            'employee_id' => $employee->id,
+            'work_date' => $this->today(),
+        ]);
+
+        if ($att->time_in) {
+            throw ValidationException::withMessages([
+                'time_in' => ['You have already clocked in today.'],
+            ]);
+        }
+
+        $local = $this->localNow();
+        // Lateness is measured against the employee's EFFECTIVE schedule (start +
+        // grace), resolved from override → assigned → default — not a fixed cutoff.
+        $eff = $this->schedule->effectiveFor($employee, $local);
+        $cutoff = $this->scheduleStart($local, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
+
+        $att->time_in = now(); // stored UTC
+        $att->status = $local->gt($cutoff) ? 'late' : 'present';
+        $att->save();
+
+        return $att;
+    }
+
+    /**
+     * Toggle a lunch or break. First call starts it; second call ends it and
+     * adds the elapsed minutes to the counter.
+     */
+    public function toggleBreak(Employee $employee, string $type): Attendance
+    {
+        $this->assertNotManagement($employee);
+
+        $att = $this->todayRow($employee);
+
+        if (! $att || ! $att->time_in) {
+            throw ValidationException::withMessages([
+                'type' => ['Clock in before starting a break.'],
+            ]);
+        }
+        if ($att->time_out) {
+            throw ValidationException::withMessages([
+                'type' => ['You have already clocked out.'],
+            ]);
+        }
+
+        $startedField = "{$type}_started_at";
+        $minutesField = "{$type}_minutes";
+
+        if ($att->{$startedField} === null) {
+            $att->{$startedField} = now();
+        } else {
+            $att->{$minutesField} += $att->{$startedField}->diffInMinutes(now());
+            $att->{$startedField} = null;
+        }
+
+        $att->save();
+
+        return $att;
+    }
+
+    /**
+     * @param  array<int, array{text:string, done:bool}>  $tasks  Tasks logged at time-out.
+     */
+    public function clockOut(Employee $employee, array $tasks = []): Attendance
+    {
+        $this->assertNotManagement($employee);
+
+        $att = $this->todayRow($employee);
+
+        if (! $att || ! $att->time_in) {
+            throw ValidationException::withMessages([
+                'time_out' => ['You have not clocked in today.'],
+            ]);
+        }
+        if ($att->time_out) {
+            throw ValidationException::withMessages([
+                'time_out' => ['You have already clocked out today.'],
+            ]);
+        }
+
+        // Keep only non-empty task rows; store null when there are none.
+        $cleanTasks = array_values(array_filter(
+            array_map(fn ($t) => [
+                'text' => trim((string) ($t['text'] ?? '')),
+                'done' => (bool) ($t['done'] ?? false),
+            ], $tasks),
+            fn ($t) => $t['text'] !== '',
+        ));
+        $att->tasks = $cleanTasks ?: null;
+
+        // Auto-close any still-open lunch/break so the math is complete.
+        foreach (['lunch', 'break'] as $type) {
+            $startedField = "{$type}_started_at";
+            if ($att->{$startedField} !== null) {
+                $att->{"{$type}_minutes"} += $att->{$startedField}->diffInMinutes(now());
+                $att->{$startedField} = null;
+            }
+        }
+
+        $att->time_out = now();
+
+        $grossMinutes = $att->time_in->diffInMinutes($att->time_out);
+        $netMinutes = $grossMinutes - $att->lunch_minutes - $att->break_minutes;
+        $att->hours_worked = round(max(0, $netMinutes) / 60, 2);
+        $att->save();
+
+        return $att;
+    }
+
+    public function todayFor(Employee $employee): ?Attendance
+    {
+        return $this->todayRow($employee);
+    }
+
+    /**
+     * HR manually sets/corrects an employee's attendance for a date (e.g. they
+     * forgot to clock in, or worked despite booking leave → set Present). Times
+     * come as "HH:MM" in Manila; stored UTC.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function adjust(Employee $employee, string $workDate, array $data): Attendance
+    {
+        $tz = config('app.timezone_local');
+        $att = Attendance::firstOrNew([
+            'employee_id' => $employee->id,
+            'work_date' => $workDate,
+        ]);
+
+        $status = $data['status'];
+
+        if ($status === 'absent') {
+            $att->time_in = null;
+            $att->time_out = null;
+            $att->hours_worked = 0;
+        } else {
+            $att->time_in = ! empty($data['time_in'])
+                ? Carbon::parse("{$workDate} {$data['time_in']}", $tz) : null;
+            $att->time_out = ! empty($data['time_out'])
+                ? Carbon::parse("{$workDate} {$data['time_out']}", $tz) : null;
+
+            if ($att->time_in && $att->time_out) {
+                $gross = ($att->time_out->getTimestamp() - $att->time_in->getTimestamp()) / 60;
+                $net = $gross - $att->lunch_minutes - $att->break_minutes;
+                $att->hours_worked = round(max(0, $net) / 60, 2);
+            } else {
+                $att->hours_worked = 0;
+            }
+        }
+
+        $att->status = $status;
+        $att->note = $data['note'] ?? null;
+        $att->save();
+
+        // A correction can change someone's flags — keep them in sync.
+        $this->violations->recompute();
+
+        return $att;
+    }
+
+    /** The employee's rows for the current Manila week (Mon–Sun), newest first. */
+    public function currentWeek(Employee $employee): Collection
+    {
+        $start = $this->localNow()->startOfWeek()->toDateString();
+        $end = $this->localNow()->endOfWeek()->toDateString();
+
+        return Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->orderByDesc('work_date')
+            ->get();
+    }
+
+    /**
+     * The 8 summary tiles for a date (default today), computed against each
+     * employee's schedule + approved leave.
+     *
+     * @return array<string, mixed>
+     */
+    public function summary(?string $date = null): array
+    {
+        $tz = config('app.timezone_local');
+        $date ??= $this->today();
+        $dateCarbon = Carbon::parse($date, $tz)->startOfDay();
+
+        $employees = Employee::with('workSchedule')->get();
+        $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
+        $onLeaveIds = $this->onLeaveIds($date);
+
+        $s = [
+            'checked_in' => 0, 'not_checked_in' => 0, 'on_leave' => 0,
+            'early_arrivals' => 0, 'late_arrivals' => 0, 'on_time' => 0,
+            'total_employees' => $employees->count(), 'absent' => 0,
+        ];
+
+        foreach ($employees as $emp) {
+            $eff = $this->schedule->effectiveFor($emp, $dateCarbon);
+            $row = $rows->get($emp->id);
+            $isOnLeave = $onLeaveIds->contains($emp->id);
+
+            if ($isOnLeave) {
+                $s['on_leave']++;
+            }
+
+            // Management: exempt from attendance — auto-present (on time) on scheduled
+            // workdays, never absent/not-checked-in. On leave/rest days, fall through.
+            if ($emp->isManagement()) {
+                if (! $isOnLeave && $eff['is_workday']) {
+                    $s['checked_in']++;
+                    $s['on_time']++;
+                }
+
+                continue;
+            }
+
+            if ($row && $row->time_in) {
+                $s['checked_in']++;
+                $cat = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)['category'];
+                $s[$cat === 'early' ? 'early_arrivals' : ($cat === 'late' ? 'late_arrivals' : 'on_time')]++;
+            } elseif (! $isOnLeave && $eff['is_workday']) {
+                $s['absent']++;
+                $s['not_checked_in']++;
+            }
+        }
+
+        return ['date' => $date] + $s;
+    }
+
+    /**
+     * HR roster: every employee's status for a date (default today), enriched with
+     * department, arrival timing, on-leave type, and their worst violation flag.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function allForDate(?string $date = null): array
+    {
+        $tz = config('app.timezone_local');
+        $date ??= $this->today();
+        $dateCarbon = Carbon::parse($date, $tz)->startOfDay();
+        $isPast = $dateCarbon->lt($this->localNow()->startOfDay());
+
+        // Keep violation flags current for the roster.
+        $this->violations->recompute();
+        $flags = $this->violations->flagsByEmployee();
+
+        $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
+        $leaveMap = $this->onLeaveMap($date);
+
+        return Employee::with(['user', 'department', 'workSchedule'])
+            ->get()
+            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast) {
+                $att = $rows->get($emp->id);
+                $eff = $this->schedule->effectiveFor($emp, $dateCarbon);
+                $leaveName = $leaveMap->get($emp->id);
+
+                $timing = ($att && $att->time_in)
+                    ? $this->arrivalCategory($att->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)
+                    : null;
+
+                if ($att && $att->time_in) {
+                    $status = $att->status; // present | late
+                } elseif ($leaveName) {
+                    $status = 'on_leave';
+                } elseif ($emp->isManagement()) {
+                    // Management is exempt from attendance — auto-present on a scheduled
+                    // workday, rest day otherwise. Never absent/not-checked-in.
+                    $status = $eff['is_workday'] ? 'present' : 'rest_day';
+                } elseif ($att && $att->status) {
+                    $status = $att->status; // HR-set (e.g. absent)
+                } elseif ($eff['is_workday'] && $isPast) {
+                    $status = 'absent';
+                } else {
+                    $status = $eff['is_workday'] ? 'not_checked_in' : 'rest_day';
+                }
+
+                return [
+                    'employee_id' => $emp->id,
+                    'name' => $emp->user?->name,
+                    'department' => $emp->department?->name,
+                    'work_date' => $date,
+                    'time_in' => $att?->time_in,
+                    'time_out' => $att?->time_out,
+                    'first_in' => $att?->time_in,
+                    'last_out' => $att?->time_out,
+                    'hours_worked' => $att ? (float) $att->hours_worked : 0,
+                    'status' => $status,
+                    'leave_type' => $leaveName,
+                    'timing' => $timing,
+                    'flag' => $flags[$emp->id] ?? null,
+                    'tasks' => $att?->tasks ?? [],
+                ];
+            })
+            ->sortBy('name')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Scheduled workdays for an employee in an inclusive date range, per their
+     * EFFECTIVE schedule (not a flat Mon–Fri). This is the payroll daily-rate
+     * divisor, so proration matches the days the person is actually expected to work.
+     */
+    /**
+     * Dates the employee actually worked in an inclusive range (a present/late
+     * attendance record), as 'Y-m-d' strings — used to price holiday-premium pay.
+     *
+     * @return array<int, string>
+     */
+    public function workedDatesBetween(Employee $employee, string $start, string $end): array
+    {
+        return Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->whereIn('status', ['present', 'late'])
+            ->pluck('work_date')
+            ->map(fn ($d) => Carbon::parse($d)->toDateString())
+            ->all();
+    }
+
+    public function scheduledWorkdaysFor(Employee $employee, string $start, string $end): int
+    {
+        $tz = config('app.timezone_local');
+        $last = Carbon::parse($end, $tz)->startOfDay();
+        $count = 0;
+
+        for ($d = Carbon::parse($start, $tz)->startOfDay(); $d->lte($last); $d->addDay()) {
+            if ($this->schedule->effectiveFor($employee, $d)['is_workday']) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * Unpaid days for an employee in an inclusive date range — the PAYROLL view of
+     * attendance, mirroring the roster classification in allForDate(). Over the
+     * employee's scheduled workdays, a day is UNPAID when it's an explicit `absent`
+     * row, OR a PAST workday with no clock-in and no approved leave (a missing record
+     * is not free pay). Present/late days, PAID leave, rest days, and today/future
+     * days do not count. UNPAID leave (LWOP) is deducted a full day (leave is full-day
+     * only). An approved HALF-DAY request deducts 0.5 (two on one day → 1.0). Returns
+     * a float so half-days survive.
+     *
+     * Tardiness adds an EXTRA penalty per the attendance policy: in 'per_lates' mode,
+     * every N lates in the range deducts one more day (a late day is still paid on its
+     * own — the deduction is the accumulated penalty, so there's no double-counting).
+     */
+    public function unpaidDaysFor(Employee $employee, string $start, string $end): float
+    {
+        // Management staff are on a FIXED salary — they never accrue unpaid days,
+        // regardless of the caller. Guarding here (not only in PayrollService) keeps
+        // any future caller correct.
+        if ($employee->isManagement()) {
+            return 0.0;
+        }
+
+        $tz = config('app.timezone_local');
+        $today = $this->localNow()->startOfDay();
+        $last = Carbon::parse($end, $tz)->startOfDay();
+
+        $rows = Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->get()
+            ->keyBy(fn ($r) => $r->work_date->toDateString());
+
+        $leaves = LeaveRequest::with('leaveType')
+            ->where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $end)
+            ->whereDate('end_date', '>=', $start)
+            ->get();
+
+        // Approved half-day requests per date (AM + PM on one day → 2 halves = a full day).
+        $halfDayCounts = HalfDayRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get()
+            ->groupBy(fn ($h) => $h->work_date->toDateString())
+            ->map->count();
+
+        $unpaid = 0.0;
+        $lateCount = 0;
+
+        for ($d = Carbon::parse($start, $tz)->startOfDay(); $d->lte($last); $d->addDay()) {
+            if (! $this->schedule->effectiveFor($employee, $d)['is_workday']) {
+                continue; // rest day — never unpaid
+            }
+
+            $dateStr = $d->toDateString();
+
+            // Approved leave covering this day: paid leave → no deduction; unpaid leave
+            // (LWOP) → the full day is deducted (leave is full-day only).
+            $leave = $leaves->first(fn ($l) => $dateStr >= Carbon::parse($l->start_date)->toDateString()
+                && $dateStr <= Carbon::parse($l->end_date)->toDateString());
+            if ($leave) {
+                if ($leave->leaveType && ! $leave->leaveType->is_paid) {
+                    $unpaid += 1.0;
+                }
+
+                continue;
+            }
+
+            // Approved half-day request(s): 0.5 each — deducted from pay, the other
+            // half is assumed worked/paid, so skip the attendance classification.
+            if ($halves = ($halfDayCounts[$dateStr] ?? 0)) {
+                $unpaid += 0.5 * $halves;
+
+                continue;
+            }
+
+            $row = $rows->get($dateStr);
+            if ($row && $row->status === 'late') {
+                $lateCount++;
+            }
+            if ($row && $row->time_in) {
+                continue; // present or late → the day itself is paid
+            }
+            if ($row && $row->status === 'absent') {
+                $unpaid += 1.0;
+
+                continue;
+            }
+            // No usable record: unpaid only once the workday is in the past.
+            if ($d->lt($today)) {
+                $unpaid += 1.0;
+            }
+        }
+
+        // Tardiness penalty: every N lates in the range costs one day's pay.
+        $policy = $this->policy->get();
+        if ($policy->late_deduction_mode === 'per_lates' && $policy->lates_per_deduction > 0) {
+            $unpaid += intdiv($lateCount, (int) $policy->lates_per_deduction);
+        }
+
+        return $unpaid;
+    }
+
+    // --- helpers ---
+
+    /** The schedule's start time as a Carbon on the given local day. */
+    private function scheduleStart(Carbon $localDay, array $eff): Carbon
+    {
+        [$h, $m] = explode(':', $eff['start_time'] ?? self::FALLBACK_START);
+
+        return $localDay->copy()->setTime((int) $h, (int) $m, 0);
+    }
+
+    /**
+     * Classify an arrival against the schedule: early (before start), on_time
+     * (within grace), or late (past grace) with minutes past start.
+     *
+     * @param  array<string, mixed>  $eff
+     * @return array{category:string, late_minutes:int}
+     */
+    private function arrivalCategory(Carbon $timeInLocal, array $eff, Carbon $dateCarbon): array
+    {
+        $start = $this->scheduleStart($dateCarbon, $eff);
+        $graceEnd = $start->copy()->addMinutes($eff['grace_minutes'] ?? 0);
+
+        if ($timeInLocal->lt($start)) {
+            return ['category' => 'early', 'late_minutes' => 0];
+        }
+        if ($timeInLocal->lte($graceEnd)) {
+            return ['category' => 'on_time', 'late_minutes' => 0];
+        }
+
+        return ['category' => 'late', 'late_minutes' => (int) $start->diffInMinutes($timeInLocal)];
+    }
+
+    /** Employee ids on approved leave covering the date. */
+    private function onLeaveIds(string $date): \Illuminate\Support\Collection
+    {
+        return LeaveRequest::where('status', 'approved')
+            ->whereDate('start_date', '<=', $date)
+            ->whereDate('end_date', '>=', $date)
+            ->pluck('employee_id')
+            ->unique();
+    }
+
+    /** employee_id → leave type name, for employees on approved leave that date. */
+    private function onLeaveMap(string $date): \Illuminate\Support\Collection
+    {
+        return LeaveRequest::with('leaveType')
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $date)
+            ->whereDate('end_date', '>=', $date)
+            ->get()
+            ->keyBy('employee_id')
+            ->map(fn ($l) => $l->leaveType?->name);
+    }
+}
