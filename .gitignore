@@ -16,6 +16,11 @@ vendor/
 /backend/.env
 /frontend/.env.local
 
+# ── Credentials / onboarding exports — NEVER commit ──
+teamora-onboarding-credentials.csv
+*credentials*.csv
+*-credentials.csv
+
 # ── Laravel runtime ──
 /backend/storage/*.key
 /backend/storage/logs/*
