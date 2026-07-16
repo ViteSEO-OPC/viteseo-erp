@@ -81,11 +81,11 @@ class NotificationResource extends JsonResource
     private function deriveLink(array $data): ?string
     {
         if (! empty($data['lead_id'])) {
-            return '/leads/'.$data['lead_id'];
+            return '/zerem/leads/'.$data['lead_id'];
         }
 
         if (! empty($data['planner_event_id'])) {
-            return '/planner';
+            return '/zerem/planner';
         }
 
         return null;

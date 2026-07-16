@@ -34,7 +34,7 @@ class SearchService
             ->map(fn ($e) => [
                 'title' => $e->user?->name,
                 'subtitle' => trim($e->job_title . ' · ' . ($e->department?->name ?? '')),
-                'href' => "/hr/people/employees/{$e->id}",
+                'href' => "/teamora/people/employees/{$e->id}",
             ]);
 
         $departments = Department::where('name', 'like', $like)
@@ -43,7 +43,7 @@ class SearchService
             ->map(fn ($d) => [
                 'title' => $d->name,
                 'subtitle' => "Department · {$d->code}",
-                'href' => '/hr/company/departments',
+                'href' => '/teamora/company/departments',
             ]);
 
         $requisitions = Requisition::with('department')
@@ -52,7 +52,7 @@ class SearchService
             ->map(fn ($r) => [
                 'title' => $r->title,
                 'subtitle' => 'Requisition · ' . ($r->department?->name ?? ''),
-                'href' => '/hr/people/recruitment',
+                'href' => '/teamora/people/recruitment',
             ]);
 
         $groups = [];

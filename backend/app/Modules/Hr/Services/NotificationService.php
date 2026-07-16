@@ -141,11 +141,11 @@ class NotificationService
             'items' => $paged->all(),
             'has_more' => ($offset + $limit) < $total,
             'nav' => [
-                '/hr/requests/leave' => $pendingLeave->count() + $pendingHalfDay->count(),
-                '/hr/finance/reimbursement' => $pendingReimb->count(),
-                '/hr/requests/document' => $pendingDocs->count() + $pendingChanges->count(),
-                '/hr/requests/payroll' => $pendingPayslipReqs->count() + $openInquiries->count(),
-                '/hr/requests/concern' => $openConcerns->count(),
+                '/teamora/requests/leave' => $pendingLeave->count() + $pendingHalfDay->count(),
+                '/teamora/finance/reimbursement' => $pendingReimb->count(),
+                '/teamora/requests/document' => $pendingDocs->count() + $pendingChanges->count(),
+                '/teamora/requests/payroll' => $pendingPayslipReqs->count() + $openInquiries->count(),
+                '/teamora/requests/concern' => $openConcerns->count(),
             ],
         ];
     }
