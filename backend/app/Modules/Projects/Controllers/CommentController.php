@@ -13,6 +13,7 @@ use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Requests\StoreCommentRequest;
 use App\Modules\Projects\Resources\CommentResource;
 use App\Modules\Projects\Services\CommentService;
+use App\Modules\Projects\Support\SafeBroadcast;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
@@ -40,11 +41,11 @@ class CommentController extends Controller
         $comment = $this->commentService->createForTask($task, $request->validated(), $request->user());
 
         $task->loadMissing('project');
-        broadcast(new CommentCreated(
+        SafeBroadcast::toOthers(new CommentCreated(
             $comment,
             (string) $task->project->uuid,
             (string) $task->uuid,
-        ))->toOthers();
+        ));
 
         return new CommentResource($comment->load('author'));
     }
@@ -68,11 +69,11 @@ class CommentController extends Controller
         $comment = $this->commentService->createForSubtask($subtask, $request->validated(), $request->user());
 
         $subtask->loadMissing('task.project');
-        broadcast(new CommentCreated(
+        SafeBroadcast::toOthers(new CommentCreated(
             $comment,
             (string) $subtask->task->project->uuid,
             (string) $subtask->task->uuid,
-        ))->toOthers();
+        ));
 
         return new CommentResource($comment->load('author'));
     }
@@ -98,7 +99,7 @@ class CommentController extends Controller
 
         $this->commentService->delete($comment);
 
-        broadcast(new CommentDeleted($commentUuid, $projectUuid, $taskUuid, $subtaskUuid))->toOthers();
+        SafeBroadcast::toOthers(new CommentDeleted($commentUuid, $projectUuid, $taskUuid, $subtaskUuid));
 
         return response()->noContent();
     }

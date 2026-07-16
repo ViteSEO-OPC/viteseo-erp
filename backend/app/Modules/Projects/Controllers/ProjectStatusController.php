@@ -14,6 +14,7 @@ use App\Modules\Projects\Requests\StoreProjectStatusRequest;
 use App\Modules\Projects\Requests\UpdateProjectStatusRequest;
 use App\Modules\Projects\Resources\ProjectStatusResource;
 use App\Modules\Projects\Services\ProjectStatusService;
+use App\Modules\Projects\Support\SafeBroadcast;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 
@@ -40,7 +41,7 @@ class ProjectStatusController extends Controller
 
         $status = $this->projectStatusService->create($project, $request->validated());
 
-        broadcast(new StatusCreated($status))->toOthers();
+        SafeBroadcast::toOthers(new StatusCreated($status));
 
         return new ProjectStatusResource($status);
     }
@@ -51,7 +52,7 @@ class ProjectStatusController extends Controller
 
         $status = $this->projectStatusService->update($status, $request->validated());
 
-        broadcast(new StatusUpdated($status))->toOthers();
+        SafeBroadcast::toOthers(new StatusUpdated($status));
 
         return new ProjectStatusResource($status);
     }
@@ -65,7 +66,7 @@ class ProjectStatusController extends Controller
 
         $this->projectStatusService->delete($status);
 
-        broadcast(new StatusDeleted($statusUuid, $projectUuid))->toOthers();
+        SafeBroadcast::toOthers(new StatusDeleted($statusUuid, $projectUuid));
 
         return response()->noContent();
     }

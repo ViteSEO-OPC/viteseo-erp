@@ -82,6 +82,7 @@ export interface Task {
   priority: Priority;
   effort_score: number | null;
   deadline: string | null;
+  start_date?: string | null;
   subtasks_count?: number;
   // Board-list flag: the requesting user has a subtask assigned under this task,
   // so it belongs in their "My Tasks" view even if the task itself isn't theirs.
@@ -176,6 +177,7 @@ export interface CreateTaskPayload {
   priority: Priority;
   effort_score?: number | null;
   deadline?: string | null;
+  start_date?: string | null;
 }
 
 export interface ArchivedWorkspace {
@@ -232,4 +234,24 @@ export interface ArchivedSubtask {
   deleted_at: string;
   created_at: string;
   updated_at: string;
+}
+
+/** Aggregated live workload for a member (Member Workload Indicator). */
+export type WorkloadLevel = "light" | "moderate" | "heavy";
+
+export interface Workload {
+  user_id: number;
+  /** Sum of effort scores from the member's active (Todo/In Progress) work. */
+  effort_score: number;
+  level: WorkloadLevel;
+  /** Inclusive upper bounds for the Light and Moderate levels. */
+  thresholds: { light: number; moderate: number };
+}
+
+/** Aggregated live workload for a group (same rules, scoped to the group). */
+export interface GroupWorkload {
+  group_id: string;
+  effort_score: number;
+  level: WorkloadLevel;
+  thresholds: { light: number; moderate: number };
 }

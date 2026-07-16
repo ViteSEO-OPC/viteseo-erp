@@ -5,11 +5,15 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { Paginated } from "@/core/types";
+import { celebrateTask } from "@/core/lib/confetti";
 import { projectsApi } from "./api";
 import type { CreateTaskPayload, ProjectStatus, Subtask, Task } from "./types";
 
 export const projectKeys = {
   users: ["users"] as const,
+  // Member/group workload aggregates — invalidated whenever task/subtask
+  // assignment, status, or effort changes so the indicator reflects live data.
+  workloads: ["projects", "workloads"] as const,
   workspaces: ["projects", "workspaces"] as const,
   workspace: (id: string) => ["projects", "workspaces", id] as const,
   groups: (projectId?: string) =>
@@ -35,6 +39,33 @@ export function useUsers(search?: string) {
   return useQuery({
     queryKey: [...projectKeys.users, search ?? ""],
     queryFn: () => projectsApi.listUsers(search),
+  });
+}
+
+/**
+ * Live workload for a member, fetched on demand only when a valid assignee is
+ * selected in the task modal. Advisory data — it never blocks assignment.
+ */
+export function useUserWorkload(userId: number | null | undefined) {
+  return useQuery({
+    queryKey: [...projectKeys.workloads, "user", userId ?? 0],
+    queryFn: () => projectsApi.getUserWorkload(userId as number),
+    enabled: userId != null && userId > 0,
+    // Always refetch on open so PMs see current workload after recent changes.
+    staleTime: 0,
+  });
+}
+
+/**
+ * Live workload for a group — same aggregation scoped to the group. Used on the
+ * Groups page and for the task modal's group-assignment indicator.
+ */
+export function useGroupWorkload(groupId: string | null | undefined) {
+  return useQuery({
+    queryKey: [...projectKeys.workloads, "group", groupId ?? ""],
+    queryFn: () => projectsApi.getGroupWorkload(groupId as string),
+    enabled: !!groupId,
+    staleTime: 0,
   });
 }
 
@@ -327,8 +358,10 @@ export function useCreateTask(projectId: string) {
   return useMutation({
     mutationFn: (payload: CreateTaskPayload) =>
       projectsApi.createTask(projectId, payload),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) });
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
+    },
   });
 }
 export function useUpdateTask(projectId: string) {
@@ -358,11 +391,19 @@ export function useUpdateTask(projectId: string) {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(key, ctx.prev);
     },
+    onSuccess: (data, { payload }) => {
+      // Celebrate when this update transitioned the task into "done".
+      if (payload.status_id && data?.status?.key === "done") {
+        celebrateTask(data.id);
+      }
+    },
     onSettled: (_data, _err, { id }) => {
       qc.invalidateQueries({ queryKey: key });
       // Refresh the single-task detail (status/priority/etc. + new activity log)
       // so an open task view reflects the change.
       qc.invalidateQueries({ queryKey: projectKeys.task(id) });
+      // Assignment/status changes move effort between members.
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
     },
   });
 }
@@ -374,6 +415,7 @@ export function useDeleteTask(projectId: string) {
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) });
       qc.removeQueries({ queryKey: projectKeys.task(id) });
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
     },
   });
 }
@@ -400,6 +442,7 @@ export function useCreateSubtask(taskId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.subtasks(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.task(taskId) });
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
     },
   });
 }
@@ -416,6 +459,7 @@ export function useUpdateSubtask(taskId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.subtasks(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.task(taskId) });
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
     },
   });
 }
@@ -427,6 +471,7 @@ export function useDeleteSubtask(taskId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.subtasks(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.task(taskId) });
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
     },
   });
 }

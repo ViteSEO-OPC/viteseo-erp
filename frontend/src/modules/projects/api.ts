@@ -12,8 +12,10 @@ import type {
   Link,
   Project,
   ProjectStatus,
+  GroupWorkload,
   Subtask,
   Task,
+  Workload,
   Workspace,
 } from "./types";
 import type { NotificationDto } from "./notifications";
@@ -32,6 +34,22 @@ export const projectsApi = {
     const { data } = await apiClient.get<Paginated<User>>(`${BASE}/users`, {
       params: { search, per_page: 100 },
     });
+    return data.data;
+  },
+  // Live member workload (Member Workload Indicator) — loaded on demand when an
+  // assignee is selected in the task modal.
+  getUserWorkload: async (userId: number): Promise<Workload> => {
+    const { data } = await apiClient.get<ApiResource<Workload>>(
+      `${BASE}/members/${userId}/workload`,
+    );
+    return data.data;
+  },
+  // Live group workload (same aggregation, scoped to the group) — for the
+  // Groups page and the task modal's group-assignment indicator.
+  getGroupWorkload: async (groupId: string): Promise<GroupWorkload> => {
+    const { data } = await apiClient.get<ApiResource<GroupWorkload>>(
+      `${BASE}/groups/${groupId}/workload`,
+    );
     return data.data;
   },
 

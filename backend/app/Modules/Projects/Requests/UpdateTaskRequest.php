@@ -4,19 +4,53 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Requests;
 
+use App\Modules\Projects\Concerns\ChecksDeadlineDates;
 use App\Modules\Projects\Enums\AssignmentType;
 use App\Modules\Projects\Enums\TaskPriority;
 use App\Modules\Projects\Models\Group;
 use App\Modules\Projects\Models\ProjectStatus;
+use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Support\PublicId;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class UpdateTaskRequest extends FormRequest
 {
+    use ChecksDeadlineDates;
+
     public function authorize(): bool
     {
         return $this->user()?->can('update', $this->route('task')) ?? false;
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $v): void {
+            /** @var Task $task */
+            $task = $this->route('task');
+
+            // Effective values after this update (fall back to current for
+            // fields not present in the payload).
+            $start = $this->has('start_date')
+                ? $this->asDate($this->input('start_date'))
+                : $this->asDate($task->start_date?->toDateString());
+            $deadline = $this->has('deadline')
+                ? $this->asDate($this->input('deadline'))
+                : $this->asDate($task->deadline?->toDateString());
+
+            if ($start && $deadline && $deadline->lessThan($start)) {
+                $v->errors()->add('deadline', 'The due date must be on or after the start date.');
+            }
+
+            if ($this->has('deadline')) {
+                $this->flagPastDeadline(
+                    $v,
+                    $this->asDate($this->input('deadline')),
+                    $this->asDate($task->deadline?->toDateString()),
+                );
+            }
+        });
     }
 
     /**
@@ -40,6 +74,7 @@ class UpdateTaskRequest extends FormRequest
         return [
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'description' => ['sometimes', 'nullable', 'string'],
+            'start_date' => ['sometimes', 'nullable', 'date'],
             'deadline' => ['sometimes', 'nullable', 'date'],
             'assignment_type' => ['sometimes', 'required', Rule::in(array_column(AssignmentType::cases(), 'value'))],
             'priority' => ['sometimes', 'required', Rule::in(array_column(TaskPriority::cases(), 'value'))],

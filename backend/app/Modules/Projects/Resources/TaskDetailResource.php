@@ -54,6 +54,7 @@ class TaskDetailResource extends JsonResource
             'priority' => $this->priority?->value,
             'effort_score' => $this->effort_score,
             'deadline' => $this->deadline?->toIso8601String(),
+            'start_date' => $this->start_date?->toIso8601String(),
             'subtasks' => SubtaskResource::collection($this->whenLoaded('subtasks')),
             'comments' => CommentResource::collection($this->whenLoaded('comments')),
             'links' => LinkResource::collection($this->whenLoaded('links')),

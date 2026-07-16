@@ -4,7 +4,7 @@ import { RequireAuth } from "@/core/auth-context";
 import { Sidebar } from "@/core/layout/Sidebar";
 import { Topbar } from "@/core/layout/Topbar";
 import { SidebarProvider } from "@/core/layout/SidebarContext";
-import { GlobalTaskModal } from "@/modules/projects/components/GlobalTaskModal";
+import { GlobalTaskModal } from "@/modules/projects/components/tasks/GlobalTaskModal";
 
 /**
  * Projects section shell. Uses the platform's shared <RequireAuth> (single

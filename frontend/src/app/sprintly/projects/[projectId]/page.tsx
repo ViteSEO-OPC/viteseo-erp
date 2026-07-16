@@ -1,4 +1,4 @@
-import { ProjectDetailView } from "@/modules/projects/components/ProjectDetailView";
+import { ProjectDetailView } from "@/modules/projects/components/projects/ProjectDetailView";
 
 export default async function ProjectDetailPage({
   params,

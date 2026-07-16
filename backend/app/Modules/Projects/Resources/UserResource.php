@@ -27,7 +27,6 @@ class UserResource extends JsonResource
             // Managers (Admin/PM) vs Member — derived from Spatie roles so the
             // Projects UI keeps working without a users.role column.
             'role' => $this->projectsRole(),
-            'capacity_points' => $this->capacity_points,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

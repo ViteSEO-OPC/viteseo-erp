@@ -10,6 +10,7 @@ use App\Modules\Projects\Events\NotificationCreated;
 use App\Modules\Projects\Models\Comment;
 use App\Modules\Projects\Models\Notification;
 use App\Modules\Projects\Models\Task;
+use App\Modules\Projects\Support\SafeBroadcast;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -83,6 +84,6 @@ class NotificationService
      */
     private function dispatch(Notification $notification): void
     {
-        DB::afterCommit(fn () => broadcast(new NotificationCreated($notification)));
+        DB::afterCommit(fn () => SafeBroadcast::dispatch(new NotificationCreated($notification)));
     }
 }

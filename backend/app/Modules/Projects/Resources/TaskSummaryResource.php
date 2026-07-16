@@ -47,6 +47,7 @@ class TaskSummaryResource extends JsonResource
             'priority' => $this->priority?->value,
             'effort_score' => $this->effort_score,
             'deadline' => $this->deadline?->toIso8601String(),
+            'start_date' => $this->start_date?->toIso8601String(),
             'subtasks_count' => $this->whenCounted('subtasks'),
             // True when the requesting user has a subtask assigned under this task
             // (so it can surface in their "My Tasks" board even without the parent

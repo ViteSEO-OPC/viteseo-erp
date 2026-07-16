@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Modules\Projects\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Projects\Enums\StatusKey;
 use App\Modules\Projects\Enums\UserRole;
+use App\Modules\Projects\Events\TaskCompleted;
 use App\Modules\Projects\Events\TaskCreated;
 use App\Modules\Projects\Events\TaskDeleted;
 use App\Modules\Projects\Events\TaskUpdated;
@@ -17,6 +19,7 @@ use App\Modules\Projects\Resources\TaskDetailResource;
 use App\Modules\Projects\Resources\TaskResource;
 use App\Modules\Projects\Resources\TaskSummaryResource;
 use App\Modules\Projects\Services\TaskService;
+use App\Modules\Projects\Support\SafeBroadcast;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
@@ -61,7 +64,7 @@ class TaskController extends Controller
         $task = $this->taskService->create($project, $request->validated(), $request->user());
         $task->load('project', 'status', 'group', 'assignee', 'assignedBy');
 
-        broadcast(new TaskCreated($task))->toOthers();
+        SafeBroadcast::toOthers(new TaskCreated($task));
 
         return new TaskResource($task);
     }
@@ -91,10 +94,18 @@ class TaskController extends Controller
             $data = array_intersect_key($data, array_flip(['status_id']));
         }
 
+        // Track whether this update transitions the task INTO the done status,
+        // so we can fire the completion celebration exactly once.
+        $wasDone = $task->loadMissing('status')->status?->key === StatusKey::DONE;
+
         $task = $this->taskService->update($task, $data, $user);
         $task->load('project', 'status', 'group', 'assignee', 'assignedBy');
 
-        broadcast(new TaskUpdated($task))->toOthers();
+        SafeBroadcast::toOthers(new TaskUpdated($task));
+
+        if (! $wasDone && $task->status?->key === StatusKey::DONE) {
+            SafeBroadcast::toOthers(new TaskCompleted($task));
+        }
 
         return new TaskResource($task);
     }
@@ -110,7 +121,7 @@ class TaskController extends Controller
 
         $this->taskService->delete($task);
 
-        broadcast(new TaskDeleted($taskUuid, $projectUuid))->toOthers();
+        SafeBroadcast::toOthers(new TaskDeleted($taskUuid, $projectUuid));
 
         return response()->noContent();
     }

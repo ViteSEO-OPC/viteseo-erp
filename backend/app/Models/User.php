@@ -24,12 +24,13 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Spatie\Permission\Traits\HasRoles;
 
-// `avatar`, `preferences`, `capacity_points` are Projects-module columns added
-// by the additive users migration; `status`, `last_login_at` + soft-deletes are
+// `avatar`, `preferences` are Projects-module columns added by the additive
+// users migration (`capacity_points` was dropped — workload is now derived from
+// live effort aggregation); `status`, `last_login_at` + soft-deletes are
 // added by the CRM module's additive users migration (CRM needs reversible user
 // "deactivate"/"delete"). `role` is intentionally absent (Spatie roles are the
 // single source of truth).
-#[Fillable(['name', 'email', 'password', 'avatar', 'preferences', 'capacity_points', 'status', 'last_login_at'])]
+#[Fillable(['name', 'email', 'password', 'avatar', 'preferences', 'status', 'last_login_at'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -48,7 +49,6 @@ class User extends Authenticatable
             'last_login_at' => 'datetime',
             'password' => 'hashed',
             'preferences' => 'array',
-            'capacity_points' => 'integer',
         ];
     }
 

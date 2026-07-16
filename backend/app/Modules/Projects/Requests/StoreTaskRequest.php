@@ -4,20 +4,43 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Requests;
 
+use App\Modules\Projects\Concerns\ChecksDeadlineDates;
 use App\Modules\Projects\Enums\AssignmentType;
 use App\Modules\Projects\Enums\TaskPriority;
 use App\Modules\Projects\Models\Group;
 use App\Modules\Projects\Models\ProjectStatus;
 use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Support\PublicId;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class StoreTaskRequest extends FormRequest
 {
+    use ChecksDeadlineDates;
+
     public function authorize(): bool
     {
         return $this->user()?->can('create', Task::class) ?? false;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return ['deadline.after_or_equal' => 'The due date can’t be in the past.'];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $v): void {
+            $start = $this->asDate($this->input('start_date'));
+            $deadline = $this->asDate($this->input('deadline'));
+            if ($start && $deadline && $deadline->lessThan($start)) {
+                $v->errors()->add('deadline', 'The due date must be on or after the start date.');
+            }
+        });
     }
 
     /**
@@ -41,7 +64,8 @@ class StoreTaskRequest extends FormRequest
         return [
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
-            'deadline' => ['nullable', 'date'],
+            'start_date' => ['nullable', 'date'],
+            'deadline' => ['nullable', 'date', 'after_or_equal:today'],
             'assignment_type' => ['required', Rule::in(array_column(AssignmentType::cases(), 'value'))],
             'priority' => ['required', Rule::in(array_column(TaskPriority::cases(), 'value'))],
             'status_id' => ['required', 'integer', 'exists:pm_project_statuses,id'],

@@ -6,7 +6,7 @@ namespace App\Modules\Projects\Events;
 
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /**
@@ -19,7 +19,7 @@ use Illuminate\Foundation\Events\Dispatchable;
  * re-fetch models on the queue and its __unserialize can't rehydrate readonly
  * properties declared in this base class).
  */
-abstract class ProjectBroadcastEvent implements ShouldBroadcast
+abstract class ProjectBroadcastEvent implements ShouldBroadcastNow
 {
     use Dispatchable;
     use InteractsWithSockets;

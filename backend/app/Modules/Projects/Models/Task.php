@@ -42,6 +42,7 @@ class Task extends Model
         'priority',
         'effort_score',
         'deadline',
+        'start_date',
     ];
 
     protected $casts = [
@@ -49,6 +50,7 @@ class Task extends Model
         'priority' => TaskPriority::class,
         'effort_score' => 'integer',
         'deadline' => 'date',
+        'start_date' => 'date',
     ];
 
     public function project(): BelongsTo

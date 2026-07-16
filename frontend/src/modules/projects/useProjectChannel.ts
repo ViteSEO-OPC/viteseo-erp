@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Paginated } from "@/core/types";
 import { getEcho } from "@/core/realtime/echo";
+import { celebrateTask } from "@/core/lib/confetti";
 import { projectKeys } from "./hooks";
 import type { ProjectStatus, Task } from "./types";
 
@@ -67,6 +68,11 @@ export function useProjectChannel(projectId?: string): void {
           prev ? { ...prev, ...task } : prev,
         );
       }
+    });
+
+    // A task was marked done by someone else — join the celebration.
+    channel.listen(".TaskCompleted", (task: Task) => {
+      celebrateTask(task.id);
     });
 
     channel.listen(".TaskDeleted", (ev: TaskDeletedEvent) => {

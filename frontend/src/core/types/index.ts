@@ -6,7 +6,6 @@ export interface User {
   email: string;
   avatar?: string | null;
   role?: UserRole;
-  capacity_points?: number | null;
   preferences?: Record<string, unknown> | null;
   created_at?: string;
 }

@@ -8,17 +8,18 @@ use App\Modules\Projects\Models\Notification;
 use App\Modules\Projects\Resources\NotificationResource;
 use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Broadcasting\PrivateChannel;
-use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
+use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 
 /**
  * Broadcast on the recipient's private user channel. Not a ProjectBroadcastEvent
  * (different channel) and never uses ->toOthers() (the recipient is never the actor).
  *
- * Holds only scalars/arrays (payload resolved in the constructor) — no
- * SerializesModels, so nothing is re-fetched on the queue worker.
+ * Broadcasts synchronously (ShouldBroadcastNow) so delivery never depends on a
+ * running queue worker. Holds only scalars/arrays (payload resolved in the
+ * constructor), so nothing needs to be re-fetched.
  */
-class NotificationCreated implements ShouldBroadcast
+class NotificationCreated implements ShouldBroadcastNow
 {
     use Dispatchable;
     use InteractsWithSockets;

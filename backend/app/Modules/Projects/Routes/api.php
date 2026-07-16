@@ -13,6 +13,7 @@ use App\Modules\Projects\Controllers\ProjectStatusController;
 use App\Modules\Projects\Controllers\SubtaskController;
 use App\Modules\Projects\Controllers\TaskController;
 use App\Modules\Projects\Controllers\UserDirectoryController;
+use App\Modules\Projects\Controllers\WorkloadController;
 use App\Modules\Projects\Controllers\WorkspaceController;
 use Illuminate\Support\Facades\Route;
 
@@ -38,6 +39,12 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     Route::post('projects/{project}/statuses', [ProjectStatusController::class, 'store']);
     Route::match(['put', 'patch'], 'statuses/{status}', [ProjectStatusController::class, 'update']);
     Route::delete('statuses/{status}', [ProjectStatusController::class, 'destroy']);
+
+    // Workload indicators — live active effort aggregation, loaded on demand
+    // when selecting an assignee (member or group) in the task modal, and for
+    // the Groups page. Advisory only.
+    Route::get('members/{user}/workload', [WorkloadController::class, 'show']);
+    Route::get('groups/{group}/workload', [WorkloadController::class, 'showGroup']);
 
     // Tasks (nested index/store, shallow member routes)
     Route::get('projects/{project}/tasks', [TaskController::class, 'index']);

@@ -44,6 +44,7 @@ class TaskResource extends JsonResource
             'priority' => $this->priority?->value,
             'effort_score' => $this->effort_score,
             'deadline' => $this->deadline?->toIso8601String(),
+            'start_date' => $this->start_date?->toIso8601String(),
             'subtasks_count' => $this->whenCounted('subtasks'),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

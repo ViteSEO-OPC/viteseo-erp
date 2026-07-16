@@ -1,4 +1,4 @@
-import { WorkspaceDetailView } from '@/modules/projects/components/WorkspaceDetailView';
+import { WorkspaceDetailView } from '@/modules/projects/components/workspaces/WorkspaceDetailView';
 
 export default async function WorkspaceDetailPage({
   params,

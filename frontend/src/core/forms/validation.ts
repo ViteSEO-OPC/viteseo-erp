@@ -78,11 +78,24 @@ export const createTaskSchema = z
     status_id: requiredString('Select a status'),
     priority: taskPriorityEnum,
     deadline: z.string().optional(),
+    start_date: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // Individual tasks may be left unassigned (default); groups still require one.
     if (val.assignment_type === 'group' && !val.group_id) {
       ctx.addIssue({ code: 'custom', path: ['group_id'], message: 'Select a group' });
+    }
+    // Date rules (ISO YYYY-MM-DD strings compare lexicographically = chronologically).
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    if (val.start_date && val.start_date < todayStr) {
+      ctx.addIssue({ code: 'custom', path: ['start_date'], message: 'The start date can’t be in the past.' });
+    }
+    if (val.deadline && val.deadline < todayStr) {
+      ctx.addIssue({ code: 'custom', path: ['deadline'], message: 'The due date can’t be in the past.' });
+    }
+    if (val.deadline && val.start_date && val.deadline < val.start_date) {
+      ctx.addIssue({ code: 'custom', path: ['deadline'], message: 'Due date must be on or after the start date.' });
     }
   });
 

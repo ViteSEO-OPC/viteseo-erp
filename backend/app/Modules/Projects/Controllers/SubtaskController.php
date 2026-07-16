@@ -14,6 +14,7 @@ use App\Modules\Projects\Requests\StoreSubtaskRequest;
 use App\Modules\Projects\Requests\UpdateSubtaskRequest;
 use App\Modules\Projects\Resources\SubtaskResource;
 use App\Modules\Projects\Services\SubtaskService;
+use App\Modules\Projects\Support\SafeBroadcast;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
@@ -80,11 +81,11 @@ class SubtaskController extends Controller
         $subtask->load('task', 'assignee', 'status');
         $subtask->task->loadMissing('project');
 
-        broadcast(new SubtaskUpdated(
+        SafeBroadcast::toOthers(new SubtaskUpdated(
             $subtask,
             (string) $subtask->task->project->uuid,
             (string) $subtask->task->uuid,
-        ))->toOthers();
+        ));
 
         return new SubtaskResource($subtask);
     }
