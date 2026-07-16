@@ -12,26 +12,29 @@ export function StatCardChart({ card }: StatCardChartProps) {
   return (
     <Card className="border-border shadow-card">
       <CardContent className="flex flex-col gap-2 pt-4">
-        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
+        <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
           {card.label}
         </span>
-        <span className="text-display font-extrabold leading-none text-gray-900">
+        <span className="text-display font-extrabold leading-none text-foreground">
           {card.value}
         </span>
-        <span className="text-xs text-gray-500">{card.subCaption}</span>
+        <span className="text-xs text-muted-foreground">{card.subCaption}</span>
 
-        <div className="mt-1 flex items-center gap-2">
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-              card.trendTone === "teal"
-                ? "bg-teal-400/10 text-teal-900"
-                : "bg-red-500/10 text-red-500",
-            )}
-          >
-            {card.trendDirection === "up" ? "↑" : "↓"} {card.trendPercent}
-          </span>
-        </div>
+        {/* Trend chip only when a real comparison exists — never fabricated for live aggregates. */}
+        {card.trendPercent && (
+          <div className="mt-1 flex items-center gap-2">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                card.trendTone === "teal"
+                  ? "bg-teal-400/10 text-teal-900 dark:text-teal-400"
+                  : "bg-red-500/10 text-red-500",
+              )}
+            >
+              {card.trendDirection === "up" ? "↑" : "↓"} {card.trendPercent}
+            </span>
+          </div>
+        )}
 
         {card.sparkline && (
           <div className="mt-2 flex items-end gap-0.5">
@@ -50,13 +53,13 @@ export function StatCardChart({ card }: StatCardChartProps) {
 
         {card.progress && (
           <div className="mt-2">
-            <div className="h-2 rounded-full bg-gray-150">
+            <div className="h-2 rounded-full bg-secondary">
               <div
                 className="h-2 rounded-full bg-teal-400 transition-all"
                 style={{ width: `${(card.progress.value / card.progress.target) * 100}%` }}
               />
             </div>
-            <span className="mt-1 text-[10px] text-gray-500">
+            <span className="mt-1 text-[10px] text-muted-foreground">
               {card.progress.value}% … {card.progress.target}%
             </span>
           </div>

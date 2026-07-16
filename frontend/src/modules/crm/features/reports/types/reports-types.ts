@@ -5,17 +5,13 @@ export type KpiCard = {
   label: string;
   value: string;
   subCaption: string;
-  trendDirection: TrendDirection;
-  trendPercent: string;
-  trendTone: "teal" | "red";
+  // Trend/sparkline are OPTIONAL: only rendered when a real period-over-period comparison exists.
+  // Reports KPIs sourced from live aggregates omit them (no fabricated trend — house honesty rule).
+  trendDirection?: TrendDirection;
+  trendPercent?: string;
+  trendTone?: "teal" | "red";
   sparkline?: number[];
   progress?: { value: number; target: number };
-};
-
-export type StatusBarItem = {
-  label: string;
-  value: number;
-  color: string;
 };
 
 export type DonutSegment = {
@@ -24,39 +20,8 @@ export type DonutSegment = {
   color: string;
 };
 
-export type DonutChart = {
-  title: string;
-  subtitle: string;
-  centerLabel: string;
-  segments: DonutSegment[];
-};
-
 export type LineSeries = {
   name: string;
   data: { month: string; value: number }[];
   color: string;
-};
-
-export type ConversionBar = {
-  month: string;
-  value: number;
-  color: string;
-  highlight?: boolean;
-};
-
-export type IndustryBar = {
-  sector: string;
-  value: number;
-  color: string;
-};
-
-export type ReportsData = {
-  kpis: KpiCard[];
-  statusBars: StatusBarItem[];
-  priorityDonut: DonutChart;
-  outcomeDonuts: DonutChart[];
-  outreachLine: LineSeries[];
-  conversionBars: ConversionBar[];
-  industryBars: IndustryBar[];
-  range: string;
 };

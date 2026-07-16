@@ -17,7 +17,7 @@ export function CopilotHeader({ onMinimize }: Props) {
           <h2 className="text-lg font-bold text-foreground">
             Vite AI Copilot
           </h2>
-          <p className="flex items-center gap-1.5 text-xs text-teal-700">
+          <p className="flex items-center gap-1.5 text-xs text-teal-700 dark:text-teal-400">
             <span className="h-1.5 w-1.5 rounded-full bg-teal-500" aria-hidden />
             Ready to assist
           </p>
@@ -25,7 +25,7 @@ export function CopilotHeader({ onMinimize }: Props) {
         <button
           type="button"
           onClick={onMinimize}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-200 text-gray-600 transition-colors hover:bg-gray-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-secondary text-secondary-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label="Minimize"
         >
           <Minus className="h-4 w-4" />

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { Checkbox } from "@/modules/crm/components/ui/checkbox";
+import { Button } from "@/modules/crm/components/ui/button";
 import {
   Table,
   TableBody,
@@ -22,16 +23,16 @@ import type { Lead, OutreachStatus, CallingStatus } from "@/modules/crm/features
 // Priority as the primary indicator). website_status remains in the model/API and on the
 // Lead Detail + Edit surfaces — this is a presentation-only change to the list view.
 const emailConfig: Record<OutreachStatus, { label: string; className: string }> = {
-  sent: { label: "Sent", className: "bg-gray-100 text-gray-600" },
+  sent: { label: "Sent", className: "bg-muted text-secondary-foreground" },
   opened: { label: "Opened", className: "bg-blue-500/10 text-blue-500" },
-  replied: { label: "Replied", className: "bg-green-100 text-green-700" },
+  replied: { label: "Replied", className: "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400" },
   none: { label: "\u2014", className: "text-muted-foreground" },
 };
 
 const callConfig: Record<CallingStatus, { label: string; className: string }> = {
-  called: { label: "Called", className: "bg-green-100 text-green-700" },
+  called: { label: "Called", className: "bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400" },
   scheduled: { label: "Scheduled", className: "bg-blue-500/10 text-blue-500" },
-  "not-called": { label: "Not Called", className: "bg-gray-100 text-gray-600" },
+  "not-called": { label: "Not Called", className: "bg-muted text-secondary-foreground" },
 };
 
 const chipClass = "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium";
@@ -47,9 +48,37 @@ type LeadsTableProps = {
   /** Assign/Reassign is Admin/SA only; BD sees the owner but can't change it. */
   canAssign: boolean;
   onAssign: (lead: Lead) => void;
+  /** Ids of the currently-selected leads (scoped to the visible page). */
+  selectedIds: Set<string>;
+  /** Toggle a single row's selection. */
+  onToggleSelect: (id: string) => void;
+  /** Select-all / clear for the current page (driven by the header checkbox). */
+  onToggleSelectAll: (checked: boolean) => void;
+  /** Clear the whole selection (Bulk Actions bar). */
+  onClearSelection: () => void;
+  /** Open the (reused) delete confirmation for the selected leads. */
+  onBulkDelete: () => void;
+  /** True while a bulk delete is in flight — locks the checkboxes + bar. */
+  bulkDeleting: boolean;
 };
 
-export function LeadsTable({ leads, isLoading, isError, onRetry, searchActive, onEdit, onDelete, canAssign, onAssign }: LeadsTableProps) {
+export function LeadsTable({
+  leads,
+  isLoading,
+  isError,
+  onRetry,
+  searchActive,
+  onEdit,
+  onDelete,
+  canAssign,
+  onAssign,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  onClearSelection,
+  onBulkDelete,
+  bulkDeleting,
+}: LeadsTableProps) {
   const router = useRouter();
 
   if (isLoading) return <TableSkeleton />;
@@ -58,35 +87,102 @@ export function LeadsTable({ leads, isLoading, isError, onRetry, searchActive, o
   const th = "h-10 px-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
   const td = "px-3 py-3.5 text-sm";
 
+  // Selection is scoped to the visible page: the header checkbox reflects the rows on screen.
+  const selectedCount = leads.reduce((n, lead) => (selectedIds.has(lead.id) ? n + 1 : n), 0);
+  const allSelected = leads.length > 0 && selectedCount === leads.length;
+  const someSelected = selectedCount > 0 && !allSelected;
+  const totalCols = canAssign ? 10 : 9;
+
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-card">
       <Table>
         <TableHeader>
-          <TableRow className="border-b border-border-subtle bg-surface-table-header">
-            <TableHead className={th + " w-10"}>
-              <Checkbox aria-label="Select all" />
-            </TableHead>
-            <TableHead className={th}>Business</TableHead>
-            <TableHead className={th}>Contact</TableHead>
-            <TableHead className={th}>Priority</TableHead>
-            <TableHead className={th}>Email</TableHead>
-            <TableHead className={th}>Calling</TableHead>
-            <TableHead className={th}>Status</TableHead>
-            {canAssign ? <TableHead className={th}>Assigned BD</TableHead> : null}
-            <TableHead className={th}>Last Activity</TableHead>
-            <TableHead className={th + " w-24 text-center"}>Action</TableHead>
-          </TableRow>
+          {selectedCount > 0 ? (
+            <TableRow className="border-b border-border-subtle bg-primary/5 hover:bg-primary/5">
+              <TableHead className={th + " w-10"}>
+                <Checkbox
+                  aria-label="Select all"
+                  checked={allSelected}
+                  indeterminate={someSelected}
+                  onCheckedChange={onToggleSelectAll}
+                  disabled={bulkDeleting}
+                />
+              </TableHead>
+              <TableHead colSpan={totalCols - 1} className="h-10 px-3">
+                <div className="flex flex-wrap items-center gap-3 text-sm normal-case tracking-normal">
+                  <span className="font-semibold text-foreground">
+                    {selectedCount} Lead{selectedCount === 1 ? "" : "s"} Selected
+                  </span>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    onClick={onBulkDelete}
+                    disabled={bulkDeleting}
+                  >
+                    Delete Selected
+                  </Button>
+                  {/* Assign BD is intentionally disabled for now (bulk assign not yet wired). */}
+                  <Button type="button" variant="outline" size="sm" disabled>
+                    Assign BD
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={onClearSelection}
+                    disabled={bulkDeleting}
+                  >
+                    Clear Selection
+                  </Button>
+                </div>
+              </TableHead>
+            </TableRow>
+          ) : (
+            <TableRow className="border-b border-border-subtle bg-surface-table-header">
+              <TableHead className={th + " w-10"}>
+                <Checkbox
+                  aria-label="Select all"
+                  checked={allSelected}
+                  indeterminate={someSelected}
+                  onCheckedChange={onToggleSelectAll}
+                  disabled={leads.length === 0}
+                />
+              </TableHead>
+              <TableHead className={th}>Business</TableHead>
+              <TableHead className={th}>Contact</TableHead>
+              <TableHead className={th}>Priority</TableHead>
+              <TableHead className={th}>Email</TableHead>
+              <TableHead className={th}>Calling</TableHead>
+              <TableHead className={th}>Status</TableHead>
+              {canAssign ? <TableHead className={th}>Assigned BD</TableHead> : null}
+              <TableHead className={th}>Last Activity</TableHead>
+              <TableHead className={th + " w-24 text-center"}>Action</TableHead>
+            </TableRow>
+          )}
         </TableHeader>
         <TableBody>
           {leads && leads.length > 0 ? (
             leads.map((lead) => (
               <TableRow
                 key={lead.id}
-                className="cursor-pointer border-b border-border-subtle transition-colors hover:bg-muted"
+                data-selected={selectedIds.has(lead.id) ? "" : undefined}
+                className="cursor-pointer border-b border-border-subtle transition-colors hover:bg-muted data-[selected]:bg-primary/5"
                 onClick={() => router.push(`/zerem/leads/${lead.id}`)}
               >
                 <TableCell className="px-3 py-3.5">
-                  <Checkbox aria-label={`Select ${lead.business}`} />
+                  {/* stopPropagation so ticking a row doesn't trigger the row's navigation. */}
+                  <span
+                    className="inline-flex"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Checkbox
+                      aria-label={`Select ${lead.business}`}
+                      checked={selectedIds.has(lead.id)}
+                      onCheckedChange={() => onToggleSelect(lead.id)}
+                      disabled={bulkDeleting}
+                    />
+                  </span>
                 </TableCell>
                 <TableCell className={td + " font-semibold text-foreground"}>
                   {lead.business}

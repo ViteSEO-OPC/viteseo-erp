@@ -18,6 +18,8 @@ use Illuminate\Support\Facades\Log;
  */
 class InboundEmailService
 {
+    public function __construct(private readonly InboundReplyProcessor $replyProcessor) {}
+
     /**
      * @return Email|null the persisted (or pre-existing) inbound row; null only if it could not persist
      */
@@ -37,8 +39,12 @@ class InboundEmailService
 
         [$leadId, $threadId, $strategy] = $this->match($message);
 
+        // A matched reply from a real person (not an auto-reply/bounce) is the only inbound that becomes
+        // a lead-visible Activity AND drives the post-ingest fan-out (Planner/score/notification).
+        $isHumanReply = $leadId !== null && ! $this->isAutomated($message);
+
         try {
-            $email = DB::transaction(function () use ($message, $leadId, $threadId): Email {
+            $email = DB::transaction(function () use ($message, $leadId, $threadId, $isHumanReply): Email {
                 $email = Email::create([
                     'lead_id' => $leadId,
                     'user_id' => null,
@@ -61,7 +67,7 @@ class InboundEmailService
 
                 // Only a matched, human reply becomes a lead-visible Activity. Automated traffic
                 // (auto-replies, vacation responders, bounces) is persisted but not surfaced.
-                if ($leadId !== null && ! $this->isAutomated($message)) {
+                if ($isHumanReply) {
                     /** @var Lead|null $lead */
                     $lead = Lead::find($leadId);
                     $lead?->activities()->create([
@@ -96,6 +102,18 @@ class InboundEmailService
             }
 
             throw $e;
+        }
+
+        // Post-ingest fan-out (RC2). Reaching here means the row was just created (both idempotency
+        // paths above return early), so the fan-out runs exactly once per new matched human reply —
+        // Pub/Sub redelivery can never double-complete, double-score, or double-notify. Kept OUTSIDE the
+        // persistence transaction: side-effects (score refresh, notification) must not hold the write
+        // lock, and a fan-out hiccup must not roll back the stored email/Activity.
+        if ($isHumanReply) {
+            $lead = Lead::find($leadId);
+            if ($lead !== null) {
+                $this->replyProcessor->process($lead, $email);
+            }
         }
 
         // Observability (design §8): record how each inbound message was matched. A rising

@@ -58,13 +58,13 @@ export function FollowUpInbox({ items, selectedId, onSelectItem, className }: Fo
               <SelectValue>
                 {(value) =>
                   value === "all" || !value
-                    ? "All"
+                    ? "All Statuses"
                     : statusChipConfig[value as FollowUpStatus].label
                 }
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="all">All Statuses</SelectItem>
               {STATUS_FILTER_ORDER.map((status) => (
                 <SelectItem key={status} value={status}>
                   {statusChipConfig[status].label}

@@ -11,7 +11,6 @@ import type {
   Lead,
   LeadWritePayload,
 } from "@/modules/crm/features/leads/types/lead-types";
-import type { PlannerEvent } from "@/modules/crm/features/calendar/types/calendar-types";
 
 /** Create a lead. Omitted fields fall through to backend/DB defaults. */
 export function useCreateLead() {
@@ -21,6 +20,11 @@ export function useCreateLead() {
       apiClient.post("/leads", payload).then((r) => r.data.data as Lead),
     onSuccess: (lead) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
+      // A new lead moves dashboard counts (Total / Leads-by-Status / Lead Acquisition) and
+      // My Performance (assigned / Estimated Pipeline), and logs a `created` Activity.
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
       toast.success(`Lead "${lead.business}" created`);
     },
     onError: (err) => {
@@ -38,6 +42,17 @@ export function useUpdateLead() {
     onSuccess: (lead, { id }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.detail(id) });
+      // An edit / status quick-change can move the Lead Score, Estimated Pipeline (leads.amount),
+      // and the status / priority aggregates — refresh every computed view. The `updated` Activity
+      // surfaces in the feeds; the per-lead timeline is covered by detail(id) (prefix match).
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
+      // Setting Cold Calling → Scheduled makes the LeadObserver auto-create a follow-up PlannerEvent
+      // (via the single FollowUpScheduler); lead-name edits also flow onto existing event cards.
+      // Refresh the one shared Planner cache — the same key the Outreach inbox reads — so a newly
+      // created follow-up appears without a page refresh.
+      queryClient.invalidateQueries({ queryKey: queryKeys.planner.list() });
       toast.success(`Lead "${lead.business}" updated`);
     },
     onError: (err) => {
@@ -57,8 +72,11 @@ export function useAssignLead() {
     onSuccess: (lead) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.detail(lead.id) });
-      // The lead.assigned Activity surfaces in the feed(s).
-      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.recentActivity() });
+      // Reassignment changes the per-BD "assigned" counts (BD Performance) and the ownership-scoped
+      // My Performance / dashboard aggregates; the lead.assigned Activity surfaces in the feeds.
+      // dashboard.all supersedes the prior recentActivity()-only invalidation.
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
       toast.success(`Assigned to ${lead.assignedTo?.name ?? "BD"}`);
     },
@@ -105,6 +123,11 @@ export function useImportLeads() {
     onSuccess: (result) => {
       if (!result.dryRun) {
         queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
+        // A committed import adds many leads → dashboard counts + Lead Acquisition, My Performance
+        // (assigned / Estimated Pipeline), and the activity feeds all change.
+        queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
         toast.success(
           `Imported ${result.importedCount} lead${result.importedCount === 1 ? "" : "s"}`,
         );
@@ -117,30 +140,6 @@ export function useImportLeads() {
   });
 }
 
-/**
- * Schedule a follow-up for a lead (Lead Details "Schedule follow-up" Quick Action). Hits the
- * authoritative POST /leads/{id}/follow-ups, which delegates to the single FollowUpScheduler — the
- * SAME creation flow as Cold Calling → Scheduled — so follow-ups never gain a second path. A bare
- * call (no body) creates an undated To-Do; a date/note may be supplied. Invalidating the shared
- * Planner cache refreshes the Follow-ups inbox and every calendar view together.
- */
-export function useScheduleFollowUp() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ leadId, body }: { leadId: string; body?: Record<string, unknown> }) =>
-      apiClient.post(`/leads/${leadId}/follow-ups`, body ?? {}).then((r) => r.data.data as PlannerEvent),
-    onSuccess: (_event, { leadId }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.planner.all }); // Follow-ups inbox + calendar
-      queryClient.invalidateQueries({ queryKey: queryKeys.leads.detail(leadId) }); // lead timeline
-      queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all }); // planner-event.created Activity
-      toast.success("Follow-up added to your Planner");
-    },
-    onError: (err) => {
-      toast.error(getApiErrorMessage(err, "Failed to schedule follow-up"));
-    },
-  });
-}
-
 /** Soft-delete a lead. Invalidates the list. */
 export function useDeleteLead() {
   const queryClient = useQueryClient();
@@ -148,10 +147,76 @@ export function useDeleteLead() {
     mutationFn: (id: string) => apiClient.delete(`/leads/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
+      // A delete reduces Total Leads, status / priority aggregates, BD Performance, Lead Acquisition,
+      // and My Performance (incl. Estimated Pipeline / Revenue when the lead carried an amount / deal).
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
       toast.success("Lead deleted");
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, "Failed to delete lead"));
+    },
+  });
+}
+
+/** Outcome of a bulk delete: which ids succeeded and which failed (with a reason). */
+export type BulkDeleteResult = {
+  succeeded: string[];
+  failed: { id: string; reason: unknown }[];
+};
+
+/**
+ * Bulk soft-delete leads. There is no bulk endpoint, so this fans out over the SAME
+ * authoritative `DELETE /leads/{id}` route once per lead — identical behavior to
+ * {@link useDeleteLead} (observers, activity logging and soft-deletes all intact); no new
+ * delete logic is introduced. `Promise.allSettled` lets a single failure not abort the rest:
+ * the list is invalidated whenever anything was deleted, and the caller can keep the failed
+ * ids selected. One combined success/error toast (reusing the shared helpers) replaces the
+ * per-lead toast to avoid a flood.
+ */
+export function useBulkDeleteLeads() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: string[]): Promise<BulkDeleteResult> => {
+      const outcomes = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            await apiClient.delete(`/leads/${id}`);
+            return { id, ok: true as const };
+          } catch (reason) {
+            return { id, ok: false as const, reason };
+          }
+        }),
+      );
+      const succeeded = outcomes.filter((o) => o.ok).map((o) => o.id);
+      const failed = outcomes
+        .filter((o) => !o.ok)
+        .map((o) => ({ id: o.id, reason: "reason" in o ? o.reason : undefined }));
+      return { succeeded, failed };
+    },
+    onSuccess: ({ succeeded, failed }) => {
+      if (succeeded.length > 0) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
+        // Same computed views as the single delete — refresh dashboards, My Performance, and feeds.
+        queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
+        toast.success(
+          `${succeeded.length} lead${succeeded.length === 1 ? "" : "s"} deleted`,
+        );
+      }
+      if (failed.length > 0) {
+        toast.error(
+          getApiErrorMessage(
+            failed[0]?.reason,
+            `Failed to delete ${failed.length} lead${failed.length === 1 ? "" : "s"}`,
+          ),
+        );
+      }
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, "Failed to delete leads"));
     },
   });
 }

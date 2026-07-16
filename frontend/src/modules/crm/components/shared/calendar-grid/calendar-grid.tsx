@@ -6,7 +6,7 @@ import type { CalendarApi } from "@fullcalendar/core";
 const FullCalendarWrapper = dynamic(() => import("./calendar-grid-inner"), {
   ssr: false,
   loading: () => (
-    <div className="h-[520px] w-full animate-pulse rounded-lg bg-gray-100" />
+    <div className="h-[520px] w-full animate-pulse rounded-lg bg-muted" />
   ),
 });
 

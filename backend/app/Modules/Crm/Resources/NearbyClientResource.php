@@ -32,13 +32,77 @@ class NearbyClientResource extends JsonResource
             'area' => $this->city ?? $this->province ?? $this->region,
             'contact' => $this->contact_name,
             'status' => $this->status,
-            'priority' => $this->priority,
+            // DERIVED prospecting priority — computed from Website Intelligence for the Nearby context
+            // ONLY (see prospectingPriority). This is NOT the CRM `leads.priority` business field (which
+            // stays a separate concern for qualified CRM leads); it is never read from or written to the
+            // database here.
+            'priority' => $this->prospectingPriority(),
             // A discovered business is "active" unless it has been declined.
             'active' => $this->status !== 'declined',
-            // Real coordinates (WGS84) captured at discovery — the map that renders them is the
-            // next milestone. No distance/marker position is computed or fabricated here.
+            // Real coordinates (WGS84) captured at discovery, consumed by the interactive map.
             'latitude' => $this->latitude,
             'longitude' => $this->longitude,
+            // Website Intelligence summary — audit findings only, to help BD spot stronger prospects.
+            // These are OBSERVATIONS (never a score/priority/status): interpretation stays elsewhere.
+            'website' => $this->websiteSummary(),
+        ];
+    }
+
+    /**
+     * Derived PROSPECTING priority for the Nearby bounded context — a weaker digital presence is a
+     * stronger prospect for the BD team:
+     *
+     *   no-website      → high
+     *   needs-redesign  → medium
+     *   has-website     → low
+     *
+     * Computed purely from Website Intelligence (`website_status`) at presentation time — never
+     * persisted, and deliberately independent of the CRM `leads.priority` field. An unclassified /
+     * not-yet-audited business (no website_status) defaults to medium (neutral).
+     */
+    private function prospectingPriority(): string
+    {
+        return match ($this->website_status) {
+            'no-website' => 'high',
+            'needs-redesign' => 'medium',
+            'has-website' => 'low',
+            default => 'medium',
+        };
+    }
+
+    /**
+     * Compact, BD-facing view of the lead's Website Intelligence. `audited` is false until the audit
+     * has run; every signal is a real detection result (or false/empty) — nothing is fabricated.
+     *
+     * @return array<string, mixed>
+     */
+    private function websiteSummary(): array
+    {
+        $e = $this->websiteEnrichment;
+
+        return [
+            'url' => $this->website,
+            'status' => $this->website_status, // has-website | needs-redesign | no-website | null
+            'audited' => $e !== null,
+            'auditedAt' => $e?->last_checked_at?->toIso8601String(),
+            'signals' => $e === null ? null : [
+                'reachable' => (bool) $e->website_reachable,
+                'https' => (bool) $e->https_enabled,
+                'about' => (bool) $e->about_page,
+                'contact' => (bool) $e->contact_page,
+                'services' => (bool) $e->services_page,
+                'careers' => (bool) $e->careers_page,
+                'blog' => (bool) $e->blog_page,
+                'emailDetected' => ! empty($e->emails_found),
+                'phoneDetected' => ! empty($e->phones_found),
+                // Named social channels — each exposed individually so the UI can render it as its
+                // own Detected/Missing chip. Provider-agnostic: only the channel's PRESENCE is
+                // surfaced (never the URL), so the CRM/UI stays independent of the discovery provider.
+                'facebook' => ! empty($e->facebook_url),
+                'instagram' => ! empty($e->instagram_url),
+                'linkedin' => ! empty($e->linkedin_url),
+                'youtube' => ! empty($e->youtube_url),
+            ],
         ];
     }
 

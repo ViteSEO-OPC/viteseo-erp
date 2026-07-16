@@ -250,34 +250,10 @@ export function mapActivity(api: ActivityApi): ActivityItem {
   };
 }
 
-// Copilot AI summary — its own dashboard-specific data source (GET /dashboard/copilot-summary),
-// kept completely separate from the generic /activities audit log. Values are backend-driven
-// placeholders today (see the endpoint's TODO) — the frontend holds no hardcoded metrics.
-type CopilotSummaryApi = {
-  rescoredLeads: number;
-  movedToHigh: number;
-  generatedAt: string;
-};
-
-export function useCopilotSummary() {
-  return useQuery<CopilotSummaryApi>({
-    queryKey: queryKeys.dashboard.copilotSummary(),
-    queryFn: () => apiClient.get("/dashboard/copilot-summary").then((r) => r.data.data),
-  });
-}
-
-// Builds the static Copilot row (unchanged design: ai/Sparkles tile) from the backend
-// summary. Only presentation copy lives here; the numbers/timestamp come from the endpoint.
-function buildCopilotRow(summary: CopilotSummaryApi): ActivityItem {
-  return {
-    id: "copilot-summary",
-    type: "ai",
-    actor: "Copilot",
-    action: "re-scored",
-    object: `${summary.rescoredLeads} leads — ${summary.movedToHigh} moved to High`,
-    timestamp: summary.generatedAt,
-  };
-}
+// NOTE: the "Copilot AI summary" row (GET /dashboard/copilot-summary) is intentionally NOT consumed.
+// That endpoint returns fixed placeholder counts for an AI-scoring run that does not exist yet, so
+// surfacing it would display fabricated business information. It stays hidden until a real AI scoring
+// run produces genuine metrics — Recent Activity shows only the real, ownership-scoped activity feed.
 
 /**
  * Shared live activity feed over the ownership-scoped `GET /activities` endpoint — the SAME
@@ -302,17 +278,13 @@ export function useActivityFeed(limit?: number) {
 }
 
 export function useRecentActivity() {
-  // Two independent sources, composed only for presentation: the Copilot summary pinned on
-  // top, then the shared backend activity feed below. Neither endpoint depends on the other.
-  const summary = useCopilotSummary();
+  // Only the real, ownership-scoped activity feed. The Copilot summary row was removed — it showed
+  // fixed placeholder counts (no real AI-scoring run exists), and fabricated metrics must not appear.
   const feed = useActivityFeed(3);
 
-  const copilotRow = summary.data ? buildCopilotRow(summary.data) : undefined;
-  const data = copilotRow && feed.data ? [copilotRow, ...feed.data] : undefined;
-
   return {
-    data,
-    isLoading: summary.isLoading || feed.isLoading,
-    isError: summary.isError || feed.isError,
+    data: feed.data,
+    isLoading: feed.isLoading,
+    isError: feed.isError,
   };
 }

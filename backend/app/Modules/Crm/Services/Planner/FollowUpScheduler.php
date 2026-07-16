@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Services\Planner;
 use App\Modules\Crm\Controllers\PlannerEventController;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
+use App\Modules\Crm\Services\Outreach\InboundReplyProcessor;
 use Illuminate\Support\Facades\Auth;
 
 /**
@@ -71,6 +72,32 @@ class FollowUpScheduler
             'source' => 'outreach',
             'description' => 'Auto-created when Cold Calling was set to Scheduled.',
         ]);
+    }
+
+    /**
+     * Complete every open (non-completed) follow-up for a lead. The single place follow-up completion
+     * is triggered by an automated flow — the Inbound Email reply fan-out calls this when a prospect
+     * replies (see {@see InboundReplyProcessor}). Planner remains the OWNER of
+     * completion: each transition runs through the normal PlannerEvent save, so PlannerEventObserver
+     * logs the `planner-event.completed` Activity — no bypass, no duplicated status logic.
+     *
+     * Idempotent: a lead with no open follow-up completes nothing and returns 0.
+     *
+     * @return int number of follow-ups transitioned to completed
+     */
+    public function completeOpenFor(Lead $lead): int
+    {
+        $open = PlannerEvent::query()
+            ->where('lead_id', $lead->id)
+            ->where('event_type', 'follow-up')
+            ->where('status', '!=', 'completed')
+            ->get();
+
+        foreach ($open as $event) {
+            $event->update(['status' => 'completed']);
+        }
+
+        return $open->count();
     }
 
     /** Whether the lead already has a follow-up that has not been completed (the dedupe guard). */

@@ -14,7 +14,7 @@ import {
 import type { ServiceAreaLevel } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
 
 const FIELD =
-  "h-10 w-full rounded-lg border border-border bg-background px-3.5 text-sm text-foreground placeholder:text-gray-400 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
+  "h-10 w-full rounded-lg border border-border bg-background px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
 const SELECT = cn(FIELD, "appearance-none pr-8");
 
 const LEVELS: { value: ServiceAreaLevel; label: string }[] = [
@@ -94,7 +94,7 @@ export function TargetAreasPanel({ className }: { className?: string }) {
       </div>
 
       {/* List */}
-      {isLoading && <div className="h-24 w-full animate-pulse rounded-lg bg-gray-100" />}
+      {isLoading && <div className="h-24 w-full animate-pulse rounded-lg bg-muted" />}
       {isError && <ErrorState message="Failed to load target areas" />}
       {!isLoading && !isError && areas && areas.length > 0 && (
         <ul className="divide-y divide-border-subtle">

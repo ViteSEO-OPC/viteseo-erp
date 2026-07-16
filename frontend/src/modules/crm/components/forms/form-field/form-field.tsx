@@ -18,7 +18,7 @@ export function FormField({ label, required, optional, children, className }: Fo
           <span className="ml-0.5 text-red-500" aria-hidden>*</span>
         )}
         {optional && !required && (
-          <span className="font-normal text-gray-400 lowercase"> (optional)</span>
+          <span className="font-normal text-muted-foreground lowercase"> (optional)</span>
         )}
       </label>
       <div aria-required={required ? true : undefined}>

@@ -24,6 +24,9 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<LoginResponse>;
   logout: () => Promise<void>;
   hasRole: (role: Role) => boolean;
+  /** Merge a partial update into the cached auth user (e.g. after a self-service
+   *  profile save) so headers/sidebars reflect it without a full /me refetch. */
+  updateUser: (patch: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -86,12 +89,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [roles],
   );
 
+  const updateUser = useCallback((patch: Partial<AuthUser>) => {
+    setUser((current) => (current ? { ...current, ...patch } : current));
+  }, []);
+
   // Effective permissions ride on the user payload (platform UserResource).
   const permissions = user?.permissions ?? [];
 
   return (
     <AuthContext.Provider
-      value={{ user, roles, permissions, employee, loading, login, logout, hasRole }}
+      value={{ user, roles, permissions, employee, loading, login, logout, hasRole, updateUser }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,0 +1,83 @@
+{
+  "name": "RC3 \u2014 4. No-Response Escalation (observability; CRM decides)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "crm-follow-up-completed",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "n4-webhook",
+      "name": "CRM Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "crm-follow-up-completed"
+    },
+    {
+      "parameters": {
+        "jsMode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "\nconst crypto = require('crypto');\nconst secret = String($env.N8N_WEBHOOK_SECRET || '');\nif (!secret) { throw new Error('N8N_WEBHOOK_SECRET is not configured in n8n'); }\nconst item = items[0];\nconst headers = item.json.headers || {};\nconst provided = String(headers['x-crm-signature'] || headers['X-CRM-Signature'] || '');\n// Raw body requires the CRM Webhook node \"Raw Body\" option (binary); fall back to canonical JSON.\nlet raw;\nif (item.binary && item.binary.data && item.binary.data.data) {\n  raw = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\n} else {\n  raw = JSON.stringify(item.json.body || {});\n}\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw, 'utf8').digest('hex');\nconst ok = provided.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));\nif (!ok) { throw new Error('Invalid X-CRM-Signature -- webhook rejected'); }\nconst env = JSON.parse(raw);\n// Idempotency: dedupe on the envelope event_id (at-least-once delivery).\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nif (env.event_id && sd.seen[env.event_id]) { return []; }\nif (env.event_id) { sd.seen[env.event_id] = Date.now(); }\nconst data = env.data || {};\nif (env.topic !== 'follow-up.completed') { return []; }\n\n// The escalation DECISION + ACTIONS (create Planner task, notify BD) are performed server-side by the\n// CRM (EscalateUnansweredFollowUp). n8n MUST NOT evaluate reply state or duplicate the action -- this\n// workflow is the orchestration/observability hook. Extend the No-Op below to forward to an ops log.\nreturn [{ json: { planner_event_id: data.planner_event_id, lead_id: data.lead_id,\n                  assigned_to: data.assigned_to, note: 'CRM performs escalation server-side' } }];\n"
+      },
+      "id": "n4-code",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "n4-noop",
+      "name": "CRM escalates server-side (observability only)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "CRM Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "CRM escalates server-side (observability only)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "description": "RC3 Outreach Automation Pack. n8n orchestrates only; Laravel decides. Enable N8N_ENABLED on the CRM + point N8N_WEBHOOK_URL here. Link the 'CRM Service Token' credential (php artisan n8n:token) and set CRM_API_URL + N8N_WEBHOOK_SECRET."
+  }
+}

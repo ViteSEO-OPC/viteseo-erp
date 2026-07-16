@@ -26,11 +26,21 @@ return [
     |--------------------------------------------------------------------------
     | Gmail push provider
     |--------------------------------------------------------------------------
-    | Service-account key path (domain-wide delegation), the Pub/Sub topic Gmail
-    | publishes to, and the OAuth scope. gmail.readonly is sufficient for sync;
-    | switch to gmail.modify only if we later mark messages read.
+    | Authentication is KEYLESS by default (org policy iam.disableServiceAccountKeyCreation —
+    | no downloadable service-account JSON key). Domain-wide delegation is performed by signing
+    | the delegation assertion via the IAM Credentials signJwt API using the runtime identity
+    | (Application Default Credentials — Workload Identity Federation off-GCP, or an attached
+    | service account on-GCP) which must hold roles/iam.serviceAccountTokenCreator on the sync SA.
+    |
+    | `auth`            keyless (preferred, no key) | key (legacy JSON-key fallback only)
+    | `service_account` the SA impersonated for delegation (keyless mode); e.g. crm-inbound-sync@…
+    | `credentials`     path to a downloadable SA JSON key — used ONLY when auth=key (fallback)
+    |
+    | gmail.readonly is sufficient for sync; switch to gmail.modify only if we later mark read.
     */
     'gmail' => [
+        'auth' => env('OUTREACH_GMAIL_AUTH', 'keyless'),
+        'service_account' => env('GMAIL_SYNC_SERVICE_ACCOUNT'),
         'credentials' => env('GOOGLE_APPLICATION_CREDENTIALS'),
         'topic' => env('GMAIL_PUBSUB_TOPIC'),
         'scopes' => ['https://www.googleapis.com/auth/gmail.readonly'],

@@ -36,16 +36,16 @@ export function ChartCard({
       <CardContent className="flex flex-col gap-3 pt-4">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-bold text-gray-900">{title}</h3>
+            <h3 className="text-sm font-bold text-foreground">{title}</h3>
             {subtitle && (
-              <p className="text-xs text-gray-500">{subtitle}</p>
+              <p className="text-xs text-muted-foreground">{subtitle}</p>
             )}
           </div>
           {filter && <div className="shrink-0">{filter}</div>}
         </div>
         {isLoading && (
           <div className="flex items-center justify-center py-8">
-            <div className="h-32 w-full animate-pulse rounded-lg bg-gray-100" />
+            <div className="h-32 w-full animate-pulse rounded-lg bg-muted" />
           </div>
         )}
         {isError && <ErrorState message="Failed to load chart" onRetry={onRetry} />}

@@ -22,8 +22,8 @@ export function PriorityChip({ priority }: Props) {
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium",
         priority === "high" && "bg-red-500/10 text-red-500",
-        priority === "medium" && "bg-chart-3/10 text-yellow-800",
-        priority === "low" && "bg-teal-400/10 text-teal-900",
+        priority === "medium" && "bg-chart-3/10 text-yellow-800 dark:text-chart-3",
+        priority === "low" && "bg-teal-400/10 text-teal-900 dark:text-teal-400",
       )}
     >
       <span

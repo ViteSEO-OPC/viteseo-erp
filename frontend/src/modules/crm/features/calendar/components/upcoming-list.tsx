@@ -10,7 +10,7 @@ type UpcomingListProps = {
 
 export function UpcomingList({ items }: UpcomingListProps) {
   return (
-    <aside className="w-full border-t border-gray-150 bg-white md:w-[305px] md:shrink-0 md:border-l md:border-t-0" aria-label="Upcoming events">
+    <aside className="w-full border-t border-border-subtle bg-card md:w-[305px] md:shrink-0 md:border-l md:border-t-0" aria-label="Upcoming events">
       <div className="px-4 pt-4">
         <SectionHeader title="Upcoming" className="mb-0" />
       </div>

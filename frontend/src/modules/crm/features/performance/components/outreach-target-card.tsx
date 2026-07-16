@@ -8,7 +8,7 @@ import { useKpiMetrics, findMetric } from "@/modules/crm/features/performance/ho
 
 function Meter({ pct, barClass }: { pct: number; barClass: string }) {
   return (
-    <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-150">
+    <div className="h-2.5 w-full overflow-hidden rounded-full bg-secondary">
       <div className={cn("h-full rounded-full", barClass)} style={{ width: `${pct}%` }} />
     </div>
   );
@@ -57,7 +57,7 @@ export function OutreachTargetCard({ className }: { className?: string }) {
               </p>
             </div>
             {isLoading ? (
-              <span className="h-6 w-12 shrink-0 animate-pulse rounded bg-gray-100" />
+              <span className="h-6 w-12 shrink-0 animate-pulse rounded bg-muted" />
             ) : (
               <span className="shrink-0 text-lg font-bold text-primary-accent">{pct}%</span>
             )}

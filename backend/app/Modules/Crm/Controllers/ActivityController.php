@@ -30,6 +30,7 @@ class ActivityController extends Controller
     {
         $activities = Activity::query()
             ->visibleTo($request->user())
+            ->forCrmReporting() // exclude unqualified-prospect activity (Nearby pool) from CRM reporting
             ->with([
                 'causer',
                 'subject' => fn ($morphTo) => $morphTo->constrain([

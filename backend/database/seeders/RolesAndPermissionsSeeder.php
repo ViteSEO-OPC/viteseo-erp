@@ -144,6 +144,14 @@ class RolesAndPermissionsSeeder extends Seeder
         $crmPermissions = [
             'crm.leads.view', 'crm.leads.create', 'crm.leads.edit', 'crm.leads.delete',
             'crm.leads.import', 'crm.leads.export', 'crm.leads.assign',
+            // Archive Management — restore a soft-deleted ("archived") lead. Management-only
+            // (Admin/Super Admin), mirroring leads.delete: BDs never archive or restore.
+            'crm.leads.restore',
+            // Qualify a discovered prospect (Nearby Clients) into the CRM sales pipeline. The bridge
+            // from Prospect Pool → Active CRM Lead. BD self-service (BD/Admin/Super Admin).
+            'crm.leads.qualify',
+            // Deal bounded context — creating a Deal ("Mark as Won"). BD sales workflow.
+            'crm.deals.create',
             'crm.lead.notes.create', 'crm.lead.notes.edit', 'crm.lead.notes.delete',
             'crm.follow-ups.view', 'crm.follow-ups.create', 'crm.follow-ups.edit',
             'crm.reports.view', 'crm.reports.export',
@@ -157,6 +165,14 @@ class RolesAndPermissionsSeeder extends Seeder
             Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
         }
 
+        // RC3 Outreach Automation Pack — automation-only ability. Defined so it exists on a fresh
+        // install, but DELIBERATELY NOT synced to any human role: only the scoped n8n service
+        // account holds it, granted by `php artisan n8n:token` from config/n8n.php. This keeps the
+        // send-authorization least-privilege and off every human role.
+        foreach (['crm.outreach.automation.send'] as $automationPermission) {
+            Permission::firstOrCreate(['name' => $automationPermission, 'guard_name' => 'web']);
+        }
+
         // super_admin (CEO) — unrestricted (also bypasses via Gate::before in
         // CrmServiceProvider); synced for clarity.
         $superAdmin->givePermissionTo($crmPermissions);
@@ -168,6 +184,10 @@ class RolesAndPermissionsSeeder extends Seeder
         // No export, no delete, no reports, no user management.
         $crmBd->syncPermissions([
             'crm.leads.view', 'crm.leads.create', 'crm.leads.edit', 'crm.leads.import',
+            // A BD qualifies discovered prospects (Nearby Clients) into their own CRM pipeline.
+            'crm.leads.qualify',
+            // BD closes their own deals (Mark as Won).
+            'crm.deals.create',
             'crm.lead.notes.create', 'crm.lead.notes.edit', 'crm.lead.notes.delete',
             'crm.follow-ups.view', 'crm.follow-ups.create', 'crm.follow-ups.edit',
             'crm.calendar.view', 'crm.calendar.create', 'crm.calendar.edit', 'crm.calendar.delete',

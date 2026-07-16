@@ -47,8 +47,8 @@ const iconMap = {
 const bgMap: Record<ActivityType, string> = {
   ai: "bg-teal-100 text-teal-700",
   email: "bg-teal-100 text-teal-700",
-  call: "bg-gray-100 text-gray-600",
-  auth: "bg-slate-100 text-slate-600",
+  call: "bg-muted text-secondary-foreground",
+  auth: "bg-muted text-secondary-foreground",
   note: "bg-indigo-100 text-indigo-600",
 };
 

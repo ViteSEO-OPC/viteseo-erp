@@ -41,7 +41,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export function useAuth() {
-  const { user, roles, loading, login: platformLogin, logout } = usePlatformAuth();
+  const {
+    user,
+    roles,
+    loading,
+    login: platformLogin,
+    logout,
+    updateUser: platformUpdateUser,
+  } = usePlatformAuth();
 
   const permissions = useMemo(
     () => (user as { permissions?: string[] } | null)?.permissions ?? [],
@@ -72,11 +79,25 @@ export function useAuth() {
     [platformLogin],
   );
 
+  // Self-service profile save (name/phone) — forward the patch to the shared
+  // platform auth context so the topbar/sidebar name updates immediately.
+  const updateUser = useCallback(
+    (patch: Partial<CrmUser>) => {
+      const { name, email } = patch;
+      platformUpdateUser({
+        ...(name !== undefined ? { name } : {}),
+        ...(email !== undefined ? { email } : {}),
+      });
+    },
+    [platformUpdateUser],
+  );
+
   return {
     user: adaptedUser,
     isAuthenticated: !!adaptedUser,
     isLoading: loading,
     login,
     logout,
+    updateUser,
   };
 }

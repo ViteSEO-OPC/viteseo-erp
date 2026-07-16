@@ -30,7 +30,7 @@ export function LeadScoreRing({ value, label = "LEAD SCORE", size = 72 }: Props)
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke="var(--gray-150)"
+            stroke="var(--color-border-subtle)"
             strokeWidth={stroke}
           />
           <circle

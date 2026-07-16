@@ -20,13 +20,13 @@ import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
 import { isAxiosError } from "axios";
 
 const FIELD =
-  "h-10 w-full rounded-lg border border-border bg-background px-3.5 text-sm text-foreground placeholder:text-gray-400 transition-colors focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
+  "h-10 w-full rounded-lg border border-border bg-background px-3.5 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
 
 const SELECT =
   "h-10 w-full appearance-none rounded-lg border border-border bg-background pl-3.5 pr-9 text-sm text-foreground transition-colors focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
 
 const TEXTAREA =
-  "min-h-[96px] w-full resize-none rounded-lg border border-border bg-background px-3.5 py-2.5 text-sm text-foreground placeholder:text-gray-400 transition-colors focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
+  "min-h-[96px] w-full resize-none rounded-lg border border-border bg-background px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
 
 const STEPS = [
   { label: "Business Info" },
@@ -140,7 +140,7 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
             <button
               type="button"
               onClick={handleClose}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label="Close"
             >
               <X className="h-4 w-4" />

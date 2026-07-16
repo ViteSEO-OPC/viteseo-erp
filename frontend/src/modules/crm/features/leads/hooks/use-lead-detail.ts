@@ -25,13 +25,12 @@ type LeadApiDetail = {
   lastActivity: string;
 };
 
-// Quick Actions catalog. "email" is wired to the existing outreach endpoint (Draft & Send Email);
-// the other three are deferred features and remain inert until individually wired.
+// Quick Actions catalog (row actions). "email" redirects to the Outreach module with this lead;
+// "follow-up" opens the Schedule Follow-up modal (existing Planner backend). Won/Lost + Lead Status
+// are dedicated controls rendered directly by the card, not rows.
 const QUICK_ACTIONS: QuickAction[] = [
-  { id: "qa-1", key: "email", icon: "Mail", iconTone: "teal", title: "Draft & send email", subtitle: "Compose with AI suggestions" },
-  { id: "qa-2", key: "call", icon: "Phone", iconTone: "indigo", title: "Log a call", subtitle: "Record call notes & outcome" },
-  { id: "qa-3", key: "follow-up", icon: "Calendar", iconTone: "amber", title: "Schedule follow-up", subtitle: "Set reminder & next action" },
-  { id: "qa-4", key: "contacted", icon: "CheckCircle", iconTone: "green", title: "Mark as contacted", subtitle: "Update lead status" },
+  { id: "qa-1", key: "email", icon: "Mail", iconTone: "teal", title: "Draft & send email", subtitle: "Compose in Outreach" },
+  { id: "qa-2", key: "follow-up", icon: "Calendar", iconTone: "amber", title: "Schedule follow-up", subtitle: "Set date & reminder" },
 ];
 
 function mapToLeadDetail(api: LeadApiDetail): LeadDetail {

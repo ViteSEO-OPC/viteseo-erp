@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Observers;
 
+use App\Modules\Crm\Events\FollowUpCompleted;
 use App\Modules\Crm\Models\PlannerEvent;
 use Illuminate\Support\Facades\Auth;
 
@@ -25,6 +26,13 @@ class PlannerEventObserver
         // BD Performance will care about completions); every other change is a generic update.
         if ($event->wasChanged('status') && $event->status === 'completed') {
             $this->log($event, 'planner-event.completed', 'Event completed');
+
+            // RC3 Outreach Automation Pack — a completed FOLLOW-UP is a domain event (FROZEN #6): it
+            // feeds the `follow-up.completed` n8n webhook (observability) and the server-side
+            // No-Response Escalation. Only follow-ups escalate; other event types just log completion.
+            if ($event->event_type === 'follow-up') {
+                event(new FollowUpCompleted($event));
+            }
 
             return;
         }

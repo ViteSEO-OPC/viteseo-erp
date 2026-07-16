@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Controllers;
 use App\Http\Controllers\Controller;
 
 use App\Modules\Crm\Requests\IndexEmailRequest;
+use App\Modules\Crm\Requests\RescheduleEmailRequest;
 use App\Modules\Crm\Requests\SaveDraftRequest;
 use App\Modules\Crm\Requests\SendEmailRequest;
 use App\Modules\Crm\Resources\EmailResource;
@@ -12,9 +13,11 @@ use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
 use App\Modules\Crm\Services\Outreach\OutreachEmailService;
+use App\Modules\Crm\Services\Outreach\ScheduledEmailService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Carbon;
 
 /**
  * Outreach email — the whole Email lifecycle lives here (draft → sent → failed). A draft is
@@ -29,22 +32,48 @@ class EmailController extends Controller
      * history record, and log an `email.sent` Activity. Authorization on the route
      * (view lead + follow-ups.create).
      */
-    public function store(SendEmailRequest $request, Lead $lead, OutreachEmailService $service): JsonResponse
-    {
+    public function store(
+        SendEmailRequest $request,
+        Lead $lead,
+        OutreachEmailService $service,
+        ScheduledEmailService $scheduled,
+    ): JsonResponse {
         $data = $request->validated();
 
         /** @var User $sender */
         $sender = $request->user();
 
-        $email = $service->sendToLead(
-            $lead,
-            $sender,
-            (string) $data['subject'],
-            (string) $data['body'],
-            isset($data['to']) ? (string) $data['to'] : null,
-        );
+        $to = isset($data['to']) ? (string) $data['to'] : null;
+
+        // RC3 Send-Later: a future `scheduled_at` schedules the email (no send now); otherwise send now.
+        $email = isset($data['scheduled_at'])
+            ? $scheduled->schedule($lead, $sender, (string) $data['subject'], (string) $data['body'], Carbon::parse((string) $data['scheduled_at']), $to)
+            : $service->sendToLead($lead, $sender, (string) $data['subject'], (string) $data['body'], $to);
 
         return (new EmailResource($email))->response()->setStatusCode(201);
+    }
+
+    /** Cancel a still-scheduled email (author/Admin; scheduled-only — EmailPolicy@cancel). */
+    public function cancel(Email $email, ScheduledEmailService $scheduled): JsonResponse
+    {
+        return (new EmailResource($scheduled->cancel($email)))->response();
+    }
+
+    /** Reschedule a still-scheduled email to a new future time (EmailPolicy@reschedule). */
+    public function reschedule(RescheduleEmailRequest $request, Email $email, ScheduledEmailService $scheduled): JsonResponse
+    {
+        $scheduledAt = Carbon::parse((string) $request->validated()['scheduled_at']);
+
+        return (new EmailResource($scheduled->reschedule($email, $scheduledAt)))->response();
+    }
+
+    /** Send a still-scheduled email immediately through the single pipeline (EmailPolicy@sendNow). */
+    public function sendNow(Request $request, Email $email, ScheduledEmailService $scheduled): JsonResponse
+    {
+        /** @var User $sender */
+        $sender = $request->user();
+
+        return (new EmailResource($scheduled->sendNow($email, $sender)))->response();
     }
 
     /** The current user's own drafts (author-private WIP), newest first. */

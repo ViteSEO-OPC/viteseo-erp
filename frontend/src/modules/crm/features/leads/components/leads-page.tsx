@@ -6,7 +6,7 @@ import { LeadsSummaryTabs } from "@/modules/crm/features/leads/components/leads-
 import { LeadsToolbar } from "@/modules/crm/features/leads/components/leads-toolbar";
 import { LeadsFilterBar } from "@/modules/crm/features/leads/components/leads-filter-bar";
 import { LeadsTable } from "@/modules/crm/features/leads/components/leads-table";
-import { Pagination } from "@/modules/crm/features/leads/components/pagination";
+import { Pagination } from "@/modules/crm/components/shared/pagination/pagination";
 import { ImportLeadsModal } from "@/modules/crm/features/leads/components/import-leads-modal";
 import { CreateLeadWizard } from "@/modules/crm/features/leads/components/create-lead-wizard";
 import { EditLeadDrawer } from "@/modules/crm/features/leads/components/edit-lead-drawer";
@@ -16,7 +16,7 @@ import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { useLeads } from "@/modules/crm/features/leads/hooks/use-leads-data";
 import { useNicheDistribution } from "@/modules/crm/features/leads/hooks/use-niche-distribution";
 import { useExportLeads } from "@/modules/crm/features/leads/hooks/use-export-leads";
-import { useDeleteLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
+import { useDeleteLead, useBulkDeleteLeads } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { useHeaderSearch } from "@/modules/crm/providers/header-search-provider";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
@@ -26,7 +26,12 @@ export function LeadsPageLayout() {
   const [editLead, setEditLead] = useState<Lead | null>(null);
   const [assignLead, setAssignLead] = useState<Lead | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
+  // Bulk selection lives here (alongside the single-delete state) and is scoped to the visible
+  // page — the reset effect below clears it whenever the page or filters change.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
   const deleteLead = useDeleteLead();
+  const bulkDelete = useBulkDeleteLeads();
   // Assign/Reassign ownership is Admin/SA only (leads.assign is not held by BD).
   const { hasMinRole } = usePermissions();
   const canAssign = hasMinRole("crm_admin");
@@ -35,6 +40,34 @@ export function LeadsPageLayout() {
     if (!deleteTarget) return;
     deleteLead.mutate(deleteTarget.id, {
       onSuccess: () => setDeleteTarget(null),
+    });
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkDelete = () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    bulkDelete.mutate(ids, {
+      // Drop only the successfully-deleted ids; any that failed stay selected so the user can
+      // retry — the selection state is never corrupted by a partial failure.
+      onSuccess: ({ succeeded }) => {
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          succeeded.forEach((id) => next.delete(id));
+          return next;
+        });
+        setBulkOpen(false);
+      },
     });
   };
   // Single source of truth for the list: one useLeads instance drives the
@@ -62,6 +95,30 @@ export function LeadsPageLayout() {
     isError,
     retry,
   } = useLeads();
+
+  // Select-all / clear targets the leads currently on screen ("current filtered results").
+  const toggleSelectAll = (checked: boolean) => {
+    setSelectedIds(checked ? new Set((data ?? []).map((lead) => lead.id)) : new Set());
+  };
+
+  // Selection is per-page: reset it whenever the page or the filter/sort/search set changes so
+  // the "N Selected" count always matches the visible rows. Uses React's "adjust state during
+  // render" pattern (keyed on a signature) rather than an effect. A successful delete keeps the
+  // same page + filters (it only invalidates the query), so this won't clear the survivors.
+  const selectionKey = `${page}::${JSON.stringify(listParams)}`;
+  const [prevSelectionKey, setPrevSelectionKey] = useState(selectionKey);
+  if (prevSelectionKey !== selectionKey) {
+    setPrevSelectionKey(selectionKey);
+    setSelectedIds(new Set());
+  }
+
+  // Priority Summary cards mirror the table's dataset: pass the current filters MINUS `priority`
+  // (the drill-down — including it would zero the other two cards) and MINUS `sort` (order doesn't
+  // change which leads are counted). React Query hashes the key by value, so a fresh object per
+  // render is fine. Every list-invalidating mutation refreshes these cards via the shared key prefix.
+  const summaryFilters: Record<string, string> = Object.fromEntries(
+    Object.entries(listParams).filter(([key]) => key !== "priority" && key !== "sort"),
+  );
 
   // Niche distribution uses the API's real per-industry totals (industry_counts) — accurate and
   // page-independent — feeding the chips + bar + summary. `total` (meta.total) drives "Showing X".
@@ -97,7 +154,7 @@ export function LeadsPageLayout() {
   return (
     <>
       <div className="flex flex-col gap-6">
-        <LeadsKpiRow />
+        <LeadsKpiRow filters={summaryFilters} />
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <LeadsSummaryTabs />
@@ -127,6 +184,12 @@ export function LeadsPageLayout() {
             onDelete={(lead) => setDeleteTarget(lead)}
             canAssign={canAssign}
             onAssign={(lead) => setAssignLead(lead)}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            onToggleSelectAll={toggleSelectAll}
+            onClearSelection={clearSelection}
+            onBulkDelete={() => setBulkOpen(true)}
+            bulkDeleting={bulkDelete.isPending}
           />
           <Pagination
             page={page}
@@ -166,20 +229,31 @@ export function LeadsPageLayout() {
         />
       ) : null}
 
+      {/* One shared ConfirmDialog serves both single- and bulk-delete; only its text switches. */}
       <ConfirmDialog
-        open={!!deleteTarget}
+        open={bulkOpen || !!deleteTarget}
         onOpenChange={(o) => {
-          if (!o) setDeleteTarget(null);
+          if (o) return;
+          // Guard against Esc/overlay-dismiss while a delete is in flight.
+          if (bulkOpen ? bulkDelete.isPending : deleteLead.isPending) return;
+          setBulkOpen(false);
+          setDeleteTarget(null);
         }}
-        title="Delete lead?"
-        description={
-          deleteTarget
-            ? `"${deleteTarget.business}" will be deleted. This can't be undone.`
-            : ""
+        title={
+          bulkOpen
+            ? `Delete ${selectedIds.size} selected lead${selectedIds.size === 1 ? "" : "s"}?`
+            : "Delete lead?"
         }
-        confirmLabel="Delete Lead"
-        onConfirm={handleDelete}
-        loading={deleteLead.isPending}
+        description={
+          bulkOpen
+            ? "This action cannot be undone."
+            : deleteTarget
+              ? `"${deleteTarget.business}" will be deleted. This can't be undone.`
+              : ""
+        }
+        confirmLabel={bulkOpen ? "Delete Selected" : "Delete Lead"}
+        onConfirm={bulkOpen ? handleBulkDelete : handleDelete}
+        loading={bulkOpen ? bulkDelete.isPending : deleteLead.isPending}
         destructive
       />
     </>

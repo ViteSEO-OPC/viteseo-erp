@@ -1,6 +1,6 @@
 "use client";
 
-import { Search } from "lucide-react";
+import { Search, LocateFixed, X } from "lucide-react";
 import {
   Select,
   SelectTrigger,
@@ -8,7 +8,13 @@ import {
   SelectContent,
   SelectItem,
 } from "@/modules/crm/components/ui/select";
-import type { NearbyFilters as Filters } from "@/modules/crm/features/nearby-clients/hooks/use-nearby-clients";
+import { cn } from "@/modules/crm/lib/utils";
+import {
+  RADIUS_OPTIONS,
+  type NearbyFilters as Filters,
+  type NearbyOrigin,
+  type GeolocationStatus,
+} from "@/modules/crm/features/nearby-clients/hooks/use-nearby-clients";
 
 function FilterSelect({
   value,
@@ -49,10 +55,27 @@ function Label({ children }: { children: React.ReactNode }) {
 type Props = {
   filters: Filters;
   patch: (next: Partial<Filters>) => void;
-  options: { areas: string[]; niches: string[]; statuses: string[] };
+  options: { locations: string[]; niches: string[]; statuses: string[]; priorities: string[] };
+  origin: NearbyOrigin | null;
+  selectLocation: (area: string) => void;
+  useMyLocation: () => void;
+  clearOrigin: () => void;
+  geoStatus: GeolocationStatus;
 };
 
-export function NearbyFilters({ filters, patch, options }: Props) {
+export function NearbyFilters({
+  filters,
+  patch,
+  options,
+  origin,
+  selectLocation,
+  useMyLocation,
+  clearOrigin,
+  geoStatus,
+}: Props) {
+  // The Location picker reflects the origin only when the origin came FROM a location (not geolocation).
+  const locationValue = origin?.kind === "location" ? origin.label : "";
+
   return (
     <div className="flex flex-col gap-4">
       {/* Search */}
@@ -61,37 +84,99 @@ export function NearbyFilters({ filters, patch, options }: Props) {
         <input
           value={filters.search}
           onChange={(e) => patch({ search: e.target.value })}
-          placeholder="Search saved clients…"
-          className="h-10 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-gray-400 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30"
-          aria-label="Search saved clients"
+          placeholder="Search discovered clients…"
+          className="h-10 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30"
+          aria-label="Search discovered clients"
         />
       </div>
 
-      {/* Distance */}
+      {/* Search origin — where the radius is measured from. */}
+      <div className="flex flex-col gap-1.5">
+        <Label>Search origin</Label>
+        <FilterSelect
+          value={locationValue}
+          onChange={selectLocation}
+          allLabel="All locations"
+          options={options.locations}
+        />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={useMyLocation}
+            className={cn(
+              "inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              origin?.kind === "geolocation"
+                ? "border-teal-400 bg-teal-50 text-teal-700 dark:bg-teal-950/40"
+                : "border-border bg-background text-foreground hover:bg-muted",
+            )}
+            aria-pressed={origin?.kind === "geolocation"}
+          >
+            <LocateFixed className="h-3.5 w-3.5" aria-hidden />
+            {geoStatus === "locating" ? "Locating…" : "Use my location"}
+          </button>
+          {origin && (
+            <button
+              type="button"
+              onClick={clearOrigin}
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted"
+              aria-label="Clear search origin"
+            >
+              <X className="h-3.5 w-3.5" aria-hidden />
+              Clear
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {origin
+            ? `Showing businesses within ${filters.radiusKm} km of ${origin.label}.`
+            : "Showing all discovered businesses. Pick a location or use your position to search by radius."}
+        </p>
+        {geoStatus === "denied" && (
+          <p className="text-[11px] text-amber-600">Location permission denied — pick a location instead.</p>
+        )}
+        {geoStatus === "unavailable" && (
+          <p className="text-[11px] text-amber-600">Geolocation isn’t available in this browser.</p>
+        )}
+      </div>
+
+      {/* Radius — measured from the selected origin. Inert until an origin is chosen. */}
       <div>
         <div className="flex items-center justify-between">
-          <Label>Distance</Label>
-          <span className="text-sm font-bold text-teal-700">{filters.distanceKm} km</span>
+          <Label>Radius</Label>
+          <span className={cn("text-sm font-bold", origin ? "text-teal-700" : "text-muted-foreground")}>
+            {filters.radiusKm} km
+          </span>
         </div>
-        <input
-          type="range"
-          min={1}
-          max={10}
-          value={filters.distanceKm}
-          onChange={(e) => patch({ distanceKm: Number(e.target.value) })}
-          className="mt-2 w-full accent-teal-500"
-          aria-label="Distance in kilometres"
-        />
-        <div className="mt-1 flex justify-between text-[10px] text-muted-foreground">
-          <span>1 km</span>
-          <span>10 km</span>
+        <div className="mt-2 grid grid-cols-4 gap-2">
+          {RADIUS_OPTIONS.map((km) => (
+            <button
+              key={km}
+              type="button"
+              disabled={!origin}
+              onClick={() => patch({ radiusKm: km })}
+              className={cn(
+                "rounded-lg border px-2 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                filters.radiusKm === km && origin
+                  ? "border-teal-400 bg-teal-50 text-teal-700 dark:bg-teal-950/40"
+                  : "border-border bg-background text-foreground hover:bg-muted",
+                !origin && "cursor-not-allowed opacity-50 hover:bg-background",
+              )}
+            >
+              {km} km
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Location */}
+      {/* Prospecting priority — derived from Website Intelligence (No website → High, etc.). */}
       <div className="flex flex-col gap-1.5">
-        <Label>Location</Label>
-        <FilterSelect value={filters.area} onChange={(v) => patch({ area: v })} allLabel="All locations" options={options.areas} />
+        <Label>Prospecting priority</Label>
+        <FilterSelect
+          value={filters.priority}
+          onChange={(v) => patch({ priority: v })}
+          allLabel="All priorities"
+          options={options.priorities}
+        />
       </div>
 
       {/* Niche + Status */}

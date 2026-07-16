@@ -22,7 +22,12 @@ import {
 
 type MobileView = "inbox" | "composer";
 
-export function FollowUpsWorkspace() {
+type FollowUpsWorkspaceProps = {
+  /** Lead to auto-focus, from the /follow-ups?lead=<id> deep-link (Lead Detail's Draft & send). */
+  leadId?: string;
+};
+
+export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
   const {
     items,
     selectedId,
@@ -38,7 +43,11 @@ export function FollowUpsWorkspace() {
     updateDraft,
     toggleSchedule,
     setScheduleDatetime,
-  } = useFollowUpsData();
+    purposeOptions,
+    toneOptions,
+    selectPurpose,
+    selectTone,
+  } = useFollowUpsData(leadId);
 
   const sendEmail = useSendEmail();
   const drafts = useDrafts();
@@ -54,23 +63,37 @@ export function FollowUpsWorkspace() {
   // Send: an already-saved draft transitions in place (same row); otherwise a fresh send.
   // The inbox row is a PlannerEvent, so the email targets its linked lead (`leadId`), not the
   // event id. A follow-up with no linked lead has no send target.
+  //
+  // Auto-complete (Planner Email Tasks only): when the selected row is a Planner `email` task and
+  // the send SUCCEEDS (returned Email.status === 'sent'), complete its Planner event through the
+  // EXISTING completion flow (markDone → PATCH /planner-events → observer logs planner-event.completed
+  // → KPI reacts). This closes the flow Planner Email Task → Composer → Send → Completed. Normal
+  // follow-ups/calls/meetings/tasks are unaffected (they still complete only via manual Mark Done),
+  // and a failed send (onError) never completes.
   const handleSend = () => {
     if (activeDraftId) {
       sendDraft.mutate(activeDraftId, { onSuccess: () => setActiveDraftId(null) });
       return;
     }
-    if (!selectedItem?.leadId) return;
-    sendEmail.mutate({
-      leadId: selectedItem.leadId,
-      subject: draft.subject,
-      body: draft.body,
-      to: selectedItem.email || undefined,
-    });
+    const item = selectedItem;
+    if (!item?.leadId) return;
+    sendEmail.mutate(
+      { leadId: item.leadId, subject: draft.subject, body: draft.body, to: item.email || undefined },
+      {
+        onSuccess: (email) => {
+          if (!item.isVirtual && item.eventType === "email" && email.status === "sent") {
+            markDone(item.id);
+          }
+        },
+      },
+    );
   };
 
-  // Mark Done: complete the selected follow-up PlannerEvent (removes it from the inbox).
+  // Mark Done: complete the selected follow-up PlannerEvent (removes it from the inbox). A virtual
+  // lead context (deep-linked lead with no follow-up) has no event to complete, so it is skipped —
+  // the button is disabled for it below.
   const handleMarkDone = () => {
-    if (!selectedItem) return;
+    if (!selectedItem || selectedItem.isVirtual) return;
     markDone(selectedItem.id);
     setMobileView("inbox");
   };
@@ -144,10 +167,14 @@ export function FollowUpsWorkspace() {
               draft={draft}
               scheduler={scheduler}
               onUpdateDraft={updateDraft}
+              purposeOptions={purposeOptions}
+              toneOptions={toneOptions}
+              onSelectPurpose={selectPurpose}
+              onSelectTone={selectTone}
               onToggleSchedule={handleToggleSchedule}
               onSaveDraft={handleSaveDraft}
               savingDraft={saveDraft.isPending || updateDraftMutation.isPending}
-              onMarkDone={handleMarkDone}
+              onMarkDone={selectedItem.isVirtual ? undefined : handleMarkDone}
               markingDone={markingDone}
               onSend={handleSend}
               sending={sendEmail.isPending || sendDraft.isPending}

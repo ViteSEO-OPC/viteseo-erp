@@ -47,7 +47,8 @@ export function ComposerActionBar({
       <Button
         variant="outline"
         onClick={onMarkDone}
-        disabled={markingDone}
+        disabled={markingDone || !onMarkDone}
+        title={!onMarkDone ? "No follow-up to complete for this lead" : undefined}
         className="min-h-11 border-teal-500 text-teal-600 hover:bg-teal-50 hover:text-teal-700 md:min-h-0"
       >
         <Check className="h-4 w-4" />

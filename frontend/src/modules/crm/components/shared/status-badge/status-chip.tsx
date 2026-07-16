@@ -9,25 +9,25 @@ const statusConfig: Record<
     dot: "bg-teal-500",
     label: "Interested",
     chipBg: "bg-teal-400/10",
-    chipText: "text-teal-900",
+    chipText: "text-teal-900 dark:text-teal-400",
   },
   "awaiting-reply": {
     dot: "bg-gray-500",
     label: "Awaiting Reply",
-    chipBg: "bg-gray-100",
-    chipText: "text-gray-600",
+    chipBg: "bg-muted",
+    chipText: "text-secondary-foreground",
   },
   declined: {
     dot: "bg-red-500",
     label: "Declined",
     chipBg: "bg-red-500/10",
-    chipText: "text-red-800",
+    chipText: "text-red-800 dark:text-red-500",
   },
   "call-back-req": {
     dot: "bg-teal-500",
     label: "Call-back Req.",
     chipBg: "bg-teal-400/10",
-    chipText: "text-teal-900",
+    chipText: "text-teal-900 dark:text-teal-400",
   },
 };
 

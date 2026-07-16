@@ -24,7 +24,7 @@ export function UploadDropzone({ onFile, disabled }: Props) {
       type="button"
       onClick={handleClick}
       disabled={disabled}
-      className="flex w-full cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-teal-400 bg-gray-50 px-6 py-8 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex w-full cursor-pointer flex-col items-center gap-3 rounded-xl border-2 border-dashed border-teal-400 bg-muted px-6 py-8 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
       aria-label="Upload CSV or XLSX file"
     >
       <input
@@ -50,10 +50,10 @@ export function UploadDropzone({ onFile, disabled }: Props) {
       </div>
 
       <div className="flex items-center gap-2">
-        <Badge variant="outline" className="border-gray-200 bg-white text-xs font-medium text-foreground">
+        <Badge variant="outline" className="border-border bg-card text-xs font-medium text-foreground">
           CSV
         </Badge>
-        <Badge variant="outline" className="border-gray-200 bg-white text-xs font-medium text-foreground">
+        <Badge variant="outline" className="border-border bg-card text-xs font-medium text-foreground">
           XLSX
         </Badge>
       </div>

@@ -17,7 +17,7 @@ export function CalendarLegend() {
             style={{ backgroundColor: item.color }}
             aria-hidden
           />
-          <span className="text-xs text-gray-600">{item.label}</span>
+          <span className="text-xs text-secondary-foreground">{item.label}</span>
         </div>
       ))}
     </div>

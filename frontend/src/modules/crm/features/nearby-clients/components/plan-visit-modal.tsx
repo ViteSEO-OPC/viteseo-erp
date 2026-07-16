@@ -26,10 +26,10 @@ import { useCreatePlannerEvent, type PlannerEventDraft } from "@/modules/crm/fea
 import type { NearbyClient } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
 
 const FIELD =
-  "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-gray-400 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
+  "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
 const FIELD_ERROR = "border-red-400 focus:border-red-400 focus:ring-red-400/30";
 const TEXTAREA =
-  "min-h-[88px] w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-gray-400 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
+  "min-h-[88px] w-full resize-none rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
 
 // Value-equals-label: base-ui SelectValue renders the raw value, so the readable label IS the value
 // (matches the Nearby filters + Planner Select convention). The purpose becomes the created event's
@@ -148,7 +148,7 @@ function PlanVisitForm({ client, onClose }: { client: NearbyClient; onClose: () 
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label="Close"
           >
             <X className="h-4 w-4" />

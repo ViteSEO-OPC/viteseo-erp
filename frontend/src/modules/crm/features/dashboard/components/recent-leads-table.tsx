@@ -31,7 +31,7 @@ export function RecentLeadsTable() {
       {isLoading && <TableSkeleton />}
       {isError && <ErrorState message="Failed to load leads" />}
       {!isLoading && !isError && leads && leads.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card">
+        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-card">
           <Table>
             <TableHeader>
               <TableRow className="border-b border-border-subtle bg-surface-table-header">

@@ -32,6 +32,9 @@ class LeadResource extends JsonResource
             'region' => $this->region,
             'province' => $this->province,
             'city' => $this->city,
+            // Free-text business address (Excel Import). Part of a lead's business identity and the
+            // Tier-3 dedup discriminator; nullable — existing/non-imported leads return null.
+            'address' => $this->address,
             // Discovery-provider coordinates + provenance (Lead Enrichment). Coordinates feed the
             // future Interactive Map; `source` marks the supplying provider (provider-agnostic —
             // the CRM never branches on its value).

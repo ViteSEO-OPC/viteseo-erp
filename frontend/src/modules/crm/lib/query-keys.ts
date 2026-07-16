@@ -22,6 +22,11 @@ export const queryKeys = {
     lists: () => [...queryKeys.leads.all, "list"] as const,
     list: (filters: Record<string, unknown>) =>
       [...queryKeys.leads.lists(), filters] as const,
+    // Priority Summary cards (GET /leads/priority-summary). Nested UNDER lists() so every mutation
+    // that already invalidates leads.lists() (create/update/delete/bulk/import/restore) also
+    // refreshes the cards by prefix match — the cards can never drift from the table.
+    prioritySummary: (filters: Record<string, unknown>) =>
+      [...queryKeys.leads.lists(), "priority-summary", filters] as const,
     details: () => [...queryKeys.leads.all, "detail"] as const,
     detail: (id: string) => [...queryKeys.leads.details(), id] as const,
     // Per-lead activity timeline. Nested under detail(id) so the existing
@@ -30,6 +35,12 @@ export const queryKeys = {
     // Per-lead internal notes (GET /leads/{lead}/notes). Nested under detail(id), like
     // activities, so note writes invalidate only this lead's data — never unrelated feeds.
     notes: (id: string) => [...queryKeys.leads.detail(id), "notes"] as const,
+    // Per-lead email conversation (GET /leads/{lead}/emails). Nested under detail(id) so future
+    // email writes (e.g. an inbound reply landing) invalidate only this lead's thread by prefix.
+    emails: (id: string) => [...queryKeys.leads.detail(id), "emails"] as const,
+    // Per-lead rendered email templates (GET /leads/{lead}/email-templates) — Purpose+Tone → Subject+Body
+    // rendered for this lead. Nested under detail(id).
+    emailTemplates: (id: string) => [...queryKeys.leads.detail(id), "email-templates"] as const,
   },
   followUps: {
     all: ["follow-ups"] as const,
@@ -76,6 +87,11 @@ export const queryKeys = {
     events: (dateRange: { start: string; end: string }) =>
       [...queryKeys.planner.all, "events", dateRange] as const,
   },
+  me: {
+    // The authenticated user's own profile (GET /me) — powers the BD self-service Settings page.
+    all: ["me"] as const,
+    profile: () => [...queryKeys.me.all, "profile"] as const,
+  },
   users: {
     all: ["users"] as const,
     lists: () => [...queryKeys.users.all, "list"] as const,
@@ -83,5 +99,20 @@ export const queryKeys = {
       [...queryKeys.users.lists(), filters] as const,
     details: () => [...queryKeys.users.all, "detail"] as const,
     detail: (id: string) => [...queryKeys.users.details(), id] as const,
+  },
+  archive: {
+    // Archive Management — soft-deleted ("archived") leads (GET /leads/archived).
+    all: ["archive"] as const,
+    lists: () => [...queryKeys.archive.all, "list"] as const,
+    list: (filters: Record<string, unknown>) =>
+      [...queryKeys.archive.lists(), filters] as const,
+  },
+  notifications: {
+    // In-app Notification Center — reads the existing Laravel Database Notifications
+    // (`notifications` table). `all` prefix lets a single mark-read/mark-all invalidation
+    // refresh both the list and the unread-count badge at once.
+    all: ["notifications"] as const,
+    list: () => [...queryKeys.notifications.all, "list"] as const,
+    unreadCount: () => [...queryKeys.notifications.all, "unread-count"] as const,
   },
 } as const;

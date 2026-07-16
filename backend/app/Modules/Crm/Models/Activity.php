@@ -70,4 +70,36 @@ class Activity extends Model
                 });
         });
     }
+
+    /**
+     * CRM-reporting filter — the single source of truth for which activities participate in CRM
+     * reporting and KPIs (Dashboard "Recent Activity", Activity Logs, M-06 Activity Volume, and any
+     * future notification/audit-report surface built on this feed).
+     *
+     * Excludes every activity whose subject is an unqualified discovered PROSPECT ({@see
+     * Lead::scopeProspect}) — a prospect lives in the Nearby Clients pool, outside CRM operations, so
+     * its discovery/import/enrichment activity must not surface here or feed any metric. The moment a
+     * prospect is qualified it is no longer a prospect, so ALL of its activity — including its original
+     * discovery record — participates again: qualified/active leads keep their COMPLETE history.
+     *
+     * Deliberately orthogonal to {@see scopeVisibleTo}: this filter is about lifecycle participation,
+     * that one about ownership. Compose both (`->visibleTo($user)->forCrmReporting()`); neither changes
+     * the other. Non-lead subjects (auth events, notes, …) are untouched.
+     *
+     * @param  Builder<Activity>  $query
+     */
+    public function scopeForCrmReporting(Builder $query): void
+    {
+        $leadType = (new Lead)->getMorphClass();
+
+        // Keep everything EXCEPT activities whose subject is an unqualified prospect lead. Written in
+        // inclusive (keep-if) form so it is NULL-safe: a `NOT(subject_type = Lead AND …)` predicate
+        // would evaluate to NULL — and be dropped — for subjectless activities (e.g. auth events),
+        // silently excluding them from CRM reporting. Each branch below keeps a legitimate row:
+        $query->where(function (Builder $keep) use ($leadType): void {
+            $keep->where('subject_type', '!=', $leadType)                    // another model's activity
+                ->orWhereNull('subject_type')                               // a subjectless activity
+                ->orWhereNotIn('subject_id', Lead::prospect()->select('id')); // a lead, but not a prospect
+        });
+    }
 }

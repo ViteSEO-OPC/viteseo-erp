@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Services\Outreach;
 
+use App\Modules\Crm\Events\OutboundEmailSent;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
@@ -31,7 +32,7 @@ class OutreachEmailService
         $toEmail = $this->resolveRecipient($lead, $to);
         $sent = $this->dispatch($lead, $toEmail, $subject, $body);
 
-        return DB::transaction(function () use ($lead, $sender, $subject, $body, $toEmail, $sent): Email {
+        $email = DB::transaction(function () use ($lead, $sender, $subject, $body, $toEmail, $sent): Email {
             $email = Email::create([
                 'lead_id' => $lead->id,
                 'user_id' => $sender->id,
@@ -53,33 +54,49 @@ class OutreachEmailService
 
             return $email;
         });
+
+        $this->announceIfSent($email);
+
+        return $email;
     }
 
     /**
      * Send a previously-saved draft (Decision 2): the SAME Email row transitions draft → sent —
-     * no second record is created. Reuses the provider transport and the centralized Activity log,
-     * so the send behaviour is identical to sendToLead().
+     * no second record is created. Thin alias over {@see sendExisting()}.
      *
      * @throws ValidationException when the draft has no resolvable recipient
      */
     public function sendDraft(Email $draft, User $sender): Email
     {
-        $lead = $draft->lead;
+        return $this->sendExisting($draft, $sender);
+    }
 
-        // Business guard: a draft whose lead has been soft-deleted (or unlinked) cannot be sent.
+    /**
+     * Send an already-persisted outbound Email row (a draft OR a Send-Later scheduled email) through
+     * the SAME provider transport and the SAME centralized Activity log — the row transitions to
+     * `sent`, no second record is created. This is the single outbound send pipeline (RC3 FROZEN #1):
+     * drafts, scheduled sends, and Send-Now all funnel here.
+     *
+     * @throws ValidationException when the row has no resolvable recipient / lead
+     */
+    public function sendExisting(Email $email, User $sender): Email
+    {
+        $lead = $email->lead;
+
+        // Business guard: an email whose lead has been soft-deleted (or unlinked) cannot be sent.
         // Fail as validation (422) BEFORE entering the send pipeline — never a 500 on a null lead.
         if ($lead === null) {
             throw ValidationException::withMessages([
-                'lead' => 'This lead no longer exists. The draft cannot be sent.',
+                'lead' => 'This lead no longer exists. The email cannot be sent.',
             ]);
         }
 
-        $toEmail = $this->resolveRecipient($lead, $draft->to_email);
-        $subject = (string) $draft->subject;
-        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $draft->body);
+        $toEmail = $this->resolveRecipient($lead, $email->to_email);
+        $subject = (string) $email->subject;
+        $sent = $this->dispatch($lead, $toEmail, $subject, (string) $email->body);
 
-        return DB::transaction(function () use ($draft, $lead, $sender, $subject, $toEmail, $sent): Email {
-            $draft->update([
+        $email = DB::transaction(function () use ($email, $lead, $sender, $subject, $toEmail, $sent): Email {
+            $email->update([
                 'from_email' => (string) config('outreach.from.address'),
                 'from_name' => (string) config('outreach.from.name'),
                 'to_email' => $toEmail,
@@ -87,14 +104,29 @@ class OutreachEmailService
                 'provider' => $sent->provider,
                 'provider_message_id' => $sent->providerMessageId,
                 'message_id' => $sent->messageId,
-                'status' => $sent->status,   // draft → sent (or failed)
+                'status' => $sent->status,   // draft/scheduled → sent (or failed)
                 'sent_at' => now(),
             ]);
 
-            $this->logSent($lead, $sender, $draft, $subject, $toEmail);
+            $this->logSent($lead, $sender, $email, $subject, $toEmail);
 
-            return $draft;
+            return $email;
         });
+
+        $this->announceIfSent($email);
+
+        return $email;
+    }
+
+    /**
+     * Emit the OutboundEmailSent domain event after a successful send (RC3 Phase 5 seam — consumed by the
+     * n8n `email.sent` webhook). Post-commit and status-guarded; adds no send behaviour.
+     */
+    private function announceIfSent(Email $email): void
+    {
+        if ($email->status === 'sent') {
+            event(new OutboundEmailSent($email));
+        }
     }
 
     /** @throws ValidationException when no recipient can be resolved */

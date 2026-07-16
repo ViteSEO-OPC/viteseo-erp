@@ -4,14 +4,17 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useLeadDetail } from "@/modules/crm/features/leads/hooks/use-lead-detail";
 import { useLeadActivities } from "@/modules/crm/features/leads/hooks/use-lead-activities";
-import { useDeleteLead, useScheduleFollowUp } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
+import { useDeleteLead, useUpdateLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { LeadDetailHeader } from "@/modules/crm/features/leads/components/lead-detail-header";
 import { LeadSummaryCard } from "@/modules/crm/features/leads/components/lead-summary-card";
 import { AssignLeadModal } from "@/modules/crm/features/leads/components/assign-lead-modal";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { QuickActionsCard } from "@/modules/crm/features/leads/components/quick-actions-card";
-import { EmailComposeModal } from "@/modules/crm/features/leads/components/email-compose-modal";
+import { ScheduleFollowUpModal } from "@/modules/crm/features/leads/components/schedule-follow-up-modal";
+import { WonConfirmDialog } from "@/modules/crm/features/leads/components/won-confirm-dialog";
+import { LostConfirmDialog } from "@/modules/crm/features/leads/components/lost-confirm-dialog";
 import { DiscussionNotes } from "@/modules/crm/features/leads/components/discussion-notes";
+import { EmailThread } from "@/modules/crm/features/leads/components/email-thread";
 import { ActivityTimeline } from "@/modules/crm/features/leads/components/activity-timeline";
 import { EditLeadDrawer } from "@/modules/crm/features/leads/components/edit-lead-drawer";
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
@@ -23,19 +26,17 @@ export function LeadDetailPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
-  const [composeOpen, setComposeOpen] = useState(false);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [wonOpen, setWonOpen] = useState(false);
+  const [lostOpen, setLostOpen] = useState(false);
   const { lead, editableLead, quickActions, isLoading, isError } = useLeadDetail(params.id);
   const activities = useLeadActivities(params.id);
   const deleteLead = useDeleteLead();
-  const scheduleFollowUp = useScheduleFollowUp();
+  const updateLead = useUpdateLead();
   const { hasMinRole, can } = usePermissions();
   const canAssign = hasMinRole("crm_admin");
   // Mirror the backend authorization: DELETE /leads/{id} requires leads.delete (BDMs lack it).
-  // Gate every Delete affordance so the UI never offers an action the API will 403.
   const canDelete = can("leads.delete");
-  // Outreach email + Schedule follow-up both reuse the follow-ups.create permission
-  // (POST /leads/{id}/emails and POST /leads/{id}/follow-ups authorize on it).
-  const canEmail = can("follow-ups.create");
 
   const handleDelete = () => {
     deleteLead.mutate(params.id, {
@@ -75,20 +76,26 @@ export function LeadDetailPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[62fr_38fr]">
           <div className="flex flex-col gap-6">
             <LeadSummaryCard lead={lead} />
+            <EmailThread leadId={params.id} />
             <DiscussionNotes leadId={params.id} />
           </div>
           <div className="flex flex-col gap-6">
             <QuickActionsCard
               actions={quickActions}
               onSelect={(key) => {
-                if (key === "email" && canEmail) setComposeOpen(true);
-                // "Schedule follow-up" → the single authoritative FollowUpScheduler flow
-                // (POST /leads/{id}/follow-ups). Guard against double-create while in flight.
-                else if (key === "follow-up" && canEmail && !scheduleFollowUp.isPending) {
-                  scheduleFollowUp.mutate({ leadId: params.id });
-                }
-                // "call" / "contacted" remain deferred (no-op).
+                // "Draft & send email" → the existing Outreach module, carrying this lead. No email
+                // composer is duplicated in Lead Detail (single source of truth = Outreach).
+                if (key === "email") router.push(`/zerem/follow-ups?lead=${params.id}`);
+                // "Schedule follow-up" → the approved modal (existing Planner backend).
+                else if (key === "follow-up") setFollowUpOpen(true);
               }}
+              status={lead.status}
+              onStatusChange={(status) =>
+                updateLead.mutate({ id: params.id, payload: { status: status as typeof lead.status } })
+              }
+              statusPending={updateLead.isPending}
+              onWon={() => setWonOpen(true)}
+              onLost={() => setLostOpen(true)}
             />
             <ActivityTimeline
               events={activities.data}
@@ -116,16 +123,27 @@ export function LeadDetailPage() {
         />
       ) : null}
 
-      {canEmail ? (
-        <EmailComposeModal
-          key={lead.id}
-          open={composeOpen}
-          onOpenChange={setComposeOpen}
-          leadId={params.id}
-          leadName={lead.business}
-          leadEmail={lead.email}
-        />
-      ) : null}
+      <ScheduleFollowUpModal
+        open={followUpOpen}
+        onOpenChange={setFollowUpOpen}
+        leadId={params.id}
+        leadName={lead.business}
+      />
+
+      <WonConfirmDialog
+        open={wonOpen}
+        onOpenChange={setWonOpen}
+        leadId={params.id}
+        leadName={lead.business}
+        defaultAmount={lead.amount}
+      />
+
+      <LostConfirmDialog
+        open={lostOpen}
+        onOpenChange={setLostOpen}
+        leadId={params.id}
+        leadName={lead.business}
+      />
 
       <ConfirmDialog
         open={confirmOpen}

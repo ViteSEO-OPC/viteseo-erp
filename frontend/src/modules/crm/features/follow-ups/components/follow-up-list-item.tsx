@@ -28,8 +28,8 @@ export function FollowUpListItem({ item, selected, onSelect }: FollowUpListItemP
       className={cn(
         "flex w-full items-start gap-3 border-b border-border-subtle px-4 py-3.5 text-left transition-colors md:px-6",
         "min-h-[44px]",
-        "hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-        selected && "bg-[var(--chip-teal-bg)] hover:bg-[var(--chip-teal-bg)]",
+        "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+        selected && "bg-primary/10 hover:bg-primary/10",
       )}
       aria-current={selected ? "true" : undefined}
     >
@@ -37,10 +37,10 @@ export function FollowUpListItem({ item, selected, onSelect }: FollowUpListItemP
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-bold text-gray-900">
+            <span className="truncate text-sm font-bold text-foreground">
               {item.name}
             </span>
-            <span className="shrink-0 text-[11px] text-gray-500">
+            <span className="shrink-0 text-[11px] text-muted-foreground">
               {item.timestamp}
             </span>
           </div>
@@ -55,8 +55,8 @@ export function FollowUpListItem({ item, selected, onSelect }: FollowUpListItemP
             <span>{chip.label}</span>
           </span>
         </div>
-        <p className="truncate text-[11px] text-gray-500">{item.company}</p>
-        <p className="mt-1 truncate text-[12px] text-gray-600">{item.preview}</p>
+        <p className="truncate text-[11px] text-muted-foreground">{item.company}</p>
+        <p className="mt-1 truncate text-[12px] text-secondary-foreground">{item.preview}</p>
       </div>
     </button>
   );

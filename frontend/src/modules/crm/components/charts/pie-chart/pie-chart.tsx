@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 
 const RechartsPieChart = dynamic(
   () => import("./pie-chart-inner"),
-  { ssr: false, loading: () => <div className="h-full min-h-[180px] w-full animate-pulse rounded-lg bg-gray-100" /> },
+  { ssr: false, loading: () => <div className="h-full min-h-[180px] w-full animate-pulse rounded-lg bg-muted" /> },
 );
 
 type Segment = {

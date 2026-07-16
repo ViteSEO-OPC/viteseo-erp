@@ -30,7 +30,7 @@ use Spatie\Permission\Traits\HasRoles;
 // added by the CRM module's additive users migration (CRM needs reversible user
 // "deactivate"/"delete"). `role` is intentionally absent (Spatie roles are the
 // single source of truth).
-#[Fillable(['name', 'email', 'password', 'avatar', 'preferences', 'status', 'last_login_at'])]
+#[Fillable(['name', 'email', 'password', 'avatar', 'preferences', 'phone', 'status', 'last_login_at'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {

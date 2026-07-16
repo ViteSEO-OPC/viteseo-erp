@@ -3,6 +3,9 @@
 import { useState, useCallback, useMemo } from "react";
 import { usePlannerEvents } from "@/modules/crm/features/calendar/hooks/use-planner-events";
 import { useUpdatePlannerEvent } from "@/modules/crm/features/calendar/hooks/use-planner-mutations";
+import { useLeadDetail } from "@/modules/crm/features/leads/hooks/use-lead-detail";
+import { useEmailTemplates } from "@/modules/crm/features/follow-ups/hooks/use-email-templates";
+import { isPendingOutreachEvent } from "@/modules/crm/features/follow-ups/lib/outreach-pending";
 import { formatBusiness } from "@/modules/crm/lib/timezone";
 import type { PlannerEvent } from "@/modules/crm/features/calendar/types/calendar-types";
 import type {
@@ -13,18 +16,19 @@ import type {
   AvatarColor,
 } from "@/modules/crm/features/follow-ups/types/follow-ups-types";
 
-// The Follow-ups inbox is a view over the Planner — its rows ARE follow-up PlannerEvents
-// (event_type='follow-up') that are not yet completed. Planner owns the follow-up lifecycle:
-// Mark Done PATCHes {status:'completed'} through the existing update flow, which persists the
-// completion, logs a `planner-event.updated` Activity via the observer, and lets the BD KPI
-// engine's activity-volume metric react — no parallel model, endpoint, or business logic here.
-// It reuses the single Planner query cache, so completing a follow-up here also refreshes the
+// The Follow-ups inbox is a view over the Planner — its rows are the pending Planner events that
+// are COMMUNICATION tasks Outreach fulfils: `follow-up` events and Planner `email` Email-Tasks.
+// (Preserves the frozen architecture: Planner owns their schedule; Outreach lists + sends them.
+// Other Planner types — call/meeting/task — stay Planner-only and never appear here.) Planner owns
+// the lifecycle: Mark Done PATCHes {status:'completed'} through the existing update flow, which
+// persists the completion, logs a `planner-event.updated` Activity via the observer, and lets the
+// BD KPI engine's activity-volume metric react — no parallel model, endpoint, or business logic
+// here. It reuses the single Planner query cache, so completing an item here also refreshes the
 // Calendar and Board.
 const AVATAR_COLORS: AvatarColor[] = ["teal", "blue", "orange", "purple", "gray"];
 
-// Pending PlannerEvent statuses the inbox surfaces. `completed` is intentionally absent — a
-// completed follow-up leaves the inbox (that is what Mark Done does).
-const PENDING_STATUSES = new Set<FollowUpStatus>(["todo", "scheduled", "in_progress"]);
+// The "actionable outreach item" definition (follow-up/email + pending) lives in one place —
+// `isPendingOutreachEvent` — so the inbox list here and the sidebar Outreach badge share it exactly.
 
 function initialsFor(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -39,6 +43,7 @@ function mapEventToFollowUp(event: PlannerEvent, index: number): FollowUpItem {
   const name = event.lead?.contact?.trim() || event.title;
   return {
     id: event.id,
+    eventType: event.eventType,
     leadId: event.leadId,
     initials: initialsFor(name),
     avatarColor: AVATAR_COLORS[index % AVATAR_COLORS.length] ?? "gray",
@@ -63,18 +68,19 @@ const INITIAL_DRAFT: EmailDraft = {
   aiSuggestion: "Draft your message, then send it directly to this lead. AI suggestions arrive once the Copilot module is connected.",
 };
 
-export function useFollowUpsData() {
+export function useFollowUpsData(leadId?: string) {
   const { data: events = [], isLoading, isError } = usePlannerEvents();
   const completeEvent = useUpdatePlannerEvent();
+  // Lead reached via the ?lead= deep-link. Reuses the SAME react-query cache the Lead Detail page
+  // already populated (identical queryKey), so this is a cache hit — no duplicate fetch or logic.
+  // Only consulted for Case B (a lead with no pending follow-up in the inbox).
+  const { lead: deepLinkLead } = useLeadDetail(leadId ?? "");
 
-  // Only pending follow-up events belong in "Follow-ups Pending". Filtering client-side keeps this
-  // on the one shared Planner cache (no follow-up-specific request), so Mark Done's optimistic
-  // status→completed patch drops the row here the instant it is applied.
+  // Only pending communication tasks (follow-ups + Email Tasks) belong in "Follow-ups Pending".
+  // Filtering client-side keeps this on the one shared Planner cache (no follow-up-specific request),
+  // so Mark Done's optimistic status→completed patch drops the row here the instant it is applied.
   const items = useMemo(
-    () =>
-      events
-        .filter((e) => e.eventType === "follow-up" && PENDING_STATUSES.has(e.status as FollowUpStatus))
-        .map(mapEventToFollowUp),
+    () => events.filter(isPendingOutreachEvent).map(mapEventToFollowUp),
     [events],
   );
 
@@ -85,8 +91,43 @@ export function useFollowUpsData() {
   // Drives whether Save updates-vs-creates and whether Send transitions an existing draft.
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
 
-  // Default to the first follow-up until the BD picks one; undefined once the inbox is empty.
-  const selectedItem = items.find((i) => i.id === selectedId) ?? items[0];
+  // Case A — the deep-linked lead already has a pending follow-up in the inbox: that real event
+  // becomes the default selection (below), reusing the normal composer path. Derived, not synced via
+  // an effect, so a late-arriving match settles in naturally and a manual pick still overrides it.
+  const deepLinkMatch = useMemo(
+    () => (leadId ? items.find((i) => i.leadId === leadId) : undefined),
+    [leadId, items],
+  );
+
+  // Case B — the deep-linked lead has no follow-up in the inbox: build a virtual composer context
+  // straight from the lead so Outreach's existing composer opens and sends unchanged. Withheld until
+  // the inbox has resolved (so a real Case-A match wins) and only when no inbox row matches.
+  const injectedItem = useMemo<FollowUpItem | null>(() => {
+    if (!leadId || isLoading || deepLinkMatch) return null;
+    if (!deepLinkLead) return null;
+    const name = deepLinkLead.contact?.trim() || deepLinkLead.business;
+    return {
+      id: `lead:${leadId}`,
+      // A deep-linked lead context, not a real Planner event — never auto-completed (isVirtual guards it).
+      eventType: "follow-up",
+      leadId,
+      initials: initialsFor(name),
+      avatarColor: "teal",
+      name,
+      company: deepLinkLead.business,
+      timestamp: "—",
+      status: "todo",
+      preview: "",
+      email: deepLinkLead.email ?? "",
+      isVirtual: true,
+    };
+  }, [leadId, isLoading, deepLinkMatch, deepLinkLead]);
+
+  // Effective selection, most-specific first: an explicit manual pick, then the deep-linked lead's
+  // follow-up (Case A), then the injected lead context (Case B), then the first follow-up as the
+  // default; undefined once everything is empty. `selectedId` stays "" until the BD picks a row.
+  const selectedItem =
+    items.find((i) => i.id === selectedId) ?? deepLinkMatch ?? injectedItem ?? items[0];
 
   const selectItem = useCallback((id: string) => {
     setSelectedId(id);
@@ -128,6 +169,34 @@ export function useFollowUpsData() {
     setScheduler((prev) => ({ ...prev, datetime }));
   }, []);
 
+  // RC3 Phase 2 — deterministic email templates for the selected lead. The Purpose + Tone dropdowns
+  // draw their options from the active templates; picking a combination populates Subject + Body from
+  // the matching rendered template (the BD can then edit before sending). No AI — the backend renders
+  // {{token}} placeholders deterministically.
+  const { templates } = useEmailTemplates(selectedItem?.leadId ?? null);
+  const purposeOptions = useMemo(
+    () => Array.from(new Set(templates.map((t) => t.purpose))),
+    [templates],
+  );
+  const toneOptions = useMemo(
+    () => Array.from(new Set(templates.map((t) => t.tone))),
+    [templates],
+  );
+  const applyTemplate = useCallback(
+    (purpose: string, tone: string) => {
+      const match = templates.find((t) => t.purpose === purpose && t.tone === tone);
+      setDraft((prev) => ({
+        ...prev,
+        purpose,
+        tone,
+        ...(match ? { subject: match.subject, body: match.body } : {}),
+      }));
+    },
+    [templates],
+  );
+  const selectPurpose = useCallback((purpose: string) => applyTemplate(purpose, draft.tone), [applyTemplate, draft.tone]);
+  const selectTone = useCallback((tone: string) => applyTemplate(draft.purpose, tone), [applyTemplate, draft.purpose]);
+
   return {
     items,
     selectedId: selectedItem?.id ?? "",
@@ -143,6 +212,10 @@ export function useFollowUpsData() {
     updateDraft,
     toggleSchedule,
     setScheduleDatetime,
+    purposeOptions,
+    toneOptions,
+    selectPurpose,
+    selectTone,
     isLoading,
     isError,
   };

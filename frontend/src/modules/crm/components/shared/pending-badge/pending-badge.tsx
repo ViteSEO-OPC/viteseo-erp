@@ -20,7 +20,7 @@ export function PendingBadge({
     <span
       title={reason ?? "Pending — awaiting a backend dependency"}
       className={cn(
-        "inline-flex shrink-0 items-center rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600",
+        "inline-flex shrink-0 items-center rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground",
         className,
       )}
     >

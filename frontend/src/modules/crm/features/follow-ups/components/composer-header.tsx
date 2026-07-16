@@ -16,18 +16,18 @@ export function ComposerHeader({ item, onBack }: ComposerHeaderProps) {
         <button
           type="button"
           onClick={onBack}
-          className="flex h-11 w-11 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
+          className="flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
           aria-label="Back to inbox"
         >
           <ArrowLeft className="h-5 w-5" />
         </button>
       )}
       <span className="relative">
-        <span className="absolute -left-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-white" />
+        <span className="absolute -left-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-teal-500 ring-2 ring-card" />
         <AvatarInitials initials={item.initials} size="sm" />
       </span>
       <div>
-        <p className="text-base font-bold text-gray-900">
+        <p className="text-base font-bold text-foreground">
           Email — {item.company}
         </p>
         <p className="text-xs text-muted-foreground">

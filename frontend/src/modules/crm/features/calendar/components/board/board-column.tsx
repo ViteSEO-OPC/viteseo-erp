@@ -18,13 +18,13 @@ export function BoardColumn({ column, events, onEditEvent, onAddItem }: BoardCol
   const { setNodeRef, isOver } = useDroppable({ id: column.status });
 
   return (
-    <div className="flex min-w-0 flex-col rounded-xl bg-gray-50 p-3">
+    <div className="flex min-w-0 flex-col rounded-xl bg-muted p-3">
       <div className="mb-2 flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: column.dot }} aria-hidden />
-          <span className="text-sm font-bold text-gray-900">{column.label}</span>
+          <span className="text-sm font-bold text-foreground">{column.label}</span>
         </div>
-        <span className="text-xs font-medium text-gray-400">{events.length}</span>
+        <span className="text-xs font-medium text-muted-foreground">{events.length}</span>
       </div>
 
       <div
@@ -40,7 +40,7 @@ export function BoardColumn({ column, events, onEditEvent, onAddItem }: BoardCol
         <button
           type="button"
           onClick={() => onAddItem(column.status)}
-          className="mt-1 flex items-center justify-center gap-1 rounded-lg border border-dashed border-gray-200 py-2 text-xs font-medium text-gray-400 transition-colors hover:border-gray-300 hover:text-gray-600"
+          className="mt-1 flex items-center justify-center gap-1 rounded-lg border border-dashed border-border py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-secondary-foreground"
         >
           <Plus className="h-3.5 w-3.5" />
           Add item

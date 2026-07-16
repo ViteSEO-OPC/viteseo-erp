@@ -1,113 +1,164 @@
 "use client";
 
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/modules/crm/components/ui/select";
-import { ReportsToolbar } from "@/modules/crm/features/reports/components/reports-toolbar";
+import { AlertTriangle } from "lucide-react";
 import { StatCardChart } from "@/modules/crm/features/reports/components/stat-card-chart";
+import { ConversionFunnel } from "@/modules/crm/features/reports/components/conversion-funnel";
+import { NicheBars } from "@/modules/crm/features/reports/components/niche-bars";
+import { WidgetPlaceholder } from "@/modules/crm/features/reports/components/widget-placeholder";
 import { ChartCard } from "@/modules/crm/components/shared/chart-card/chart-card";
-import { LabeledBarList } from "@/modules/crm/components/shared/labeled-bar-list/labeled-bar-list";
-import { BarChart } from "@/modules/crm/components/charts/bar-chart/bar-chart";
 import { LineChart } from "@/modules/crm/components/charts/line-chart/line-chart";
 import { PieChart } from "@/modules/crm/components/charts/pie-chart/pie-chart";
-import { useReportsData } from "@/modules/crm/features/reports/hooks/use-reports-data";
+import { useReportsData, type ReportsView } from "@/modules/crm/features/reports/hooks/use-reports-data";
+import { useLeadsNiche } from "@/modules/crm/features/reports/hooks/use-leads-niche";
 
+/**
+ * Reports & Performance — Management analytics dashboard (Super Admin / Admin only; BDs use My
+ * Performance). Route access is enforced by the RoleGuard in the dashboard layout; every LIVE figure
+ * is a team-scoped backend aggregate (see useReportsData / useLeadsNiche) reusing existing endpoints.
+ * Deferred widgets (needing a new backend concept) render honest placeholders, never fabricated data.
+ * Responsive: two-column rows collapse to a single column below `lg`.
+ */
 export function ReportsGrid() {
-  const { data, range, setRange } = useReportsData();
+  const { view, kpisLoading, statusLoading, statusError, acqLoading, acqError } = useReportsData();
+  const niche = useLeadsNiche();
+
+  // Text alternatives for the opaque (SVG) charts — screen readers get the real figures.
+  const acqAria = view.acquisition
+    ? `Monthly new leads, last 6 months: ${(view.acquisition[0]?.data ?? [])
+        .map((d) => `${d.month} ${d.value}`)
+        .join(", ")}.`
+    : undefined;
+  const statusAria = view.statusMix
+    ? `Lead status mix, ${view.statusMix.total} total: ${view.statusMix.segments
+        .map((s) => `${s.label} ${s.value}`)
+        .join(", ")}.`
+    : undefined;
 
   return (
     <div className="flex flex-col gap-6">
-      <ReportsToolbar range={range} onRangeChange={setRange} />
+      {/* Team-wide management report only. Per-BD drill-down is a future backend capability and is
+          intentionally NOT surfaced as a control until it is actually implemented. */}
 
-      {/* Row 1 — KPI cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {data.kpis.map((kpi) => (
-          <StatCardChart key={kpi.id} card={kpi} />
-        ))}
+      {/* KPI row — live team aggregates (performance summary). No fabricated trends. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {kpisLoading
+          ? Array.from({ length: view.kpis.length }).map((_, i) => (
+              <div
+                key={i}
+                className="h-[104px] animate-pulse rounded-xl border border-border bg-muted"
+                aria-hidden
+              />
+            ))
+          : view.kpis.map((kpi) => <StatCardChart key={kpi.id} card={kpi} />)}
       </div>
 
-      {/* Row 2 — Status bar + Priority donut */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+      {/* Conversion funnel (+ biggest drop-off) | Lead status mix */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <ChartCard
-          title="Total leads by status"
-          subtitle="Distribution across pipeline stages"
-          className="md:col-span-8"
+          title="Conversion funnel"
+          subtitle="Where the pipeline narrows — All Leads → Engaged → Interested → Converted"
+          className="lg:col-span-7"
+          isLoading={kpisLoading || statusLoading}
+          isError={statusError}
+          isEmpty={!!view.funnel && view.funnel.total === 0}
+          emptyMessage="No leads yet"
         >
-          <LabeledBarList rows={data.statusBars} max={100} />
+          {view.funnel ? (
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
+              <div className="min-w-0 flex-1">
+                <ConversionFunnel stages={view.funnel.stages} total={view.funnel.total} />
+              </div>
+              {view.dropOff ? <DropOffCallout dropOff={view.dropOff} /> : null}
+            </div>
+          ) : null}
         </ChartCard>
 
         <ChartCard
-          title={data.priorityDonut.title}
-          subtitle={data.priorityDonut.subtitle}
-          className="md:col-span-4"
+          title="Lead status mix"
+          subtitle="Distribution across the pipeline"
+          className="lg:col-span-5"
+          isLoading={statusLoading}
+          isError={statusError}
+          isEmpty={!!view.statusMix && view.statusMix.total === 0}
+          emptyMessage="No leads yet"
         >
-          <PieChart
-            segments={data.priorityDonut.segments}
-            centerLabel={data.priorityDonut.centerLabel}
-          />
+          {view.statusMix ? (
+            <div role="img" aria-label={statusAria}>
+              <PieChart
+                segments={view.statusMix.segments}
+                centerLabel={`${view.statusMix.total} leads`}
+              />
+            </div>
+          ) : null}
         </ChartCard>
       </div>
 
-      {/* Row 3 — Three donut cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {data.outcomeDonuts.map((donut, i) => (
-          <ChartCard key={i} title={donut.title} subtitle={donut.subtitle}>
-            <PieChart
-              segments={donut.segments}
-              centerLabel={donut.centerLabel}
-            />
-          </ChartCard>
-        ))}
-      </div>
-
-      {/* Row 4 — Line + Conversion bar */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+      {/* Outreach progress by channel (deferred) | Monthly lead acquisition */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <WidgetPlaceholder
+          className="lg:col-span-7"
+          title="Outreach progress by channel"
+          subtitle="Email vs. cold calling — done, doing, remaining"
+          reason="Needs a backend aggregate over the existing email_outreach / calling_status columns. Planned for the post-production-sync milestone."
+        />
         <ChartCard
-          title="Monthly outreach activity"
-          subtitle="Email vs Cold call, Feb – Jul"
-          className="md:col-span-8"
+          title="Monthly lead acquisition"
+          subtitle="Newly added leads, last 6 months"
+          className="lg:col-span-5"
+          isLoading={acqLoading}
+          isError={acqError}
+          isEmpty={!!view.acquisition && view.acquisition[0]?.data.every((d) => d.value === 0)}
+          emptyMessage="No leads added yet"
         >
-          <LineChart series={data.outreachLine} />
-        </ChartCard>
-
-        <ChartCard
-          title="Lead conversion rate"
-          subtitle="Monthly conversion % (Feb – Jul)"
-          className="md:col-span-4"
-        >
-          <BarChart
-            data={data.conversionBars.map((b) => ({
-              label: b.month,
-              value: b.value,
-              color: b.color,
-              highlight: b.highlight,
-            }))}
-            max={30}
-          />
+          {view.acquisition ? (
+            <div role="img" aria-label={acqAria}>
+              <LineChart series={view.acquisition} />
+            </div>
+          ) : null}
         </ChartCard>
       </div>
 
-      {/* Row 5 — Industry bars */}
+      {/* Quarter targets (deferred) | Decline reason analysis (deferred) */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <WidgetPlaceholder
+          title="Quarter targets & follow-through"
+          subtitle="Goal bars for management review"
+          reason="Requires a Targets / Quotas model, which does not exist yet. Deferred pending product definition."
+        />
+        <WidgetPlaceholder
+          title="Decline reason analysis"
+          subtitle="Why did we lose them?"
+          reason="Requires capturing a decline reason in the Lose flow plus an aggregate endpoint. Deferred — the Lose flow is frozen."
+        />
+      </div>
+
+      {/* Leads by niche — reuses the /leads industry_counts SQL aggregate (top industries by count). */}
       <ChartCard
-        title="Leads by industry"
-        subtitle="Distribution across top sectors"
-        filter={
-          <Select defaultValue="Last 30 Days">
-            <SelectTrigger className="h-7 rounded-lg bg-gray-150 px-2 py-1 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Last 30 Days">Last 30 Days</SelectItem>
-            </SelectContent>
-          </Select>
-        }
+        title="Leads by niche"
+        subtitle="Which markets are we fishing in? Top industries by lead count"
+        isLoading={niche.isLoading}
+        isError={niche.isError}
+        isEmpty={!niche.isLoading && niche.top.length === 0}
+        emptyMessage="No industry data yet"
       >
-        <LabeledBarList rows={data.industryBars.map((b) => ({ label: b.sector, value: b.value, color: b.color }))} />
+        <NicheBars items={niche.top} max={niche.max} />
       </ChartCard>
+    </div>
+  );
+}
+
+/** Biggest stage-to-stage loss in the funnel — pure presentation over existing funnel figures. */
+function DropOffCallout({ dropOff }: { dropOff: NonNullable<ReportsView["dropOff"]> }) {
+  return (
+    <div className="flex shrink-0 flex-col justify-center gap-2 rounded-xl border border-border bg-muted/40 p-4 lg:w-52">
+      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        <AlertTriangle className="h-4 w-4" aria-hidden /> Biggest drop-off
+      </div>
+      <p className="text-2xl font-extrabold text-red-500">{dropOff.dropPct}%</p>
+      <p className="text-xs text-muted-foreground">
+        {dropOff.from} → {dropOff.to}. This stage loses the most leads — the highest-leverage place to
+        focus follow-up effort.
+      </p>
     </div>
   );
 }

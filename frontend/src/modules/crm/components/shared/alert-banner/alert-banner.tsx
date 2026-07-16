@@ -31,14 +31,14 @@ export function AlertBanner({ message, variant = "warning", children }: Props) {
         aria-expanded={expanded}
       >
         {isInfo ? (
-          <Zap className="h-4 w-4 shrink-0 text-teal-700" />
+          <Zap className="h-4 w-4 shrink-0 text-teal-700 dark:text-teal-400" />
         ) : (
-          <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-800" />
+          <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-800 dark:text-chart-3" />
         )}
         <span
           className={cn(
             "flex-1 text-sm font-medium",
-            isInfo ? "text-teal-900" : "text-yellow-800",
+            isInfo ? "text-teal-900 dark:text-teal-400" : "text-yellow-800 dark:text-chart-3",
           )}
         >
           {message}
@@ -47,7 +47,7 @@ export function AlertBanner({ message, variant = "warning", children }: Props) {
           <ChevronDown
             className={cn(
               "h-4 w-4 shrink-0 transition-transform",
-              isInfo ? "text-teal-900" : "text-yellow-800",
+              isInfo ? "text-teal-900 dark:text-teal-400" : "text-yellow-800 dark:text-chart-3",
               expanded && "rotate-180",
             )}
           />

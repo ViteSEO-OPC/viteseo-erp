@@ -104,7 +104,7 @@ export function assignableRoles(roles: readonly string[] | undefined): Role[] {
  * Page/module visibility — the single source of truth for both the sidebar and the
  * RoleGuard. Each entry is a {@link RoleAccessRule}: use `minRole` for the default
  * inherit-upward model, or `allowedRoles` for a role-exclusive surface.
- * Approved matrix: BD Manager → Dashboard/Leads/Outreach/Activity Logs;
+ * Approved matrix: Business Development Manager → Dashboard/Leads/Outreach/Activity Logs;
  * Admin (CRM Manager) additionally → Reports/Settings; Super Admin → everything.
  * Planner is BD-exclusive (a personal workspace) — see its entry.
  */
@@ -127,6 +127,10 @@ export const PAGE_ACCESS: PageAccess[] = [
   // My Performance — BD-facing personal surface; content is ownership-scoped server-side.
   { href: "/zerem/my-performance", minRole: "crm_bd" },
   { href: "/zerem/activity-logs", minRole: "crm_bd" },
+  // BD self-service profile ("Settings" in the BD sidebar) — role-exclusive, like Planner: visible
+  // ONLY to Business Development Managers. Admin/Super Admin have the separate admin Settings module
+  // at /settings. Self-service edits own name + phone via PATCH /me (no admin user management).
+  { href: "/zerem/profile", allowedRoles: ["crm_bd"] },
   { href: "/zerem/reports", minRole: "crm_admin" },
   { href: "/zerem/settings", minRole: "crm_admin" },
 ];

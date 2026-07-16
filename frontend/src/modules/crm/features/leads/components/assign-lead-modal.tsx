@@ -11,19 +11,13 @@ import {
 } from "@/modules/crm/components/ui/dialog";
 import { Button } from "@/modules/crm/components/ui/button";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/modules/crm/components/ui/select";
+import { RelationshipSelect } from "@/modules/crm/components/shared/relationship-select/relationship-select";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
 import { useAssignLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
 const closeButtonClass =
-  "flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 type Props = {
   open: boolean;
@@ -65,16 +59,17 @@ export function AssignLeadModal({ open, onOpenChange, lead }: Props) {
             Business Development Manager.
           </p>
           <FormField label="Business Development Manager" required>
-            <Select value={assignedTo} onValueChange={(v) => setAssignedTo(v ?? "")}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder={isLoading ? "Loading…" : "Select a BD"} />
-              </SelectTrigger>
-              <SelectContent>
-                {bdUsers.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <RelationshipSelect
+              value={assignedTo}
+              onValueChange={setAssignedTo}
+              options={bdUsers.map((u) => ({ value: u.id, label: u.name }))}
+              placeholder={isLoading ? "Loading…" : "Select a BD"}
+              // The lead already carries its owner's name, so the current BD resolves to a name even
+              // if it falls outside the (paginated) options list — never a raw id.
+              fallbackLabel={lead.assignedTo?.name}
+              triggerClassName="w-full"
+              aria-label="Business Development Manager"
+            />
           </FormField>
         </div>
 

@@ -212,8 +212,8 @@ function EventForm({
           </Field>
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-gray-150 px-3 py-2">
-          <span className="text-sm font-medium text-gray-700">All day</span>
+        <div className="flex items-center justify-between rounded-lg border border-border-subtle px-3 py-2">
+          <span className="text-sm font-medium text-foreground">All day</span>
           <Switch checked={allDay} onCheckedChange={setAllDay} />
         </div>
 
@@ -260,7 +260,7 @@ function EventForm({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-1.5">
-      <span className="text-sm font-medium text-gray-700">{label}</span>
+      <span className="text-sm font-medium text-foreground">{label}</span>
       {children}
     </label>
   );

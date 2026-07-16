@@ -33,6 +33,7 @@ class BdKpiService
         // One status aggregation over the ownership-scoped leads → powers M-01/M-02/M-03/M-05.
         /** @var array<string, int> $statusCounts */
         $statusCounts = Lead::query()
+            ->active()
             ->visibleTo($user)
             ->selectRaw('status, COUNT(*) as aggregate')
             ->groupBy('status')
@@ -42,6 +43,7 @@ class BdKpiService
 
         // M-04 numerator: engaged = any outreach started OR any calling activity.
         $engagedCount = Lead::query()
+            ->active()
             ->visibleTo($user)
             ->where(fn ($q) => $q->where('email_outreach', '!=', 'none')
                 ->orWhere('cold_calling', '!=', 'not-called'))
@@ -51,6 +53,7 @@ class BdKpiService
         $windowStart = $now->copy()->subDays($this->config->activityWindowDays);
         $activityVolume = Activity::query()
             ->visibleTo($user)
+            ->forCrmReporting() // M-06 counts CRM activity only — prospect-pool activity is excluded
             ->where('created_at', '>=', $windowStart)
             ->count();
 

@@ -1,0 +1,143 @@
+{
+  "name": "RC3 \u2014 2. Introduction Email (lead qualified)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "crm-lead-qualified",
+        "responseMode": "onReceived",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "n2-webhook",
+      "name": "CRM Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "crm-lead-qualified"
+    },
+    {
+      "parameters": {
+        "jsMode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "\nconst crypto = require('crypto');\nconst secret = String($env.N8N_WEBHOOK_SECRET || '');\nif (!secret) { throw new Error('N8N_WEBHOOK_SECRET is not configured in n8n'); }\nconst item = items[0];\nconst headers = item.json.headers || {};\nconst provided = String(headers['x-crm-signature'] || headers['X-CRM-Signature'] || '');\n// Raw body requires the CRM Webhook node \"Raw Body\" option (binary); fall back to canonical JSON.\nlet raw;\nif (item.binary && item.binary.data && item.binary.data.data) {\n  raw = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\n} else {\n  raw = JSON.stringify(item.json.body || {});\n}\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw, 'utf8').digest('hex');\nconst ok = provided.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));\nif (!ok) { throw new Error('Invalid X-CRM-Signature -- webhook rejected'); }\nconst env = JSON.parse(raw);\n// Idempotency: dedupe on the envelope event_id (at-least-once delivery).\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nif (env.event_id && sd.seen[env.event_id]) { return []; }\nif (env.event_id) { sd.seen[env.event_id] = Date.now(); }\nconst data = env.data || {};\nif (env.topic !== 'lead.qualified') { return []; }\n\nif (!data.lead_id || !data.assigned_to) { return []; }\nreturn [{ json: { lead_id: data.lead_id, assigned_to: data.assigned_to } }];\n"
+      },
+      "id": "n2-code",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_API_URL }}/api/planner-events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ title: 'Introduction email', event_type: 'email', source: 'outreach', lead_id: $json.lead_id, assigned_to: $json.assigned_to, starts_at: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "n2-http1",
+      "name": "Create Planner email task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CRM_SERVICE_TOKEN_CREDENTIAL_ID",
+          "name": "CRM Service Token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "onError": "stopWorkflow"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.CRM_API_URL }}/api/automation/leads/{{ $json.lead_id }}/emails",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ purpose: 'introduction', workflow: 'introduction' }) }}",
+        "options": {}
+      },
+      "id": "n2-http2",
+      "name": "Send introduction email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_CRM_SERVICE_TOKEN_CREDENTIAL_ID",
+          "name": "CRM Service Token"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "onError": "stopWorkflow"
+    }
+  ],
+  "connections": {
+    "CRM Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Create Planner email task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Planner email task": {
+      "main": [
+        [
+          {
+            "node": "Send introduction email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {},
+  "meta": {
+    "description": "RC3 Outreach Automation Pack. n8n orchestrates only; Laravel decides. Enable N8N_ENABLED on the CRM + point N8N_WEBHOOK_URL here. Link the 'CRM Service Token' credential (php artisan n8n:token) and set CRM_API_URL + N8N_WEBHOOK_SECRET."
+  }
+}

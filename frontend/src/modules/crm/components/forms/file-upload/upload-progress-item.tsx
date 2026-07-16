@@ -15,7 +15,7 @@ export function UploadProgressItem({
   onCancel,
 }: Props) {
   return (
-    <div className="rounded-lg border border-border bg-gray-50 p-4">
+    <div className="rounded-lg border border-border bg-muted p-4">
       <div className="flex items-center gap-3">
         <FileText className="h-5 w-5 shrink-0 text-teal-400" />
         <div className="flex-1 min-w-0">

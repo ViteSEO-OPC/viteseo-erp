@@ -18,9 +18,9 @@ export function UserMessageBubble({ message }: Props) {
   return (
     <div className="flex flex-row-reverse items-start gap-3">
       <AvatarInitials initials={user?.name ?? ""} size="sm" />
-      <div className="max-w-[75%] rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+      <div className="max-w-[75%] rounded-xl border border-border bg-card p-3 shadow-sm">
         <MessageRichText segments={message.segments} />
-        <p className="mt-1 text-xs text-gray-500">
+        <p className="mt-1 text-xs text-muted-foreground">
           {formatActivityTimestamp(message.timestamp)}
         </p>
       </div>

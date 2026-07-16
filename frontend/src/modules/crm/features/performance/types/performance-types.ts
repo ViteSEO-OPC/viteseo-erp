@@ -7,6 +7,7 @@ export type PerfKpiIcon =
   | "conversion"
   | "converted"
   | "revenue"
+  | "pipeline"
   | "active"
   | "assigned"
   | "followups";

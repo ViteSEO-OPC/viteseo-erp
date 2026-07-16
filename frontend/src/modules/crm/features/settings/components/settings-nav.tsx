@@ -5,8 +5,6 @@ import { usePathname } from "next/navigation";
 import {
   Settings,
   Archive,
-  Trash2,
-  RotateCcw,
   Users,
   Lock,
   type LucideIcon,
@@ -21,13 +19,9 @@ const GROUPS: NavGroup[] = [
   {
     heading: "Records & Data",
     items: [
-      { label: "Lead Archive", href: "/zerem/settings/lead-archive", icon: Archive },
-      { label: "Recycle Bin", href: "/zerem/settings/recycle-bin", icon: Trash2 },
-      {
-        label: "Restore Archived Leads",
-        href: "/zerem/settings/restore-archived-leads",
-        icon: RotateCcw,
-      },
+      // Single consolidated Archive Management surface (replaces the former Lead Archive /
+      // Recycle Bin / Restore Archived Leads stubs). One archive state: SoftDeletes (deleted_at).
+      { label: "Archive Management", href: "/zerem/settings/archive", icon: Archive },
     ],
   },
   {

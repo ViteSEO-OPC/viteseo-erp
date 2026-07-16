@@ -18,7 +18,7 @@ export function EmptyPanel({ icon: Icon, message, className }: EmptyPanelProps) 
         className,
       )}
     >
-      <Icon className="h-8 w-8 text-gray-300" aria-hidden />
+      <Icon className="h-8 w-8 text-muted-foreground" aria-hidden />
       <span>{message}</span>
     </div>
   );

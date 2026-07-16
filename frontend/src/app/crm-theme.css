@@ -11,6 +11,8 @@
   --color-teal-500: #2AB8B4;
   --color-teal-700: #0F7A78;
   --color-teal-900: #0C6260;
+  --color-green-500: #22C55E;
+  --color-green-400: #4ADE80;
   --color-cream: #FBFBEF;
   --color-gray-150: #F0F0F0;
   --color-priority-high: var(--priority-high);
@@ -265,46 +267,80 @@
    Applies under .dark OR [data-theme="dark"]. Overrides ONLY the
    semantic/leaf tokens; components never change.
 
-   ⚠ BASELINE ONLY: no approved dark Figma/palette was provided. The
-   surface shades below REUSE the existing gray ramp as a placeholder.
-   Accurate dark surfaces almost certainly need new tokens — fill these
-   from an approved dark design. See Dark-Mode-Theming.md.
+   Reference-matched cool-neutral ramp (ported from the pod's approved
+   dark design — see Admin-Dashboard / Leads dark reference). The sidebar
+   sits DARKER than the page; cards lift ABOVE the page. Dark-specific
+   surface hexes live in the --dark-* primitives below so the semantic
+   mapping stays readable.
 
-   NOTE: components still using primitive utilities (bg-gray-100,
-   text-red-500, …) will NOT flip until refactored to semantic
-   utilities — see the de-hardcoding backlog in Dark-Mode-Theming.md.
+   NOTE: components using opaque primitive utilities (bg-gray-100,
+   text-teal-900, …) do NOT flip via these tokens. Badge/chip text that
+   would land dark-on-dark is corrected with `dark:` variants in the
+   components themselves (light theme untouched).
    ══════════════════════════════════════════════════════════════════ */
 .dark,
 [data-theme="dark"] {
+  /* ── Dark surface ramp (reference-matched). ────────────────────── */
+  --dark-sidebar: #141414;         /* near-black — darker than the page */
+  --dark-bg-page: #141414;         /* cool charcoal page */
+  --dark-card: #1C1C1C;            /* card / panel — lifted above page */
+  --dark-surface-subtle: #22262D;  /* muted chips, secondary, inset */
+  --dark-table-header: #191C21;    /* table header strip */
+  --dark-hover: #262B33;           /* row / control hover */
+  --dark-border: #2C313A;          /* default 1px border */
+  --dark-border-subtle: #23272E;   /* hairline / divider */
+
   /* Core neutrals (semantic leaf tokens — cascade into --background/--card/… ) */
-  --color-bg-page: var(--gray-900);            /* ⚠ baseline */
-  --color-surface-card: var(--gray-800);       /* ⚠ baseline */
-  --color-surface-sidebar: var(--gray-900);    /* ⚠ baseline */
-  --color-surface-subtle: var(--gray-800);     /* ⚠ baseline */
-  --color-surface-table-header: var(--gray-800); /* ⚠ baseline */
-  --color-border-default: var(--gray-600);     /* ⚠ baseline */
-  --color-border-subtle: var(--gray-800);      /* ⚠ baseline */
-  --color-text-heading: var(--gray-50);        /* ⚠ baseline */
-  --color-text-body: var(--gray-100);          /* ⚠ baseline */
-  --color-text-secondary: var(--gray-200);     /* ⚠ baseline */
-  --color-text-caption: var(--gray-300);       /* ⚠ baseline */
-  --color-text-placeholder: var(--gray-400);
-  --color-text-disabled: var(--gray-600);
+  --color-bg-page: var(--dark-bg-page);
+  --color-surface-card: var(--dark-card);
+  --color-surface-sidebar: var(--dark-sidebar);
+  --color-surface-subtle: var(--dark-surface-subtle);
+  --color-surface-table-header: var(--dark-table-header);
+  --color-border-default: var(--dark-border);
+  --color-border-subtle: var(--dark-border-subtle);
+  --color-text-heading: #F3F5F7;
+  --color-text-body: #DBDFE4;
+  --color-text-secondary: #AEB4BC;
+  --color-text-caption: #8A9099;
+  --color-text-placeholder: #6E747D;
+  --color-text-disabled: #565C64;
 
   /* App-layer tokens that point at primitives directly must be re-pointed */
-  --color-secondary: var(--gray-800);          /* ⚠ baseline */
-  --color-muted: var(--gray-800);              /* ⚠ baseline */
-  --color-input: var(--gray-600);              /* ⚠ baseline */
-  --color-sidebar-accent: var(--gray-800);     /* ⚠ baseline */
+  --color-secondary: var(--dark-surface-subtle);
+  --color-muted: var(--dark-surface-subtle);
+  --color-input: var(--dark-border);
+  --color-sidebar-accent: var(--dark-surface-subtle);
   --color-primary-foreground: var(--gray-900);
 
-  /* Feature surfaces — ⚠ pending approved dark design */
-  --copilot-bg: var(--gray-800);
-  --table-row: var(--gray-800);
-  --table-hover: var(--gray-600);
-  --header: var(--gray-900);
-  --sidebar-hover: var(--gray-800);
-  /* Priority / lead / calendar / chart accents kept as-is (brand hues read on dark); ⚠ confirm */
+  /* Feature surfaces */
+  --copilot-bg: var(--dark-card);
+  --table-row: var(--dark-card);
+  --table-hover: var(--dark-hover);
+  --table-selected: rgba(79, 216, 215, 0.12);  /* teal-400 @ 12% */
+  --header: var(--dark-bg-page);
+  --header-border: var(--dark-border);
+  --sidebar-hover: var(--dark-surface-subtle);
+  --input-border: var(--dark-border);
+
+  /* Internal Notes bubbles — inset one step darker than the card so the
+     flipping `text-foreground` reads against them. */
+  --note-bg-self: var(--dark-bg-page);
+  --note-bg-other: var(--dark-bg-page);
+
+  /* Pastel banner surfaces → subtle tinted panels on dark (paired text gets
+     dark: variants in the components). */
+  --color-ai-banner-bg: rgba(79, 216, 215, 0.10);   /* teal-400 @ 10% */
+  --color-warning-bg: rgba(249, 199, 79, 0.12);      /* gold @ 12% */
+
+  /* Copilot — the light mint/cream header gradient + chip surfaces become subtle teal-tinted
+     panels that read on the dark card. FAB open state (#2F3E3E) already reads on dark, kept. */
+  --copilot-top-accent: var(--teal-400);
+  --copilot-header-gradient-from: rgba(79, 216, 215, 0.10);
+  --copilot-header-gradient-to: var(--dark-card);
+  --copilot-chip-bg: rgba(79, 216, 215, 0.10);
+  --copilot-chip-border: rgba(79, 216, 215, 0.30);
+
+  /* Priority / lead / calendar / chart accents kept as brand hues (read on dark). */
 }
 
 

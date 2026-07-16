@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Services;
 
 use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Models\Lead;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -41,6 +42,8 @@ class LeadImportService
         'email_outreach' => ['email outreach'],
         'cold_calling' => ['cold calling'],
         'status' => ['update', 'update status'],
+        // Business address (Excel) — persisted to leads.address; the Tier-3 dedup discriminator.
+        'address' => ['address', 'business address', 'street address', 'location'],
     ];
 
     /** Human labels for the mapping preview (crmField). */
@@ -54,6 +57,7 @@ class LeadImportService
         'email_outreach' => 'Email Outreach',
         'cold_calling' => 'Cold Calling',
         'status' => 'Update Status',
+        'address' => 'Address',
     ];
 
     /** Columns whose raw text is translated to a CRM enum via the Shared Translation Engine. */
@@ -102,9 +106,10 @@ class LeadImportService
      * @return array{
      *   dryRun: bool,
      *   fileName: string,
-     *   summary: array{total: int, valid: int, duplicates: int, errors: int},
+     *   summary: array{total: int, valid: int, restored: int, duplicates: int, errors: int},
      *   mapping: list<array{csvColumn: string, crmField: string}>,
      *   duplicates: list<array{row: int, email: string}>,
+     *   restored: list<array{row: int, business: string}>,
      *   errors: list<array{row: int, messages: list<string>}>,
      *   unknownValues: list<array{field: string, value: string, count: int, rows: list<int>}>,
      *   importedCount: int
@@ -131,14 +136,28 @@ class LeadImportService
 
         $rules = (new StoreLeadRequest)->rules();
 
-        /** @var list<array<string, string>> $validRows */
-        $validRows = [];
+        // Import-only relaxation (PO-approved 2026-07-14; resolves the open Lead-Import decision
+        // Addendum A.5 / A.4.4). Contact Name is OPTIONAL for imports: many legitimate lead sources
+        // are company-only records (generic / sales / info@ / contact@ inboxes) with no identified
+        // contact person yet. Only the `required` constraint is dropped — the string + max:255 checks
+        // are kept, so validation is not weakened further. StoreLeadRequest itself is untouched, so
+        // manual lead creation still requires a contact name. Email/duplicate/translation logic is
+        // unchanged. A blank Owner's Name simply imports with an empty contact_name (column is
+        // NOT NULL with no default → stored as '').
+        $rules['contact_name'] = ['nullable', 'string', 'max:255'];
+
+        /** @var list<array<string, string>> $newRows */
+        $newRows = [];
+        /** @var array<string, Lead> $toRestore  dedup key => soft-deleted lead to restore */
+        $toRestore = [];
         /** @var list<array{row: int, email: string}> $duplicates */
         $duplicates = [];
+        /** @var list<array{row: int, business: string}> $restored */
+        $restored = [];
         /** @var list<array{row: int, messages: list<string>}> $errors */
         $errors = [];
 
-        // Collect the file's emails up-front so existing-lead lookups are a single query.
+        // Parse + translate every non-blank row first.
         $parsed = [];
         /** @var array<string, array{field: string, value: string, rows: list<int>}> $unknownAgg */
         $unknownAgg = [];
@@ -152,8 +171,11 @@ class LeadImportService
             $parsed[] = ['rowNumber' => $rowNumber, 'data' => $data];
         }
 
-        $existingEmails = $this->existingEmailSet($parsed);
-        $seenInFile = [];
+        // CRM-wide, ownership-independent deduplication index (Tier 1 email, Tier 2 business+phone,
+        // Tier 3 business+address). Includes soft-deleted leads so a matching archived lead is
+        // RESTORED rather than duplicated.
+        [$activeKeys, $trashedByKey] = $this->existingDedupIndex($parsed);
+        $seenKeys = [];
 
         foreach ($parsed as $item) {
             $rowNumber = $item['rowNumber'];
@@ -166,24 +188,40 @@ class LeadImportService
                 continue;
             }
 
-            $email = isset($data['email']) && $data['email'] !== '' ? mb_strtolower($data['email']) : null;
+            $key = $this->dedupKey($data);
+            $emailForReport = isset($data['email']) && $data['email'] !== '' ? $data['email'] : '';
 
-            if ($email !== null && (isset($existingEmails[$email]) || isset($seenInFile[$email]))) {
-                $duplicates[] = ['row' => $rowNumber, 'email' => $data['email']];
+            // Already active in the CRM (any BD), or an earlier row in this file → duplicate (skip).
+            if (isset($activeKeys[$key]) || isset($seenKeys[$key])) {
+                $duplicates[] = ['row' => $rowNumber, 'email' => $emailForReport];
 
                 continue;
             }
 
-            if ($email !== null) {
-                $seenInFile[$email] = true;
+            // Matches a soft-deleted lead → restore it instead of creating a new record.
+            if (isset($trashedByKey[$key])) {
+                $toRestore[$key] = $trashedByKey[$key];
+                $restored[] = ['row' => $rowNumber, 'business' => $data['business_name'] ?? ''];
+                $seenKeys[$key] = true;
+
+                continue;
             }
 
-            $validRows[] = $data;
+            // New business → import (owned by the importing BD until reassigned).
+            $seenKeys[$key] = true;
+            $newRows[] = $data;
         }
 
         $importedCount = 0;
-        if (! $dryRun && $validRows !== []) {
-            $importedCount = $this->persist($validRows, $userId, $assignedTo);
+        if (! $dryRun) {
+            DB::transaction(function () use ($newRows, $userId, $assignedTo, $toRestore, &$importedCount): void {
+                if ($newRows !== []) {
+                    $importedCount = $this->persist($newRows, $userId, $assignedTo);
+                }
+                foreach ($toRestore as $lead) {
+                    $lead->restore(); // fires LeadObserver::restored → one immutable `lead.restored` Activity
+                }
+            });
         }
 
         return [
@@ -191,12 +229,16 @@ class LeadImportService
             'fileName' => $file->getClientOriginalName(),
             'summary' => [
                 'total' => count($parsed),
-                'valid' => count($validRows),
+                // "valid" = rows that will land as an active lead this import (new + restored), so the
+                // client's "Import N" affordance stays meaningful even for a restore-only file.
+                'valid' => count($newRows) + count($toRestore),
+                'restored' => count($toRestore),
                 'duplicates' => count($duplicates),
                 'errors' => count($errors),
             ],
             'mapping' => $this->mappingPreview($header, $map),
             'duplicates' => $duplicates,
+            'restored' => $restored,
             'errors' => $errors,
             'unknownValues' => $this->formatUnknowns($unknownAgg),
             'importedCount' => $importedCount,
@@ -482,34 +524,117 @@ class LeadImportService
     }
 
     /**
-     * @param  list<array{rowNumber: int, data: array<string, string>}>  $parsed
-     * @return array<string, true> lowercased existing emails present in the file
+     * The deterministic, CRM-wide, ownership-independent dedup key for a parsed row (or an existing
+     * lead, via {@see dedupKeyForLead}). Hierarchy (PO-approved 2026-07-14):
+     *   Tier 1 — `e:<email>`                    when an email is present (strongest identity)
+     *   Tier 2 — `bp:<business>|<phone>`        no email, phone present (branch discriminator)
+     *   Tier 3 — `ba:<business>|<address>`      no email, no phone (address discriminates chains)
+     * All parts are normalized so the same business always yields the same key across imports/BDs.
+     *
+     * @param  array<string, string>  $data
      */
-    private function existingEmailSet(array $parsed): array
+    private function dedupKey(array $data): string
     {
-        $fileEmails = [];
+        $email = isset($data['email']) && $data['email'] !== '' ? mb_strtolower(trim($data['email'])) : '';
+        if ($email !== '') {
+            return 'e:'.$email;
+        }
+
+        $business = $this->normBiz($data['business_name'] ?? '');
+        $phone = isset($data['phone']) ? $this->normPhone($data['phone']) : '';
+        if ($phone !== '') {
+            return 'bp:'.$business.'|'.$phone;
+        }
+
+        $address = isset($data['address']) ? $this->normAddress($data['address']) : '';
+
+        return 'ba:'.$business.'|'.$address;
+    }
+
+    /** Dedup key for an existing lead — same hierarchy/normalization as {@see dedupKey}. */
+    private function dedupKeyForLead(Lead $lead): string
+    {
+        return $this->dedupKey([
+            'email' => (string) ($lead->email ?? ''),
+            'business_name' => (string) ($lead->business_name ?? ''),
+            'phone' => (string) ($lead->phone ?? ''),
+            'address' => (string) ($lead->address ?? ''),
+        ]);
+    }
+
+    private function normBiz(string $value): string
+    {
+        return mb_strtolower(trim($value));
+    }
+
+    private function normPhone(string $value): string
+    {
+        $digits = (string) preg_replace('/\D+/', '', $value);
+        // PH canonicalization: a +63XXXXXXXXXX form (12 digits, leading 63) == the local 0XXXXXXXXXX.
+        if (strlen($digits) === 12 && str_starts_with($digits, '63')) {
+            $digits = '0'.substr($digits, 2);
+        }
+
+        return $digits;
+    }
+
+    private function normAddress(string $value): string
+    {
+        return (string) preg_replace('/\s+/', ' ', mb_strtolower(trim($value)));
+    }
+
+    /**
+     * Builds the CRM-wide dedup index (ownership-independent, soft-deletes included) for the file's
+     * rows: one query over leads matching any of the file's emails or business names, keyed by
+     * {@see dedupKeyForLead}. Returns [activeKeys, trashedByKey] — an active match ⇒ duplicate, a
+     * soft-deleted match ⇒ restore.
+     *
+     * @param  list<array{rowNumber: int, data: array<string, string>}>  $parsed
+     * @return array{0: array<string, true>, 1: array<string, Lead>}
+     */
+    private function existingDedupIndex(array $parsed): array
+    {
+        $emails = [];
+        $bizNames = [];
         foreach ($parsed as $item) {
-            if (isset($item['data']['email']) && $item['data']['email'] !== '') {
-                $fileEmails[mb_strtolower($item['data']['email'])] = true;
+            $data = $item['data'];
+            if (isset($data['email']) && $data['email'] !== '') {
+                $emails[mb_strtolower(trim($data['email']))] = true;
+            }
+            if (isset($data['business_name']) && $data['business_name'] !== '') {
+                $bizNames[$this->normBiz($data['business_name'])] = true;
             }
         }
 
-        if ($fileEmails === []) {
-            return [];
+        /** @var array<string, true> $activeKeys */
+        $activeKeys = [];
+        /** @var array<string, Lead> $trashedByKey */
+        $trashedByKey = [];
+        if ($emails === [] && $bizNames === []) {
+            return [$activeKeys, $trashedByKey];
         }
 
-        $matches = Lead::query()
-            ->whereNotNull('email')
-            ->whereIn(DB::raw('LOWER(email)'), array_keys($fileEmails))
-            ->pluck('email')
-            ->all();
+        $leads = Lead::withTrashed()
+            ->where(function (Builder $q) use ($emails, $bizNames): void {
+                if ($emails !== []) {
+                    $q->orWhereIn(DB::raw('LOWER(TRIM(email))'), array_keys($emails));
+                }
+                if ($bizNames !== []) {
+                    $q->orWhereIn(DB::raw('LOWER(TRIM(business_name))'), array_keys($bizNames));
+                }
+            })
+            ->get(['id', 'business_name', 'email', 'phone', 'address', 'deleted_at']);
 
-        $set = [];
-        foreach ($matches as $email) {
-            $set[mb_strtolower((string) $email)] = true;
+        foreach ($leads as $lead) {
+            $key = $this->dedupKeyForLead($lead);
+            if ($lead->deleted_at === null) {
+                $activeKeys[$key] = true;
+            } elseif (! isset($trashedByKey[$key])) {
+                $trashedByKey[$key] = $lead;
+            }
         }
 
-        return $set;
+        return [$activeKeys, $trashedByKey];
     }
 
     /**

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, ZoomControl, useMap, useMapEvents } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, Circle, ZoomControl, useMap, useMapEvents } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
 import L from "leaflet";
 import { LocateFixed } from "lucide-react";
@@ -11,7 +11,9 @@ import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 import { Button } from "@/modules/crm/components/ui/button";
 import { useTheme } from "@/modules/crm/providers/theme-provider";
 import { centroid, type LatLng } from "@/modules/crm/features/nearby-clients/lib/distance";
+import { WebsiteIntelBadge } from "@/modules/crm/features/nearby-clients/components/website-intel-badge";
 import type { NearbyClient, NearbyPriority } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
+import type { NearbyOrigin } from "@/modules/crm/features/nearby-clients/hooks/use-nearby-clients";
 
 const PIN_COLOR: Record<NearbyPriority, string> = {
   high: "#ef4444",
@@ -20,6 +22,9 @@ const PIN_COLOR: Record<NearbyPriority, string> = {
 };
 
 // Keyless CARTO basemaps — theme-aware (Positron light / Dark Matter dark). OSM + CARTO attribution.
+// The map provider lives entirely behind this component (see nearby-map.tsx): the rest of the Nearby
+// module speaks only in coordinates + NearbyClient, so this Leaflet/OSM layer can be swapped for
+// another provider (e.g. Google Maps) without touching the hook, filters, list, or page.
 const TILES = {
   light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
   dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
@@ -27,7 +32,8 @@ const TILES = {
 const ATTRIBUTION =
   '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
-const MANILA_FALLBACK: LatLng = { lat: 14.5547, lng: 121.0244 };
+// National fallback centre (roughly the middle of the Philippines) for the empty/no-origin view.
+const PH_FALLBACK: LatLng = { lat: 12.8797, lng: 121.774 };
 
 function pinIcon(priority: NearbyPriority, selected: boolean): L.DivIcon {
   const size = selected ? 30 : 22;
@@ -42,37 +48,61 @@ function pinIcon(priority: NearbyPriority, selected: boolean): L.DivIcon {
   });
 }
 
+// Distinct crosshair marker for the search origin (where the radius is measured from).
+const ORIGIN_ICON = L.divIcon({
+  className: "nearby-origin",
+  html: `<span style="display:block;width:18px;height:18px;border-radius:9999px;background:#0d9488;border:3px solid #fff;box-shadow:0 0 0 4px rgba(13,148,136,0.35);"></span>`,
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
+
 type Props = {
   clients: NearbyClient[];
+  origin: NearbyOrigin | null;
+  radiusKm: number;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onPlanVisit: (client: NearbyClient) => void;
   onDirections: (client: NearbyClient) => void;
+  onQualify: (client: NearbyClient) => void;
 };
 
 /**
- * Re-frames the view to fit the current result set. Re-runs whenever `fitKey` changes — that key
- * folds in both the result-set identity (so filtering re-frames) and a manual reset nonce (so the
- * "Reset view" button re-frames). Not a once-only fit.
+ * Re-frames the view whenever `fitKey` changes. With an origin, it frames the radius circle so the
+ * whole search area is visible; without one, it fits all result markers (or the whole country when
+ * empty). `fitKey` folds in the origin, radius, result-set identity, and a manual-reset nonce.
  */
-function FitBounds({ points, fitKey }: { points: LatLng[]; fitKey: string }) {
+function FitBounds({
+  points,
+  origin,
+  radiusKm,
+  fitKey,
+}: {
+  points: LatLng[];
+  origin: NearbyOrigin | null;
+  radiusKm: number;
+  fitKey: string;
+}) {
   const map = useMap();
   const lastKey = useRef<string | null>(null);
   useEffect(() => {
-    const first = points[0];
-    if (!first || lastKey.current === fitKey) return;
+    if (lastKey.current === fitKey) return;
     lastKey.current = fitKey;
-    // The map mounts via dynamic import in a flex/grid; settle + invalidateSize before fitting.
     const id = setTimeout(() => {
       map.invalidateSize();
-      if (points.length === 1) {
+      if (origin) {
+        // Frame the radius circle (a square of side 2·radius centred on the origin).
+        const bounds = L.latLng(origin.lat, origin.lng).toBounds(radiusKm * 2000);
+        map.fitBounds(bounds, { padding: [36, 36] });
+      } else if (points.length === 1) {
+        const first = points[0]!;
         map.setView([first.lat, first.lng], 15);
-      } else {
+      } else if (points.length > 1) {
         map.fitBounds(points.map((p) => [p.lat, p.lng]), { padding: [48, 48] });
       }
     }, 150);
     return () => clearTimeout(id);
-  }, [fitKey, points, map]);
+  }, [fitKey, points, origin, radiusKm, map]);
   return null;
 }
 
@@ -126,7 +156,7 @@ function SelectionController({
   return null;
 }
 
-export function NearbyMapInner({ clients, selectedId, onSelect, onPlanVisit, onDirections }: Props) {
+export function NearbyMapInner({ clients, origin, radiusKm, selectedId, onSelect, onPlanVisit, onDirections, onQualify }: Props) {
   const { theme } = useTheme();
   const markerRefs = useRef<Record<string, L.Marker>>({});
   const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
@@ -141,11 +171,14 @@ export function NearbyMapInner({ clients, selectedId, onSelect, onPlanVisit, onD
     () => located.map((c) => ({ lat: c.latitude as number, lng: c.longitude as number })),
     [located],
   );
-  const initialCenter = centroid(points) ?? MANILA_FALLBACK;
-  // Re-frame when the result set changes (filtering) or the user resets the view.
+  const initialCenter = origin ?? centroid(points) ?? PH_FALLBACK;
+  // Re-frame when the origin/radius change, the result set changes, or the user resets the view.
   const fitKey = useMemo(
-    () => `${located.map((c) => c.id).join(",")}::${fitNonce}`,
-    [located, fitNonce],
+    () =>
+      `${origin ? `${origin.lat.toFixed(4)},${origin.lng.toFixed(4)}@${radiusKm}` : "none"}::${located
+        .map((c) => c.id)
+        .join(",")}::${fitNonce}`,
+    [origin, radiusKm, located, fitNonce],
   );
 
   const resetView = () => setFitNonce((n) => n + 1);
@@ -154,16 +187,33 @@ export function NearbyMapInner({ clients, selectedId, onSelect, onPlanVisit, onD
     <div className="relative h-full w-full">
       <MapContainer
         center={[initialCenter.lat, initialCenter.lng]}
-        zoom={13}
+        zoom={origin ? 12 : 6}
         zoomControl={false}
         scrollWheelZoom
         className="h-full min-h-[480px] w-full"
       >
         <TileLayer key={theme} url={theme === "dark" ? TILES.dark : TILES.light} attribution={ATTRIBUTION} />
         <ZoomControl position="bottomright" />
-        <FitBounds points={points} fitKey={fitKey} />
+        <FitBounds points={points} origin={origin} radiusKm={radiusKm} fitKey={fitKey} />
         <ViewportWatcher points={points} onChange={setAnyInView} />
         <SelectionController selectedId={selectedId} markerRefs={markerRefs} clusterRef={clusterRef} />
+
+        {/* Search origin + radius (only when an origin is chosen). */}
+        {origin && (
+          <>
+            <Circle
+              center={[origin.lat, origin.lng]}
+              radius={radiusKm * 1000}
+              pathOptions={{ color: "#0d9488", weight: 1.5, fillColor: "#0d9488", fillOpacity: 0.08 }}
+            />
+            <Marker position={[origin.lat, origin.lng]} icon={ORIGIN_ICON} zIndexOffset={1000}>
+              <Popup>
+                <p className="text-sm font-bold text-card-foreground">{origin.label}</p>
+                <p className="text-xs text-muted-foreground">Search origin · {radiusKm} km radius</p>
+              </Popup>
+            </Marker>
+          </>
+        )}
 
         <MarkerClusterGroup ref={clusterRef} chunkedLoading showCoverageOnHover={false}>
           {located.map((c) => (
@@ -187,9 +237,15 @@ export function NearbyMapInner({ clients, selectedId, onSelect, onPlanVisit, onD
                     {c.distanceKm !== undefined ? `${c.distanceKm.toFixed(1)} km away · ` : ""}
                     {c.contact}
                   </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <Button variant="default" size="sm" onClick={() => onPlanVisit(c)}>+ Plan visit</Button>
-                    <Button variant="outline" size="sm" onClick={() => onDirections(c)}>Directions</Button>
+                  {c.website && (
+                    <div className="mt-2">
+                      <WebsiteIntelBadge website={c.website} compact />
+                    </div>
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button variant="default" size="sm" onClick={() => onQualify(c)}>Accept into CRM</Button>
+                    <Button variant="outline" size="sm" onClick={() => onPlanVisit(c)}>Plan visit</Button>
+                    <Button variant="ghost" size="sm" onClick={() => onDirections(c)}>Directions</Button>
                   </div>
                 </div>
               </Popup>
@@ -198,8 +254,8 @@ export function NearbyMapInner({ clients, selectedId, onSelect, onPlanVisit, onD
         </MarkerClusterGroup>
       </MapContainer>
 
-      {/* Reset view — always return the map to the current result set. */}
-      {located.length > 0 && (
+      {/* Reset view — always return the map to the current result set / search area. */}
+      {(located.length > 0 || origin) && (
         <button
           type="button"
           onClick={resetView}

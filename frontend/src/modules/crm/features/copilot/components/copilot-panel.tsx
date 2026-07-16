@@ -30,12 +30,12 @@ export function CopilotPanel({
     <div
       role="dialog"
       aria-label="Vite AI Copilot"
-      className="fixed inset-0 z-[70] flex flex-col overflow-hidden bg-white md:inset-auto md:bottom-24 md:right-6 md:h-[600px] md:max-h-[calc(100vh-7rem)] md:w-[373px] md:rounded-2xl md:border md:border-gray-200 md:shadow-lg"
+      className="fixed inset-0 z-[70] flex flex-col overflow-hidden bg-card md:inset-auto md:bottom-24 md:right-6 md:h-[600px] md:max-h-[calc(100vh-7rem)] md:w-[373px] md:rounded-2xl md:border md:border-border md:shadow-lg"
     >
       <CopilotHeader status={status} onMinimize={onClose} />
       <ConversationArea messages={messages} />
       {prompts.length > 0 && (
-        <div className="shrink-0 border-t border-gray-150 bg-white px-4 py-3">
+        <div className="shrink-0 border-t border-border-subtle bg-card px-4 py-3">
           <SuggestedPromptChips prompts={prompts} onSelect={onPromptSelect} />
         </div>
       )}

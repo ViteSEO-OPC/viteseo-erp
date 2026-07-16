@@ -43,11 +43,11 @@ export function DraftsList({ drafts, isLoading, onOpen, onSend, onDiscard, pendi
                 onClick={() => onOpen(draft)}
                 className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
-                <span className="block truncate text-sm font-bold text-gray-900">
+                <span className="block truncate text-sm font-bold text-foreground">
                   {draft.subject || "(No subject)"}
                 </span>
-                <p className="truncate text-[11px] text-gray-500">To: {draft.to || "—"}</p>
-                <p className="mt-1 truncate text-[12px] text-gray-600">
+                <p className="truncate text-[11px] text-muted-foreground">To: {draft.to || "—"}</p>
+                <p className="mt-1 truncate text-[12px] text-secondary-foreground">
                   {draft.body || "No content yet."}
                 </p>
               </button>

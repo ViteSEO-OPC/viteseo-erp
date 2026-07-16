@@ -18,13 +18,7 @@ import { MappingTable } from "@/modules/crm/features/leads/components/mapping-ta
 import { UploadDropzone } from "@/modules/crm/components/forms/file-upload/upload-dropzone";
 import { UploadProgressItem } from "@/modules/crm/components/forms/file-upload/upload-progress-item";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/modules/crm/components/ui/select";
+import { RelationshipSelect } from "@/modules/crm/components/shared/relationship-select/relationship-select";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { useImportLeads } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
@@ -155,7 +149,7 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
             <button
               type="button"
               onClick={() => handleOpenChange(false)}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-gray-500 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label="Close"
             >
               <X className="h-4 w-4" />
@@ -168,16 +162,14 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
           <div className="flex flex-col gap-5">
             {isManager ? (
               <FormField label="Assign to Business Development Manager" required>
-                <Select value={assignedTo} onValueChange={(v) => setAssignedTo(v ?? "")}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={bdLoading ? "Loading…" : "Select a BD to own these leads"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {bdUsers.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <RelationshipSelect
+                  value={assignedTo}
+                  onValueChange={setAssignedTo}
+                  options={bdUsers.map((u) => ({ value: u.id, label: u.name }))}
+                  placeholder={bdLoading ? "Loading…" : "Select a BD to own these leads"}
+                  triggerClassName="w-full"
+                  aria-label="Assign to Business Development Manager"
+                />
               </FormField>
             ) : null}
 

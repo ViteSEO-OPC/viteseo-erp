@@ -21,7 +21,7 @@ export function BoardCardContent({ event, dragging }: { event: PlannerEvent; dra
   return (
     <div
       className={cn(
-        "rounded-lg border border-gray-150 bg-white p-3 shadow-sm",
+        "rounded-lg border border-border-subtle bg-card p-3 shadow-sm",
         dragging && "shadow-md ring-2 ring-teal-300",
       )}
     >
@@ -32,14 +32,14 @@ export function BoardCardContent({ event, dragging }: { event: PlannerEvent; dra
         >
           {meta.label}
         </span>
-        {hint && <span className="shrink-0 text-[11px] text-gray-400">{hint}</span>}
+        {hint && <span className="shrink-0 text-[11px] text-muted-foreground">{hint}</span>}
       </div>
-      <p className="text-sm font-semibold leading-snug text-gray-900">{event.title}</p>
-      {leadLine && <p className="mt-0.5 text-xs text-gray-500">{leadLine}</p>}
+      <p className="text-sm font-semibold leading-snug text-foreground">{event.title}</p>
+      {leadLine && <p className="mt-0.5 text-xs text-muted-foreground">{leadLine}</p>}
       {event.owner && (
         <div className="mt-2 flex items-center gap-1.5">
           <AvatarInitials initials={event.owner.name} size="sm" />
-          <span className="text-xs text-gray-600">{event.owner.name}</span>
+          <span className="text-xs text-secondary-foreground">{event.owner.name}</span>
         </div>
       )}
     </div>

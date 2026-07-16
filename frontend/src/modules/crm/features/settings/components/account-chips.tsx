@@ -17,7 +17,7 @@ export function StatusPill({ status }: { status: TeamUserStatus }) {
     <span
       className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide",
-        isActive ? "bg-teal-500/10 text-teal-700" : "bg-gray-100 text-gray-500",
+        isActive ? "bg-teal-500/10 text-teal-700" : "bg-muted text-muted-foreground",
       )}
     >
       {isActive ? "Active" : "Inactive"}

@@ -2,6 +2,7 @@ import {
   PieChart as ConversionIcon,
   Trophy,
   Wallet,
+  Coins,
   UserCheck,
   Users,
   CheckCircle2,
@@ -16,6 +17,7 @@ const ICONS: Record<PerfKpiIcon, LucideIcon> = {
   conversion: ConversionIcon,
   converted: Trophy,
   revenue: Wallet,
+  pipeline: Coins,
   active: UserCheck,
   assigned: Users,
   followups: CheckCircle2,
@@ -46,7 +48,7 @@ export function PerformanceKpiCard({ card, isLoading }: Props) {
         </div>
 
         {isLoading ? (
-          <div className="mt-1 h-8 w-20 animate-pulse rounded bg-gray-100" />
+          <div className="mt-1 h-8 w-20 animate-pulse rounded bg-muted" />
         ) : (
           <span
             className={cn(

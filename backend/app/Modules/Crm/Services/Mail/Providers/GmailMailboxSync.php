@@ -7,12 +7,16 @@ use App\Modules\Crm\Services\Mail\Inbound\InboundMessage;
 use App\Modules\Crm\Services\Mail\Inbound\MailboxFetchResult;
 use App\Modules\Crm\Services\Mail\Inbound\NotificationCursor;
 use App\Modules\Crm\Services\Mail\Inbound\WatchRegistration;
+use Google\Auth\ApplicationDefaultCredentials;
 use Google\Client as GoogleClient;
 use Google\Service\Gmail;
 use Google\Service\Gmail\Message as GmailMessage;
 use Google\Service\Gmail\MessagePart;
 use Google\Service\Gmail\WatchRequest;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+use RuntimeException;
 
 /**
  * Gmail push implementation of MailboxSyncProvider (Phase-1 inbound provider). Uses a
@@ -114,14 +118,110 @@ class GmailMailboxSync implements MailboxSyncProvider
         return new NotificationCursor(mailbox: $mailbox, cursor: $cursor);
     }
 
+    /**
+     * Build a Gmail client authenticated to impersonate $mailbox via domain-wide delegation.
+     *
+     * KEYLESS by default (org policy: no downloadable service-account key) — the delegation assertion
+     * is signed via the IAM Credentials signJwt API using the runtime identity (ADC / Workload Identity
+     * Federation), never a local private key. The legacy JSON-key path is retained only as an optional
+     * `auth=key` fallback for environments where key creation is permitted. Only the authentication
+     * mechanism differs; every caller (watch/unwatch/fetchSince) is unchanged.
+     */
     private function gmail(string $mailbox): Gmail
     {
         $client = new GoogleClient;
-        $client->setAuthConfig((string) $this->config['credentials']);
         $client->setScopes((array) ($this->config['scopes'] ?? []));
-        $client->setSubject($mailbox); // domain-wide delegation: impersonate the mailbox
+
+        if (($this->config['auth'] ?? 'keyless') === 'key') {
+            // Legacy fallback: downloadable service-account JSON key signs the delegation locally.
+            $client->setAuthConfig((string) $this->config['credentials']);
+            $client->setSubject($mailbox); // domain-wide delegation: impersonate the mailbox
+        } else {
+            // Preferred: a keyless, domain-wide-delegated Gmail access token (IAM signJwt → jwt-bearer).
+            $client->setAccessToken($this->keylessDelegatedToken($mailbox));
+        }
 
         return new Gmail($client);
+    }
+
+    /**
+     * Mint a domain-wide-delegated Gmail access token for $mailbox WITHOUT a service-account key
+     * (honors iam.disableServiceAccountKeyCreation). Cached (~50 min) to avoid re-minting each sync.
+     *
+     * @return array{access_token: string, expires_in: int}
+     */
+    private function keylessDelegatedToken(string $mailbox): array
+    {
+        $sa = (string) ($this->config['service_account'] ?? '');
+        if ($sa === '') {
+            throw new RuntimeException(
+                'Keyless Gmail auth requires outreach.gmail.service_account (env GMAIL_SYNC_SERVICE_ACCOUNT).'
+            );
+        }
+
+        $scopes = implode(' ', (array) ($this->config['scopes'] ?? []));
+
+        /** @var array{access_token: string, expires_in: int} $token */
+        $token = Cache::remember(
+            "outreach:gmail:dwd-token:{$sa}:{$mailbox}",
+            3000, // access tokens live ~1h; refresh a little early
+            function () use ($sa, $mailbox, $scopes): array {
+                $now = time();
+                $assertion = $this->signDelegatedJwt($sa, [
+                    'iss' => $sa,
+                    'sub' => $mailbox, // the impersonated mailbox — domain-wide delegation
+                    'scope' => $scopes,
+                    'aud' => 'https://oauth2.googleapis.com/token',
+                    'iat' => $now,
+                    'exp' => $now + 3600,
+                ]);
+
+                $response = Http::asForm()->post('https://oauth2.googleapis.com/token', [
+                    'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                    'assertion' => $assertion,
+                ]);
+
+                if ($response->failed()) {
+                    throw new RuntimeException('Gmail keyless token exchange failed: '.$response->body());
+                }
+
+                return [
+                    'access_token' => (string) $response->json('access_token'),
+                    'expires_in' => (int) $response->json('expires_in', 3600),
+                ];
+            },
+        );
+
+        return $token;
+    }
+
+    /**
+     * Sign a JWT AS the service account via the IAM Credentials signJwt API — no private key. The source
+     * identity comes from ADC (Workload Identity Federation off-GCP, or an attached SA on-GCP) and must
+     * hold roles/iam.serviceAccountTokenCreator on $sa. This is the single keyed→keyless substitution.
+     *
+     * @param  array<string, mixed>  $claims
+     */
+    private function signDelegatedJwt(string $sa, array $claims): string
+    {
+        $source = ApplicationDefaultCredentials::getCredentials('https://www.googleapis.com/auth/cloud-platform');
+        $bearer = (string) ($source->fetchAuthToken()['access_token'] ?? '');
+        if ($bearer === '') {
+            throw new RuntimeException(
+                'No ADC source token for IAM signJwt — check Workload Identity Federation / GOOGLE_APPLICATION_CREDENTIALS.'
+            );
+        }
+
+        $response = Http::withToken($bearer)->post(
+            "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{$sa}:signJwt",
+            ['payload' => (string) json_encode($claims)],
+        );
+
+        if ($response->failed()) {
+            throw new RuntimeException("IAM signJwt failed for {$sa}: ".$response->body());
+        }
+
+        return (string) $response->json('signedJwt');
     }
 
     private function toInboundMessage(string $mailbox, GmailMessage $message): InboundMessage

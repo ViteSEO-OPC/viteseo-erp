@@ -7,6 +7,7 @@ import { Button } from "@/modules/crm/components/ui/button";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { useNearbyClients } from "@/modules/crm/features/nearby-clients/hooks/use-nearby-clients";
+import { useQualifyProspect } from "@/modules/crm/features/nearby-clients/hooks/use-qualify-prospect";
 import { NearbyFilters } from "@/modules/crm/features/nearby-clients/components/nearby-filters";
 import { ClientsInRangeList } from "@/modules/crm/features/nearby-clients/components/clients-in-range-list";
 import { NearbyMap } from "@/modules/crm/features/nearby-clients/components/nearby-map";
@@ -23,11 +24,27 @@ import type { NearbyClient } from "@/modules/crm/features/nearby-clients/types/n
 export function NearbyClientsPage() {
   const { hasMinRole } = usePermissions();
   const isManager = hasMinRole("crm_admin");
-  const { clients, filters, patch, options, isLoading, isError } = useNearbyClients();
+  const {
+    clients,
+    filters,
+    patch,
+    options,
+    origin,
+    selectLocation,
+    useMyLocation,
+    clearOrigin,
+    geoStatus,
+    isLoading,
+    isError,
+  } = useNearbyClients();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [planClient, setPlanClient] = useState<NearbyClient | null>(null);
   const [areasOpen, setAreasOpen] = useState(false);
+
+  // The qualification bridge: accept a prospect into the CRM. On success it leaves the pool.
+  const qualify = useQualifyProspect();
+  const onQualify = (client: NearbyClient) => qualify.mutate(client.id);
 
   const onDirections = (client: NearbyClient) => {
     if (client.latitude !== null && client.longitude !== null) {
@@ -64,13 +81,22 @@ export function NearbyClientsPage() {
         {/* Left: pinned filters + internally-scrolling list */}
         <div className="flex h-[70vh] min-h-[480px] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-card lg:col-span-4 lg:h-full lg:min-h-0">
           <div className="shrink-0 p-5 pb-4">
-            <NearbyFilters filters={filters} patch={patch} options={options} />
+            <NearbyFilters
+              filters={filters}
+              patch={patch}
+              options={options}
+              origin={origin}
+              selectLocation={selectLocation}
+              useMyLocation={useMyLocation}
+              clearOrigin={clearOrigin}
+              geoStatus={geoStatus}
+            />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto border-t border-border-subtle px-5 py-4">
             {isLoading ? (
               <div className="flex flex-col gap-3" aria-busy>
                 {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="h-24 w-full animate-pulse rounded-xl bg-gray-100" />
+                  <div key={i} className="h-24 w-full animate-pulse rounded-xl bg-muted" />
                 ))}
               </div>
             ) : isError ? (
@@ -82,6 +108,8 @@ export function NearbyClientsPage() {
                 onSelect={setSelectedId}
                 onPlanVisit={setPlanClient}
                 onDirections={onDirections}
+                onQualify={onQualify}
+                qualifyingId={qualify.isPending ? (qualify.variables ?? null) : null}
               />
             )}
           </div>
@@ -91,10 +119,13 @@ export function NearbyClientsPage() {
         <NearbyMap
           className="h-[70vh] min-h-[480px] lg:col-span-8 lg:h-full"
           clients={clients}
+          origin={origin}
+          radiusKm={filters.radiusKm}
           selectedId={selectedId}
           onSelect={setSelectedId}
           onPlanVisit={setPlanClient}
           onDirections={onDirections}
+          onQualify={onQualify}
         />
       </div>
 

@@ -1,10 +1,9 @@
-import { User, Mail, Phone, Briefcase, UserCheck, Clock, Wallet } from "lucide-react";
+import { User, Mail, Phone, Briefcase, UserCheck, Wallet } from "lucide-react";
 import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
 import { PriorityChip } from "@/modules/crm/components/shared/status-badge/priority-chip";
 import { StatusChip } from "@/modules/crm/components/shared/status-badge/status-chip";
 import { LeadScoreRing } from "@/modules/crm/features/leads/components/lead-score-ring";
 import { InfoGrid, InfoField } from "@/modules/crm/components/shared/info-grid/info-grid";
-import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 import type { LeadDetail } from "@/modules/crm/features/leads/types/lead-detail-types";
 import { WEBSITE_STATUS_LABELS } from "@/modules/crm/features/leads/types/lead-types";
 
@@ -35,7 +34,7 @@ export function LeadSummaryCard({ lead }: Props) {
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <PriorityChip priority={lead.priority} />
               <StatusChip status={lead.status} />
-              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+              <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
                 {websiteLabel}
               </span>
             </div>
@@ -73,9 +72,9 @@ export function LeadSummaryCard({ lead }: Props) {
               <span className="text-muted-foreground italic">Not set</span>
             )}
           </InfoField>
-          <InfoField label="LAST ACTIVITY" icon={<Clock />}>
+          {/* <InfoField label="LAST ACTIVITY" icon={<Clock />}>
             {formatActivityTimestamp(lead.lastActivity)}
-          </InfoField>
+          </InfoField> */}
         </InfoGrid>
       </div>
     </div>

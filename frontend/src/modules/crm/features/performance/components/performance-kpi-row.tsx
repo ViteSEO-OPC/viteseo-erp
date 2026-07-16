@@ -9,11 +9,11 @@ import {
 import type { PerfKpiCard } from "@/modules/crm/features/performance/types/performance-types";
 
 /**
- * The six-card KPI row. Five cards are LIVE from the ownership-scoped performance summary
- * (Conversion Rate, Converted Leads, Overall Revenue, Active Leads, Assigned Leads). "Completed
- * Follow-ups" is **Pending Planner integration** — there is no follow-up/appointment module yet, so it
- * shows a Pending badge and no value (never a fabricated number). No trend chips — real values carry
- * no invented month-over-month delta (the frozen spec forbids fabricated trends).
+ * The KPI row. Live from the ownership-scoped performance summary: Conversion Rate, Converted Leads,
+ * Overall Revenue (Σ deals.amount), **Estimated Pipeline Value** (Σ leads.amount — prospect estimate,
+ * distinct from revenue), Active Leads, Assigned Leads. "Completed Follow-ups" is **Pending Planner
+ * integration** — no follow-up/appointment module yet, so it shows a Pending badge and no value. No
+ * trend chips — real values carry no invented month-over-month delta. All values are server-computed.
  */
 export function PerformanceKpiRow() {
   const { data: s, isLoading } = useMyPerformanceSummary();
@@ -42,6 +42,14 @@ export function PerformanceKpiRow() {
       value: formatPeso(s?.overallRevenue),
       valueTone: "accent",
       caption: "From converted leads",
+    },
+    {
+      id: "estimated-pipeline-value",
+      label: "Estimated Pipeline",
+      icon: "pipeline",
+      value: formatPeso(s?.estimatedPipelineValue),
+      valueTone: "accent",
+      caption: "Est. value of open leads",
     },
     {
       id: "active-leads",
@@ -76,10 +84,10 @@ export function PerformanceKpiRow() {
 
   const cards = [...liveCards, followUpsCard];
 
-  // 6-across single row only at 2xl (the approved design's presentation width); laptops fall back
-  // to a readable 3-across so the KPI labels never truncate under the icon + Demo badge.
+  // Seven KPIs. Single row at 2xl (7-across); laptops fall back to a readable 3/4-across so the KPI
+  // labels never truncate under the icon + badge.
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
       {cards.map((card) => (
         <PerformanceKpiCard
           key={card.id}

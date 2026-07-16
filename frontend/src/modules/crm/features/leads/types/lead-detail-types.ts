@@ -34,9 +34,30 @@ export type TimelineEvent = {
   type: ActivityType;
 };
 
-// Stable semantic identifier for a Quick Action, decoupled from copy/order. Only "email" is
-// wired today (Draft & Send Email); the rest are deferred and remain inert until wired.
-export type QuickActionKey = "email" | "call" | "follow-up" | "contacted";
+// One message in the Lead Details Email Thread (read-only), mapped from an Email record on the
+// per-lead endpoint (GET /leads/{lead}/emails). Both directions share this shape; the component
+// distinguishes inbound vs outbound and picks the sender/recipient label from it. RC2 is read-only —
+// reply composition, attachments, and AI summaries are future additions over the same shape.
+export type EmailThreadMessage = {
+  id: string;
+  direction: "inbound" | "outbound";
+  subject: string;
+  body: string;
+  // Delivery/lifecycle state: sent · received · failed · draft.
+  status: string;
+  // Unified chronological key (inbound receipt / outbound send / row creation).
+  timestamp: string;
+  // Inbound sender (populated for inbound rows).
+  fromName: string | null;
+  fromEmail: string | null;
+  // Outbound recipient + the CRM user who sent it.
+  to: string | null;
+  senderName: string | null;
+};
+
+// Stable semantic identifier for a Quick Action row, decoupled from copy/order.
+// "email" → redirect to Outreach; "follow-up" → open the Schedule Follow-up modal.
+export type QuickActionKey = "email" | "follow-up";
 
 export type QuickAction = {
   id: string;

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Edit3, Trash2, UserPlus } from "lucide-react";
+import { ArrowLeft, Download, Edit3, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/modules/crm/components/ui/button";
 
 type Props = {
@@ -46,12 +46,24 @@ export function LeadDetailHeader({ title, subtitle, canAssign, canDelete, assign
               variant="outline"
               size="sm"
               onClick={onDelete}
-              className="border-red-500/40 text-red-500 hover:bg-red-500/10"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
             >
               <Trash2 className="h-4 w-4" />
               Delete Lead
             </Button>
           ) : null}
+          {/* Export PDF — presentation-only (disabled). PDF export is not wired before the demo;
+              this is a visual placeholder and performs no action (mirrors the Won/Lose pattern). */}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled
+            title="PDF export not enabled yet"
+            className="cursor-not-allowed opacity-60"
+          >
+            <Download className="h-4 w-4" />
+            Export PDF
+          </Button>
           <Button variant="default" size="sm" onClick={onEdit}>
             <Edit3 className="h-4 w-4" />
             Edit Lead

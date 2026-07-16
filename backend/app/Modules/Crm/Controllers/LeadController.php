@@ -6,37 +6,33 @@ use App\Http\Controllers\Controller;
 
 use App\Modules\Crm\Requests\AssignLeadRequest;
 use App\Modules\Crm\Requests\ImportLeadsRequest;
+use App\Modules\Crm\Requests\IndexArchivedLeadRequest;
 use App\Modules\Crm\Requests\IndexLeadRequest;
 use App\Modules\Crm\Requests\IngestDiscoveredLeadsRequest;
+use App\Modules\Crm\Requests\RestoreAllRequest;
 use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Requests\UpdateLeadRequest;
 use App\Modules\Crm\Resources\ActivityResource;
+use App\Modules\Crm\Resources\ArchivedLeadResource;
+use App\Modules\Crm\Resources\EmailResource;
 use App\Modules\Crm\Resources\LeadResource;
+use App\Modules\Crm\Models\Activity;
 use App\Modules\Crm\Models\Lead;
+use App\Models\User;
 use App\Modules\Crm\Services\LeadImportService;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
 use Illuminate\Contracts\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class LeadController extends Controller
 {
     public function index(IndexLeadRequest $request): AnonymousResourceCollection
     {
-        $search = trim((string) $request->validated('search'));
-        $priority = $request->validated('priority');
-        $websiteStatus = $request->validated('website_status');
-        // Status may be a comma-separated list (e.g. a summary tab mapping to multiple statuses).
-        $statuses = array_values(array_filter(array_map('trim', explode(',', (string) $request->validated('status')))));
-        // Raw industry filter — comma-separated free-text values (the frontend derives these from
-        // the selected canonical niches). Compared case-insensitively so casing/imports don't matter.
-        $industries = array_values(array_filter(array_map(
-            static fn (string $v): string => mb_strtolower(trim($v)),
-            explode(',', (string) $request->validated('industry')),
-        )));
-
         // Sort whitelist → [column, direction]. Default ('recent'/absent) = newest first, i.e. the
         // prior `latest('id')` behavior, unchanged. Export reuses this same ordering (filter-aware).
         [$sortColumn, $sortDir] = match ($request->validated('sort')) {
@@ -48,35 +44,23 @@ class LeadController extends Controller
             default => ['id', 'desc'],
         };
 
-        $leads = Lead::query()
+        // Active CRM leads only — discovered prospects live in the Nearby Clients pool and enter the
+        // Leads list (and its export, which reuses this query) only once qualified.
+        $query = Lead::query()
+            ->active()
             ->visibleTo($request->user())
-            ->with('assignedTo')
-            ->when($search !== '', function (Builder $query) use ($search): void {
-                // Match across business, contact, email, phone (MVP scope). LIKE wildcards escaped.
-                $term = '%'.addcslashes($search, '%_\\').'%';
-                $query->where(function (Builder $sub) use ($term): void {
-                    $sub->where('business_name', 'like', $term)
-                        ->orWhere('contact_name', 'like', $term)
-                        ->orWhere('email', 'like', $term)
-                        ->orWhere('phone', 'like', $term);
-                });
-            })
-            ->when($priority, function (Builder $query) use ($priority): void {
-                $query->where('priority', $priority);
-            })
-            ->when($websiteStatus, function (Builder $query) use ($websiteStatus): void {
-                $query->where('website_status', $websiteStatus);
-            })
-            ->when($statuses !== [], function (Builder $query) use ($statuses): void {
-                $query->whereIn('status', $statuses);
-            })
-            ->when($industries !== [], function (Builder $query) use ($industries): void {
-                $query->whereIn(DB::raw('LOWER(industry)'), $industries);
-            })
+            ->with('assignedTo');
+
+        // Shared with the Priority Summary cards (GET /leads/priority-summary): the table and the
+        // cards filter over the IDENTICAL dataset so they can never disagree. Priority is applied
+        // here (it is a real table filter / card drill-down).
+        $this->applyLeadListFilters($query, $request, applyPriority: true);
+
+        $leads = $query
             ->orderBy($sortColumn, $sortDir)
             // Stable tiebreaker so pagination is deterministic when the primary sort has ties
             // (id is monotonic with creation → also keeps just-imported leads grouped sensibly).
-            ->when($sortColumn !== 'id', fn (Builder $query) => $query->orderByDesc('id'))
+            ->when($sortColumn !== 'id', fn (Builder $sub) => $sub->orderByDesc('id'))
             ->paginate(10);
 
         // Real per-industry lead totals across the whole dataset — grouped in SQL, independent of
@@ -84,6 +68,7 @@ class LeadController extends Controller
         // stable counts (industry IS the niche; no taxonomy/mapping). Returned alongside the list
         // in the same response (no extra endpoint). Soft-deleted leads are excluded via the model.
         $industryCounts = Lead::query()
+            ->active()
             ->visibleTo($request->user())
             ->whereNotNull('industry')
             ->where('industry', '!=', '')
@@ -97,6 +82,95 @@ class LeadController extends Controller
         return LeadResource::collection($leads)->additional([
             'industry_counts' => $industryCounts,
         ]);
+    }
+
+    /**
+     * Priority distribution for the Leads-page summary cards (High / Medium / Low counts).
+     *
+     * Aggregates `leads.priority` — the manual business-priority field — NOT Lead Score and NOT
+     * website_status. The cards therefore always agree with the table's Priority column (both read
+     * the same column). Ownership-scoped (visibleTo) and filter-aware: it honors every list filter
+     * EXCEPT priority itself (see {@see applyLeadListFilters}), so the three cards reflect the same
+     * dataset the table shows and act as a priority switcher over it. Priority is never derived
+     * from Lead Score — a lead's score and its (manual) priority may intentionally differ.
+     *
+     * Footer metrics: avgScore = average Lead Score within the bucket (analytical only); totalPct =
+     * the bucket's share of the filtered leads (% of total leads, not pipeline value).
+     */
+    public function prioritySummary(IndexLeadRequest $request): JsonResponse
+    {
+        $query = Lead::query()->active()->visibleTo($request->user());
+        $this->applyLeadListFilters($query, $request, applyPriority: false);
+
+        $total = (clone $query)->count();
+
+        /** @var Collection<int, object{priority: string, count: int, avg_score: float|null}> $rows */
+        $rows = (clone $query)
+            ->selectRaw('priority, COUNT(*) as count, AVG(score) as avg_score')
+            ->groupBy('priority')
+            ->get();
+
+        $buckets = collect(['high', 'medium', 'low'])->map(function (string $priority) use ($rows, $total): array {
+            $row = $rows->firstWhere('priority', $priority);
+            $count = (int) ($row->count ?? 0);
+
+            return [
+                'priority' => $priority,
+                'count' => $count,
+                'avgScore' => (int) round((float) ($row->avg_score ?? 0)),
+                'totalPct' => $total > 0 ? (int) round($count / $total * 100) : 0,
+            ];
+        })->all();
+
+        return response()->json(['data' => $buckets]);
+    }
+
+    /**
+     * Apply the shared Leads list filters to a visibleTo-scoped query so the list endpoint and the
+     * Priority Summary cards ({@see prioritySummary}) always operate on the EXACT same dataset —
+     * the table and the cards must never disagree. `$applyPriority` is false for the summary so
+     * that drilling the table into one priority (?priority=high) never zeroes the other two cards:
+     * the cards always show the full priority distribution of the current non-priority filters.
+     *
+     * @param  EloquentBuilder<Lead>  $query
+     */
+    private function applyLeadListFilters(EloquentBuilder $query, IndexLeadRequest $request, bool $applyPriority): void
+    {
+        $search = trim((string) $request->validated('search'));
+        $priority = $request->validated('priority');
+        $websiteStatus = $request->validated('website_status');
+        // Status may be a comma-separated list (e.g. a summary tab mapping to multiple statuses).
+        $statuses = array_values(array_filter(array_map('trim', explode(',', (string) $request->validated('status')))));
+        // Raw industry filter — comma-separated free-text values (the frontend derives these from
+        // the selected canonical niches). Compared case-insensitively so casing/imports don't matter.
+        $industries = array_values(array_filter(array_map(
+            static fn (string $v): string => mb_strtolower(trim($v)),
+            explode(',', (string) $request->validated('industry')),
+        )));
+
+        $query
+            ->when($search !== '', function (Builder $q) use ($search): void {
+                // Match across business, contact, email, phone (MVP scope). LIKE wildcards escaped.
+                $term = '%'.addcslashes($search, '%_\\').'%';
+                $q->where(function (Builder $sub) use ($term): void {
+                    $sub->where('business_name', 'like', $term)
+                        ->orWhere('contact_name', 'like', $term)
+                        ->orWhere('email', 'like', $term)
+                        ->orWhere('phone', 'like', $term);
+                });
+            })
+            ->when($applyPriority && $priority, function (Builder $q) use ($priority): void {
+                $q->where('priority', $priority);
+            })
+            ->when($websiteStatus, function (Builder $q) use ($websiteStatus): void {
+                $q->where('website_status', $websiteStatus);
+            })
+            ->when($statuses !== [], function (Builder $q) use ($statuses): void {
+                $q->whereIn('status', $statuses);
+            })
+            ->when($industries !== [], function (Builder $q) use ($industries): void {
+                $q->whereIn(DB::raw('LOWER(industry)'), $industries);
+            });
     }
 
     public function store(StoreLeadRequest $request): JsonResponse
@@ -141,6 +215,166 @@ class LeadController extends Controller
         $lead->delete();
 
         return response()->json(null, 204);
+    }
+
+    // ── Archive Management (Admin/Super Admin) ──────────────────────────────────────────────────
+    // Soft delete (`deleted_at`) is the single archive state — there is no separate archive table.
+    // Archiving a lead is `destroy()` above (soft delete, logged by LeadObserver::deleted). The
+    // methods below list archived leads and restore them.
+
+    /**
+     * List archived (soft-deleted) leads with the archive filter set (search / year on the archive
+     * date / status / assigned BD / archived-by), newest-archived first, paginated. Ownership-scoped
+     * via `Lead::scopeVisibleTo` (a pass-through for Admin/SA — the only roles the route allows).
+     * The header count, the "Archived By" filter options, and the owning-BD are all backend-supplied.
+     */
+    public function archived(IndexArchivedLeadRequest $request): AnonymousResourceCollection
+    {
+        $user = $request->user();
+
+        $leads = $this->archivedQuery($user, $request->validated())
+            // assignedTo → owning BD; archiveActivity.causer → "Archived By" (eager-loaded, no N+1).
+            ->with(['assignedTo', 'archiveActivity.causer'])
+            ->orderByDesc('deleted_at')
+            ->orderByDesc('id') // stable tiebreaker for deterministic pagination
+            ->paginate(10);
+
+        return ArchivedLeadResource::collection($leads)->additional([
+            // Total archived leads in the user's scope, independent of the current filters — the
+            // backend-backed header count ("N Archived Leads").
+            'summary' => [
+                'totalArchived' => Lead::onlyTrashed()->visibleTo($user)->count(),
+            ],
+            // Distinct users who have archived a visible lead — powers the "Archived By" filter
+            // dropdown (backend-driven; no hardcoded names).
+            'filters' => [
+                'archivers' => $this->archiverOptions($user),
+            ],
+        ]);
+    }
+
+    /**
+     * Restore ONE archived lead. The single restore workflow (see {@see restoreLead()}); the bulk
+     * endpoint funnels through the same method, so restore logic and its Activity log exist once.
+     * Route binding uses `withTrashed()` so the soft-deleted model resolves; authorized by
+     * LeadPolicy@restore (leads.restore + ownership).
+     */
+    public function restore(Lead $lead): JsonResponse
+    {
+        $this->restoreLead($lead);
+
+        return response()->json(['data' => ['id' => (string) $lead->id, 'restored' => true]]);
+    }
+
+    /**
+     * Bulk restore. One endpoint, two archive UI actions: pass `ids` to restore the checked rows
+     * ("Restore Selected"), or omit them to restore the whole current filter set ("Restore all
+     * filtered"). Every matched lead is restored through the SAME per-record path as {@see restore()}
+     * — one restore workflow, one Activity per lead — each individually authorized.
+     */
+    public function restoreAll(RestoreAllRequest $request): JsonResponse
+    {
+        $user = $request->user();
+        $data = $request->validated();
+
+        $query = $this->archivedQuery($user, $data);
+
+        /** @var array<int, int> $ids */
+        $ids = $data['ids'] ?? [];
+        if ($ids !== []) {
+            $query->whereIn('id', $ids);
+        }
+
+        $restored = 0;
+        foreach ($query->get() as $lead) {
+            // Per-record authorization: leads.restore + ownership (a pass-through for Admin/SA).
+            $this->authorize('restore', $lead);
+            $this->restoreLead($lead);
+            $restored++;
+        }
+
+        return response()->json(['data' => ['restored' => $restored]]);
+    }
+
+    /**
+     * The single restore mechanism. `$lead->restore()` clears `deleted_at` (the sole archive state)
+     * and fires LeadObserver::restored(), which writes the one immutable `lead.restored` Activity.
+     * Idempotent — a non-archived lead is left untouched.
+     */
+    private function restoreLead(Lead $lead): void
+    {
+        if ($lead->trashed()) {
+            $lead->restore();
+        }
+    }
+
+    /**
+     * Shared archived-leads query (soft-deleted only, ownership-scoped) with the archive filters
+     * applied. Used by BOTH {@see archived()} (list) and {@see restoreAll()} (bulk), so the archive
+     * filter semantics are defined exactly once.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return EloquentBuilder<Lead>
+     */
+    private function archivedQuery(User $user, array $filters): EloquentBuilder
+    {
+        $search = trim((string) ($filters['search'] ?? ''));
+        $statuses = array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) ($filters['status'] ?? '')),
+        )));
+        $year = $filters['year'] ?? null;
+        $assignedBd = $filters['assigned_bd'] ?? null;
+        $archivedBy = $filters['archived_by'] ?? null;
+
+        return Lead::onlyTrashed()
+            ->visibleTo($user)
+            ->when($search !== '', function (Builder $query) use ($search): void {
+                $term = '%'.addcslashes($search, '%_\\').'%';
+                $query->where(function (Builder $sub) use ($term): void {
+                    $sub->where('business_name', 'like', $term)
+                        ->orWhere('contact_name', 'like', $term)
+                        ->orWhere('email', 'like', $term)
+                        ->orWhere('phone', 'like', $term);
+                });
+            })
+            ->when($statuses !== [], fn (Builder $query) => $query->whereIn('status', $statuses))
+            ->when($year !== null && $year !== '', fn (Builder $query) => $query->whereYear('deleted_at', (int) $year))
+            ->when($assignedBd === 'unassigned', fn (Builder $query) => $query->whereNull('assigned_to'))
+            ->when($assignedBd !== null && $assignedBd !== '' && $assignedBd !== 'unassigned',
+                fn (Builder $query) => $query->where('assigned_to', (int) $assignedBd))
+            ->when($archivedBy !== null && $archivedBy !== '', function (Builder $query) use ($archivedBy): void {
+                // Leads whose `deleted` Activity was caused by the given user (archived-by).
+                $query->whereIn('id', Activity::query()
+                    ->where('subject_type', (new Lead)->getMorphClass())
+                    ->where('event', 'deleted')
+                    ->where('causer_id', (int) $archivedBy)
+                    ->select('subject_id'));
+            });
+    }
+
+    /**
+     * Distinct users who have archived a lead visible to the requester — the backend-driven option
+     * set for the "Archived By" filter (no hardcoded names).
+     *
+     * @return array<int, array{id: string, name: string}>
+     */
+    private function archiverOptions(User $user): array
+    {
+        $causerIds = Activity::query()
+            ->where('subject_type', (new Lead)->getMorphClass())
+            ->where('event', 'deleted')
+            ->whereNotNull('causer_id')
+            ->whereIn('subject_id', Lead::onlyTrashed()->visibleTo($user)->select('id'))
+            ->distinct()
+            ->pluck('causer_id');
+
+        return User::query()
+            ->whereIn('id', $causerIds)
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn (User $u): array => ['id' => (string) $u->id, 'name' => $u->name])
+            ->all();
     }
 
     public function assign(AssignLeadRequest $request, Lead $lead): JsonResponse
@@ -216,6 +450,21 @@ class LeadController extends Controller
             ->paginate(15);
 
         return ActivityResource::collection($activities);
+    }
+
+    /**
+     * The full email conversation with this lead (outbound + inbound), chronologically ordered — the
+     * read-only source for the Lead Details "Email Thread" panel. Reuses the existing Email model +
+     * EmailResource (no duplicated mapping) and eager-loads the sender to avoid N+1. Ownership is
+     * enforced by the route (`can:view,lead`); the relation carries the chronological order.
+     */
+    public function emails(Lead $lead): AnonymousResourceCollection
+    {
+        $emails = $lead->emails()
+            ->with('sender')
+            ->paginate(20);
+
+        return EmailResource::collection($emails);
     }
 
     /**

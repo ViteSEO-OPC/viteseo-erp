@@ -29,10 +29,37 @@ class EmailPolicy
         return $user->can('crm.follow-ups.create') && $this->draftOwnedBy($user, $email);
     }
 
+    /**
+     * RC3 Send-Later pre-execution actions. Permitted ONLY while the email is still `scheduled`
+     * (not yet claimed by the sender job) and only for its author or an Admin — once sent it is
+     * immutable history, so these are denied. Send-Now uses the send permission.
+     */
+    public function cancel(User $user, Email $email): bool
+    {
+        return $user->can('crm.follow-ups.edit') && $this->scheduledOwnedBy($user, $email);
+    }
+
+    public function reschedule(User $user, Email $email): bool
+    {
+        return $user->can('crm.follow-ups.edit') && $this->scheduledOwnedBy($user, $email);
+    }
+
+    public function sendNow(User $user, Email $email): bool
+    {
+        return $user->can('crm.follow-ups.create') && $this->scheduledOwnedBy($user, $email);
+    }
+
     /** Only a draft, and only its author or an Admin, may be mutated/sent. */
     private function draftOwnedBy(User $user, Email $email): bool
     {
         return $email->status === 'draft'
+            && ($email->user_id === $user->id || $user->hasRole('crm_admin'));
+    }
+
+    /** Only a still-scheduled email, and only its author or an Admin, may be cancelled/rescheduled/sent-now. */
+    private function scheduledOwnedBy(User $user, Email $email): bool
+    {
+        return $email->status === 'scheduled'
             && ($email->user_id === $user->id || $user->hasRole('crm_admin'));
     }
 }

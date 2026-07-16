@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 
 const RechartsBarChart = dynamic(
   () => import("./bar-chart-inner"),
-  { ssr: false, loading: () => <div className="h-full min-h-[200px] w-full animate-pulse rounded-lg bg-gray-100" /> },
+  { ssr: false, loading: () => <div className="h-full min-h-[200px] w-full animate-pulse rounded-lg bg-muted" /> },
 );
 
 type BarChartProps = {

@@ -1,6 +1,8 @@
+import { CheckCircle2 } from "lucide-react";
 import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
 import { Button } from "@/modules/crm/components/ui/button";
 import { cn } from "@/modules/crm/lib/utils";
+import { WebsiteIntelPanel } from "@/modules/crm/features/nearby-clients/components/website-intel-panel";
 import type { NearbyClient, NearbyPriority } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
 
 const PRIORITY: Record<NearbyPriority, { dot: string; text: string; cls: string }> = {
@@ -24,9 +26,11 @@ type Props = {
   onSelect: () => void;
   onPlanVisit: () => void;
   onDirections: () => void;
+  onQualify: () => void;
+  qualifying?: boolean;
 };
 
-export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDirections }: Props) {
+export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDirections, onQualify, qualifying }: Props) {
   const p = PRIORITY[client.priority];
   return (
     <div
@@ -56,16 +60,32 @@ export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDir
         <Chip dot={p.dot} text={p.text} cls={p.cls} />
       </div>
 
+      {client.website && (
+        <div className="mt-3 border-t border-border-subtle pt-3">
+          <WebsiteIntelPanel website={client.website} priority={client.priority} />
+        </div>
+      )}
+
       <div className="mt-3 flex items-center gap-2">
         <Button
           variant="default"
           size="sm"
-          onClick={(e) => { e.stopPropagation(); onPlanVisit(); }}
+          disabled={qualifying}
+          onClick={(e) => { e.stopPropagation(); onQualify(); }}
+          title="Accept this prospect into your CRM leads"
         >
-          + Plan visit
+          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+          {qualifying ? "Accepting…" : "Accept into CRM"}
         </Button>
         <Button
           variant="outline"
+          size="sm"
+          onClick={(e) => { e.stopPropagation(); onPlanVisit(); }}
+        >
+          Plan visit
+        </Button>
+        <Button
+          variant="ghost"
           size="sm"
           onClick={(e) => { e.stopPropagation(); onDirections(); }}
         >

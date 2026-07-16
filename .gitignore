@@ -33,3 +33,8 @@ teamora-onboarding-credentials.csv
 .DS_Store
 Thumbs.db
 *.log
+
+# Python virtualenvs (e.g. scraper tooling) — never commit; recreate from requirements.txt
+.venv/
+venv/
+*.egg-info/

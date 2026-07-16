@@ -68,7 +68,7 @@ function NoteItem({ note, canManage, onSave, onDelete, isBusy }: NoteItemProps) 
                 type="button"
                 onClick={onDelete}
                 disabled={isBusy}
-                className="rounded p-1 text-muted-foreground hover:text-red-600"
+                className="rounded p-1 text-muted-foreground hover:text-destructive"
                 aria-label="Delete note"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -84,7 +84,7 @@ function NoteItem({ note, canManage, onSave, onDelete, isBusy }: NoteItemProps) 
               onChange={(e) => setDraft(e.target.value)}
               rows={3}
               maxLength={5000}
-              className="w-full rounded-lg border border-border bg-white px-3.5 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              className="w-full rounded-lg border border-border bg-card px-3.5 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Edit note"
             />
             <div className="flex items-center gap-2">
@@ -141,8 +141,8 @@ export function DiscussionNotes({ leadId }: Props) {
         <div className="flex flex-col gap-4" aria-hidden>
           {[0, 1].map((i) => (
             <div key={i} className="flex gap-3">
-              <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-gray-100" />
-              <div className="h-16 flex-1 animate-pulse rounded-lg bg-gray-100" />
+              <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-muted" />
+              <div className="h-16 flex-1 animate-pulse rounded-lg bg-muted" />
             </div>
           ))}
         </div>
@@ -181,7 +181,7 @@ export function DiscussionNotes({ leadId }: Props) {
           }}
           maxLength={5000}
           placeholder="Add an internal note…"
-          className="h-10 flex-1 rounded-lg border border-border bg-white px-3.5 text-sm text-foreground placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-ring"
+          className="h-10 flex-1 rounded-lg border border-border bg-card px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           aria-label="Add an internal note"
         />
         <Button

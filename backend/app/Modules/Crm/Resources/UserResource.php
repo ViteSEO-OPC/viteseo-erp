@@ -22,6 +22,7 @@ class UserResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
+            'phone' => $this->phone,
             // Primary role (the app uses exactly one role per account) alongside the full
             // roles/permissions arrays the auth layer relies on.
             'role' => $roles->first(),

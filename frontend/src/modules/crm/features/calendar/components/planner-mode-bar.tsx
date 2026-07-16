@@ -23,7 +23,7 @@ export function PlannerModeBar({ mode, onModeChange, onNewTask }: PlannerModeBar
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="inline-flex items-center gap-0.5 rounded-lg bg-gray-100 p-0.5">
+      <div className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
         <ModeTab active={mode === "calendar"} onClick={() => onModeChange("calendar")} icon={CalendarDays} label="Calendar" />
         <ModeTab active={mode === "board"} onClick={() => onModeChange("board")} icon={LayoutGrid} label="Board" />
       </div>
@@ -33,7 +33,7 @@ export function PlannerModeBar({ mode, onModeChange, onNewTask }: PlannerModeBar
           {legend.map((t) => (
             <span key={t} className="flex items-center gap-1.5">
               <span className="h-2 w-2 rounded-full" style={{ backgroundColor: EVENT_TYPE_META[t].dot }} aria-hidden />
-              <span className="text-xs text-gray-600">{EVENT_TYPE_META[t].label}</span>
+              <span className="text-xs text-secondary-foreground">{EVENT_TYPE_META[t].label}</span>
             </span>
           ))}
         </div>
@@ -65,7 +65,7 @@ function ModeTab({
       onClick={onClick}
       className={cn(
         "flex items-center gap-1.5 rounded-md px-3 py-1 text-[13px] font-medium transition-colors",
-        active ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
+        active ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
       )}
     >
       <Icon className="h-4 w-4" />

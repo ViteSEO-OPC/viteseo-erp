@@ -34,7 +34,7 @@ export default function PieChartInner({ segments, centerLabel, donut = true, sho
         </RechartsPie>
       </ResponsiveContainer>
       {centerLabel && donut && (
-        <span className="pointer-events-none absolute text-sm font-bold text-gray-900">
+        <span className="pointer-events-none absolute text-sm font-bold text-foreground">
           {centerLabel}
         </span>
       )}
@@ -43,7 +43,7 @@ export default function PieChartInner({ segments, centerLabel, donut = true, sho
           {segments.map((seg, i) => {
             const pct = total > 0 ? Math.round((seg.value / total) * 100) : 0;
             return (
-              <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
+              <div key={i} className="flex items-center gap-2 text-xs text-secondary-foreground">
                 <span
                   className="h-2.5 w-2.5 rounded-full shrink-0"
                   style={{ backgroundColor: seg.color }}

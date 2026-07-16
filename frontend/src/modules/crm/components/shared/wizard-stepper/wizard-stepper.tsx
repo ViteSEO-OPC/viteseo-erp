@@ -31,7 +31,7 @@ export function WizardStepper({ steps, current, completed, className }: Props) {
                 className={cn(
                   "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-colors",
                   (isActive || isCompleted) && "bg-teal-400 text-white",
-                  isInactive && "bg-gray-200 text-gray-500",
+                  isInactive && "bg-secondary text-muted-foreground",
                 )}
                 aria-current={isActive ? "step" : undefined}
               >
@@ -54,7 +54,7 @@ export function WizardStepper({ steps, current, completed, className }: Props) {
             </div>
 
             {index < steps.length - 1 && (
-              <div className="mx-3 h-px flex-1 bg-gray-200" />
+              <div className="mx-3 h-px flex-1 bg-secondary" />
             )}
           </div>
         );

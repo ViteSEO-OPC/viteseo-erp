@@ -21,7 +21,7 @@ export function Sidebar({ variant = "full", className }: SidebarProps) {
       aria-label="Primary"
       className={cn(
         "flex h-full flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar",
-        variant === "full" && "w-[217px]",
+        variant === "full" && "w-[288px]",
         variant === "icon-rail" && "w-[64px]",
         variant === "overlay" && "w-full",
         className,

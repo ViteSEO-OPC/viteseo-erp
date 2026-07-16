@@ -20,7 +20,7 @@ import type { CreatedUser } from "@/modules/crm/features/settings/types/user-typ
 import { cn } from "@/modules/crm/lib/utils";
 
 const closeButtonClass =
-  "flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /** Client-side strong temp password (server hashes it; or generates its own if left blank). */
 function generateTempPassword(length = 16): string {

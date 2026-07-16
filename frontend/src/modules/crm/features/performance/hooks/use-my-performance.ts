@@ -20,6 +20,8 @@ export type PerformanceSummary = {
   engagedLeads: number;
   convertedLeads: number;
   overallRevenue: number;
+  /** Σ leads.amount (Estimated Deal Value, prospect-stage) — NOT revenue; distinct backend field. */
+  estimatedPipelineValue: number;
   conversionRate: number | null;
 };
 

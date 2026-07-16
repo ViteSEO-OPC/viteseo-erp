@@ -32,6 +32,7 @@ class DashboardController extends Controller
         // powers both the `interested` KPI and the Lead Status Summary tab counts —
         // no duplicate aggregation, no new endpoint.
         $statusCounts = Lead::query()
+            ->active()
             ->visibleTo($user)
             ->selectRaw('status, COUNT(*) as count')
             ->groupBy('status')
@@ -39,8 +40,8 @@ class DashboardController extends Controller
 
         return response()->json([
             'data' => [
-                'totalLeads' => Lead::query()->visibleTo($user)->count(),
-                'highPriority' => Lead::query()->visibleTo($user)->where('priority', 'high')->count(),
+                'totalLeads' => Lead::query()->active()->visibleTo($user)->count(),
+                'highPriority' => Lead::query()->active()->visibleTo($user)->where('priority', 'high')->count(),
                 'interested' => (int) $statusCounts->get('interested', 0),
                 // Raw per-status counts (frozen enum keys). The UI applies its own
                 // label mapping — keeping this response terminology-neutral.
@@ -87,10 +88,11 @@ class DashboardController extends Controller
     public function priorityBuckets(Request $request): JsonResponse
     {
         $user = $request->user();
-        $total = Lead::query()->visibleTo($user)->count();
+        $total = Lead::query()->active()->visibleTo($user)->count();
 
         /** @var Collection<int, object{website_status: string, count: int, avg_score: float|null}> $rows */
         $rows = Lead::query()
+            ->active()
             ->visibleTo($user)
             ->selectRaw('website_status, COUNT(*) as count, AVG(score) as avg_score')
             ->groupBy('website_status')
@@ -119,13 +121,14 @@ class DashboardController extends Controller
         $user = $request->user();
 
         $leads = Lead::query()
+            ->active()
             ->visibleTo($user)
             ->latest('id')
             ->limit(5)
             ->get();
 
         return LeadResource::collection($leads)
-            ->additional(['meta' => ['total' => Lead::query()->visibleTo($user)->count()]]);
+            ->additional(['meta' => ['total' => Lead::query()->active()->visibleTo($user)->count()]]);
     }
 
     /**
@@ -161,6 +164,7 @@ class DashboardController extends Controller
 
         // Assigned leads per BD — one GROUP BY, no N+1. DB is the source of truth.
         $assigned = Lead::query()
+            ->active()
             ->whereIn('assigned_to', $ids)
             ->selectRaw('assigned_to, COUNT(*) as count')
             ->groupBy('assigned_to')
@@ -204,6 +208,7 @@ class DashboardController extends Controller
         for ($i = 0; $i < 6; $i++) {
             $month = (clone $start)->addMonthsNoOverflow($i);
             $count = Lead::query()
+                ->active()
                 ->visibleTo($user)
                 ->whereBetween('created_at', [(clone $month)->startOfMonth(), (clone $month)->endOfMonth()])
                 ->count();
@@ -229,7 +234,9 @@ class DashboardController extends Controller
      *   - activeLeads     : visible leads in the frozen ACTIVE_SET (BD-PERF-COMP-SPEC R-1)
      *   - engagedLeads    : visible leads with any outreach or any calling (M-04 Engagement basis)
      *   - convertedLeads  : visible leads with ≥1 deal (won conversion)
-     *   - overallRevenue  : Σ deal amounts across visible leads
+     *   - overallRevenue  : Σ deals.amount across visible leads (realized revenue — Deals only)
+     *   - estimatedPipelineValue : Σ leads.amount across visible leads (prospect-stage Estimated Deal
+     *                       Value — NOT revenue; distinct field, distinct source)
      *   - conversionRate  : convertedLeads ÷ engagedLeads × 100 (approved denominator), 1 dp;
      *                       null when engagedLeads == 0 (undefined — never 0%, frozen edge rule)
      *
@@ -245,21 +252,27 @@ class DashboardController extends Controller
         // Frozen ACTIVE_SET (BD-PERF-COMP-SPEC R-1): all statuses except `declined`.
         $activeSet = ['new', 'interested', 'awaiting-reply', 'call-back-req'];
 
-        $assignedLeads = Lead::query()->visibleTo($user)->count();
-        $activeLeads = Lead::query()->visibleTo($user)->whereIn('status', $activeSet)->count();
+        $assignedLeads = Lead::query()->active()->visibleTo($user)->count();
+        $activeLeads = Lead::query()->active()->visibleTo($user)->whereIn('status', $activeSet)->count();
 
         // Engagement basis (M-04): any outreach started OR any calling activity.
-        $engagedLeads = Lead::query()->visibleTo($user)
+        $engagedLeads = Lead::query()->active()->visibleTo($user)
             ->where(fn (Builder $q) => $q->where('email_outreach', '!=', 'none')
                 ->orWhere('cold_calling', '!=', 'not-called'))
             ->count();
 
         // Converted leads + revenue from the deals table, scoped to the user's visible leads.
-        $convertedLeads = Lead::query()->visibleTo($user)->has('deals')->count();
-        $visibleLeadIds = Lead::query()->visibleTo($user)->pluck('id');
+        $convertedLeads = Lead::query()->active()->visibleTo($user)->has('deals')->count();
+        $visibleLeadIds = Lead::query()->active()->visibleTo($user)->pluck('id');
+        // REVENUE = realized, won business → Σ deals.amount ONLY (never leads.amount). Unchanged.
         $overallRevenue = $visibleLeadIds->isEmpty()
             ? 0.0
             : (float) Deal::query()->whereIn('lead_id', $visibleLeadIds)->sum('amount');
+
+        // ESTIMATED PIPELINE VALUE = prospect-stage Estimated Deal Value → Σ leads.amount, ownership-
+        // scoped. Distinct from Revenue: this is the sum of `leads.amount` (an estimate on open leads),
+        // NOT realized revenue. Single source of truth for the pipeline figure — computed only here.
+        $estimatedPipelineValue = (float) Lead::query()->active()->visibleTo($user)->sum('amount');
 
         // Conversion Rate = converted ÷ engaged (approved). Zero denominator → null (undefined).
         $conversionRate = $engagedLeads > 0
@@ -272,6 +285,7 @@ class DashboardController extends Controller
             'engagedLeads' => $engagedLeads,
             'convertedLeads' => $convertedLeads,
             'overallRevenue' => $overallRevenue,
+            'estimatedPipelineValue' => $estimatedPipelineValue,
             'conversionRate' => $conversionRate,
         ]]);
     }

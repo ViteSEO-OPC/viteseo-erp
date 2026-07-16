@@ -16,7 +16,7 @@ type UpcomingItemProps = {
 
 export function UpcomingItem({ item }: UpcomingItemProps) {
   return (
-    <div className="flex items-start gap-3 border-b border-gray-150 py-3 last:border-b-0">
+    <div className="flex items-start gap-3 border-b border-border-subtle py-3 last:border-b-0">
       <DateChip day={item.day} weekday={item.weekday} isToday={item.isToday} />
       <div className="flex items-start gap-2 pt-1">
         <span
@@ -25,8 +25,8 @@ export function UpcomingItem({ item }: UpcomingItemProps) {
           aria-hidden
         />
         <div>
-          <p className="text-sm font-bold text-gray-900">{item.title}</p>
-          <p className="text-xs text-gray-500">{item.time}</p>
+          <p className="text-sm font-bold text-foreground">{item.title}</p>
+          <p className="text-xs text-muted-foreground">{item.time}</p>
         </div>
       </div>
     </div>

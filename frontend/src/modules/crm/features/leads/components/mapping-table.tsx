@@ -19,10 +19,10 @@ type Props = {
 
 export function MappingTable({ rows }: Props) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
+    <div className="overflow-x-auto rounded-lg border border-border">
       <Table>
         <TableHeader>
-          <TableRow className="border-b border-border-subtle bg-gray-50">
+          <TableRow className="border-b border-border-subtle bg-surface-table-header">
             <TableHead className="h-9 px-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
               CSV COLUMN
             </TableHead>

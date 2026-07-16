@@ -21,7 +21,7 @@ export function ProgressBar({ value, max = 100, tone, className }: Props) {
       value={value}
       className={cn("flex-wrap", className)}
     >
-      <ProgressTrack className="h-2 rounded-full bg-gray-150">
+      <ProgressTrack className="h-2 rounded-full bg-secondary">
         <ProgressIndicator
           className={cn("rounded-full transition-all", toneColor[tone])}
           style={{ width: `${(value / max) * 100}%` }}

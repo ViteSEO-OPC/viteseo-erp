@@ -54,7 +54,7 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
         <Table>
           <TableHeader>
             <TableRow className="border-b border-border-subtle">
-              <TableHead className={th}>Business Developer</TableHead>
+              <TableHead className={th}>Business Development Manager</TableHead>
               <TableHead className={th}>Assigned</TableHead>
               <TableHead className={th}>Follow-ups</TableHead>
               <TableHead className={th}>Converted</TableHead>
@@ -70,7 +70,7 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
                     <AvatarInitials initials={r.initials} size="sm" />
                     <div>
                       <p className="text-sm font-semibold text-foreground">{r.name}</p>
-                      <p className="text-xs text-muted-foreground">Business Developer</p>
+                      <p className="text-xs text-muted-foreground">Business Development Manager</p>
                     </div>
                   </div>
                 </TableCell>

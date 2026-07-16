@@ -15,11 +15,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
 /**
  * @property Carbon|null $last_activity Cast to datetime; declared so static analysis applies the cast.
+ * @property Carbon|null $qualified_at Cast to datetime; declared so static analysis applies the cast.
  */
 #[ObservedBy([LeadObserver::class])]
 #[Fillable([
@@ -39,6 +41,7 @@ use Illuminate\Support\Carbon;
     'region',
     'province',
     'city',
+    'address',
     'latitude',
     'longitude',
     'place_id',
@@ -46,6 +49,8 @@ use Illuminate\Support\Carbon;
     'website',
     'assigned_to',
     'created_by',
+    'qualified_at',
+    'qualified_by',
 ])]
 class Lead extends Model
 {
@@ -85,6 +90,7 @@ class Lead extends Model
     {
         return [
             'last_activity' => 'datetime',
+            'qualified_at' => 'datetime',
             'score' => 'integer',
             // Estimated Deal Value (prospect-stage). NOT revenue — actual revenue lives on
             // `deals.amount`. Kept as a separate business concept.
@@ -108,10 +114,32 @@ class Lead extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    /** @return BelongsTo<User, $this> The Business Developer who qualified this prospect into the CRM. */
+    public function qualifiedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'qualified_by');
+    }
+
     /** @return MorphMany<Activity, $this> */
     public function activities(): MorphMany
     {
         return $this->morphMany(Activity::class, 'subject');
+    }
+
+    /**
+     * The most recent `deleted` Activity for this lead — the archive provenance the Archive
+     * Management "Archived By" column derives its causer from. A one-of-many relation (latest by id
+     * among `event = deleted`) so the archive list can eager-load it (`archiveActivity.causer`) with
+     * no N+1 and no `deleted_by` column — the immutable audit trail is the source of truth.
+     *
+     * @return MorphOne<Activity, $this>
+     */
+    public function archiveActivity(): MorphOne
+    {
+        return $this->morphOne(Activity::class, 'subject')->ofMany(
+            ['id' => 'max'],
+            fn (Builder $query) => $query->where('event', 'deleted'),
+        );
     }
 
     /**
@@ -134,6 +162,18 @@ class Lead extends Model
     public function notes(): HasMany
     {
         return $this->hasMany(Note::class)->oldest();
+    }
+
+    /**
+     * The full email conversation (both directions) with this lead — the read-only source for the
+     * Lead Details "Email Thread" panel. Ordered chronologically by when each message actually
+     * happened (inbound receipt / outbound send), falling back to row creation.
+     *
+     * @return HasMany<Email, $this>
+     */
+    public function emails(): HasMany
+    {
+        return $this->hasMany(Email::class)->orderByRaw('COALESCE(received_at, sent_at, created_at) ASC');
     }
 
     /**
@@ -215,5 +255,50 @@ class Lead extends Model
     public function scopeDiscovered(Builder $query): void
     {
         $query->whereNotNull('source');
+    }
+
+    /**
+     * The Prospect Pool — discovered businesses NOT yet qualified into the CRM. This is the Nearby
+     * Clients surface: candidates awaiting a Business Developer's qualification decision. They never
+     * participate in Business Computation.
+     *
+     * @param  Builder<Lead>  $query
+     */
+    public function scopeProspect(Builder $query): void
+    {
+        $query->whereNotNull('source')->whereNull('qualified_at');
+    }
+
+    /**
+     * Active CRM Leads — the sales pipeline. A lead is active when it was entered deliberately
+     * (`source` null: manual create / Excel import) OR a discovered prospect that has been qualified
+     * (`qualified_at` set). **This is the scope Business Computation must query** (dashboards, Lead
+     * Score aggregates, performance, pipeline, revenue). Unqualified prospects are excluded. The OR is
+     * grouped so it composes safely with other constraints (e.g. `->visibleTo()`).
+     *
+     * @param  Builder<Lead>  $query
+     */
+    public function scopeActive(Builder $query): void
+    {
+        $query->where(function (Builder $q): void {
+            $q->whereNull('source')->orWhereNotNull('qualified_at');
+        });
+    }
+
+    /**
+     * Discovered prospects that have been qualified into the CRM (the subset of active leads that came
+     * from discovery). Provenance stays on `source`; this reflects the lifecycle crossing only.
+     *
+     * @param  Builder<Lead>  $query
+     */
+    public function scopeQualified(Builder $query): void
+    {
+        $query->whereNotNull('qualified_at');
+    }
+
+    /** True while this lead is an unqualified discovered prospect (outside the CRM pipeline). */
+    public function isProspect(): bool
+    {
+        return $this->source !== null && $this->qualified_at === null;
     }
 }

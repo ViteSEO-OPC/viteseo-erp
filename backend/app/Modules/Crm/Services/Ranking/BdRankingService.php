@@ -38,7 +38,7 @@ class BdRankingService
 
         $inputs = [];
         foreach ($bds as $bd) {
-            $assigned = Lead::query()->where('assigned_to', $bd->id)->count();
+            $assigned = Lead::query()->active()->where('assigned_to', $bd->id)->count();
 
             if ($assigned === 0) {
                 // No portfolio → carried through to the "No portfolio" bucket, never ranked with 0 (§5.6).
@@ -48,7 +48,7 @@ class BdRankingService
             }
 
             // C1 Portfolio Quality — mean PLS across the BD's assigned leads (frozen Lead Score Engine).
-            $c1 = (float) Lead::query()->where('assigned_to', $bd->id)->avg('score');
+            $c1 = (float) Lead::query()->active()->where('assigned_to', $bd->id)->avg('score');
 
             // C2/C3/C4 — M-04 / M-05 / M-06 from the frozen BD KPI Engine, scoped to this BD. The
             // metrics always exist in the catalog; only their value can be null (an undefined ratio),

@@ -15,7 +15,7 @@ import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 import type { TeamUser } from "@/modules/crm/features/settings/types/user-types";
 
 const closeButtonClass =
-  "flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 type Props = {
   open: boolean;

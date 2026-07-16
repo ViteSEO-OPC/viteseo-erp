@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Observers;
 
+use App\Modules\Crm\Events\LeadQualified;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Services\Planner\FollowUpScheduler;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
@@ -38,7 +39,13 @@ class LeadObserver
     public function created(Lead $lead): void
     {
         $this->log($lead, 'created', 'Lead created');
-        $this->scorer->refresh($lead);
+
+        // Lead Score is computed for ACTIVE CRM leads only. A discovered PROSPECT (source set,
+        // not yet qualified) carries no score until a BD qualifies it into the CRM (see updated()).
+        // Manually-created / imported leads are active from creation, so they score here as before.
+        if (! $lead->isProspect()) {
+            $this->scorer->refresh($lead);
+        }
 
         // A lead created already marked Cold Calling = Scheduled needs its follow-up too.
         if ($lead->cold_calling === 'scheduled') {
@@ -53,6 +60,30 @@ class LeadObserver
             ->keys()
             ->all();
 
+        // A restore() internally save()s with deleted_at → null, which fires this `updated` hook.
+        // That transition is the Archive Management restore and is logged once by restored() below —
+        // suppress the spurious "Lead updated" here (and the pointless re-score) when the ONLY change
+        // is the soft-delete column. Soft-DELETE itself never reaches here (it doesn't save()).
+        if ($changed === ['deleted_at']) {
+            return;
+        }
+
+        // Qualification bridge: a prospect crossing into the CRM (qualified_at null → set). This is a
+        // single semantic event — log a distinct `lead.qualified` Activity (not a generic "updated"),
+        // and compute the Lead Score NOW (the first and only time discovery data is scored). Suppress
+        // the generic update log + normal recompute for this transition.
+        if ($lead->wasChanged('qualified_at') && $lead->qualified_at !== null) {
+            $this->log($lead, 'lead.qualified', 'Lead qualified into CRM');
+            $this->scorer->refresh($lead);
+
+            // RC3 Outreach Automation Pack — announce the qualification as a domain event (FROZEN #6)
+            // so the `lead.qualified` n8n webhook (Introduction Email workflow) can react. Additive:
+            // no change to the qualification transition itself.
+            event(new LeadQualified($lead));
+
+            return;
+        }
+
         $this->log(
             $lead,
             'updated',
@@ -60,7 +91,9 @@ class LeadObserver
             $changed === [] ? null : ['changed' => $changed],
         );
 
-        if (array_intersect($changed, self::SCORING_INPUTS) !== []) {
+        // Recompute the score only for ACTIVE leads. A prospect being enriched (e.g. Website
+        // Intelligence writing website_status) must NOT be scored — it has no CRM score until qualified.
+        if (! $lead->isProspect() && array_intersect($changed, self::SCORING_INPUTS) !== []) {
             $this->scorer->refresh($lead);
         }
 
@@ -74,6 +107,17 @@ class LeadObserver
     public function deleted(Lead $lead): void
     {
         $this->log($lead, 'deleted', 'Lead deleted');
+    }
+
+    /**
+     * Fired by Laravel SoftDeletes when $lead->restore() runs (Archive Management). This is the
+     * SINGLE Activity logging path for restore: both the single-record restore endpoint and the
+     * bulk restore-all funnel through $lead->restore(), so every restore — however it is triggered —
+     * records exactly one immutable `lead.restored` Activity, attributed to the acting user.
+     */
+    public function restored(Lead $lead): void
+    {
+        $this->log($lead, 'lead.restored', 'Lead restored');
     }
 
     /** @param array<string, mixed>|null $properties */

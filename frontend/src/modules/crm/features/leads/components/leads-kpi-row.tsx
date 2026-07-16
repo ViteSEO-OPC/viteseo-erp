@@ -1,22 +1,26 @@
-import { PriorityCard } from "@/modules/crm/features/dashboard/components/priority-card";
+import { LeadsPriorityCard } from "@/modules/crm/features/leads/components/leads-priority-card";
 import { PrioritySkeleton } from "@/modules/crm/features/dashboard/components/priority-skeleton";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
-// Reuse the Dashboard's live priority-buckets hook (GET /dashboard/priority-buckets):
-// real count / avgScore / pipelinePct merged with the shared static title+description.
-// No duplicate endpoint or aggregation — same query the Dashboard already uses.
-import { usePriorityBuckets } from "@/modules/crm/features/dashboard/hooks/use-dashboard-data";
+// Leads-page Priority Summary cards: High/Medium/Low counts aggregated from leads.priority
+// (GET /leads/priority-summary) — the SAME column the table's Priority badge reads, so the cards
+// and the table can never disagree. Filter-aware via `filters` (the current table filters minus
+// priority), so the cards describe the same dataset the table shows.
+import { useLeadsPrioritySummary } from "@/modules/crm/features/leads/hooks/use-leads-priority-summary";
 
-export function LeadsKpiRow() {
-  const { data: buckets, isLoading, isError } = usePriorityBuckets();
+type Props = {
+  filters: Record<string, string>;
+};
+
+export function LeadsKpiRow({ filters }: Props) {
+  const { data, isLoading, isError } = useLeadsPrioritySummary(filters);
 
   if (isLoading) return <PrioritySkeleton />;
   if (isError) return <ErrorState message="Failed to load priority summary" />;
-  if (!buckets) return null;
-
+  if (!data) return null;
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-      {buckets.map((bucket) => (
-        <PriorityCard key={bucket.websiteStatus} bucket={bucket} />
+      {data.map((bucket) => (
+        <LeadsPriorityCard key={bucket.priority} bucket={bucket} />
       ))}
     </div>
   );

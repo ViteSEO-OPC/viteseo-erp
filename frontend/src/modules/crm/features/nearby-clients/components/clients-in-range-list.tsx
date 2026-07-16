@@ -8,9 +8,11 @@ type Props = {
   onSelect: (id: string) => void;
   onPlanVisit: (client: NearbyClient) => void;
   onDirections: (client: NearbyClient) => void;
+  onQualify: (client: NearbyClient) => void;
+  qualifyingId: string | null;
 };
 
-export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit, onDirections }: Props) {
+export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit, onDirections, onQualify, qualifyingId }: Props) {
   const nearest = clients[0]?.distanceKm ?? null;
   const activeCount = clients.filter((c) => c.active).length;
 
@@ -39,6 +41,8 @@ export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit,
               onSelect={() => onSelect(c.id)}
               onPlanVisit={() => onPlanVisit(c)}
               onDirections={() => onDirections(c)}
+              onQualify={() => onQualify(c)}
+              qualifying={qualifyingId === c.id}
             />
           ))}
         </div>
