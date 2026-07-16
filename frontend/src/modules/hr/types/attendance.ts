@@ -42,6 +42,19 @@ export interface ViolationFlag {
   severity: Severity;
   count: number;
   types: string[];
+  /** 'YYYY-MM-DD' of the violation driving this flag (may be a past month). */
+  work_date: string;
+}
+
+/** An employee's effective schedule for a day. Times are "HH:MM" (Manila, 24h). */
+export interface EmployeeSchedule {
+  name: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  grace_minutes: number;
+  /** ISO weekdays that are workdays (1 = Mon … 7 = Sun). */
+  workdays: number[];
+  is_workday: boolean | null;
 }
 
 /** HR roster row (one per employee for a given day). */
@@ -49,6 +62,10 @@ export interface HrAttendanceRow {
   employee_id: number;
   name: string | null;
   department: string | null;
+  /** 'YYYY-MM-DD' — bounds how far back violation history can be browsed. */
+  hire_date: string | null;
+  /** Effective work schedule for this date (override → assigned → default). */
+  schedule: EmployeeSchedule;
   work_date: string;
   time_in: string | null;
   time_out: string | null;
@@ -60,6 +77,8 @@ export interface HrAttendanceRow {
   timing: AttendanceTiming | null;
   flag: ViolationFlag | null;
   tasks: DayTask[];
+  /** HR's correction note for this day, if any. */
+  note: string | null;
 }
 
 export interface AttendanceSummary {

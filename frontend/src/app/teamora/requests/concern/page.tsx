@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { User, Check } from "lucide-react";
+import { Check, Eye, EyeOff } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
@@ -17,14 +17,28 @@ import {
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/core/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
+import {
+  StatusFilter,
+  filterByStatus,
+  type StatusFilterOption,
+} from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate, formatDateTime } from "@/core/lib/format";
 import { useConcerns, useSetConcernStatus, useScheduleMeeting } from "@/modules/hr/hooks/use-concerns";
 import { concernCategoryLabel, type Concern } from "@/modules/hr/types/concern";
 
+const CONCERN_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "under_review", label: "Under review" },
+  { value: "resolved", label: "Resolved" },
+];
+
 export default function ConcernsPage() {
   const { data: rows, isLoading, isError } = useConcerns();
   const [selected, setSelected] = useState<Concern | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(rows ?? [], status);
 
   const columns: Column<Concern>[] = [
     {
@@ -35,12 +49,7 @@ export default function ConcernsPage() {
       header: "Submitter",
       cell: (c) =>
         c.is_anonymous ? (
-          <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <User className="size-3.5" />
-            </span>
-            Anonymous
-          </span>
+          <AnonymousSubmitter name={c.employee?.name ?? null} />
         ) : (
           <span className="text-sm font-semibold text-foreground">{c.employee?.name ?? "—"}</span>
         ),
@@ -73,10 +82,17 @@ export default function ConcernsPage() {
         ) : (
           <DataTable
             columns={columns}
-            rows={rows ?? []}
+            rows={visible}
             rowKey={(c) => c.id}
             onRowClick={(c) => setSelected(c)}
             needsAction={(c) => c.status !== "resolved"}
+            // HR sees the submitter (even anonymous), so name is searchable here — this
+            // data is HR-only. The 'anonymous' keyword still matches anonymous concerns.
+            getSearchText={(c) =>
+              `${c.reference_no} ${concernCategoryLabel(c.category)} ${c.status} ${c.employee?.name ?? ""} ${c.is_anonymous ? "anonymous" : ""}`
+            }
+            searchPlaceholder="Search ref, category…"
+            toolbar={<StatusFilter options={CONCERN_STATUS_OPTIONS} value={status} onChange={setStatus} />}
             empty="No concerns submitted."
           />
         )}
@@ -84,6 +100,37 @@ export default function ConcernsPage() {
 
       <ConcernDetail concern={selected} onOpenChange={(o) => !o && setSelected(null)} />
     </div>
+  );
+}
+
+/**
+ * Anonymous submitter, masked by default. HR may reveal it (eye toggle) to deter abuse,
+ * but must keep it private. The toggle stops row-click propagation so it won't open the
+ * detail modal.
+ */
+function AnonymousSubmitter({ name }: { name: string | null }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <span className="inline-flex items-center gap-2 text-sm">
+      <span className="flex flex-col leading-tight">
+        <span className={cn("font-semibold", shown ? "text-foreground" : "text-muted-foreground")}>
+          {shown ? name ?? "Unknown" : "Anonymous"}
+        </span>
+        <span className="text-[11px] font-medium text-warning">Keep private</span>
+      </span>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setShown((v) => !v);
+        }}
+        className="text-muted-foreground transition-colors hover:text-foreground"
+        aria-label={shown ? "Hide submitter" : "Reveal submitter"}
+        title={shown ? "Hide submitter" : "Reveal submitter — keep it private"}
+      >
+        {shown ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+      </button>
+    </span>
   );
 }
 
@@ -102,6 +149,8 @@ function ConcernDetail({
   const [when, setWhen] = useState("");
   const [location, setLocation] = useState("");
   const [agenda, setAgenda] = useState("");
+  // Anonymous submitter stays masked until HR reveals it; re-mask on close.
+  const [showName, setShowName] = useState(false);
 
   function handleOpenChange(open: boolean) {
     if (!open) {
@@ -109,6 +158,7 @@ function ConcernDetail({
       setWhen("");
       setLocation("");
       setAgenda("");
+      setShowName(false);
     }
     onOpenChange(open);
   }
@@ -133,7 +183,7 @@ function ConcernDetail({
       toast.success(
         "Meeting scheduled",
         concern.is_anonymous
-          ? "The anonymous submitter will see the invite — their identity stays hidden."
+          ? "The submitter will see the invite. Keep their identity private."
           : `${concern.employee?.name} will see the invite.`,
       );
       setScheduling(false);
@@ -147,7 +197,7 @@ function ConcernDetail({
 
   return (
     <Dialog open={!!concern} onOpenChange={handleOpenChange}>
-      <DialogContent className="gap-4 px-6 py-5 sm:max-w-[497px]">
+      <DialogContent className="flex flex-col gap-4 px-6 py-5 sm:max-w-[497px]">
         {concern && (
           <>
             <DialogHeader className="gap-1">
@@ -155,18 +205,43 @@ function ConcernDetail({
                 <span className="text-base font-semibold text-foreground">{concern.reference_no}</span>
                 <StatusBadge status={concern.status} />
               </DialogTitle>
-              <DialogDescription className="text-[13px]">
-                {concern.is_anonymous ? "Anonymous" : concern.employee?.name} ·{" "}
-                {concernCategoryLabel(concern.category)}
+              <DialogDescription className="flex items-center gap-1.5 text-[13px]">
+                {concern.is_anonymous ? (
+                  <>
+                    <span>{showName ? concern.employee?.name ?? "Unknown" : "Anonymous"}</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowName((v) => !v)}
+                      className="text-muted-foreground transition-colors hover:text-foreground"
+                      aria-label={showName ? "Hide submitter" : "Reveal submitter"}
+                      title={showName ? "Hide submitter" : "Reveal submitter — keep it private"}
+                    >
+                      {showName ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                    </button>
+                  </>
+                ) : (
+                  <span>{concern.employee?.name ?? "—"}</span>
+                )}
+                <span>· {concernCategoryLabel(concern.category)}</span>
               </DialogDescription>
             </DialogHeader>
+
+            {concern.is_anonymous && (
+              <div className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
+                <EyeOff className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  Submitted anonymously. You can see the submitter to prevent abuse — keep their
+                  identity private and don&apos;t disclose it to others.
+                </span>
+              </div>
+            )}
 
             <div className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3.5 py-3 text-sm text-foreground">
               {concern.description}
             </div>
 
             {concern.meetings.length > 0 && (
-              <p className="-mt-1 text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Meeting set for {formatDateTime(concern.meetings[0].scheduled_at)}
                 {concern.meetings[0].location ? ` · ${concern.meetings[0].location}` : ""}.
               </p>

@@ -15,11 +15,12 @@ class PayrollInquiry extends Model
 
     protected $fillable = [
         'employee_id', 'payslip_id', 'subject', 'topic', 'message', 'attachment_path',
-        'priority', 'status', 'resolution_note', 'resolved_by', 'resolved_at',
+        'priority', 'status', 'resolution_note', 'resolution_attachments', 'resolved_by', 'resolved_at',
     ];
 
     protected $casts = [
         'resolved_at' => 'datetime',
+        'resolution_attachments' => 'array',
     ];
 
     public function employee(): BelongsTo

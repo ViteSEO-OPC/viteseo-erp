@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { Clock, ChevronLeft, ChevronRight, CalendarPlus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Clock, CalendarPlus } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DataTable, type Column } from "@/core/components/data-table";
 import {
   Dialog,
   DialogContent,
@@ -19,10 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toManilaTimeInput, formatDate } from "@/core/lib/format";
 import { useAdjustAttendance, useViolations, useResolveViolation } from "@/modules/hr/hooks/use-attendance";
-import type { HrAttendanceRow, Severity } from "@/modules/hr/types/attendance";
-
-const selectClass =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
+import type { HrAttendanceRow, Severity, Violation } from "@/modules/hr/types/attendance";
 
 const DOT: Record<Severity, string> = {
   green: "bg-success",
@@ -45,14 +43,52 @@ const STATUS_PILL: Record<string, { cls: string; label: string }> = {
   absent: { cls: "bg-danger-subtle text-danger", label: "Absent" },
 };
 
-const VIOLATIONS_PER_PAGE = 5;
+// Compact select for the period filter (auto width, unlike the full-width `selectClass`).
+const filterSelectClass =
+  "h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none focus-visible:border-ring disabled:opacity-50";
+
+// Month options for the period filter, value = 2-digit month.
+const MONTHS = Array.from({ length: 12 }, (_, i) => ({
+  value: String(i + 1).padStart(2, "0"),
+  label: new Date(2000, i, 1).toLocaleDateString("en-PH", { month: "long" }),
+}));
 
 function titleCase(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function shortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+// Current calendar year in Manila.
+function manilaYear(): number {
+  return Number(
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric" }).format(new Date()),
+  );
+}
+
+// Mirror of the backend rule: status follows the time-in — none = absent; otherwise
+// late if past the schedule start + grace, else present. (Both are Manila "HH:MM".)
+function deriveStatus(timeIn: string, schedule: HrAttendanceRow["schedule"]): "present" | "late" | "absent" {
+  if (!timeIn) return "absent";
+  const start = schedule?.start_time;
+  if (!start) return "present";
+  const [sh, sm] = start.split(":").map(Number);
+  const cutoff = sh * 60 + sm + (schedule?.grace_minutes ?? 0);
+  const [th, tm] = timeIn.split(":").map(Number);
+  return th * 60 + tm > cutoff ? "late" : "present";
+}
+
+// "09:00" → "9:00 AM".
+function to12h(hhmm: string | null | undefined): string {
+  if (!hhmm) return "—";
+  const [h, m] = hhmm.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+const WEEKDAY_ABBR = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; // ISO 1..7
+function formatWorkdays(days: number[] | undefined): string {
+  if (!days || days.length === 0) return "—";
+  return [...days].sort((a, b) => a - b).map((d) => WEEKDAY_ABBR[d] ?? d).join(", ");
 }
 
 export function AttendanceAdjustDialog({
@@ -95,24 +131,44 @@ function Details({
 }) {
   const adjustMut = useAdjustAttendance();
   const resolve = useResolveViolation();
-  const { data: violations } = useViolations(row.employee_id);
 
-  const [status, setStatus] = useState(row.status === "absent" ? "absent" : row.status || "present");
   const [timeIn, setTimeIn] = useState(toManilaTimeInput(row.time_in));
   const [timeOut, setTimeOut] = useState(toManilaTimeInput(row.time_out));
-  const [note, setNote] = useState("");
-  const [vpage, setVpage] = useState(1);
+  const [note, setNote] = useState(row.note ?? "");
 
-  const isAbsent = status === "absent";
+  // Status is not editable — it's derived from the times HR enters, matching the
+  // server. No time-in disables (and clears) the time-out.
+  const derivedStatus = deriveStatus(timeIn, row.schedule);
+  const noTimeIn = !timeIn;
+
+  // Violation history: fetch ALL months, filter client-side by an optional period.
+  const { data: violations } = useViolations(row.employee_id);
+  const allViolations = useMemo(() => violations ?? [], [violations]);
+
+  const currentYear = manilaYear();
+  const [periodMonth, setPeriodMonth] = useState("all"); // "all" | "01".."12"
+  const [periodYear, setPeriodYear] = useState(currentYear);
+
+  // Year options: the employee's hire year → this year (newest first).
+  const years = useMemo(() => {
+    const hireYear = row.hire_date ? Number(row.hire_date.slice(0, 4)) : currentYear;
+    const start = Math.min(hireYear, currentYear);
+    return Array.from({ length: currentYear - start + 1 }, (_, i) => currentYear - i);
+  }, [row.hire_date, currentYear]);
+
+  const filteredViolations = useMemo(() => {
+    if (periodMonth === "all") return allViolations;
+    const prefix = `${periodYear}-${periodMonth}`; // 'YYYY-MM'
+    return allViolations.filter((v) => v.work_date.startsWith(prefix));
+  }, [allViolations, periodMonth, periodYear]);
 
   async function onSave() {
     try {
       await adjustMut.mutateAsync({
         employee_id: row.employee_id,
         work_date: row.work_date,
-        status,
-        time_in: isAbsent || !timeIn ? null : timeIn,
-        time_out: isAbsent || !timeOut ? null : timeOut,
+        time_in: timeIn || null,
+        time_out: timeIn && timeOut ? timeOut : null,
         note: note || null,
       });
       toast.success("Attendance updated");
@@ -123,13 +179,62 @@ function Details({
   }
 
   const level = ALERT_LEVELS.find((l) => l.sev === (row.flag?.severity ?? "green")) ?? ALERT_LEVELS[0];
-  const pill = STATUS_PILL[status] ?? { cls: "bg-muted text-muted-foreground", label: titleCase(status) };
+  const pill = STATUS_PILL[derivedStatus] ?? { cls: "bg-muted text-muted-foreground", label: titleCase(derivedStatus) };
 
-  const allViolations = violations ?? [];
-  const totalPages = Math.max(1, Math.ceil(allViolations.length / VIOLATIONS_PER_PAGE));
-  const pageViolations = allViolations.slice(
-    (vpage - 1) * VIOLATIONS_PER_PAGE,
-    (vpage - 1) * VIOLATIONS_PER_PAGE + VIOLATIONS_PER_PAGE,
+  // Violation-history table columns (unresolved float to the top via `needsAction`).
+  const violationColumns: Column<Violation>[] = [
+    { header: "Date", cell: (v) => formatDate(v.work_date), className: "whitespace-nowrap" },
+    { header: "Type", cell: (v) => <span className="font-medium text-foreground">{titleCase(v.type)}</span> },
+    { header: "Details", cell: (v) => <span className="text-muted-foreground">{v.details ?? "—"}</span> },
+    {
+      header: "Alert",
+      className: "text-center",
+      cell: (v) => <span className={cn("mx-auto inline-block size-2.5 rounded-full", DOT[v.severity])} />,
+    },
+    {
+      header: "Status",
+      align: "right",
+      cell: (v) =>
+        v.resolved ? (
+          <span className="text-caption text-muted-foreground">Resolved</span>
+        ) : (
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={resolve.isPending}
+            onClick={() => resolve.mutate(v.id)}
+          >
+            Resolve
+          </Button>
+        ),
+    },
+  ];
+
+  const periodToolbar = (
+    <div className="flex items-center gap-1.5">
+      <select
+        className={filterSelectClass}
+        value={periodMonth}
+        onChange={(e) => setPeriodMonth(e.target.value)}
+        aria-label="Filter by month"
+      >
+        <option value="all">All time</option>
+        {MONTHS.map((m) => (
+          <option key={m.value} value={m.value}>{m.label}</option>
+        ))}
+      </select>
+      <select
+        className={filterSelectClass}
+        value={periodYear}
+        disabled={periodMonth === "all"}
+        onChange={(e) => setPeriodYear(Number(e.target.value))}
+        aria-label="Filter by year"
+      >
+        {years.map((y) => (
+          <option key={y} value={y}>{y}</option>
+        ))}
+      </select>
+    </div>
   );
 
   return (
@@ -168,6 +273,22 @@ function Details({
               }
             />
           </div>
+          <div className="mt-4">
+            <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">Work Schedule</p>
+            <div className="mt-1 text-sm text-foreground">
+              <span className="font-medium">{row.schedule?.name ?? "—"}</span>
+              {row.schedule?.start_time && (
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {to12h(row.schedule.start_time)}–{to12h(row.schedule.end_time)}
+                  {" · "}
+                  {formatWorkdays(row.schedule.workdays)}
+                  {" · "}
+                  {row.schedule.grace_minutes}m grace
+                </span>
+              )}
+            </div>
+          </div>
         </Section>
 
         {/* Today's record — editable */}
@@ -176,22 +297,30 @@ function Details({
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <Info label="Date" value={formatDate(row.work_date)} />
               <div className="space-y-1.5">
-                <Label>Status</Label>
-                <select className={selectClass} value={status} onChange={(e) => setStatus(e.target.value)}>
-                  <option value="present">Present</option>
-                  <option value="late">Late</option>
-                  <option value="absent">Absent</option>
-                </select>
+                <Label>Status (auto)</Label>
+                <div className="flex h-8 items-center">
+                  <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold", pill.cls)}>
+                    {pill.label}
+                  </span>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label>Time In</Label>
-                <Input type="time" value={timeIn} disabled={isAbsent} onChange={(e) => setTimeIn(e.target.value)} />
+                <Input type="time" value={timeIn} onChange={(e) => setTimeIn(e.target.value)} />
               </div>
               <div className="space-y-1.5">
                 <Label>Time Out</Label>
-                <Input type="time" value={timeOut} disabled={isAbsent} onChange={(e) => setTimeOut(e.target.value)} />
+                <Input
+                  type="time"
+                  value={timeOut}
+                  disabled={noTimeIn}
+                  onChange={(e) => setTimeOut(e.target.value)}
+                />
               </div>
             </div>
+            <p className="mt-2 text-caption text-muted-foreground">
+              Status updates automatically from Time In. Clear Time In to mark the day absent.
+            </p>
             <p className="mt-3 text-caption text-muted-foreground">
               Hours worked: <span className="font-semibold text-foreground">{Number(row.hours_worked.toFixed(1))}</span>
             </p>
@@ -242,69 +371,22 @@ function Details({
           </div>
         </Section>
 
-        {/* Violation history — paginated (5 per page) */}
+        {/* Violation history — all months by default; filter by month + year. */}
         <Section title="Violation History">
-          {allViolations.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No violations on record.</p>
-          ) : (
-            <div className="overflow-hidden rounded-lg border border-border">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-border text-label uppercase tracking-wide text-muted-foreground">
-                    <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Type</th>
-                    <th className="px-3 py-2">Instance</th>
-                    <th className="px-3 py-2 text-center">Alert</th>
-                    <th className="px-3 py-2 text-right"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {pageViolations.map((v) => (
-                    <tr key={v.id}>
-                      <td className="px-3 py-2 text-muted-foreground">{shortDate(v.work_date)}</td>
-                      <td className="px-3 py-2 font-medium text-foreground">{titleCase(v.type)}</td>
-                      <td className="px-3 py-2 text-muted-foreground">{v.details ?? "—"}</td>
-                      <td className="px-3 py-2 text-center">
-                        <span className={cn("inline-block size-2.5 rounded-full", DOT[v.severity])} />
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        {v.resolved ? (
-                          <span className="text-caption text-muted-foreground">Resolved</span>
-                        ) : (
-                          <Button size="xs" variant="outline" disabled={resolve.isPending} onClick={() => resolve.mutate(v.id)}>
-                            Resolve
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {totalPages > 1 && (
-                <div className="flex items-center justify-end gap-1 border-t border-border px-3 py-2">
-                  <button
-                    type="button"
-                    disabled={vpage <= 1}
-                    onClick={() => setVpage((p) => Math.max(1, p - 1))}
-                    className="inline-flex size-6 items-center justify-center rounded-md border border-input transition-colors hover:bg-muted disabled:opacity-40"
-                    aria-label="Previous page"
-                  >
-                    <ChevronLeft className="size-3.5" />
-                  </button>
-                  <span className="px-2 text-caption text-muted-foreground">Page {vpage} of {totalPages}</span>
-                  <button
-                    type="button"
-                    disabled={vpage >= totalPages}
-                    onClick={() => setVpage((p) => Math.min(totalPages, p + 1))}
-                    className="inline-flex size-6 items-center justify-center rounded-md border border-input transition-colors hover:bg-muted disabled:opacity-40"
-                    aria-label="Next page"
-                  >
-                    <ChevronRight className="size-3.5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
+          <DataTable
+            columns={violationColumns}
+            rows={filteredViolations}
+            rowKey={(v) => v.id}
+            needsAction={(v) => !v.resolved}
+            pageSize={5}
+            searchPlaceholder="Search violations…"
+            toolbar={periodToolbar}
+            empty={
+              periodMonth === "all"
+                ? "No violations on record."
+                : "No violations for the selected period."
+            }
+          />
         </Section>
       </div>
 

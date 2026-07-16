@@ -109,9 +109,6 @@ export default function EmployeeOverviewPage() {
       <div className="mt-6 rounded-card border border-border bg-card p-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-h3 font-bold text-foreground">My Requests</h2>
-          <Link href="/teamora/requests" className="text-sm font-semibold text-brand hover:underline">
-            View all
-          </Link>
         </div>
         <DataTable
           columns={columns}

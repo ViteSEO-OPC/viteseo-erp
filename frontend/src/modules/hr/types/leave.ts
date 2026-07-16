@@ -2,9 +2,13 @@ export interface LeaveType {
   id: number;
   name: string;
   code: string;
-  days_per_year: string;
+  days_per_year: number;
   is_paid: boolean;
   color: string | null;
+  /** Whether this type may be filed for past dates at all. */
+  allow_backdated: boolean;
+  /** Max days a past-dated request may reach back; null = no limit (only when allow_backdated). */
+  backdate_limit_days: number | null;
 }
 
 // Half-day requests — separate from leave, always unpaid (deducted from pay).
@@ -41,6 +45,7 @@ export interface LeaveRequest {
   days: number;
   reason: string;
   status: "pending" | "approved" | "rejected";
+  review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
   created_at: string;

@@ -164,8 +164,8 @@ class PayrollController extends Controller
         return PayslipSummaryResource::collection($this->service->myPayslips($employee))->response();
     }
 
-    // GET /api/v1/hr/me/payslips/{payslip} — one payslip (own) + YTD. Gated: the payslip
-    // must be unlocked by an approved payslip request before its figures are returned.
+    // GET /api/v1/hr/me/payslips/{payslip} — one payslip (own) + YTD. Viewable once the
+    // payroll run is finalized (cutoff done); no request needed.
     public function showPayslip(Request $request, Payslip $payslip): JsonResponse
     {
         $employee = $request->user()->employee;
@@ -174,9 +174,9 @@ class PayrollController extends Controller
             return response()->json(['message' => 'Not found.'], Response::HTTP_NOT_FOUND);
         }
 
-        if (! $this->service->isUnlocked($payslip, $employee)) {
+        if (! $this->service->isViewable($payslip)) {
             return response()->json([
-                'message' => 'This payslip is locked. Request a copy and wait for HR approval to view it.',
+                'message' => 'This payslip is not yet available — its payroll run is still being finalized.',
             ], Response::HTTP_FORBIDDEN);
         }
 
@@ -189,7 +189,7 @@ class PayrollController extends Controller
     }
 
     // GET /api/v1/hr/me/payslips/{payslip}/pdf — the caller's own payslip as a PDF.
-    // Same gate as showPayslip: must be owned AND unlocked by an approved request.
+    // Same gate as showPayslip: must be owned AND its run finalized.
     public function myPayslipPdf(Request $request, Payslip $payslip): SymfonyResponse
     {
         $employee = $request->user()->employee;
@@ -198,9 +198,9 @@ class PayrollController extends Controller
             return response()->json(['message' => 'Not found.'], Response::HTTP_NOT_FOUND);
         }
 
-        if (! $this->service->isUnlocked($payslip, $employee)) {
+        if (! $this->service->isViewable($payslip)) {
             return response()->json([
-                'message' => 'This payslip is locked. Request a copy and wait for HR approval to view it.',
+                'message' => 'This payslip is not yet available — its payroll run is still being finalized.',
             ], Response::HTTP_FORBIDDEN);
         }
 

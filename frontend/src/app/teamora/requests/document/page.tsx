@@ -6,6 +6,11 @@ import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/core/components/page-header";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
+import {
+  StatusFilter,
+  filterByStatus,
+  type StatusFilterOption,
+} from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
 import { formatDate } from "@/core/lib/format";
@@ -30,6 +35,21 @@ const DOC_STATUS_LABEL: Record<string, string> = {
   fulfilled: "Completed",
   rejected: "Rejected",
 };
+
+const DOC_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "in_progress", label: "Processing" },
+  { value: "fulfilled", label: "Completed" },
+  { value: "rejected", label: "Rejected" },
+];
+
+const CHANGE_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+];
 
 // Red-outline "Reject" button (matches the Figma) over the neutral outline variant.
 const REJECT_BTN = "border-danger text-danger hover:bg-danger-subtle hover:text-danger";
@@ -66,6 +86,8 @@ function DocumentQueue() {
   const fulfillMut = useFulfillDocumentRequest();
   const rejectMut = useRejectDocumentRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: DocumentRequest } | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(rows ?? [], status);
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -133,7 +155,18 @@ function DocumentQueue() {
       ) : isError ? (
         <p className="text-sm text-destructive">Could not load requests.</p>
       ) : (
-        <DataTable columns={columns} rows={rows ?? []} rowKey={(r) => r.id} needsAction={(r) => r.status === "pending"} empty="No document requests." />
+        <DataTable
+          columns={columns}
+          rows={visible}
+          rowKey={(r) => r.id}
+          needsAction={(r) => r.status === "pending"}
+          getSearchText={(r) =>
+            `${r.employee.name ?? ""} ${r.type === "other" && r.other_detail ? r.other_detail : documentTypeLabel(r.type)} ${r.status}`
+          }
+          searchPlaceholder="Search employee, document…"
+          toolbar={<StatusFilter options={DOC_STATUS_OPTIONS} value={status} onChange={setStatus} />}
+          empty="No document requests."
+        />
       )}
       <ReviewDialog
         open={!!review}
@@ -153,6 +186,8 @@ function ChangeQueue() {
   const approveMut = useApproveChangeRequest();
   const rejectMut = useRejectChangeRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: ChangeRequest } | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(rows ?? [], status);
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -201,7 +236,18 @@ function ChangeQueue() {
       ) : isError ? (
         <p className="text-sm text-destructive">Could not load requests.</p>
       ) : (
-        <DataTable columns={columns} rows={rows ?? []} rowKey={(r) => r.id} needsAction={(r) => r.status === "pending"} empty="No change requests." />
+        <DataTable
+          columns={columns}
+          rows={visible}
+          rowKey={(r) => r.id}
+          needsAction={(r) => r.status === "pending"}
+          getSearchText={(r) =>
+            `${r.field_label} ${r.old_value ?? ""} ${r.new_value ?? ""} ${r.status}`
+          }
+          searchPlaceholder="Search field, value…"
+          toolbar={<StatusFilter options={CHANGE_STATUS_OPTIONS} value={status} onChange={setStatus} />}
+          empty="No change requests."
+        />
       )}
       <ReviewDialog
         open={!!review}

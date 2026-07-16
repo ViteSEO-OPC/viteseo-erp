@@ -27,6 +27,23 @@ type FormValues = z.infer<typeof schema>;
 const selectClass =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
+// Local (browser-tz) YYYY-MM-DD. en-CA formats as ISO. The backend re-checks in
+// Asia/Manila — this is just the picker's guardrail.
+const todayISO = () => new Date().toLocaleDateString("en-CA");
+const isoDaysAgo = (n: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toLocaleDateString("en-CA");
+};
+
+/** Earliest date this leave type may start, mirroring the backend backdating gate. */
+function earliestStart(type: LeaveType | undefined): string | undefined {
+  if (!type) return undefined;
+  if (!type.allow_backdated) return todayISO(); // no past dates
+  if (type.backdate_limit_days != null) return isoDaysAgo(type.backdate_limit_days);
+  return undefined; // backdating allowed with no limit
+}
+
 export function LeaveRequestForm({
   types,
   balances,
@@ -64,6 +81,7 @@ export function LeaveRequestForm({
   const remaining = balance?.remaining_days ?? 0;
   const willRemain = remaining - requested;
   const overBalance = isPaidType && !!balance && requested > remaining;
+  const minDate = earliestStart(selectedType);
   const canSubmit = !!typeId && requested > 0 && !overBalance;
 
   async function onSubmit(v: FormValues) {
@@ -110,19 +128,30 @@ export function LeaveRequestForm({
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>Start Date</Label>
-            <Input type="date" {...register("start_date")} />
+            <Input type="date" min={minDate} {...register("start_date")} />
             {errors.start_date && (
               <p className="text-xs text-destructive">{errors.start_date.message}</p>
             )}
           </div>
           <div className="space-y-1.5">
             <Label>End Date</Label>
-            <Input type="date" {...register("end_date")} />
+            <Input type="date" min={minDate} {...register("end_date")} />
             {errors.end_date && (
               <p className="text-xs text-destructive">{errors.end_date.message}</p>
             )}
           </div>
         </div>
+
+        {/* Backdating rule for the selected type. */}
+        {selectedType && (
+          <p className="text-caption text-muted-foreground">
+            {!selectedType.allow_backdated
+              ? "This leave must be filed for today or a future date."
+              : selectedType.backdate_limit_days != null
+                ? `Backdated filing allowed up to ${selectedType.backdate_limit_days} day(s) back (on or after ${minDate}).`
+                : "Backdated filing allowed for any past date."}
+          </p>
+        )}
 
         <p className="text-caption text-muted-foreground">
           Leave is booked in full days. Need only part of a day? Use{" "}

@@ -131,7 +131,7 @@ export function EmployeeLeaveCreditsEditor({ employeeId }: { employeeId: number 
           </select>
           <Input
             type="number"
-            step="0.5"
+            step="1"
             min="0"
             placeholder="Days"
             className="h-9 w-24"
@@ -170,7 +170,7 @@ function EntitledCell({
   return (
     <Input
       type="number"
-      step="0.5"
+      step="1"
       min="0"
       className="h-8 w-20"
       value={local}

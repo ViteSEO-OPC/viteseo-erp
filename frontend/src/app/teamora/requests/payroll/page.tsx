@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { X, Paperclip } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +18,11 @@ import {
 import { PageHeader } from "@/core/components/page-header";
 import { Avatar } from "@/core/components/avatar";
 import { DataTable, type Column } from "@/core/components/data-table";
+import {
+  StatusFilter,
+  filterByStatus,
+  type StatusFilterOption,
+} from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
 import { formatDate, formatDateTime } from "@/core/lib/format";
@@ -34,6 +41,20 @@ const REJECT_BTN = "border-danger text-danger hover:bg-danger-subtle hover:text-
 
 // Figma label for a declined payslip request (our status is "rejected").
 const PAYSLIP_STATUS_LABEL: Record<string, string> = { rejected: "Declined" };
+
+const PAYSLIP_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Declined" },
+];
+
+const INQUIRY_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "in_progress", label: "In progress" },
+  { value: "done", label: "Done" },
+];
 
 /** Elapsed time between two timestamps → "1 day 2 hrs" / "1 hr 45 min" / "12 min". */
 function turnaround(from: string, to: string | null): string {
@@ -61,14 +82,15 @@ function EmployeeCell({ employee }: { employee: { id: number; name: string | nul
 export default function PayrollRequestsPage() {
   return (
     <div className="p-8">
-      <PageHeader title="Payroll" subtitle="Payslip copy requests and payroll inquiries." />
+      <PageHeader title="Payroll" subtitle="Signed hard-copy requests and payroll inquiries." />
 
       {/* Payslip requests */}
       <section className="mt-6">
-        <h2 className="mb-3 text-h3 font-bold text-foreground">Payslip requests</h2>
+        <h2 className="mb-3 text-h3 font-bold text-foreground">Signed hard copy requests</h2>
         <PayslipQueue />
         <p className="mt-3 text-sm text-muted-foreground">
-          All payslip requests must be approved by Miss Chris and must include a valid reason.
+          Employees can already view and download their payslips. These are requests for a
+          printed, signed copy — approve to prepare one, or decline with a reason.
         </p>
       </section>
 
@@ -85,13 +107,15 @@ function PayslipQueue() {
   const approveMut = useApprovePayslipRequest();
   const rejectMut = useRejectPayslipRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: PayslipRequest } | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(rows ?? [], status);
 
   async function onConfirm(reason: string) {
     if (!review) return;
     try {
       if (review.mode === "approve") {
         await approveMut.mutateAsync(review.row.id);
-        toast.success("Payslip request approved");
+        toast.success("Hard-copy request approved");
       } else {
         await rejectMut.mutateAsync({ id: review.row.id, reason });
         toast.error("Request declined", "The requester has been notified.");
@@ -133,13 +157,24 @@ function PayslipQueue() {
       ) : isError ? (
         <p className="text-sm text-destructive">Could not load payslip requests.</p>
       ) : (
-        <DataTable columns={columns} rows={rows ?? []} rowKey={(r) => r.id} needsAction={(r) => r.status === "pending"} empty="No payslip requests." />
+        <DataTable
+          columns={columns}
+          rows={visible}
+          rowKey={(r) => r.id}
+          needsAction={(r) => r.status === "pending"}
+          getSearchText={(r) =>
+            `${r.employee.name ?? ""} ${r.payslip_cycle ?? ""} ${r.reason} ${r.status}`
+          }
+          searchPlaceholder="Search employee, period, reason…"
+          toolbar={<StatusFilter options={PAYSLIP_STATUS_OPTIONS} value={status} onChange={setStatus} />}
+          empty="No hard-copy requests."
+        />
       )}
       <ReviewDialog
         open={!!review}
         onOpenChange={(o) => !o && setReview(null)}
         mode={review?.mode ?? "approve"}
-        subject={review ? `${review.row.employee.name}'s payslip request` : ""}
+        subject={review ? `${review.row.employee.name}'s signed hard-copy request` : ""}
         onConfirm={onConfirm}
       />
     </>
@@ -153,6 +188,8 @@ function InquiryQueue() {
   const progressMut = useProgressPayrollInquiry();
   const [resolving, setResolving] = useState<PayrollInquiry | null>(null);
   const [viewing, setViewing] = useState<PayrollInquiry | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(rows ?? [], status);
 
   const hasHighPriority = (rows ?? []).some(
     (r) => r.priority === "high" && r.status !== "done",
@@ -174,6 +211,15 @@ function InquiryQueue() {
         <span className="block max-w-[220px] truncate">{r.subject ?? r.topic ?? r.message}</span>
       ),
     },
+    {
+      header: "Pay period",
+      cell: (r) =>
+        r.payslip_cycle ? (
+          <span className="whitespace-nowrap text-foreground">{r.payslip_cycle}</span>
+        ) : (
+          <span className="text-muted-foreground">Not specific</span>
+        ),
+    },
     { header: "Requested", cell: (r) => <span className="text-muted-foreground">{formatDateTime(r.created_at)}</span> },
     { header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
     { header: "Resolved", cell: (r) => <span className="text-muted-foreground">{r.resolved_at ? formatDateTime(r.resolved_at) : "—"}</span> },
@@ -189,20 +235,25 @@ function InquiryQueue() {
             </Button>
           );
         }
-        return (
-          <div className="flex justify-end gap-2">
-            {r.status === "pending" && (
-              <Button
-                size="sm"
-                className="bg-info text-white hover:bg-info/90"
-                disabled={progressMut.isPending}
-                onClick={() => onStart(r)}
-              >
-                Start
+        // One action at a time: Pending → Start, then In progress → Mark Done.
+        if (r.status === "in_progress") {
+          return (
+            <div className="flex justify-end">
+              <Button size="sm" variant="success" onClick={() => setResolving(r)}>
+                Mark Done
               </Button>
-            )}
-            <Button size="sm" variant="success" onClick={() => setResolving(r)}>
-              Mark Done
+            </div>
+          );
+        }
+        return (
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              className="bg-info text-white hover:bg-info/90"
+              disabled={progressMut.isPending}
+              onClick={() => onStart(r)}
+            >
+              Start
             </Button>
           </div>
         );
@@ -221,9 +272,8 @@ function InquiryQueue() {
         )}
       </div>
       <p className="mt-1 mb-4 text-sm text-muted-foreground">
-        Employees submit payroll inquiries via the &ldquo;Request Inquiry&rdquo; button on their
-        payslip view. HR is notified in-app and via Telegram. HR follows up via Telegram and resolves
-        inquiries here.
+        Employees raise inquiries from a specific payslip — the pay period shows in the table.
+        HR is notified in-app and via Telegram, follows up there, and resolves inquiries here.
       </p>
 
       {isLoading ? (
@@ -231,7 +281,18 @@ function InquiryQueue() {
       ) : isError ? (
         <p className="text-sm text-destructive">Could not load inquiries.</p>
       ) : (
-        <DataTable columns={columns} rows={rows ?? []} rowKey={(r) => r.id} needsAction={(r) => r.status !== "done"} empty="No payroll inquiries." />
+        <DataTable
+          columns={columns}
+          rows={visible}
+          rowKey={(r) => r.id}
+          needsAction={(r) => r.status !== "done"}
+          getSearchText={(r) =>
+            `${r.employee.name ?? ""} ${r.subject ?? r.topic ?? r.message ?? ""} ${r.status}`
+          }
+          searchPlaceholder="Search employee, topic…"
+          toolbar={<StatusFilter options={INQUIRY_STATUS_OPTIONS} value={status} onChange={setStatus} />}
+          empty="No payroll inquiries."
+        />
       )}
 
       <ResolveDialog
@@ -253,15 +314,25 @@ function ResolveDialog({
 }) {
   const resolveMut = useResolvePayrollInquiry();
   const [note, setNote] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+
+  function addFiles(list: FileList | null) {
+    if (list) setFiles((prev) => [...prev, ...Array.from(list)]);
+  }
+  function removeFile(index: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  const canSubmit = note.trim().length > 0 && !resolveMut.isPending;
 
   async function confirm() {
-    if (!inquiry) return;
+    if (!inquiry || !note.trim()) return;
     try {
-      await resolveMut.mutateAsync({ id: inquiry.id, note: note.trim() || undefined });
+      await resolveMut.mutateAsync({ id: inquiry.id, note: note.trim(), files });
       toast.success("Inquiry marked done");
       onOpenChange(false);
     } catch {
-      toast.error("Could not resolve the inquiry.");
+      toast.error("Could not resolve the inquiry. Check the note and files, then retry.");
     }
   }
 
@@ -271,21 +342,64 @@ function ResolveDialog({
         <DialogHeader>
           <DialogTitle>Resolve inquiry</DialogTitle>
           <DialogDescription>
-            Mark {inquiry?.employee.name}&apos;s inquiry as done. Add a resolution note (optional).
+            Explain how {inquiry?.employee.name}&apos;s inquiry was resolved. Attach proof if you have it.
           </DialogDescription>
         </DialogHeader>
-        <textarea
-          rows={3}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="How was it resolved? (optional)"
-          className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring"
-        />
+
+        <div className="space-y-1.5">
+          <Label htmlFor="res-note">
+            How was it resolved? <span className="text-destructive">*</span>
+          </Label>
+          <textarea
+            id="res-note"
+            rows={3}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Describe the resolution…"
+            className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="res-files">Proof (optional) — images, PDF, or Word</Label>
+          <input
+            id="res-files"
+            type="file"
+            multiple
+            accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx"
+            onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
+            className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-foreground hover:file:bg-muted/70"
+          />
+          {files.length > 0 && (
+            <ul className="space-y-1 pt-1">
+              {files.map((f, i) => (
+                <li
+                  key={`${f.name}-${i}`}
+                  className="flex items-center justify-between gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{f.name}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeFile(i)}
+                    className="shrink-0 text-muted-foreground transition-colors hover:text-destructive"
+                    aria-label={`Remove ${f.name}`}
+                  >
+                    <X className="size-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline">Cancel</Button>
           </DialogClose>
-          <Button variant="success" disabled={resolveMut.isPending} onClick={confirm}>
+          <Button variant="success" disabled={!canSubmit} onClick={confirm}>
             {resolveMut.isPending ? "Saving…" : "Mark done"}
           </Button>
         </DialogFooter>
@@ -311,6 +425,28 @@ function NoteDialog({
         <p className="rounded-lg bg-muted px-3 py-2.5 text-sm text-foreground">
           {inquiry?.resolution_note?.trim() || "No note was added."}
         </p>
+        {inquiry && inquiry.resolution_attachments.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold text-muted-foreground">
+              Proof attached ({inquiry.resolution_attachments.length})
+            </p>
+            <ul className="space-y-1">
+              {inquiry.resolution_attachments.map((a, i) => (
+                <li key={i}>
+                  <a
+                    href={a.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+                  >
+                    <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{a.name}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <DialogFooter>
           <DialogClose asChild>
             <Button variant="outline">Close</Button>

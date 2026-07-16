@@ -493,9 +493,9 @@ class PayrollService
     }
 
     /**
-     * The caller's payslip HISTORY — periods only, no amounts. Each slip carries a
-     * derived `request_status` / `unlocked` so the UI can show Request / Pending / View.
-     * Actual figures are gated behind an approved payslip request (see showPayslip).
+     * The caller's payslip HISTORY. A payslip is viewable once its run is finalized
+     * (`completed`) — no request needed. Each slip also carries `hardcopy_status`,
+     * the state of any signed-hard-copy request the employee raised for that period.
      */
     public function myPayslips(Employee $employee): Collection
     {
@@ -509,27 +509,24 @@ class PayrollService
         $statuses = $this->requestStatusMap($employee);
 
         return $slips->each(function (Payslip $slip) use ($statuses) {
-            $status = $statuses[$slip->id] ?? 'none';
-            $slip->setAttribute('request_status', $status);
-            $slip->setAttribute('unlocked', $status === 'approved');
+            // `unlocked` = viewable. Kept as the attribute name the UI already reads.
+            $slip->setAttribute('unlocked', $this->isViewable($slip));
+            $slip->setAttribute('hardcopy_status', $statuses[$slip->id] ?? 'none');
         });
     }
 
     /**
-     * A payslip is UNLOCKED for an employee once one of their payslip requests for it
-     * has been approved. Permanent — the approved request persists.
+     * A payslip is viewable to its owner once its payroll run is finalized (cutoff done).
+     * Runs are `processing` mid-recompute, then `completed` — only the latter is released.
      */
-    public function isUnlocked(Payslip $payslip, Employee $employee): bool
+    public function isViewable(Payslip $payslip): bool
     {
-        return PayslipRequest::where('employee_id', $employee->id)
-            ->where('payslip_id', $payslip->id)
-            ->where('status', 'approved')
-            ->exists();
+        return $payslip->payrollRun?->status === 'completed';
     }
 
     /**
-     * Best request status per payslip for this employee (approved > pending > rejected),
-     * so the history list can label each period without leaking amounts.
+     * Best signed-hard-copy request status per payslip for this employee
+     * (approved > pending > rejected), so the history list can label each period.
      *
      * @return array<int, string> payslip_id => status
      */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Paperclip } from "lucide-react";
 import { AxiosError } from "axios";
 import { notify as toast } from "@/core/lib/notify";
@@ -35,38 +35,41 @@ const selectClass =
   "h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
 
 /**
- * "Request payroll inquiry" — an employee raises a payroll question for HR (distinct
- * from requesting a payslip copy). Carries a subject, topic, the related pay period,
- * a description and an optional payslip screenshot.
+ * "Raise an inquiry" about ONE specific payslip — an employee's payroll question for
+ * HR (distinct from requesting a signed hard copy). Always tied to the payslip it was
+ * opened from, so HR sees exactly which pay period it concerns. Carries a subject,
+ * topic, description and an optional screenshot.
  */
 export function PayrollInquiryDialog({
   open,
   onOpenChange,
-  periods,
-  defaultPayslipId,
+  payslip,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  periods: PayslipSummary[];
-  defaultPayslipId?: number;
+  /** The payslip this inquiry is about (the one currently open). */
+  payslip?: PayslipSummary;
 }) {
   const mut = useCreatePayrollInquiry();
   const [subject, setSubject] = useState("");
   const [topic, setTopic] = useState(TOPICS[0]);
-  const [payslipId, setPayslipId] = useState("");
   const [message, setMessage] = useState("");
   const [file, setFile] = useState<File | null>(null);
 
-  useEffect(() => {
-    if (open) {
+  // Reset on close so the next open starts fresh (no effect needed).
+  function handleOpenChange(next: boolean) {
+    if (!next) {
       setSubject("");
       setTopic(TOPICS[0]);
-      setPayslipId(defaultPayslipId ? String(defaultPayslipId) : "");
       setMessage("");
       setFile(null);
     }
-  }, [open, defaultPayslipId]);
+    onOpenChange(next);
+  }
 
+  const period = payslip
+    ? `${formatDate(payslip.cycle_start)} – ${formatDate(payslip.cycle_end)}`
+    : null;
   const canSubmit = subject.trim() !== "" && message.trim() !== "";
 
   async function submit() {
@@ -76,11 +79,11 @@ export function PayrollInquiryDialog({
         subject: subject.trim(),
         topic,
         message: message.trim(),
-        payslip_id: payslipId ? Number(payslipId) : null,
+        payslip_id: payslip?.id ?? null,
         attachment: file,
       });
       toast.success("Inquiry submitted", "HR has been notified.");
-      onOpenChange(false);
+      handleOpenChange(false);
     } catch (err) {
       const errors = (err instanceof AxiosError ? err.response?.data?.errors : undefined) as
         | Record<string, string[]>
@@ -94,12 +97,14 @@ export function PayrollInquiryDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Request payroll inquiry</DialogTitle>
+          <DialogTitle>Raise an inquiry</DialogTitle>
           <DialogDescription>
-            Describe the concern. HR is notified the moment you submit.
+            {period
+              ? `About your payslip for ${period}. HR is notified the moment you submit.`
+              : "Describe the concern. HR is notified the moment you submit."}
           </DialogDescription>
         </DialogHeader>
 
@@ -129,20 +134,13 @@ export function PayrollInquiryDialog({
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="inq-period">Related pay period</Label>
-              <select
+              <Label htmlFor="inq-period">Pay period</Label>
+              <div
                 id="inq-period"
-                className={selectClass}
-                value={payslipId}
-                onChange={(e) => setPayslipId(e.target.value)}
+                className="flex h-9 items-center rounded-lg border border-input bg-muted/40 px-2.5 text-sm text-muted-foreground"
               >
-                <option value="">Not specific</option>
-                {periods.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {formatDate(p.cycle_start)} – {formatDate(p.cycle_end)}
-                  </option>
-                ))}
-              </select>
+                {period ?? "—"}
+              </div>
             </div>
           </div>
 

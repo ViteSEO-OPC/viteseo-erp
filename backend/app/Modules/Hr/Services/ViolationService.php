@@ -29,11 +29,18 @@ class ViolationService
         private readonly AttendancePolicyService $policy,
     ) {}
 
-    public function list(?int $employeeId = null): Collection
+    /**
+     * @param  string|null  $month  'YYYY-MM' — restrict to that calendar month (Manila).
+     */
+    public function list(?int $employeeId = null, ?string $month = null): Collection
     {
         return Violation::with('employee.user')
             ->when($employeeId, fn ($q) => $q->where('employee_id', $employeeId))
-            ->orderByDesc('resolved') // unresolved first
+            ->when($month, function ($q) use ($month) {
+                [$start, $end] = $this->monthBounds($month);
+                $q->whereBetween('work_date', [$start, $end]);
+            })
+            ->orderBy('resolved') // unresolved (0) first, then resolved (1)
             ->orderByDesc('work_date')
             ->get();
     }
@@ -46,9 +53,12 @@ class ViolationService
     }
 
     /**
-     * Worst unresolved flag + count per employee, for the roster.
+     * Worst unresolved flag + count per employee, for the roster. `work_date` is the
+     * date of the violation DRIVING the severity (worst severity, most recent on a
+     * tie) — the roster flag can point to a past month, so the detail modal uses this
+     * to open on the right month instead of blindly the current one.
      *
-     * @return array<int, array{severity:string, count:int, types:array<int,string>}>
+     * @return array<int, array{severity:string, count:int, types:array<int,string>, work_date:string}>
      */
     public function flagsByEmployee(): array
     {
@@ -56,29 +66,59 @@ class ViolationService
             ->get()
             ->groupBy('employee_id')
             ->map(function ($group) {
-                $worst = $group->sortByDesc(fn ($v) => Violation::SEVERITY_RANK[$v->severity] ?? 0)->first();
+                // Stable sort: latest-first, then by severity — so `first()` is the
+                // worst, breaking ties toward the most recent occurrence.
+                $worst = $group
+                    ->sortByDesc(fn ($v) => $v->work_date->timestamp)
+                    ->sortByDesc(fn ($v) => Violation::SEVERITY_RANK[$v->severity] ?? 0)
+                    ->first();
 
                 return [
                     'severity' => $worst->severity,
                     'count' => $group->count(),
                     'types' => $group->pluck('type')->unique()->values()->all(),
+                    'work_date' => $worst->work_date->toDateString(),
                 ];
             })
             ->all();
     }
 
-    /** Regenerate violations for the current month across all employees. */
-    public function recompute(): void
+    /**
+     * Regenerate violations across all employees for one calendar month (Manila).
+     * Defaults to the current month. Streak/late-count logic is per-month, so each
+     * month is self-contained — recomputing one month never touches another's rows,
+     * which is what lets violation history accumulate across months.
+     *
+     * @param  string|null  $month  'YYYY-MM' — the month to (re)compute; null = current.
+     */
+    public function recompute(?string $month = null): void
     {
         $tz = config('app.timezone_local');
         $today = now($tz)->startOfDay();
-        $monthStart = $today->copy()->startOfMonth();
+
+        $monthStart = $month
+            ? Carbon::parse("{$month}-01", $tz)->startOfMonth()
+            : $today->copy()->startOfMonth();
+
+        if ($monthStart->gt($today)) {
+            return; // a future month has nothing to compute
+        }
+
+        $monthEnd = $monthStart->copy()->endOfMonth();
+        // Never scan past today — the current month is only complete up to today.
+        $scanEnd = $monthEnd->gt($today) ? $today->copy() : $monthEnd;
+
         $latesBeforeAbsence = $this->policy->get()->consecutive_lates_before_absence;
 
-        // Approved leaves overlapping this month, grouped by employee.
+        // The earliest attendance record anywhere is our proxy for when the org began
+        // tracking attendance — nobody can be "absent" for a day before tracking existed.
+        // (Swap for an explicit go-live/config date if one is ever added.)
+        $trackingStart = Attendance::min('work_date');
+
+        // Approved leaves overlapping the scanned range, grouped by employee.
         $leaves = LeaveRequest::where('status', 'approved')
             ->whereDate('end_date', '>=', $monthStart->toDateString())
-            ->whereDate('start_date', '<=', $today->toDateString())
+            ->whereDate('start_date', '<=', $scanEnd->toDateString())
             ->get(['employee_id', 'start_date', 'end_date'])
             ->groupBy('employee_id');
 
@@ -86,7 +126,7 @@ class ViolationService
 
         foreach (Employee::with('workSchedule')->get() as $emp) {
             $rows = Attendance::where('employee_id', $emp->id)
-                ->whereBetween('work_date', [$monthStart->toDateString(), $today->toDateString()])
+                ->whereBetween('work_date', [$monthStart->toDateString(), $scanEnd->toDateString()])
                 ->get()
                 ->keyBy(fn ($r) => $r->work_date->toDateString());
 
@@ -94,7 +134,16 @@ class ViolationService
             $absentStreak = 0;
             $monthlyLate = 0;
 
-            for ($d = $monthStart->copy(); $d->lte($today); $d->addDay()) {
+            // An absence can't predate the employee's hire, the org's tracking start,
+            // or the scanned month. Below this floor, a missing record is "not tracked",
+            // not an absence — otherwise every empty pre-hire/pre-go-live day is an AWOL.
+            $absenceFloor = max(array_filter([
+                $monthStart->toDateString(),
+                $emp->hire_date?->toDateString(),
+                $trackingStart,
+            ]));
+
+            for ($d = $monthStart->copy(); $d->lte($scanEnd); $d->addDay()) {
                 $eff = $this->schedule->effectiveFor($emp, $d);
                 if (! $eff['is_workday']) {
                     continue; // rest day — never a violation
@@ -104,6 +153,7 @@ class ViolationService
                 $row = $rows->get($dateStr);
                 $isPast = $d->lt($today);
                 $onLeave = $this->onLeave($leaves->get($emp->id), $dateStr);
+                $clockedIn = $row && $row->time_in !== null;
 
                 if ($row && $row->status === 'late') {
                     $monthlyLate++;
@@ -117,9 +167,12 @@ class ViolationService
                         : "Late arrival (#{$monthlyLate} this month)";
 
                     $computed[] = $this->incident($emp->id, 'late', $sev, $dateStr, $note);
-                } elseif ($isPast && ! $onLeave && $row && $row->status === 'absent') {
-                    // Only an EXPLICIT absent row is an unauthorised absence — a
-                    // missing historical row is "untracked", not proof of absence.
+                } elseif ($isPast && ! $onLeave && ! $clockedIn && $dateStr >= $absenceFloor) {
+                    // Unauthorised absence: a past scheduled workday (at/after the org's
+                    // tracking start and the employee's hire date) with no approved leave
+                    // and no clock-in — whether HR explicitly marked it 'absent' OR the
+                    // record is simply missing. Mirrors the roster and payroll, which both
+                    // treat an untracked past workday as an absence.
                     $absentStreak++;
                     $lateStreak = 0;
 
@@ -142,10 +195,46 @@ class ViolationService
             }
         }
 
-        $this->sync($computed);
+        $this->sync($computed, $monthStart->toDateString(), $monthEnd->toDateString());
+    }
+
+    /**
+     * Build the full violation history: recompute every month from the org's tracking
+     * start (earliest attendance record) up to the current month. Idempotent and
+     * persisted, so the "All time" history view has data for every month, not just the
+     * ones that happen to have been opened. No attendance anywhere → nothing to do.
+     */
+    public function recomputeHistory(): void
+    {
+        $tz = config('app.timezone_local');
+        $earliest = Attendance::min('work_date');
+        if (! $earliest) {
+            return;
+        }
+
+        $month = Carbon::parse($earliest, $tz)->startOfMonth();
+        $current = now($tz)->startOfMonth();
+
+        while ($month->lte($current)) {
+            $this->recompute($month->format('Y-m'));
+            $month->addMonth();
+        }
     }
 
     // --- helpers ---
+
+    /**
+     * Inclusive 'Y-m-d' [start, end] of a 'YYYY-MM' month in Manila.
+     *
+     * @return array{0:string, 1:string}
+     */
+    private function monthBounds(string $month): array
+    {
+        $tz = config('app.timezone_local');
+        $start = Carbon::parse("{$month}-01", $tz)->startOfMonth();
+
+        return [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()];
+    }
 
     /** @return array{employee_id:int, type:string, severity:string, work_date:string, details:string} */
     private function incident(int $employeeId, string $type, string $severity, string $date, string $details): array
@@ -175,11 +264,13 @@ class ViolationService
 
     /**
      * Upsert computed incidents and drop stale unresolved ones. updateOrCreate
-     * never touches `resolved`, so an HR-resolved row stays resolved.
+     * never touches `resolved`, so an HR-resolved row stays resolved. The stale-row
+     * cleanup is scoped to [$monthStart, $monthEnd] so recomputing one month never
+     * deletes another month's history.
      *
      * @param  array<int, array<string, mixed>>  $computed
      */
-    private function sync(array $computed): void
+    private function sync(array $computed, string $monthStart, string $monthEnd): void
     {
         $keys = [];
         foreach ($computed as $c) {
@@ -190,11 +281,14 @@ class ViolationService
             $keys[] = "{$c['employee_id']}|{$c['type']}|{$c['work_date']}";
         }
 
-        Violation::where('resolved', false)->get()->each(function (Violation $v) use ($keys) {
-            $key = "{$v->employee_id}|{$v->type}|" . $v->work_date->toDateString();
-            if (! in_array($key, $keys, true)) {
-                $v->delete();
-            }
-        });
+        Violation::where('resolved', false)
+            ->whereBetween('work_date', [$monthStart, $monthEnd])
+            ->get()
+            ->each(function (Violation $v) use ($keys) {
+                $key = "{$v->employee_id}|{$v->type}|" . $v->work_date->toDateString();
+                if (! in_array($key, $keys, true)) {
+                    $v->delete();
+                }
+            });
     }
 }

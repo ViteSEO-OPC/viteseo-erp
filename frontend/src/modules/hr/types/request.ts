@@ -93,6 +93,7 @@ export interface PayrollInquiry {
   priority: string;
   status: string;
   resolution_note: string | null;
+  resolution_attachments: { url: string; name: string }[];
   resolved_at: string | null;
   payslip_id: number | null;
   payslip_cycle: string | null;

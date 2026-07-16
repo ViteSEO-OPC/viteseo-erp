@@ -242,7 +242,7 @@ function AllotmentCell({
   return (
     <Input
       type="number"
-      step="0.5"
+      step="1"
       min="0"
       className="h-8 w-20"
       value={local}

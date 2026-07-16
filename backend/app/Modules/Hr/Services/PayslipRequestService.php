@@ -33,7 +33,7 @@ class PayslipRequestService
             'status' => 'pending',
         ])->load('employee.user');
 
-        $this->audit->log('submitted', 'Payroll', 'Payslip copy request', $request);
+        $this->audit->log('submitted', 'Payroll', 'Signed hard-copy request', $request);
 
         return $request;
     }
@@ -52,7 +52,7 @@ class PayslipRequestService
         $this->audit->log(
             'approved',
             'Payroll',
-            "Approved payslip request for {$employeeName}",
+            "Approved signed hard-copy request for {$employeeName}",
             $request,
         );
 
@@ -74,7 +74,7 @@ class PayslipRequestService
         $this->audit->log(
             'declined',
             'Payroll',
-            "Declined payslip request for {$employeeName}",
+            "Declined signed hard-copy request for {$employeeName}",
             $request,
         );
 

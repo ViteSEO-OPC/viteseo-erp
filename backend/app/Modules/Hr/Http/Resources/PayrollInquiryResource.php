@@ -24,6 +24,12 @@ class PayrollInquiryResource extends JsonResource
             'priority' => $this->priority,
             'status' => $this->status,
             'resolution_note' => $this->resolution_note,
+            'resolution_attachments' => collect($this->resolution_attachments ?? [])
+                ->map(fn (array $a) => [
+                    'url' => Storage::disk('public')->url($a['path']),
+                    'name' => $a['name'] ?? basename($a['path']),
+                ])
+                ->all(),
             'resolved_at' => $this->resolved_at,
             'payslip_id' => $this->payslip_id,
             'payslip_cycle' => $this->payslipCycle(),

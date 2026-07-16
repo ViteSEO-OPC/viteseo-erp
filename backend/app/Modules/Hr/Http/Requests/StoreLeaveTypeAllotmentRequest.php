@@ -21,7 +21,7 @@ class StoreLeaveTypeAllotmentRequest extends FormRequest
         return [
             'leave_type_id' => ['required', 'integer', 'exists:hr_leave_types,id'],
             'employment_status' => ['required', 'string', Rule::in(EmployeeService::STATUSES)],
-            'days_per_year' => ['required', 'numeric', 'min:0', 'max:365'],
+            'days_per_year' => ['required', 'integer', 'min:0', 'max:365'],
         ];
     }
 }

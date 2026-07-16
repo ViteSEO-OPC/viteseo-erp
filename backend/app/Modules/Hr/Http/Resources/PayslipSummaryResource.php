@@ -6,10 +6,10 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * The employee's payslip HISTORY row — pay period + request state only, NO amounts.
- * Figures stay hidden until an approved payslip request unlocks the full payslip
- * (served by PayslipResource via showPayslip). `request_status` / `unlocked` are
- * derived attributes set in PayrollService::myPayslips().
+ * The employee's payslip HISTORY row — pay period + state only, NO amounts. A payslip
+ * is `unlocked` (viewable) once its payroll run is finalized; the full figures come
+ * from PayslipResource via showPayslip. `hardcopy_status` is the state of any signed
+ * hard-copy request for the period. Both are derived in PayrollService::myPayslips().
  */
 class PayslipSummaryResource extends JsonResource
 {
@@ -23,9 +23,10 @@ class PayslipSummaryResource extends JsonResource
             'cycle_start' => $this->payrollRun?->cycle_start?->format('Y-m-d'),
             'cycle_end' => $this->payrollRun?->cycle_end?->format('Y-m-d'),
             'status' => $this->status,
-            // 'none' | 'pending' | 'approved' | 'rejected' — drives Request/Pending/View.
-            'request_status' => $this->request_status ?? 'none',
+            // Viewable once the run is finalized — no request needed.
             'unlocked' => (bool) ($this->unlocked ?? false),
+            // 'none' | 'pending' | 'approved' | 'rejected' — signed hard-copy request state.
+            'hardcopy_status' => $this->hardcopy_status ?? 'none',
         ];
     }
 }

@@ -142,7 +142,15 @@ export async function progressPayrollInquiry(id: number): Promise<PayrollInquiry
   return res.data.data;
 }
 
-export async function resolvePayrollInquiry(id: number, note?: string): Promise<PayrollInquiry> {
-  const res = await apiClient.post(`/hr/payroll-inquiries/${id}/resolve`, { note });
+export async function resolvePayrollInquiry(
+  id: number,
+  note: string,
+  files: File[] = [],
+): Promise<PayrollInquiry> {
+  // Multipart: HR's resolution note plus any number of proof files.
+  const fd = new FormData();
+  fd.append("note", note);
+  for (const file of files) fd.append("attachments[]", file);
+  const res = await apiClient.post(`/hr/payroll-inquiries/${id}/resolve`, fd);
   return res.data.data;
 }

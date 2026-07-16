@@ -106,8 +106,8 @@ export const employeeNav: NavEntry[] = [
   { label: "Payslips", href: "/teamora/payslips", icon: FileText },
   { label: "Claims", href: "/teamora/claims", icon: Wallet },
   { label: "Concerns", href: "/teamora/concerns", icon: ShieldAlert },
-  { label: "FAQ", href: "/teamora/faq", icon: HelpCircle },
   { label: "Benefits", href: "/teamora/benefits", icon: Heart },
+  { label: "FAQ", href: "/teamora/faq", icon: HelpCircle },
 ];
 
 export const navByVariant: Record<ShellVariant, NavEntry[]> = {

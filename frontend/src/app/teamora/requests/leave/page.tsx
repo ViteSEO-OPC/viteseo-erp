@@ -13,6 +13,11 @@ import {
   DataTable,
   type Column,
 } from "@/core/components/data-table";
+import {
+  StatusFilter,
+  filterByStatus,
+  type StatusFilterOption,
+} from "@/core/components/status-filter";
 import { formatDate } from "@/core/lib/format";
 import {
   useLeaveRequests,
@@ -26,11 +31,21 @@ import {
 } from "@/modules/hr/hooks/use-half-day";
 import type { LeaveRequest, HalfDayRequest } from "@/modules/hr/types/leave";
 
+// Pending / Approved / Rejected are the leave + half-day lifecycle states.
+const REQUEST_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+];
+
 export default function TimeLeavePage() {
   const { data: requests, isLoading, isError } = useLeaveRequests();
   const approveMut = useApproveLeaveRequest();
   const rejectMut = useRejectLeaveRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: LeaveRequest } | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(requests ?? [], status);
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -137,9 +152,16 @@ export default function TimeLeavePage() {
         ) : (
           <DataTable
             columns={columns}
-            rows={requests ?? []}
+            rows={visible}
             rowKey={(r) => r.id}
             needsAction={(r) => r.status === "pending"}
+            getSearchText={(r) =>
+              `${r.employee.name ?? ""} ${r.leave_type.name} ${r.reason} ${r.status}`
+            }
+            searchPlaceholder="Search employee, type, reason…"
+            toolbar={
+              <StatusFilter options={REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
+            }
             empty="No leave requests yet."
           />
         )}
@@ -165,6 +187,8 @@ function HalfDaySection() {
   const approveMut = useApproveHalfDayRequest();
   const rejectMut = useRejectHalfDayRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: HalfDayRequest } | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(requests ?? [], status);
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -235,9 +259,16 @@ function HalfDaySection() {
         ) : (
           <DataTable
             columns={columns}
-            rows={requests ?? []}
+            rows={visible}
             rowKey={(r) => r.id}
             needsAction={(r) => r.status === "pending"}
+            getSearchText={(r) =>
+              `${r.employee.name ?? ""} ${r.period} ${r.reason} ${r.status}`
+            }
+            searchPlaceholder="Search employee, reason…"
+            toolbar={
+              <StatusFilter options={REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
+            }
             empty="No half-day requests yet."
           />
         )}

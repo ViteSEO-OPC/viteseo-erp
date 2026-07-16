@@ -32,7 +32,7 @@ class LeaveRequest extends Model
         'start_date' => 'date',
         'end_date' => 'date',
         'is_half_day' => 'boolean',
-        'days' => 'decimal:1',
+        'days' => 'integer',
         'reviewed_at' => 'datetime',
     ];
 

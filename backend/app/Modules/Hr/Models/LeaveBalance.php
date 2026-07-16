@@ -22,8 +22,9 @@ class LeaveBalance extends Model
 
     protected $casts = [
         'year' => 'integer',
-        'entitled_days' => 'decimal:1',
-        'used_days' => 'decimal:1',
+        // Whole days only — paid leave can't be a half-day.
+        'entitled_days' => 'integer',
+        'used_days' => 'integer',
     ];
 
     public function employee(): BelongsTo

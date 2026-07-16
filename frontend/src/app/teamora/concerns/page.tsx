@@ -52,7 +52,12 @@ function SubmitSection() {
     if (!description.trim()) return;
     try {
       await createMut.mutateAsync({ category, description: description.trim(), is_anonymous: anonymous });
-      toast.success("Concern submitted", anonymous ? "Your identity is hidden from HR." : "HR has been notified.");
+      toast.success(
+        "Concern submitted",
+        anonymous
+          ? "Your name is hidden from colleagues. HR can see it only to prevent abuse, and keeps it private."
+          : "HR has been notified.",
+      );
       setDescription("");
       setAnonymous(false);
     } catch {
@@ -85,16 +90,22 @@ function SubmitSection() {
             className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring"
           />
         </div>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"
-            className="size-4 rounded border-input accent-brand"
+            className="mt-0.5 size-4 rounded border-input accent-brand"
             checked={anonymous}
             onChange={(e) => setAnonymous(e.target.checked)}
           />
-          <span className="inline-flex items-center gap-1.5">
-            <EyeOff className="size-3.5 text-muted-foreground" />
-            Submit anonymously — HR won&apos;t see your identity
+          <span className="inline-flex items-start gap-1.5">
+            <EyeOff className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+            <span>
+              Submit anonymously — hidden from colleagues.
+              <span className="block text-xs text-muted-foreground">
+                HR can still see who you are to prevent jokes and spam, and is responsible for
+                keeping your identity private.
+              </span>
+            </span>
           </span>
         </label>
         <div className="flex justify-end">

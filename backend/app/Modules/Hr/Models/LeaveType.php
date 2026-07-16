@@ -12,11 +12,14 @@ class LeaveType extends Model
 
     protected $table = 'hr_leave_types';
 
-    protected $fillable = ['name', 'code', 'days_per_year', 'is_paid', 'color'];
+    protected $fillable = ['name', 'code', 'days_per_year', 'is_paid', 'color', 'allow_backdated', 'backdate_limit_days'];
 
     protected $casts = [
-        'days_per_year' => 'decimal:1',
+        // Paid leave is whole-day only (half-days are a separate unpaid request).
+        'days_per_year' => 'integer',
         'is_paid' => 'boolean',
+        'allow_backdated' => 'boolean',
+        'backdate_limit_days' => 'integer',
     ];
 
     public function allotments(): HasMany

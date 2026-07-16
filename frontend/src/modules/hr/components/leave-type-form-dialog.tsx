@@ -28,9 +28,17 @@ import type { LeaveType } from "@/modules/hr/types/leave";
 const schema = z.object({
   name: z.string().min(1, "Name is required").max(255),
   code: z.string().min(1, "Code is required").max(50),
-  days_per_year: z.coerce.number().min(0, "Must be 0 or more").max(365),
+  days_per_year: z.coerce.number().int("Whole days only").min(0, "Must be 0 or more").max(365),
   is_paid: z.boolean(),
   color: z.string().max(20).optional(),
+  allow_backdated: z.boolean(),
+  // Kept as the raw text-input value; "" = no limit. Parsed to number | null on submit.
+  backdate_limit_days: z
+    .union([
+      z.coerce.number().int().min(1, "At least 1 day").max(365, "At most 365 days"),
+      z.literal(""),
+    ])
+    .optional(),
 });
 
 type FormValues = z.input<typeof schema>;
@@ -54,11 +62,32 @@ export function LeaveTypeFormDialog({
     handleSubmit,
     reset,
     setError,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { name: "", code: "", days_per_year: 0, is_paid: true, color: "#4FDBD7" },
+    defaultValues: {
+      name: "",
+      code: "",
+      days_per_year: 0,
+      is_paid: true,
+      color: "#4FDBD7",
+      allow_backdated: false,
+      backdate_limit_days: "",
+    },
   });
+
+  // Show the day-cap input only when backdated filing is allowed.
+  const allowBackdated = watch("allow_backdated");
+
+  // The swatch and the hex text box are two views of ONE field. Both read this
+  // value and write it via setValue, so picking a color in the swatch updates
+  // the hex box (and vice-versa) — and Save always submits what you see.
+  const color = watch("color") ?? "";
+  const swatchValue = /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#000000";
+  const setColor = (value: string) =>
+    setValue("color", value, { shouldValidate: true, shouldDirty: true });
 
   useEffect(() => {
     if (open) {
@@ -70,8 +99,18 @@ export function LeaveTypeFormDialog({
               days_per_year: Number(leaveType.days_per_year),
               is_paid: leaveType.is_paid,
               color: leaveType.color ?? "#4FDBD7",
+              allow_backdated: leaveType.allow_backdated,
+              backdate_limit_days: leaveType.backdate_limit_days ?? "",
             }
-          : { name: "", code: "", days_per_year: 0, is_paid: true, color: "#4FDBD7" },
+          : {
+              name: "",
+              code: "",
+              days_per_year: 0,
+              is_paid: true,
+              color: "#4FDBD7",
+              allow_backdated: false,
+              backdate_limit_days: "",
+            },
       );
     }
   }, [open, leaveType, reset]);
@@ -83,6 +122,12 @@ export function LeaveTypeFormDialog({
       days_per_year: Number(values.days_per_year),
       is_paid: values.is_paid,
       color: values.color || null,
+      allow_backdated: values.allow_backdated,
+      // No cap (or backdating off) → null.
+      backdate_limit_days:
+        values.allow_backdated && values.backdate_limit_days !== "" && values.backdate_limit_days != null
+          ? Number(values.backdate_limit_days)
+          : null,
     };
     try {
       if (leaveType) {
@@ -132,7 +177,7 @@ export function LeaveTypeFormDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="lt-days">Base days / year</Label>
-              <Input id="lt-days" type="number" step="0.5" min="0" aria-invalid={!!errors.days_per_year} {...register("days_per_year")} />
+              <Input id="lt-days" type="number" step="1" min="0" aria-invalid={!!errors.days_per_year} {...register("days_per_year")} />
               {errors.days_per_year && <p className="text-xs text-destructive">{errors.days_per_year.message}</p>}
             </div>
           </div>
@@ -154,9 +199,60 @@ export function LeaveTypeFormDialog({
           <div className="space-y-1.5">
             <Label htmlFor="lt-color">Color</Label>
             <div className="flex items-center gap-2">
-              <input id="lt-color" type="color" className="h-9 w-12 rounded border border-input bg-transparent" {...register("color")} />
-              <Input className="flex-1" placeholder="#4FDBD7" {...register("color")} />
+              <input
+                id="lt-color"
+                type="color"
+                className="h-9 w-12 rounded border border-input bg-transparent"
+                value={swatchValue}
+                onChange={(e) => setColor(e.target.value)}
+              />
+              <Input
+                className="flex-1"
+                placeholder="#4FDBD7"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+              />
             </div>
+          </div>
+
+          <div className="rounded-lg border border-border p-3">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 rounded border-input accent-brand"
+                {...register("allow_backdated")}
+              />
+              <span>
+                Allow backdated filing
+                <span className="block text-xs text-muted-foreground">
+                  Let employees file this leave for dates that already passed (e.g. sick
+                  leave). When off, only today or future dates are accepted.
+                </span>
+              </span>
+            </label>
+
+            {allowBackdated && (
+              <div className="mt-3 space-y-1.5 pl-6">
+                <Label htmlFor="lt-backdate">Max days back</Label>
+                <Input
+                  id="lt-backdate"
+                  type="number"
+                  step="1"
+                  min="1"
+                  max="365"
+                  placeholder="Leave blank for no limit"
+                  aria-invalid={!!errors.backdate_limit_days}
+                  {...register("backdate_limit_days")}
+                />
+                {errors.backdate_limit_days ? (
+                  <p className="text-xs text-destructive">{errors.backdate_limit_days.message}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    How far back a request may reach. Blank = no limit.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter>

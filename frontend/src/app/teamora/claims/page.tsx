@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PageHeader } from "@/core/components/page-header";
 import { StatusBadge } from "@/core/components/status-badge";
+import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { ClaimForm } from "@/modules/hr/components/claim-form";
@@ -19,8 +20,6 @@ function statusNote(status: string): string | null {
       return "Queued for payroll";
     case "paid":
       return "Paid in your payslip";
-    case "rejected":
-      return "Declined by HR";
     default:
       return null;
   }
@@ -28,16 +27,25 @@ function statusNote(status: string): string | null {
 
 export default function ClaimsPage() {
   const { data: claims, isLoading, isError } = useReimbursements();
-  const [showAll, setShowAll] = useState(false);
+  const [declined, setDeclined] = useState<Reimbursement | null>(null);
 
   const all = claims ?? [];
-  const rows = showAll ? all : all.slice(0, 5);
 
   const columns: Column<Reimbursement>[] = [
     { header: "Category", cell: (c) => categoryLabel(c.category) },
     {
       header: "Description",
       cell: (c) => {
+        if (c.status === "rejected") {
+          return (
+            <div>
+              <p className="font-medium text-foreground">{c.description}</p>
+              <p className="text-caption text-danger">
+                {formatDate(c.created_at)} · Tap to see why
+              </p>
+            </div>
+          );
+        }
         const note = statusNote(c.status);
         return (
           <div>
@@ -73,25 +81,28 @@ export default function ClaimsPage() {
             <>
               <DataTable
                 columns={columns}
-                rows={rows}
+                rows={all}
                 rowKey={(c) => c.id}
+                pageSize={6}
+                pageSizeOptions={[6, 12, 24, 48]}
+                onRowClick={(c) => {
+                  if (c.status === "rejected") setDeclined(c);
+                }}
+                rowClassName={(c) => (c.status === "rejected" ? "cursor-pointer" : undefined)}
                 empty="No claims yet. File your first one."
               />
-              {all.length > 5 && (
-                <div className="mt-4 border-t border-border pt-3 text-center">
-                  <button
-                    type="button"
-                    onClick={() => setShowAll((s) => !s)}
-                    className="text-sm font-semibold text-brand hover:underline"
-                  >
-                    {showAll ? "Show less" : "View full history"}
-                  </button>
-                </div>
-              )}
             </>
           )}
         </div>
       </div>
+
+      <RejectionReasonDialog
+        open={!!declined}
+        onOpenChange={(o) => !o && setDeclined(null)}
+        title="Claim declined"
+        subject={declined ? declined.description : undefined}
+        reason={declined?.review_note ?? null}
+      />
     </div>
   );
 }

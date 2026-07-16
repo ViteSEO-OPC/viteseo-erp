@@ -13,18 +13,18 @@ export function LeaveBalanceCard({ balance }: { balance: LeaveBalance }) {
       </p>
       <p className="mt-2">
         <span className="text-h2 font-bold text-foreground">
-          {remaining.toFixed(1)}
+          {remaining}
         </span>
         <span className="text-sm text-muted-foreground">
           {" "}
-          / {entitled.toFixed(1)} days
+          / {entitled} days
         </span>
       </p>
       <ProgressBar percent={pct} className="mt-3" />
       <div className="mt-2 flex justify-between text-caption">
         <span className="font-medium text-brand">{Math.round(pct)}% Remaining</span>
         <span className="text-muted-foreground">
-          {balance.used_days.toFixed(1)} used
+          {balance.used_days} used
         </span>
       </div>
     </div>

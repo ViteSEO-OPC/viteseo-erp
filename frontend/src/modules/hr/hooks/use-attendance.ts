@@ -73,11 +73,12 @@ export function useAttendanceSummary(date?: string) {
   });
 }
 
-// A specific employee's violations (for the flag detail dialog).
-export function useViolations(employeeId: number | null) {
+// A specific employee's violations for a given month (for the flag detail dialog).
+// `month` is 'YYYY-MM'; omitting it returns all months (unused by the dialog now).
+export function useViolations(employeeId: number | null, month?: string) {
   return useQuery({
-    queryKey: ["hr", "violations", employeeId ?? "none"],
-    queryFn: () => getViolations(employeeId as number),
+    queryKey: ["hr", "violations", employeeId ?? "none", month ?? "all"],
+    queryFn: () => getViolations(employeeId as number, month),
     enabled: employeeId != null,
   });
 }

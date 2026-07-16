@@ -47,17 +47,18 @@ export interface PayrollRun {
   breakdown?: PayrollBreakdownRow[];
 }
 
-// Employee payslip HISTORY row — periods + request state only, NO amounts. Figures
-// are served by the gated detail (Payslip) once an approved request unlocks them.
-export type PayslipRequestStatus = "none" | "pending" | "approved" | "rejected";
+// Employee payslip HISTORY row — periods only, NO amounts. `unlocked` = viewable once
+// the payroll run is finalized (no request needed). `hardcopy_status` is the state of
+// any signed hard-copy request for the period. Figures come from the Payslip detail.
+export type HardcopyStatus = "none" | "pending" | "approved" | "rejected";
 
 export interface PayslipSummary {
   id: number;
   cycle_start: string;
   cycle_end: string;
   status: string;
-  request_status: PayslipRequestStatus;
   unlocked: boolean;
+  hardcopy_status: HardcopyStatus;
 }
 
 export interface Payslip {

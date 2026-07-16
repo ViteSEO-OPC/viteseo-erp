@@ -40,13 +40,23 @@ class PayrollInquiryController extends Controller
         return PayrollInquiryResource::make($this->service->progress($payrollInquiry))->response();
     }
 
-    // POST /hr/payroll-inquiries/{payrollInquiry}/resolve — mark done (+ note).
+    // POST /hr/payroll-inquiries/{payrollInquiry}/resolve — mark done. HR must explain
+    // how it was resolved and may attach proof files (images/PDF/Word).
     public function resolve(Request $request, PayrollInquiry $payrollInquiry): JsonResponse
     {
-        $data = $request->validate(['note' => ['nullable', 'string', 'max:1000']]);
+        $data = $request->validate([
+            'note' => ['required', 'string', 'max:2000'],
+            'attachments' => ['nullable', 'array', 'max:10'],
+            'attachments.*' => ['file', 'max:5120', 'mimes:jpg,jpeg,png,webp,pdf,doc,docx'],
+        ]);
 
         return PayrollInquiryResource::make(
-            $this->service->resolve($payrollInquiry, $request->user(), $data['note'] ?? null),
+            $this->service->resolve(
+                $payrollInquiry,
+                $request->user(),
+                $data['note'],
+                $request->file('attachments', []),
+            ),
         )->response();
     }
 }

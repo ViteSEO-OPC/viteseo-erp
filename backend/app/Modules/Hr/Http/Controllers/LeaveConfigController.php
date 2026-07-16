@@ -90,7 +90,7 @@ class LeaveConfigController extends Controller
     {
         $data = $request->validate([
             'leave_type_id' => ['required', 'integer', 'exists:hr_leave_types,id'],
-            'entitled_days' => ['required', 'numeric', 'min:0', 'max:365'],
+            'entitled_days' => ['required', 'integer', 'min:0', 'max:365'],
         ]);
 
         $balance = $this->service->upsertBalance($employee, $data);

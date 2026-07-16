@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { StatusFilter, type StatusFilterOption } from "@/core/components/status-filter";
 
 export interface Column<T> {
   /** Column header (rendered uppercase, gray). */
@@ -14,6 +15,45 @@ export interface Column<T> {
 }
 
 const DEFAULT_PAGE_SIZES = [10, 25, 50, 100];
+
+/** "in_progress" → "In Progress". Used for auto-generated status-filter labels. */
+function humanize(s: string): string {
+  return s.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** A row's `status`, if it has a string one — the signal that auto-filtering applies. */
+function rowStatus(row: unknown): string | undefined {
+  if (row && typeof row === "object") {
+    const s = (row as { status?: unknown }).status;
+    if (typeof s === "string") return s;
+  }
+  return undefined;
+}
+
+/**
+ * Default searchable text when a caller doesn't supply `getSearchText`: every
+ * top-level primitive value on the row plus one level into nested objects (so
+ * e.g. `employee.name`, `leave_type.name` are searchable). Callers with a privacy
+ * rule (e.g. anonymous concerns) MUST pass an explicit getSearchText instead.
+ */
+function autoSearchText(row: unknown): string {
+  if (row == null || typeof row !== "object") return String(row ?? "");
+  const parts: string[] = [];
+  for (const val of Object.values(row as Record<string, unknown>)) {
+    if (val == null) continue;
+    const t = typeof val;
+    if (t === "string" || t === "number" || t === "boolean") {
+      parts.push(String(val));
+    } else if (t === "object") {
+      for (const nested of Object.values(val as Record<string, unknown>)) {
+        if (nested == null) continue;
+        const nt = typeof nested;
+        if (nt === "string" || nt === "number") parts.push(String(nested));
+      }
+    }
+  }
+  return parts.join(" ");
+}
 
 /**
  * Styled list table per the Style Guide: uppercase gray column headers (13px),
@@ -34,6 +74,11 @@ export function DataTable<T>({
   title,
   titleRight,
   needsAction,
+  searchable = true,
+  getSearchText,
+  searchPlaceholder = "Search…",
+  filterable = true,
+  toolbar,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -58,18 +103,72 @@ export function DataTable<T>({
    * before already-decided ones, without disturbing the order within each group.
    */
   needsAction?: (row: T) => boolean;
+  /** Search box on by default. Set false to hide it for this table. */
+  searchable?: boolean;
+  /**
+   * Custom searchable text per row. Defaults to every visible field on the row
+   * (see autoSearchText). Pass this when a field must NOT be searchable — e.g.
+   * never expose an anonymous submitter's identity.
+   */
+  getSearchText?: (row: T) => string;
+  /** Placeholder for the search box. */
+  searchPlaceholder?: string;
+  /**
+   * Status filter on by default when rows have a string `status` field (options
+   * derived from the data). Set false to hide it, or pass an explicit `toolbar`
+   * to supply your own (curated labels, etc.).
+   */
+  filterable?: boolean;
+  /** Controls rendered next to the search box; overrides the auto status filter. */
+  toolbar?: React.ReactNode;
 }) {
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(pageSize);
+  const [query, setQuery] = useState("");
+  const [statusValue, setStatusValue] = useState("all");
+
+  // Auto status filter: only when enabled, no explicit toolbar, and rows carry a
+  // string `status`. Options are the distinct statuses in first-seen order.
+  const autoStatus = filterable && !toolbar;
+  const autoStatusOptions = useMemo<StatusFilterOption[]>(() => {
+    if (!autoStatus) return [];
+    const seen = new Set<string>();
+    const opts: StatusFilterOption[] = [{ value: "all", label: "All" }];
+    for (const row of rows) {
+      const s = rowStatus(row);
+      if (s && !seen.has(s)) {
+        seen.add(s);
+        opts.push({ value: s, label: humanize(s) });
+      }
+    }
+    return opts.length > 1 ? opts : [];
+  }, [autoStatus, rows]);
+  const showStatusFilter = autoStatusOptions.length > 1;
+
+  const statusFilteredRows = useMemo(() => {
+    if (!showStatusFilter || statusValue === "all") return rows;
+    return rows.filter((row) => rowStatus(row) === statusValue);
+  }, [rows, showStatusFilter, statusValue]);
+
+  // Text search: explicit getSearchText, else every visible field (autoSearchText).
+  const searchText = useMemo(
+    () => (searchable ? getSearchText ?? ((row: T) => autoSearchText(row)) : undefined),
+    [searchable, getSearchText],
+  );
+  const searchedRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!searchText || !q) return statusFilteredRows;
+    return statusFilteredRows.filter((row) => searchText(row).toLowerCase().includes(q));
+  }, [statusFilteredRows, searchText, query]);
 
   // Float rows that still need action to the top (stable partition).
   const orderedRows = useMemo(() => {
-    if (!needsAction) return rows;
+    if (!needsAction) return searchedRows;
     const need: T[] = [];
     const rest: T[] = [];
-    for (const row of rows) (needsAction(row) ? need : rest).push(row);
-    return need.length && rest.length ? [...need, ...rest] : rows;
-  }, [rows, needsAction]);
+    for (const row of searchedRows) (needsAction(row) ? need : rest).push(row);
+    return need.length && rest.length ? [...need, ...rest] : searchedRows;
+  }, [searchedRows, needsAction]);
 
   // Reset to page 1 whenever the row set or page size changes.
   const totalRows = orderedRows.length;
@@ -105,6 +204,34 @@ export function DataTable<T>({
         </div>
       )}
 
+      {(searchText || toolbar || showStatusFilter) && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          {searchText ? (
+            <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+                placeholder={searchPlaceholder}
+                className="h-8 w-full rounded-lg border border-input bg-transparent pl-8 pr-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              />
+            </div>
+          ) : (
+            <span />
+          )}
+          {toolbar ? (
+            <div className="flex flex-wrap items-center gap-2">{toolbar}</div>
+          ) : showStatusFilter ? (
+            <StatusFilter
+              options={autoStatusOptions}
+              value={statusValue}
+              onChange={(v) => { setStatusValue(v); setPage(1); }}
+            />
+          ) : null}
+        </div>
+      )}
+
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-left">
           <thead>
@@ -130,7 +257,7 @@ export function DataTable<T>({
                   colSpan={columns.length}
                   className="px-4 py-10 text-center text-sm text-muted-foreground"
                 >
-                  {empty}
+                  {query.trim() || statusValue !== "all" ? "No matches." : empty}
                 </td>
               </tr>
             ) : (

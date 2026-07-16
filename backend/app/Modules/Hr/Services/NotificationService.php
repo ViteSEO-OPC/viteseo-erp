@@ -24,14 +24,14 @@ use Illuminate\Support\Collection;
  */
 class NotificationService
 {
-    public function forUser(User $user): array
+    public function forUser(User $user, int $limit = 20, int $offset = 0): array
     {
         return $user->hasAnyRole(['hr_officer', 'super_admin'])
-            ? $this->forHr()
+            ? $this->forHr($limit, $offset)
             : $this->forEmployee($user);
     }
 
-    private function forHr(): array
+    private function forHr(int $limit, int $offset): array
     {
         $items = new Collection();
 
@@ -42,7 +42,7 @@ class NotificationService
                 'id' => "leave-{$l->id}",
                 'title' => "Leave request · {$l->employee->user?->name}",
                 'subtitle' => "{$l->leaveType->name} · {$l->days} day(s)",
-                'href' => '/hr/requests/leave',
+                'href' => '/teamora/requests/leave',
                 'at' => $l->created_at,
             ]);
         }
@@ -54,7 +54,7 @@ class NotificationService
                 'id' => "halfday-{$h->id}",
                 'title' => "Half-day request · {$h->employee->user?->name}",
                 'subtitle' => "{$h->work_date->format('M j')} · {$h->period} (unpaid)",
-                'href' => '/hr/requests/leave',
+                'href' => '/teamora/requests/leave',
                 'at' => $h->created_at,
             ]);
         }
@@ -66,7 +66,7 @@ class NotificationService
                 'id' => "claim-{$r->id}",
                 'title' => "Reimbursement · {$r->employee->user?->name}",
                 'subtitle' => ucfirst($r->category) . ' · ₱' . number_format((float) $r->amount, 0),
-                'href' => '/hr/finance/reimbursement',
+                'href' => '/teamora/finance/reimbursement',
                 'at' => $r->created_at,
             ]);
         }
@@ -78,7 +78,7 @@ class NotificationService
                 'id' => "doc-{$d->id}",
                 'title' => "Document request · {$d->employee->user?->name}",
                 'subtitle' => ucfirst($d->type) . ' record',
-                'href' => '/hr/requests/document',
+                'href' => '/teamora/requests/document',
                 'at' => $d->created_at,
             ]);
         }
@@ -90,7 +90,7 @@ class NotificationService
                 'id' => "change-{$c->id}",
                 'title' => "Change request · {$c->employee->user?->name}",
                 'subtitle' => ucfirst(str_replace('_', ' ', $c->field)) . ' update',
-                'href' => '/hr/requests/document',
+                'href' => '/teamora/requests/document',
                 'at' => $c->created_at,
             ]);
         }
@@ -102,7 +102,7 @@ class NotificationService
                 'id' => "payslipreq-{$p->id}",
                 'title' => "Payslip request · {$p->employee->user?->name}",
                 'subtitle' => 'Needs approval',
-                'href' => '/hr/requests/payroll',
+                'href' => '/teamora/requests/payroll',
                 'at' => $p->created_at,
             ]);
         }
@@ -114,7 +114,7 @@ class NotificationService
                 'id' => "inquiry-{$q->id}",
                 'title' => "Payroll inquiry · {$q->employee->user?->name}",
                 'subtitle' => 'High priority',
-                'href' => '/hr/requests/payroll',
+                'href' => '/teamora/requests/payroll',
                 'at' => $q->created_at,
             ]);
         }
@@ -127,16 +127,19 @@ class NotificationService
                 'id' => "concern-{$c->id}",
                 'title' => $c->is_anonymous ? 'Anonymous concern' : "Concern · {$c->employee->user?->name}",
                 'subtitle' => ucfirst($c->category) . " · {$c->reference_no}",
-                'href' => '/hr/requests/concern',
+                'href' => '/teamora/requests/concern',
                 'at' => $c->submitted_at,
             ]);
         }
 
         $sorted = $items->sortByDesc('at')->values();
+        $total = $sorted->count();
+        $paged = $sorted->slice($offset, $limit)->values();
 
         return [
-            'total' => $sorted->count(),
-            'items' => $sorted->all(),
+            'total' => $total,
+            'items' => $paged->all(),
+            'has_more' => ($offset + $limit) < $total,
             'nav' => [
                 '/hr/requests/leave' => $pendingLeave->count() + $pendingHalfDay->count(),
                 '/hr/finance/reimbursement' => $pendingReimb->count(),
@@ -162,7 +165,7 @@ class NotificationService
                 'id' => "leave-{$l->id}",
                 'title' => "Leave {$l->status}",
                 'subtitle' => "{$l->leaveType->name} · {$l->days} day(s)",
-                'href' => '/time-off',
+                'href' => '/teamora/time-off',
                 'at' => $l->reviewed_at,
             ]));
 
@@ -172,7 +175,7 @@ class NotificationService
                 'id' => "halfday-{$h->id}",
                 'title' => "Half-day {$h->status}",
                 'subtitle' => "{$h->work_date->format('M j')} · {$h->period}",
-                'href' => '/time-off',
+                'href' => '/teamora/time-off',
                 'at' => $h->reviewed_at,
             ]));
 
@@ -182,7 +185,7 @@ class NotificationService
                 'id' => "claim-{$r->id}",
                 'title' => "Claim {$r->status}",
                 'subtitle' => ucfirst($r->category) . ' · ₱' . number_format((float) $r->amount, 0),
-                'href' => '/claims',
+                'href' => '/teamora/claims',
                 'at' => $r->reviewed_at,
             ]));
 
@@ -192,7 +195,7 @@ class NotificationService
                 'id' => "doc-{$d->id}",
                 'title' => "Document request {$d->status}",
                 'subtitle' => ucfirst($d->type) . ' record',
-                'href' => '/profile',
+                'href' => '/teamora/profile',
                 'at' => $d->reviewed_at,
             ]));
 
@@ -202,7 +205,7 @@ class NotificationService
                 'id' => "change-{$c->id}",
                 'title' => "Change request {$c->status}",
                 'subtitle' => ucfirst(str_replace('_', ' ', $c->field)) . ' update',
-                'href' => '/profile',
+                'href' => '/teamora/profile',
                 'at' => $c->reviewed_at,
             ]));
 
@@ -212,7 +215,7 @@ class NotificationService
                 'id' => "payslipreq-{$p->id}",
                 'title' => "Payslip request {$p->status}",
                 'subtitle' => 'Payslip copy',
-                'href' => '/payslips',
+                'href' => '/teamora/payslips',
                 'at' => $p->reviewed_at,
             ]));
 
@@ -222,7 +225,7 @@ class NotificationService
                 'id' => "inquiry-{$q->id}",
                 'title' => 'Payroll inquiry resolved',
                 'subtitle' => 'HR responded',
-                'href' => '/payslips',
+                'href' => '/teamora/payslips',
                 'at' => $q->resolved_at,
             ]));
 
@@ -235,7 +238,7 @@ class NotificationService
                 'id' => "meeting-{$m->id}",
                 'title' => 'Meeting invitation',
                 'subtitle' => $m->concern ? "Re: {$m->concern->reference_no}" : 'HR scheduled a meeting',
-                'href' => '/concerns',
+                'href' => '/teamora/concerns',
                 'at' => $m->created_at,
             ]));
 
@@ -245,7 +248,7 @@ class NotificationService
                 'id' => "concern-{$c->id}",
                 'title' => 'Concern resolved',
                 'subtitle' => $c->reference_no,
-                'href' => '/concerns',
+                'href' => '/teamora/concerns',
                 'at' => $c->resolved_at,
             ]));
 
@@ -254,6 +257,7 @@ class NotificationService
         return [
             'total' => $sorted->count(),
             'items' => $sorted->all(),
+            'has_more' => false,
             'nav' => [], // employees have no per-page action badges
         ];
     }

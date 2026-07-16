@@ -19,7 +19,8 @@ class AdjustAttendanceRequest extends FormRequest
         return [
             'employee_id' => ['required', 'integer', 'exists:hr_employees,id'],
             'work_date' => ['required', 'date'],
-            'status' => ['required', 'in:present,late,absent'],
+            // Status is derived server-side from the times (see AttendanceService::adjust),
+            // never accepted from the client.
             'time_in' => ['nullable', 'date_format:H:i'],
             'time_out' => ['nullable', 'date_format:H:i'],
             'note' => ['nullable', 'string', 'max:255'],

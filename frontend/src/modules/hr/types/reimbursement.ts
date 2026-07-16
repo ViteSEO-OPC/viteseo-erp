@@ -19,6 +19,7 @@ export interface Reimbursement {
   description: string;
   receipt_url: string | null;
   status: ReimbursementStatus;
+  review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
   created_at: string;

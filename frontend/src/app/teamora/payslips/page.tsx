@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Download, FileText, Lock, MessageCircleQuestion, Plus } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Download, FileSignature, MessageCircleQuestion, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -24,9 +24,12 @@ import { downloadMyPayslipPdf } from "@/modules/hr/api/payroll";
 import {
   useCreatePayslipRequest,
   useMyPayrollInquiries,
+  useMyPayslipRequests,
 } from "@/modules/hr/hooks/use-requests";
 import { PayrollInquiryDialog } from "@/modules/hr/components/payroll-inquiry-dialog";
+import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
 import type { PayslipSummary } from "@/modules/hr/types/payroll";
+import type { PayslipRequest } from "@/modules/hr/types/request";
 
 function cycleLabel(start: string, end: string) {
   return `${formatDate(start)} – ${formatDate(end)}`;
@@ -36,17 +39,24 @@ export default function PayslipsPage() {
   const { data: payslips, isLoading } = useMyPayslips();
   const list = payslips ?? [];
 
-  // Only APPROVED payslips are viewable; default the selection to the newest one.
-  const unlocked = list.filter((p) => p.unlocked);
+  // A payslip is viewable once its run is finalized; default to the newest viewable one.
+  const viewable = list.filter((p) => p.unlocked);
   const [chosenId, setChosenId] = useState<number | undefined>();
-  const selectedId = chosenId ?? unlocked[0]?.id;
+  const selectedId = chosenId ?? viewable[0]?.id;
   const selected = list.find((p) => p.id === selectedId);
-  // Never fetch the gated detail for a locked payslip (the API 403s it).
+  // Only fetch figures for a viewable payslip (a still-processing run 403s).
   const { data: detail } = usePayslip(selected?.unlocked ? selectedId : undefined);
 
   const [copyId, setCopyId] = useState<number | null>(null);
   const [inquiryOpen, setInquiryOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  // A declined hard-copy request for the selected payslip, so the employee can see why.
+  const { data: hardcopyReqs } = useMyPayslipRequests();
+  const [declinedCopy, setDeclinedCopy] = useState<PayslipRequest | null>(null);
+  const rejectedCopy = selected
+    ? (hardcopyReqs ?? []).find((r) => r.payslip_id === selected.id && r.status === "rejected")
+    : undefined;
 
   async function onDownloadPdf(id: number) {
     setPdfBusy(true);
@@ -59,22 +69,27 @@ export default function PayslipsPage() {
     }
   }
   const { data: inquiries } = useMyPayrollInquiries();
+  const [inqPage, setInqPage] = useState(1);
+  const [inqSize, setInqSize] = useState(5);
+
+  const inquiryList = inquiries ?? [];
+  const inqPageSizes = [5, 10, 20, 50];
+  const inqTotalPages = Math.max(1, Math.ceil(inquiryList.length / inqSize));
+  const inqSafePage = Math.min(inqPage, inqTotalPages);
+  const pagedInquiries = useMemo(
+    () => inquiryList.slice((inqSafePage - 1) * inqSize, inqSafePage * inqSize),
+    [inquiryList, inqSafePage, inqSize],
+  );
 
   return (
     <div className="p-8">
       <PageHeader
         title="Payslips"
-        subtitle="Request a payslip; once HR approves it you can view and download it here."
-        actions={
-          <Button onClick={() => setInquiryOpen(true)}>
-            <Plus />
-            Request Inquiry
-          </Button>
-        }
+        subtitle="Your payslips appear here once each pay run is finalized. Open one to raise an inquiry or request a signed hard copy."
       />
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[340px_1fr]">
-        {/* History — periods only, no amounts until unlocked */}
+        {/* History — pay periods; finalized ones are viewable */}
         <div className="rounded-card border border-border bg-card p-4">
           <h2 className="mb-3 px-2 text-h3 font-bold text-foreground">History</h2>
           {isLoading ? (
@@ -89,7 +104,6 @@ export default function PayslipsPage() {
                   payslip={p}
                   selected={p.id === selectedId}
                   onView={() => setChosenId(p.id)}
-                  onRequest={() => setCopyId(p.id)}
                 />
               ))}
             </div>
@@ -108,16 +122,22 @@ export default function PayslipsPage() {
                   {detail.payslip.employee.name} · Viteseo Inc.
                 </p>
               </div>
-              <Button
-                className="print-hide"
-                variant="outline"
-                size="sm"
-                disabled={pdfBusy}
-                onClick={() => onDownloadPdf(detail.payslip.id)}
-              >
-                <Download />
-                {pdfBusy ? "Downloading…" : "Download PDF"}
-              </Button>
+              <div className="print-hide flex items-center gap-2">
+                <HardCopyControl
+                  status={selected?.hardcopy_status ?? "none"}
+                  onRequest={() => setCopyId(detail.payslip.id)}
+                  onViewReason={rejectedCopy ? () => setDeclinedCopy(rejectedCopy) : undefined}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={pdfBusy}
+                  onClick={() => onDownloadPdf(detail.payslip.id)}
+                >
+                  <Download />
+                  {pdfBusy ? "Downloading…" : "Download PDF"}
+                </Button>
+              </div>
             </div>
 
             <Section title="Earnings">
@@ -189,21 +209,20 @@ export default function PayslipsPage() {
             </div>
           </div>
         ) : (
-          <LockedPanel
+          <EmptyPanel
             hasAny={list.length > 0}
-            hasUnlocked={unlocked.length > 0}
-            selected={selected}
-            onRequest={selected ? () => setCopyId(selected.id) : undefined}
+            hasViewable={viewable.length > 0}
+            selectedProcessing={!!selected && !selected.unlocked}
           />
         )}
       </div>
 
       {/* My payroll inquiries + HR replies (raised via Request Inquiry above) */}
-      {(inquiries ?? []).length > 0 && (
+      {inquiryList.length > 0 && (
         <div className="mt-6 rounded-card border border-border bg-card p-6">
           <h2 className="mb-3 text-h3 font-bold text-foreground">My Inquiries</h2>
           <div className="divide-y divide-border">
-            {(inquiries ?? []).map((q) => (
+            {pagedInquiries.map((q) => (
               <div key={q.id} className="py-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -225,6 +244,49 @@ export default function PayslipsPage() {
               </div>
             ))}
           </div>
+          {inquiryList.length > inqSize && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 -mx-6 -mb-6">
+              <div className="flex items-center gap-2 text-caption text-muted-foreground">
+                <span>Rows per page</span>
+                <select
+                  value={inqSize}
+                  onChange={(e) => { setInqSize(Number(e.target.value)); setInqPage(1); }}
+                  className="h-7 rounded-md border border-input bg-card px-1.5 text-caption text-foreground outline-none focus-visible:border-ring"
+                >
+                  {inqPageSizes.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+                <span className="hidden sm:inline">
+                  · Showing {(inqSafePage - 1) * inqSize + 1}–{Math.min(inqSafePage * inqSize, inquiryList.length)} of {inquiryList.length}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={inqSafePage <= 1}
+                  onClick={() => setInqPage((p) => Math.max(1, p - 1))}
+                  className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="size-4" />
+                </button>
+                <span className="px-2 text-caption text-foreground">
+                  Page {inqSafePage} of {inqTotalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={inqSafePage >= inqTotalPages}
+                  onClick={() => setInqPage((p) => Math.min(inqTotalPages, p + 1))}
+                  className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="size-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -235,8 +297,13 @@ export default function PayslipsPage() {
       <PayrollInquiryDialog
         open={inquiryOpen}
         onOpenChange={setInquiryOpen}
-        periods={list}
-        defaultPayslipId={selected?.unlocked ? selected.id : undefined}
+        payslip={selected?.unlocked ? selected : undefined}
+      />
+      <RejectionReasonDialog
+        open={!!declinedCopy}
+        onOpenChange={(o) => !o && setDeclinedCopy(null)}
+        title="Hard-copy request declined"
+        reason={declinedCopy?.review_note ?? null}
       />
     </div>
   );
@@ -246,12 +313,10 @@ function PayslipRow({
   payslip,
   selected,
   onView,
-  onRequest,
 }: {
   payslip: PayslipSummary;
   selected: boolean;
   onView: () => void;
-  onRequest: () => void;
 }) {
   const label = cycleLabel(payslip.cycle_start, payslip.cycle_end);
   const Wrapper = payslip.unlocked ? "button" : "div";
@@ -269,40 +334,81 @@ function PayslipRow({
       )}
     >
       <div className="flex items-center gap-2">
-        {!payslip.unlocked && <Lock className="size-3.5 text-muted-foreground" />}
-        <p className="text-sm font-medium text-foreground">{label}</p>
+        {!payslip.unlocked && <Clock className="size-3.5 text-muted-foreground" />}
+        <p className={cn("text-sm font-medium", payslip.unlocked ? "text-foreground" : "text-muted-foreground")}>
+          {label}
+        </p>
       </div>
 
       {payslip.unlocked ? (
-        <StatusBadge status="approved" label="Approved" />
-      ) : payslip.request_status === "pending" ? (
-        <span className="text-caption font-medium text-warning">Pending</span>
+        // A pending/approved signed-hard-copy request shows a small hint here.
+        payslip.hardcopy_status === "pending" ? (
+          <span className="text-caption font-medium text-warning">Copy pending</span>
+        ) : payslip.hardcopy_status === "approved" ? (
+          <span className="text-caption font-medium text-success">Copy approved</span>
+        ) : (
+          <StatusBadge status="approved" label="Available" />
+        )
       ) : (
-        <Button
-          size="xs"
-          variant="outline"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRequest();
-          }}
-        >
-          {payslip.request_status === "rejected" ? "Request again" : "Request"}
-        </Button>
+        <span className="text-caption font-medium text-muted-foreground">Processing</span>
       )}
     </Wrapper>
   );
 }
 
-function LockedPanel({
-  hasAny,
-  hasUnlocked,
-  selected,
+/** Signed-hard-copy request control shown on the payslip detail. */
+function HardCopyControl({
+  status,
   onRequest,
+  onViewReason,
+}: {
+  status: PayslipSummary["hardcopy_status"];
+  onRequest: () => void;
+  onViewReason?: () => void;
+}) {
+  if (status === "pending") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md bg-warning-subtle px-2.5 py-1.5 text-caption font-medium text-warning">
+        <Clock className="size-3.5" />
+        Hard copy requested
+      </span>
+    );
+  }
+  if (status === "approved") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md bg-success-subtle px-2.5 py-1.5 text-caption font-medium text-success">
+        <FileSignature className="size-3.5" />
+        Hard copy approved
+      </span>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      {status === "rejected" && onViewReason && (
+        <button
+          type="button"
+          onClick={onViewReason}
+          className="text-caption font-medium text-danger hover:underline"
+        >
+          Tap to see why
+        </button>
+      )}
+      <Button variant="outline" size="sm" onClick={onRequest}>
+        <FileSignature />
+        {status === "rejected" ? "Request hard copy again" : "Request signed hard copy"}
+      </Button>
+    </div>
+  );
+}
+
+function EmptyPanel({
+  hasAny,
+  hasViewable,
+  selectedProcessing,
 }: {
   hasAny: boolean;
-  hasUnlocked: boolean;
-  selected?: PayslipSummary;
-  onRequest?: () => void;
+  hasViewable: boolean;
+  selectedProcessing: boolean;
 }) {
   if (!hasAny) {
     return (
@@ -312,25 +418,19 @@ function LockedPanel({
     );
   }
 
-  const canRequest =
-    selected && !selected.unlocked && selected.request_status !== "pending" && onRequest;
-
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-border bg-card py-16 text-center">
-      <Lock className="size-8 text-muted-foreground" />
+      <Clock className="size-8 text-muted-foreground" />
       <p className="text-sm font-medium text-foreground">
-        {hasUnlocked ? "Select an approved payslip to view it." : "Your payslips are locked."}
+        {selectedProcessing
+          ? "This payslip is still being finalized."
+          : hasViewable
+            ? "Select a payslip to view it."
+            : "Your payslips will appear here once each pay run is finalized."}
       </p>
       <p className="max-w-sm text-caption text-muted-foreground">
-        Payslips stay private until you request one and HR approves it. Use the{" "}
-        <span className="font-medium">Request</span> button next to a period.
+        Payslips become available automatically after the pay run is completed — no request needed.
       </p>
-      {canRequest && (
-        <Button variant="outline" size="sm" onClick={onRequest}>
-          <FileText />
-          Request this payslip
-        </Button>
-      )}
     </div>
   );
 }
@@ -349,7 +449,7 @@ function PayslipCopyDialog({
     if (!text.trim() || !payslipId) return;
     try {
       await copyMut.mutateAsync({ reason: text.trim(), payslip_id: payslipId });
-      toast.success("Payslip request submitted", "HR will review it.");
+      toast.success("Hard-copy request submitted", "HR will prepare a signed copy.");
       setText("");
       onOpenChange(false);
     } catch (err) {
@@ -367,17 +467,17 @@ function PayslipCopyDialog({
     <Dialog open={payslipId != null} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Request a payslip copy</DialogTitle>
+          <DialogTitle>Request a signed hard copy</DialogTitle>
           <DialogDescription>
-            Tell HR why you need this payslip (required). They&apos;ll approve it before
-            you can view it.
+            You can already view and download this payslip. Use this only to request a
+            printed, signed copy from HR — tell them why you need it (required).
           </DialogDescription>
         </DialogHeader>
         <textarea
           rows={3}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="e.g. for a bank loan application"
+          placeholder="e.g. signed copy for a bank loan application"
           className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring"
         />
         <DialogFooter>

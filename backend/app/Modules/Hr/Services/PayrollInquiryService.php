@@ -55,13 +55,29 @@ class PayrollInquiryService
         return $inquiry->load(['employee.user', 'payslip.payrollRun']);
     }
 
-    public function resolve(PayrollInquiry $inquiry, User $resolver, ?string $note = null): PayrollInquiry
+    /**
+     * Resolve an inquiry. HR must say how it was resolved (`$note`) and may attach
+     * proof files. Each file is stored on the public disk; we keep its path (to build
+     * a URL) and original name (to display).
+     *
+     * @param  array<int, UploadedFile>  $files
+     */
+    public function resolve(PayrollInquiry $inquiry, User $resolver, string $note, array $files = []): PayrollInquiry
     {
         $this->assertStatus($inquiry, ['pending', 'in_progress'], 'resolve');
+
+        $attachments = [];
+        foreach ($files as $file) {
+            $attachments[] = [
+                'path' => $file->store('payroll-inquiry-resolutions', 'public'),
+                'name' => $file->getClientOriginalName(),
+            ];
+        }
 
         $inquiry->update([
             'status' => 'done',
             'resolution_note' => $note,
+            'resolution_attachments' => $attachments ?: null,
             'resolved_by' => $resolver->id,
             'resolved_at' => now(),
         ]);

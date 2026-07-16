@@ -126,8 +126,8 @@ export function useCreatePayslipRequest() {
     mutationFn: createPayslipRequest,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: MY_PAYSLIP_REQS_KEY });
-      // The payslip history row reflects request_status — refresh it so the
-      // requested period flips to "Pending" right away.
+      // The payslip history row reflects hardcopy_status — refresh it so the
+      // requested period flips to "Copy pending" right away.
       qc.invalidateQueries({ queryKey: ["hr", "me", "payslips"] });
     },
   });
@@ -178,7 +178,8 @@ export function useProgressPayrollInquiry() {
 export function useResolvePayrollInquiry() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, note }: { id: number; note?: string }) => resolvePayrollInquiry(id, note),
+    mutationFn: ({ id, note, files }: { id: number; note: string; files?: File[] }) =>
+      resolvePayrollInquiry(id, note, files),
     onSuccess: () => qc.invalidateQueries({ queryKey: INQUIRIES_KEY }),
   });
 }

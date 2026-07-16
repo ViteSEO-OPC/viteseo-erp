@@ -16,7 +16,7 @@ class LeaveTypeAllotment extends Model
     ];
 
     protected $casts = [
-        'days_per_year' => 'decimal:1',
+        'days_per_year' => 'integer',
     ];
 
     public function leaveType(): BelongsTo

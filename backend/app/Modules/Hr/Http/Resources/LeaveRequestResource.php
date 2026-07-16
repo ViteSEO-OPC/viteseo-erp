@@ -28,7 +28,7 @@ class LeaveRequestResource extends JsonResource
             'end_date' => $this->end_date?->format('Y-m-d'),
             'is_half_day' => $this->is_half_day,
             'half_day_period' => $this->half_day_period,
-            'days' => (float) $this->days,
+            'days' => (int) $this->days,
             'reason' => $this->reason,
             'status' => $this->status,
             'reviewed_at' => $this->reviewed_at,

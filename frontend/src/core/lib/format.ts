@@ -59,6 +59,20 @@ export function formatHm(totalMinutes: number): string {
   return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 }
 
+/**
+ * A late duration in hours + minutes: 75 → "1h 15m", 45 → "45m", 120 → "2h".
+ * 0 or negative → "" (caller decides whether to show anything).
+ */
+export function formatLateDuration(totalMinutes: number): string {
+  const m = Math.max(0, Math.round(totalMinutes));
+  if (m === 0) return "";
+  const h = Math.floor(m / 60);
+  const mins = m % 60;
+  if (h === 0) return `${mins}m`;
+  if (mins === 0) return `${h}h`;
+  return `${h}h ${mins}m`;
+}
+
 /** Compact age since an ISO timestamp — "6h", "3d", "2w" — for "Pending N" labels. */
 export function formatShortAge(iso: string | null | undefined): string {
   if (!iso) return "";

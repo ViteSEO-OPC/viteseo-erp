@@ -14,13 +14,27 @@ class ViolationController extends Controller
 {
     public function __construct(private readonly ViolationService $service) {}
 
-    // GET /hr/violations?employee=
+    // GET /hr/violations?employee=&month=YYYY-MM
     public function index(Request $request): JsonResponse
     {
-        $employeeId = $request->query('employee');
+        $validated = $request->validate([
+            'employee' => ['nullable', 'integer'],
+            'month' => ['nullable', 'regex:/^\d{4}-\d{2}$/'],
+        ]);
+
+        $employeeId = $validated['employee'] ?? null;
+        $month = $validated['month'] ?? null;
+
+        // A specific month → (re)build just that month. No month → build the full
+        // history so the "All time" view has every month's data, not only opened ones.
+        if ($month) {
+            $this->service->recompute($month);
+        } else {
+            $this->service->recomputeHistory();
+        }
 
         return ViolationResource::collection(
-            $this->service->list($employeeId ? (int) $employeeId : null),
+            $this->service->list($employeeId ? (int) $employeeId : null, $month),
         )->response();
     }
 

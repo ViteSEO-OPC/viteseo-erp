@@ -182,17 +182,27 @@ class AttendanceService
             'work_date' => $workDate,
         ]);
 
-        $status = $data['status'];
-
-        if ($status === 'absent') {
+        // Status is DERIVED from the times, never sent by the client: no time-in means
+        // absent; otherwise present vs late is decided against the employee's effective
+        // schedule (start + grace) for that day — the same rule as a live clock-in.
+        if (empty($data['time_in'])) {
             $att->time_in = null;
             $att->time_out = null;
             $att->hours_worked = 0;
+            $att->status = 'absent';
         } else {
-            $att->time_in = ! empty($data['time_in'])
-                ? Carbon::parse("{$workDate} {$data['time_in']}", $tz) : null;
+            // Parse the "HH:MM" as Manila wall-clock, then convert to UTC before
+            // storing — Eloquent formats the Carbon's own wall-clock into the column
+            // WITHOUT converting tz, so a Manila-tz Carbon would be saved 8h off.
+            $day = Carbon::parse($workDate, $tz)->startOfDay();
+            $timeIn = Carbon::parse("{$workDate} {$data['time_in']}", $tz);
+            $att->time_in = $timeIn->copy()->utc();
             $att->time_out = ! empty($data['time_out'])
-                ? Carbon::parse("{$workDate} {$data['time_out']}", $tz) : null;
+                ? Carbon::parse("{$workDate} {$data['time_out']}", $tz)->utc() : null;
+
+            $eff = $this->schedule->effectiveFor($employee, $day);
+            $cutoff = $this->scheduleStart($day, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
+            $att->status = $timeIn->gt($cutoff) ? 'late' : 'present';
 
             if ($att->time_in && $att->time_out) {
                 $gross = ($att->time_out->getTimestamp() - $att->time_in->getTimestamp()) / 60;
@@ -203,7 +213,6 @@ class AttendanceService
             }
         }
 
-        $att->status = $status;
         $att->note = $data['note'] ?? null;
         $att->save();
 
@@ -236,6 +245,7 @@ class AttendanceService
         $tz = config('app.timezone_local');
         $date ??= $this->today();
         $dateCarbon = Carbon::parse($date, $tz)->startOfDay();
+        $isPast = $dateCarbon->lt($this->localNow()->startOfDay());
 
         $employees = Employee::with('workSchedule')->get();
         $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
@@ -272,8 +282,14 @@ class AttendanceService
                 $cat = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)['category'];
                 $s[$cat === 'early' ? 'early_arrivals' : ($cat === 'late' ? 'late_arrivals' : 'on_time')]++;
             } elseif (! $isOnLeave && $eff['is_workday']) {
-                $s['absent']++;
-                $s['not_checked_in']++;
+                // No clock-in on a workday: it's a true absence only once the day has
+                // passed (or HR explicitly marked it absent). During today the employee
+                // can still clock in, so it's "not checked in" — mirrors allForDate().
+                if ($isPast || ($row && $row->status === 'absent')) {
+                    $s['absent']++;
+                } else {
+                    $s['not_checked_in']++;
+                }
             }
         }
 
@@ -331,6 +347,15 @@ class AttendanceService
                     'employee_id' => $emp->id,
                     'name' => $emp->user?->name,
                     'department' => $emp->department?->name,
+                    'hire_date' => $emp->hire_date?->format('Y-m-d'),
+                    'schedule' => [
+                        'name' => $eff['schedule_name'],
+                        'start_time' => $eff['start_time'],
+                        'end_time' => $eff['end_time'],
+                        'grace_minutes' => $eff['grace_minutes'],
+                        'workdays' => $eff['workdays'],
+                        'is_workday' => $eff['is_workday'],
+                    ],
                     'work_date' => $date,
                     'time_in' => $att?->time_in,
                     'time_out' => $att?->time_out,
@@ -342,6 +367,7 @@ class AttendanceService
                     'timing' => $timing,
                     'flag' => $flags[$emp->id] ?? null,
                     'tasks' => $att?->tasks ?? [],
+                    'note' => $att?->note,
                 ];
             })
             ->sortBy('name')

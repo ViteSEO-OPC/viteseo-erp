@@ -19,6 +19,8 @@ This security audit identified **18 vulnerabilities** across the Laravel backend
 **Location:** `backend/.env:28`  
 **Risk:** Database compromise, session forgery
 
+**In plain terms:** The DB password and app key live in `.env`; if that file ever leaks, an attacker gets the keys to your data. *Example:* `.env` is accidentally committed to a public repo and anyone reading it can connect to the database. *(Verified: it is not in git today, so the real risk is low.)*
+
 **Issue:**
 - Database password `Viteseo_App_2026` visible in `.env` file
 - `APP_KEY` exposed - if leaked, allows session/cookie forgery and decryption of encrypted data
@@ -49,6 +51,8 @@ php artisan key:generate
 
 **Location:** `frontend/src/core/auth-context.tsx:60`, `frontend/src/core/api-client.ts:11`  
 **Risk:** Token theft via XSS attacks
+
+**In plain terms:** The login token sits in the browser's `localStorage`, which any script on the page can read — so a malicious script can copy it and reuse it as you. *Example:* an XSS bug runs `localStorage.getItem('token')`, sends it to the attacker, and they call the API as you from their own machine. *(The danger isn't you seeing your own token — it's a remote attacker stealing it.)*
 
 **Issue:**
 ```typescript
@@ -91,6 +95,8 @@ export const getToken = () => authToken;
 **Location:** `backend/routes/api.php:12`  
 **Risk:** Brute-force password attacks
 
+**In plain terms:** Login accepts unlimited attempts, so passwords can be guessed at machine speed. *Example:* a script tries 10,000 passwords a minute against `hr@viteseo.ph` until one works.
+
 **Issue:**
 ```php
 Route::post('login', [AuthController::class, 'login']);  // No throttle
@@ -132,6 +138,8 @@ RateLimiter::for('login', function (Request $request) {
 
 **Location:** `backend/app/Modules/Hr/Services/EmployeeService.php:48`  
 **Risk:** Weak initial passwords, no forced change
+
+**In plain terms:** Every HR-created employee gets the password `password`, with no forced change. *Example:* an attacker logs into a new hire's account with `password` before the employee ever does.
 
 **Issue:**
 ```php
@@ -183,6 +191,8 @@ public function login(LoginRequest $request): JsonResponse
 
 **Location:** Multiple controllers  
 **Risk:** Unauthorized access to other users' data
+
+**In plain terms:** The worry was that changing an ID in a URL could open someone else's record. *Example (why it's OK):* payslip endpoints already verify the record is yours, and "any HR can approve any leave" is intentional and HR-gated — so this is a **false positive**.
 
 **Issues:**
 - `LeaveController::approve/reject` - Any HR officer can approve any leave
@@ -239,6 +249,8 @@ Route::middleware(['auth:sanctum', 'can:view,payslip'])
 
 **Location:** `backend/app/Modules/Hr/Services/ReimbursementService.php:47`  
 **Risk:** Malicious file upload, public file access
+
+**In plain terms:** Uploads were thought to be unchecked and publicly reachable. *Example:* type and size **are** actually validated; the genuine problem is public storage — see **#20**.
 
 **Issue:**
 ```php
@@ -319,6 +331,8 @@ private function scanFile($path): bool
 **Location:** `backend/config/cors.php:21`  
 **Risk:** Production deployment failure, security misconfiguration
 
+**In plain terms:** The API only accepts calls from `localhost`, which must be set per-environment before launch. *Example:* the deployed frontend at `app.viteseo.ph` is blocked until its real origin is configured. *(Deployment concern, not a live exploit.)*
+
 **Issue:**
 ```php
 'allowed_origins' => ['http://localhost:3000'],
@@ -350,6 +364,8 @@ FRONTEND_URL=https://hris.viteseo.ph
 
 **Location:** `backend/.env`, `backend/config/session.php`  
 **Risk:** Token interception, session hijacking
+
+**In plain terms:** Without forced HTTPS, tokens can travel over plain HTTP and be sniffed in transit. *Example:* on public Wi-Fi an attacker reads the token off an unencrypted request. *(Production concern.)*
 
 **Issue:**
 - `SESSION_SECURE_COOKIE` not set
@@ -393,6 +409,8 @@ class SecureHeaders
 **Location:** `backend/.env:4`  
 **Risk:** Information disclosure, stack traces exposed
 
+**In plain terms:** `APP_DEBUG=true` shows full error stack traces, revealing internal file paths and queries. *Example:* a broken request returns a page exposing file paths and SQL (you saw this in our 422 test). *(Turn off in production.)*
+
 **Issue:**
 ```
 APP_DEBUG=true
@@ -424,6 +442,8 @@ public function render($request, Throwable $e)
 
 **Location:** No security headers middleware  
 **Risk:** XSS, clickjacking, MIME sniffing
+
+**In plain terms:** Missing browser security headers make client-side attacks easier. *Example:* the site could be loaded inside an attacker's invisible iframe to hijack clicks (clickjacking). *(Mostly a frontend concern.)*
 
 **Recommended Fixes:**
 ```php
@@ -471,6 +491,8 @@ class SecurityHeaders
 **Location:** `backend/app/Modules/Hr/Services/ReportService.php:54`  
 **Risk:** SQL injection if user input reaches query
 
+**In plain terms:** The worry was user input being pasted into raw SQL. *Example (why it's OK):* every raw query uses fixed strings or bound parameters — no user input reaches SQL, so this is a **false positive**.
+
 **Issue:**
 ```php
 ->selectRaw('hr_departments.name, count(*) as count')
@@ -508,6 +530,8 @@ class ReportService
 **Location:** `backend/.env:32`  
 **Risk:** Sensitive data exposure if database compromised
 
+**In plain terms:** Session data isn't encrypted at rest. *Example:* not applicable in practice — the app authenticates with tokens, not sessions, and stores nothing sensitive in them.
+
 **Issue:**
 ```
 SESSION_ENCRYPT=false
@@ -532,6 +556,8 @@ session(['user_id' => $user->id]);
 
 **Location:** `backend/config/sanctum.php`  
 **Risk:** Stolen tokens valid indefinitely
+
+**In plain terms:** A token never expires, so a leaked one keeps working forever. *Example:* a token pulled from an old backup still logs the attacker in a year later.
 
 **Recommended Fixes:**
 ```php
@@ -571,6 +597,8 @@ Route::post('auth/refresh', function (Request $request) {
 
 **Location:** `backend/.env:21`  
 **Risk:** Sensitive data in logs (passwords, tokens, PII)
+
+**In plain terms:** `LOG_LEVEL=debug` can write sensitive detail into log files. *Example:* a debug line records a request payload containing PII. *(Lower the level in production.)*
 
 **Issue:**
 ```
@@ -630,6 +658,8 @@ class SensitiveDataProcessor
 **Location:** Not implemented  
 **Risk:** Account takeover via typos, fake emails
 
+**In plain terms:** Email addresses aren't verified on signup. *Example:* not applicable here — HR creates accounts, so there is no public self-registration to verify.
+
 **Recommended Fixes:**
 ```php
 // Add email verification
@@ -657,6 +687,8 @@ $user->sendEmailVerificationNotification();
 **Location:** `backend/config/cors.php:19,25`  
 **Risk:** Overly permissive CORS policy
 
+**In plain terms:** Allowing all HTTP methods/headers is broader than needed. *Example:* minor — tighten to the specific methods/headers actually used. *(Low risk while origins are restricted.)*
+
 **Issue:**
 ```php
 'allowed_methods' => ['*'],
@@ -682,6 +714,8 @@ $user->sendEmailVerificationNotification();
 
 **Location:** Not implemented  
 **Risk:** Persistent brute-force attacks
+
+**In plain terms:** No lockout after repeated failed logins (companion to #3). *Example:* an attacker keeps guessing with no cooldown; a 15-minute lock after ~5 failures would stop them.
 
 **Recommended Fixes:**
 ```php
@@ -733,6 +767,8 @@ public function login(LoginRequest $request): JsonResponse
 
 **Location:** `backend/app/Modules/Hr/Models/Employee.php:30`  
 **Risk:** PII exposure if database compromised
+
+**In plain terms:** Bank account numbers are stored unencrypted. *Example:* a leaked DB backup exposes every employee's account number in plain text.
 
 **Issue:**
 ```php
@@ -880,6 +916,8 @@ Round 2 found **6 new vulnerabilities** not covered by the original 18: **1 crit
 **Location:** `app/Modules/Hr/Services/AuditService.php` (`log()`), `app/Modules/Hr/Services/ConcernService.php:48`, surfaced by `app/Modules/Hr/Services/ReportService.php:697` (Audit Trail report + CSV export)
 **Risk:** Breaks the system's core anonymity invariant — retaliation risk against whistle-blowers/reporters
 
+**In plain terms:** An anonymous concern is logged as the person who filed it, and any HR officer can read that log — so "anonymous" isn't. *Example:* HR opens the Audit Trail and sees "Jane Cruz · submitted · concern (CN-AB12)" matching the anonymous report, identifying the reporter.
+
 **Issue:**
 `AuditService::log()` stamps every entry with the acting user and their IP:
 ```php
@@ -917,6 +955,8 @@ Verify no other "self-service" audit call (e.g. concern status/meeting entries) 
 **Location:** `app/Modules/Hr/Services/RecruitmentService.php:167` (resumes), `app/Modules/Hr/Services/EmployeeService.php:326` (employee documents)
 **Risk:** Unauthenticated access to candidate PII and HR documents; defeats an existing access-control feature
 
+**In plain terms:** Resumes and employee documents sit on the public disk, so their URLs open without logging in — skipping the access-request gate. *Example:* pasting `…/storage/hr/resumes/5/abc.pdf` into any browser downloads a resume even when signed out.
+
 **Issue:**
 ```php
 $resume->store("hr/resumes/{$requisition->id}", 'public');          // resumes
@@ -948,6 +988,8 @@ $file->store("hr/employee-documents/{$employee->id}", 'local');
 **Location:** `app/Modules/Hr/Routes/api.php` (`POST employees/{employee}/hr-role`), `app/Modules/Hr/Services/EmployeeService.php:294` (`setHrRole`)
 **Risk:** Any HR account (or a compromised one) can mint more admin-equivalent accounts and persist access
 
+**In plain terms:** Any HR officer can grant full HR access to anyone, with no admin gate. *Example:* a phished HR login promotes a fake account to HR Officer as a permanent backdoor into all payroll and records.
+
 **Issue:**
 The role-grant endpoint sits inside the `role:hr_officer` group, and the service only blocks self-*revocation*:
 ```php
@@ -972,6 +1014,8 @@ Route::post('employees/{employee}/hr-role', [EmployeeController::class, 'setHrRo
 
 **Location:** `app/Modules/Hr/Services/ReportService.php` (`buildCsv()`, `fputcsv` at ~line 131)
 **Risk:** Code/formula execution in the recipient's spreadsheet app (data exfiltration via DDE/HYPERLINK)
+
+**In plain terms:** Exported CSV cells that start with `=` are run as formulas by Excel/Sheets. *Example:* an employee sets their name to `=HYPERLINK(...)`; it executes when HR opens the exported audit CSV.
 
 **Issue:**
 The Audit Trail CSV writes user-influenced values (actor names, free-text descriptions, table cells) straight through `fputcsv` with no neutralization:
@@ -999,6 +1043,8 @@ private function csvCell(string $v): string
 **Location:** `app/Modules/Hr/Routes/api.php:104-105`, `ReportService` (`audit` + `diversity` set `'restricted' => true`)
 **Risk:** Sensitive reports (audit log, demographic data) exposed to all HR officers
 
+**In plain terms:** The "restricted" reports are only hidden in the menu, not blocked on the server. *Example:* a junior HR officer types `/hr/reports/audit` in the URL and gets the full audit log anyway.
+
 **Issue:**
 `GET/POST /hr/reports/{key}` is guarded only by `role:hr_officer`. The Audit Trail and Diversity reports are flagged `restricted: true` ("restricted to admins and HR leadership") and the UI shows a lock, but there is **no server-side enforcement** — any HR officer can view and export them. This is also what makes finding #19 reachable by any HR officer.
 
@@ -1023,6 +1069,8 @@ public function show(Request $request, string $key): JsonResponse
 
 **Location:** `app/Modules/Hr/Routes/api.php` (`POST candidates/{candidate}/email`, `POST candidates/{candidate}/reject` with `send_email`)
 **Risk:** Email-bombing candidates / sender-reputation damage once real SMTP is configured
+
+**In plain terms:** There's no limit on candidate emails, so they can be spammed. *Example:* a loop fires 500 emails to one candidate, getting your mail domain flagged as an abuser.
 
 **Issue:**
 The stage-email and rejection endpoints dispatch real email with no throttle or per-candidate cooldown, so a scripted loop (or a rogue HR account) can flood a candidate's inbox. Currently masked by the dev mail catcher, but a live-delivery footgun.

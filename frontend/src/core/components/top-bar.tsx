@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Search, Bell, Check, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { formatRelative } from "@/core/lib/format";
+import { employeeNav, isGroup, type ShellVariant } from "@/core/nav";
 import { useNotificationCenter } from "@/core/notifications-context";
-import { useSearch } from "@/core/use-search";
+import { useSearch, type SearchGroup } from "@/core/use-search";
 
-export function TopBar() {
-  const { items, total, markRead, dismiss, markAllRead } = useNotificationCenter();
+export function TopBar({ variant }: { variant: ShellVariant }) {
+  const { items, total, markRead, dismiss, markAllRead, hasMore, loadMore } = useNotificationCenter();
   const [bellOpen, setBellOpen] = useState(false);
+
+  const isEmployee = variant === "employee";
 
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
@@ -19,10 +22,24 @@ export function TopBar() {
     const t = setTimeout(() => setDebouncedQ(q), 250);
     return () => clearTimeout(t);
   }, [q]);
-  const { data: search, isFetching } = useSearch(debouncedQ);
+  const { data: search, isFetching } = useSearch(isEmployee ? "" : debouncedQ);
+
+  const navMatches = useMemo<SearchGroup[]>(() => {
+    if (!isEmployee) return [];
+    const term = debouncedQ.trim().toLowerCase();
+    if (term.length < 2) return [];
+    const items = employeeNav
+      .flatMap((e) => (isGroup(e) ? e.children : [e]))
+      .filter((l) => l.label.toLowerCase().includes(term))
+      .map((l) => ({ title: l.label, subtitle: "Go to page", href: l.href }));
+    return items.length ? [{ label: "Pages", items }] : [];
+  }, [isEmployee, debouncedQ]);
+
+  const groups = isEmployee ? navMatches : (search?.groups ?? []);
+  const fetching = isEmployee ? false : isFetching;
 
   const searchOpen = q.trim().length >= 2;
-  const hasResults = (search?.groups ?? []).some((g) => g.items.length > 0);
+  const hasResults = groups.some((g) => g.items.length > 0);
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-4 border-b border-border bg-card px-6">
@@ -33,7 +50,7 @@ export function TopBar() {
           type="text"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search employees, departments, requisitions…"
+          placeholder={isEmployee ? "Jump to a page…" : "Search employees, departments, requisitions…"}
           className="h-9 w-full rounded-lg border border-border bg-muted/40 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none"
         />
 
@@ -42,14 +59,14 @@ export function TopBar() {
             <div className="fixed inset-0 z-10" onClick={() => setQ("")} />
             <div className="absolute left-0 top-full z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-popover shadow-lg">
               <div className="max-h-96 overflow-y-auto py-1">
-                {isFetching && !search ? (
+                {fetching && !hasResults ? (
                   <p className="px-4 py-6 text-center text-sm text-muted-foreground">Searching…</p>
                 ) : !hasResults ? (
                   <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-                    No matches for “{q}”.
+                    No matches for "{q}".
                   </p>
                 ) : (
-                  search?.groups.map((group) => (
+                  groups.map((group) => (
                     <div key={group.label}>
                       <p className="px-4 pt-2 pb-1 text-label font-bold uppercase tracking-wide text-muted-foreground">
                         {group.label}
@@ -111,7 +128,8 @@ export function TopBar() {
                     You’re all caught up.
                   </p>
                 ) : (
-                  items.map((n) => (
+                  <>
+                    {items.map((n) => (
                     <div
                       key={n.id}
                       className={cn(
@@ -153,7 +171,17 @@ export function TopBar() {
                         </button>
                       </div>
                     </div>
-                  ))
+                  ))}
+                    {hasMore && (
+                      <button
+                        type="button"
+                        onClick={loadMore}
+                        className="w-full border-t border-border px-4 py-2.5 text-center text-sm font-medium text-brand transition-colors hover:bg-muted/40"
+                      >
+                        Load more
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>

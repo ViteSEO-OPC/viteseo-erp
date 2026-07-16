@@ -24,6 +24,10 @@ interface NotificationCenter {
   markRead: (id: string) => void;
   dismiss: (id: string) => void;
   markAllRead: () => void;
+  /** Whether more items exist beyond the current page. */
+  hasMore: boolean;
+  /** Fetch the next page of notifications. */
+  loadMore: () => void;
 }
 
 const Ctx = createContext<NotificationCenter | null>(null);
@@ -32,7 +36,8 @@ const Ctx = createContext<NotificationCenter | null>(null);
 // namespaced per user so shared browsers don't leak state between accounts.
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const { data } = useNotifications();
+  const [limit, setLimit] = useState(20);
+  const { data } = useNotifications(limit, 0);
 
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
@@ -101,8 +106,14 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     return badges;
   }, [items]);
 
+  const hasMore = data?.has_more ?? false;
+
+  const loadMore = useCallback(() => {
+    setLimit((prev) => prev + 20);
+  }, []);
+
   return (
-    <Ctx.Provider value={{ items, total, navBadges, markRead, dismiss, markAllRead }}>
+    <Ctx.Provider value={{ items, total, navBadges, markRead, dismiss, markAllRead, hasMore, loadMore }}>
       {children}
     </Ctx.Provider>
   );

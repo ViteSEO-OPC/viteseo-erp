@@ -54,7 +54,19 @@ class StorePayslipRequestRequest extends FormRequest
             if ($duplicate) {
                 $validator->errors()->add(
                     'payslip_id',
-                    'You already have a pending or approved request for this payslip.',
+                    'You already have a pending or approved hard-copy request for this payslip.',
+                );
+            }
+
+            // Can only request a signed hard copy of a finalized (viewable) payslip.
+            $finalized = \App\Modules\Hr\Models\Payslip::where('id', $payslipId)
+                ->whereHas('payrollRun', fn ($q) => $q->where('status', 'completed'))
+                ->exists();
+
+            if (! $finalized) {
+                $validator->errors()->add(
+                    'payslip_id',
+                    'This payslip is not finalized yet, so a hard copy cannot be requested.',
                 );
             }
         });

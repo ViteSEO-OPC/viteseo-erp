@@ -1,9 +1,11 @@
 "use client";
 
-import Link from "next/link";
+import { useState, useMemo } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PageHeader } from "@/core/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
+import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
 import { formatDate } from "@/core/lib/format";
 import { LeaveBalanceCard } from "@/modules/hr/components/leave-balance-card";
 import { LeaveRequestForm } from "@/modules/hr/components/leave-request-form";
@@ -22,6 +24,7 @@ interface HistItem {
   date: string;
   status: string;
   at: string;
+  reason: string | null;
 }
 
 export default function TimeOffPage() {
@@ -29,6 +32,9 @@ export default function TimeOffPage() {
   const { data: types } = useLeaveTypes();
   const { data: requests } = useLeaveRequests();
   const { data: halfDays } = useHalfDayRequests();
+  const [declined, setDeclined] = useState<HistItem | null>(null);
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(6);
 
   const annual = balances?.find((b) => b.leave_type.code === "ANL");
   const sick = balances?.find((b) => b.leave_type.code === "SCK");
@@ -47,6 +53,7 @@ export default function TimeOffPage() {
           : `${formatDate(l.start_date)} – ${formatDate(l.end_date)}`,
       status: l.status,
       at: l.created_at,
+      reason: l.review_note,
     })),
     ...(halfDays ?? []).map((h) => ({
       key: `h${h.id}`,
@@ -54,8 +61,17 @@ export default function TimeOffPage() {
       date: `${formatDate(h.work_date)} · Unpaid`,
       status: h.status,
       at: h.created_at,
+      reason: h.review_note,
     })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
+
+  const pageSizes = [6, 12, 24, 48];
+  const totalPages = Math.max(1, Math.ceil(history.length / size));
+  const safePage = Math.min(page, totalPages);
+  const pageHistory = useMemo(
+    () => history.slice((safePage - 1) * size, safePage * size),
+    [history, safePage, size],
+  );
 
   return (
     <div className="p-8">
@@ -84,28 +100,91 @@ export default function TimeOffPage() {
           <div className="rounded-card border border-border bg-card p-6">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-h3 font-bold text-foreground">My Request History</h2>
-              <Link href="/teamora/requests" className="text-sm font-semibold text-brand hover:underline">
-                View all
-              </Link>
             </div>
             <div className="divide-y divide-border">
               {history.length === 0 ? (
                 <p className="py-6 text-sm text-muted-foreground">No requests yet.</p>
               ) : (
-                history.slice(0, 6).map((r) => (
-                  <div key={r.key} className="flex items-center justify-between py-3">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{r.title}</p>
-                      <p className="text-caption text-muted-foreground">{r.date}</p>
+                pageHistory.map((r) =>
+                  r.status === "rejected" ? (
+                    <button
+                      key={r.key}
+                      type="button"
+                      onClick={() => setDeclined(r)}
+                      className="flex w-full items-center justify-between py-3 text-left transition-colors hover:bg-muted/40"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{r.title}</p>
+                        <p className="text-caption text-danger">{r.date} · Tap to see why</p>
+                      </div>
+                      <StatusBadge status={r.status} />
+                    </button>
+                  ) : (
+                    <div key={r.key} className="flex items-center justify-between py-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{r.title}</p>
+                        <p className="text-caption text-muted-foreground">{r.date}</p>
+                      </div>
+                      <StatusBadge status={r.status} />
                     </div>
-                    <StatusBadge status={r.status} />
-                  </div>
-                ))
+                  ),
+                )
               )}
             </div>
+            {history.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
+                <div className="flex items-center gap-2 text-caption text-muted-foreground">
+                  <span>Rows per page</span>
+                  <select
+                    value={size}
+                    onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}
+                    className="h-7 rounded-md border border-input bg-card px-1.5 text-caption text-foreground outline-none focus-visible:border-ring"
+                  >
+                    {pageSizes.map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                  <span className="hidden sm:inline">
+                    · Showing {(safePage - 1) * size + 1}–{Math.min(safePage * size, history.length)} of {history.length}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={safePage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="size-4" />
+                  </button>
+                  <span className="px-2 text-caption text-foreground">
+                    Page {safePage} of {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="size-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      <RejectionReasonDialog
+        open={!!declined}
+        onOpenChange={(o) => !o && setDeclined(null)}
+        title={declined?.key.startsWith("h") ? "Half-day declined" : "Leave declined"}
+        subject={declined ? `${declined.title} · ${declined.date}` : undefined}
+        reason={declined?.reason ?? null}
+      />
     </div>
   );
 }

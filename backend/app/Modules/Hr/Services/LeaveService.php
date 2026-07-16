@@ -17,6 +17,7 @@ class LeaveService
     public function __construct(
         private readonly HolidayService $holidays,
         private readonly AuditService $audit,
+        private readonly ViolationService $violations,
     ) {}
 
     /**
@@ -49,6 +50,38 @@ class LeaveService
         }
 
         return (float) $days;
+    }
+
+    /**
+     * Reject a past-dated request unless the leave type explicitly allows backdating,
+     * and then only within the type's window (backdate_limit_days; NULL = no limit).
+     * "Past" and the window are measured in whole days against today in Asia/Manila
+     * (day-boundary rule, §5.5b), so timezone can't let a request slip through.
+     */
+    private function assertBackdatingAllowed(?LeaveType $type, string $startDate): void
+    {
+        $tz = config('app.timezone_local');
+        $today = Carbon::now($tz)->startOfDay();
+        $start = Carbon::parse($startDate, $tz)->startOfDay();
+
+        if ($start->gte($today)) {
+            return; // today or future — always allowed
+        }
+
+        if (! $type || ! $type->allow_backdated) {
+            throw ValidationException::withMessages([
+                'start_date' => ['This leave type cannot be filed for past dates.'],
+            ]);
+        }
+
+        if ($type->backdate_limit_days !== null) {
+            $earliest = $today->copy()->subDays($type->backdate_limit_days);
+            if ($start->lt($earliest)) {
+                throw ValidationException::withMessages([
+                    'start_date' => ["This leave type can only be backdated up to {$type->backdate_limit_days} day(s) — no earlier than {$earliest->toDateString()}."],
+                ]);
+            }
+        }
     }
 
     /** The employee's balances for the current (Manila) year, with the type. */
@@ -96,6 +129,9 @@ class LeaveService
         // needs a balance with enough remaining credits.
         $type = LeaveType::find($data['leave_type_id']);
         $year = Carbon::parse($data['start_date'])->year;
+
+        // Past-dated filing is gated per leave type (HR-configurable).
+        $this->assertBackdatingAllowed($type, $data['start_date']);
 
         if (! $type || $type->is_paid) {
             $balance = LeaveBalance::where('employee_id', $employee->id)
@@ -149,7 +185,9 @@ class LeaveService
      */
     public function approve(LeaveRequest $request, User $reviewer): LeaveRequest
     {
-        return DB::transaction(function () use ($request, $reviewer) {
+        $wasPending = $request->status === 'pending';
+
+        $result = DB::transaction(function () use ($request, $reviewer) {
             if ($request->status !== 'pending') {
                 return $request->load(['employee.user', 'leaveType', 'reviewer']);
             }
@@ -183,6 +221,15 @@ class LeaveService
 
             return $request;
         });
+
+        // A newly-approved leave can retroactively clear an absence/AWOL flag on the
+        // covered days (e.g. a backdated leave). Recompute so violation history stays
+        // in sync immediately, not only on the next attendance-roster load.
+        if ($wasPending) {
+            $this->violations->recompute();
+        }
+
+        return $result;
     }
 
     /** Reject: mark rejected + reviewer + reason. Balance is untouched. */

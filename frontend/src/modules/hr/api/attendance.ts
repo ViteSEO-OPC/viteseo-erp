@@ -43,9 +43,15 @@ export async function getAttendanceSummary(date?: string): Promise<AttendanceSum
   return res.data.data;
 }
 
-export async function getViolations(employeeId?: number): Promise<Violation[]> {
+export async function getViolations(
+  employeeId?: number,
+  month?: string,
+): Promise<Violation[]> {
   const res = await apiClient.get("/hr/violations", {
-    params: employeeId ? { employee: employeeId } : undefined,
+    params: {
+      ...(employeeId ? { employee: employeeId } : {}),
+      ...(month ? { month } : {}),
+    },
   });
   return res.data.data;
 }
@@ -58,7 +64,7 @@ export async function resolveViolation(id: number): Promise<Violation> {
 export interface AdjustAttendanceInput {
   employee_id: number;
   work_date: string;
-  status: string;
+  // Status is derived server-side from the times — not sent by the client.
   time_in: string | null;
   time_out: string | null;
   note: string | null;

@@ -26,7 +26,7 @@ export function AppShell({
       <div className="fixed inset-0 flex overflow-hidden">
         <Sidebar variant={variant} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <TopBar />
+          <TopBar variant={variant} />
           <main className="min-h-0 flex-1 overflow-y-auto bg-background">{children}</main>
         </div>
       </div>

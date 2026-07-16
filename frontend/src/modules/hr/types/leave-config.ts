@@ -15,6 +15,8 @@ export interface LeaveTypeInput {
   days_per_year: number;
   is_paid: boolean;
   color?: string | null;
+  allow_backdated: boolean;
+  backdate_limit_days?: number | null;
 }
 
 // The employment statuses leave allotments are keyed on (mirrors the backend
