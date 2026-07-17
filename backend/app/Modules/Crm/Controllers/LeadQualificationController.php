@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Controllers;
 
+use App\Http\Controllers\Controller;
+
 use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Models\Lead;
 use Illuminate\Http\JsonResponse;

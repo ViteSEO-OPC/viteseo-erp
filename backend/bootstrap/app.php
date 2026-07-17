@@ -12,6 +12,14 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    // Registers the /broadcasting/auth endpoint (guarded by Sanctum) for private
+    // Reverb channels. Channels themselves are defined per-module (see
+    // routes/channels.php). Realtime stays inert until a broadcaster is configured
+    // (BROADCAST_CONNECTION), so this is safe even when Reverb is off.
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['middleware' => ['auth:sanctum']],
+    )
     ->withMiddleware(function (Middleware $middleware): void {
         // Spatie permission middleware aliases — used to gate HR-only routes
         // with role:hr_officer / permission:hr.<resource>.<action>.

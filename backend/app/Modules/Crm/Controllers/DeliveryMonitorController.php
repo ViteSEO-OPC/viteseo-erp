@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Controllers;
 
+use App\Http\Controllers\Controller;
+
 use App\Models\User;
 use App\Modules\Crm\Services\Outreach\DeliveryMonitorService;
 use Illuminate\Http\JsonResponse;

@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Controllers;
 
+use App\Http\Controllers\Controller;
+
 use App\Modules\Crm\Events\ProposalSent;
 use App\Modules\Crm\Requests\AutomationSendEmailRequest;
 use App\Modules\Crm\Resources\EmailResource;
