@@ -31,6 +31,9 @@ export function SoftBadge({ tone, children }: { tone: Tone; children: React.Reac
 export function deriveAttendanceStatus(row: HrAttendanceRow): { label: string; tone: Tone } {
   if (row.leave_type) return { label: `On leave · ${row.leave_type}`, tone: "warning" };
   if (row.time_in) return { label: "Checked in", tone: "success" };
+  // Management is exempt from attendance — the backend reports them `present` on a
+  // scheduled workday with no clock-in row, so HR/CEO see them as present (auto).
+  if (row.status === "present") return { label: "Present (auto)", tone: "success" };
   if (row.status === "absent") return { label: "Absent", tone: "danger" };
   if (row.status === "rest_day") return { label: "Rest day", tone: "muted" };
   return { label: "Not checked in", tone: "muted" };
