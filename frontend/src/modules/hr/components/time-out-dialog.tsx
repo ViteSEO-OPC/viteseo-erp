@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -35,11 +35,21 @@ export function TimeOutDialog({
   pending: boolean;
 }) {
   const [tasks, setTasks] = useState<DayTask[]>([emptyTask()]);
+  // Errors only appear once they've tried to confirm — not while first typing.
+  const [showErrors, setShowErrors] = useState(false);
+  const inputs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Reset the list each time the modal opens (Radix keeps it mounted while closed).
   useEffect(() => {
-    if (open) setTasks([emptyTask()]);
+    if (open) {
+      setTasks([emptyTask()]);
+      setShowErrors(false);
+    }
   }, [open]);
+
+  const isBlank = (t: DayTask) => t.text.trim() === "";
+  const firstBlank = tasks.findIndex(isBlank);
+  const hasBlank = firstBlank !== -1;
 
   function update(i: number, patch: Partial<DayTask>) {
     setTasks((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -52,10 +62,14 @@ export function TimeOutDialog({
   }
 
   async function confirm() {
-    const cleaned = tasks
-      .map((t) => ({ text: t.text.trim(), done: t.done }))
-      .filter((t) => t.text !== "");
-    await onConfirm(cleaned);
+    // Every field must say something — previously blanks were quietly dropped,
+    // which let you clock out having logged nothing at all.
+    if (hasBlank) {
+      setShowErrors(true);
+      inputs.current[firstBlank]?.focus();
+      return;
+    }
+    await onConfirm(tasks.map((t) => ({ text: t.text.trim(), done: t.done })));
   }
 
   return (
@@ -89,9 +103,13 @@ export function TimeOutDialog({
                   aria-label="Task done"
                 />
                 <Input
+                  ref={(el) => {
+                    inputs.current[i] = el;
+                  }}
                   className="flex-1"
                   placeholder={`Task ${i + 1} — e.g. Finished the payroll report`}
                   value={t.text}
+                  aria-invalid={showErrors && isBlank(t)}
                   onChange={(e) => update(i, { text: e.target.value })}
                 />
                 <button
@@ -105,6 +123,14 @@ export function TimeOutDialog({
               </div>
             ))}
           </div>
+          {showErrors && hasBlank && (
+            <p className="text-xs text-destructive">
+              {tasks.length === 1
+                ? "Log at least one task before timing out."
+                : "Every task needs a description — fill it in or remove the row."}
+            </p>
+          )}
+
           <Button type="button" variant="ghost" size="sm" onClick={add}>
             <Plus />
             Add task

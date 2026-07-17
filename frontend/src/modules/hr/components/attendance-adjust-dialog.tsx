@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { toManilaTimeInput, formatDate } from "@/core/lib/format";
 import { useAdjustAttendance, useViolations, useResolveViolation } from "@/modules/hr/hooks/use-attendance";
+import { SEVERITY_LABEL } from "@/modules/hr/types/attendance";
 import type { HrAttendanceRow, Severity, Violation } from "@/modules/hr/types/attendance";
 
 const DOT: Record<Severity, string> = {
@@ -31,10 +32,10 @@ const DOT: Record<Severity, string> = {
 
 // The alert-level ladder shown in the legend (and used for the current level).
 const ALERT_LEVELS: { sev: Severity; label: string; desc: string }[] = [
-  { sev: "green", label: "Low / Informational", desc: "1st lateness; 1st–2nd Tardiness / month" },
-  { sev: "yellow", label: "Caution", desc: "2nd lateness; 3rd Tardiness / month; 1-Day UA (1st)" },
-  { sev: "orange", label: "Warning", desc: "3 Consecutive Lates; 4th Tardiness / month; 2-Day UA (1st)" },
-  { sev: "red", label: "Critical", desc: "2-Day UA (2nd); 3+ Days Without Notice (AWOL)" },
+  { sev: "green", label: SEVERITY_LABEL.green, desc: "1st lateness; 1st–2nd Tardiness / month" },
+  { sev: "yellow", label: SEVERITY_LABEL.yellow, desc: "2nd lateness; 3rd Tardiness / month; 1-Day UA (1st)" },
+  { sev: "orange", label: SEVERITY_LABEL.orange, desc: "3 Consecutive Lates; 4th Tardiness / month; 2-Day UA (1st)" },
+  { sev: "red", label: SEVERITY_LABEL.red, desc: "2-Day UA (2nd); 3+ Days Without Notice (AWOL)" },
 ];
 
 const STATUS_PILL: Record<string, { cls: string; label: string }> = {

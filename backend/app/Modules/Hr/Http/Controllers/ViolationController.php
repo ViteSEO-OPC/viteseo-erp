@@ -9,10 +9,34 @@ use App\Modules\Hr\Services\ViolationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-// Attendance → violations. hr_officer-only.
+// Attendance → violations. hr_officer-only, except me() which serves the caller
+// their own flags.
 class ViolationController extends Controller
 {
     public function __construct(private readonly ViolationService $service) {}
+
+    /**
+     * GET /hr/me/violations?month=YYYY-MM — the caller's own flags, resolved from
+     * the token. Read-only on purpose: unlike index(), it never triggers a
+     * recompute, so an employee opening their dashboard can't kick off a
+     * full-history rebuild.
+     */
+    public function me(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'month' => ['nullable', 'regex:/^\d{4}-\d{2}$/'],
+        ]);
+
+        $employee = $request->user()->employee;
+
+        if (! $employee) {
+            return ViolationResource::collection([])->response();
+        }
+
+        return ViolationResource::collection(
+            $this->service->list($employee->id, $validated['month'] ?? null),
+        )->response();
+    }
 
     // GET /hr/violations?employee=&month=YYYY-MM
     public function index(Request $request): JsonResponse
