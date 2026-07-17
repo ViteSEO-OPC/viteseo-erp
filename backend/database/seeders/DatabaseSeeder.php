@@ -25,6 +25,7 @@ use App\Modules\Hr\Database\Seeders\RecruitmentDemoSeeder;
 use App\Modules\Hr\Database\Seeders\ReimbursementDemoSeeder;
 use App\Modules\Hr\Database\Seeders\RequestsDemoSeeder;
 use App\Modules\Hr\Database\Seeders\WorkScheduleSeeder;
+use App\Modules\Crm\Database\Seeders\CrmDemoSeeder;
 use App\Modules\Crm\Database\Seeders\EmailTemplateSeeder;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -45,6 +46,9 @@ class DatabaseSeeder extends Seeder
             RolesAndPermissionsSeeder::class,
             // CRM (Zerem) — default Purpose+Tone email templates (content config, idempotent).
             EmailTemplateSeeder::class,
+            // CRM (Zerem) — demo pipeline (leads/prospects/deals/planner/outreach) + the CRM demo
+            // logins. Needs the roles above; independent of the HR seeders. Idempotent.
+            CrmDemoSeeder::class,
             DepartmentSeeder::class,
             LeaveTypesSeeder::class,
             // Config defaults must exist before employees are created — new hires
