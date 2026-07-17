@@ -22,6 +22,7 @@ class StoreFaqRequest extends FormRequest
             'question' => ['required', 'string', 'max:255'],
             'answer' => ['required', 'string', 'max:5000'],
             'category' => ['required', Rule::in(FaqService::CATEGORIES)],
+            'status' => ['nullable', Rule::in(FaqService::STATUSES)],
             'tags' => ['nullable', 'array'],
             'tags.*' => ['string', 'max:50'],
             'is_pinned' => ['boolean'],

@@ -19,12 +19,17 @@ export interface Faq {
   updated_at: string;
 }
 
+export const FAQ_STATUSES = [
+  { value: "draft", label: "Draft" },
+  { value: "published", label: "Published" },
+  { value: "archived", label: "Archived" },
+] as const;
+
 export interface FaqInput {
   question: string;
   answer: string;
   category: string;
-  tags: string[];
-  is_pinned: boolean;
+  status: string;
 }
 
 export function faqCategoryLabel(c: string): string {

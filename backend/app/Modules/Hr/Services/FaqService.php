@@ -13,6 +13,8 @@ class FaqService
 
     public const CATEGORIES = ['payroll', 'leave', 'attendance', 'benefits', 'general'];
 
+    public const STATUSES = ['draft', 'published', 'archived'];
+
     /**
      * HR sees every entry; employees see only published ones. Supports a text
      * search over question / answer / category / tags. Pinned first.
@@ -39,6 +41,8 @@ class FaqService
     /** @param array<string, mixed> $data */
     public function create(array $data): Faq
     {
+        // fields() supplies 'status' only when the caller chose one; otherwise a
+        // new entry starts as a draft.
         $faq = Faq::create($this->fields($data) + [
             'status' => 'draft',
             'updated_by' => Auth::id(),
@@ -104,12 +108,22 @@ class FaqService
      */
     private function fields(array $data): array
     {
-        return [
+        $fields = [
             'question' => $data['question'],
             'answer' => $data['answer'],
             'category' => $data['category'],
             'tags' => $data['tags'] ?? [],
-            'is_pinned' => $data['is_pinned'] ?? false,
         ];
+
+        // Pinning and status have their own endpoints (togglePin / setStatus), so
+        // only overwrite them when the caller actually sent a value — otherwise a
+        // plain edit would unpin the entry or reset its status.
+        foreach (['is_pinned', 'status'] as $key) {
+            if (isset($data[$key])) {
+                $fields[$key] = $data[$key];
+            }
+        }
+
+        return $fields;
     }
 }
