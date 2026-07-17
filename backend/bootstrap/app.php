@@ -30,7 +30,10 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // Render JSON (not the HTML "Route [login] not defined" page) for API calls
+        // AND the broadcasting auth endpoint, so an unauthenticated private-channel
+        // handshake returns a clean 401 instead of a 500.
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*'),
+            fn (Request $request) => $request->is('api/*') || $request->is('broadcasting/auth'),
         );
     })->create();
