@@ -31,6 +31,7 @@ import { useMyLeaveBalances } from "@/modules/hr/hooks/use-leave";
 import { EmployeeScheduleEditor } from "@/modules/hr/components/employee-schedule-editor";
 import { EmployeeLeaveCreditsEditor } from "@/modules/hr/components/employee-leave-credits-editor";
 import type { LeaveBalance } from "@/modules/hr/types/leave";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 
 export type TabKey = "personal" | "job" | "compensation" | "documents";
 
@@ -358,6 +359,7 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
   const upload = useUploadEmployeeDocument(employeeId);
   const remove = useDeleteEmployeeDocument(employeeId);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [removing, setRemoving] = useState<{ id: number; name: string } | null>(null);
 
   async function onFile(file?: File) {
     if (!file) return;
@@ -370,8 +372,7 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
     if (fileRef.current) fileRef.current.value = ""; // allow re-uploading the same file
   }
 
-  async function onRemove(id: number, name: string) {
-    if (!confirm(`Remove "${name}"? This can't be undone.`)) return;
+  async function performRemove(id: number) {
     try {
       await remove.mutateAsync(id);
       toast.success("Document removed");
@@ -426,7 +427,7 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
                 variant="ghost"
                 size="icon-sm"
                 disabled={remove.isPending}
-                onClick={() => onRemove(d.id, d.name)}
+                onClick={() => setRemoving({ id: d.id, name: d.name })}
                 aria-label={`Remove ${d.name}`}
                 title="Remove"
               >
@@ -436,6 +437,17 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
           ))}
         </div>
       )}
+
+      <DeleteConfirmDialog
+        open={!!removing}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title="Remove document"
+        question={`Are you sure you want to remove “${removing?.name ?? ""}”?`}
+        description="This action cannot be undone. The file will be permanently deleted from this employee's record."
+        confirmLabel="Remove"
+        isPending={remove.isPending}
+        onConfirm={() => performRemove(removing!.id)}
+      />
     </div>
   );
 }

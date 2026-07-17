@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/core/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { HolidayFormDialog } from "@/modules/hr/components/holiday-form-dialog";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
   useHolidaySets,
   useHolidays,
@@ -73,6 +74,7 @@ export default function HolidaysPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Holiday | null>(null);
+  const [deleting, setDeleting] = useState<Holiday | null>(null);
 
   // Selecting a country/year auto-loads its national holidays (once per key).
   const attempted = useRef<Set<string>>(new Set());
@@ -142,10 +144,7 @@ export default function HolidaysPage() {
           <button
             type="button"
             className="text-danger hover:underline"
-            onClick={async () => {
-              if (!confirm(`Remove "${h.name}"?`)) return;
-              try { await deleteHolidayMut.mutateAsync(h.id); toast.success("Removed"); } catch { toast.error("Could not remove."); }
-            }}
+            onClick={() => setDeleting(h)}
           >
             Remove
           </button>
@@ -217,6 +216,23 @@ export default function HolidaysPage() {
       {activeSet && (
         <HolidayFormDialog open={dialogOpen} onOpenChange={setDialogOpen} setId={activeSet.id} holiday={editing} />
       )}
+
+      <DeleteConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title="Remove holiday"
+        question={`Are you sure you want to remove “${deleting?.name ?? ""}”?`}
+        description="This action cannot be undone. The holiday will be removed from this set."
+        confirmLabel="Remove"
+        onConfirm={async () => {
+          try {
+            await deleteHolidayMut.mutateAsync(deleting!.id);
+            toast.success("Removed");
+          } catch {
+            toast.error("Could not remove.");
+          }
+        }}
+      />
     </div>
   );
 }

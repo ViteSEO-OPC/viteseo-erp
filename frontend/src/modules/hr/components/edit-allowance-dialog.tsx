@@ -17,6 +17,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { usePatchBenefitProgram } from "@/modules/hr/hooks/use-benefit-programs";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
   ALLOWANCE_FREQUENCIES,
   TAX_TREATMENTS,
@@ -42,6 +43,7 @@ export function EditAllowanceDialog({
 
 function AllowanceForm({ program, onDone }: { program: BenefitProgram; onDone: () => void }) {
   const patch = usePatchBenefitProgram();
+  const [confirming, setConfirming] = useState(false);
   const [amount, setAmount] = useState(program.amount ?? "");
   const [frequency, setFrequency] = useState(program.frequency);
   const [tax, setTax] = useState(program.tax_treatment);
@@ -67,8 +69,7 @@ function AllowanceForm({ program, onDone }: { program: BenefitProgram; onDone: (
     }
   }
 
-  async function deactivate() {
-    if (!confirm(`Deactivate "${program.name}"? Future payouts stop; history is kept.`)) return;
+  async function performDeactivate() {
     try {
       await patch.mutateAsync({ id: program.id, patch: { is_active: false } });
       toast.success("Allowance deactivated");
@@ -128,7 +129,7 @@ function AllowanceForm({ program, onDone }: { program: BenefitProgram; onDone: (
             <p className="text-sm font-semibold text-danger">Deactivate allowance</p>
             <p className="text-xs text-muted-foreground">Stops future payouts. History is kept.</p>
           </div>
-          <Button variant="outline" size="sm" onClick={deactivate} disabled={patch.isPending}>
+          <Button variant="outline" size="sm" onClick={() => setConfirming(true)} disabled={patch.isPending}>
             Deactivate
           </Button>
         </div>
@@ -142,6 +143,19 @@ function AllowanceForm({ program, onDone }: { program: BenefitProgram; onDone: (
           {patch.isPending ? "Saving…" : "Save changes"}
         </Button>
       </DialogFooter>
+
+      {/* Deactivation isn't a delete, so the copy and the button label say so —
+          the red treatment is still right for a destructive-ish action. */}
+      <DeleteConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Deactivate allowance"
+        question={`Are you sure you want to deactivate “${program.name}”?`}
+        description="Future payouts stop. Past history is kept."
+        confirmLabel="Deactivate"
+        isPending={patch.isPending}
+        onConfirm={performDeactivate}
+      />
     </>
   );
 }

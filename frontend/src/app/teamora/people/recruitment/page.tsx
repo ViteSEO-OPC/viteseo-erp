@@ -40,6 +40,7 @@ import {
 import { RequisitionFormDialog } from "@/modules/hr/components/requisition-form-dialog";
 import { CandidateFormDialog } from "@/modules/hr/components/candidate-form-dialog";
 import { CandidateDetailDialog } from "@/modules/hr/components/candidate-detail-dialog";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { CandidatesTable } from "@/modules/hr/components/candidates-table";
 import {
   useRequisitions,
@@ -62,6 +63,7 @@ export default function RecruitmentPage() {
   const [selectedId, setSelectedId] = useState<number | null | undefined>();
   const [reqDialog, setReqDialog] = useState(false);
   const [editingReq, setEditingReq] = useState<Requisition | null>(null);
+  const [deletingReq, setDeletingReq] = useState<Requisition | null>(null);
   const [candDialog, setCandDialog] = useState(false);
   const [detail, setDetail] = useState<Candidate | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -89,8 +91,7 @@ export default function RecruitmentPage() {
   // null means the user deliberately cleared the selection → show all candidates.
   const activeReqId = selectedId === null ? undefined : (selectedId ?? defaultReqId);
 
-  async function onDeleteReq(req: Requisition) {
-    if (!confirm(`Delete requisition "${req.title}"?`)) return;
+  async function performDeleteReq(req: Requisition) {
     try {
       await deleteReqMut.mutateAsync(req.id);
       if (activeReqId === req.id) setSelectedId(null);
@@ -133,7 +134,7 @@ export default function RecruitmentPage() {
           <Button
             size="icon-sm"
             variant="ghost"
-            onClick={(e) => { e.stopPropagation(); onDeleteReq(r); }}
+            onClick={(e) => { e.stopPropagation(); setDeletingReq(r); }}
           >
             <Trash2 />
             <span className="sr-only">Delete</span>
@@ -141,7 +142,7 @@ export default function RecruitmentPage() {
         </div>
       ),
     },
-  ], [openEditReq, onDeleteReq]);
+  ], [openEditReq]);
 
   // Require an 8px drag before starting, so button clicks aren't treated as drags.
   const sensors = useSensors(
@@ -359,6 +360,15 @@ export default function RecruitmentPage() {
       <RejectionDialog
         candidate={rejecting}
         onOpenChange={(o) => !o && setRejecting(null)}
+      />
+
+      <DeleteConfirmDialog
+        open={!!deletingReq}
+        onOpenChange={(o) => !o && setDeletingReq(null)}
+        title="Delete requisition"
+        entityName={deletingReq?.title}
+        description="This action cannot be undone. The requisition and its candidate pipeline will be permanently removed."
+        onConfirm={() => performDeleteReq(deletingReq!)}
       />
     </div>
   );

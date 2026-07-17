@@ -18,6 +18,7 @@ import { PageHeader } from "@/core/components/page-header";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
 import { formatDate } from "@/core/lib/format";
 import { OfficeExpenseFormDialog } from "@/modules/hr/components/office-expense-form-dialog";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
   useOfficeExpenses,
   useDeleteOfficeExpense,
@@ -82,6 +83,7 @@ export default function OfficeExpensesPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<OfficeExpense | null>(null);
+  const [deleting, setDeleting] = useState<OfficeExpense | null>(null);
   const [period, setPeriod] = useState<Period>("all");
   const [sort, setSort] = useState<Sort>("date_desc");
   // Which stat-card amounts are masked (privacy show/hide toggle).
@@ -116,8 +118,7 @@ export default function OfficeExpensesPage() {
     return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2);
   }, [filtered]);
 
-  async function onDelete(e: OfficeExpense) {
-    if (!confirm(`Delete "${e.description}"?`)) return;
+  async function performDelete(e: OfficeExpense) {
     try {
       await deleteMut.mutateAsync(e.id);
       toast.success("Expense deleted");
@@ -148,7 +149,7 @@ export default function OfficeExpensesPage() {
             <Pencil />
             <span className="sr-only">Edit</span>
           </Button>
-          <Button size="icon-sm" variant="ghost" onClick={() => onDelete(e)}>
+          <Button size="icon-sm" variant="ghost" onClick={() => setDeleting(e)}>
             <Trash2 />
             <span className="sr-only">Delete</span>
           </Button>
@@ -249,6 +250,15 @@ export default function OfficeExpensesPage() {
       </div>
 
       <OfficeExpenseFormDialog open={dialogOpen} onOpenChange={setDialogOpen} expense={editing} />
+
+      <DeleteConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title="Delete expense"
+        entityName={deleting?.description}
+        description="This action cannot be undone. The expense will be permanently removed from the records."
+        onConfirm={() => performDelete(deleting!)}
+      />
     </div>
   );
 }
