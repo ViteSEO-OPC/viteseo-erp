@@ -1,6 +1,6 @@
 "use client";
 
-import { Moon } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { useTheme } from "@/modules/crm/providers/theme-provider";
 
@@ -21,10 +21,15 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
-      aria-label="Toggle dark mode"
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       aria-pressed={theme === "dark"}
     >
-      <Moon className="h-[18px] w-[18px]" />
+      {/* Show the action, not the state: a sun to go light, a moon to go dark. */}
+      {theme === "dark" ? (
+        <Sun className="h-[18px] w-[18px]" />
+      ) : (
+        <Moon className="h-[18px] w-[18px]" />
+      )}
     </button>
   );
 }

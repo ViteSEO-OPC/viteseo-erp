@@ -8,6 +8,10 @@ import { PermissionsProvider } from "@/modules/crm/providers/permissions-provide
 import { ThemeProvider } from "@/modules/crm/providers/theme-provider";
 import { canAccessPath } from "@/modules/crm/lib/rbac";
 import { AppShell } from "@/modules/crm/components/layout/app-shell/app-shell";
+// Zerem-only dark theme. Imported here (the CRM section layout) so Next bundles it for `/zerem/*`
+// routes ONLY — it never loads on HRIS/Sprintly/Admin. Scoped to `.zerem-theme-scope`; touches no
+// shared stylesheet.
+import "@/modules/crm/styles/zerem-theme.css";
 
 /**
  * CRM (Zerem) section shell. Lives under the platform's root <AuthProvider>
