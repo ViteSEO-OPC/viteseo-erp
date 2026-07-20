@@ -106,7 +106,7 @@ export function AttendanceAdjustDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         {/* Keyed so state re-initialises from a fresh row (Radix unmounts on close). */}
         {row && (
           <Details

@@ -80,7 +80,7 @@ function Body({ setId, holiday, onDone }: { setId: number; holiday: Holiday | nu
           <Label htmlFor="h-name">Name</Label>
           <Input id="h-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Independence Day" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="h-date">Date</Label>
             <Input id="h-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />

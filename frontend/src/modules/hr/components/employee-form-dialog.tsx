@@ -324,7 +324,7 @@ export function EmployeeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
@@ -703,7 +703,7 @@ function ScheduleFields({
           Leave all off to use the assigned schedule&apos;s days.
         </p>
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <Label>Override start</Label>
           <Input type="time" value={ovStart} onChange={(e) => setOvStart(e.target.value)} />

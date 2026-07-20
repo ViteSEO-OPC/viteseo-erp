@@ -170,7 +170,7 @@ export function FaqFormDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={cn("gap-0 p-0", isEdit ? "max-w-[560px]" : "max-w-[500px]")}
+        className={cn("gap-0 p-0", isEdit ? "sm:max-w-[560px]" : "sm:max-w-[500px]")}
       >
         <DialogHeader className={cn("mb-0", pad, isEdit ? "pt-6 pb-5" : "py-6")}>
           {/* Sizes restated here for the same tailwind-merge reason as labelClass:
@@ -238,7 +238,7 @@ export function FaqFormDialog({
             {/* Create picks a category from chips; edit uses a dot select beside
                 Status. Both frames are drawn that way. */}
             {isEdit ? (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="faq-category" className={labelClass}>
                     Category
@@ -316,7 +316,7 @@ export function FaqFormDialog({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label htmlFor="faq-status" className={labelClass}>
                       Status

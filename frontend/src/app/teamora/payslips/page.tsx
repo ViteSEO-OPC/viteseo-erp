@@ -168,7 +168,7 @@ export default function PayslipsPage() {
             </div>
 
             {/* YTD */}
-            <div className="mt-5 grid grid-cols-3 gap-4 rounded-lg border border-border p-4">
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4 rounded-lg border border-border p-4">
               <Ytd label="YTD Gross" value={formatPeso(detail.ytd.gross)} />
               <Ytd label="YTD Deductions" value={formatPeso(detail.ytd.deductions)} />
               <Ytd label="YTD Net" value={formatPeso(detail.ytd.net)} />

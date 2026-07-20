@@ -88,7 +88,7 @@ export function DeleteConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[440px] gap-0 p-0">
+      <DialogContent className="sm:max-w-[440px] gap-0 p-0">
         <DialogHeader className="mb-0 px-7 pt-6 pb-5">
           {/* Sizes restated because cn()'s tailwind-merge runs on its default
               config and strips the project's custom text-* scale. */}

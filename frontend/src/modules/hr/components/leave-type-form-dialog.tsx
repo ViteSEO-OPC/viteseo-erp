@@ -169,7 +169,7 @@ export function LeaveTypeFormDialog({
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="lt-code">Code</Label>
               <Input id="lt-code" placeholder="ANL" aria-invalid={!!errors.code} {...register("code")} />

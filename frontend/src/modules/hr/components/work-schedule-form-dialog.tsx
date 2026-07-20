@@ -163,7 +163,7 @@ export function WorkScheduleFormDialog({
             {errors.workdays && <p className="text-xs text-destructive">{errors.workdays.message}</p>}
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="ws-start">Start</Label>
               <Input id="ws-start" type="time" aria-invalid={!!errors.start_time} {...register("start_time")} />

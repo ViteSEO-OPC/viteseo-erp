@@ -33,7 +33,7 @@ export function CandidateDetailDialog({
 }) {
   return (
     <Dialog open={!!candidate} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         {candidate && (
           <>
             <DialogHeader>

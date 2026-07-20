@@ -198,8 +198,8 @@ export function BenefitProgramFormDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2 space-y-1.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="sm:col-span-2 space-y-1.5">
               <Label htmlFor="bp-name">Name</Label>
               <Input
                 id="bp-name"
@@ -308,7 +308,7 @@ export function BenefitProgramFormDialog({
               Show a usage progress bar
             </label>
             {hasProgress && (
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="bp-percent">Percent</Label>
                   <Input
@@ -325,7 +325,7 @@ export function BenefitProgramFormDialog({
                     </p>
                   )}
                 </div>
-                <div className="col-span-2 space-y-1.5">
+                <div className="sm:col-span-2 space-y-1.5">
                   <Label htmlFor="bp-caption">Caption</Label>
                   <Input
                     id="bp-caption"
