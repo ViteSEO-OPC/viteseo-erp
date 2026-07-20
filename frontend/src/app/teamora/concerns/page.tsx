@@ -6,7 +6,7 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate, formatDateTime } from "@/core/lib/format";
@@ -28,7 +28,7 @@ const selectClass =
 
 export default function MyConcernsPage() {
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="My Concerns"
         subtitle="Raise a concern — named or anonymous — and respond to meeting invites."

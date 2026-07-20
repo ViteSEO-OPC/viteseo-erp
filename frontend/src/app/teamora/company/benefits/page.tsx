@@ -5,7 +5,7 @@ import { Pencil, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { formatPeso } from "@/core/lib/format";
 import { useContributionSettings } from "@/modules/hr/hooks/use-benefits";
 import { useBenefitPrograms } from "@/modules/hr/hooks/use-benefit-programs";
@@ -50,7 +50,7 @@ export default function BenefitsPage() {
   const [editHmo, setEditHmo] = useState<BenefitProgram | null>(null);
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Benefits"
         subtitle={
@@ -243,7 +243,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function EmptyHint({ text }: { text: string }) {
   return (
-    <div className="rounded-card border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+    <div className="rounded-card border border-dashed border-border bg-card p-4 sm:p-8 text-center text-sm text-muted-foreground">
       {text}
     </div>
   );

@@ -14,7 +14,7 @@ import {
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
 import { formatDate } from "@/core/lib/format";
 import { OfficeExpenseFormDialog } from "@/modules/hr/components/office-expense-form-dialog";
@@ -159,7 +159,7 @@ export default function OfficeExpensesPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Office Expenses"
         subtitle="Track company and office spending."

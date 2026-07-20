@@ -64,7 +64,7 @@ export function HalfDayRequestForm() {
       </p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="mt-4 space-y-4" noValidate>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>Date</Label>
             <Input type="date" {...register("work_date")} />

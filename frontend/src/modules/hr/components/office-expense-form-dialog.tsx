@@ -38,7 +38,7 @@ export function OfficeExpenseFormDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
         {/* Keyed so state re-initialises fresh each time it opens (no effects). */}
         {open && <FormBody key={expense?.id ?? "new"} expense={expense ?? null} onDone={() => onOpenChange(false)} />}
       </DialogContent>
@@ -94,7 +94,7 @@ function FormBody({ expense, onDone }: { expense: OfficeExpense | null; onDone: 
       </DialogHeader>
 
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="oe-cat">Category</Label>
             <select id="oe-cat" className={selectClass} value={form.category} onChange={(e) => set("category", e.target.value)}>
@@ -108,7 +108,7 @@ function FormBody({ expense, onDone }: { expense: OfficeExpense | null; onDone: 
             <Input id="oe-amt" type="number" min="0" step="0.01" value={form.amount} onChange={(e) => set("amount", e.target.value)} />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="oe-date">Date</Label>
             <Input id="oe-date" type="date" value={form.expense_date} onChange={(e) => set("expense_date", e.target.value)} />

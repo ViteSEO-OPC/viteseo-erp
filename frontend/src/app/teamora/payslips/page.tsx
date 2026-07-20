@@ -16,7 +16,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { useMyPayslips, usePayslip } from "@/modules/hr/hooks/use-payroll";
@@ -82,7 +82,7 @@ export default function PayslipsPage() {
   );
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Payslips"
         subtitle="Your payslips appear here once each pay run is finalized. Open one to raise an inquiry or request a signed hard copy."
@@ -168,7 +168,7 @@ export default function PayslipsPage() {
             </div>
 
             {/* YTD */}
-            <div className="mt-5 grid grid-cols-3 gap-4 rounded-lg border border-border p-4">
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4 rounded-lg border border-border p-4">
               <Ytd label="YTD Gross" value={formatPeso(detail.ytd.gross)} />
               <Ytd label="YTD Deductions" value={formatPeso(detail.ytd.deductions)} />
               <Ytd label="YTD Net" value={formatPeso(detail.ytd.net)} />
@@ -465,7 +465,7 @@ function PayslipCopyDialog({
 
   return (
     <Dialog open={payslipId != null} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Request a signed hard copy</DialogTitle>
           <DialogDescription>

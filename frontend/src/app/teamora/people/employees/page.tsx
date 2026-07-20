@@ -6,7 +6,7 @@ import { Plus, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { EmployeeCard } from "@/modules/hr/components/employee-card";
 import { EmployeeFormDialog } from "@/modules/hr/components/employee-form-dialog";
 import { useEmployees } from "@/modules/hr/hooks/use-employees";
@@ -59,7 +59,7 @@ export default function EmployeesPage() {
   })();
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Employees"
         subtitle={

@@ -15,7 +15,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { Avatar } from "@/core/components/avatar";
 import { DataTable, type Column } from "@/core/components/data-table";
 import {
@@ -81,7 +81,7 @@ function EmployeeCell({ employee }: { employee: { id: number; name: string | nul
 
 export default function PayrollRequestsPage() {
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader title="Payroll" subtitle="Signed hard-copy requests and payroll inquiries." />
 
       {/* Payslip requests */}
@@ -338,7 +338,7 @@ function ResolveDialog({
 
   return (
     <Dialog open={!!inquiry} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Resolve inquiry</DialogTitle>
           <DialogDescription>
@@ -417,7 +417,7 @@ function NoteDialog({
 }) {
   return (
     <Dialog open={!!inquiry} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Resolution note</DialogTitle>
           <DialogDescription>{inquiry?.employee.name}&apos;s payroll inquiry</DialogDescription>

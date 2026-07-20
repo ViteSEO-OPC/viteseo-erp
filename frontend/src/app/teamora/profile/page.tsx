@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { EmployeeRecord } from "@/modules/hr/components/employee-record";
 import { ChangeRequestModal } from "@/modules/hr/components/change-request-modal";
 import { DocumentRequestModal } from "@/modules/hr/components/document-request-modal";
@@ -13,7 +13,7 @@ export default function ProfilePage() {
   const [docOpen, setDocOpen] = useState(false);
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="My Profile"
         subtitle="Your employee record. Request detail changes and documents from HR."

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatusBadge } from "@/core/components/status-badge";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -65,7 +65,7 @@ export default function ClaimsPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader title="Claims" subtitle="File and track your expense claims." />
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[2fr_3fr]">

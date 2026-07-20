@@ -3,7 +3,7 @@
 import { Headset, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { BenefitCard } from "@/modules/hr/components/benefit-card";
 import { useMyBenefits } from "@/modules/hr/hooks/use-benefit-programs";
 
@@ -12,7 +12,7 @@ export default function BenefitsPage() {
   const list = benefits ?? [];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="My Benefits"
         subtitle="Overview of your active insurance and allowance programs."

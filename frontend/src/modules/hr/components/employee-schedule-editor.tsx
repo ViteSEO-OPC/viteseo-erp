@@ -162,7 +162,7 @@ function Editor({
         <p className="text-xs text-muted-foreground">Leave all off to use the assigned schedule&apos;s days.</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="ov-start">Override start</Label>
           <Input id="ov-start" type="time" value={start} onChange={(e) => setStart(e.target.value)} />

@@ -28,7 +28,7 @@ export function EditHmoDialog({
 }) {
   return (
     <Dialog open={!!program} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-xl">
         {program && <HmoForm key={program.id} program={program} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>

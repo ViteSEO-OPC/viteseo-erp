@@ -6,7 +6,7 @@ import { ArrowLeft, Info, Download, Lock } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { ReportBars } from "@/modules/hr/components/report-bars";
@@ -49,7 +49,7 @@ function GenericReport({ reportKey }: { reportKey: string }) {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title={report?.title ?? "Report"}
         subtitle={report?.description}

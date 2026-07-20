@@ -4,7 +4,7 @@ import { useState } from "react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
 import {
   StatusFilter,
@@ -56,7 +56,7 @@ const REJECT_BTN = "border-danger text-danger hover:bg-danger-subtle hover:text-
 
 export default function RequestsPage() {
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Document"
         subtitle="Employees request documents from HR through the portal - payroll, leave, and attendance records. Requests are tracked with status and fulfilled from the employee's digital 201 file."

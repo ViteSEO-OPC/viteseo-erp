@@ -7,7 +7,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
@@ -135,7 +135,7 @@ export default function FaqAdminPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="FAQ"
         subtitle="Author the self-service knowledge base. Employees read the published entries."

@@ -5,7 +5,7 @@ import { Plus, Pencil, Trash2, Archive, RotateCcw } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import {
   DataTable,
   PrimaryCell,
@@ -100,7 +100,7 @@ export default function DepartmentsPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Departments"
         subtitle="Manage the departments employees are assigned to."

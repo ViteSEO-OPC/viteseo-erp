@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 
 const REPORTS: {
   key: string;
@@ -73,7 +73,7 @@ const REPORTS: {
 
 export default function ReportsPage() {
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader title="Reports" subtitle="Build, schedule and export across every module" />
 
       <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">

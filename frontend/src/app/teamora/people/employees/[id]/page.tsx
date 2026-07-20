@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { EmployeeRecord } from "@/modules/hr/components/employee-record";
 import {
   EmployeeFormDialog,
@@ -22,7 +22,7 @@ export default function EmployeeRecordPage() {
   const [editSection, setEditSection] = useState<EmployeeEditSection>("personal");
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Employee"
         subtitle={employee ? `Viewing ${employee.name}` : undefined}

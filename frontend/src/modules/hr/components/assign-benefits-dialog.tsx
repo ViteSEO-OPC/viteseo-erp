@@ -42,7 +42,7 @@ export function AssignBenefitsDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-2xl">
         <AssignForm
           key={open ? "open" : "closed"}
           employees={employees}

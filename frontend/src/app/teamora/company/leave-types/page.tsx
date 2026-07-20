@@ -6,7 +6,7 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { LeaveTypeFormDialog } from "@/modules/hr/components/leave-type-form-dialog";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
@@ -92,7 +92,7 @@ export default function LeaveTypesPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Leave Type"
         subtitle="Leave types and per-status allotment defaults. Set individual credits in each employee's profile."

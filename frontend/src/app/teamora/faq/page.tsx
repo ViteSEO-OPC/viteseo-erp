@@ -5,7 +5,7 @@ import { Search, ChevronDown, Pin } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { useFaqs, useViewFaq } from "@/modules/hr/hooks/use-faqs";
 import { FAQ_CATEGORIES, faqCategoryLabel, type Faq } from "@/modules/hr/types/faq";
 
@@ -31,7 +31,7 @@ export default function FaqPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader title="FAQ" subtitle="Answers to common questions about payroll, leave, attendance and more." />
 
       {/* Search + category filter */}

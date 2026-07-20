@@ -5,7 +5,7 @@ import { Zap, Check, X } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
@@ -124,7 +124,7 @@ export default function TimeLeavePage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Time & Leave"
         subtitle="Review and decide on employee leave requests."

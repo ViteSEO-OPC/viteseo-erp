@@ -98,7 +98,7 @@ export function PayrollInquiryDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Raise an inquiry</DialogTitle>
           <DialogDescription>
@@ -119,7 +119,7 @@ export function PayrollInquiryDialog({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="inq-topic">Topic</Label>
               <select

@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 
 import { RequireAuth, useAuth } from "@/core/auth-context";
-import { AppShell } from "@/core/components/app-shell";
+import { TeamoraShell } from "@/modules/hr/components/teamora-shell";
 
 /**
  * TeamOra (HRIS) shell — hosts BOTH the HR-management portal and the employee
@@ -46,7 +46,9 @@ export default function TeamoraLayout({
 
   return (
     <RequireAuth role={requiredRole}>
-      <AppShell variant={isManager ? "hr" : "employee"}>{children}</AppShell>
+      <TeamoraShell variant={isManager ? "hr" : "employee"}>
+        {children}
+      </TeamoraShell>
     </RequireAuth>
   );
 }

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { cn } from "@/lib/utils";
 import { formatTimeManila, formatDate } from "@/core/lib/format";
@@ -107,7 +107,7 @@ export default function AttendancePage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Attendance"
         subtitle="Daily check-in status, timing, and violation flags — click a row to correct it."

@@ -16,7 +16,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -210,7 +210,7 @@ export default function PayrollPage() {
   const thirteenthTotal = (thirteenth?.rows ?? []).reduce((s, r) => s + r.thirteenth_month, 0);
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Payroll"
         subtitle={
@@ -369,7 +369,7 @@ export default function PayrollPage() {
 
       {/* Run history — opened from the header button */}
       <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Run History</DialogTitle>
             <DialogDescription>
@@ -405,7 +405,7 @@ export default function PayrollPage() {
 
       {/* Past-run breakdown — drilled into from the Run History modal */}
       <Dialog open={viewRunId != null} onOpenChange={(o) => !o && setViewRunId(null)}>
-        <DialogContent className="sm:max-w-4xl">
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>
               {viewRun
@@ -448,7 +448,7 @@ export default function PayrollPage() {
 
       {/* 13th-month accrual — opened from the header button */}
       <Dialog open={thirteenthOpen} onOpenChange={setThirteenthOpen}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>13th-Month Pay{thirteenth ? ` · ${thirteenth.year}` : ""}</DialogTitle>
             <DialogDescription>
@@ -489,7 +489,7 @@ export default function PayrollPage() {
       </Dialog>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{alreadyRun ? "Re-run this pay group?" : "Run this pay group?"}</DialogTitle>
             <DialogDescription>

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/core/auth-context";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -84,7 +84,7 @@ export default function EmployeeOverviewPage() {
   });
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title={`${greeting}, ${user?.name?.split(" ")[0] ?? "there"} 👋`}
         subtitle={`${todayLong} · Everything in one place.`}
