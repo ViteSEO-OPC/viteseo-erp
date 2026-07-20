@@ -106,7 +106,7 @@ export function AttendanceAdjustDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg">
         {/* Keyed so state re-initialises from a fresh row (Radix unmounts on close). */}
         {row && (
           <Details
@@ -250,7 +250,7 @@ function Details({
         <DialogDescription>View attendance records, violations, and alert status.</DialogDescription>
       </DialogHeader>
 
-      <div className="max-h-[65vh] space-y-6 overflow-y-auto px-0.5">
+      <div className="max-h-[65vh] space-y-6 overflow-y-auto overflow-x-hidden px-0.5">
         {/* Employee */}
         <Section title="Employee">
           <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">

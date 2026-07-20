@@ -324,7 +324,7 @@ export function EmployeeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
@@ -335,7 +335,7 @@ export function EmployeeFormDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
-          <div className="max-h-[60vh] space-y-6 overflow-y-auto px-0.5">
+          <div className="max-h-[60vh] space-y-6 overflow-y-auto overflow-x-hidden px-0.5">
             {/* Personal */}
             <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-2", !show("personal") && "hidden")}>
               <Field label="First name" error={errors.first_name?.message}>

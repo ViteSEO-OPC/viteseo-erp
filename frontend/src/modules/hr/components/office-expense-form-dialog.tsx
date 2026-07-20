@@ -38,7 +38,7 @@ export function OfficeExpenseFormDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
         {/* Keyed so state re-initialises fresh each time it opens (no effects). */}
         {open && <FormBody key={expense?.id ?? "new"} expense={expense ?? null} onDone={() => onOpenChange(false)} />}
       </DialogContent>

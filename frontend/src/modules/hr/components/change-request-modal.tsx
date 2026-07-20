@@ -87,7 +87,7 @@ export function ChangeRequestModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Request profile changes</DialogTitle>
           <DialogDescription>
@@ -95,7 +95,7 @@ export function ChangeRequestModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[60vh] space-y-4 overflow-y-auto px-0.5">
+        <div className="max-h-[60vh] space-y-4 overflow-y-auto overflow-x-hidden px-0.5">
           <div className="space-y-3">
             {rows.map((r, i) => (
               <div key={i} className="rounded-lg border border-border p-3">

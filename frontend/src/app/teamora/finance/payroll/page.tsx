@@ -489,7 +489,7 @@ export default function PayrollPage() {
       </Dialog>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{alreadyRun ? "Re-run this pay group?" : "Run this pay group?"}</DialogTitle>
             <DialogDescription>
