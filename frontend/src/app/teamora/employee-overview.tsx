@@ -9,6 +9,7 @@ import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { TimeClockPanel } from "@/modules/hr/components/time-clock-panel";
 import { LeaveBalanceCard } from "@/modules/hr/components/leave-balance-card";
+import { UpcomingMeetingsCard } from "@/modules/hr/components/upcoming-meetings-card";
 import { useMyLeaveBalances, useLeaveRequests } from "@/modules/hr/hooks/use-leave";
 import { useReimbursements } from "@/modules/hr/hooks/use-reimbursements";
 import { useMyNextPayday } from "@/modules/hr/hooks/use-payroll";
@@ -30,7 +31,6 @@ export default function EmployeeOverviewPage() {
   const { data: nextPayday } = useMyNextPayday();
 
   const annual = balances?.find((b) => b.leave_type.code === "ANL");
-  const sick = balances?.find((b) => b.leave_type.code === "SCK");
 
   // Merge leave + reimbursements into one recent "My Requests" feed.
   const requests: MyRequestRow[] = [
@@ -94,10 +94,10 @@ export default function EmployeeOverviewPage() {
         <TimeClockPanel />
       </div>
 
-      {/* Balances + next payday */}
+      {/* Leave balance · upcoming meeting · next payday */}
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {annual ? <LeaveBalanceCard balance={annual} /> : <StatCard label="Annual Leave" value="—" />}
-        {sick ? <LeaveBalanceCard balance={sick} /> : <StatCard label="Sick Leave" value="—" />}
+        <UpcomingMeetingsCard />
         <StatCard
           label="Next Payday"
           value={nextPayday ? formatDate(nextPayday.pay_date) : "—"}
