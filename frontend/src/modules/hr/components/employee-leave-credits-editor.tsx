@@ -14,6 +14,7 @@ import {
   useDeleteEmployeeBalance,
 } from "@/modules/hr/hooks/use-leave-config";
 import type { LeaveBalance } from "@/modules/hr/types/leave";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 
 /**
  * HR-editable per-employee leave credits — change entitled days, add a leave type,
@@ -26,6 +27,7 @@ export function EmployeeLeaveCreditsEditor({ employeeId }: { employeeId: number 
   const upsert = useUpsertEmployeeBalance(employeeId);
   const remove = useDeleteEmployeeBalance(employeeId);
 
+  const [removing, setRemoving] = useState<LeaveBalance | null>(null);
   const [addTypeId, setAddTypeId] = useState<string>("");
   const [addDays, setAddDays] = useState<string>("");
 
@@ -62,15 +64,7 @@ export function EmployeeLeaveCreditsEditor({ employeeId }: { employeeId: number 
         <Button
           size="icon-sm"
           variant="ghost"
-          onClick={async () => {
-            if (!confirm(`Remove ${b.leave_type.name} from this employee?`)) return;
-            try {
-              await remove.mutateAsync(b.id);
-              toast.success("Leave type removed");
-            } catch {
-              toast.error("Could not remove it.");
-            }
-          }}
+          onClick={() => setRemoving(b)}
         >
           <Trash2 />
           <span className="sr-only">Remove</span>
@@ -143,6 +137,23 @@ export function EmployeeLeaveCreditsEditor({ employeeId }: { employeeId: number 
           </Button>
         </div>
       )}
+
+      <DeleteConfirmDialog
+        open={!!removing}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title="Remove leave type"
+        question={`Remove “${removing?.leave_type.name ?? ""}” from this employee?`}
+        description="This action cannot be undone. Their balance for this leave type will be discarded."
+        confirmLabel="Remove"
+        onConfirm={async () => {
+          try {
+            await remove.mutateAsync(removing!.id);
+            toast.success("Leave type removed");
+          } catch {
+            toast.error("Could not remove it.");
+          }
+        }}
+      />
     </div>
   );
 }

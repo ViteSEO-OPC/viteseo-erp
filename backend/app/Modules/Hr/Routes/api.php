@@ -61,6 +61,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Attendance — the caller clocks their own time; HR sees the roster.
     Route::get('me/attendance', [AttendanceController::class, 'me']);
+    // The caller's own violation flags (read-only; HR's /violations is role-gated).
+    Route::get('me/violations', [ViolationController::class, 'me']);
     Route::post('attendance/clock-in', [AttendanceController::class, 'clockIn']);
     Route::post('attendance/clock-out', [AttendanceController::class, 'clockOut']);
     Route::post('attendance/break', [AttendanceController::class, 'break']);

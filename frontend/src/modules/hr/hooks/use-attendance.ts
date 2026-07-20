@@ -11,6 +11,7 @@ import {
   adjustAttendance,
   getAttendanceSummary,
   getViolations,
+  getMyViolations,
   resolveViolation,
   getDailyOverride,
   upsertDailyOverride,
@@ -80,6 +81,14 @@ export function useViolations(employeeId: number | null, month?: string) {
     queryKey: ["hr", "violations", employeeId ?? "none", month ?? "all"],
     queryFn: () => getViolations(employeeId as number, month),
     enabled: employeeId != null,
+  });
+}
+
+/** The signed-in employee's own violations (the dashboard alert banner). */
+export function useMyViolations(month?: string) {
+  return useQuery({
+    queryKey: ["hr", "me", "violations", month ?? "all"],
+    queryFn: () => getMyViolations(month),
   });
 }
 

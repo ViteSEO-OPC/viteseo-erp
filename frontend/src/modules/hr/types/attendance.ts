@@ -33,6 +33,22 @@ export interface MyAttendance {
 
 export type Severity = "green" | "yellow" | "orange" | "red";
 
+/** Mirrors Violation::SEVERITY_RANK on the API — higher wins when picking the worst flag. */
+export const SEVERITY_RANK: Record<Severity, number> = {
+  green: 1,
+  yellow: 2,
+  orange: 3,
+  red: 4,
+};
+
+/** The alert-level ladder (shown in HR's legend and on the employee's banner). */
+export const SEVERITY_LABEL: Record<Severity, string> = {
+  green: "Low / Informational",
+  yellow: "Caution",
+  orange: "Warning",
+  red: "Critical",
+};
+
 export interface AttendanceTiming {
   category: "early" | "on_time" | "late";
   late_minutes: number;

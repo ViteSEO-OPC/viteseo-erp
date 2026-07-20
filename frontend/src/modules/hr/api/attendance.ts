@@ -56,6 +56,14 @@ export async function getViolations(
   return res.data.data;
 }
 
+/** The caller's own flags. Read-only server-side — never triggers a recompute. */
+export async function getMyViolations(month?: string): Promise<Violation[]> {
+  const res = await apiClient.get("/hr/me/violations", {
+    params: month ? { month } : undefined,
+  });
+  return res.data.data;
+}
+
 export async function resolveViolation(id: number): Promise<Violation> {
   const res = await apiClient.post(`/hr/violations/${id}/resolve`);
   return res.data.data;

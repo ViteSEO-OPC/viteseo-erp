@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/core/components/page-header";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { WorkScheduleFormDialog } from "@/modules/hr/components/work-schedule-form-dialog";
 import {
   useWorkSchedules,
@@ -23,6 +24,7 @@ export default function RulesPage() {
   const deleteMut = useDeleteWorkSchedule();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<WorkSchedule | null>(null);
+  const [deleting, setDeleting] = useState<WorkSchedule | null>(null);
 
   function openCreate() {
     setEditing(null);
@@ -32,8 +34,7 @@ export default function RulesPage() {
     setEditing(s);
     setDialogOpen(true);
   }
-  async function onDelete(s: WorkSchedule) {
-    if (!confirm(`Delete schedule "${s.name}"?`)) return;
+  async function performDelete(s: WorkSchedule) {
     try {
       await deleteMut.mutateAsync(s.id);
       toast.success("Schedule deleted");
@@ -67,7 +68,7 @@ export default function RulesPage() {
             <SchedulesTable
               rows={schedules ?? []}
               onEdit={openEdit}
-              onDelete={onDelete}
+              onDelete={setDeleting}
             />
           )}
         </section>
@@ -80,6 +81,15 @@ export default function RulesPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         schedule={editing}
+      />
+
+      <DeleteConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title="Delete schedule"
+        entityName={deleting?.name}
+        description="This action cannot be undone. Employees assigned to this schedule will need a new one."
+        onConfirm={() => performDelete(deleting!)}
       />
     </div>
   );

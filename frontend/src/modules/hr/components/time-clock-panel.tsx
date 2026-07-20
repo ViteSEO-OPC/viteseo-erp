@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
@@ -18,12 +18,63 @@ import {
 import { formatTimeManila, formatHm } from "@/core/lib/format";
 import {
   useMyAttendance,
+  useMyViolations,
   useClockIn,
   useClockOut,
   useToggleBreak,
 } from "@/modules/hr/hooks/use-attendance";
 import { TimeOutDialog } from "@/modules/hr/components/time-out-dialog";
-import type { Attendance, ClockState, DayTask } from "@/modules/hr/types/attendance";
+import { SEVERITY_LABEL, SEVERITY_RANK } from "@/modules/hr/types/attendance";
+import type {
+  Attendance,
+  ClockState,
+  DayTask,
+  Severity,
+  Violation,
+} from "@/modules/hr/types/attendance";
+
+// Banner fill per severity — the Figma draws the yellow ("Caution") case; the
+// other three reuse the same tokens the HR roster dot already uses.
+const BANNER_FILL: Record<Severity, string> = {
+  green: "bg-success",
+  yellow: "bg-warning",
+  orange: "bg-severity-orange",
+  red: "bg-danger",
+};
+
+const BANNER_MARK: Record<Severity, string> = {
+  green: "text-success",
+  yellow: "text-warning",
+  orange: "text-severity-orange",
+  red: "text-danger",
+};
+
+/** The employee's own attendance flag, mirroring HR's violation view. */
+function AttendanceAlertBanner({ violation }: { violation: Violation }) {
+  return (
+    <div
+      role="status"
+      className={cn(
+        "flex items-center gap-3 rounded-xl px-4 py-2.5",
+        BANNER_FILL[violation.severity],
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "flex size-5 shrink-0 items-center justify-center rounded-full bg-white font-bold",
+          BANNER_MARK[violation.severity],
+        )}
+      >
+        !
+      </span>
+      <p className="text-[length:var(--text-label)] whitespace-nowrap text-white">
+        <span className="font-bold">{SEVERITY_LABEL[violation.severity]}:</span>{" "}
+        {violation.details}
+      </p>
+    </div>
+  );
+}
 
 const STATUS_META: Record<ClockState, { label: string; dot: string }> = {
   not_clocked_in: { label: "Clocked out", dot: "bg-danger" },
@@ -68,13 +119,35 @@ export function TimeClockPanel() {
   const busy = clockInMut.isPending || clockOutMut.isPending || breakMut.isPending;
   const active = state === "clocked_in" || state === "on_lunch" || state === "on_break";
 
+  // The employee's own flag for the current Manila month. Only unresolved,
+  // above-green flags surface — a clean record shows no banner — and the worst
+  // one wins so a red AWOL is never hidden behind a newer yellow lateness.
+  const manilaMonth = new Date()
+    .toLocaleDateString("en-CA", { timeZone: "Asia/Manila" })
+    .slice(0, 7);
+  const { data: myViolations } = useMyViolations(manilaMonth);
+  const alertFlag = useMemo(() => {
+    const open = (myViolations ?? []).filter(
+      (v) => !v.resolved && v.severity !== "green",
+    );
+    return (
+      [...open].sort(
+        (a, b) =>
+          SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
+          b.work_date.localeCompare(a.work_date),
+      )[0] ?? null
+    );
+  }, [myViolations]);
+
+  // 12-hour to match every other time in the app (formatTimeManila renders
+  // "01:30 PM"); 2-digit hour keeps the mono digits from shifting at 9→10.
   const clockText = active
     ? new Date(now).toLocaleTimeString("en-PH", {
         timeZone: "Asia/Manila",
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
-        hour12: false,
+        hour12: true,
       })
     : "– – : – – : – –";
 
@@ -161,12 +234,20 @@ export function TimeClockPanel() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 rounded-card bg-dark-teal p-6 text-white lg:grid-cols-[1fr_auto_320px]">
+    // Column widths follow the Figma: a 420px right rail (40px of it inner
+    // padding) butted straight against the divider, so the left column doesn't
+    // stretch and strand the two halves apart.
+    <div className="grid grid-cols-1 gap-6 rounded-card bg-dark-teal p-8 text-white lg:grid-cols-[1fr_auto_420px] lg:gap-x-0">
       {/* Left: status + clock + actions */}
       <div>
-        <div className="flex items-center gap-2">
-          <span className={cn("size-2.5 rounded-full", meta.dot)} />
-          <span className="text-sm font-semibold">{meta.label}</span>
+        {/* pr keeps the alert off the divider — the row is the only thing that
+            reaches the column's right edge. */}
+        <div className="flex items-center justify-between gap-4 lg:pr-5">
+          <div className="flex items-center gap-2">
+            <span className={cn("size-2.5 rounded-full", meta.dot)} />
+            <span className="text-sm font-semibold">{meta.label}</span>
+          </div>
+          {alertFlag && <AttendanceAlertBanner violation={alertFlag} />}
         </div>
 
         <p className="mt-6 font-mono text-4xl font-bold tracking-wider text-brand">
@@ -217,7 +298,7 @@ export function TimeClockPanel() {
       <div className="hidden w-px bg-white/15 lg:block" />
 
       {/* Right: today's stats + week */}
-      <div>
+      <div className="lg:pl-10">
         <p className="text-label font-bold uppercase tracking-wide text-white/50">
           Today&apos;s Stats
         </p>

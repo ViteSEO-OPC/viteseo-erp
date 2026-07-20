@@ -12,6 +12,7 @@ import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
 import { FaqFormDialog } from "@/modules/hr/components/faq-form-dialog";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
   useFaqs,
   useDeleteFaq,
@@ -57,6 +58,7 @@ export default function FaqAdminPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Faq | null>(null);
+  const [deleting, setDeleting] = useState<Faq | null>(null);
 
   async function run(fn: () => Promise<unknown>, ok: string) {
     try {
@@ -125,7 +127,7 @@ export default function FaqAdminPage() {
             icon={Trash2}
             label="Delete"
             className="text-danger"
-            onClick={() => { if (confirm("Delete this FAQ?")) run(() => deleteMut.mutateAsync(f.id), "Deleted"); }}
+            onClick={() => setDeleting(f)}
           />
         </div>
       ),
@@ -180,6 +182,15 @@ export default function FaqAdminPage() {
       </section>
 
       <FaqFormDialog open={dialogOpen} onOpenChange={setDialogOpen} faq={editing} />
+
+      <DeleteConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title="Delete FAQ"
+        entityName={deleting?.question}
+        description="This action cannot be undone. This FAQ will be permanently removed and will no longer be visible to employees."
+        onConfirm={() => run(() => deleteMut.mutateAsync(deleting!.id), "Deleted")}
+      />
     </div>
   );
 }

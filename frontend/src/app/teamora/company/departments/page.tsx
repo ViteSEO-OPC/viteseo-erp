@@ -19,6 +19,7 @@ import {
   useToggleDepartmentArchive,
 } from "@/modules/hr/hooks/use-departments";
 import type { Department } from "@/modules/hr/types/department";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 
 export default function DepartmentsPage() {
   const { data: departments, isLoading, isError } = useDepartments();
@@ -27,6 +28,7 @@ export default function DepartmentsPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Department | null>(null);
+  const [deleting, setDeleting] = useState<Department | null>(null);
 
   function openCreate() {
     setEditing(null);
@@ -38,8 +40,7 @@ export default function DepartmentsPage() {
     setDialogOpen(true);
   }
 
-  async function onDelete(dept: Department) {
-    if (!confirm(`Delete "${dept.name}"? This can be restored later.`)) return;
+  async function performDelete(dept: Department) {
     try {
       await deleteMut.mutateAsync(dept.id);
       toast.success("Department deleted");
@@ -89,7 +90,7 @@ export default function DepartmentsPage() {
             {d.is_active ? <Archive /> : <RotateCcw />}
             <span className="sr-only">{d.is_active ? "Archive" : "Restore"}</span>
           </Button>
-          <Button size="icon-sm" variant="ghost" onClick={() => onDelete(d)}>
+          <Button size="icon-sm" variant="ghost" onClick={() => setDeleting(d)}>
             <Trash2 />
             <span className="sr-only">Delete</span>
           </Button>
@@ -132,6 +133,17 @@ export default function DepartmentsPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         department={editing}
+      />
+
+      {/* Departments are soft-deleted, so the copy deliberately avoids the
+          "cannot be undone" wording the other deletes use. */}
+      <DeleteConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title="Delete department"
+        entityName={deleting?.name}
+        description="This department will be removed from the list. It can be restored later."
+        onConfirm={() => performDelete(deleting!)}
       />
     </div>
   );

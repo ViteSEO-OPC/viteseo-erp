@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/core/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { LeaveTypeFormDialog } from "@/modules/hr/components/leave-type-form-dialog";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
   useLeaveTypes,
   useDeleteLeaveType,
@@ -23,6 +24,7 @@ export default function LeaveTypesPage() {
   const deleteMut = useDeleteLeaveType();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LeaveType | null>(null);
+  const [deleting, setDeleting] = useState<LeaveType | null>(null);
 
   function openCreate() {
     setEditing(null);
@@ -32,8 +34,7 @@ export default function LeaveTypesPage() {
     setEditing(t);
     setDialogOpen(true);
   }
-  async function onDelete(t: LeaveType) {
-    if (!confirm(`Delete leave type "${t.name}"?`)) return;
+  async function performDelete(t: LeaveType) {
     try {
       await deleteMut.mutateAsync(t.id);
       toast.success("Leave type deleted");
@@ -81,7 +82,7 @@ export default function LeaveTypesPage() {
             <Pencil />
             <span className="sr-only">Edit</span>
           </Button>
-          <Button size="icon-sm" variant="ghost" onClick={() => onDelete(t)}>
+          <Button size="icon-sm" variant="ghost" onClick={() => setDeleting(t)}>
             <Trash2 />
             <span className="sr-only">Delete</span>
           </Button>
@@ -128,6 +129,15 @@ export default function LeaveTypesPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         leaveType={editing}
+      />
+
+      <DeleteConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title="Delete leave type"
+        entityName={deleting?.name}
+        description="This action cannot be undone. Employees will no longer be able to file this leave type."
+        onConfirm={() => performDelete(deleting!)}
       />
     </div>
   );
