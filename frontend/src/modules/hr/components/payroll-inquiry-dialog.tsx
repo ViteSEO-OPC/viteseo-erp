@@ -98,7 +98,7 @@ export function PayrollInquiryDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto lg:max-w-lg">
         <DialogHeader>
           <DialogTitle>Raise an inquiry</DialogTitle>
           <DialogDescription>

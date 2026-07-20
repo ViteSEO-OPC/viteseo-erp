@@ -58,6 +58,8 @@ export interface PayslipSummary {
   cycle_end: string;
   status: string;
   unlocked: boolean;
+  // Net pay for the history row — present only once the slip is unlocked (finalized).
+  net_pay: number | null;
   hardcopy_status: HardcopyStatus;
 }
 

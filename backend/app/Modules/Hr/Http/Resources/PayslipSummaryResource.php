@@ -25,6 +25,9 @@ class PayslipSummaryResource extends JsonResource
             'status' => $this->status,
             // Viewable once the run is finalized — no request needed.
             'unlocked' => (bool) ($this->unlocked ?? false),
+            // Net pay for the history row — the employee's own figure, and only once the
+            // run is finalized (a still-processing slip must not leak amounts early).
+            'net_pay' => ($this->unlocked ?? false) ? (float) $this->net_pay : null,
             // 'none' | 'pending' | 'approved' | 'rejected' — signed hard-copy request state.
             'hardcopy_status' => $this->hardcopy_status ?? 'none',
         ];

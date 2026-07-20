@@ -1,12 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { AxiosError } from "axios";
 import {
   ArrowRight,
   EyeOff,
   FileText,
-  Search,
   ShieldCheck,
   ShieldAlert,
   UploadCloud,
@@ -20,6 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { DataTable, type Column } from "@/core/components/data-table";
+import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
 import { useMyConcerns, useCreateConcern } from "@/modules/hr/hooks/use-concerns";
 import {
@@ -269,144 +270,75 @@ function RaiseConcernCard() {
   );
 }
 
-const STATUS_PILL: Record<string, { label: string; cls: string }> = {
-  pending: { label: "Pending", cls: "bg-warning-subtle text-warning" },
-  under_review: { label: "Under Review", cls: "bg-warning-subtle text-warning" },
-  meeting_scheduled: { label: "Meeting Scheduled", cls: "bg-info-subtle text-info" },
-  resolved: { label: "Resolved", cls: "bg-success-subtle text-success" },
-};
-
-/** Backend status, upgraded to "Meeting Scheduled" when an invite is live. */
-function displayStatus(c: Concern): { label: string; cls: string } {
-  if (c.status === "resolved") return STATUS_PILL.resolved;
+/** Backend status, upgraded to "Meeting scheduled" when an invite is live. */
+function concernBadge(c: Concern): { status: string; label?: string } {
+  if (c.status === "resolved") return { status: "resolved" };
   const hasMeeting = (c.meetings ?? []).some((m) =>
     ["scheduled", "accepted"].includes(m.status),
   );
-  if (hasMeeting) return STATUS_PILL.meeting_scheduled;
-  return STATUS_PILL[c.status] ?? STATUS_PILL.pending;
+  if (hasMeeting) return { status: "scheduled", label: "Meeting scheduled" };
+  return { status: c.status };
 }
 
 function MyConcernsCard() {
   const { data: rows } = useMyConcerns();
-  const [query, setQuery] = useState("");
-
   const all = rows ?? [];
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter((c) => {
-      // Never search on submitter identity — reference/category/status only.
-      const haystack = [
-        c.reference_no,
-        concernCategoryLabel(c.category),
-        displayStatus(c).label,
-        c.is_anonymous ? "anonymous" : "named",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [all, query]);
+
+  const columns: Column<Concern>[] = [
+    {
+      header: "Ref",
+      cell: (c) => <span className="font-semibold text-foreground">{c.reference_no}</span>,
+    },
+    {
+      header: "Category",
+      cell: (c) => (
+        <span className="inline-flex items-center gap-1.5">
+          {c.is_safety && <ShieldAlert className="size-3.5 text-danger" />}
+          {concernCategoryLabel(c.category)}
+        </span>
+      ),
+    },
+    {
+      header: "Visibility",
+      cell: (c) => (
+        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+          {c.is_anonymous ? <EyeOff className="size-3.5" /> : <User className="size-3.5" />}
+          {c.is_anonymous ? "Anonymous" : "Named"}
+        </span>
+      ),
+    },
+    {
+      header: "Status",
+      cell: (c) => {
+        const b = concernBadge(c);
+        return <StatusBadge status={b.status} label={b.label} />;
+      },
+    },
+    {
+      header: "Submitted",
+      align: "right",
+      cell: (c) => formatDate(c.submitted_at),
+    },
+  ];
 
   return (
-    <section className="flex flex-col gap-6 rounded-card border border-border bg-card p-6 shadow-sm sm:p-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-h3 font-bold text-foreground">My Concerns</h2>
-        <div className="relative w-full sm:w-52">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search concerns…"
-            className="h-9 w-full rounded-lg border border-input bg-transparent pl-8 pr-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-          />
-        </div>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="px-3 py-3 text-label font-bold uppercase tracking-wide text-muted-foreground">
-                Ref
-              </th>
-              <th className="px-3 py-3 text-label font-bold uppercase tracking-wide text-muted-foreground">
-                Category
-              </th>
-              <th className="px-3 py-3 text-label font-bold uppercase tracking-wide text-muted-foreground">
-                Visibility
-              </th>
-              <th className="px-3 py-3 text-label font-bold uppercase tracking-wide text-muted-foreground">
-                Status
-              </th>
-              <th className="px-3 py-3 text-right text-label font-bold uppercase tracking-wide text-muted-foreground">
-                Submitted
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="px-3 py-10 text-center text-sm text-muted-foreground"
-                >
-                  {query.trim() ? "No matches." : "You haven't raised any concerns."}
-                </td>
-              </tr>
-            ) : (
-              filtered.map((c) => {
-                const pill = displayStatus(c);
-                return (
-                  <tr key={c.id} className="border-b border-border last:border-0">
-                    <td className="px-3 py-4 align-middle text-sm font-semibold text-foreground">
-                      {c.reference_no}
-                    </td>
-                    <td className="px-3 py-4 align-middle text-sm text-foreground">
-                      <span className="inline-flex items-center gap-1.5">
-                        {c.is_safety && (
-                          <ShieldAlert className="size-3.5 text-danger" />
-                        )}
-                        {concernCategoryLabel(c.category)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-4 align-middle">
-                      {c.is_anonymous ? (
-                        <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                          <EyeOff className="size-3.5" /> Anonymous
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                          <User className="size-3.5" /> Named
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-4 align-middle">
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full px-3 py-1 text-xs font-bold",
-                          pill.cls,
-                        )}
-                      >
-                        {pill.label}
-                      </span>
-                    </td>
-                    <td className="px-3 py-4 align-middle text-right text-sm text-muted-foreground">
-                      {formatDate(c.submitted_at)}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <p className="text-caption text-muted-foreground">
-        Showing {filtered.length} of {all.length} submitted{" "}
-        {all.length === 1 ? "report" : "reports"}.
-      </p>
-    </section>
+    <DataTable
+      title="My Concerns"
+      columns={columns}
+      rows={all}
+      rowKey={(c) => c.id}
+      // Privacy: search on reference/category/visibility/status only — never identity.
+      getSearchText={(c) =>
+        [
+          c.reference_no,
+          concernCategoryLabel(c.category),
+          c.is_anonymous ? "anonymous" : "named",
+          concernBadge(c).label ?? c.status,
+        ].join(" ")
+      }
+      searchPlaceholder="Search concerns…"
+      filterable={false}
+      empty="You haven't raised any concerns."
+    />
   );
 }
