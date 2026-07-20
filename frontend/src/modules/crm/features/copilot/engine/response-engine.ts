@@ -35,12 +35,12 @@ function interpolate(text: string, ctx: CopilotContext): string {
 // the app's real paths (Outreach is the /follow-ups workspace). Any emphasized token NOT in this map
 // stays plain bold/emphasis (e.g. "Companies", "Discussion Notes", "Subject:").
 const MODULE_ROUTES: Record<string, string> = {
-  dashboard: "/dashboard",
-  leads: "/leads",
-  outreach: "/follow-ups",
-  "follow-ups": "/follow-ups",
-  "my performance": "/my-performance",
-  "activity logs": "/activity-logs",
+  dashboard: "/zerem/dashboard",
+  leads: "/zerem/leads",
+  outreach: "/zerem/follow-ups",
+  "follow-ups": "/zerem/follow-ups",
+  "my performance": "/zerem/my-performance",
+  "activity logs": "/zerem/activity-logs",
 };
 
 function moduleRoute(label: string): string | undefined {
@@ -88,7 +88,7 @@ function renderNavigate(config: ResponseConfig, ctx: CopilotContext): EngineResu
   const raw = config.text ?? config.template ?? "Opening…";
   return {
     segments: toSegments(interpolate(raw, ctx)),
-    action: config.action ?? { type: "navigate", target: "/dashboard" },
+    action: config.action ?? { type: "navigate", target: "/zerem/dashboard" },
   };
 }
 
@@ -186,7 +186,7 @@ function renderSummary(config: ResponseConfig, ctx: CopilotContext): EngineResul
 // navigate action so the action engine stays agnostic to how the id was derived.
 function renderOpenLead(config: ResponseConfig, ctx: CopilotContext): EngineResult {
   const lead = ctx.topLeads[0];
-  const target = (config.action?.target ?? "/leads/:id").replace(":id", lead?.id ?? "");
+  const target = (config.action?.target ?? "/zerem/leads/:id").replace(":id", lead?.id ?? "");
   const segments: RichTextSegment[] = config.text
     ? toSegments(interpolate(config.text, ctx))
     : [

@@ -28,7 +28,7 @@ export function DashboardPage() {
     setRegistered(true);
     setOnSubmit((value) => {
       const query = value.trim();
-      routerRef.current.push(query ? `/leads?search=${encodeURIComponent(query)}` : "/leads");
+      routerRef.current.push(query ? `/zerem/leads?search=${encodeURIComponent(query)}` : "/zerem/leads");
     });
     return () => {
       setRegistered(false);

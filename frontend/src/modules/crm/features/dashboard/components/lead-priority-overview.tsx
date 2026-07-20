@@ -12,7 +12,7 @@ export function LeadPriorityOverview() {
       <SectionHeader
         title="Lead Priority Overview"
         linkText="Open Smart Leads Prioritization"
-        linkHref="/leads"
+        linkHref="/zerem/leads"
       />
       {isLoading && <PrioritySkeleton />}
       {isError && <ErrorState message="Failed to load priority data" />}

@@ -7,15 +7,15 @@ import type { ActionConfig } from "@/modules/crm/features/copilot/engine/types";
  * (Kept in sync with app/(dashboard)/* and the app-shell PAGE_TITLES map.)
  */
 export const KNOWN_ROUTES = [
-  "/dashboard",
-  "/leads",
-  "/follow-ups",
-  "/my-performance",
-  "/planner",
-  "/reports",
-  "/activity-logs",
-  "/settings",
-  "/email-drafts",
+  "/zerem/dashboard",
+  "/zerem/leads",
+  "/zerem/follow-ups",
+  "/zerem/my-performance",
+  "/zerem/planner",
+  "/zerem/reports",
+  "/zerem/activity-logs",
+  "/zerem/settings",
+  "/zerem/email-drafts",
 ] as const;
 
 /** Injected navigator — keeps the engine decoupled from Next's router (the hook wires it up). */

@@ -289,7 +289,7 @@ export function useLeadStatusSummary() {
       active: joined === currentStatus,
       // Bare drill-down: only ?status= (drops any active priority/search) so the table always
       // matches the displayed count — same overview→drill-down model as the Priority cards.
-      href: joined ? `/leads?status=${joined}` : "/leads",
+      href: joined ? `/zerem/leads?status=${joined}` : "/zerem/leads",
     };
   });
 

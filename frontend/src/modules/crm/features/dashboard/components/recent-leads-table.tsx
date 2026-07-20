@@ -26,7 +26,7 @@ export function RecentLeadsTable() {
       <SectionHeader
         title="Recent Leads"
         linkText={total != null ? `View all ${total}` : "View all"}
-        linkHref="/leads"
+        linkHref="/zerem/leads"
       />
       {isLoading && <TableSkeleton />}
       {isError && <ErrorState message="Failed to load leads" />}

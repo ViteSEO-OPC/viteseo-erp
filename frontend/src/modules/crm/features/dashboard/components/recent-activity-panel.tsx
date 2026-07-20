@@ -13,7 +13,7 @@ export function RecentActivityPanel() {
       <SectionHeader
         title="Recent Activity"
         linkText="Full history"
-        linkHref="/activity-logs"
+        linkHref="/zerem/activity-logs"
       />
       {isLoading && <ActivitySkeleton />}
       {isError && <ErrorState message="Failed to load activity" />}
