@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { EmployeeRecord } from "@/modules/hr/components/employee-record";
 import {
   EmployeeFormDialog,

@@ -6,7 +6,7 @@ import { ArrowLeft, Download } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { HeadcountMovementChart } from "@/modules/hr/components/headcount-movement-chart";
 import { useReport, useExportReport } from "@/modules/hr/hooks/use-report";
 

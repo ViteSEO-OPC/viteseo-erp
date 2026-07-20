@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 
 const REPORTS: {
   key: string;

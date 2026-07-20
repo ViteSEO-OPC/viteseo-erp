@@ -189,8 +189,11 @@ export function PendingApprovals() {
     }
   }
 
+  // Stacked on phones: at 320px the Approve/Reject pair eats ~160px of a ~240px
+  // row, truncating the name and age away to nothing. Below `sm` the buttons
+  // drop onto their own line so the request stays readable.
   const rowClass =
-    "flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-3 transition-colors hover:bg-muted/40";
+    "flex flex-col items-stretch gap-2 rounded-lg border border-border px-3.5 py-3 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between sm:gap-3";
 
   // Chip + name + "Pending Xh" — shared by both row shapes.
   function RowBody({ item }: { item: Item }) {
@@ -212,7 +215,7 @@ export function PendingApprovals() {
   }
 
   return (
-    <div className="rounded-card border border-border bg-card p-6">
+    <div className="rounded-card border border-border bg-card p-4 sm:p-6">
       <h2 className="text-h3 font-bold text-foreground">Pending Approvals</h2>
 
       <div className="mt-4 h-80 space-y-3 overflow-y-auto pr-1">
@@ -228,7 +231,7 @@ export function PendingApprovals() {
                 <Link href={item.href} className="min-w-0 flex-1">
                   <RowBody item={item} />
                 </Link>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 gap-2 [&>button]:flex-1 sm:[&>button]:flex-none">
                   <Button
                     size="sm"
                     variant="success"

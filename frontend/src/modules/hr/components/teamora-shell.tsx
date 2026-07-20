@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
-import { Menu, X, Zap } from "lucide-react";
+import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/core/components/sidebar";
 import { TopBar } from "@/core/components/top-bar";
 import { NotificationProvider } from "@/core/notifications-context";
 import type { ShellVariant } from "@/core/nav";
+import { TeamoraMobileTopBar } from "@/modules/hr/components/teamora-mobile-top-bar";
 
 /**
  * TeamOra's responsive frame — an HR-local replacement for `core/AppShell`.
@@ -32,12 +32,15 @@ export function TeamoraShell({
   children: React.ReactNode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const pathname = usePathname();
 
-  // Navigating from a drawer link should close the drawer behind you.
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [pathname]);
+  // Navigating from a drawer link should close the drawer behind you. Handled
+  // by delegation rather than an effect on `pathname`: the nav links live
+  // inside core's `Sidebar`, so there is no per-link handler to hook, and
+  // closing in an effect would be a cascading setState. Anchors close it;
+  // the group expand/collapse buttons deliberately don't.
+  const closeIfNavigating = (e: React.MouseEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
+  };
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -72,6 +75,7 @@ export function TeamoraShell({
           role="dialog"
           aria-modal="true"
           aria-label="Navigation menu"
+          onClick={closeIfNavigating}
           className={cn(
             "fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out lg:hidden",
             // `invisible` (not just the off-screen transform) so the drawer's
@@ -91,26 +95,17 @@ export function TeamoraShell({
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* The hamburger bar. Separate from `TopBar` because that component is
-              shared core — this adds the control without forking it. */}
-          <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border bg-card px-4 lg:hidden">
-            <button
-              type="button"
-              onClick={() => setMobileOpen(true)}
-              aria-label="Open navigation"
-              aria-expanded={mobileOpen}
-              aria-controls="teamora-mobile-nav"
-              className="-ml-1.5 flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <Menu className="size-5" />
-            </button>
-            <span className="flex size-6 items-center justify-center rounded-md bg-brand text-brand-foreground">
-              <Zap className="size-4" fill="currentColor" />
-            </span>
-            <span className="font-bold text-foreground">TeamOra</span>
+          {/* Two bars, one at a time: the HR-owned mobile bar below `lg` (it
+              carries the hamburger, and a notification dropdown that fits a
+              320px screen), core's shared bar from `lg` up. */}
+          <TeamoraMobileTopBar
+            variant={variant}
+            onOpenNav={() => setMobileOpen(true)}
+          />
+          <div className="hidden lg:block">
+            <TopBar variant={variant} />
           </div>
 
-          <TopBar variant={variant} />
           <main className="min-h-0 flex-1 overflow-y-auto bg-background">
             {children}
           </main>

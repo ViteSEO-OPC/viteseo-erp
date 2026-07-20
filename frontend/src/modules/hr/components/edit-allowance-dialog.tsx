@@ -34,7 +34,7 @@ export function EditAllowanceDialog({
 }) {
   return (
     <Dialog open={!!program} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
         {program && <AllowanceForm key={program.id} program={program} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>

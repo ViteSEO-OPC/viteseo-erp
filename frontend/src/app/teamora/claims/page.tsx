@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatusBadge } from "@/core/components/status-badge";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
 import { DataTable, type Column } from "@/core/components/data-table";

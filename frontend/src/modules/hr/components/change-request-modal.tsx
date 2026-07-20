@@ -87,7 +87,7 @@ export function ChangeRequestModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Request profile changes</DialogTitle>
           <DialogDescription>

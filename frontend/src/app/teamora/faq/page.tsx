@@ -5,7 +5,7 @@ import { Search, ChevronDown, Pin } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { useFaqs, useViewFaq } from "@/modules/hr/hooks/use-faqs";
 import { FAQ_CATEGORIES, faqCategoryLabel, type Faq } from "@/modules/hr/types/faq";
 

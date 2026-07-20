@@ -29,7 +29,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
@@ -424,7 +424,7 @@ function RejectionDialog({
 
   return (
     <Dialog open={!!candidate} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-md">
         {candidate && (
           <>
             <DialogHeader>

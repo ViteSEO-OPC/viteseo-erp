@@ -4,7 +4,7 @@ import { useState } from "react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
 import {
   StatusFilter,

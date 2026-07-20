@@ -5,7 +5,7 @@ import { Zap, Check, X } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";

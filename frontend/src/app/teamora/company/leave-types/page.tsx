@@ -6,7 +6,7 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { LeaveTypeFormDialog } from "@/modules/hr/components/leave-type-form-dialog";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";

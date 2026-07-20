@@ -34,7 +34,7 @@ export function HolidayFormDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
         {open && <Body key={holiday?.id ?? "new"} setId={setId} holiday={holiday ?? null} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>

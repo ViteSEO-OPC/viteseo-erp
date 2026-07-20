@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { WorkScheduleFormDialog } from "@/modules/hr/components/work-schedule-form-dialog";
 import {

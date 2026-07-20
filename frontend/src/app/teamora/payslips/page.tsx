@@ -16,7 +16,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { useMyPayslips, usePayslip } from "@/modules/hr/hooks/use-payroll";
@@ -465,7 +465,7 @@ function PayslipCopyDialog({
 
   return (
     <Dialog open={payslipId != null} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Request a signed hard copy</DialogTitle>
           <DialogDescription>

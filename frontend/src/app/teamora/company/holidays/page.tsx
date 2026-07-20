@@ -7,7 +7,7 @@ import { AxiosError } from "axios";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { HolidayFormDialog } from "@/modules/hr/components/holiday-form-dialog";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";

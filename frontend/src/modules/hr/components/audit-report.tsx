@@ -7,7 +7,7 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { useReport, useExportReport } from "@/modules/hr/hooks/use-report";
 import type { AuditEntry } from "@/modules/hr/types/reports";

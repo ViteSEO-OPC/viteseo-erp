@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import {
   StatusFilter,
@@ -197,7 +197,7 @@ function ConcernDetail({
 
   return (
     <Dialog open={!!concern} onOpenChange={handleOpenChange}>
-      <DialogContent className="flex flex-col gap-4 px-6 py-5 sm:max-w-[497px]">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto flex flex-col gap-4 px-6 py-5 sm:max-w-[497px]">
         {concern && (
           <>
             <DialogHeader className="gap-1">

@@ -152,7 +152,7 @@ export function LeaveTypeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit leave type" : "Add leave type"}</DialogTitle>
           <DialogDescription>

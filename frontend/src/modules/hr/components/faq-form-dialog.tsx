@@ -170,7 +170,7 @@ export function FaqFormDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className={cn("gap-0 p-0", isEdit ? "sm:max-w-[560px]" : "sm:max-w-[500px]")}
+        className={cn("max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto gap-0 p-0", isEdit ? "sm:max-w-[560px]" : "sm:max-w-[500px]")}
       >
         <DialogHeader className={cn("mb-0", pad, isEdit ? "pt-6 pb-5" : "py-6")}>
           {/* Sizes restated here for the same tailwind-merge reason as labelClass:

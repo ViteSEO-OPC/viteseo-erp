@@ -59,7 +59,7 @@ export function GracePeriodButton() {
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Today&apos;s Grace Period</DialogTitle>
             <DialogDescription>

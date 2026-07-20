@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { EmployeeRecord } from "@/modules/hr/components/employee-record";
 import { ChangeRequestModal } from "@/modules/hr/components/change-request-modal";
 import { DocumentRequestModal } from "@/modules/hr/components/document-request-modal";

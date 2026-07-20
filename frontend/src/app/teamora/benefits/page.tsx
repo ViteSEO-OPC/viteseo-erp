@@ -3,7 +3,7 @@
 import { Headset, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { BenefitCard } from "@/modules/hr/components/benefit-card";
 import { useMyBenefits } from "@/modules/hr/hooks/use-benefit-programs";
 

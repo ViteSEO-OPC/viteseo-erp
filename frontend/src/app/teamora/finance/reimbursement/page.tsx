@@ -5,7 +5,7 @@ import { Info, Check, X, Paperclip } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/core/components/page-header";
+import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
 import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
