@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Anonymity policy (§14.3g) is enforced HERE, not in the UI. An anonymous concern
@@ -27,6 +28,17 @@ class ConcernResource extends JsonResource
             'reference_no' => $this->reference_no,
             'category' => $this->category,
             'description' => $this->description,
+            'reported_person' => $this->reported_person,
+            // Supporting documents. Filenames are already generalised for anonymous
+            // concerns at storage time; the path is a random hash, never the original.
+            'attachments' => collect($this->attachments ?? [])
+                ->map(fn (array $a) => [
+                    'name' => $a['name'] ?? 'Attachment',
+                    'url' => Storage::disk('public')->url($a['path']),
+                    'size' => $a['size'] ?? null,
+                    'mime' => $a['mime'] ?? null,
+                ])
+                ->values(),
             'is_anonymous' => $this->is_anonymous,
             'is_safety' => $this->category === 'safety',
             'status' => $this->status,

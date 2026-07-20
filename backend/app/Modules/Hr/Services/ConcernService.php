@@ -7,6 +7,8 @@ use App\Modules\Hr\Models\Concern;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Meeting;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -31,15 +33,22 @@ class ConcernService
             ->get();
     }
 
-    /** @param array<string, mixed> $data */
-    public function create(Employee $employee, array $data): Concern
+    /**
+     * @param  array<string, mixed>  $data
+     * @param  array<int, UploadedFile>  $files
+     */
+    public function create(Employee $employee, array $data, array $files = []): Concern
     {
+        $isAnonymous = (bool) ($data['is_anonymous'] ?? false);
+
         $concern = Concern::create([
             'employee_id' => $employee->id, // stored, but hidden for anonymous (Resource)
             'reference_no' => $this->uniqueReference(),
             'category' => $data['category'],
             'description' => $data['description'],
-            'is_anonymous' => (bool) ($data['is_anonymous'] ?? false),
+            'reported_person' => $data['reported_person'] ?? null,
+            'attachments' => $this->storeAttachments($files, $isAnonymous),
+            'is_anonymous' => $isAnonymous,
             'status' => 'pending',
             'submitted_at' => now(),
         ]);
@@ -48,6 +57,64 @@ class ConcernService
         $this->audit->log('submitted', 'Concerns', "{$concern->category} concern ({$concern->reference_no})", $concern);
 
         return $concern;
+    }
+
+    /**
+     * Persist uploaded documents and return their JSON metadata. For ANONYMOUS
+     * concerns the submitter's identity is protected before storage: images are
+     * re-encoded to strip EXIF/metadata, and the display name is generalised so an
+     * original filename (which can carry a person's name) is never surfaced. Files
+     * always land under a random hashed path, so the stored path is never guessable.
+     *
+     * @param  array<int, UploadedFile>  $files
+     * @return array<int, array<string, mixed>>
+     */
+    private function storeAttachments(array $files, bool $anonymous): array
+    {
+        $out = [];
+
+        foreach (array_values($files) as $i => $file) {
+            if (! $file instanceof UploadedFile) {
+                continue;
+            }
+
+            $ext = strtolower($file->getClientOriginalExtension());
+            $path = $this->storeFile($file, $ext, $anonymous);
+
+            $out[] = [
+                'path' => $path,
+                'name' => $anonymous
+                    ? 'Attachment ' . ($i + 1) . ($ext ? ".{$ext}" : '')
+                    : $file->getClientOriginalName(),
+                'size' => Storage::disk('public')->size($path),
+                'mime' => $file->getClientMimeType(),
+            ];
+        }
+
+        return $out;
+    }
+
+    private function storeFile(UploadedFile $file, string $ext, bool $anonymous): string
+    {
+        // Strip metadata from images on anonymous submissions by re-encoding via GD;
+        // this drops EXIF (camera, GPS, author) that could deanonymise the submitter.
+        if ($anonymous && in_array($ext, ['jpg', 'jpeg', 'png'], true) && function_exists('imagecreatefromstring')) {
+            $src = @imagecreatefromstring((string) file_get_contents($file->getRealPath()));
+
+            if ($src !== false) {
+                ob_start();
+                $ext === 'png' ? imagepng($src) : imagejpeg($src, null, 90);
+                $bytes = (string) ob_get_clean();
+                imagedestroy($src);
+
+                $path = 'concern-attachments/' . Str::random(40) . ".{$ext}";
+                Storage::disk('public')->put($path, $bytes);
+
+                return $path;
+            }
+        }
+
+        return $file->store('concern-attachments', 'public');
     }
 
     public function setStatus(Concern $concern, string $status, User $actor): Concern

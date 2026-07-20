@@ -13,12 +13,10 @@ export async function getMyConcerns(): Promise<Concern[]> {
   return res.data.data;
 }
 
-export async function createConcern(input: {
-  category: string;
-  description: string;
-  is_anonymous: boolean;
-}): Promise<Concern> {
-  const res = await apiClient.post("/hr/me/concerns", input);
+// Sent as multipart/form-data so supporting documents can ride along.
+// (Axios sets the multipart boundary automatically for a FormData body.)
+export async function createConcern(form: FormData): Promise<Concern> {
+  const res = await apiClient.post("/hr/me/concerns", form);
   return res.data.data;
 }
 

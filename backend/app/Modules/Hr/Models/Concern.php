@@ -14,12 +14,13 @@ class Concern extends Model
     protected $table = 'hr_concerns';
 
     protected $fillable = [
-        'employee_id', 'reference_no', 'category', 'description',
-        'is_anonymous', 'status', 'submitted_at', 'resolved_at',
+        'employee_id', 'reference_no', 'category', 'description', 'reported_person',
+        'attachments', 'is_anonymous', 'status', 'submitted_at', 'resolved_at',
     ];
 
     protected $casts = [
         'is_anonymous' => 'boolean',
+        'attachments' => 'array',
         'submitted_at' => 'datetime',
         'resolved_at' => 'datetime',
     ];

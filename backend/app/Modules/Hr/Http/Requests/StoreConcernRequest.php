@@ -21,7 +21,11 @@ class StoreConcernRequest extends FormRequest
         return [
             'category' => ['required', Rule::in(ConcernService::CATEGORIES)],
             'description' => ['required', 'string', 'max:5000'],
+            'reported_person' => ['nullable', 'string', 'max:255'],
             'is_anonymous' => ['boolean'],
+            // Supporting documents — optional; each image/pdf up to 10 MB.
+            'attachments' => ['nullable', 'array', 'max:5'],
+            'attachments.*' => ['file', 'mimes:jpg,jpeg,png,pdf', 'max:10240'],
         ];
     }
 }

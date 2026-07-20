@@ -335,7 +335,7 @@ export function TimeClockPanel() {
 
       {/* Confirmation modal for time in / lunch / break */}
       <Dialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
-        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto lg:max-w-lg">
           {confirmMeta && (
             <>
               <DialogHeader>

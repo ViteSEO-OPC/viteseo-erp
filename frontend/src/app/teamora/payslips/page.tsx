@@ -1,7 +1,16 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Download, FileSignature, MessageCircleQuestion, Clock, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Download,
+  FileSignature,
+  MessageCircleQuestion,
+  Clock,
+  Plus,
+  X,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -42,7 +51,8 @@ export default function PayslipsPage() {
   // A payslip is viewable once its run is finalized; default to the newest viewable one.
   const viewable = list.filter((p) => p.unlocked);
   const [chosenId, setChosenId] = useState<number | undefined>();
-  const selectedId = chosenId ?? viewable[0]?.id;
+  const [closed, setClosed] = useState(false);
+  const selectedId = closed ? undefined : chosenId ?? viewable[0]?.id;
   const selected = list.find((p) => p.id === selectedId);
   // Only fetch figures for a viewable payslip (a still-processing run 403s).
   const { data: detail } = usePayslip(selected?.unlocked ? selectedId : undefined);
@@ -68,6 +78,12 @@ export default function PayslipsPage() {
       setPdfBusy(false);
     }
   }
+
+  function selectPayslip(id: number) {
+    setChosenId(id);
+    setClosed(false);
+  }
+
   const { data: inquiries } = useMyPayrollInquiries();
   const [inqPage, setInqPage] = useState(1);
   const [inqSize, setInqSize] = useState(5);
@@ -85,25 +101,32 @@ export default function PayslipsPage() {
     <div className="p-4 sm:p-8">
       <PageHeader
         title="Payslips"
-        subtitle="Your payslips appear here once each pay run is finalized. Open one to raise an inquiry or request a signed hard copy."
+        actions={
+          <Button onClick={() => setInquiryOpen(true)}>
+            <Plus />
+            Request Inquiry
+          </Button>
+        }
       />
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[340px_1fr]">
+      <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(320px,420px)_1fr]">
         {/* History — pay periods; finalized ones are viewable */}
-        <div className="rounded-card border border-border bg-card p-4">
-          <h2 className="mb-3 px-2 text-h3 font-bold text-foreground">History</h2>
+        <div className="h-fit overflow-hidden rounded-card border border-border bg-card shadow-sm">
+          <div className="border-b border-border p-6">
+            <h2 className="text-h3 font-bold text-foreground">History</h2>
+          </div>
           {isLoading ? (
-            <p className="px-2 text-sm text-muted-foreground">Loading…</p>
+            <p className="p-6 text-sm text-muted-foreground">Loading…</p>
           ) : list.length === 0 ? (
-            <p className="px-2 text-sm text-muted-foreground">No payslips yet.</p>
+            <p className="p-6 text-sm text-muted-foreground">No payslips yet.</p>
           ) : (
-            <div className="space-y-1">
+            <div>
               {list.map((p) => (
                 <PayslipRow
                   key={p.id}
                   payslip={p}
                   selected={p.id === selectedId}
-                  onView={() => setChosenId(p.id)}
+                  onView={() => selectPayslip(p.id)}
                 />
               ))}
             </div>
@@ -112,32 +135,42 @@ export default function PayslipsPage() {
 
         {/* Detail — only for an unlocked (approved) payslip */}
         {selected?.unlocked && detail ? (
-          <div className="print-area rounded-card border border-border bg-card p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="print-area rounded-card border border-border bg-card p-6 shadow-sm sm:p-8">
+            <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-h3 font-bold text-foreground">
+                <h2 className="text-h2 font-bold text-foreground">
                   Payslip — {cycleLabel(detail.payslip.cycle_start, detail.payslip.cycle_end)}
                 </h2>
-                <p className="text-caption text-muted-foreground">
+                <p className="text-body text-muted-foreground">
                   {detail.payslip.employee.name} · Viteseo Inc.
                 </p>
               </div>
-              <div className="print-hide flex items-center gap-2">
-                <HardCopyControl
-                  status={selected?.hardcopy_status ?? "none"}
-                  onRequest={() => setCopyId(detail.payslip.id)}
-                  onViewReason={rejectedCopy ? () => setDeclinedCopy(rejectedCopy) : undefined}
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={pdfBusy}
-                  onClick={() => onDownloadPdf(detail.payslip.id)}
-                >
-                  <Download />
-                  {pdfBusy ? "Downloading…" : "Download PDF"}
-                </Button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setClosed(true)}
+                aria-label="Close payslip"
+                className="print-hide shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-6" />
+              </button>
+            </div>
+
+            {/* Actions retained from the platform (not in the mock, kept for parity) */}
+            <div className="print-hide mt-4 flex flex-wrap items-center justify-end gap-2">
+              <HardCopyControl
+                status={selected?.hardcopy_status ?? "none"}
+                onRequest={() => setCopyId(detail.payslip.id)}
+                onViewReason={rejectedCopy ? () => setDeclinedCopy(rejectedCopy) : undefined}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pdfBusy}
+                onClick={() => onDownloadPdf(detail.payslip.id)}
+              >
+                <Download />
+                {pdfBusy ? "Downloading…" : "Download PDF"}
+              </Button>
             </div>
 
             <Section title="Earnings">
@@ -160,18 +193,18 @@ export default function PayslipsPage() {
               <Row label="Withholding tax" value={formatPeso(detail.payslip.withholding_tax)} negative />
             </Section>
 
-            <div className="mt-5 flex items-center justify-between border-t-2 border-brand pt-4">
-              <span className="text-lg font-bold text-foreground">Net pay</span>
-              <span className="text-h2 font-bold text-brand">
+            <div className="mt-4 flex items-center justify-between border-t-2 border-brand py-5">
+              <span className="text-h3 font-bold text-foreground">Net pay</span>
+              <span className="text-h1 font-bold text-brand">
                 {formatPeso(detail.payslip.net_pay)}
               </span>
             </div>
 
             {/* YTD */}
-            <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4 rounded-lg border border-border p-4">
+            <div className="grid grid-cols-1 gap-4 rounded-lg border border-border p-5 shadow-sm sm:grid-cols-3 sm:divide-x sm:divide-border">
               <Ytd label="YTD Gross" value={formatPeso(detail.ytd.gross)} />
-              <Ytd label="YTD Deductions" value={formatPeso(detail.ytd.deductions)} />
-              <Ytd label="YTD Net" value={formatPeso(detail.ytd.net)} />
+              <Ytd label="YTD Deductions" value={formatPeso(detail.ytd.deductions)} className="sm:pl-4" />
+              <Ytd label="YTD Net" value={formatPeso(detail.ytd.net)} className="sm:pl-4" />
             </div>
 
             {/* 13th-month accrual (basic pay earned this year ÷ 12) */}
@@ -200,13 +233,6 @@ export default function PayslipsPage() {
                 <p className="text-caption text-muted-foreground">Employee signature</p>
               </div>
             </div>
-
-            <div className="print-hide mt-6 flex justify-end">
-              <Button variant="ghost" size="sm" onClick={() => setInquiryOpen(true)}>
-                <MessageCircleQuestion />
-                Raise an inquiry about this payslip
-              </Button>
-            </div>
           </div>
         ) : (
           <EmptyPanel
@@ -219,7 +245,7 @@ export default function PayslipsPage() {
 
       {/* My payroll inquiries + HR replies (raised via Request Inquiry above) */}
       {inquiryList.length > 0 && (
-        <div className="mt-6 rounded-card border border-border bg-card p-6">
+        <div className="mt-8 rounded-card border border-border bg-card p-6 shadow-sm">
           <h2 className="mb-3 text-h3 font-bold text-foreground">My Inquiries</h2>
           <div className="divide-y divide-border">
             {pagedInquiries.map((q) => (
@@ -245,7 +271,7 @@ export default function PayslipsPage() {
             ))}
           </div>
           {inquiryList.length > inqSize && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 -mx-6 -mb-6">
+            <div className="-mx-6 -mb-6 flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
               <div className="flex items-center gap-2 text-caption text-muted-foreground">
                 <span>Rows per page</span>
                 <select
@@ -325,32 +351,39 @@ function PayslipRow({
     <Wrapper
       {...(payslip.unlocked ? { onClick: onView, type: "button" as const } : {})}
       className={cn(
-        "flex w-full items-center justify-between rounded-lg border-l-2 px-3 py-2.5 text-left transition-colors",
+        "flex w-full flex-col gap-2.5 border-b border-l-8 border-b-border p-6 text-left transition-colors last:border-b-0",
         payslip.unlocked && selected
-          ? "border-brand bg-brand-subtle"
+          ? "border-l-brand bg-brand/15"
           : payslip.unlocked
-            ? "border-transparent hover:bg-muted"
-            : "border-transparent",
+            ? "border-l-transparent hover:bg-muted/50"
+            : "border-l-transparent",
       )}
     >
-      <div className="flex items-center gap-2">
-        {!payslip.unlocked && <Clock className="size-3.5 text-muted-foreground" />}
-        <p className={cn("text-sm font-medium", payslip.unlocked ? "text-foreground" : "text-muted-foreground")}>
-          {label}
-        </p>
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2">
+          {!payslip.unlocked && <Clock className="size-4 text-muted-foreground" />}
+          <span
+            className={cn(
+              "text-body font-medium",
+              payslip.unlocked ? "text-foreground" : "text-muted-foreground",
+            )}
+          >
+            {label}
+          </span>
+        </span>
+
+        {payslip.unlocked ? (
+          <StatusBadge
+            status={payslip.status === "disbursed" ? "paid" : "approved"}
+            label={payslip.status === "disbursed" ? "Paid" : "Available"}
+          />
+        ) : (
+          <StatusBadge status="processing" label="Processing" />
+        )}
       </div>
 
-      {payslip.unlocked ? (
-        // A pending/approved signed-hard-copy request shows a small hint here.
-        payslip.hardcopy_status === "pending" ? (
-          <span className="text-caption font-medium text-warning">Copy pending</span>
-        ) : payslip.hardcopy_status === "approved" ? (
-          <span className="text-caption font-medium text-success">Copy approved</span>
-        ) : (
-          <StatusBadge status="approved" label="Available" />
-        )
-      ) : (
-        <span className="text-caption font-medium text-muted-foreground">Processing</span>
+      {payslip.unlocked && payslip.net_pay != null && (
+        <span className="text-body text-foreground">{formatPeso(payslip.net_pay)}</span>
       )}
     </Wrapper>
   );
@@ -412,14 +445,14 @@ function EmptyPanel({
 }) {
   if (!hasAny) {
     return (
-      <div className="rounded-card border border-border bg-card p-6 text-sm text-muted-foreground">
+      <div className="rounded-card border border-border bg-card p-6 text-sm text-muted-foreground shadow-sm">
         You have no payslips yet.
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-border bg-card py-16 text-center">
+    <div className="flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-border bg-card py-16 text-center shadow-sm">
       <Clock className="size-8 text-muted-foreground" />
       <p className="text-sm font-medium text-foreground">
         {selectedProcessing
@@ -465,7 +498,7 @@ function PayslipCopyDialog({
 
   return (
     <Dialog open={payslipId != null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto lg:max-w-lg">
         <DialogHeader>
           <DialogTitle>Request a signed hard copy</DialogTitle>
           <DialogDescription>
@@ -496,17 +529,19 @@ function PayslipCopyDialog({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mt-6">
-      <p className="mb-2 text-label font-bold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </p>
-      <div className="space-y-2">{children}</div>
+      <div className="border-b border-border pb-2.5">
+        <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+        </p>
+      </div>
+      <div className="mt-1">{children}</div>
     </div>
   );
 }
 
 function Row({ label, value, negative }: { label: string; value: string; negative?: boolean }) {
   return (
-    <div className="flex items-center justify-between text-sm">
+    <div className="flex items-center justify-between py-3 text-body">
       <span className="text-muted-foreground">{label}</span>
       <span className={cn(negative ? "text-danger" : "text-foreground")}>
         {negative ? "− " : ""}
@@ -516,11 +551,11 @@ function Row({ label, value, negative }: { label: string; value: string; negativ
   );
 }
 
-function Ytd({ label, value }: { label: string; value: string }) {
+function Ytd({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div>
-      <p className="text-caption text-muted-foreground">{label}</p>
-      <p className="mt-0.5 text-sm font-semibold text-foreground">{value}</p>
+    <div className={className}>
+      <p className="text-sm font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 text-body font-medium text-foreground">{value}</p>
     </div>
   );
 }
