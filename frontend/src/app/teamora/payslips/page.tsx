@@ -82,7 +82,7 @@ export default function PayslipsPage() {
   );
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Payslips"
         subtitle="Your payslips appear here once each pay run is finalized. Open one to raise an inquiry or request a signed hard copy."

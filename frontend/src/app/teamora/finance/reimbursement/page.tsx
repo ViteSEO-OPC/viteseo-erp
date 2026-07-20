@@ -134,7 +134,7 @@ export default function ReimbursementPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Reimbursement"
         subtitle="Claims arrive automatically when employees file them."

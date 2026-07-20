@@ -100,7 +100,7 @@ export default function DepartmentsPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Departments"
         subtitle="Manage the departments employees are assigned to."

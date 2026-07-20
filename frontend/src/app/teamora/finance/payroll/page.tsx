@@ -210,7 +210,7 @@ export default function PayrollPage() {
   const thirteenthTotal = (thirteenth?.rows ?? []).reduce((s, r) => s + r.thirteenth_month, 0);
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Payroll"
         subtitle={

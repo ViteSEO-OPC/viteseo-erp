@@ -74,7 +74,7 @@ export default function TimeOffPage() {
   );
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Time Off"
         subtitle="Request leave and track your remaining balance."

@@ -124,7 +124,7 @@ export default function TimeLeavePage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Time & Leave"
         subtitle="Review and decide on employee leave requests."

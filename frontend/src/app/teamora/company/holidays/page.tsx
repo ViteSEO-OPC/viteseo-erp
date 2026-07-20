@@ -154,7 +154,7 @@ export default function HolidaysPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Holiday List"
         subtitle="Manage company holidays by country and year. Holidays are customizable, country-based, and refreshed annually."

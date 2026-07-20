@@ -50,7 +50,7 @@ export default function BenefitsPage() {
   const [editHmo, setEditHmo] = useState<BenefitProgram | null>(null);
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Benefits"
         subtitle={
@@ -243,7 +243,7 @@ function StatusBadge({ status }: { status: string }) {
 
 function EmptyHint({ text }: { text: string }) {
   return (
-    <div className="rounded-card border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+    <div className="rounded-card border border-dashed border-border bg-card p-4 sm:p-8 text-center text-sm text-muted-foreground">
       {text}
     </div>
   );

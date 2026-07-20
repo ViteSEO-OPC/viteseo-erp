@@ -68,7 +68,7 @@ export default function ConcernsPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Concerns"
         subtitle="This queue is restricted to HR/Admin only. Safety-related concerns feed into the Health & Safety report."

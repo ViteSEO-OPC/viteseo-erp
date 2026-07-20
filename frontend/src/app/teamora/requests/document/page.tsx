@@ -56,7 +56,7 @@ const REJECT_BTN = "border-danger text-danger hover:bg-danger-subtle hover:text-
 
 export default function RequestsPage() {
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Document"
         subtitle="Employees request documents from HR through the portal - payroll, leave, and attendance records. Requests are tracked with status and fulfilled from the employee's digital 201 file."

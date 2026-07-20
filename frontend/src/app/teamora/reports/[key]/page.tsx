@@ -49,7 +49,7 @@ function GenericReport({ reportKey }: { reportKey: string }) {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title={report?.title ?? "Report"}
         subtitle={report?.description}

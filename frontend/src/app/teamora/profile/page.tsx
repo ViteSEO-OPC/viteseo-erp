@@ -13,7 +13,7 @@ export default function ProfilePage() {
   const [docOpen, setDocOpen] = useState(false);
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="My Profile"
         subtitle="Your employee record. Request detail changes and documents from HR."

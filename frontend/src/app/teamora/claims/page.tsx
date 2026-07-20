@@ -65,7 +65,7 @@ export default function ClaimsPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader title="Claims" subtitle="File and track your expense claims." />
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[2fr_3fr]">

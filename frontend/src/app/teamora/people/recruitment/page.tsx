@@ -195,7 +195,7 @@ export default function RecruitmentPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Recruitment"
         subtitle={`${openReqs} open requisitions · ${totalCandidates} candidates in pipeline`}

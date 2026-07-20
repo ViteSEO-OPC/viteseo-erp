@@ -31,7 +31,7 @@ export default function FaqPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader title="FAQ" subtitle="Answers to common questions about payroll, leave, attendance and more." />
 
       {/* Search + category filter */}

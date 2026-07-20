@@ -81,7 +81,7 @@ function EmployeeCell({ employee }: { employee: { id: number; name: string | nul
 
 export default function PayrollRequestsPage() {
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader title="Payroll" subtitle="Signed hard-copy requests and payroll inquiries." />
 
       {/* Payslip requests */}

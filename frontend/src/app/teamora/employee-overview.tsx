@@ -84,7 +84,7 @@ export default function EmployeeOverviewPage() {
   });
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title={`${greeting}, ${user?.name?.split(" ")[0] ?? "there"} 👋`}
         subtitle={`${todayLong} · Everything in one place.`}

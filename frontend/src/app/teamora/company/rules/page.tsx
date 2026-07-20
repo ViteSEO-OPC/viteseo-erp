@@ -45,7 +45,7 @@ export default function RulesPage() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Company Rules"
         subtitle="Work schedules and the attendance policy the violation system reads. Set individual schedules in each employee's profile."

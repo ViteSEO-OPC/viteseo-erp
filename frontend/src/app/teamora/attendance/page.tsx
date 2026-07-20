@@ -107,7 +107,7 @@ export default function AttendancePage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="Attendance"
         subtitle="Daily check-in status, timing, and violation flags — click a row to correct it."

@@ -135,7 +135,7 @@ export default function FaqAdminPage() {
   ];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="FAQ"
         subtitle="Author the self-service knowledge base. Employees read the published entries."

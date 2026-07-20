@@ -28,7 +28,7 @@ const selectClass =
 
 export default function MyConcernsPage() {
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       <PageHeader
         title="My Concerns"
         subtitle="Raise a concern — named or anonymous — and respond to meeting invites."
