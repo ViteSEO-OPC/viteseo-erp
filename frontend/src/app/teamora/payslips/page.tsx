@@ -113,7 +113,7 @@ export default function PayslipsPage() {
         {/* Detail — only for an unlocked (approved) payslip */}
         {selected?.unlocked && detail ? (
           <div className="print-area rounded-card border border-border bg-card p-6">
-            <div className="flex items-start justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-h3 font-bold text-foreground">
                   Payslip — {cycleLabel(detail.payslip.cycle_start, detail.payslip.cycle_end)}

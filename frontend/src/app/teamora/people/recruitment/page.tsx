@@ -246,7 +246,7 @@ export default function RecruitmentPage() {
       >
         {selected ? (
           <div className="mt-6">
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="text-h3 font-bold text-foreground">Unassigned Candidates · {selected.title}</h2>
               <Button
                 disabled={!canAddCandidate}

@@ -68,7 +68,7 @@ function AttendanceAlertBanner({ violation }: { violation: Violation }) {
       >
         !
       </span>
-      <p className="text-[length:var(--text-label)] whitespace-nowrap text-white">
+      <p className="text-[length:var(--text-label)] text-white sm:whitespace-nowrap">
         <span className="font-bold">{SEVERITY_LABEL[violation.severity]}:</span>{" "}
         {violation.details}
       </p>
@@ -242,7 +242,7 @@ export function TimeClockPanel() {
       <div>
         {/* pr keeps the alert off the divider — the row is the only thing that
             reaches the column's right edge. */}
-        <div className="flex items-center justify-between gap-4 lg:pr-5">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 lg:pr-5">
           <div className="flex items-center gap-2">
             <span className={cn("size-2.5 rounded-full", meta.dot)} />
             <span className="text-sm font-semibold">{meta.label}</span>
