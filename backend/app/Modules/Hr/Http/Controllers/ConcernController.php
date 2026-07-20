@@ -41,7 +41,13 @@ class ConcernController extends Controller
             return response()->json(['message' => 'Only employees can submit concerns.'], Response::HTTP_FORBIDDEN);
         }
 
-        return ConcernResource::make($this->service->create($employee, $request->validated()))
+        $concern = $this->service->create(
+            $employee,
+            $request->validated(),
+            $request->file('attachments', []),
+        );
+
+        return ConcernResource::make($concern)
             ->response()->setStatusCode(Response::HTTP_CREATED);
     }
 

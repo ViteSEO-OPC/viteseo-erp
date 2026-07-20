@@ -35,6 +35,7 @@ class ConcernsDemoSeeder extends Seeder
         $service->create($leo, [
             'category' => 'conduct',
             'description' => 'Repeated inappropriate comments during team meetings.',
+            'reported_person' => 'A team lead',
             'is_anonymous' => false,
         ]);
 

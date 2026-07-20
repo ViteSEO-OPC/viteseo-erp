@@ -1,10 +1,10 @@
 // Phase-2 Slice 21 — concerns + meeting scheduling (privacy-critical).
 
 export const CONCERN_CATEGORIES = [
-  { value: "conduct", label: "Workplace conduct" },
+  { value: "conduct", label: "Workplace Conduct" },
   { value: "harassment", label: "Harassment" },
-  { value: "safety", label: "Safety incident" },
-  { value: "policy", label: "Policy violation" },
+  { value: "safety", label: "Safety & Security" },
+  { value: "policy", label: "Policy Violation" },
   { value: "other", label: "Other" },
 ] as const;
 
@@ -29,11 +29,20 @@ export interface Meeting {
   } | null;
 }
 
+export interface ConcernAttachment {
+  name: string;
+  url: string;
+  size: number | null;
+  mime: string | null;
+}
+
 export interface Concern {
   id: number;
   reference_no: string;
   category: string;
   description: string;
+  reported_person: string | null;
+  attachments: ConcernAttachment[];
   is_anonymous: boolean;
   is_safety: boolean;
   status: string;
