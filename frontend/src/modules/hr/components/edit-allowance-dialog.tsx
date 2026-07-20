@@ -124,7 +124,7 @@ function AllowanceForm({ program, onDone }: { program: BenefitProgram; onDone: (
           from the next payroll cutoff.
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/40 bg-danger-subtle px-3 py-2.5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-danger/40 bg-danger-subtle px-3 py-2.5">
           <div>
             <p className="text-sm font-semibold text-danger">Deactivate allowance</p>
             <p className="text-xs text-muted-foreground">Stops future payouts. History is kept.</p>

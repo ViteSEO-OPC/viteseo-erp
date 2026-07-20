@@ -68,7 +68,7 @@ function AttendanceAlertBanner({ violation }: { violation: Violation }) {
       >
         !
       </span>
-      <p className="text-[length:var(--text-label)] whitespace-nowrap text-white">
+      <p className="text-[length:var(--text-label)] text-white sm:whitespace-nowrap">
         <span className="font-bold">{SEVERITY_LABEL[violation.severity]}:</span>{" "}
         {violation.details}
       </p>
@@ -242,7 +242,7 @@ export function TimeClockPanel() {
       <div>
         {/* pr keeps the alert off the divider — the row is the only thing that
             reaches the column's right edge. */}
-        <div className="flex items-center justify-between gap-4 lg:pr-5">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 lg:pr-5">
           <div className="flex items-center gap-2">
             <span className={cn("size-2.5 rounded-full", meta.dot)} />
             <span className="text-sm font-semibold">{meta.label}</span>
@@ -250,7 +250,10 @@ export function TimeClockPanel() {
           {alertFlag && <AttendanceAlertBanner violation={alertFlag} />}
         </div>
 
-        <p className="mt-6 font-mono text-4xl font-bold tracking-wider text-brand">
+        {/* Smaller + tighter below `sm`: at 320px the card's inner width is
+            ~240px, and "01:30:45 PM" at text-4xl/tracking-wider needs ~253px,
+            which wrapped the AM/PM onto its own line. */}
+        <p className="mt-6 font-mono text-3xl font-bold tracking-wide whitespace-nowrap text-brand sm:text-4xl sm:tracking-wider">
           {clockText}
         </p>
 
@@ -262,32 +265,35 @@ export function TimeClockPanel() {
           {state === "clocked_out" && "You've clocked out for today."}
         </p>
 
-        <div className="mt-5 flex flex-wrap gap-2">
+        {/* Stacked full-width on phones with a wider gap: wrapped side-by-side
+            buttons put "Time out" a few pixels from "Start break", which is an
+            easy mis-tap when the two do very different things. */}
+        <div className="mt-5 grid gap-3 sm:flex sm:flex-wrap sm:gap-2">
           <button
             disabled={busy || state !== "not_clocked_in"}
             onClick={() => setConfirm("time_in")}
-            className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="rounded-lg bg-brand px-4 py-3 sm:py-2 text-sm font-semibold text-brand-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             Time in
           </button>
           <button
             disabled={busy || !(state === "clocked_in" || state === "on_lunch")}
             onClick={() => setConfirm("lunch")}
-            className="rounded-lg border border-white/25 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:opacity-40"
+            className="rounded-lg border border-white/25 px-4 py-3 sm:py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             {lunchActive ? "End lunch" : "Start lunch"}
           </button>
           <button
             disabled={busy || !(state === "clocked_in" || state === "on_break")}
             onClick={() => setConfirm("break")}
-            className="rounded-lg border border-white/25 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:opacity-40"
+            className="rounded-lg border border-white/25 px-4 py-3 sm:py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             {breakActive ? "End break" : "Start break"}
           </button>
           <button
             disabled={busy || state !== "clocked_in"}
             onClick={() => setTimeOutOpen(true)}
-            className="rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="rounded-lg bg-danger px-4 py-3 sm:py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             Time out
           </button>

@@ -107,7 +107,7 @@ export function EmployeeRecord({
       <div className="rounded-card border border-border bg-card p-6">
         {/* Documents renders its own header (with the Upload button). */}
         {tab !== "documents" && (
-          <div className="mb-5 flex items-center justify-between">
+          <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-h3 font-bold text-foreground">
               {TABS.find((t) => t.key === tab)?.label} Information
             </h2>
@@ -291,7 +291,7 @@ function MyDocuments({ onRequestDocument }: { onRequestDocument?: () => void }) 
 
   return (
     <div>
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-h3 font-bold text-foreground">Documents</h2>
         {onRequestDocument && (
           <Button size="sm" onClick={onRequestDocument}>
@@ -455,7 +455,7 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
 function ActivateOnboarding({ employeeId }: { employeeId: number }) {
   const activate = useActivateEmployee();
   return (
-    <div className="flex items-center justify-between rounded-card border border-warning/40 bg-warning-subtle p-4">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-card border border-warning/40 bg-warning-subtle p-4">
       <div>
         <p className="text-sm font-semibold text-foreground">Onboarding in progress</p>
         <p className="text-xs text-muted-foreground">Mark complete once this hire is fully onboarded.</p>
