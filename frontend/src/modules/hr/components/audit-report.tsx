@@ -10,10 +10,8 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { useReport, useExportReport } from "@/modules/hr/hooks/use-report";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import type { AuditEntry } from "@/modules/hr/types/reports";
-
-const selectClass =
-  "h-9 rounded-lg border border-border bg-card px-3 pr-8 text-sm font-medium text-foreground outline-none focus-visible:border-ring";
 
 const RANGES = [
   { value: 3, label: "Last 3 Months" },
@@ -98,11 +96,13 @@ export function AuditReport() {
 
       {/* Filter: date range only */}
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <select aria-label="Date range" className={selectClass} value={range} onChange={(e) => setRange(Number(e.target.value))}>
-          {RANGES.map((r) => (
-            <option key={r.value} value={r.value}>{r.label}</option>
-          ))}
-        </select>
+        <SimpleSelect
+          aria-label="Date range"
+          className="w-48"
+          value={String(range)}
+          onValueChange={(v) => setRange(Number(v))}
+          options={RANGES.map((r) => ({ value: String(r.value), label: r.label }))}
+        />
       </div>
 
       <div className="mt-6">

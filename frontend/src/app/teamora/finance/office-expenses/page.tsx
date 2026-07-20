@@ -9,7 +9,6 @@ import {
   Eye,
   EyeOff,
   Calendar,
-  ChevronDown,
 } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
@@ -27,6 +26,14 @@ import {
   expenseCategoryLabel,
   type OfficeExpense,
 } from "@/modules/hr/types/office-expense";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  SimpleSelect,
+} from "@/modules/hr/ui/select";
 
 type Period = "all" | "week" | "month" | "year";
 type Sort = "date_desc" | "amount_desc" | "amount_asc";
@@ -169,21 +176,18 @@ export default function OfficeExpensesPage() {
               <Plus />
               Add Expense
             </Button>
-            <div className="relative">
-              <Calendar className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <select
-                aria-label="Filter by period"
-                value={period}
-                onChange={(e) => setPeriod(e.target.value as Period)}
-                className="h-9 appearance-none rounded-lg border border-border bg-card pl-9 pr-8 text-sm font-medium text-foreground outline-none focus-visible:border-ring"
-              >
-                <option value="all">All time</option>
-                <option value="week">This week</option>
-                <option value="month">This month</option>
-                <option value="year">This year</option>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            </div>
+            <Select value={period} onValueChange={(v) => setPeriod(v as Period)}>
+              <SelectTrigger aria-label="Filter by period" className="relative w-40 pl-9">
+                <Calendar className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All time</SelectItem>
+                <SelectItem value="week">This week</SelectItem>
+                <SelectItem value="month">This month</SelectItem>
+                <SelectItem value="year">This year</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         }
       />
@@ -219,15 +223,16 @@ export default function OfficeExpensesPage() {
       <div className="mt-6 flex justify-end">
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           Sort
-          <select
-            className="h-9 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none focus-visible:border-ring"
+          <SimpleSelect
+            className="w-48"
             value={sort}
-            onChange={(e) => setSort(e.target.value as Sort)}
-          >
-            <option value="date_desc">Date (newest)</option>
-            <option value="amount_desc">Amount (high → low)</option>
-            <option value="amount_asc">Amount (low → high)</option>
-          </select>
+            onValueChange={(v) => setSort(v as Sort)}
+            options={[
+              { value: "date_desc", label: "Date (newest)" },
+              { value: "amount_desc", label: "Amount (high → low)" },
+              { value: "amount_asc", label: "Amount (low → high)" },
+            ]}
+          />
         </label>
       </div>
 

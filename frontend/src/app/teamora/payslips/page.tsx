@@ -37,6 +37,7 @@ import {
 } from "@/modules/hr/hooks/use-requests";
 import { PayrollInquiryDialog } from "@/modules/hr/components/payroll-inquiry-dialog";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import type { PayslipSummary } from "@/modules/hr/types/payroll";
 import type { PayslipRequest } from "@/modules/hr/types/request";
 
@@ -274,15 +275,12 @@ export default function PayslipsPage() {
             <div className="-mx-6 -mb-6 flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
               <div className="flex items-center gap-2 text-caption text-muted-foreground">
                 <span>Rows per page</span>
-                <select
-                  value={inqSize}
-                  onChange={(e) => { setInqSize(Number(e.target.value)); setInqPage(1); }}
-                  className="h-7 rounded-md border border-input bg-card px-1.5 text-caption text-foreground outline-none focus-visible:border-ring"
-                >
-                  {inqPageSizes.map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
+                <SimpleSelect
+                  className="h-7 w-16"
+                  value={String(inqSize)}
+                  onValueChange={(v) => { setInqSize(Number(v)); setInqPage(1); }}
+                  options={inqPageSizes.map((n) => ({ value: String(n), label: String(n) }))}
+                />
                 <span className="hidden sm:inline">
                   · Showing {(inqSafePage - 1) * inqSize + 1}–{Math.min(inqSafePage * inqSize, inquiryList.length)} of {inquiryList.length}
                 </span>

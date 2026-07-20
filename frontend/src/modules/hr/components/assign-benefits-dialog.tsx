@@ -25,6 +25,7 @@ import {
   useCreateBenefitPlan,
 } from "@/modules/hr/hooks/use-benefit-programs";
 import type { BenefitProgram } from "@/modules/hr/types/benefits";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 export function AssignBenefitsDialog({
   open,
@@ -323,37 +324,27 @@ function AssignForm({
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   {hmoPlans.length > 1 ? (
-                    <select
-                      className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring"
-                      value={hmoId ?? ""}
-                      onChange={(e) => setHmoId(Number(e.target.value))}
-                    >
-                      {hmoPlans.map((h) => (
-                        <option key={h.id} value={h.id}>
-                          {h.name}
-                        </option>
-                      ))}
-                    </select>
+                    <SimpleSelect
+                      className="w-56"
+                      value={hmoId != null ? String(hmoId) : ""}
+                      onValueChange={(v) => setHmoId(Number(v))}
+                      options={hmoPlans.map((h) => ({ value: String(h.id), label: h.name }))}
+                    />
                   ) : (
                     <p className="text-sm font-semibold text-foreground">{hmo.name}</p>
                   )}
                   <p className="text-caption text-muted-foreground">tier per employee</p>
                 </div>
-                <label className="flex items-center gap-2 text-caption text-muted-foreground">
+                <div className="flex items-center gap-2 text-caption text-muted-foreground">
                   Set all to
-                  <select
-                    className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:border-ring"
-                    defaultValue=""
-                    onChange={(e) => e.target.value && setAllTiers(e.target.value)}
-                  >
-                    <option value="">—</option>
-                    {hmo.tiers.map((t) => (
-                      <option key={t.name} value={t.name}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <SimpleSelect
+                    className="w-32"
+                    value=""
+                    onValueChange={(v) => v && setAllTiers(v)}
+                    placeholder="—"
+                    options={hmo.tiers.map((t) => ({ value: t.name, label: t.name }))}
+                  />
+                </div>
               </div>
               <div className="max-h-40 space-y-1 overflow-y-auto">
                 {selectedEligible.length === 0 ? (
@@ -372,19 +363,14 @@ function AssignForm({
                             Deduct {formatPeso(cutoff * 2)}/mo ({formatPeso(cutoff)}/cutoff)
                           </p>
                         </div>
-                        <select
-                          className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm text-foreground outline-none focus-visible:border-ring"
+                        <SimpleSelect
+                          className="w-32"
                           value={tierName}
-                          onChange={(e2) =>
-                            setTierByEmp((prev) => ({ ...prev, [id]: e2.target.value }))
+                          onValueChange={(v) =>
+                            setTierByEmp((prev) => ({ ...prev, [id]: v }))
                           }
-                        >
-                          {hmo.tiers.map((t) => (
-                            <option key={t.name} value={t.name}>
-                              {t.name}
-                            </option>
-                          ))}
-                        </select>
+                          options={hmo.tiers.map((t) => ({ value: t.name, label: t.name }))}
+                        />
                       </div>
                     );
                   })

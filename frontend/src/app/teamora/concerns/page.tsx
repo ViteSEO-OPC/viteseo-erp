@@ -28,9 +28,7 @@ import {
   concernCategoryLabel,
   type Concern,
 } from "@/modules/hr/types/concern";
-
-const selectClass =
-  "h-11 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB — matches the backend rule.
@@ -131,18 +129,13 @@ function RaiseConcernCard() {
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="cat">Category</Label>
-          <select
+          <SimpleSelect
             id="cat"
-            className={selectClass}
+            className="h-11"
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
-          >
-            {CONCERN_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
-              </option>
-            ))}
-          </select>
+            onValueChange={setCategory}
+            options={CONCERN_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))}
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="reported">Person Being Reported (Optional)</Label>

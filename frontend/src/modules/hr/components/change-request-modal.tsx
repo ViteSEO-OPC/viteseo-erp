@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { CHANGE_FIELDS } from "@/modules/hr/types/request";
 import {
   useCreateChangeRequest,
@@ -25,9 +26,6 @@ import {
 } from "@/modules/hr/hooks/use-requests";
 
 type Row = { field: string; value: string };
-
-const selectClass =
-  "h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
 
 const newRow = (): Row => ({ field: CHANGE_FIELDS[0].value, value: "" });
 
@@ -100,15 +98,11 @@ export function ChangeRequestModal({
             {rows.map((r, i) => (
               <div key={i} className="rounded-lg border border-border p-3">
                 <div className="flex items-center gap-2">
-                  <select
-                    className={selectClass}
+                  <SimpleSelect
                     value={r.field}
-                    onChange={(e) => update(i, { field: e.target.value })}
-                  >
-                    {CHANGE_FIELDS.map((f) => (
-                      <option key={f.value} value={f.value}>{f.label}</option>
-                    ))}
-                  </select>
+                    onValueChange={(v) => update(i, { field: v })}
+                    options={CHANGE_FIELDS.map((f) => ({ value: f.value, label: f.label }))}
+                  />
                   <button
                     type="button"
                     onClick={() => remove(i)}

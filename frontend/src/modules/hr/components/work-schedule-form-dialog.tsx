@@ -24,6 +24,7 @@ import {
   useUpdateWorkSchedule,
 } from "@/modules/hr/hooks/use-rules";
 import { WEEKDAYS, type WorkSchedule } from "@/modules/hr/types/rules";
+import { TimePicker } from "@/modules/hr/ui/time-picker";
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -166,12 +167,34 @@ export function WorkScheduleFormDialog({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="ws-start">Start</Label>
-              <Input id="ws-start" type="time" aria-invalid={!!errors.start_time} {...register("start_time")} />
+              <Controller
+                control={control}
+                name="start_time"
+                render={({ field }) => (
+                  <TimePicker
+                    id="ws-start"
+                    value={field.value}
+                    onChange={field.onChange}
+                    aria-invalid={!!errors.start_time}
+                  />
+                )}
+              />
               {errors.start_time && <p className="text-xs text-destructive">{errors.start_time.message}</p>}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="ws-end">End</Label>
-              <Input id="ws-end" type="time" aria-invalid={!!errors.end_time} {...register("end_time")} />
+              <Controller
+                control={control}
+                name="end_time"
+                render={({ field }) => (
+                  <TimePicker
+                    id="ws-end"
+                    value={field.value}
+                    onChange={field.onChange}
+                    aria-invalid={!!errors.end_time}
+                  />
+                )}
+              />
               {errors.end_time && <p className="text-xs text-destructive">{errors.end_time.message}</p>}
             </div>
             <div className="space-y-1.5">

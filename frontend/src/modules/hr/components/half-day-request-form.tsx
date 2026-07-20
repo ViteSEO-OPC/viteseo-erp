@@ -1,6 +1,6 @@
 "use client";
 
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -8,8 +8,9 @@ import { notify as toast } from "@/core/lib/notify";
 import { Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { useCreateHalfDayRequest } from "@/modules/hr/hooks/use-half-day";
 
 const schema = z.object({
@@ -20,14 +21,12 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-const selectClass =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
-
 export function HalfDayRequestForm() {
   const createMut = useCreateHalfDayRequest();
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     setError,
@@ -67,17 +66,37 @@ export function HalfDayRequestForm() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>Date</Label>
-            <Input type="date" {...register("work_date")} />
+            <Controller
+              control={control}
+              name="work_date"
+              render={({ field }) => (
+                <DatePicker
+                  value={field.value}
+                  onChange={field.onChange}
+                  aria-invalid={!!errors.work_date}
+                />
+              )}
+            />
             {errors.work_date && (
               <p className="text-xs text-destructive">{errors.work_date.message}</p>
             )}
           </div>
           <div className="space-y-1.5">
             <Label>Which half</Label>
-            <select className={selectClass} {...register("period")}>
-              <option value="AM">Morning (AM)</option>
-              <option value="PM">Afternoon (PM)</option>
-            </select>
+            <Controller
+              control={control}
+              name="period"
+              render={({ field }) => (
+                <SimpleSelect
+                  value={field.value}
+                  onValueChange={field.onChange}
+                  options={[
+                    { value: "AM", label: "Morning (AM)" },
+                    { value: "PM", label: "Afternoon (PM)" },
+                  ]}
+                />
+              )}
+            />
           </div>
         </div>
 

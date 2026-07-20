@@ -15,11 +15,10 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { useAddHoliday, useUpdateHoliday } from "@/modules/hr/hooks/use-holidays";
 import { HOLIDAY_TYPES, type Holiday } from "@/modules/hr/types/holiday";
-
-const selectClass =
-  "h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
 
 export function HolidayFormDialog({
   open,
@@ -83,16 +82,17 @@ function Body({ setId, holiday, onDone }: { setId: number; holiday: Holiday | nu
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="h-date">Date</Label>
-            <Input id="h-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <DatePicker id="h-date" value={date} onChange={setDate} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="h-type">Type</Label>
-            <select id="h-type" className={selectClass} value={type} onChange={(e) => setType(e.target.value)}>
-              <option value="" disabled>— Select type —</option>
-              {HOLIDAY_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
+            <SimpleSelect
+              id="h-type"
+              value={type}
+              onValueChange={setType}
+              placeholder="— Select type —"
+              options={HOLIDAY_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+            />
           </div>
         </div>
       </div>

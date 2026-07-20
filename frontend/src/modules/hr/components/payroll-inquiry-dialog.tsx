@@ -19,6 +19,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { formatDate } from "@/core/lib/format";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { useCreatePayrollInquiry } from "@/modules/hr/hooks/use-requests";
 import type { PayslipSummary } from "@/modules/hr/types/payroll";
 
@@ -30,9 +31,6 @@ const TOPICS = [
   "Tax question",
   "Other",
 ];
-
-const selectClass =
-  "h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
 
 /**
  * "Raise an inquiry" about ONE specific payslip — an employee's payroll question for
@@ -122,16 +120,12 @@ export function PayrollInquiryDialog({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="inq-topic">Topic</Label>
-              <select
+              <SimpleSelect
                 id="inq-topic"
-                className={selectClass}
                 value={topic}
-                onChange={(e) => setTopic(e.target.value)}
-              >
-                {TOPICS.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
+                onValueChange={setTopic}
+                options={TOPICS.map((t) => ({ value: t, label: t }))}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="inq-period">Pay period</Label>

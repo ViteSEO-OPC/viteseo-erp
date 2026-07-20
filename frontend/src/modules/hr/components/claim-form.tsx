@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { useCreateReimbursement } from "@/modules/hr/hooks/use-reimbursements";
 import {
   REIMBURSEMENT_CATEGORIES,
@@ -28,9 +29,6 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-const selectClass =
-  "h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
-
 export function ClaimForm() {
   const createMut = useCreateReimbursement();
   const [receipt, setReceipt] = useState<File | null>(null);
@@ -38,6 +36,7 @@ export function ClaimForm() {
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     setError,
@@ -88,12 +87,22 @@ export function ClaimForm() {
       <form onSubmit={handleSubmit(onSubmit)} className="mt-4 space-y-4" noValidate>
         <div className="space-y-1.5">
           <Label>Category</Label>
-          <select className={selectClass} {...register("category")}>
-            <option value="">Select category</option>
-            {REIMBURSEMENT_CATEGORIES.map((c) => (
-              <option key={c} value={c}>{categoryLabel(c)}</option>
-            ))}
-          </select>
+          <Controller
+            control={control}
+            name="category"
+            render={({ field }) => (
+              <SimpleSelect
+                value={field.value}
+                onValueChange={field.onChange}
+                placeholder="Select category"
+                aria-invalid={!!errors.category}
+                options={REIMBURSEMENT_CATEGORIES.map((c) => ({
+                  value: c,
+                  label: categoryLabel(c),
+                }))}
+              />
+            )}
+          />
           {errors.category && (
             <p className="text-xs text-destructive">{errors.category.message}</p>
           )}

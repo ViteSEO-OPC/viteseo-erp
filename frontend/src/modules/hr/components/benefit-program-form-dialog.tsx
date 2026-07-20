@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useFieldArray, useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -30,6 +30,7 @@ import {
   type BenefitProgram,
   type BenefitProgramInput,
 } from "@/modules/hr/types/benefits";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 const schema = z
   .object({
@@ -214,17 +215,19 @@ export function BenefitProgramFormDialog({
 
             <div className="space-y-1.5">
               <Label htmlFor="bp-category">Category</Label>
-              <select
-                id="bp-category"
-                className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
-                {...register("category")}
-              >
-                {BENEFIT_CATEGORIES.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
+              <Controller
+                control={control}
+                name="category"
+                render={({ field }) => (
+                  <SimpleSelect
+                    id="bp-category"
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    aria-invalid={!!errors.category}
+                    options={BENEFIT_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))}
+                  />
+                )}
+              />
             </div>
 
             <div className="space-y-1.5">

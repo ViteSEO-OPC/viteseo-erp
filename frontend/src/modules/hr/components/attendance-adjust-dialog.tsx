@@ -20,6 +20,8 @@ import {
 import { cn } from "@/lib/utils";
 import { toManilaTimeInput, formatDate } from "@/core/lib/format";
 import { useAdjustAttendance, useViolations, useResolveViolation } from "@/modules/hr/hooks/use-attendance";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { TimePicker } from "@/modules/hr/ui/time-picker";
 import { SEVERITY_LABEL } from "@/modules/hr/types/attendance";
 import type { HrAttendanceRow, Severity, Violation } from "@/modules/hr/types/attendance";
 
@@ -43,10 +45,6 @@ const STATUS_PILL: Record<string, { cls: string; label: string }> = {
   late: { cls: "bg-danger-subtle text-danger", label: "Late" },
   absent: { cls: "bg-danger-subtle text-danger", label: "Absent" },
 };
-
-// Compact select for the period filter (auto width, unlike the full-width `selectClass`).
-const filterSelectClass =
-  "h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none focus-visible:border-ring disabled:opacity-50";
 
 // Month options for the period filter, value = 2-digit month.
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
@@ -213,28 +211,24 @@ function Details({
 
   const periodToolbar = (
     <div className="flex items-center gap-1.5">
-      <select
-        className={filterSelectClass}
+      <SimpleSelect
+        className="w-36"
         value={periodMonth}
-        onChange={(e) => setPeriodMonth(e.target.value)}
+        onValueChange={setPeriodMonth}
         aria-label="Filter by month"
-      >
-        <option value="all">All time</option>
-        {MONTHS.map((m) => (
-          <option key={m.value} value={m.value}>{m.label}</option>
-        ))}
-      </select>
-      <select
-        className={filterSelectClass}
-        value={periodYear}
+        options={[
+          { value: "all", label: "All time" },
+          ...MONTHS.map((m) => ({ value: m.value, label: m.label })),
+        ]}
+      />
+      <SimpleSelect
+        className="w-28"
+        value={String(periodYear)}
         disabled={periodMonth === "all"}
-        onChange={(e) => setPeriodYear(Number(e.target.value))}
+        onValueChange={(v) => setPeriodYear(Number(v))}
         aria-label="Filter by year"
-      >
-        {years.map((y) => (
-          <option key={y} value={y}>{y}</option>
-        ))}
-      </select>
+        options={years.map((y) => ({ value: String(y), label: String(y) }))}
+      />
     </div>
   );
 
@@ -307,16 +301,11 @@ function Details({
               </div>
               <div className="space-y-1.5">
                 <Label>Time In</Label>
-                <Input type="time" value={timeIn} onChange={(e) => setTimeIn(e.target.value)} />
+                <TimePicker value={timeIn} onChange={setTimeIn} />
               </div>
               <div className="space-y-1.5">
                 <Label>Time Out</Label>
-                <Input
-                  type="time"
-                  value={timeOut}
-                  disabled={noTimeIn}
-                  onChange={(e) => setTimeOut(e.target.value)}
-                />
+                <TimePicker value={timeOut} onChange={setTimeOut} disabled={noTimeIn} />
               </div>
             </div>
             <p className="mt-2 text-caption text-muted-foreground">

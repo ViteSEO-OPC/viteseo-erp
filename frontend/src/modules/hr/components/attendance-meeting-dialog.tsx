@@ -16,6 +16,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { useScheduleEmployeeMeeting } from "@/modules/hr/hooks/use-concerns";
+import { DateTimePicker } from "@/modules/hr/ui/date-time-picker";
 
 /**
  * HR schedules a meeting with an employee (from Attendance) about their lateness /
@@ -73,7 +74,7 @@ export function AttendanceMeetingDialog({
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="am-when">Date &amp; time</Label>
-            <Input id="am-when" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+            <DateTimePicker value={when} onChange={setWhen} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="am-loc">Location (optional)</Label>

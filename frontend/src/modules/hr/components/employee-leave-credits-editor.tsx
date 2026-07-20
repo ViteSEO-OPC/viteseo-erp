@@ -6,6 +6,7 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DataTable, type Column } from "@/core/components/data-table";
 import {
   useLeaveTypes,
@@ -111,18 +112,13 @@ export function EmployeeLeaveCreditsEditor({ employeeId }: { employeeId: number 
       {/* Add a leave type this person doesn't have yet. */}
       {missingTypes.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-card border border-border bg-card p-3">
-          <select
-            className="h-9 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
+          <SimpleSelect
+            className="h-9 w-48"
             value={addTypeId}
-            onChange={(e) => setAddTypeId(e.target.value)}
-          >
-            <option value="">Add leave type…</option>
-            {missingTypes.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+            onValueChange={setAddTypeId}
+            placeholder="Add leave type…"
+            options={missingTypes.map((t) => ({ value: String(t.id), label: t.name }))}
+          />
           <Input
             type="number"
             step="1"

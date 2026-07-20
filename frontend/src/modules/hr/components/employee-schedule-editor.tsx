@@ -19,6 +19,8 @@ import {
   type WorkSchedule,
   type EmployeeSchedule,
 } from "@/modules/hr/types/rules";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { TimePicker } from "@/modules/hr/ui/time-picker";
 
 /**
  * An employee's effective work schedule, with HR editing (assign a schedule + set
@@ -122,19 +124,16 @@ function Editor({
 
       <div className="space-y-1.5">
         <Label htmlFor="assign-schedule">Assigned schedule</Label>
-        <select
+        <SimpleSelect
           id="assign-schedule"
-          className="h-9 w-full max-w-xs rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
-          value={scheduleId}
-          onChange={(e) => setScheduleId(e.target.value)}
-        >
-          <option value="">Default schedule</option>
-          {schedules.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+          className="max-w-xs"
+          value={scheduleId || "default"}
+          onValueChange={(v) => setScheduleId(v === "default" ? "" : v)}
+          options={[
+            { value: "default", label: "Default schedule" },
+            ...schedules.map((s) => ({ value: String(s.id), label: s.name })),
+          ]}
+        />
       </div>
 
       <div className="space-y-1.5">
@@ -165,11 +164,11 @@ function Editor({
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="ov-start">Override start</Label>
-          <Input id="ov-start" type="time" value={start} onChange={(e) => setStart(e.target.value)} />
+          <TimePicker id="ov-start" value={start} onChange={setStart} />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="ov-end">Override end</Label>
-          <Input id="ov-end" type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
+          <TimePicker id="ov-end" value={end} onChange={setEnd} />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="ov-grace">Override grace</Label>
