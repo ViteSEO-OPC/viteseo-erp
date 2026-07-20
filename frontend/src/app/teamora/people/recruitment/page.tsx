@@ -289,7 +289,12 @@ export default function RecruitmentPage() {
         {selected && (
           <div className="mt-8">
             <h2 className="mb-3 text-h3 font-bold text-foreground">Pipeline — {selected.title}</h2>
-            <div className="flex gap-3 overflow-x-auto pb-2">
+            {/* Horizontal scroll with snap: on a phone one 256px column fills
+                most of the width and the next one peeks, so a swipe lands
+                cleanly on the following stage instead of drifting between two.
+                `overscroll-x-contain` keeps that swipe from triggering the
+                browser's back gesture. */}
+            <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-2">
               {selected.stages.map(({ key, label }) => {
                 const all = (candidates ?? []).filter((c) => c.stage === key);
                 if (key === "rejected") {
@@ -511,7 +516,7 @@ function RejectedColumn({
     <div
       ref={setNodeRef}
       className={cn(
-        "flex h-[32rem] w-64 shrink-0 flex-col rounded-card border p-2.5 transition-colors",
+        "flex h-[32rem] w-64 shrink-0 snap-start flex-col rounded-card border p-2.5 transition-colors",
         isOver ? "border-danger bg-danger-subtle" : "border-border bg-muted/30",
       )}
     >
@@ -607,7 +612,7 @@ function KanbanColumn({
       ref={setNodeRef}
       className={cn(
         // Fixed height so every column lines up; the card list inside scrolls.
-        "flex h-[32rem] w-64 shrink-0 flex-col rounded-card border p-2.5 transition-colors",
+        "flex h-[32rem] w-64 shrink-0 snap-start flex-col rounded-card border p-2.5 transition-colors",
         isOver ? "border-brand bg-brand-subtle" : "border-border bg-muted/30",
       )}
     >
