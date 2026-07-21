@@ -9,6 +9,8 @@ export interface LeaveType {
   days_per_year: number;
   is_paid: boolean;
   color: string | null;
+  /** Optional HR-facing blurb describing the leave type. */
+  description: string | null;
   /** Whether this type may be filed for past dates at all. */
   allow_backdated: boolean;
   /** Max days a past-dated request may reach back; null = no limit (only when allow_backdated). */

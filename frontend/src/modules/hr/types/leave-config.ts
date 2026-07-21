@@ -40,6 +40,7 @@ export interface LeaveTypeInput {
   code: string;
   is_paid: boolean;
   color?: string | null;
+  description?: string | null;
   allow_backdated: boolean;
   backdate_limit_days?: number | null;
 }
