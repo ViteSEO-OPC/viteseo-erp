@@ -12,7 +12,6 @@ export interface LeaveTypeAllotment {
 export interface LeaveTypeInput {
   name: string;
   code: string;
-  days_per_year: number;
   is_paid: boolean;
   color?: string | null;
   allow_backdated: boolean;

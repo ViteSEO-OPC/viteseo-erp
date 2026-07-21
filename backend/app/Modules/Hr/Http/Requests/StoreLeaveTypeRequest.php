@@ -20,7 +20,9 @@ class StoreLeaveTypeRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'code' => ['required', 'string', 'max:50', 'unique:hr_leave_types,code'],
-            'days_per_year' => ['required', 'integer', 'min:0', 'max:365'],
+            // Per-status credits live in hr_leave_type_allotments; this base default
+            // is optional and stored as 0 when omitted.
+            'days_per_year' => ['sometimes', 'integer', 'min:0', 'max:365'],
             'is_paid' => ['sometimes', 'boolean'],
             'color' => ['nullable', 'string', 'max:20'],
             'allow_backdated' => ['sometimes', 'boolean'],

@@ -20,12 +20,6 @@ import {
 import { EMPLOYMENT_STATUSES } from "@/modules/hr/types/leave-config";
 import type { LeaveType } from "@/modules/hr/types/leave";
 
-/** Base days come back as decimal(5,1); show one decimal to match the design (e.g. "15.0"). */
-function formatDays(value: number | string): string {
-  const n = Number(value);
-  return Number.isFinite(n) ? n.toFixed(1) : String(value);
-}
-
 export default function LeaveTypesPage() {
   const { data: types, isLoading, isError } = useLeaveTypes();
   const deleteMut = useDeleteLeaveType();
@@ -65,11 +59,6 @@ export default function LeaveTypesPage() {
           </div>
         </div>
       ),
-    },
-    {
-      header: "Base days / year",
-      className: "text-center",
-      cell: (t) => formatDays(t.days_per_year),
     },
     {
       header: "Pay",
@@ -318,14 +307,24 @@ function AllotmentCell({
   const [local, setLocal] = useState(String(value));
 
   async function save() {
-    const days = Number(local);
-    if (Number.isNaN(days) || days === value) return;
+    const parsed = Number(local);
+    if (Number.isNaN(parsed)) {
+      setLocal(String(value));
+      return;
+    }
+    // Allotments are whole days only.
+    const days = Math.max(0, Math.round(parsed));
+    if (days === value) {
+      setLocal(String(days));
+      return;
+    }
     try {
       await upsert.mutateAsync({
         leave_type_id: leaveTypeId,
         employment_status: status,
         days_per_year: days,
       });
+      setLocal(String(days));
     } catch {
       toast.error("Could not save the allotment.");
       setLocal(String(value));
@@ -335,7 +334,7 @@ function AllotmentCell({
   return (
     <Input
       type="number"
-      step="0.5"
+      step="1"
       min="0"
       className="mx-auto h-8 w-16 text-center"
       value={local}

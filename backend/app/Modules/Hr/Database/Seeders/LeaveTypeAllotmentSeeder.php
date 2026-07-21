@@ -27,8 +27,8 @@ class LeaveTypeAllotmentSeeder extends Seeder
         foreach (LeaveType::all() as $type) {
             foreach (EmployeeService::STATUSES as $status) {
                 $factor = $factors[$status] ?? 1.0;
-                // Snap to the nearest half-day for tidy numbers.
-                $days = round((float) $type->days_per_year * $factor * 2) / 2;
+                // Allotments are whole days only — round to the nearest day.
+                $days = (int) round((float) $type->days_per_year * $factor);
 
                 LeaveTypeAllotment::updateOrCreate(
                     ['leave_type_id' => $type->id, 'employment_status' => $status],
