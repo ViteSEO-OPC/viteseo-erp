@@ -25,6 +25,16 @@ export interface SharedAllotment {
   days_per_year: number;
 }
 
+// Shared-mode: one employee's actual pool balance for the year (the editable
+// override, mirroring per-type balances).
+export interface EmployeeSharedBalance {
+  id: number;
+  year: number;
+  entitled_days: number;
+  used_days: number;
+  remaining_days: number;
+}
+
 export interface LeaveTypeInput {
   name: string;
   code: string;

@@ -1,28 +1,119 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DataTable, type Column } from "@/core/components/data-table";
 import {
   useLeaveTypes,
+  useLeaveSetting,
   useEmployeeBalances,
   useUpsertEmployeeBalance,
   useDeleteEmployeeBalance,
+  useEmployeeSharedBalance,
+  useUpsertEmployeeSharedBalance,
 } from "@/modules/hr/hooks/use-leave-config";
 import type { LeaveBalance } from "@/modules/hr/types/leave";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 
 /**
- * HR-editable per-employee leave credits — change entitled days, add a leave type,
- * or remove one. The per-person balance is the source of truth for that employee.
- * Lives on the employee profile (moved off Company → Leave Type).
+ * HR-editable per-employee leave credits, mode-aware: in not-shared mode a
+ * per-type table (the source of truth for that person); in shared mode a single
+ * editable pool balance. Lives on the employee profile.
  */
 export function EmployeeLeaveCreditsEditor({ employeeId }: { employeeId: number }) {
+  const { data: setting } = useLeaveSetting();
+
+  if (setting?.allotment_mode === "shared") {
+    return <SharedPoolEditor employeeId={employeeId} />;
+  }
+
+  return <PerTypeCreditsEditor employeeId={employeeId} />;
+}
+
+/**
+ * Shared mode: one pool balance per employee. HR edits the entitled days; used is
+ * read-only (spent via approved leave) and remaining is derived.
+ */
+function SharedPoolEditor({ employeeId }: { employeeId: number }) {
+  const { data, isLoading } = useEmployeeSharedBalance(employeeId);
+  const upsert = useUpsertEmployeeSharedBalance(employeeId);
+  const [local, setLocal] = useState<string>("");
+
+  useEffect(() => {
+    setLocal(data ? String(data.entitled_days) : "0");
+  }, [data]);
+
+  async function save() {
+    const days = Number(local);
+    if (Number.isNaN(days) || days === (data?.entitled_days ?? -1)) return;
+    try {
+      await upsert.mutateAsync({ entitled_days: days });
+      toast.success("Shared leave pool updated");
+    } catch {
+      toast.error("Could not save.");
+      setLocal(data ? String(data.entitled_days) : "0");
+    }
+  }
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Loading leave credits…</p>;
+  }
+
+  const used = data?.used_days ?? 0;
+  const remaining = (Number(local) || 0) - used;
+
+  return (
+    <div className="max-w-md space-y-3 rounded-card border border-border bg-card p-4">
+      <div>
+        <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
+          Shared Leave Pool
+        </p>
+        <p className="mt-1 text-caption text-muted-foreground">
+          One pool spent across all leave types this year.
+        </p>
+      </div>
+
+      <div className="flex items-end gap-3">
+        <div className="space-y-1.5">
+          <Label>Entitled days / year</Label>
+          <Input
+            type="number"
+            step="1"
+            min="0"
+            className="h-9 w-28"
+            value={local}
+            onChange={(e) => setLocal(e.target.value)}
+            onBlur={save}
+          />
+        </div>
+        <Button size="sm" onClick={save} disabled={upsert.isPending}>
+          {upsert.isPending ? "Saving…" : "Save"}
+        </Button>
+      </div>
+
+      <div className="flex gap-6 text-sm">
+        <span className="text-muted-foreground">
+          Used: <span className="font-medium text-foreground">{used}</span>
+        </span>
+        <span className="text-muted-foreground">
+          Remaining: <span className="font-medium text-foreground">{remaining}</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Not-shared mode: HR-editable per-type credits — change entitled days, add a
+ * leave type, or remove one. The per-person balance is the source of truth.
+ */
+function PerTypeCreditsEditor({ employeeId }: { employeeId: number }) {
   const { data: balances, isLoading } = useEmployeeBalances(employeeId);
   const { data: allTypes } = useLeaveTypes();
   const upsert = useUpsertEmployeeBalance(employeeId);

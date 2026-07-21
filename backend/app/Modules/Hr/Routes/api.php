@@ -192,6 +192,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('employees/{employee}/leave-balances', [LeaveConfigController::class, 'balancesIndex']);
         Route::put('employees/{employee}/leave-balances', [LeaveConfigController::class, 'upsertBalance']);
         Route::delete('leave-balances/{leaveBalance}', [LeaveConfigController::class, 'destroyBalance']);
+        // Shared-mode: this person's single pool balance (entitled days) for the year.
+        Route::get('employees/{employee}/shared-leave-balance', [LeaveConfigController::class, 'sharedBalanceShow']);
+        Route::put('employees/{employee}/shared-leave-balance', [LeaveConfigController::class, 'upsertSharedBalance']);
 
         // Company → Benefits: flexible benefit-programs catalogue (HR-authored).
         Route::get('benefit-programs', [BenefitProgramController::class, 'index']);

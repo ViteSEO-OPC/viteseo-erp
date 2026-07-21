@@ -242,4 +242,47 @@ class LeaveConfigService
         $balance->loadMissing('leaveType');
         $this->audit->log('removed', 'Leave Types', "Removed a '{$balance->leaveType?->name}' leave balance", $balance);
     }
+
+    // --- Per-person shared pool balance (the shared-mode override) ---
+
+    /** This person's shared pool balance for the current year (or null). */
+    public function sharedBalanceFor(Employee $employee): ?SharedLeaveBalance
+    {
+        $year = now(config('app.timezone_local'))->year;
+
+        return SharedLeaveBalance::where('employee_id', $employee->id)
+            ->where('year', $year)
+            ->first();
+    }
+
+    /**
+     * Set this person's shared pool entitlement for the current year (create the
+     * row if missing). used_days is preserved — HR only changes the entitlement.
+     *
+     * @param array<string, mixed> $data
+     */
+    public function upsertSharedBalance(Employee $employee, array $data): SharedLeaveBalance
+    {
+        $year = now(config('app.timezone_local'))->year;
+
+        $balance = SharedLeaveBalance::withTrashed()->firstOrNew([
+            'employee_id' => $employee->id,
+            'year' => $year,
+        ]);
+
+        // A previously-removed row is revived on edit.
+        if ($balance->trashed()) {
+            $balance->restore();
+        }
+
+        $balance->entitled_days = $data['entitled_days'];
+        $balance->used_days ??= 0;
+        $balance->save();
+
+        $employee->loadMissing('user');
+        $name = $employee->user?->name ?? $employee->name;
+        $this->audit->log('assigned', 'Leave Types', "Set shared leave pool for {$name} to {$balance->entitled_days} day(s)", $balance);
+
+        return $balance;
+    }
 }
