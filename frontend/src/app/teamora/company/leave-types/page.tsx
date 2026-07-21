@@ -6,6 +6,7 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { LeaveTypeFormDialog } from "@/modules/hr/components/leave-type-form-dialog";
@@ -15,8 +16,13 @@ import {
   useDeleteLeaveType,
   useAllotments,
   useUpsertAllotment,
+  useLeaveSetting,
+  useUpdateLeaveSetting,
+  useSharedAllotments,
+  useUpsertSharedAllotment,
 } from "@/modules/hr/hooks/use-leave-config";
 import { EMPLOYMENT_STATUSES } from "@/modules/hr/types/leave-config";
+import type { AllotmentMode } from "@/modules/hr/types/leave-config";
 import type { LeaveType } from "@/modules/hr/types/leave";
 
 export default function LeaveTypesPage() {
@@ -49,7 +55,7 @@ export default function LeaveTypesPage() {
       cell: (t) => (
         <div className="flex items-center gap-2.5">
           <span
-            className="size-3 shrink-0 rounded-full"
+            className="size-2.5 shrink-0 rounded-full"
             style={{ backgroundColor: t.color ?? "#94a3b8" }}
           />
           <div>
@@ -59,25 +65,25 @@ export default function LeaveTypesPage() {
         </div>
       ),
     },
-    { header: "Base days / year", cell: (t) => t.days_per_year },
     {
       header: "Pay",
+      className: "text-center",
       cell: (t) =>
         t.is_paid ? (
-          <span className="rounded-full bg-success-subtle px-2 py-0.5 text-xs font-semibold text-success">
+          <span className="rounded-full bg-success-subtle px-2.5 py-0.5 text-xs font-semibold text-success">
             Paid
           </span>
         ) : (
-          <span className="rounded-full bg-danger-subtle px-2 py-0.5 text-xs font-semibold text-danger">
+          <span className="rounded-full bg-danger-subtle px-2.5 py-0.5 text-xs font-semibold text-danger">
             Unpaid
           </span>
         ),
     },
     {
       header: "Actions",
-      align: "right",
+      className: "text-center",
       cell: (t) => (
-        <div className="flex justify-end gap-1">
+        <div className="flex justify-center gap-1">
           <Button size="icon-sm" variant="ghost" onClick={() => openEdit(t)}>
             <Pencil />
             <span className="sr-only">Edit</span>
@@ -94,12 +100,12 @@ export default function LeaveTypesPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Leave Type"
-        subtitle="Leave types and per-status allotment defaults. Set individual credits in each employee's profile."
+        title="Leave Types"
+        subtitle="Configure leave types and default allotments for roles. Changes apply prospectively and do not affect approved or used balances."
         actions={
           <Button onClick={openCreate}>
             <Plus />
-            Add leave type
+            Add Leave Type
           </Button>
         }
       />
@@ -117,12 +123,15 @@ export default function LeaveTypesPage() {
               rows={types ?? []}
               rowKey={(t) => t.id}
               empty="No leave types yet. Add your first one."
+              searchable={false}
+              filterable={false}
+              pageSize={0}
             />
           )}
         </section>
 
         {/* Section B — allotment defaults */}
-        <AllotmentGrid types={types ?? []} />
+        <AllotmentDefaults types={types ?? []} />
       </div>
 
       <LeaveTypeFormDialog
@@ -143,9 +152,101 @@ export default function LeaveTypesPage() {
   );
 }
 
-// ---- Section B: allotment defaults grid (leave type × employment status) ----
+// ---- Section B: allotment defaults (leave type × employment status) ----
 
-function AllotmentGrid({ types }: { types: LeaveType[] }) {
+function AllotmentDefaults({ types }: { types: LeaveType[] }) {
+  // "Not Shared" (default) = every leave type carries its own credits, keyed by
+  // employment status. "Shared" = one pool per employment status, spent across
+  // any leave type. The mode is a company-wide setting persisted server-side.
+  const { data: setting } = useLeaveSetting();
+  const updateMode = useUpdateLeaveSetting();
+
+  // The mutation optimistically updates this cache, so the toggle is instant
+  // and stable — no snap-back while the switch/backfill is in flight.
+  const mode: AllotmentMode = setting?.allotment_mode ?? "not_shared";
+
+  async function changeMode(next: AllotmentMode) {
+    if (next === mode) return;
+    try {
+      await updateMode.mutateAsync(next);
+      toast.success(
+        next === "shared"
+          ? "Switched to a shared leave pool."
+          : "Switched to per-leave-type credits.",
+      );
+    } catch {
+      toast.error("Could not change the allotment mode.");
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-h3 font-bold text-foreground">Allotment defaults</h2>
+          <p className="text-sm text-muted-foreground">
+            Starting credits for a new hire, by employment status. Editing these only
+            affects future hires — existing employees keep their own credits.
+          </p>
+        </div>
+        <AllotmentModeToggle mode={mode} onChange={changeMode} />
+      </div>
+
+      {mode === "not_shared" ? (
+        <NotSharedGrid types={types} />
+      ) : (
+        <SharedGrid types={types} />
+      )}
+    </section>
+  );
+}
+
+/**
+ * Figma "segmented-toggle": a light-gray track holding two equal pills; the
+ * active one is a white, subtly-shadowed pill with bold ink text.
+ */
+function AllotmentModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: AllotmentMode;
+  onChange: (mode: AllotmentMode) => void;
+}) {
+  const options: { value: AllotmentMode; label: string }[] = [
+    { value: "shared", label: "Shared" },
+    { value: "not_shared", label: "Not Shared" },
+  ];
+
+  return (
+    <div
+      role="tablist"
+      className="flex w-full shrink-0 gap-1 rounded-xl bg-muted p-1 sm:w-[320px]"
+    >
+      {options.map((o) => {
+        const active = mode === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              "flex-1 rounded-lg py-2.5 text-center text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              active
+                ? "bg-card font-bold text-foreground shadow-sm"
+                : "font-semibold text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function NotSharedGrid({ types }: { types: LeaveType[] }) {
   const { data: allotments } = useAllotments();
 
   // Lookup: `${leaveTypeId}:${status}` -> days.
@@ -158,67 +259,205 @@ function AllotmentGrid({ types }: { types: LeaveType[] }) {
   }, [allotments]);
 
   return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground">Allotment defaults</h2>
-        <p className="text-xs text-muted-foreground">
-          Starting credits for a new hire, by employment status. Editing these only
-          affects future hires — existing employees keep their own credits (edit
-          those below).
-        </p>
-      </div>
-
-      <div className="overflow-x-auto rounded-card border border-border bg-card">
-        <table className="w-full min-w-[560px] text-sm">
-          <thead>
-            <tr className="border-b border-border text-left">
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Leave type
+    <div className="overflow-x-auto rounded-card border border-border bg-card">
+      <table className="w-full min-w-[640px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/50">
+            <th className="px-4 py-3 text-left text-label font-bold uppercase tracking-wide text-muted-foreground">
+              Leave type
+            </th>
+            {EMPLOYMENT_STATUSES.map((s) => (
+              <th
+                key={s.value}
+                className="px-4 py-3 text-center text-label font-bold uppercase tracking-wide text-muted-foreground"
+              >
+                {s.label}
               </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {types.map((t) => (
+            <tr key={t.id} className="border-b border-border last:border-0">
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: t.color ?? "#94a3b8" }}
+                  />
+                  <span className="font-medium text-foreground">{t.name}</span>
+                </div>
+              </td>
               {EMPLOYMENT_STATUSES.map((s) => (
-                <th
-                  key={s.value}
-                  className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                >
-                  {s.label}
-                </th>
+                <td key={s.value} className="px-4 py-3 text-center">
+                  <AllotmentCell
+                    leaveTypeId={t.id}
+                    status={s.value}
+                    value={lookup.get(`${t.id}:${s.value}`) ?? 0}
+                  />
+                </td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {types.map((t) => (
+          ))}
+          {types.length === 0 && (
+            <tr>
+              <td
+                colSpan={EMPLOYMENT_STATUSES.length + 1}
+                className="px-4 py-10 text-center text-sm text-muted-foreground"
+              >
+                Add a leave type to set its allotments.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Shared mode: all leave types draw from ONE pool per employment status. The
+ * first leave type row hosts the editable pool sizes; every other type is
+ * disabled ("—") to signal it shares that single pool.
+ */
+function SharedGrid({ types }: { types: LeaveType[] }) {
+  const { data: shared } = useSharedAllotments();
+
+  const lookup = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of shared ?? []) m.set(a.employment_status, a.days_per_year);
+    return m;
+  }, [shared]);
+
+  // In the PH, Service Incentive Leave (SIL) is the statutory pool employees can
+  // spend on any purpose — so SIL hosts the editable shared numbers. Fall back to
+  // the first type if SIL isn't configured.
+  const poolTypeId = useMemo(() => {
+    const sil = types.find((t) => t.code === "SIL");
+    return sil?.id ?? types[0]?.id ?? null;
+  }, [types]);
+
+  return (
+    <div className="overflow-x-auto rounded-card border border-border bg-card">
+      <table className="w-full min-w-[640px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/50">
+            <th className="px-4 py-3 text-left text-label font-bold uppercase tracking-wide text-muted-foreground">
+              Leave type
+            </th>
+            {EMPLOYMENT_STATUSES.map((s) => (
+              <th
+                key={s.value}
+                className="px-4 py-3 text-center text-label font-bold uppercase tracking-wide text-muted-foreground"
+              >
+                {s.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {types.map((t) => {
+            const isPoolRow = t.id === poolTypeId;
+            return (
               <tr key={t.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-2.5">
+                <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
                     <span
-                      className="size-2.5 shrink-0 rounded-full"
+                      className={cn(
+                        "size-2.5 shrink-0 rounded-full",
+                        !isPoolRow && "opacity-40",
+                      )}
                       style={{ backgroundColor: t.color ?? "#94a3b8" }}
                     />
-                    <span className="font-medium text-foreground">{t.name}</span>
+                    <span
+                      className={cn(
+                        "font-medium",
+                        isPoolRow ? "text-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      {t.name}
+                    </span>
                   </div>
                 </td>
                 {EMPLOYMENT_STATUSES.map((s) => (
-                  <td key={s.value} className="px-4 py-2.5">
-                    <AllotmentCell
-                      leaveTypeId={t.id}
-                      status={s.value}
-                      value={lookup.get(`${t.id}:${s.value}`) ?? 0}
-                    />
+                  <td key={s.value} className="px-4 py-3 text-center">
+                    {isPoolRow ? (
+                      <SharedAllotmentCell
+                        key={`${s.value}:${lookup.get(s.value) ?? 0}`}
+                        status={s.value}
+                        value={lookup.get(s.value) ?? 0}
+                      />
+                    ) : (
+                      <Input
+                        disabled
+                        aria-hidden
+                        tabIndex={-1}
+                        className="mx-auto h-8 w-16 text-center"
+                        value=""
+                        readOnly
+                      />
+                    )}
                   </td>
                 ))}
               </tr>
-            ))}
-            {types.length === 0 && (
-              <tr>
-                <td colSpan={EMPLOYMENT_STATUSES.length + 1} className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  Add a leave type to set its allotments.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            );
+          })}
+          {types.length === 0 && (
+            <tr>
+              <td
+                colSpan={EMPLOYMENT_STATUSES.length + 1}
+                className="px-4 py-10 text-center text-sm text-muted-foreground"
+              >
+                Add a leave type to set the shared pool.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SharedAllotmentCell({
+  status,
+  value,
+}: {
+  status: string;
+  value: number;
+}) {
+  const upsert = useUpsertSharedAllotment();
+  const [local, setLocal] = useState(String(value));
+
+  async function save() {
+    const parsed = Number(local);
+    if (Number.isNaN(parsed)) {
+      setLocal(String(value));
+      return;
+    }
+    const days = Math.max(0, Math.round(parsed));
+    if (days === value) {
+      setLocal(String(days));
+      return;
+    }
+    try {
+      await upsert.mutateAsync({ employment_status: status, days_per_year: days });
+      setLocal(String(days));
+    } catch {
+      toast.error("Could not save the shared allotment.");
+      setLocal(String(value));
+    }
+  }
+
+  return (
+    <Input
+      type="number"
+      step="1"
+      min="0"
+      className="mx-auto h-8 w-16 text-center"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={save}
+    />
   );
 }
 
@@ -235,14 +474,24 @@ function AllotmentCell({
   const [local, setLocal] = useState(String(value));
 
   async function save() {
-    const days = Number(local);
-    if (Number.isNaN(days) || days === value) return;
+    const parsed = Number(local);
+    if (Number.isNaN(parsed)) {
+      setLocal(String(value));
+      return;
+    }
+    // Allotments are whole days only.
+    const days = Math.max(0, Math.round(parsed));
+    if (days === value) {
+      setLocal(String(days));
+      return;
+    }
     try {
       await upsert.mutateAsync({
         leave_type_id: leaveTypeId,
         employment_status: status,
         days_per_year: days,
       });
+      setLocal(String(days));
     } catch {
       toast.error("Could not save the allotment.");
       setLocal(String(value));
@@ -254,11 +503,10 @@ function AllotmentCell({
       type="number"
       step="1"
       min="0"
-      className="h-8 w-20"
+      className="mx-auto h-8 w-16 text-center"
       value={local}
       onChange={(e) => setLocal(e.target.value)}
       onBlur={save}
     />
   );
 }
-

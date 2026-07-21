@@ -28,7 +28,6 @@ import type { LeaveType } from "@/modules/hr/types/leave";
 const schema = z.object({
   name: z.string().min(1, "Name is required").max(255),
   code: z.string().min(1, "Code is required").max(50),
-  days_per_year: z.coerce.number().int("Whole days only").min(0, "Must be 0 or more").max(365),
   is_paid: z.boolean(),
   color: z.string().max(20).optional(),
   allow_backdated: z.boolean(),
@@ -70,7 +69,6 @@ export function LeaveTypeFormDialog({
     defaultValues: {
       name: "",
       code: "",
-      days_per_year: 0,
       is_paid: true,
       color: "#4FDBD7",
       allow_backdated: false,
@@ -96,7 +94,6 @@ export function LeaveTypeFormDialog({
           ? {
               name: leaveType.name,
               code: leaveType.code,
-              days_per_year: Number(leaveType.days_per_year),
               is_paid: leaveType.is_paid,
               color: leaveType.color ?? "#4FDBD7",
               allow_backdated: leaveType.allow_backdated,
@@ -105,7 +102,6 @@ export function LeaveTypeFormDialog({
           : {
               name: "",
               code: "",
-              days_per_year: 0,
               is_paid: true,
               color: "#4FDBD7",
               allow_backdated: false,
@@ -119,7 +115,6 @@ export function LeaveTypeFormDialog({
     const input = {
       name: values.name,
       code: values.code,
-      days_per_year: Number(values.days_per_year),
       is_paid: values.is_paid,
       color: values.color || null,
       allow_backdated: values.allow_backdated,
@@ -157,8 +152,8 @@ export function LeaveTypeFormDialog({
           <DialogTitle>{isEdit ? "Edit leave type" : "Add leave type"}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Update this leave type. The base days are the default before per-status allotments."
-              : "Create a leave type. Its base days are the default before per-status allotments."}
+              ? "Update this leave type. Set the default credits per employment status in the allotment defaults table."
+              : "Create a leave type. Set its default credits per employment status in the allotment defaults table."}
           </DialogDescription>
         </DialogHeader>
 
@@ -169,17 +164,10 @@ export function LeaveTypeFormDialog({
             {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="lt-code">Code</Label>
-              <Input id="lt-code" placeholder="ANL" aria-invalid={!!errors.code} {...register("code")} />
-              {errors.code && <p className="text-xs text-destructive">{errors.code.message}</p>}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="lt-days">Base days / year</Label>
-              <Input id="lt-days" type="number" step="1" min="0" aria-invalid={!!errors.days_per_year} {...register("days_per_year")} />
-              {errors.days_per_year && <p className="text-xs text-destructive">{errors.days_per_year.message}</p>}
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="lt-code">Code</Label>
+            <Input id="lt-code" placeholder="ANL" aria-invalid={!!errors.code} {...register("code")} />
+            {errors.code && <p className="text-xs text-destructive">{errors.code.message}</p>}
           </div>
 
           <label className="flex items-start gap-2 text-sm">

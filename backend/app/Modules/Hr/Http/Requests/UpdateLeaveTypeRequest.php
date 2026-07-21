@@ -23,7 +23,8 @@ class UpdateLeaveTypeRequest extends FormRequest
                 'required', 'string', 'max:50',
                 Rule::unique('hr_leave_types', 'code')->ignore($this->route('leaveType')?->id),
             ],
-            'days_per_year' => ['required', 'integer', 'min:0', 'max:365'],
+            // Per-status credits live in hr_leave_type_allotments; base default is optional.
+            'days_per_year' => ['sometimes', 'integer', 'min:0', 'max:365'],
             'is_paid' => ['sometimes', 'boolean'],
             'color' => ['nullable', 'string', 'max:20'],
             'allow_backdated' => ['sometimes', 'boolean'],

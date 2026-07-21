@@ -27,7 +27,7 @@ import {
   useDeleteEmployeeDocument,
 } from "@/modules/hr/hooks/use-employees";
 import { useCreateDocumentRequest } from "@/modules/hr/hooks/use-requests";
-import { useMyLeaveBalances } from "@/modules/hr/hooks/use-leave";
+import { useMyLeaveSummary } from "@/modules/hr/hooks/use-leave";
 import { EmployeeScheduleEditor } from "@/modules/hr/components/employee-schedule-editor";
 import { EmployeeLeaveCreditsEditor } from "@/modules/hr/components/employee-leave-credits-editor";
 import type { LeaveBalance } from "@/modules/hr/types/leave";
@@ -533,10 +533,44 @@ function HrAccessSection({ employee }: { employee: Employee }) {
   );
 }
 
-// An employee viewing their OWN leave credits (the "me" endpoint).
+// An employee viewing their OWN leave credits (the "me" endpoint). In shared
+// mode there are no per-type credits — just the single pool.
 function MyLeaveCredits() {
-  const { data, isLoading } = useMyLeaveBalances();
-  return <LeaveCreditsGrid balances={data} isLoading={isLoading} />;
+  const { data, isLoading } = useMyLeaveSummary();
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Loading leave credits…</p>;
+  }
+
+  if (data?.mode === "shared") {
+    const pool = data.pool;
+    if (!pool) {
+      return (
+        <p className="text-sm text-muted-foreground">No shared leave balance for this year.</p>
+      );
+    }
+    return (
+      <div className="max-w-sm rounded-card border border-border p-4">
+        <div className="flex items-center gap-2">
+          <span className="size-2.5 shrink-0 rounded-full bg-brand" />
+          <p className="truncate text-sm font-medium text-foreground">Shared Leave Pool</p>
+        </div>
+        <p className="mt-2 text-h3 font-bold text-foreground">
+          {pool.remaining_days}
+          <span className="text-sm font-normal text-muted-foreground">
+            {" "}
+            / {pool.entitled_days} days
+          </span>
+        </p>
+        <p className="text-caption text-muted-foreground">{pool.used_days} used this year</p>
+        <p className="mt-2 text-caption text-muted-foreground">
+          All leave types draw from this shared pool.
+        </p>
+      </div>
+    );
+  }
+
+  return <LeaveCreditsGrid balances={data?.balances} isLoading={false} />;
 }
 
 // Shared card grid: one card per leave type showing remaining / entitled days.

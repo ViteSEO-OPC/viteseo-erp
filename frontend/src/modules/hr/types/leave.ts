@@ -1,3 +1,7 @@
+import type { AllotmentMode } from "@/modules/hr/types/leave-config";
+
+export type { AllotmentMode };
+
 export interface LeaveType {
   id: number;
   name: string;
@@ -34,6 +38,22 @@ export interface LeaveBalance {
   leave_type: { id: number; name: string; code: string; color: string | null };
 }
 
+// Shared-mode: one credit pool per employee, spent across any leave type.
+export interface LeavePool {
+  entitled_days: number;
+  used_days: number;
+  remaining_days: number;
+}
+
+// GET /hr/me/leave-balances — mode-aware. In not_shared, `balances` holds the
+// per-type credits; in shared, `pool` holds the single balance (and `balances`
+// is ignored by the UI).
+export interface MyLeaveSummary {
+  mode: AllotmentMode;
+  balances: LeaveBalance[];
+  pool: LeavePool | null;
+}
+
 export interface LeaveRequest {
   id: number;
   employee: { id: number; name: string | null };
@@ -44,10 +64,13 @@ export interface LeaveRequest {
   half_day_period: string | null;
   days: number;
   reason: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "cancelled";
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
   created_at: string;
 }
 

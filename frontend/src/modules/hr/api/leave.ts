@@ -1,8 +1,8 @@
 import { apiClient } from "@/core/api-client";
 import type {
   LeaveType,
-  LeaveBalance,
   LeaveRequest,
+  MyLeaveSummary,
   StoreLeaveInput,
 } from "@/modules/hr/types/leave";
 
@@ -11,9 +11,13 @@ export async function getLeaveTypes(): Promise<LeaveType[]> {
   return res.data.data;
 }
 
-export async function getMyLeaveBalances(): Promise<LeaveBalance[]> {
+export async function getMyLeaveSummary(): Promise<MyLeaveSummary> {
   const res = await apiClient.get("/hr/me/leave-balances");
-  return res.data.data;
+  return {
+    mode: res.data.meta?.mode ?? "not_shared",
+    balances: res.data.data ?? [],
+    pool: res.data.meta?.pool ?? null,
+  };
 }
 
 // HR gets all requests; employees get their own (scoped server-side by role).
@@ -26,6 +30,14 @@ export async function createLeaveRequest(
   input: StoreLeaveInput,
 ): Promise<LeaveRequest> {
   const res = await apiClient.post("/hr/leave-requests", input);
+  return res.data.data;
+}
+
+export async function cancelLeaveRequest(
+  id: number,
+  reason: string,
+): Promise<LeaveRequest> {
+  const res = await apiClient.post(`/hr/leave-requests/${id}/cancel`, { reason });
   return res.data.data;
 }
 

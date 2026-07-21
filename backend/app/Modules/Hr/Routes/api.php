@@ -53,6 +53,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/leave-balances', [LeaveController::class, 'myBalances']);
     Route::get('leave-requests', [LeaveController::class, 'index']);
     Route::post('leave-requests', [LeaveController::class, 'store']);
+    // Cancel is open to any authenticated user; the service enforces that an
+    // employee can only cancel their own pending request (HR can cancel more).
+    Route::post('leave-requests/{leaveRequest}/cancel', [LeaveController::class, 'cancel']);
 
     // Half-day requests — separate from leave (always unpaid). Caller files + views
     // own; service scopes by role.
@@ -172,6 +175,12 @@ Route::middleware('auth:sanctum')->group(function () {
         // Company → Departments: archive/restore (HR only). CRUD is above.
         Route::post('departments/{department}/archive', [DepartmentController::class, 'archive']);
         Route::post('departments/{department}/restore', [DepartmentController::class, 'restore']);
+
+        // Company → Leave Type: global mode (shared vs not-shared) + shared pool defaults.
+        Route::get('leave-settings', [LeaveConfigController::class, 'settingsShow']);
+        Route::match(['put', 'patch'], 'leave-settings', [LeaveConfigController::class, 'settingsUpdate']);
+        Route::get('shared-leave-allotments', [LeaveConfigController::class, 'sharedAllotmentsIndex']);
+        Route::post('shared-leave-allotments', [LeaveConfigController::class, 'storeSharedAllotment']);
 
         // Company → Leave Type: catalogue + allotment defaults + per-person balances.
         Route::post('leave-types', [LeaveConfigController::class, 'storeType']);

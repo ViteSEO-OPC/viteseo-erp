@@ -9,14 +9,24 @@ import {
   deleteLeaveType,
   getAllotments,
   upsertAllotment,
+  getLeaveSetting,
+  updateLeaveSetting,
+  getSharedAllotments,
+  upsertSharedAllotment,
   getEmployeeBalances,
   upsertEmployeeBalance,
   deleteEmployeeBalance,
 } from "@/modules/hr/api/leave-config";
-import type { LeaveTypeInput } from "@/modules/hr/types/leave-config";
+import type {
+  AllotmentMode,
+  LeaveSetting,
+  LeaveTypeInput,
+} from "@/modules/hr/types/leave-config";
 
 const TYPES_KEY = ["hr", "leave-config", "types"] as const;
 const ALLOTMENTS_KEY = ["hr", "leave-config", "allotments"] as const;
+const SETTINGS_KEY = ["hr", "leave-config", "settings"] as const;
+const SHARED_ALLOTMENTS_KEY = ["hr", "leave-config", "shared-allotments"] as const;
 const balancesKey = (employeeId: number) =>
   ["hr", "leave-config", "balances", employeeId] as const;
 
@@ -72,6 +82,53 @@ export function useUpsertAllotment() {
   return useMutation({
     mutationFn: upsertAllotment,
     onSuccess: () => qc.invalidateQueries({ queryKey: ALLOTMENTS_KEY }),
+  });
+}
+
+// --- Global allotment mode (shared vs not-shared) ---
+
+export function useLeaveSetting() {
+  return useQuery({ queryKey: SETTINGS_KEY, queryFn: getLeaveSetting });
+}
+
+export function useUpdateLeaveSetting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (mode: AllotmentMode) => updateLeaveSetting(mode),
+    // Optimistically flip the cached mode so the toggle is instant and never
+    // snaps back while the request (and its balance backfill) is in flight.
+    onMutate: async (mode) => {
+      await qc.cancelQueries({ queryKey: SETTINGS_KEY });
+      const previous = qc.getQueryData<LeaveSetting>(SETTINGS_KEY);
+      qc.setQueryData<LeaveSetting>(SETTINGS_KEY, { allotment_mode: mode });
+      return { previous };
+    },
+    onError: (_err, _mode, ctx) => {
+      if (ctx?.previous) qc.setQueryData(SETTINGS_KEY, ctx.previous);
+    },
+    // Reconcile with the server's authoritative response (no refetch flicker).
+    onSuccess: (data) => {
+      qc.setQueryData(SETTINGS_KEY, data);
+    },
+    // Switching mode backfills balances server-side; refresh the grids only.
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: SHARED_ALLOTMENTS_KEY });
+      qc.invalidateQueries({ queryKey: ALLOTMENTS_KEY });
+    },
+  });
+}
+
+// --- Shared allotment defaults ---
+
+export function useSharedAllotments() {
+  return useQuery({ queryKey: SHARED_ALLOTMENTS_KEY, queryFn: getSharedAllotments });
+}
+
+export function useUpsertSharedAllotment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: upsertSharedAllotment,
+    onSuccess: () => qc.invalidateQueries({ queryKey: SHARED_ALLOTMENTS_KEY }),
   });
 }
 

@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\CancelLeaveRequest;
 use App\Modules\Hr\Http\Requests\StoreLeaveRequest;
 use App\Modules\Hr\Http\Resources\LeaveBalanceResource;
 use App\Modules\Hr\Http\Resources\LeaveRequestResource;
@@ -30,12 +31,20 @@ class LeaveController extends Controller
         $employee = $request->user()->employee;
 
         if (! $employee) {
-            return response()->json(['data' => []]);
+            return response()->json([
+                'data' => [],
+                'meta' => ['mode' => 'not_shared', 'pool' => null],
+            ]);
         }
 
-        $balances = $this->service->balancesForCurrentYear($employee);
+        $summary = $this->service->summaryForCurrentYear($employee);
 
-        return LeaveBalanceResource::collection($balances)->response();
+        return LeaveBalanceResource::collection($summary['balances'])
+            ->additional(['meta' => [
+                'mode' => $summary['mode'],
+                'pool' => $summary['pool'],
+            ]])
+            ->response();
     }
 
     // GET /api/v1/hr/leave-requests — HR sees all; employees see their own.
@@ -63,6 +72,19 @@ class LeaveController extends Controller
         return LeaveRequestResource::make($leaveRequest)
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    // POST /api/v1/hr/leave-requests/{leaveRequest}/cancel — employee (own,
+    // pending) or HR (pending/approved). Rules enforced in the service.
+    public function cancel(CancelLeaveRequest $request, LeaveRequest $leaveRequest): JsonResponse
+    {
+        $updated = $this->service->cancel(
+            $leaveRequest,
+            $request->user(),
+            $request->validated()['reason'],
+        );
+
+        return LeaveRequestResource::make($updated)->response();
     }
 
     // POST /api/v1/hr/leave-requests/{leaveRequest}/approve — HR only.

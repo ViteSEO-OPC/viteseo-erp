@@ -4,9 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   getLeaveTypes,
-  getMyLeaveBalances,
+  getMyLeaveSummary,
   getLeaveRequests,
   createLeaveRequest,
+  cancelLeaveRequest,
   approveLeaveRequest,
   rejectLeaveRequest,
 } from "@/modules/hr/api/leave";
@@ -21,8 +22,8 @@ export function useLeaveTypes() {
   return useQuery({ queryKey: TYPES_KEY, queryFn: getLeaveTypes });
 }
 
-export function useMyLeaveBalances() {
-  return useQuery({ queryKey: BALANCES_KEY, queryFn: getMyLeaveBalances });
+export function useMyLeaveSummary() {
+  return useQuery({ queryKey: BALANCES_KEY, queryFn: getMyLeaveSummary });
 }
 
 export function useLeaveRequests() {
@@ -33,6 +34,21 @@ export function useCreateLeaveRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: StoreLeaveInput) => createLeaveRequest(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: REQUESTS_KEY });
+      qc.invalidateQueries({ queryKey: BALANCES_KEY });
+      qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
+  });
+}
+
+// Cancel refreshes the queue, balances, AND notifications: an approved leave
+// that's cancelled returns credits (pool or per-type) and reopens the day.
+export function useCancelLeaveRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      cancelLeaveRequest(id, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: REQUESTS_KEY });
       qc.invalidateQueries({ queryKey: BALANCES_KEY });

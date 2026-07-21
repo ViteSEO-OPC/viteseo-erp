@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Zap, Check, X } from "lucide-react";
+import { Zap, Check, X, Ban } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
+import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
 import {
   DataTable,
   type Column,
@@ -23,6 +24,7 @@ import {
   useLeaveRequests,
   useApproveLeaveRequest,
   useRejectLeaveRequest,
+  useCancelLeaveRequest,
 } from "@/modules/hr/hooks/use-leave";
 import {
   useHalfDayRequests,
@@ -43,9 +45,16 @@ export default function TimeLeavePage() {
   const { data: requests, isLoading, isError } = useLeaveRequests();
   const approveMut = useApproveLeaveRequest();
   const rejectMut = useRejectLeaveRequest();
+  const cancelMut = useCancelLeaveRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: LeaveRequest } | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<LeaveRequest | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
+
+  // HR may cancel an approved leave only before it starts (Manila day), matching
+  // the backend rule. Dates are stored as Y-m-d, so a string compare is safe.
+  const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+  const canCancel = (r: LeaveRequest) => r.status === "approved" && r.start_date > todayManila;
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -60,6 +69,18 @@ export default function TimeLeavePage() {
       }
     } catch {
       toast.error("Action failed. Please try again.");
+    }
+  }
+
+  async function onCancelConfirm(reason: string) {
+    if (!cancelTarget) return;
+    try {
+      await cancelMut.mutateAsync({ id: cancelTarget.id, reason });
+      toast.success(`Cancelled ${cancelTarget.employee.name}'s leave`);
+    } catch {
+      toast.error("Couldn't cancel. Please try again.");
+      // Rethrow so the dialog stays open for a retry.
+      throw new Error("cancel failed");
     }
   }
 
@@ -115,6 +136,19 @@ export default function TimeLeavePage() {
             >
               <X />
               Reject
+            </Button>
+          </div>
+        ) : canCancel(r) ? (
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-danger text-danger hover:bg-danger/10 hover:text-danger"
+              disabled={cancelMut.isPending && cancelMut.variables?.id === r.id}
+              onClick={() => setCancelTarget(r)}
+            >
+              <Ban />
+              Cancel
             </Button>
           </div>
         ) : (
@@ -173,6 +207,17 @@ export default function TimeLeavePage() {
         mode={review?.mode ?? "approve"}
         subject={review ? `${review.r.employee.name}'s ${review.r.leave_type.name}` : ""}
         onConfirm={onConfirm}
+      />
+
+      <CancelLeaveDialog
+        open={!!cancelTarget}
+        onOpenChange={(o) => !o && setCancelTarget(null)}
+        subject={
+          cancelTarget
+            ? `${cancelTarget.employee.name}'s ${cancelTarget.leave_type.name}`
+            : undefined
+        }
+        onConfirm={onCancelConfirm}
       />
 
       <HalfDaySection />

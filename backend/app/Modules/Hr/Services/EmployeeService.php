@@ -9,9 +9,12 @@ use App\Modules\Hr\Models\EmployeeBenefit;
 use App\Modules\Hr\Models\EmployeeDocument;
 use App\Modules\Hr\Models\EmploymentHistory;
 use App\Modules\Hr\Models\LeaveBalance;
+use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
 use App\Modules\Hr\Models\SalaryHistory;
+use App\Modules\Hr\Models\SharedLeaveAllotment;
+use App\Modules\Hr\Models\SharedLeaveBalance;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -165,21 +168,33 @@ class EmployeeService
                 ...$this->profileData($data),
             ]);
 
-            // 3) Seed this year's leave balances from the allotment defaults for
-            //    this employment status (falling back to the leave type's base
-            //    days). These are only the STARTING credits — HR can freely edit
-            //    each person's balances afterwards (per-person override).
+            // 3) Seed this year's leave credits from the allotment defaults for
+            //    this employment status. These are only the STARTING credits — HR
+            //    can freely edit each person's balances afterwards (per-person
+            //    override). The shape depends on the company allotment mode:
+            //    shared = one pool; not-shared = one row per leave type.
             $year = now(config('app.timezone_local'))->year;
-            $allotments = LeaveTypeAllotment::where('employment_status', $employee->employment_status)
-                ->pluck('days_per_year', 'leave_type_id');
-            foreach (LeaveType::all() as $type) {
-                LeaveBalance::create([
+            if (LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED) {
+                $poolDays = SharedLeaveAllotment::where('employment_status', $employee->employment_status)
+                    ->value('days_per_year');
+                SharedLeaveBalance::create([
                     'employee_id' => $employee->id,
-                    'leave_type_id' => $type->id,
                     'year' => $year,
-                    'entitled_days' => $allotments[$type->id] ?? $type->days_per_year,
+                    'entitled_days' => (int) ($poolDays ?? 0),
                     'used_days' => 0,
                 ]);
+            } else {
+                $allotments = LeaveTypeAllotment::where('employment_status', $employee->employment_status)
+                    ->pluck('days_per_year', 'leave_type_id');
+                foreach (LeaveType::all() as $type) {
+                    LeaveBalance::create([
+                        'employee_id' => $employee->id,
+                        'leave_type_id' => $type->id,
+                        'year' => $year,
+                        'entitled_days' => $allotments[$type->id] ?? $type->days_per_year,
+                        'used_days' => 0,
+                    ]);
+                }
             }
 
             // 4) Seed the contribution checklist — enrolled in every active

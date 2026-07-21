@@ -10,7 +10,7 @@ import { formatPeso, formatDate } from "@/core/lib/format";
 import { TimeClockPanel } from "@/modules/hr/components/time-clock-panel";
 import { LeaveBalanceCard } from "@/modules/hr/components/leave-balance-card";
 import { UpcomingMeetingsCard } from "@/modules/hr/components/upcoming-meetings-card";
-import { useMyLeaveBalances, useLeaveRequests } from "@/modules/hr/hooks/use-leave";
+import { useMyLeaveSummary, useLeaveRequests } from "@/modules/hr/hooks/use-leave";
 import { useReimbursements } from "@/modules/hr/hooks/use-reimbursements";
 import { useMyNextPayday } from "@/modules/hr/hooks/use-payroll";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
@@ -25,12 +25,14 @@ interface MyRequestRow {
 
 export default function EmployeeOverviewPage() {
   const { user } = useAuth();
-  const { data: balances } = useMyLeaveBalances();
+  const { data: summary } = useMyLeaveSummary();
   const { data: leaves } = useLeaveRequests();
   const { data: claims } = useReimbursements();
   const { data: nextPayday } = useMyNextPayday();
 
-  const annual = balances?.find((b) => b.leave_type.code === "ANL");
+  // Shared mode: show the single pool. Not-shared: the Annual Leave balance.
+  const pool = summary?.pool ?? null;
+  const annual = summary?.balances?.find((b) => b.leave_type.code === "ANL");
 
   // Merge leave + reimbursements into one recent "My Requests" feed.
   const requests: MyRequestRow[] = [
@@ -96,7 +98,27 @@ export default function EmployeeOverviewPage() {
 
       {/* Leave balance · upcoming meeting · next payday */}
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {annual ? <LeaveBalanceCard balance={annual} /> : <StatCard label="Annual Leave" value="—" />}
+        {summary?.mode === "shared" ? (
+          pool ? (
+            <LeaveBalanceCard
+              label="Leave Pool"
+              entitled={pool.entitled_days}
+              remaining={pool.remaining_days}
+              used={pool.used_days}
+            />
+          ) : (
+            <StatCard label="Leave Pool" value="—" />
+          )
+        ) : annual ? (
+          <LeaveBalanceCard
+            label={annual.leave_type.name}
+            entitled={annual.entitled_days}
+            remaining={annual.remaining_days}
+            used={annual.used_days}
+          />
+        ) : (
+          <StatCard label="Annual Leave" value="—" />
+        )}
         <UpcomingMeetingsCard />
         <StatCard
           label="Next Payday"

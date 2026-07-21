@@ -34,6 +34,9 @@ class LeaveRequestResource extends JsonResource
             'reviewed_at' => $this->reviewed_at,
             'reviewed_by' => $this->reviewer?->name,
             'review_note' => $this->review_note,
+            'cancelled_at' => $this->cancelled_at,
+            'cancelled_by' => $this->canceller?->name,
+            'cancel_reason' => $this->cancel_reason,
             'created_at' => $this->created_at,
         ];
     }
