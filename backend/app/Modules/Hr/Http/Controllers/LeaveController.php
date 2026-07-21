@@ -31,12 +31,20 @@ class LeaveController extends Controller
         $employee = $request->user()->employee;
 
         if (! $employee) {
-            return response()->json(['data' => []]);
+            return response()->json([
+                'data' => [],
+                'meta' => ['mode' => 'not_shared', 'pool' => null],
+            ]);
         }
 
-        $balances = $this->service->balancesForCurrentYear($employee);
+        $summary = $this->service->summaryForCurrentYear($employee);
 
-        return LeaveBalanceResource::collection($balances)->response();
+        return LeaveBalanceResource::collection($summary['balances'])
+            ->additional(['meta' => [
+                'mode' => $summary['mode'],
+                'pool' => $summary['pool'],
+            ]])
+            ->response();
     }
 
     // GET /api/v1/hr/leave-requests — HR sees all; employees see their own.

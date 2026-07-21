@@ -14,7 +14,12 @@ import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { useCreateLeaveRequest } from "@/modules/hr/hooks/use-leave";
 import { computeLeaveDays } from "@/modules/hr/lib/leave-days";
-import type { LeaveBalance, LeaveType } from "@/modules/hr/types/leave";
+import type {
+  AllotmentMode,
+  LeaveBalance,
+  LeavePool,
+  LeaveType,
+} from "@/modules/hr/types/leave";
 
 const schema = z.object({
   leave_type_id: z.string().min(1, "Select a leave type"),
@@ -45,9 +50,13 @@ function earliestStart(type: LeaveType | undefined): string | undefined {
 export function LeaveRequestForm({
   types,
   balances,
+  mode = "not_shared",
+  pool = null,
 }: {
   types: LeaveType[];
   balances: LeaveBalance[];
+  mode?: AllotmentMode;
+  pool?: LeavePool | null;
 }) {
   const createMut = useCreateLeaveRequest();
 
@@ -76,10 +85,13 @@ export function LeaveRequestForm({
   const selectedType = types.find((t) => t.id === Number(typeId));
   // Unpaid leave (LWOP) has no credit pool — it's deducted from pay, not a balance.
   const isPaidType = selectedType?.is_paid ?? true;
+  const isShared = mode === "shared";
+  // Shared mode: every paid type draws from ONE pool; not-shared: the per-type row.
   const balance = balances.find((b) => b.leave_type.id === Number(typeId));
-  const remaining = balance?.remaining_days ?? 0;
+  const hasBalanceRecord = isShared ? !!pool : !!balance;
+  const remaining = isShared ? (pool?.remaining_days ?? 0) : (balance?.remaining_days ?? 0);
   const willRemain = remaining - requested;
-  const overBalance = isPaidType && !!balance && requested > remaining;
+  const overBalance = isPaidType && hasBalanceRecord && requested > remaining;
   const minDate = earliestStart(selectedType);
   const canSubmit = !!typeId && requested > 0 && !overBalance;
 

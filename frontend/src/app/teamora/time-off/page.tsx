@@ -2,43 +2,78 @@
 
 import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
+import { Button } from "@/components/ui/button";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
+import { notify as toast } from "@/core/lib/notify";
 import { formatDate } from "@/core/lib/format";
 import { LeaveBalanceCard } from "@/modules/hr/components/leave-balance-card";
+import { LeaveTypesListCard } from "@/modules/hr/components/leave-types-list-card";
 import { LeaveRequestForm } from "@/modules/hr/components/leave-request-form";
 import { HalfDayRequestForm } from "@/modules/hr/components/half-day-request-form";
 import { TimeOffCalendar } from "@/modules/hr/components/time-off-calendar";
+import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
 import {
   useLeaveTypes,
-  useMyLeaveBalances,
+  useMyLeaveSummary,
   useLeaveRequests,
+  useCancelLeaveRequest,
 } from "@/modules/hr/hooks/use-leave";
 import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
 interface HistItem {
   key: string;
+  id: number;
+  kind: "leave" | "half";
   title: string;
   date: string;
   status: string;
   at: string;
   reason: string | null;
+  /** Employees can cancel only their own still-pending leave. */
+  cancellable: boolean;
 }
 
 export default function TimeOffPage() {
-  const { data: balances } = useMyLeaveBalances();
+  const { data: summary } = useMyLeaveSummary();
   const { data: types } = useLeaveTypes();
   const { data: requests } = useLeaveRequests();
   const { data: halfDays } = useHalfDayRequests();
+  const cancelMut = useCancelLeaveRequest();
   const [declined, setDeclined] = useState<HistItem | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<HistItem | null>(null);
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(6);
 
-  const annual = balances?.find((b) => b.leave_type.code === "ANL");
-  const sick = balances?.find((b) => b.leave_type.code === "SCK");
+  const mode = summary?.mode ?? "not_shared";
+  const balances = useMemo(() => summary?.balances ?? [], [summary]);
+  const pool = summary?.pool ?? null;
+
+  // Shared: one pool card + the type names. Not-shared: a single Leave Types
+  // card listing every paid type with its own credits (no featured card).
+  const paidCodes = useMemo(
+    () => new Set((types ?? []).filter((t) => t.is_paid).map((t) => t.code)),
+    [types],
+  );
+
+  const listItems =
+    mode === "shared"
+      ? (types ?? [])
+          .filter((t) => t.is_paid)
+          .map((t) => ({ key: `t${t.id}`, name: t.name, remaining: 0, entitled: 0 }))
+      : balances
+          .filter((b) => paidCodes.has(b.leave_type.code))
+          .map((b) => ({
+            key: `b${b.id}`,
+            name: b.leave_type.name,
+            remaining: b.remaining_days,
+            entitled: b.entitled_days,
+          }));
+
   const pendingCount =
     (requests ?? []).filter((r) => r.status === "pending").length +
     (halfDays ?? []).filter((h) => h.status === "pending").length;
@@ -47,6 +82,8 @@ export default function TimeOffPage() {
   const history: HistItem[] = [
     ...(requests ?? []).map((l) => ({
       key: `l${l.id}`,
+      id: l.id,
+      kind: "leave" as const,
       title: l.leave_type.name,
       date:
         l.start_date === l.end_date
@@ -55,14 +92,18 @@ export default function TimeOffPage() {
       status: l.status,
       at: l.created_at,
       reason: l.review_note,
+      cancellable: l.status === "pending",
     })),
     ...(halfDays ?? []).map((h) => ({
       key: `h${h.id}`,
+      id: h.id,
+      kind: "half" as const,
       title: `Half-day (${h.period})`,
       date: `${formatDate(h.work_date)} · Unpaid`,
       status: h.status,
       at: h.created_at,
       reason: h.review_note,
+      cancellable: false,
     })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
@@ -74,6 +115,18 @@ export default function TimeOffPage() {
     [history, safePage, size],
   );
 
+  async function handleCancel(reason: string) {
+    if (!cancelTarget) return;
+    try {
+      await cancelMut.mutateAsync({ id: cancelTarget.id, reason });
+      toast.success("Request cancelled", "Your leave request has been cancelled.");
+    } catch {
+      toast.error("Couldn't cancel", "Please try again.");
+      // Rethrow so the dialog stays open for a retry.
+      throw new Error("cancel failed");
+    }
+  }
+
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
@@ -81,17 +134,48 @@ export default function TimeOffPage() {
         subtitle="Request leave and track your remaining balance."
       />
 
-      {/* Balance summary */}
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {annual ? <LeaveBalanceCard balance={annual} /> : <StatCard label="Annual Leave" value="—" />}
-        {sick ? <LeaveBalanceCard balance={sick} /> : <StatCard label="Sick Leave" value="—" />}
+      {/* Balance summary: (pool in shared) · leave-types list · pending */}
+      <div
+        className={cn(
+          "mt-6 grid grid-cols-1 gap-4",
+          mode === "shared" ? "sm:grid-cols-3" : "sm:grid-cols-2",
+        )}
+      >
+        {mode === "shared" &&
+          (pool ? (
+            <LeaveBalanceCard
+              label="Leave Pool"
+              entitled={pool.entitled_days}
+              remaining={pool.remaining_days}
+              used={pool.used_days}
+              centered
+            />
+          ) : (
+            <StatCard label="Leave Pool" value="—" subNote="No pool for this year" />
+          ))}
+
+        <LeaveTypesListCard
+          items={listItems}
+          showCredits={mode !== "shared"}
+          note={
+            mode === "shared"
+              ? "All leave types draw from your shared pool."
+              : undefined
+          }
+        />
+
         <StatCard label="Pending Requests" value={pendingCount} subNote="Awaiting HR decision" />
       </div>
 
       {/* Left: the two request cards · Right: calendar + history */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="space-y-6">
-          <LeaveRequestForm types={types ?? []} balances={balances ?? []} />
+          <LeaveRequestForm
+            types={types ?? []}
+            balances={balances}
+            mode={mode}
+            pool={pool}
+          />
           <HalfDayRequestForm />
         </div>
 
@@ -121,12 +205,24 @@ export default function TimeOffPage() {
                       <StatusBadge status={r.status} />
                     </button>
                   ) : (
-                    <div key={r.key} className="flex items-center justify-between py-3">
-                      <div>
+                    <div key={r.key} className="flex items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
                         <p className="text-sm font-semibold text-foreground">{r.title}</p>
                         <p className="text-caption text-muted-foreground">{r.date}</p>
                       </div>
-                      <StatusBadge status={r.status} />
+                      <div className="flex shrink-0 items-center gap-2">
+                        <StatusBadge status={r.status} />
+                        {r.cancellable && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-danger hover:bg-danger/10 hover:text-danger"
+                            onClick={() => setCancelTarget(r)}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ),
                 )
@@ -182,6 +278,13 @@ export default function TimeOffPage() {
         title={declined?.key.startsWith("h") ? "Half-day declined" : "Leave declined"}
         subject={declined ? `${declined.title} · ${declined.date}` : undefined}
         reason={declined?.reason ?? null}
+      />
+
+      <CancelLeaveDialog
+        open={!!cancelTarget}
+        onOpenChange={(o) => !o && setCancelTarget(null)}
+        subject={cancelTarget ? `${cancelTarget.title} · ${cancelTarget.date}` : undefined}
+        onConfirm={handleCancel}
       />
     </div>
   );

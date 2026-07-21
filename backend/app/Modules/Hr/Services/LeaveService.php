@@ -105,6 +105,44 @@ class LeaveService
     }
 
     /**
+     * The employee's leave summary for the current (Manila) year: the active
+     * allotment mode, their per-type balances (for not-shared display) and, in
+     * shared mode, the single pool balance. The frontend renders whichever the
+     * mode calls for.
+     *
+     * @return array{mode: string, balances: Collection, pool: array<string, int>|null}
+     */
+    public function summaryForCurrentYear(Employee $employee): array
+    {
+        $shared = $this->isSharedMode();
+        $balances = $this->balancesForCurrentYear($employee);
+
+        $pool = null;
+        if ($shared) {
+            $year = now(config('app.timezone_local'))->year;
+            $poolModel = SharedLeaveBalance::where('employee_id', $employee->id)
+                ->where('year', $year)
+                ->first();
+
+            if ($poolModel) {
+                $entitled = (int) $poolModel->entitled_days;
+                $used = (int) $poolModel->used_days;
+                $pool = [
+                    'entitled_days' => $entitled,
+                    'used_days' => $used,
+                    'remaining_days' => $entitled - $used,
+                ];
+            }
+        }
+
+        return [
+            'mode' => $shared ? LeaveSetting::MODE_SHARED : LeaveSetting::MODE_NOT_SHARED,
+            'balances' => $balances,
+            'pool' => $pool,
+        ];
+    }
+
+    /**
      * Requests visible to this user: HR officers see all; everyone else sees
      * only their own. (The frontend never sends an employee id.)
      */
