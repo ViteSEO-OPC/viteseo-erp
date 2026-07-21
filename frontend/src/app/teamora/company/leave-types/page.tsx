@@ -331,6 +331,14 @@ function SharedGrid({ types }: { types: LeaveType[] }) {
     return m;
   }, [shared]);
 
+  // In the PH, Service Incentive Leave (SIL) is the statutory pool employees can
+  // spend on any purpose — so SIL hosts the editable shared numbers. Fall back to
+  // the first type if SIL isn't configured.
+  const poolTypeId = useMemo(() => {
+    const sil = types.find((t) => t.code === "SIL");
+    return sil?.id ?? types[0]?.id ?? null;
+  }, [types]);
+
   return (
     <div className="overflow-x-auto rounded-card border border-border bg-card">
       <table className="w-full min-w-[640px] border-collapse text-sm">
@@ -350,8 +358,8 @@ function SharedGrid({ types }: { types: LeaveType[] }) {
           </tr>
         </thead>
         <tbody>
-          {types.map((t, i) => {
-            const isPoolRow = i === 0;
+          {types.map((t) => {
+            const isPoolRow = t.id === poolTypeId;
             return (
               <tr key={t.id} className="border-b border-border last:border-0">
                 <td className="px-4 py-3">
