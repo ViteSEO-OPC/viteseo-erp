@@ -6,6 +6,7 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl, SegmentedItem } from "@/core/ui";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { LeaveTypeFormDialog } from "@/modules/hr/components/leave-type-form-dialog";
@@ -18,6 +19,12 @@ import {
 } from "@/modules/hr/hooks/use-leave-config";
 import { EMPLOYMENT_STATUSES } from "@/modules/hr/types/leave-config";
 import type { LeaveType } from "@/modules/hr/types/leave";
+
+/** Base days come back as decimal(5,1); show one decimal to match the design (e.g. "15.0"). */
+function formatDays(value: number | string): string {
+  const n = Number(value);
+  return Number.isFinite(n) ? n.toFixed(1) : String(value);
+}
 
 export default function LeaveTypesPage() {
   const { data: types, isLoading, isError } = useLeaveTypes();
@@ -49,7 +56,7 @@ export default function LeaveTypesPage() {
       cell: (t) => (
         <div className="flex items-center gap-2.5">
           <span
-            className="size-3 shrink-0 rounded-full"
+            className="size-2.5 shrink-0 rounded-full"
             style={{ backgroundColor: t.color ?? "#94a3b8" }}
           />
           <div>
@@ -59,25 +66,30 @@ export default function LeaveTypesPage() {
         </div>
       ),
     },
-    { header: "Base days / year", cell: (t) => t.days_per_year },
+    {
+      header: "Base days / year",
+      className: "text-center",
+      cell: (t) => formatDays(t.days_per_year),
+    },
     {
       header: "Pay",
+      className: "text-center",
       cell: (t) =>
         t.is_paid ? (
-          <span className="rounded-full bg-success-subtle px-2 py-0.5 text-xs font-semibold text-success">
+          <span className="rounded-full bg-success-subtle px-2.5 py-0.5 text-xs font-semibold text-success">
             Paid
           </span>
         ) : (
-          <span className="rounded-full bg-danger-subtle px-2 py-0.5 text-xs font-semibold text-danger">
+          <span className="rounded-full bg-danger-subtle px-2.5 py-0.5 text-xs font-semibold text-danger">
             Unpaid
           </span>
         ),
     },
     {
       header: "Actions",
-      align: "right",
+      className: "text-center",
       cell: (t) => (
-        <div className="flex justify-end gap-1">
+        <div className="flex justify-center gap-1">
           <Button size="icon-sm" variant="ghost" onClick={() => openEdit(t)}>
             <Pencil />
             <span className="sr-only">Edit</span>
@@ -94,12 +106,12 @@ export default function LeaveTypesPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Leave Type"
-        subtitle="Leave types and per-status allotment defaults. Set individual credits in each employee's profile."
+        title="Leave Types"
+        subtitle="Configure leave types and default allotments for roles. Changes apply prospectively and do not affect approved or used balances."
         actions={
           <Button onClick={openCreate}>
             <Plus />
-            Add leave type
+            Add Leave Type
           </Button>
         }
       />
@@ -117,12 +129,15 @@ export default function LeaveTypesPage() {
               rows={types ?? []}
               rowKey={(t) => t.id}
               empty="No leave types yet. Add your first one."
+              searchable={false}
+              filterable={false}
+              pageSize={0}
             />
           )}
         </section>
 
         {/* Section B — allotment defaults */}
-        <AllotmentGrid types={types ?? []} />
+        <AllotmentDefaults types={types ?? []} />
       </div>
 
       <LeaveTypeFormDialog
@@ -143,9 +158,53 @@ export default function LeaveTypesPage() {
   );
 }
 
-// ---- Section B: allotment defaults grid (leave type × employment status) ----
+// ---- Section B: allotment defaults (leave type × employment status) ----
 
-function AllotmentGrid({ types }: { types: LeaveType[] }) {
+type AllotmentMode = "shared" | "not_shared";
+
+function AllotmentDefaults({ types }: { types: LeaveType[] }) {
+  // "Not Shared" (default) = every leave type carries its own credits, keyed by
+  // employment status. "Shared" mode is a separate model coming in a later slice.
+  const [mode, setMode] = useState<AllotmentMode>("not_shared");
+
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-h3 font-bold text-foreground">Allotment defaults</h2>
+          <p className="text-sm text-muted-foreground">
+            Starting credits for a new hire, by employment status. Editing these only
+            affects future hires — existing employees keep their own credits.
+          </p>
+        </div>
+        <SegmentedControl className="shrink-0">
+          <SegmentedItem
+            active={mode === "shared"}
+            onClick={() => setMode("shared")}
+          >
+            Shared
+          </SegmentedItem>
+          <SegmentedItem
+            active={mode === "not_shared"}
+            onClick={() => setMode("not_shared")}
+          >
+            Not Shared
+          </SegmentedItem>
+        </SegmentedControl>
+      </div>
+
+      {mode === "not_shared" ? (
+        <NotSharedGrid types={types} />
+      ) : (
+        <div className="rounded-card border border-border bg-card px-4 py-12 text-center text-sm text-muted-foreground">
+          Shared allotment configuration is coming next.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function NotSharedGrid({ types }: { types: LeaveType[] }) {
   const { data: allotments } = useAllotments();
 
   // Lookup: `${leaveTypeId}:${status}` -> days.
@@ -158,67 +217,59 @@ function AllotmentGrid({ types }: { types: LeaveType[] }) {
   }, [allotments]);
 
   return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground">Allotment defaults</h2>
-        <p className="text-xs text-muted-foreground">
-          Starting credits for a new hire, by employment status. Editing these only
-          affects future hires — existing employees keep their own credits (edit
-          those below).
-        </p>
-      </div>
-
-      <div className="overflow-x-auto rounded-card border border-border bg-card">
-        <table className="w-full min-w-[560px] text-sm">
-          <thead>
-            <tr className="border-b border-border text-left">
-              <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Leave type
+    <div className="overflow-x-auto rounded-card border border-border bg-card">
+      <table className="w-full min-w-[640px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/50">
+            <th className="px-4 py-3 text-left text-label font-bold uppercase tracking-wide text-muted-foreground">
+              Leave type
+            </th>
+            {EMPLOYMENT_STATUSES.map((s) => (
+              <th
+                key={s.value}
+                className="px-4 py-3 text-center text-label font-bold uppercase tracking-wide text-muted-foreground"
+              >
+                {s.label}
               </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {types.map((t) => (
+            <tr key={t.id} className="border-b border-border last:border-0">
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: t.color ?? "#94a3b8" }}
+                  />
+                  <span className="font-medium text-foreground">{t.name}</span>
+                </div>
+              </td>
               {EMPLOYMENT_STATUSES.map((s) => (
-                <th
-                  key={s.value}
-                  className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                >
-                  {s.label}
-                </th>
+                <td key={s.value} className="px-4 py-3 text-center">
+                  <AllotmentCell
+                    leaveTypeId={t.id}
+                    status={s.value}
+                    value={lookup.get(`${t.id}:${s.value}`) ?? 0}
+                  />
+                </td>
               ))}
             </tr>
-          </thead>
-          <tbody>
-            {types.map((t) => (
-              <tr key={t.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: t.color ?? "#94a3b8" }}
-                    />
-                    <span className="font-medium text-foreground">{t.name}</span>
-                  </div>
-                </td>
-                {EMPLOYMENT_STATUSES.map((s) => (
-                  <td key={s.value} className="px-4 py-2.5">
-                    <AllotmentCell
-                      leaveTypeId={t.id}
-                      status={s.value}
-                      value={lookup.get(`${t.id}:${s.value}`) ?? 0}
-                    />
-                  </td>
-                ))}
-              </tr>
-            ))}
-            {types.length === 0 && (
-              <tr>
-                <td colSpan={EMPLOYMENT_STATUSES.length + 1} className="px-4 py-6 text-center text-sm text-muted-foreground">
-                  Add a leave type to set its allotments.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+          ))}
+          {types.length === 0 && (
+            <tr>
+              <td
+                colSpan={EMPLOYMENT_STATUSES.length + 1}
+                className="px-4 py-10 text-center text-sm text-muted-foreground"
+              >
+                Add a leave type to set its allotments.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -252,13 +303,12 @@ function AllotmentCell({
   return (
     <Input
       type="number"
-      step="1"
+      step="0.5"
       min="0"
-      className="h-8 w-20"
+      className="mx-auto h-8 w-16 text-center"
       value={local}
       onChange={(e) => setLocal(e.target.value)}
       onBlur={save}
     />
   );
 }
-
