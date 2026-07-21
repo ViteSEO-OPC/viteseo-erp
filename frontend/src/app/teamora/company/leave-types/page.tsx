@@ -6,7 +6,7 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SegmentedControl, SegmentedItem } from "@/core/ui";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { LeaveTypeFormDialog } from "@/modules/hr/components/leave-type-form-dialog";
@@ -177,20 +177,7 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
             affects future hires — existing employees keep their own credits.
           </p>
         </div>
-        <SegmentedControl className="shrink-0">
-          <SegmentedItem
-            active={mode === "shared"}
-            onClick={() => setMode("shared")}
-          >
-            Shared
-          </SegmentedItem>
-          <SegmentedItem
-            active={mode === "not_shared"}
-            onClick={() => setMode("not_shared")}
-          >
-            Not Shared
-          </SegmentedItem>
-        </SegmentedControl>
+        <AllotmentModeToggle mode={mode} onChange={setMode} />
       </div>
 
       {mode === "not_shared" ? (
@@ -201,6 +188,51 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Figma "segmented-toggle": a light-gray track holding two equal pills; the
+ * active one is a white, subtly-shadowed pill with bold ink text.
+ */
+function AllotmentModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: AllotmentMode;
+  onChange: (mode: AllotmentMode) => void;
+}) {
+  const options: { value: AllotmentMode; label: string }[] = [
+    { value: "shared", label: "Shared" },
+    { value: "not_shared", label: "Not Shared" },
+  ];
+
+  return (
+    <div
+      role="tablist"
+      className="flex w-full shrink-0 gap-1 rounded-xl bg-muted p-1 sm:w-[320px]"
+    >
+      {options.map((o) => {
+        const active = mode === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              "flex-1 rounded-lg py-2.5 text-center text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              active
+                ? "bg-card font-bold text-foreground shadow-sm"
+                : "font-semibold text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
