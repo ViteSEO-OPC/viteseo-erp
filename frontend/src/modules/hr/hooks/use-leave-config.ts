@@ -17,7 +17,11 @@ import {
   upsertEmployeeBalance,
   deleteEmployeeBalance,
 } from "@/modules/hr/api/leave-config";
-import type { AllotmentMode, LeaveTypeInput } from "@/modules/hr/types/leave-config";
+import type {
+  AllotmentMode,
+  LeaveSetting,
+  LeaveTypeInput,
+} from "@/modules/hr/types/leave-config";
 
 const TYPES_KEY = ["hr", "leave-config", "types"] as const;
 const ALLOTMENTS_KEY = ["hr", "leave-config", "allotments"] as const;
@@ -91,9 +95,23 @@ export function useUpdateLeaveSetting() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (mode: AllotmentMode) => updateLeaveSetting(mode),
-    // Switching mode backfills balances server-side; refresh both grids.
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: SETTINGS_KEY });
+    // Optimistically flip the cached mode so the toggle is instant and never
+    // snaps back while the request (and its balance backfill) is in flight.
+    onMutate: async (mode) => {
+      await qc.cancelQueries({ queryKey: SETTINGS_KEY });
+      const previous = qc.getQueryData<LeaveSetting>(SETTINGS_KEY);
+      qc.setQueryData<LeaveSetting>(SETTINGS_KEY, { allotment_mode: mode });
+      return { previous };
+    },
+    onError: (_err, _mode, ctx) => {
+      if (ctx?.previous) qc.setQueryData(SETTINGS_KEY, ctx.previous);
+    },
+    // Reconcile with the server's authoritative response (no refetch flicker).
+    onSuccess: (data) => {
+      qc.setQueryData(SETTINGS_KEY, data);
+    },
+    // Switching mode backfills balances server-side; refresh the grids only.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: SHARED_ALLOTMENTS_KEY });
       qc.invalidateQueries({ queryKey: ALLOTMENTS_KEY });
     },

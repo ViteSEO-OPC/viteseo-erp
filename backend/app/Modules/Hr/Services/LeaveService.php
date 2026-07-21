@@ -6,7 +6,10 @@ use App\Models\User;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveRequest;
+use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
+use App\Modules\Hr\Models\SharedLeaveBalance;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -84,6 +87,12 @@ class LeaveService
         }
     }
 
+    /** True when the company runs one shared leave pool per employee (vs per-type). */
+    private function isSharedMode(): bool
+    {
+        return LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED;
+    }
+
     /** The employee's balances for the current (Manila) year, with the type. */
     public function balancesForCurrentYear(Employee $employee): Collection
     {
@@ -102,7 +111,7 @@ class LeaveService
     public function listRequests(User $user): Collection
     {
         $query = LeaveRequest::query()
-            ->with(['employee.user', 'leaveType', 'reviewer'])
+            ->with(['employee.user', 'leaveType', 'reviewer', 'canceller'])
             ->latest();
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
@@ -134,22 +143,43 @@ class LeaveService
         $this->assertBackdatingAllowed($type, $data['start_date']);
 
         if (! $type || $type->is_paid) {
-            $balance = LeaveBalance::where('employee_id', $employee->id)
-                ->where('leave_type_id', $data['leave_type_id'])
-                ->where('year', $year)
-                ->first();
+            if ($this->isSharedMode()) {
+                // Shared mode: every paid leave type draws from ONE pool per
+                // employee. Validate against the pool's remaining, not per-type.
+                $pool = SharedLeaveBalance::where('employee_id', $employee->id)
+                    ->where('year', $year)
+                    ->first();
 
-            if (! $balance) {
-                throw ValidationException::withMessages([
-                    'leave_type_id' => ["You have no leave balance for {$year} for this type."],
-                ]);
-            }
+                if (! $pool) {
+                    throw ValidationException::withMessages([
+                        'leave_type_id' => ["You have no shared leave balance for {$year}."],
+                    ]);
+                }
 
-            $remaining = (float) $balance->entitled_days - (float) $balance->used_days;
-            if ($days > $remaining) {
-                throw ValidationException::withMessages([
-                    'end_date' => ["Requested {$days} day(s) exceeds your remaining balance of {$remaining} day(s)."],
-                ]);
+                $remaining = (float) $pool->entitled_days - (float) $pool->used_days;
+                if ($days > $remaining) {
+                    throw ValidationException::withMessages([
+                        'end_date' => ["Requested {$days} day(s) exceeds your remaining shared balance of {$remaining} day(s)."],
+                    ]);
+                }
+            } else {
+                $balance = LeaveBalance::where('employee_id', $employee->id)
+                    ->where('leave_type_id', $data['leave_type_id'])
+                    ->where('year', $year)
+                    ->first();
+
+                if (! $balance) {
+                    throw ValidationException::withMessages([
+                        'leave_type_id' => ["You have no leave balance for {$year} for this type."],
+                    ]);
+                }
+
+                $remaining = (float) $balance->entitled_days - (float) $balance->used_days;
+                if ($days > $remaining) {
+                    throw ValidationException::withMessages([
+                        'end_date' => ["Requested {$days} day(s) exceeds your remaining balance of {$remaining} day(s)."],
+                    ]);
+                }
             }
         }
 
@@ -202,11 +232,19 @@ class LeaveService
             // deducted from pay by payroll, so it never touches used_days.
             $type = LeaveType::find($request->leave_type_id);
             if (! $type || $type->is_paid) {
-                LeaveBalance::where('employee_id', $request->employee_id)
-                    ->where('leave_type_id', $request->leave_type_id)
-                    ->where('year', $request->start_date->year)
-                    ->first()
-                    ?->increment('used_days', $request->days);
+                if ($this->isSharedMode()) {
+                    // Shared mode: deduct from the single pool, regardless of type.
+                    SharedLeaveBalance::where('employee_id', $request->employee_id)
+                        ->where('year', $request->start_date->year)
+                        ->first()
+                        ?->increment('used_days', $request->days);
+                } else {
+                    LeaveBalance::where('employee_id', $request->employee_id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->where('year', $request->start_date->year)
+                        ->first()
+                        ?->increment('used_days', $request->days);
+                }
             }
 
             $request->load(['employee.user', 'leaveType', 'reviewer']);
@@ -230,6 +268,98 @@ class LeaveService
         }
 
         return $result;
+    }
+
+    /**
+     * Cancel a leave request. Employees may cancel only their OWN request while it
+     * is still pending; HR may cancel a pending OR approved request. An approved
+     * leave can only be cancelled before it starts, and cancelling it gives the
+     * deducted credits back (pool in shared mode, per-type otherwise) and
+     * recomputes violations. A reason is required.
+     */
+    public function cancel(LeaveRequest $request, User $actor, string $reason): LeaveRequest
+    {
+        $isHr = $actor->hasAnyRole(['hr_officer', 'super_admin']);
+        $isOwner = $actor->employee && $actor->employee->id === $request->employee_id;
+
+        if (! $isHr && ! $isOwner) {
+            throw new AuthorizationException('You cannot cancel this leave request.');
+        }
+
+        if (! in_array($request->status, ['pending', 'approved'], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['Only pending or approved leave can be cancelled.'],
+            ]);
+        }
+
+        // Employees can only cancel while pending; cancelling an approved leave is
+        // an HR action.
+        if (! $isHr && $request->status !== 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['You can only cancel a request while it is pending. Ask HR to cancel an approved leave.'],
+            ]);
+        }
+
+        $wasApproved = $request->status === 'approved';
+
+        // An approved leave can only be cancelled before it starts (Manila day).
+        if ($wasApproved) {
+            $tz = config('app.timezone_local');
+            $today = Carbon::now($tz)->startOfDay();
+            $start = Carbon::parse($request->start_date->toDateString(), $tz)->startOfDay();
+            if ($start->lte($today)) {
+                throw ValidationException::withMessages([
+                    'start_date' => ['This leave has already started and can no longer be cancelled.'],
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($request, $actor, $reason, $wasApproved) {
+            // Give the credits back if they were deducted at approval (paid only).
+            if ($wasApproved) {
+                $type = LeaveType::find($request->leave_type_id);
+                if (! $type || $type->is_paid) {
+                    if ($this->isSharedMode()) {
+                        $pool = SharedLeaveBalance::where('employee_id', $request->employee_id)
+                            ->where('year', $request->start_date->year)
+                            ->first();
+                        if ($pool) {
+                            $pool->update(['used_days' => max(0, (float) $pool->used_days - (float) $request->days)]);
+                        }
+                    } else {
+                        $balance = LeaveBalance::where('employee_id', $request->employee_id)
+                            ->where('leave_type_id', $request->leave_type_id)
+                            ->where('year', $request->start_date->year)
+                            ->first();
+                        if ($balance) {
+                            $balance->update(['used_days' => max(0, (float) $balance->used_days - (float) $request->days)]);
+                        }
+                    }
+                }
+            }
+
+            $request->update([
+                'status' => 'cancelled',
+                'cancelled_by' => $actor->id,
+                'cancelled_at' => now(),
+                'cancel_reason' => $reason,
+            ]);
+
+            $request->load(['employee.user', 'leaveType']);
+            $this->audit->log(
+                'cancelled',
+                'Leave',
+                "Cancelled {$request->leaveType?->name} request",
+                $request,
+            );
+        });
+
+        // Removing an approved leave can re-open an absence/AWOL flag on its days.
+        if ($wasApproved) {
+            $this->violations->recompute();
+        }
+
+        return $request->load(['employee.user', 'leaveType', 'reviewer', 'canceller']);
     }
 
     /** Reject: mark rejected + reviewer + reason. Balance is untouched. */

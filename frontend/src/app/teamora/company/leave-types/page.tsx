@@ -161,11 +161,9 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
   const { data: setting } = useLeaveSetting();
   const updateMode = useUpdateLeaveSetting();
 
-  // Reflect the pending choice immediately while the switch (and its balance
-  // backfill) is in flight, so the toggle feels instant.
-  const mode: AllotmentMode = updateMode.isPending
-    ? (updateMode.variables as AllotmentMode)
-    : (setting?.allotment_mode ?? "not_shared");
+  // The mutation optimistically updates this cache, so the toggle is instant
+  // and stable — no snap-back while the switch/backfill is in flight.
+  const mode: AllotmentMode = setting?.allotment_mode ?? "not_shared";
 
   async function changeMode(next: AllotmentMode) {
     if (next === mode) return;

@@ -26,6 +26,9 @@ class LeaveRequest extends Model
         'reviewed_at',
         'reviewed_by',
         'review_note',
+        'cancelled_at',
+        'cancelled_by',
+        'cancel_reason',
     ];
 
     protected $casts = [
@@ -34,6 +37,7 @@ class LeaveRequest extends Model
         'is_half_day' => 'boolean',
         'days' => 'integer',
         'reviewed_at' => 'datetime',
+        'cancelled_at' => 'datetime',
     ];
 
     public function employee(): BelongsTo
@@ -49,5 +53,10 @@ class LeaveRequest extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 }

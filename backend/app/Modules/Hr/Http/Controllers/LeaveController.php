@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\CancelLeaveRequest;
 use App\Modules\Hr\Http\Requests\StoreLeaveRequest;
 use App\Modules\Hr\Http\Resources\LeaveBalanceResource;
 use App\Modules\Hr\Http\Resources\LeaveRequestResource;
@@ -63,6 +64,19 @@ class LeaveController extends Controller
         return LeaveRequestResource::make($leaveRequest)
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    // POST /api/v1/hr/leave-requests/{leaveRequest}/cancel — employee (own,
+    // pending) or HR (pending/approved). Rules enforced in the service.
+    public function cancel(CancelLeaveRequest $request, LeaveRequest $leaveRequest): JsonResponse
+    {
+        $updated = $this->service->cancel(
+            $leaveRequest,
+            $request->user(),
+            $request->validated()['reason'],
+        );
+
+        return LeaveRequestResource::make($updated)->response();
     }
 
     // POST /api/v1/hr/leave-requests/{leaveRequest}/approve — HR only.

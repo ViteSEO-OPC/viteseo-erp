@@ -53,6 +53,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/leave-balances', [LeaveController::class, 'myBalances']);
     Route::get('leave-requests', [LeaveController::class, 'index']);
     Route::post('leave-requests', [LeaveController::class, 'store']);
+    // Cancel is open to any authenticated user; the service enforces that an
+    // employee can only cancel their own pending request (HR can cancel more).
+    Route::post('leave-requests/{leaveRequest}/cancel', [LeaveController::class, 'cancel']);
 
     // Half-day requests — separate from leave (always unpaid). Caller files + views
     // own; service scopes by role.
