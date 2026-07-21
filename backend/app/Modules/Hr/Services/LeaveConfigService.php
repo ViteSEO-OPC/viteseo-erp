@@ -4,12 +4,14 @@ namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LeaveBalance;
+use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
 use App\Modules\Hr\Models\SharedLeaveAllotment;
 use App\Modules\Hr\Models\SharedLeaveBalance;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Validation\ValidationException;
 
 /**
  * HR-side leave configuration (Company → Leave Type): the leave-type catalogue,
@@ -116,6 +118,16 @@ class LeaveConfigService
         $settings = LeaveSetting::current();
 
         if ($settings->allotment_mode !== $mode) {
+            // Guardrail: a request filed under one model must be decided under it,
+            // or approval would deduct from the other bucket than it was validated
+            // against. Block the switch until the queue is clear.
+            $pending = LeaveRequest::where('status', 'pending')->count();
+            if ($pending > 0) {
+                throw ValidationException::withMessages([
+                    'allotment_mode' => ["Resolve the {$pending} pending leave request(s) before switching the leave allotment model."],
+                ]);
+            }
+
             $settings->update(['allotment_mode' => $mode]);
             $this->audit->log('updated', 'Leave Types', "Switched leave allotment mode to '{$mode}'", $settings);
 

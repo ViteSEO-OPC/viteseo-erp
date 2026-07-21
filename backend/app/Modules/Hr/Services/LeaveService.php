@@ -260,29 +260,34 @@ class LeaveService
                 return $request->load(['employee.user', 'leaveType', 'reviewer']);
             }
 
+            // Only paid leave draws down a credit balance; unpaid leave (LWOP) is
+            // deducted from pay by payroll, so it never touches used_days. Stamp
+            // the bucket we deduct from so cancel can reverse it precisely even if
+            // HR later flips the global mode.
+            $type = LeaveType::find($request->leave_type_id);
+            $paid = (! $type || $type->is_paid);
+            $bucket = ! $paid
+                ? 'none'
+                : ($this->isSharedMode() ? 'pool' : 'per_type');
+
             $request->update([
                 'status' => 'approved',
                 'reviewed_by' => $reviewer->id,
                 'reviewed_at' => now(),
+                'deducted_from' => $bucket,
             ]);
 
-            // Only paid leave draws down a credit balance; unpaid leave (LWOP) is
-            // deducted from pay by payroll, so it never touches used_days.
-            $type = LeaveType::find($request->leave_type_id);
-            if (! $type || $type->is_paid) {
-                if ($this->isSharedMode()) {
-                    // Shared mode: deduct from the single pool, regardless of type.
-                    SharedLeaveBalance::where('employee_id', $request->employee_id)
-                        ->where('year', $request->start_date->year)
-                        ->first()
-                        ?->increment('used_days', $request->days);
-                } else {
-                    LeaveBalance::where('employee_id', $request->employee_id)
-                        ->where('leave_type_id', $request->leave_type_id)
-                        ->where('year', $request->start_date->year)
-                        ->first()
-                        ?->increment('used_days', $request->days);
-                }
+            if ($bucket === 'pool') {
+                SharedLeaveBalance::where('employee_id', $request->employee_id)
+                    ->where('year', $request->start_date->year)
+                    ->first()
+                    ?->increment('used_days', $request->days);
+            } elseif ($bucket === 'per_type') {
+                LeaveBalance::where('employee_id', $request->employee_id)
+                    ->where('leave_type_id', $request->leave_type_id)
+                    ->where('year', $request->start_date->year)
+                    ->first()
+                    ?->increment('used_days', $request->days);
             }
 
             $request->load(['employee.user', 'leaveType', 'reviewer']);
@@ -353,25 +358,35 @@ class LeaveService
         }
 
         DB::transaction(function () use ($request, $actor, $reason, $wasApproved) {
-            // Give the credits back if they were deducted at approval (paid only).
+            // Give the credits back if they were deducted at approval. Reverse the
+            // EXACT bucket stamped at approval (deducted_from), so a mode flip
+            // between approve and cancel can't restore the wrong table. Legacy
+            // rows (approved before stamping) fall back to the paid-type + current
+            // mode guess.
             if ($wasApproved) {
-                $type = LeaveType::find($request->leave_type_id);
-                if (! $type || $type->is_paid) {
-                    if ($this->isSharedMode()) {
-                        $pool = SharedLeaveBalance::where('employee_id', $request->employee_id)
-                            ->where('year', $request->start_date->year)
-                            ->first();
-                        if ($pool) {
-                            $pool->update(['used_days' => max(0, (float) $pool->used_days - (float) $request->days)]);
-                        }
-                    } else {
-                        $balance = LeaveBalance::where('employee_id', $request->employee_id)
-                            ->where('leave_type_id', $request->leave_type_id)
-                            ->where('year', $request->start_date->year)
-                            ->first();
-                        if ($balance) {
-                            $balance->update(['used_days' => max(0, (float) $balance->used_days - (float) $request->days)]);
-                        }
+                $bucket = $request->deducted_from;
+                if ($bucket === null) {
+                    $type = LeaveType::find($request->leave_type_id);
+                    $paid = (! $type || $type->is_paid);
+                    $bucket = ! $paid
+                        ? 'none'
+                        : ($this->isSharedMode() ? 'pool' : 'per_type');
+                }
+
+                if ($bucket === 'pool') {
+                    $pool = SharedLeaveBalance::where('employee_id', $request->employee_id)
+                        ->where('year', $request->start_date->year)
+                        ->first();
+                    if ($pool) {
+                        $pool->update(['used_days' => max(0, (float) $pool->used_days - (float) $request->days)]);
+                    }
+                } elseif ($bucket === 'per_type') {
+                    $balance = LeaveBalance::where('employee_id', $request->employee_id)
+                        ->where('leave_type_id', $request->leave_type_id)
+                        ->where('year', $request->start_date->year)
+                        ->first();
+                    if ($balance) {
+                        $balance->update(['used_days' => max(0, (float) $balance->used_days - (float) $request->days)]);
                     }
                 }
             }
