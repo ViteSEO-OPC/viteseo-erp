@@ -20,9 +20,7 @@ import {
   usePinFaq,
 } from "@/modules/hr/hooks/use-faqs";
 import { FAQ_CATEGORIES, faqCategoryLabel, type Faq } from "@/modules/hr/types/faq";
-
-const selectClass =
-  "h-9 rounded-lg border border-input bg-transparent px-2.5 text-sm text-foreground outline-none focus-visible:border-ring";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 // Category → token colors for the pill badge (matches the Figma legend).
 const CATEGORY_STYLE: Record<string, string> = {
@@ -152,18 +150,26 @@ export default function FaqAdminPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select className={selectClass} value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="all">All Categories</option>
-          {FAQ_CATEGORIES.map((c) => (
-            <option key={c.value} value={c.value}>{c.label}</option>
-          ))}
-        </select>
-        <select className={selectClass} value={status} onChange={(e) => setStatus(e.target.value)}>
-          <option value="all">All statuses</option>
-          <option value="published">Published</option>
-          <option value="draft">Draft</option>
-          <option value="archived">Archived</option>
-        </select>
+        <SimpleSelect
+          className="w-48"
+          value={category}
+          onValueChange={setCategory}
+          options={[
+            { value: "all", label: "All Categories" },
+            ...FAQ_CATEGORIES.map((c) => ({ value: c.value, label: c.label })),
+          ]}
+        />
+        <SimpleSelect
+          className="w-40"
+          value={status}
+          onValueChange={setStatus}
+          options={[
+            { value: "all", label: "All statuses" },
+            { value: "published", label: "Published" },
+            { value: "draft", label: "Draft" },
+            { value: "archived", label: "Archived" },
+          ]}
+        />
         <Button onClick={() => { setEditing(null); setDialogOpen(true); }}>
           <Plus />
           New FAQ

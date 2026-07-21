@@ -38,6 +38,7 @@ import {
   CandidateCardView,
 } from "@/modules/hr/components/candidate-card";
 import { RequisitionFormDialog } from "@/modules/hr/components/requisition-form-dialog";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { CandidateFormDialog } from "@/modules/hr/components/candidate-form-dialog";
 import { CandidateDetailDialog } from "@/modules/hr/components/candidate-detail-dialog";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
@@ -437,18 +438,12 @@ function RejectionDialog({
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="rej-reason">Reason</Label>
-                <select
+                <SimpleSelect
                   id="rej-reason"
-                  className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
                   value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                >
-                  {REJECTION_REASONS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
+                  onValueChange={setReason}
+                  options={REJECTION_REASONS.map((r) => ({ value: r, label: r }))}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="rej-note">Note (optional, internal)</Label>

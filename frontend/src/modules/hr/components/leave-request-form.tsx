@@ -1,6 +1,6 @@
 "use client";
 
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -8,9 +8,10 @@ import { notify as toast } from "@/core/lib/notify";
 import { Info, AlertTriangle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { useCreateLeaveRequest } from "@/modules/hr/hooks/use-leave";
 import { computeLeaveDays } from "@/modules/hr/lib/leave-days";
 import type { LeaveBalance, LeaveType } from "@/modules/hr/types/leave";
@@ -23,9 +24,6 @@ const schema = z.object({
 });
 
 type FormValues = z.infer<typeof schema>;
-
-const selectClass =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 // Local (browser-tz) YYYY-MM-DD. en-CA formats as ISO. The backend re-checks in
 // Asia/Manila — this is just the picker's guardrail.
@@ -55,6 +53,7 @@ export function LeaveRequestForm({
 
   const {
     register,
+    control,
     handleSubmit,
     watch,
     setError,
@@ -114,12 +113,19 @@ export function LeaveRequestForm({
       <form onSubmit={handleSubmit(onSubmit)} className="mt-4 space-y-4" noValidate>
         <div className="space-y-1.5">
           <Label>Leave Type</Label>
-          <select className={selectClass} {...register("leave_type_id")}>
-            <option value="">Select…</option>
-            {types.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
+          <Controller
+            control={control}
+            name="leave_type_id"
+            render={({ field }) => (
+              <SimpleSelect
+                value={field.value}
+                onValueChange={field.onChange}
+                placeholder="Select…"
+                aria-invalid={!!errors.leave_type_id}
+                options={types.map((t) => ({ value: String(t.id), label: t.name }))}
+              />
+            )}
+          />
           {errors.leave_type_id && (
             <p className="text-xs text-destructive">{errors.leave_type_id.message}</p>
           )}
@@ -128,14 +134,36 @@ export function LeaveRequestForm({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>Start Date</Label>
-            <Input type="date" min={minDate} {...register("start_date")} />
+            <Controller
+              control={control}
+              name="start_date"
+              render={({ field }) => (
+                <DatePicker
+                  value={field.value}
+                  onChange={field.onChange}
+                  min={minDate}
+                  aria-invalid={!!errors.start_date}
+                />
+              )}
+            />
             {errors.start_date && (
               <p className="text-xs text-destructive">{errors.start_date.message}</p>
             )}
           </div>
           <div className="space-y-1.5">
             <Label>End Date</Label>
-            <Input type="date" min={minDate} {...register("end_date")} />
+            <Controller
+              control={control}
+              name="end_date"
+              render={({ field }) => (
+                <DatePicker
+                  value={field.value}
+                  onChange={field.onChange}
+                  min={start || minDate}
+                  aria-invalid={!!errors.end_date}
+                />
+              )}
+            />
             {errors.end_date && (
               <p className="text-xs text-destructive">{errors.end_date.message}</p>
             )}
@@ -152,12 +180,6 @@ export function LeaveRequestForm({
                 : "Backdated filing allowed for any past date."}
           </p>
         )}
-
-        <p className="text-caption text-muted-foreground">
-          Leave is booked in full days. Need only part of a day? Use{" "}
-          <span className="font-medium text-foreground">Request Half-Day</span> below
-          (unpaid).
-        </p>
 
         <div className="space-y-1.5">
           <Label>Reason</Label>

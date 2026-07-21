@@ -338,7 +338,7 @@ function ResolveDialog({
 
   return (
     <Dialog open={!!inquiry} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Resolve inquiry</DialogTitle>
           <DialogDescription>
@@ -417,7 +417,7 @@ function NoteDialog({
 }) {
   return (
     <Dialog open={!!inquiry} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Resolution note</DialogTitle>
           <DialogDescription>{inquiry?.employee.name}&apos;s payroll inquiry</DialogDescription>

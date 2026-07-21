@@ -16,6 +16,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { usePatchBenefitProgram } from "@/modules/hr/hooks/use-benefit-programs";
 import { HMO_CADENCES, type BenefitProgram, type BenefitTier } from "@/modules/hr/types/benefits";
 
@@ -102,18 +103,12 @@ function HmoForm({ program, onDone }: { program: BenefitProgram; onDone: () => v
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="h-cadence">Deducted</Label>
-            <select
+            <SimpleSelect
               id="h-cadence"
-              className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
               value={cadence}
-              onChange={(e) => setCadence(e.target.value)}
-            >
-              {HMO_CADENCES.map((c) => (
-                <option key={c.value} value={c.value}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+              onValueChange={setCadence}
+              options={HMO_CADENCES.map((c) => ({ value: c.value, label: c.label }))}
+            />
           </div>
         </div>
 

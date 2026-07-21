@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Trash2, Check, ChevronDown } from "lucide-react";
+import { Plus, Pencil, Trash2, Check } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
@@ -18,6 +18,7 @@ import {
   useUpdateAttendancePolicy,
 } from "@/modules/hr/hooks/use-rules";
 import { formatWorkdays, type WorkSchedule } from "@/modules/hr/types/rules";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 export default function RulesPage() {
   const { data: schedules, isLoading, isError } = useWorkSchedules();
@@ -268,18 +269,16 @@ function AttendancePolicyEditor() {
         <div className="flex flex-wrap items-end gap-4">
           <div className="w-full max-w-[360px] space-y-1.5">
             <Label htmlFor="pol-late-mode">Mode</Label>
-            <div className="relative">
-              <select
-                id="pol-late-mode"
-                className="h-10 w-full appearance-none rounded-md border border-input bg-card px-3.5 pr-9 text-sm text-foreground outline-none focus-visible:border-ring"
-                value={lateMode}
-                onChange={(e) => setLateMode(e.target.value as "none" | "per_lates")}
-              >
-                <option value="none">No deduction</option>
-                <option value="per_lates">Deduct a day every N lates</option>
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            </div>
+            <SimpleSelect
+              id="pol-late-mode"
+              className="h-10"
+              value={lateMode}
+              onValueChange={(v) => setLateMode(v as "none" | "per_lates")}
+              options={[
+                { value: "none", label: "No deduction" },
+                { value: "per_lates", label: "Deduct a day every N lates" },
+              ]}
+            />
           </div>
           {lateMode === "per_lates" && (
             <div className="w-40 space-y-1.5">

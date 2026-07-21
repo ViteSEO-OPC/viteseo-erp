@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
-import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { cn } from "@/lib/utils";
@@ -21,6 +20,7 @@ import {
   deriveAttendanceTiming,
 } from "@/modules/hr/lib/attendance-display";
 import type { HrAttendanceRow, Severity } from "@/modules/hr/types/attendance";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 
 function manilaToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
@@ -112,7 +112,7 @@ export default function AttendancePage() {
         title="Attendance"
         subtitle="Daily check-in status, timing, and violation flags — click a row to correct it."
         actions={
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-auto" />
+          <DatePicker value={date} onChange={setDate} className="w-44" />
         }
       />
 

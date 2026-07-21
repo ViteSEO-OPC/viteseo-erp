@@ -16,6 +16,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { usePatchBenefitProgram } from "@/modules/hr/hooks/use-benefit-programs";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
@@ -101,18 +102,12 @@ function AllowanceForm({ program, onDone }: { program: BenefitProgram; onDone: (
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="a-freq">Frequency</Label>
-            <select
+            <SimpleSelect
               id="a-freq"
-              className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
               value={frequency}
-              onChange={(e) => setFrequency(e.target.value)}
-            >
-              {ALLOWANCE_FREQUENCIES.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
+              onValueChange={setFrequency}
+              options={ALLOWANCE_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
+            />
           </div>
         </div>
 

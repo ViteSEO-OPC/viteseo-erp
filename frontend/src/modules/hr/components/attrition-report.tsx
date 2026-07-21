@@ -10,9 +10,7 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { GroupedBarChart } from "@/modules/hr/components/grouped-bar-chart";
 import { TenureCurveChart } from "@/modules/hr/components/tenure-curve-chart";
 import { useReport, useExportReport } from "@/modules/hr/hooks/use-report";
-
-const selectClass =
-  "h-9 rounded-lg border border-border bg-card px-3 pr-8 text-sm font-medium text-foreground outline-none focus-visible:border-ring";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 const RANGES = [
   { value: 3, label: "Last 3 Months" },
@@ -77,17 +75,23 @@ export function AttritionReport() {
 
       {/* Filters */}
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        <select aria-label="Date range" className={selectClass} value={range} onChange={(e) => setRange(Number(e.target.value))}>
-          {RANGES.map((r) => (
-            <option key={r.value} value={r.value}>{r.label}</option>
-          ))}
-        </select>
-        <select aria-label="Department" className={selectClass} value={department} onChange={(e) => setDepartment(e.target.value)}>
-          <option value="all">All Departments</option>
-          {departments.map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
-        </select>
+        <SimpleSelect
+          aria-label="Date range"
+          className="w-48"
+          value={String(range)}
+          onValueChange={(v) => setRange(Number(v))}
+          options={RANGES.map((r) => ({ value: String(r.value), label: r.label }))}
+        />
+        <SimpleSelect
+          aria-label="Department"
+          className="w-56"
+          value={department}
+          onValueChange={setDepartment}
+          options={[
+            { value: "all", label: "All Departments" },
+            ...departments.map((d) => ({ value: String(d.id), label: d.name })),
+          ]}
+        />
       </div>
 
       {/* Two charts side by side */}

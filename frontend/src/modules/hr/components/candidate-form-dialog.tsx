@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { UserPlus, FileUp, X, FileText } from "lucide-react";
@@ -29,6 +29,7 @@ import {
   LOCATIONS,
   sourceLabel,
 } from "@/modules/hr/types/recruitment";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -41,9 +42,6 @@ const schema = z.object({
   notes: z.string(),
 });
 type FormValues = z.infer<typeof schema>;
-
-const fieldClass =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
 
 const ACCEPTED = ".pdf,.doc,.docx";
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -68,6 +66,7 @@ export function CandidateFormDialog({
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
@@ -220,16 +219,34 @@ export function CandidateFormDialog({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Applying to (requisition) *</Label>
-              <select className={fieldClass} {...register("requisition_id")}>
-                {activeReqs.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
-              </select>
+              <Controller
+                control={control}
+                name="requisition_id"
+                render={({ field }) => (
+                  <SimpleSelect
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    placeholder="Select requisition"
+                    aria-invalid={!!errors.requisition_id}
+                    options={activeReqs.map((r) => ({ value: String(r.id), label: r.title }))}
+                  />
+                )}
+              />
               {errors.requisition_id && <p className="text-xs text-destructive">{errors.requisition_id.message}</p>}
             </div>
             <div className="space-y-1.5">
               <Label>Source *</Label>
-              <select className={fieldClass} {...register("source")}>
-                {CANDIDATE_SOURCES.map((s) => <option key={s} value={s}>{sourceLabel(s)}</option>)}
-              </select>
+              <Controller
+                control={control}
+                name="source"
+                render={({ field }) => (
+                  <SimpleSelect
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    options={CANDIDATE_SOURCES.map((s) => ({ value: s, label: sourceLabel(s) }))}
+                  />
+                )}
+              />
             </div>
           </div>
 
@@ -240,10 +257,18 @@ export function CandidateFormDialog({
             </div>
             <div className="space-y-1.5">
               <Label>Location</Label>
-              <select className={fieldClass} {...register("location")}>
-                <option value="">Select location</option>
-                {LOCATIONS.map((l) => <option key={l} value={l}>{l}</option>)}
-              </select>
+              <Controller
+                control={control}
+                name="location"
+                render={({ field }) => (
+                  <SimpleSelect
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    placeholder="Select location"
+                    options={LOCATIONS.map((l) => ({ value: l, label: l }))}
+                  />
+                )}
+              />
             </div>
           </div>
 

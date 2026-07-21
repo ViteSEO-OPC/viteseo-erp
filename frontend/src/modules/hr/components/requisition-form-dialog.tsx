@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Briefcase } from "lucide-react";
@@ -31,6 +31,8 @@ import {
   LOCATIONS,
   type Requisition,
 } from "@/modules/hr/types/recruitment";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 
 const schema = z.object({
   title: z.string().min(1, "Role title is required"),
@@ -46,8 +48,6 @@ const schema = z.object({
 });
 type FormValues = z.infer<typeof schema>;
 
-const fieldClass =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
 const labelClass = "text-label font-semibold uppercase tracking-wide text-muted-foreground";
 
 const EMPTY: FormValues = {
@@ -74,6 +74,7 @@ export function RequisitionFormDialog({
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     formState: { errors, isSubmitting },
@@ -154,9 +155,17 @@ export function RequisitionFormDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>Employment Type</Label>
-                <select className={fieldClass} {...register("employment_type")}>
-                  {EMPLOYMENT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
+                <Controller
+                  control={control}
+                  name="employment_type"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={EMPLOYMENT_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+                    />
+                  )}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Salary Range</Label>
@@ -171,18 +180,36 @@ export function RequisitionFormDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>Hiring Manager *</Label>
-                <select className={fieldClass} {...register("hiring_manager_id")}>
-                  <option value="">Select manager</option>
-                  {(employees ?? []).map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
+                <Controller
+                  control={control}
+                  name="hiring_manager_id"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder="Select manager"
+                      aria-invalid={!!errors.hiring_manager_id}
+                      options={(employees ?? []).map((e) => ({ value: String(e.id), label: e.name }))}
+                    />
+                  )}
+                />
                 {errors.hiring_manager_id && <p className="text-xs text-destructive">{errors.hiring_manager_id.message}</p>}
               </div>
               <div className="space-y-1.5">
                 <Label>Department *</Label>
-                <select className={fieldClass} {...register("department_id")}>
-                  <option value="">Select department</option>
-                  {(departments ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
+                <Controller
+                  control={control}
+                  name="department_id"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder="Select department"
+                      aria-invalid={!!errors.department_id}
+                      options={(departments ?? []).map((d) => ({ value: String(d.id), label: d.name }))}
+                    />
+                  )}
+                />
                 {errors.department_id && <p className="text-xs text-destructive">{errors.department_id.message}</p>}
               </div>
             </div>
@@ -194,21 +221,43 @@ export function RequisitionFormDialog({
             <div className={`grid grid-cols-1 gap-3 ${isEdit ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
               <div className="space-y-1.5">
                 <Label>Target Start Date</Label>
-                <Input type="date" {...register("target_start_date")} />
+                <Controller
+                  control={control}
+                  name="target_start_date"
+                  render={({ field }) => (
+                    <DatePicker value={field.value} onChange={field.onChange} />
+                  )}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Location</Label>
-                <select className={fieldClass} {...register("location")}>
-                  <option value="">Select location</option>
-                  {LOCATIONS.map((l) => <option key={l} value={l}>{l}</option>)}
-                </select>
+                <Controller
+                  control={control}
+                  name="location"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder="Select location"
+                      options={LOCATIONS.map((l) => ({ value: l, label: l }))}
+                    />
+                  )}
+                />
               </div>
               {isEdit && (
                 <div className="space-y-1.5">
                   <Label>Stage</Label>
-                  <select className={fieldClass} {...register("stage")}>
-                    {REQ_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                  <Controller
+                    control={control}
+                    name="stage"
+                    render={({ field }) => (
+                      <SimpleSelect
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        options={REQ_STAGES.map((s) => ({ value: s, label: s }))}
+                      />
+                    )}
+                  />
                 </div>
               )}
             </div>

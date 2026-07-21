@@ -17,6 +17,7 @@ import {
   useLeaveRequests,
 } from "@/modules/hr/hooks/use-leave";
 import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 interface HistItem {
   key: string;
@@ -135,15 +136,12 @@ export default function TimeOffPage() {
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
                 <div className="flex items-center gap-2 text-caption text-muted-foreground">
                   <span>Rows per page</span>
-                  <select
-                    value={size}
-                    onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}
-                    className="h-7 rounded-md border border-input bg-card px-1.5 text-caption text-foreground outline-none focus-visible:border-ring"
-                  >
-                    {pageSizes.map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
+                  <SimpleSelect
+                    className="h-7 w-16"
+                    value={String(size)}
+                    onValueChange={(v) => { setSize(Number(v)); setPage(1); }}
+                    options={pageSizes.map((n) => ({ value: String(n), label: String(n) }))}
+                  />
                   <span className="hidden sm:inline">
                     · Showing {(safePage - 1) * size + 1}–{Math.min(safePage * size, history.length)} of {history.length}
                   </span>

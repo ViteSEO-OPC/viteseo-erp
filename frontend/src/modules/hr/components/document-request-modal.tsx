@@ -18,14 +18,12 @@ import {
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DOCUMENT_TYPES, documentTypeLabel } from "@/modules/hr/types/request";
 import {
   useCreateDocumentRequest,
   useMyDocumentRequests,
 } from "@/modules/hr/hooks/use-requests";
-
-const selectClass =
-  "h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
 
 /** Employee self-service: request an official document from HR + see the history. */
 export function DocumentRequestModal({
@@ -83,16 +81,12 @@ export function DocumentRequestModal({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="doc-type">Document</Label>
-              <select
+              <SimpleSelect
                 id="doc-type"
-                className={selectClass}
                 value={type}
-                onChange={(e) => setType(e.target.value)}
-              >
-                {DOCUMENT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
+                onValueChange={setType}
+                options={DOCUMENT_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+              />
             </div>
             {isOther ? (
               <div className="space-y-1.5">

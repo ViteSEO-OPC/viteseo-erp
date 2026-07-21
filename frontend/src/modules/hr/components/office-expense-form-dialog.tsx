@@ -23,9 +23,8 @@ import {
   EXPENSE_CATEGORIES,
   type OfficeExpense,
 } from "@/modules/hr/types/office-expense";
-
-const selectClass =
-  "h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 
 export function OfficeExpenseFormDialog({
   open,
@@ -38,7 +37,7 @@ export function OfficeExpenseFormDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
         {/* Keyed so state re-initialises fresh each time it opens (no effects). */}
         {open && <FormBody key={expense?.id ?? "new"} expense={expense ?? null} onDone={() => onOpenChange(false)} />}
       </DialogContent>
@@ -97,11 +96,12 @@ function FormBody({ expense, onDone }: { expense: OfficeExpense | null; onDone: 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="oe-cat">Category</Label>
-            <select id="oe-cat" className={selectClass} value={form.category} onChange={(e) => set("category", e.target.value)}>
-              {EXPENSE_CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
+            <SimpleSelect
+              id="oe-cat"
+              value={form.category}
+              onValueChange={(v) => set("category", v)}
+              options={EXPENSE_CATEGORIES.map((c) => ({ value: c.value, label: c.label }))}
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="oe-amt">Amount (₱)</Label>
@@ -111,7 +111,7 @@ function FormBody({ expense, onDone }: { expense: OfficeExpense | null; onDone: 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label htmlFor="oe-date">Date</Label>
-            <Input id="oe-date" type="date" value={form.expense_date} onChange={(e) => set("expense_date", e.target.value)} />
+            <DatePicker id="oe-date" value={form.expense_date} onChange={(v) => set("expense_date", v)} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="oe-vendor">Vendor</Label>

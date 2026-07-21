@@ -37,9 +37,7 @@ import type {
   ThirteenthMonthRow,
 } from "@/modules/hr/types/payroll";
 import { PAY_FREQUENCIES, payFrequencyLabel } from "@/modules/hr/types/employee";
-
-const selectClass =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring disabled:opacity-50";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 const TIMING_OPTIONS = [
   { value: "every", label: "Every cutoff (split)" },
@@ -268,38 +266,32 @@ export default function PayrollPage() {
       <div className="mt-6 grid grid-cols-1 gap-4 rounded-card border border-border bg-card p-4 sm:grid-cols-3">
         <div className="space-y-1.5">
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">Default pay schedule</p>
-          <select
-            className={selectClass}
+          <SimpleSelect
             value={settings?.frequency ?? "semi_monthly"}
             disabled={!settings || updateSettingsMut.isPending}
-            onChange={(e) => saveSettings({ frequency: e.target.value })}
-          >
-            {PAY_FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-          </select>
+            onValueChange={(v) => saveSettings({ frequency: v })}
+            options={PAY_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
+          />
           <p className="text-caption text-muted-foreground">Used for employees without their own frequency.</p>
         </div>
         <div className="space-y-1.5">
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">Government contributions</p>
-          <select
-            className={selectClass}
+          <SimpleSelect
             value={settings?.deduction_timing ?? "every"}
             disabled={!settings || updateSettingsMut.isPending}
-            onChange={(e) => saveSettings({ deduction_timing: e.target.value })}
-          >
-            {TIMING_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
+            onValueChange={(v) => saveSettings({ deduction_timing: v })}
+            options={TIMING_OPTIONS.map((t) => ({ value: t.value, label: t.label }))}
+          />
           <p className="text-caption text-muted-foreground">When SSS / PhilHealth / Pag-IBIG are deducted.</p>
         </div>
         <div className="space-y-1.5">
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">Withholding tax</p>
-          <select
-            className={selectClass}
+          <SimpleSelect
             value={settings?.tax_timing ?? "every"}
             disabled={!settings || updateSettingsMut.isPending}
-            onChange={(e) => saveSettings({ tax_timing: e.target.value })}
-          >
-            {TIMING_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
+            onValueChange={(v) => saveSettings({ tax_timing: v })}
+            options={TIMING_OPTIONS.map((t) => ({ value: t.value, label: t.label }))}
+          />
           <p className="text-caption text-muted-foreground">When income tax is withheld.</p>
         </div>
       </div>
@@ -489,7 +481,7 @@ export default function PayrollPage() {
       </Dialog>
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto">
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{alreadyRun ? "Re-run this pay group?" : "Run this pay group?"}</DialogTitle>
             <DialogDescription>

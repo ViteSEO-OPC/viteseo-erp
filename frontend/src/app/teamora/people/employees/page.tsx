@@ -15,9 +15,7 @@ import {
   EMPLOYMENT_STATUSES,
   statusLabel,
 } from "@/modules/hr/types/employee";
-
-const selectClass =
-  "h-8 rounded-lg border border-input bg-card px-2.5 text-sm outline-none focus-visible:border-ring";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 export default function EmployeesPage() {
   const { data: employees, isLoading, isError } = useEmployees();
@@ -86,26 +84,24 @@ export default function EmployeesPage() {
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
           />
         </div>
-        <select
-          className={selectClass}
+        <SimpleSelect
+          className="w-56"
           value={dept}
-          onChange={(e) => { setDept(e.target.value); setPage(1); }}
-        >
-          <option value="all">All Departments</option>
-          {(departments ?? []).map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
-        </select>
-        <select
-          className={selectClass}
+          onValueChange={(v) => { setDept(v); setPage(1); }}
+          options={[
+            { value: "all", label: "All Departments" },
+            ...(departments ?? []).map((d) => ({ value: String(d.id), label: d.name })),
+          ]}
+        />
+        <SimpleSelect
+          className="w-40"
           value={status}
-          onChange={(e) => { setStatus(e.target.value); setPage(1); }}
-        >
-          <option value="all">All Statuses</option>
-          {EMPLOYMENT_STATUSES.map((s) => (
-            <option key={s} value={s}>{statusLabel(s)}</option>
-          ))}
-        </select>
+          onValueChange={(v) => { setStatus(v); setPage(1); }}
+          options={[
+            { value: "all", label: "All Statuses" },
+            ...EMPLOYMENT_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })),
+          ]}
+        />
       </div>
 
       {/* Grid */}
@@ -129,15 +125,12 @@ export default function EmployeesPage() {
               <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-caption text-muted-foreground">
                   <span>Cards per page</span>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
-                    className="h-7 rounded-md border border-input bg-card px-1.5 text-caption text-foreground outline-none focus-visible:border-ring"
-                  >
-                    {[6, 12, 24, 48].map((n) => (
-                      <option key={n} value={n}>{n}</option>
-                    ))}
-                  </select>
+                  <SimpleSelect
+                    className="h-7 w-16"
+                    value={String(pageSize)}
+                    onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}
+                    options={[6, 12, 24, 48].map((n) => ({ value: String(n), label: String(n) }))}
+                  />
                 </div>
                 <div className="flex items-center gap-1">
                   <button

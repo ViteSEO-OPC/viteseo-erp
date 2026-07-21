@@ -26,6 +26,7 @@ import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate, formatDateTime } from "@/core/lib/format";
 import { useConcerns, useSetConcernStatus, useScheduleMeeting } from "@/modules/hr/hooks/use-concerns";
 import { concernCategoryLabel, type Concern } from "@/modules/hr/types/concern";
+import { DateTimePicker } from "@/modules/hr/ui/date-time-picker";
 
 const CONCERN_STATUS_OPTIONS: StatusFilterOption[] = [
   { value: "all", label: "All" },
@@ -304,7 +305,7 @@ function ConcernDetail({
                 </p>
                 <div className="space-y-1.5">
                   <Label htmlFor="m-when">Date & time</Label>
-                  <Input id="m-when" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+                  <DateTimePicker value={when} onChange={setWhen} />
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">

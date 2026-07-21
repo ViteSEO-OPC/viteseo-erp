@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { AxiosError } from "axios";
@@ -49,6 +49,9 @@ import {
   type Employee,
   type EmployeeInput,
 } from "@/modules/hr/types/employee";
+import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { TimePicker } from "@/modules/hr/ui/time-picker";
 
 const ROLE_CHANGE_TYPES = [
   { value: "promotion", label: "Promotion" },
@@ -138,9 +141,6 @@ const EMPTY: FormValues = {
   salary_change_reason: "", salary_change_type: "", role_change_type: "", role_change_reason: "",
 };
 
-const selectClass =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive";
-
 export function EmployeeFormDialog({
   open,
   onOpenChange,
@@ -169,6 +169,7 @@ export function EmployeeFormDialog({
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     setError,
@@ -324,7 +325,7 @@ export function EmployeeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
@@ -335,7 +336,7 @@ export function EmployeeFormDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
-          <div className="max-h-[60vh] space-y-6 overflow-y-auto px-0.5">
+          <div className="max-h-[60vh] space-y-6 overflow-y-auto overflow-x-hidden px-0.5">
             {/* Personal */}
             <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-2", !show("personal") && "hidden")}>
               <Field label="First name" error={errors.first_name?.message}>
@@ -357,22 +358,44 @@ export function EmployeeFormDialog({
                 <Input placeholder="+63 917 000 0000" {...register("phone")} />
               </Field>
               <Field label="Gender">
-                <select className={selectClass} {...register("gender")}>
-                  <option value="">Select…</option>
-                  {GENDERS.map((g) => <option key={g} value={g}>{g}</option>)}
-                </select>
+                <Controller
+                  control={control}
+                  name="gender"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder="Select…"
+                      options={GENDERS.map((g) => ({ value: g, label: g }))}
+                    />
+                  )}
+                />
               </Field>
               <Field label="Civil status">
-                <select className={selectClass} {...register("civil_status")}>
-                  <option value="">Select…</option>
-                  {CIVIL_STATUSES.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
+                <Controller
+                  control={control}
+                  name="civil_status"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder="Select…"
+                      options={CIVIL_STATUSES.map((c) => ({ value: c, label: c }))}
+                    />
+                  )}
+                />
               </Field>
               <Field label="Nationality">
                 <Input placeholder="Filipino" {...register("nationality")} />
               </Field>
               <Field label="Date of birth">
-                <Input type="date" {...register("date_of_birth")} />
+                <Controller
+                  control={control}
+                  name="date_of_birth"
+                  render={({ field }) => (
+                    <DatePicker value={field.value} onChange={field.onChange} />
+                  )}
+                />
               </Field>
               <Field label="Place of birth">
                 <Input {...register("place_of_birth")} />
@@ -428,33 +451,62 @@ export function EmployeeFormDialog({
                   <Input placeholder="Software Engineer" {...register("job_title")} />
                 </Field>
                 <Field label="Department" error={errors.department_id?.message}>
-                  <select className={selectClass} {...register("department_id")}>
-                    <option value="">Select…</option>
-                    {(departments ?? []).map((d) => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
+                  <Controller
+                    control={control}
+                    name="department_id"
+                    render={({ field }) => (
+                      <SimpleSelect
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        placeholder="Select…"
+                        aria-invalid={!!errors.department_id}
+                        options={(departments ?? []).map((d) => ({ value: String(d.id), label: d.name }))}
+                      />
+                    )}
+                  />
                 </Field>
                 <Field label="Manager">
-                  <select className={selectClass} {...register("manager_id")}>
-                    <option value="">None</option>
-                    {managerOptions.map((e) => (
-                      <option key={e.id} value={e.id}>{e.name}</option>
-                    ))}
-                  </select>
+                  <Controller
+                    control={control}
+                    name="manager_id"
+                    render={({ field }) => (
+                      <SimpleSelect
+                        value={field.value || "none"}
+                        onValueChange={(v) => field.onChange(v === "none" ? "" : v)}
+                        options={[
+                          { value: "none", label: "None" },
+                          ...managerOptions.map((e) => ({ value: String(e.id), label: e.name })),
+                        ]}
+                      />
+                    )}
+                  />
                 </Field>
                 <Field label="Employment status">
-                  <select className={selectClass} {...register("employment_status")}>
-                    {EMPLOYMENT_STATUSES.map((st) => (
-                      <option key={st} value={st}>{statusLabel(st)}</option>
-                    ))}
-                  </select>
+                  <Controller
+                    control={control}
+                    name="employment_status"
+                    render={({ field }) => (
+                      <SimpleSelect
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        options={EMPLOYMENT_STATUSES.map((st) => ({ value: st, label: statusLabel(st) }))}
+                      />
+                    )}
+                  />
                 </Field>
                 <Field label="Type">
-                  <select className={selectClass} {...register("employment_type")}>
-                    <option value="">Select…</option>
-                    {JOB_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
+                  <Controller
+                    control={control}
+                    name="employment_type"
+                    render={({ field }) => (
+                      <SimpleSelect
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        placeholder="Select…"
+                        options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
+                      />
+                    )}
+                  />
                 </Field>
                 <Field label="Employee role">
                   <Input placeholder="Senior Product Manager" {...register("employee_role")} />
@@ -463,7 +515,17 @@ export function EmployeeFormDialog({
                   <Input placeholder="Manila HQ · Hybrid" {...register("work_location")} />
                 </Field>
                 <Field label="Hire date" error={errors.hire_date?.message}>
-                  <Input type="date" {...register("hire_date")} />
+                  <Controller
+                    control={control}
+                    name="hire_date"
+                    render={({ field }) => (
+                      <DatePicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        aria-invalid={!!errors.hire_date}
+                      />
+                    )}
+                  />
                 </Field>
               </div>
 
@@ -471,12 +533,20 @@ export function EmployeeFormDialog({
               {isEdit && (
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Field label="Change type">
-                    <select className={selectClass} {...register("role_change_type")}>
-                      <option value="">— (logs a generic role change)</option>
-                      {ROLE_CHANGE_TYPES.map((t) => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
-                      ))}
-                    </select>
+                    <Controller
+                      control={control}
+                      name="role_change_type"
+                      render={({ field }) => (
+                        <SimpleSelect
+                          value={field.value || "generic"}
+                          onValueChange={(v) => field.onChange(v === "generic" ? "" : v)}
+                          options={[
+                            { value: "generic", label: "— (logs a generic role change)" },
+                            ...ROLE_CHANGE_TYPES.map((t) => ({ value: t.value, label: t.label })),
+                          ]}
+                        />
+                      )}
+                    />
                   </Field>
                   <Field label="Reason for change">
                     <Input placeholder="e.g. Promoted after Q2 review" {...register("role_change_reason")} />
@@ -494,7 +564,6 @@ export function EmployeeFormDialog({
                   key={employee!.id}
                   initial={scheduleData}
                   workSchedules={workSchedules ?? []}
-                  selectClass={selectClass}
                   onChange={setSchedulePayload}
                 />
               )}
@@ -506,11 +575,17 @@ export function EmployeeFormDialog({
                 <Input type="number" min="0" step="0.01" placeholder="45000" {...register("base_salary")} />
               </Field>
               <Field label="Pay frequency">
-                <select className={selectClass} {...register("pay_frequency")}>
-                  {PAY_FREQUENCIES.map((f) => (
-                    <option key={f.value} value={f.value}>{f.label}</option>
-                  ))}
-                </select>
+                <Controller
+                  control={control}
+                  name="pay_frequency"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={PAY_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
+                    />
+                  )}
+                />
               </Field>
               <Field label="Currency">
                 <Input placeholder="PHP" {...register("currency")} />
@@ -519,10 +594,18 @@ export function EmployeeFormDialog({
                 <Input placeholder="BPI" {...register("bank_name")} />
               </Field>
               <Field label="Bank type">
-                <select className={selectClass} {...register("bank_account_type")}>
-                  <option value="">Select…</option>
-                  {BANK_ACCOUNT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
+                <Controller
+                  control={control}
+                  name="bank_account_type"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder="Select…"
+                      options={BANK_ACCOUNT_TYPES.map((t) => ({ value: t, label: t }))}
+                    />
+                  )}
+                />
               </Field>
               <Field label="Bank account number">
                 <Input placeholder="1234-5678-9012-34" {...register("bank_account")} />
@@ -564,12 +647,20 @@ export function EmployeeFormDialog({
               {isEdit && (
                 <>
                   <Field label="Salary change type">
-                    <select className={selectClass} {...register("salary_change_type")}>
-                      <option value="">— (generic adjustment)</option>
-                      {SALARY_CHANGE_TYPES.map((t) => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
-                      ))}
-                    </select>
+                    <Controller
+                      control={control}
+                      name="salary_change_type"
+                      render={({ field }) => (
+                        <SimpleSelect
+                          value={field.value || "generic"}
+                          onValueChange={(v) => field.onChange(v === "generic" ? "" : v)}
+                          options={[
+                            { value: "generic", label: "— (generic adjustment)" },
+                            ...SALARY_CHANGE_TYPES.map((t) => ({ value: t.value, label: t.label })),
+                          ]}
+                        />
+                      )}
+                    />
                   </Field>
                   <Field label="Reason for salary change">
                     <Input placeholder="e.g. Annual increase" {...register("salary_change_reason")} />
@@ -630,12 +721,10 @@ function scheduleToInput(s: EmployeeSchedule): EmployeeScheduleInput {
 function ScheduleFields({
   initial,
   workSchedules,
-  selectClass,
   onChange,
 }: {
   initial: EmployeeSchedule;
   workSchedules: WorkSchedule[];
-  selectClass: string;
   onChange: (p: EmployeeScheduleInput) => void;
 }) {
   const [schedId, setSchedId] = useState(
@@ -670,12 +759,14 @@ function ScheduleFields({
       </p>
       <div className="space-y-1.5">
         <Label>Assigned schedule</Label>
-        <select className={selectClass} value={schedId} onChange={(e) => setSchedId(e.target.value)}>
-          <option value="">Default schedule</option>
-          {workSchedules.map((ws) => (
-            <option key={ws.id} value={ws.id}>{ws.name}</option>
-          ))}
-        </select>
+        <SimpleSelect
+          value={schedId || "default"}
+          onValueChange={(v) => setSchedId(v === "default" ? "" : v)}
+          options={[
+            { value: "default", label: "Default schedule" },
+            ...workSchedules.map((ws) => ({ value: String(ws.id), label: ws.name })),
+          ]}
+        />
       </div>
       <div className="space-y-1.5">
         <Label>Override workdays (optional)</Label>
@@ -706,11 +797,11 @@ function ScheduleFields({
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <Label>Override start</Label>
-          <Input type="time" value={ovStart} onChange={(e) => setOvStart(e.target.value)} />
+          <TimePicker value={ovStart} onChange={setOvStart} />
         </div>
         <div className="space-y-1.5">
           <Label>Override end</Label>
-          <Input type="time" value={ovEnd} onChange={(e) => setOvEnd(e.target.value)} />
+          <TimePicker value={ovEnd} onChange={setOvEnd} />
         </div>
         <div className="space-y-1.5">
           <Label>Override grace</Label>

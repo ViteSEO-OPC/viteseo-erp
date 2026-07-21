@@ -23,11 +23,9 @@ import {
   countryName,
   type Holiday,
 } from "@/modules/hr/types/holiday";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 
 const YEARS = [2024, 2025, 2026, 2027, 2028];
-
-const selectClass =
-  "h-9 rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground outline-none focus-visible:border-ring";
 
 // Figma type colors: Regular = green, Special = blue, Special Working = amber.
 const TYPE_STYLE: Record<string, string> = {
@@ -163,16 +161,20 @@ export default function HolidaysPage() {
       {/* Toolbar: country + year on the left, refresh + add on the right */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <select aria-label="Country" className={selectClass} value={country} onChange={(e) => setCountry(e.target.value)}>
-            {COUNTRIES.map((c) => (
-              <option key={c.code} value={c.code}>{flagEmoji(c.code)} {c.name}</option>
-            ))}
-          </select>
-          <select aria-label="Year" className={selectClass} value={year} onChange={(e) => setYear(e.target.value)}>
-            {YEARS.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
+          <SimpleSelect
+            aria-label="Country"
+            className="w-56"
+            value={country}
+            onValueChange={setCountry}
+            options={COUNTRIES.map((c) => ({ value: c.code, label: `${flagEmoji(c.code)} ${c.name}` }))}
+          />
+          <SimpleSelect
+            aria-label="Year"
+            className="w-28"
+            value={String(year)}
+            onValueChange={setYear}
+            options={YEARS.map((y) => ({ value: String(y), label: String(y) }))}
+          />
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={onRefresh} disabled={!activeSet || refreshMut.isPending}>
