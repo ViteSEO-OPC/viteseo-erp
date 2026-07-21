@@ -10,6 +10,8 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeBenefit;
 use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveRequest;
+use App\Modules\Hr\Models\LeaveSetting;
+use App\Modules\Hr\Models\SharedLeaveBalance;
 use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\Payslip;
@@ -307,7 +309,15 @@ class ReportService
     private function leave(array $filters = []): array
     {
         $deptId = $filters['department'] ?? null;
-        $balances = LeaveBalance::where('year', $this->year())->get();
+
+        // "Days used" reads the ACTIVE bucket: the shared pool in shared mode,
+        // else the sum of per-type balances (per-type used_days stays 0 under
+        // shared, so summing them would wrongly report 0).
+        $year = $this->year();
+        $isShared = LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED;
+        $daysUsed = $isShared
+            ? (float) SharedLeaveBalance::where('year', $year)->sum('used_days')
+            : (float) LeaveBalance::where('year', $year)->sum('used_days');
 
         // Approved leave days per month, stacked by leave type, last 12 months.
         $since = now(config('app.timezone_local'))->startOfMonth()->subMonths(11);
@@ -354,7 +364,7 @@ class ReportService
             'description' => 'Leave balances by employee and type, utilization, absence patterns, and liability accrual.',
             'mock' => false,
             'summary' => [
-                ['label' => 'Days used (all types)', 'value' => number_format((float) $balances->sum('used_days'), 1)],
+                ['label' => $isShared ? 'Days used (shared pool)' : 'Days used (all types)', 'value' => number_format($daysUsed, 1)],
                 ['label' => 'Pending requests', 'value' => (string) LeaveRequest::where('status', 'pending')->count()],
                 ['label' => 'Approved (all-time)', 'value' => (string) LeaveRequest::where('status', 'approved')->count()],
             ],
