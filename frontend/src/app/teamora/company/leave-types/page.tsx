@@ -16,8 +16,13 @@ import {
   useDeleteLeaveType,
   useAllotments,
   useUpsertAllotment,
+  useLeaveSetting,
+  useUpdateLeaveSetting,
+  useSharedAllotments,
+  useUpsertSharedAllotment,
 } from "@/modules/hr/hooks/use-leave-config";
 import { EMPLOYMENT_STATUSES } from "@/modules/hr/types/leave-config";
+import type { AllotmentMode } from "@/modules/hr/types/leave-config";
 import type { LeaveType } from "@/modules/hr/types/leave";
 
 export default function LeaveTypesPage() {
@@ -149,12 +154,32 @@ export default function LeaveTypesPage() {
 
 // ---- Section B: allotment defaults (leave type × employment status) ----
 
-type AllotmentMode = "shared" | "not_shared";
-
 function AllotmentDefaults({ types }: { types: LeaveType[] }) {
   // "Not Shared" (default) = every leave type carries its own credits, keyed by
-  // employment status. "Shared" mode is a separate model coming in a later slice.
-  const [mode, setMode] = useState<AllotmentMode>("not_shared");
+  // employment status. "Shared" = one pool per employment status, spent across
+  // any leave type. The mode is a company-wide setting persisted server-side.
+  const { data: setting } = useLeaveSetting();
+  const updateMode = useUpdateLeaveSetting();
+
+  // Reflect the pending choice immediately while the switch (and its balance
+  // backfill) is in flight, so the toggle feels instant.
+  const mode: AllotmentMode = updateMode.isPending
+    ? (updateMode.variables as AllotmentMode)
+    : (setting?.allotment_mode ?? "not_shared");
+
+  async function changeMode(next: AllotmentMode) {
+    if (next === mode) return;
+    try {
+      await updateMode.mutateAsync(next);
+      toast.success(
+        next === "shared"
+          ? "Switched to a shared leave pool."
+          : "Switched to per-leave-type credits.",
+      );
+    } catch {
+      toast.error("Could not change the allotment mode.");
+    }
+  }
 
   return (
     <section className="space-y-3">
@@ -166,15 +191,13 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
             affects future hires — existing employees keep their own credits.
           </p>
         </div>
-        <AllotmentModeToggle mode={mode} onChange={setMode} />
+        <AllotmentModeToggle mode={mode} onChange={changeMode} />
       </div>
 
       {mode === "not_shared" ? (
         <NotSharedGrid types={types} />
       ) : (
-        <div className="rounded-card border border-border bg-card px-4 py-12 text-center text-sm text-muted-foreground">
-          Shared allotment configuration is coming next.
-        </div>
+        <SharedGrid types={types} />
       )}
     </section>
   );
@@ -291,6 +314,144 @@ function NotSharedGrid({ types }: { types: LeaveType[] }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * Shared mode: all leave types draw from ONE pool per employment status. The
+ * first leave type row hosts the editable pool sizes; every other type is
+ * disabled ("—") to signal it shares that single pool.
+ */
+function SharedGrid({ types }: { types: LeaveType[] }) {
+  const { data: shared } = useSharedAllotments();
+
+  const lookup = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of shared ?? []) m.set(a.employment_status, a.days_per_year);
+    return m;
+  }, [shared]);
+
+  return (
+    <div className="overflow-x-auto rounded-card border border-border bg-card">
+      <table className="w-full min-w-[640px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/50">
+            <th className="px-4 py-3 text-left text-label font-bold uppercase tracking-wide text-muted-foreground">
+              Leave type
+            </th>
+            {EMPLOYMENT_STATUSES.map((s) => (
+              <th
+                key={s.value}
+                className="px-4 py-3 text-center text-label font-bold uppercase tracking-wide text-muted-foreground"
+              >
+                {s.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {types.map((t, i) => {
+            const isPoolRow = i === 0;
+            return (
+              <tr key={t.id} className="border-b border-border last:border-0">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "size-2.5 shrink-0 rounded-full",
+                        !isPoolRow && "opacity-40",
+                      )}
+                      style={{ backgroundColor: t.color ?? "#94a3b8" }}
+                    />
+                    <span
+                      className={cn(
+                        "font-medium",
+                        isPoolRow ? "text-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      {t.name}
+                    </span>
+                  </div>
+                </td>
+                {EMPLOYMENT_STATUSES.map((s) => (
+                  <td key={s.value} className="px-4 py-3 text-center">
+                    {isPoolRow ? (
+                      <SharedAllotmentCell
+                        key={`${s.value}:${lookup.get(s.value) ?? 0}`}
+                        status={s.value}
+                        value={lookup.get(s.value) ?? 0}
+                      />
+                    ) : (
+                      <Input
+                        disabled
+                        aria-hidden
+                        tabIndex={-1}
+                        className="mx-auto h-8 w-16 text-center"
+                        value=""
+                        readOnly
+                      />
+                    )}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+          {types.length === 0 && (
+            <tr>
+              <td
+                colSpan={EMPLOYMENT_STATUSES.length + 1}
+                className="px-4 py-10 text-center text-sm text-muted-foreground"
+              >
+                Add a leave type to set the shared pool.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SharedAllotmentCell({
+  status,
+  value,
+}: {
+  status: string;
+  value: number;
+}) {
+  const upsert = useUpsertSharedAllotment();
+  const [local, setLocal] = useState(String(value));
+
+  async function save() {
+    const parsed = Number(local);
+    if (Number.isNaN(parsed)) {
+      setLocal(String(value));
+      return;
+    }
+    const days = Math.max(0, Math.round(parsed));
+    if (days === value) {
+      setLocal(String(days));
+      return;
+    }
+    try {
+      await upsert.mutateAsync({ employment_status: status, days_per_year: days });
+      setLocal(String(days));
+    } catch {
+      toast.error("Could not save the shared allotment.");
+      setLocal(String(value));
+    }
+  }
+
+  return (
+    <Input
+      type="number"
+      step="1"
+      min="0"
+      className="mx-auto h-8 w-16 text-center"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={save}
+    />
   );
 }
 

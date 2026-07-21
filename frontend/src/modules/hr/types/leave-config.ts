@@ -9,6 +9,22 @@ export interface LeaveTypeAllotment {
   leave_type?: { id: number; name: string; code: string; color: string | null };
 }
 
+// Company-wide leave allotment model:
+//   not_shared = each leave type has its own per-status credits (default)
+//   shared     = one pool per employment status, spent across any leave type
+export type AllotmentMode = "not_shared" | "shared";
+
+export interface LeaveSetting {
+  allotment_mode: AllotmentMode;
+}
+
+// Shared-mode default pool size for one employment status.
+export interface SharedAllotment {
+  id: number;
+  employment_status: string;
+  days_per_year: number;
+}
+
 export interface LeaveTypeInput {
   name: string;
   code: string;

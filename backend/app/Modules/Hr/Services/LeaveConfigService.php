@@ -4,8 +4,11 @@ namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LeaveBalance;
+use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
+use App\Modules\Hr\Models\SharedLeaveAllotment;
+use App\Modules\Hr\Models\SharedLeaveBalance;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -94,6 +97,104 @@ class LeaveConfigService
         $this->audit->log('updated', 'Leave Types', "Updated {$allotment->employment_status} leave allotment for '{$allotment->leaveType?->name}'", $allotment);
 
         return $allotment;
+    }
+
+    // --- Global allotment mode (shared vs not-shared) ---
+
+    public function getSettings(): LeaveSetting
+    {
+        return LeaveSetting::current();
+    }
+
+    /**
+     * Switch the company-wide allotment model. Flipping the mode provisions the
+     * target model's balances for the current year for existing staff who lack
+     * them (non-destructive — never overwrites or resurrects edited/removed rows).
+     */
+    public function setMode(string $mode): LeaveSetting
+    {
+        $settings = LeaveSetting::current();
+
+        if ($settings->allotment_mode !== $mode) {
+            $settings->update(['allotment_mode' => $mode]);
+            $this->audit->log('updated', 'Leave Types', "Switched leave allotment mode to '{$mode}'", $settings);
+
+            if ($mode === LeaveSetting::MODE_SHARED) {
+                $this->backfillSharedBalances();
+            } else {
+                $this->backfillPerTypeBalances();
+            }
+        }
+
+        return $settings;
+    }
+
+    // --- Shared allotment defaults (one pool per employment status) ---
+
+    public function listSharedAllotments(): Collection
+    {
+        // Ensure a row exists for each status (singleton-style, like settings).
+        foreach (EmployeeService::STATUSES as $status) {
+            SharedLeaveAllotment::firstOrCreate(['employment_status' => $status], ['days_per_year' => 0]);
+        }
+
+        return SharedLeaveAllotment::orderBy('id')->get();
+    }
+
+    /**
+     * Set the shared pool default for one employment status.
+     *
+     * @param array<string, mixed> $data
+     */
+    public function upsertSharedAllotment(array $data): SharedLeaveAllotment
+    {
+        $allotment = SharedLeaveAllotment::updateOrCreate(
+            ['employment_status' => $data['employment_status']],
+            ['days_per_year' => $data['days_per_year']],
+        );
+
+        $this->audit->log('updated', 'Leave Types', "Updated shared leave allotment for {$allotment->employment_status}", $allotment);
+
+        return $allotment;
+    }
+
+    /** Provision a shared pool balance for the current year for staff who lack one. */
+    private function backfillSharedBalances(): void
+    {
+        $year = now(config('app.timezone_local'))->year;
+        $allotments = SharedLeaveAllotment::pluck('days_per_year', 'employment_status');
+
+        foreach (Employee::all() as $employee) {
+            SharedLeaveBalance::withTrashed()->firstOrCreate(
+                ['employee_id' => $employee->id, 'year' => $year],
+                [
+                    'entitled_days' => (int) ($allotments[$employee->employment_status] ?? 0),
+                    'used_days' => 0,
+                ],
+            );
+        }
+    }
+
+    /** Provision per-type balances for the current year for staff who lack them. */
+    private function backfillPerTypeBalances(): void
+    {
+        $year = now(config('app.timezone_local'))->year;
+        $types = LeaveType::all();
+
+        foreach (Employee::all() as $employee) {
+            $allotments = LeaveTypeAllotment::where('employment_status', $employee->employment_status)
+                ->pluck('days_per_year', 'leave_type_id');
+
+            foreach ($types as $type) {
+                LeaveBalance::withTrashed()->firstOrCreate(
+                    ['employee_id' => $employee->id, 'leave_type_id' => $type->id, 'year' => $year],
+                    [
+                        'entitled_days' => (int) ($allotments[$type->id] ?? $type->days_per_year),
+                        'used_days' => 0,
+                    ],
+                );
+            }
+        }
     }
 
     // --- Per-person balances (the editable override) ---

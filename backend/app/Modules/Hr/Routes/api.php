@@ -173,6 +173,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('departments/{department}/archive', [DepartmentController::class, 'archive']);
         Route::post('departments/{department}/restore', [DepartmentController::class, 'restore']);
 
+        // Company → Leave Type: global mode (shared vs not-shared) + shared pool defaults.
+        Route::get('leave-settings', [LeaveConfigController::class, 'settingsShow']);
+        Route::match(['put', 'patch'], 'leave-settings', [LeaveConfigController::class, 'settingsUpdate']);
+        Route::get('shared-leave-allotments', [LeaveConfigController::class, 'sharedAllotmentsIndex']);
+        Route::post('shared-leave-allotments', [LeaveConfigController::class, 'storeSharedAllotment']);
+
         // Company → Leave Type: catalogue + allotment defaults + per-person balances.
         Route::post('leave-types', [LeaveConfigController::class, 'storeType']);
         Route::match(['put', 'patch'], 'leave-types/{leaveType}', [LeaveConfigController::class, 'updateType']);

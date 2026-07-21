@@ -9,14 +9,20 @@ import {
   deleteLeaveType,
   getAllotments,
   upsertAllotment,
+  getLeaveSetting,
+  updateLeaveSetting,
+  getSharedAllotments,
+  upsertSharedAllotment,
   getEmployeeBalances,
   upsertEmployeeBalance,
   deleteEmployeeBalance,
 } from "@/modules/hr/api/leave-config";
-import type { LeaveTypeInput } from "@/modules/hr/types/leave-config";
+import type { AllotmentMode, LeaveTypeInput } from "@/modules/hr/types/leave-config";
 
 const TYPES_KEY = ["hr", "leave-config", "types"] as const;
 const ALLOTMENTS_KEY = ["hr", "leave-config", "allotments"] as const;
+const SETTINGS_KEY = ["hr", "leave-config", "settings"] as const;
+const SHARED_ALLOTMENTS_KEY = ["hr", "leave-config", "shared-allotments"] as const;
 const balancesKey = (employeeId: number) =>
   ["hr", "leave-config", "balances", employeeId] as const;
 
@@ -72,6 +78,39 @@ export function useUpsertAllotment() {
   return useMutation({
     mutationFn: upsertAllotment,
     onSuccess: () => qc.invalidateQueries({ queryKey: ALLOTMENTS_KEY }),
+  });
+}
+
+// --- Global allotment mode (shared vs not-shared) ---
+
+export function useLeaveSetting() {
+  return useQuery({ queryKey: SETTINGS_KEY, queryFn: getLeaveSetting });
+}
+
+export function useUpdateLeaveSetting() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (mode: AllotmentMode) => updateLeaveSetting(mode),
+    // Switching mode backfills balances server-side; refresh both grids.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: SETTINGS_KEY });
+      qc.invalidateQueries({ queryKey: SHARED_ALLOTMENTS_KEY });
+      qc.invalidateQueries({ queryKey: ALLOTMENTS_KEY });
+    },
+  });
+}
+
+// --- Shared allotment defaults ---
+
+export function useSharedAllotments() {
+  return useQuery({ queryKey: SHARED_ALLOTMENTS_KEY, queryFn: getSharedAllotments });
+}
+
+export function useUpsertSharedAllotment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: upsertSharedAllotment,
+    onSuccess: () => qc.invalidateQueries({ queryKey: SHARED_ALLOTMENTS_KEY }),
   });
 }
 

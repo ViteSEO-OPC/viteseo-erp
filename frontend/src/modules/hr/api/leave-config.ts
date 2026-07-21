@@ -1,8 +1,11 @@
 import { apiClient } from "@/core/api-client";
 import type { LeaveType, LeaveBalance } from "@/modules/hr/types/leave";
 import type {
+  AllotmentMode,
+  LeaveSetting,
   LeaveTypeAllotment,
   LeaveTypeInput,
+  SharedAllotment,
 } from "@/modules/hr/types/leave-config";
 
 // --- Leave types ---
@@ -42,6 +45,35 @@ export async function upsertAllotment(input: {
   days_per_year: number;
 }): Promise<LeaveTypeAllotment> {
   const res = await apiClient.post("/hr/leave-type-allotments", input);
+  return res.data.data;
+}
+
+// --- Global allotment mode (shared vs not-shared) ---
+
+export async function getLeaveSetting(): Promise<LeaveSetting> {
+  const res = await apiClient.get("/hr/leave-settings");
+  return res.data.data;
+}
+
+export async function updateLeaveSetting(
+  mode: AllotmentMode,
+): Promise<LeaveSetting> {
+  const res = await apiClient.put("/hr/leave-settings", { allotment_mode: mode });
+  return res.data.data;
+}
+
+// --- Shared allotment defaults (one pool per employment status) ---
+
+export async function getSharedAllotments(): Promise<SharedAllotment[]> {
+  const res = await apiClient.get("/hr/shared-leave-allotments");
+  return res.data.data;
+}
+
+export async function upsertSharedAllotment(input: {
+  employment_status: string;
+  days_per_year: number;
+}): Promise<SharedAllotment> {
+  const res = await apiClient.post("/hr/shared-leave-allotments", input);
   return res.data.data;
 }
 
