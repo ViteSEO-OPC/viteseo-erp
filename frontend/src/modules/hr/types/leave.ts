@@ -29,6 +29,21 @@ export interface HalfDayRequest {
   created_at: string;
 }
 
+// Early-out (undertime) requests — separate from leave, always unpaid: the employee
+// leaves before their scheduled end. Payroll deducts the proportional undertime.
+export interface EarlyOutRequest {
+  id: number;
+  work_date: string;
+  early_out_time: string; // HH:MM (24h)
+  reason: string;
+  status: string;
+  review_note: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  employee: { id: number; name: string | null };
+  created_at: string;
+}
+
 export interface LeaveBalance {
   id: number;
   year: number;

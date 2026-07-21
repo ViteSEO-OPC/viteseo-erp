@@ -4,10 +4,15 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { LeaveRequest, HalfDayRequest } from "@/modules/hr/types/leave";
+import type {
+  LeaveRequest,
+  HalfDayRequest,
+  EarlyOutRequest,
+} from "@/modules/hr/types/leave";
 
 const WEEKDAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 const HALF_DAY_COLOR = "#F0A608";
+const EARLY_OUT_COLOR = "#8B5CF6";
 
 interface DayMark {
   color: string;
@@ -27,9 +32,11 @@ function ymd(y: number, m: number, d: number): string {
 export function TimeOffCalendar({
   leaves,
   halfDays,
+  earlyOuts = [],
 }: {
   leaves: LeaveRequest[];
   halfDays: HalfDayRequest[];
+  earlyOuts?: EarlyOutRequest[];
 }) {
   const now = new Date();
   const [view, setView] = useState({ year: now.getFullYear(), month: now.getMonth() });
@@ -61,8 +68,16 @@ export function TimeOffCalendar({
         approved: h.status === "approved",
       });
     }
+    for (const e of earlyOuts) {
+      if (e.status === "rejected") continue;
+      set(e.work_date, {
+        color: EARLY_OUT_COLOR,
+        label: `Early-out (${e.early_out_time})`,
+        approved: e.status === "approved",
+      });
+    }
     return map;
-  }, [leaves, halfDays]);
+  }, [leaves, halfDays, earlyOuts]);
 
   // Legend — unique {label→color} across all requests.
   const legend = useMemo(() => {
@@ -71,8 +86,9 @@ export function TimeOffCalendar({
       if (l.status !== "rejected") m.set(l.leave_type.name, l.leave_type.color ?? "#4FDBD7");
     }
     if (halfDays.some((h) => h.status !== "rejected")) m.set("Half-day", HALF_DAY_COLOR);
+    if (earlyOuts.some((e) => e.status !== "rejected")) m.set("Early-out", EARLY_OUT_COLOR);
     return [...m.entries()];
-  }, [leaves, halfDays]);
+  }, [leaves, halfDays, earlyOuts]);
 
   // Build the 6×7 grid (Sunday-first), including adjacent-month spill days.
   const cells = useMemo(() => {

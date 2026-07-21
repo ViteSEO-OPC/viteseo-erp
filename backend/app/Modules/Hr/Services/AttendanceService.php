@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\Attendance;
+use App\Modules\Hr\Models\EarlyOutRequest;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\HalfDayRequest;
 use App\Modules\Hr\Models\LeaveRequest;
@@ -458,11 +459,20 @@ class AttendanceService
             ->groupBy(fn ($h) => $h->work_date->toDateString())
             ->map->count();
 
+        // Approved early-out (undertime) requests per date — each deducts a fraction of
+        // a day (undertime hours ÷ scheduled hours), applied only to days actually worked.
+        $earlyOuts = EarlyOutRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get()
+            ->groupBy(fn ($e) => $e->work_date->toDateString());
+
         $unpaid = 0.0;
         $lateCount = 0;
 
         for ($d = Carbon::parse($start, $tz)->startOfDay(); $d->lte($last); $d->addDay()) {
-            if (! $this->schedule->effectiveFor($employee, $d)['is_workday']) {
+            $eff = $this->schedule->effectiveFor($employee, $d);
+            if (! $eff['is_workday']) {
                 continue; // rest day — never unpaid
             }
 
@@ -493,6 +503,14 @@ class AttendanceService
                 $lateCount++;
             }
             if ($row && $row->time_in) {
+                // Present/late day is paid, but an approved early-out that day deducts
+                // the undertime fraction (capped so one day never exceeds a day's pay).
+                $frac = 0.0;
+                foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
+                    $frac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                }
+                $unpaid += min(1.0, $frac);
+
                 continue; // present or late → the day itself is paid
             }
             if ($row && $row->status === 'absent') {
@@ -516,6 +534,38 @@ class AttendanceService
     }
 
     // --- helpers ---
+
+    /**
+     * The unpaid fraction of a day for one early-out: undertime (end − time) over the
+     * scheduled span (end − start), clamped to [0, 1]. Returns 0.5 when the schedule
+     * window is unknown (a sane, non-zero fallback rather than free undertime).
+     *
+     * @param  array<string, mixed>  $eff
+     */
+    private function earlyOutFraction(string $time, array $eff): float
+    {
+        $toMinutes = static function (?string $hm): ?int {
+            if (! $hm) {
+                return null;
+            }
+            [$h, $m] = array_map('intval', explode(':', substr($hm, 0, 5)));
+
+            return $h * 60 + $m;
+        };
+
+        $start = $toMinutes($eff['start_time'] ?? null);
+        $end = $toMinutes($eff['end_time'] ?? null);
+        $chosen = $toMinutes($time);
+
+        if ($start === null || $end === null || $chosen === null || $end <= $start) {
+            return 0.5;
+        }
+
+        $span = $end - $start;
+        $undertime = max(0, min($span, $end - $chosen));
+
+        return $undertime / $span;
+    }
 
     /** The schedule's start time as a Carbon on the given local day. */
     private function scheduleStart(Carbon $localDay, array $eff): Carbon
