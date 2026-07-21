@@ -13,6 +13,7 @@ use App\Modules\Hr\Http\Resources\LeaveSettingResource;
 use App\Modules\Hr\Http\Resources\LeaveTypeAllotmentResource;
 use App\Modules\Hr\Http\Resources\LeaveTypeResource;
 use App\Modules\Hr\Http\Resources\SharedLeaveAllotmentResource;
+use App\Modules\Hr\Http\Resources\SharedLeaveBalanceResource;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveType;
@@ -140,5 +141,31 @@ class LeaveConfigController extends Controller
         $this->service->removeBalance($leaveBalance);
 
         return response()->noContent();
+    }
+
+    // --- Per-person shared pool balance (shared-mode override) ---
+
+    // GET /hr/employees/{employee}/shared-leave-balance — the pool for this year.
+    public function sharedBalanceShow(Employee $employee): JsonResponse
+    {
+        $balance = $this->service->sharedBalanceFor($employee);
+
+        if (! $balance) {
+            return response()->json(['data' => null]);
+        }
+
+        return SharedLeaveBalanceResource::make($balance)->response();
+    }
+
+    // PUT /hr/employees/{employee}/shared-leave-balance — set the entitlement.
+    public function upsertSharedBalance(Request $request, Employee $employee): JsonResponse
+    {
+        $data = $request->validate([
+            'entitled_days' => ['required', 'integer', 'min:0', 'max:365'],
+        ]);
+
+        $balance = $this->service->upsertSharedBalance($employee, $data);
+
+        return SharedLeaveBalanceResource::make($balance)->response();
     }
 }

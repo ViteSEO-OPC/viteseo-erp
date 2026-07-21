@@ -16,6 +16,8 @@ import {
   getEmployeeBalances,
   upsertEmployeeBalance,
   deleteEmployeeBalance,
+  getEmployeeSharedBalance,
+  upsertEmployeeSharedBalance,
 } from "@/modules/hr/api/leave-config";
 import type {
   AllotmentMode,
@@ -29,6 +31,8 @@ const SETTINGS_KEY = ["hr", "leave-config", "settings"] as const;
 const SHARED_ALLOTMENTS_KEY = ["hr", "leave-config", "shared-allotments"] as const;
 const balancesKey = (employeeId: number) =>
   ["hr", "leave-config", "balances", employeeId] as const;
+const sharedBalanceKey = (employeeId: number) =>
+  ["hr", "leave-config", "shared-balance", employeeId] as const;
 
 // --- Leave types ---
 
@@ -156,5 +160,26 @@ export function useDeleteEmployeeBalance(employeeId: number) {
   return useMutation({
     mutationFn: (balanceId: number) => deleteEmployeeBalance(balanceId),
     onSuccess: () => qc.invalidateQueries({ queryKey: balancesKey(employeeId) }),
+  });
+}
+
+// --- Per-person shared pool balance (shared-mode override) ---
+
+export function useEmployeeSharedBalance(employeeId: number | null) {
+  return useQuery({
+    queryKey: employeeId
+      ? sharedBalanceKey(employeeId)
+      : ["hr", "leave-config", "shared-balance", "none"],
+    queryFn: () => getEmployeeSharedBalance(employeeId as number),
+    enabled: employeeId != null,
+  });
+}
+
+export function useUpsertEmployeeSharedBalance(employeeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { entitled_days: number }) =>
+      upsertEmployeeSharedBalance(employeeId, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: sharedBalanceKey(employeeId) }),
   });
 }

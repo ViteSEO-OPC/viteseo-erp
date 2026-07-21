@@ -2,6 +2,7 @@ import { apiClient } from "@/core/api-client";
 import type { LeaveType, LeaveBalance } from "@/modules/hr/types/leave";
 import type {
   AllotmentMode,
+  EmployeeSharedBalance,
   LeaveSetting,
   LeaveTypeAllotment,
   LeaveTypeInput,
@@ -99,4 +100,24 @@ export async function upsertEmployeeBalance(
 
 export async function deleteEmployeeBalance(balanceId: number): Promise<void> {
   await apiClient.delete(`/hr/leave-balances/${balanceId}`);
+}
+
+// --- Per-person shared pool balance (shared-mode override) ---
+
+export async function getEmployeeSharedBalance(
+  employeeId: number,
+): Promise<EmployeeSharedBalance | null> {
+  const res = await apiClient.get(`/hr/employees/${employeeId}/shared-leave-balance`);
+  return res.data.data ?? null;
+}
+
+export async function upsertEmployeeSharedBalance(
+  employeeId: number,
+  input: { entitled_days: number },
+): Promise<EmployeeSharedBalance> {
+  const res = await apiClient.put(
+    `/hr/employees/${employeeId}/shared-leave-balance`,
+    input,
+  );
+  return res.data.data;
 }
