@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { X, Copy } from "lucide-react";
-import { toast } from "sonner";
+import { notify as toast } from "@/core/lib/notify";
 import {
   Dialog,
   DialogContent,

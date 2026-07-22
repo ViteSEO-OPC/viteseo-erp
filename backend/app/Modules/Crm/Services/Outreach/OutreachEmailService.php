@@ -4,12 +4,14 @@ namespace App\Modules\Crm\Services\Outreach;
 
 use App\Modules\Crm\Events\OutboundEmailSent;
 use App\Modules\Crm\Models\Email;
+use App\Modules\Crm\Models\EmailEvent;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\EmailMessage;
 use App\Modules\Crm\Services\Mail\SentEmail;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -29,35 +31,47 @@ class OutreachEmailService
      */
     public function sendToLead(Lead $lead, User $sender, string $subject, string $body, ?string $to = null): Email
     {
+        // Pre-flight recipient validation (422) BEFORE anything is persisted — a missing recipient is a
+        // request error, not a delivery failure, so it must never create a history row.
         $toEmail = $this->resolveRecipient($lead, $to);
-        $sent = $this->dispatch($lead, $toEmail, $subject, $body);
 
-        $email = DB::transaction(function () use ($lead, $sender, $subject, $body, $toEmail, $sent): Email {
-            $email = Email::create([
-                'lead_id' => $lead->id,
-                'user_id' => $sender->id,
-                'direction' => 'outbound',
-                'from_email' => (string) config('outreach.from.address'),
-                'from_name' => (string) config('outreach.from.name'),
-                'to_email' => $toEmail,
-                'to_name' => $lead->contact_name,
-                'subject' => $subject,
-                'body' => $body,
-                'provider' => $sent->provider,
-                'provider_message_id' => $sent->providerMessageId,
-                'message_id' => $sent->messageId,
-                'status' => $sent->status,
-                'sent_at' => now(),
-            ]);
+        // EMAIL-001: persist BEFORE transport. The row exists as `sending` the moment we commit to the
+        // send, so a provider failure is recorded as `failed` history (with the reason) instead of
+        // vanishing on a thrown exception. This stays fully synchronous — no queue, no async — and
+        // reuses the SAME single outbound pipeline (sendExisting) drafts and scheduled sends funnel through.
+        $email = Email::create([
+            'lead_id' => $lead->id,
+            'user_id' => $sender->id,
+            'direction' => 'outbound',
+            'from_email' => (string) config('outreach.from.address'),
+            'from_name' => (string) config('outreach.from.name'),
+            'to_email' => $toEmail,
+            'to_name' => $lead->contact_name,
+            'subject' => $subject,
+            'body' => $body,
+            'status' => 'sending',
+            'attempts' => 1,
+            // NOTE: queued_at is intentionally NOT set — it means "claimed by the background sender job"
+            // (see the scheduling migration + ScheduledEmailService::claim). Send-Now is fully synchronous
+            // and never enters the queue, so leaving it null keeps the queue semantics honest. `attempts`
+            // IS a transport-attempt counter (1 = this single synchronous attempt), not a queue marker.
+        ]);
+        $this->recordEvent($email, 'sending');
 
-            $this->logSent($lead, $sender, $email, $subject, $toEmail);
+        try {
+            // Transport + success persistence (status=sent, sent_at, provider ids) + email.sent Activity
+            // + OutboundEmailSent event all happen inside the existing pipeline — unchanged on success.
+            $sent = $this->sendExisting($email, $sender);
+            $this->recordEvent($sent, 'sent', ['provider' => $sent->provider]);
 
-            return $email;
-        });
+            return $sent;
+        } catch (\Throwable $e) {
+            // Record the failure as terminal history, then RE-THROW the original exception so the HTTP
+            // response (and the frontend's existing error toast) is byte-identical to today's behaviour.
+            $this->markFailed($email, $e->getMessage());
 
-        $this->announceIfSent($email);
-
-        return $email;
+            throw $e;
+        }
     }
 
     /**
@@ -154,6 +168,34 @@ class OutreachEmailService
             fromEmail: (string) config('outreach.from.address'),
             fromName: (string) config('outreach.from.name'),
         ));
+    }
+
+    /**
+     * Mark a persisted outbound email as terminally failed (Send-Now transport failure). Records the
+     * reason on the row and the append-only email_events timeline, mirroring the scheduled path's
+     * failure semantics (ScheduledEmailService::markFailed) without depending on that service.
+     */
+    private function markFailed(Email $email, string $error): void
+    {
+        $email->update(['status' => 'failed', 'failed_at' => now(), 'error' => mb_substr($error, 0, 1000)]);
+        $this->recordEvent($email, 'failed', ['error' => mb_substr($error, 0, 255)]);
+        Log::warning('outreach.send.failed', ['email_id' => $email->id, 'error' => $error]);
+    }
+
+    /**
+     * Append a lifecycle transition to the email_events timeline (same shape as
+     * ScheduledEmailService::record), so Send-Now shares the scheduled path's audit granularity.
+     *
+     * @param array<string, mixed> $meta
+     */
+    private function recordEvent(Email $email, string $type, array $meta = []): void
+    {
+        EmailEvent::create([
+            'email_id' => $email->id,
+            'type' => $type,
+            'occurred_at' => now(),
+            'meta' => $meta === [] ? null : $meta,
+        ]);
     }
 
     /** Reuse the existing centralized Activity log (identical pattern to LeadObserver). */

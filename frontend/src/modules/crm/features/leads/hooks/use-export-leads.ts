@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { toast } from "sonner";
+import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 import { downloadLeadsCsv } from "@/modules/crm/features/leads/lib/leads-csv";
