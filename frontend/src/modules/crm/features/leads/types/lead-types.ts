@@ -109,6 +109,9 @@ export type ImportResult = {
   fileName: string;
   summary: ImportSummary;
   mapping: ImportMappingRow[];
+  // Named spreadsheet headers that matched no CRM field (Smart Header Recognition). Optional so an
+  // older API response without the field still parses. Never blocks the import.
+  unknownColumns?: string[];
   duplicates: ImportDuplicate[];
   errors: ImportRowError[];
   importedCount: number;

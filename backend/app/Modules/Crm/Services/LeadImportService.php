@@ -31,9 +31,9 @@ class LeadImportService
     private const COLUMN_ALIASES = [
         'business_name' => ['business name', 'business', 'company', 'company name', 'organization', 'organisation'],
         // Owner aliases per approved P1 (2026-07-07); stored apostrophe-free — normalizeHeader() strips apostrophes so "Owner's Name" == "Owners Name".
-        'contact_name' => ['contact name', 'contact', 'name', 'full name', 'contact person', 'owners name', 'owner name', 'owner'],
+        'contact_name' => ['contact name', 'contact', 'name', 'full name', 'contact person', 'owners name', 'owner name', 'owner', 'representative'],
         'email' => ['email', 'email address', 'contact email', 'e mail', 'mail'],
-        'phone' => ['phone', 'phone number', 'telephone', 'tel', 'mobile', 'contact number'],
+        'phone' => ['phone', 'phone number', 'telephone', 'tel', 'mobile', 'mobile number', 'contact number'],
         'industry' => ['industry', 'business niche', 'niche', 'sector', 'client industry', 'vertical'],
         // Lead Acquisition Channel — the business "Source" (Referral, Facebook, Website, Cold Outreach,
         // …). Maps to `acquisition_channel`, NEVER to `crm_leads.source` (discovery provenance). Plain
@@ -42,7 +42,7 @@ class LeadImportService
         // Enum-target columns (approved business mapping P2–P5, 2026-07-07). Raw values are
         // run through the Shared Translation Engine (VALUE_TRANSLATIONS) before validation.
         // The "Website" column is repurposed as the Priority source (do NOT set website_status).
-        'priority' => ['website', 'priority'],
+        'priority' => ['website', 'priority', 'priority level'],
         'email_outreach' => ['email outreach'],
         'cold_calling' => ['cold calling'],
         'status' => ['update', 'update status'],
@@ -136,6 +136,7 @@ class LeadImportService
      *   fileName: string,
      *   summary: array{total: int, valid: int, restored: int, duplicates: int, errors: int},
      *   mapping: list<array{csvColumn: string, crmField: string}>,
+     *   unknownColumns: list<string>,
      *   duplicates: list<array{row: int, email: string}>,
      *   restored: list<array{row: int, business: string}>,
      *   errors: list<array{row: int, messages: list<string>}>,
@@ -265,6 +266,9 @@ class LeadImportService
                 'errors' => count($errors),
             ],
             'mapping' => $this->mappingPreview($header, $map),
+            // Enterprise Smart Header Recognition: named header cells that matched no CRM field, so
+            // the importer can see exactly which spreadsheet columns were ignored (never a failure).
+            'unknownColumns' => $this->unknownColumns($header, $map),
             'duplicates' => $duplicates,
             'restored' => $restored,
             'errors' => $errors,
@@ -773,13 +777,42 @@ class LeadImportService
         return $preview;
     }
 
+    /**
+     * Named header cells that matched no known CRM field — surfaced so an importer can see exactly
+     * which spreadsheet columns were ignored (enterprise Smart Header Recognition). Blank header
+     * cells are not reported (they are not real columns).
+     *
+     * @param  list<string>  $header
+     * @param  array<string, int>  $map
+     * @return list<string>
+     */
+    private function unknownColumns(array $header, array $map): array
+    {
+        $mappedIndexes = array_flip(array_values($map));
+
+        $unknown = [];
+        foreach ($header as $index => $cell) {
+            if ($this->normalizeHeader($cell) === '') {
+                continue; // blank header cell — not a column
+            }
+            if (isset($mappedIndexes[$index])) {
+                continue; // recognized and mapped to a CRM field
+            }
+            $unknown[] = trim($cell);
+        }
+
+        return $unknown;
+    }
+
     private function normalizeHeader(string $value): string
     {
         $value = strtolower(trim($value));
         // Strip apostrophes (straight + curly) so "Owner's Name" and "Owners Name" resolve identically.
         $value = str_replace(["'", "\u{2019}", "\u{2018}"], '', $value);
 
-        return (string) preg_replace('/[\s_]+/', ' ', $value);
+        // Collapse ALL separators — whitespace, underscores, and dashes — to a single space, so
+        // "E-mail", "Email_Address", and "Email  Address" all normalize onto the same alias.
+        return (string) preg_replace('/[\s_\-]+/', ' ', $value);
     }
 
     private function stringify(mixed $value): string

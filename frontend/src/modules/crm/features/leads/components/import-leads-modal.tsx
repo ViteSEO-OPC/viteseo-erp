@@ -214,6 +214,16 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
                 )}
 
                 <MappingTable rows={result.mapping} />
+
+                {result.unknownColumns && result.unknownColumns.length > 0 && (
+                  <AlertBanner
+                    message={`${result.unknownColumns.length} column${result.unknownColumns.length === 1 ? "" : "s"} were not recognized and will be ignored.`}
+                  >
+                    <p className="text-sm text-yellow-800">
+                      Unmapped: {result.unknownColumns.join(", ")}
+                    </p>
+                  </AlertBanner>
+                )}
               </>
             )}
           </div>
