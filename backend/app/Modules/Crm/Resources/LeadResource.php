@@ -42,6 +42,9 @@ class LeadResource extends JsonResource
             'longitude' => $this->longitude,
             'placeId' => $this->place_id,
             'source' => $this->source,
+            // Lead Acquisition Channel — the business "Source" (how the lead was acquired). Distinct
+            // from `source` above (discovery provenance); nullable until set by create/import.
+            'acquisitionChannel' => $this->acquisition_channel,
             // Business website URL (fit-data) — the input the Website Intelligence service audits.
             // Also surfaced as the editable "Website Domain" field on the Lead forms.
             'website' => $this->website,

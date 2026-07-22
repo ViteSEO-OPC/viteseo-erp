@@ -46,6 +46,9 @@ use Illuminate\Support\Carbon;
     'longitude',
     'place_id',
     'source',
+    // Lead Acquisition Channel — the business "Source" (Referral, Facebook, Website, Cold Outreach,
+    // …). SEPARATE from `source` (discovery provenance); pure metadata, no business computation.
+    'acquisition_channel',
     'website',
     // Digital Presence (social) + Marketplace Presence (e-commerce). All nullable/optional; plain
     // strings ready for clickable links / analytics / outreach / AI enrichment. `tiktok` (social

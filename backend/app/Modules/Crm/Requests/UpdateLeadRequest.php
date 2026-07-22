@@ -30,6 +30,9 @@ class UpdateLeadRequest extends FormRequest
             'score' => ['nullable', 'integer', 'min:0', 'max:100'],
             // Estimated Deal Value (prospect-stage). NOT revenue — never merged with deals.amount.
             'amount' => ['nullable', 'numeric', 'min:0'],
+            // Lead Acquisition Channel — business "Source"; SEPARATE from the `source` provenance
+            // column. Free string; participates in NO business computation.
+            'acquisition_channel' => ['nullable', 'string', 'max:100'],
             // Administrative-territory location (Nearby Clients / Target Location +10). Plain strings.
             'region' => ['nullable', 'string', 'max:255'],
             'province' => ['nullable', 'string', 'max:255'],

@@ -32,6 +32,12 @@ class StoreLeadRequest extends FormRequest
             'score' => ['nullable', 'integer', 'min:0', 'max:100'],
             // Estimated Deal Value (prospect-stage). NOT revenue — never merged with deals.amount.
             'amount' => ['nullable', 'numeric', 'min:0'],
+            // Lead Acquisition Channel — the business "Source" (Referral, Facebook, Website, Cold
+            // Outreach, LinkedIn, Walk-in, Event, Partner, Email Campaign, Other). SEPARATE from the
+            // `source` provenance column (untouched). Free string (not a DB enum) so an enterprise
+            // import never loses a channel that isn't in the canonical dropdown; the wizard supplies
+            // canonical values. Participates in NO business computation.
+            'acquisition_channel' => ['nullable', 'string', 'max:100'],
             // Administrative-territory location (Nearby Clients / Target Location +10). Plain strings.
             'region' => ['nullable', 'string', 'max:255'],
             'province' => ['nullable', 'string', 'max:255'],

@@ -31,6 +31,9 @@ export type Lead = {
   score: number;
   // Estimated Deal Value (prospect-stage) — NOT revenue (revenue lives on the Deal). Null until set.
   amount: number | null;
+  // Lead Acquisition Channel — the business "Source" (Referral, Facebook, …). Distinct from the
+  // backend `source` provenance field; null until set. No business computation depends on it.
+  acquisitionChannel: string | null;
   // Business website URL (leads.website) — the "Website Domain" field. Null until set.
   website: string | null;
   // Digital Presence (social) + Marketplace Presence (e-commerce). All nullable/optional. Plain
@@ -63,6 +66,8 @@ export type LeadWritePayload = {
   status?: LeadStatus;
   // Estimated Deal Value (prospect-stage). Separate from Deal revenue.
   amount?: number | null;
+  // Lead Acquisition Channel — business "Source". Maps to leads.acquisition_channel (NOT leads.source).
+  acquisition_channel?: string | null;
   // Website Domain (leads.website) + Digital/Marketplace presence — all nullable/optional.
   website?: string | null;
   facebook?: string | null;

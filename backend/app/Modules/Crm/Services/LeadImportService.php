@@ -35,6 +35,10 @@ class LeadImportService
         'email' => ['email', 'email address', 'contact email', 'e mail', 'mail'],
         'phone' => ['phone', 'phone number', 'telephone', 'tel', 'mobile', 'contact number'],
         'industry' => ['industry', 'business niche', 'niche', 'sector', 'client industry', 'vertical'],
+        // Lead Acquisition Channel — the business "Source" (Referral, Facebook, Website, Cold Outreach,
+        // …). Maps to `acquisition_channel`, NEVER to `crm_leads.source` (discovery provenance). Plain
+        // pass-through string (not a translated enum) so an enterprise sheet never loses a channel.
+        'acquisition_channel' => ['source', 'lead source', 'acquisition channel', 'marketing source', 'channel'],
         // Enum-target columns (approved business mapping P2–P5, 2026-07-07). Raw values are
         // run through the Shared Translation Engine (VALUE_TRANSLATIONS) before validation.
         // The "Website" column is repurposed as the Priority source (do NOT set website_status).
@@ -67,6 +71,7 @@ class LeadImportService
         'email' => 'Email Address',
         'phone' => 'Phone Number',
         'industry' => 'Industry',
+        'acquisition_channel' => 'Acquisition Channel',
         'priority' => 'Priority',
         'email_outreach' => 'Email Outreach',
         'cold_calling' => 'Cold Calling',

@@ -20,6 +20,7 @@ type LeadApiDetail = {
   updateStatus: "interested" | "awaiting-reply" | "declined" | "call-back-req";
   score: number;
   amount: number | null;
+  acquisitionChannel: string | null;
   website: string | null;
   facebook: string | null;
   instagram: string | null;
@@ -88,6 +89,7 @@ function toEditableLead(api: LeadApiDetail): Lead {
     updateStatus: api.updateStatus,
     score: api.score,
     amount: api.amount,
+    acquisitionChannel: api.acquisitionChannel,
     website: api.website,
     facebook: api.facebook,
     instagram: api.instagram,
