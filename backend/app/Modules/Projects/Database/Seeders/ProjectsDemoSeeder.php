@@ -386,7 +386,6 @@ class ProjectsDemoSeeder extends Seeder
     private function makeGroup(Project $project, string $name, string $color, ?User $leader, array $memberUsers): Group
     {
         $group = Group::create([
-            'project_id' => $project->id,
             'name' => $name,
             'color' => $color,
             'leader_id' => $leader?->id,
@@ -395,6 +394,10 @@ class ProjectsDemoSeeder extends Seeder
 
         $ids = array_values(array_filter(array_map(fn (?User $user) => $user?->id, $memberUsers)));
         $group->members()->syncWithoutDetaching($ids);
+
+        // Groups relate to projects via the pivot now; attach this demo group to
+        // the project it was built for (its members are already project members).
+        $group->projects()->syncWithoutDetaching([$project->id => ['created_at' => now()]]);
 
         return $group;
     }

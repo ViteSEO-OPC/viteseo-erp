@@ -72,8 +72,10 @@ class Project extends Model
         return $this->hasMany(Task::class, 'project_id');
     }
 
-    public function groups(): HasMany
+    /** Groups working on this project (a group can span many projects). */
+    public function groups(): BelongsToMany
     {
-        return $this->hasMany(Group::class, 'project_id');
+        return $this->belongsToMany(Group::class, 'pm_project_group', 'project_id', 'group_id')
+            ->withPivot('created_at');
     }
 }

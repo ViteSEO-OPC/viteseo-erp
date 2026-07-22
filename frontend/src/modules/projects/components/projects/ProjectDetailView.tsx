@@ -333,7 +333,8 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           </Card>
         </div>
 
-        {/* RIGHT COLUMN — Team Members */}
+        {/* RIGHT COLUMN — Team Members + Groups */}
+        <div className="space-y-6">
         <Card className="rounded-2xl p-6 sm:p-8">
           <h2 className="text-2xl font-bold text-ink">Team Members</h2>
           <div className="mt-6 space-y-1">
@@ -373,6 +374,43 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
             </button>
           )}
         </Card>
+
+        {/* Groups — auto-attached when all of a group's members are on this
+            project. Read-only here; managed on the Groups page. */}
+        <Card className="rounded-2xl p-6 sm:p-8">
+          <h2 className="text-2xl font-bold text-ink">Groups</h2>
+          <div className="mt-4 space-y-2">
+            {(project?.groups ?? []).length === 0 ? (
+              <p className="py-2 text-sm text-ink-soft">
+                No groups yet. A group joins automatically once every one of its
+                members is on this project.
+              </p>
+            ) : (
+              (project?.groups ?? []).map((g) => (
+                <div
+                  key={g.id}
+                  className="flex items-center gap-3 rounded-lg border border-line px-3 py-2.5"
+                >
+                  <span
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                    style={{ backgroundColor: g.color }}
+                    aria-hidden
+                  >
+                    {g.name.charAt(0).toUpperCase()}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold text-ink">{g.name}</p>
+                    <p className="truncate text-xs text-ink-soft">
+                      {g.members_count ?? g.members?.length ?? 0} members
+                      {g.leader ? ` · Led by ${g.leader.name}` : ""}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+        </div>
       </div>
 
       {isManager && (

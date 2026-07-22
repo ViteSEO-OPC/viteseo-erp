@@ -110,10 +110,10 @@ export const projectsApi = {
     return data.data;
   },
   createGroup: async (payload: {
-    project_id: string;
     name: string;
     color: string;
     leader_id: number;
+    member_ids: number[];
   }): Promise<Group> => {
     const { data } = await apiClient.post<ApiResource<Group>>(
       `${BASE}/groups`,

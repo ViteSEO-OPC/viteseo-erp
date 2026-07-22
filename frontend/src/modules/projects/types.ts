@@ -41,20 +41,33 @@ export interface Project {
   statuses?: ProjectStatus[];
   members?: User[];
   members_count?: number;
+  /** Groups working on this project (auto-attached when all their members join). */
+  groups?: Group[];
+  groups_count?: number;
   tasks_count?: number;
   created_at: string;
   updated_at: string;
 }
 
+/** Lightweight project reference embedded on a Group (a group spans many). */
+export interface GroupProjectRef {
+  id: string;
+  name: string;
+  priority: "low" | "medium" | "high" | null;
+  status?: ProjectState;
+}
+
 export interface Group {
   id: string;
-  project_id: string;
   name: string;
   color: string;
   archived: boolean;
   leader?: User;
   members?: User[];
   members_count?: number;
+  /** Projects this group belongs to (auto-attached when a project holds its roster). */
+  projects?: GroupProjectRef[];
+  projects_count?: number;
   created_at?: string;
 }
 

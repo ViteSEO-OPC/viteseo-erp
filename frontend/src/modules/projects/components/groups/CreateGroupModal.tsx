@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { groupSchema, useValidatedForm } from '@/core/forms';
-import { Button, Field, Input, Modal, Select } from '@/core/ui';
-import { useCreateGroup, useProject, useProjects } from '../../hooks';
+import { Avatar, Button, Field, Input, Modal, SearchIcon, Select } from '@/core/ui';
+import { useCreateGroup, useUsers } from '../../hooks';
 
 // Preset swatches the user picks from; the chosen hex is stored on the form.
 const COLOR_PRESETS = [
@@ -20,14 +20,18 @@ const COLOR_PRESETS = [
 export interface CreateGroupModalProps {
   open: boolean;
   onClose: () => void;
-  /** Optional: pre-select and lock the group to a specific project. */
-  projectId?: string;
 }
 
-export function CreateGroupModal({ open, onClose, projectId: fixedProjectId }: CreateGroupModalProps): React.ReactElement {
+export function CreateGroupModal({ open, onClose }: CreateGroupModalProps): React.ReactElement {
   const create = useCreateGroup();
-  const projectsQuery = useProjects();
-  const projects = projectsQuery.data?.data ?? [];
+
+  // Members are picked from the full user directory. A group isn't tied to a
+  // project — it joins a project automatically once that project holds every one
+  // of the group's members.
+  const usersQuery = useUsers();
+  const users = useMemo(() => usersQuery.data ?? [], [usersQuery.data]);
+
+  const [search, setSearch] = useState('');
 
   const {
     register,
@@ -37,35 +41,60 @@ export function CreateGroupModal({ open, onClose, projectId: fixedProjectId }: C
     setValue,
     formState: { errors },
   } = useValidatedForm(groupSchema, {
-    defaultValues: { project_id: fixedProjectId ?? '', name: '', color: COLOR_PRESETS[0], leader_id: '' },
+    defaultValues: {
+      name: '',
+      color: COLOR_PRESETS[0],
+      leader_id: '',
+      member_ids: [],
+    },
   });
 
-  const projectId = watch('project_id');
   const color = watch('color');
+  const watchedMemberIds = watch('member_ids');
+  const memberIds = useMemo(() => watchedMemberIds ?? [], [watchedMemberIds]);
+  const leaderId = watch('leader_id');
 
-  // Leader options come from the selected project's members — a group is a pod
-  // within the project, so its leader must be on the project.
-  const projectQuery = useProject(projectId);
-  const members = projectQuery.data?.members ?? [];
+  // The leader dropdown only offers the currently-selected members.
+  const selectedMembers = useMemo(
+    () => users.filter((u) => memberIds.includes(String(u.id))),
+    [users, memberIds],
+  );
 
-  // Reset the leader whenever the project changes so a stale id is never submitted.
-  useEffect(() => {
-    setValue('leader_id', '');
-  }, [projectId, setValue]);
+  const filteredUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(
+      (u) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q),
+    );
+  }, [users, search]);
+
+  const toggleMember = (id: number): void => {
+    const key = String(id);
+    const next = memberIds.includes(key)
+      ? memberIds.filter((m) => m !== key)
+      : [...memberIds, key];
+    setValue('member_ids', next, { shouldValidate: true });
+    // If the removed member was the leader, clear the now-invalid leader.
+    if (leaderId === key && !next.includes(key)) {
+      setValue('leader_id', '', { shouldValidate: true });
+    }
+  };
 
   const submit = handleSubmit(async (data) => {
     await create.mutateAsync({
-      project_id: data.project_id,
       name: data.name,
       color: data.color,
       leader_id: Number(data.leader_id),
+      member_ids: data.member_ids.map(Number),
     });
     reset();
+    setSearch('');
     onClose();
   });
 
   const close = (): void => {
     reset();
+    setSearch('');
     onClose();
   };
 
@@ -87,19 +116,6 @@ export function CreateGroupModal({ open, onClose, projectId: fixedProjectId }: C
       }
     >
       <form onSubmit={submit} className="space-y-4">
-        {!fixedProjectId && (
-          <Field label="Project" error={errors.project_id?.message}>
-            <Select {...register('project_id')}>
-              <option value="">Select a project…</option>
-              {projects.map((p) => (
-                <option key={p.id} value={String(p.id)}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        )}
-
         <Field label="Name" error={errors.name?.message}>
           <Input placeholder="e.g. Frontend POD" {...register('name')} />
         </Field>
@@ -125,18 +141,61 @@ export function CreateGroupModal({ open, onClose, projectId: fixedProjectId }: C
           </div>
         </Field>
 
+        <Field
+          label={`Members${memberIds.length ? ` (${memberIds.length})` : ''}`}
+          error={errors.member_ids?.message}
+        >
+          <div className="relative mb-2">
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or email…"
+              className="pl-9"
+            />
+          </div>
+          <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-line p-1">
+            {usersQuery.isLoading ? (
+              <p className="px-3 py-6 text-center text-sm text-ink-soft">Loading members…</p>
+            ) : filteredUsers.length === 0 ? (
+              <p className="px-3 py-6 text-center text-sm text-ink-soft">No users found.</p>
+            ) : (
+              filteredUsers.map((u) => {
+                const checked = memberIds.includes(String(u.id));
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => toggleMember(u.id)}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      checked ? 'bg-brand-soft' : 'hover:bg-black/5'
+                    }`}
+                  >
+                    <Avatar name={u.name} src={u.avatar} size={32} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-ink">{u.name}</p>
+                      <p className="truncate text-xs text-ink-soft">{u.role ?? u.email}</p>
+                    </div>
+                    <span
+                      className={`flex h-5 w-5 items-center justify-center rounded border text-xs ${
+                        checked ? 'border-brand bg-brand text-ink' : 'border-line'
+                      }`}
+                    >
+                      {checked && '✓'}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </Field>
+
         <Field label="Leader" error={errors.leader_id?.message}>
-          <Select {...register('leader_id')} disabled={!projectId || projectQuery.isLoading}>
+          <Select {...register('leader_id')} disabled={selectedMembers.length === 0}>
             <option value="">
-              {!projectId
-                ? 'Select a project first…'
-                : projectQuery.isLoading
-                  ? 'Loading members…'
-                  : members.length === 0
-                    ? 'No members on this project'
-                    : 'Select a leader…'}
+              {selectedMembers.length === 0 ? 'Select members first…' : 'Select a leader…'}
             </option>
-            {members.map((m) => (
+            {selectedMembers.map((m) => (
               <option key={m.id} value={String(m.id)}>
                 {m.name}
               </option>
