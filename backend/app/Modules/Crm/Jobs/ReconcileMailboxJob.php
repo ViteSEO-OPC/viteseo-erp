@@ -32,7 +32,17 @@ class ReconcileMailboxJob implements ShouldQueue
                 $result = $provider->fetchSince($sync->email, $sync->sync_cursor);
 
                 foreach ($result->messages as $message) {
-                    $inbound->ingest($message);
+                    // Per-message isolation: one bad message must not abort this mailbox's loop or skip the
+                    // cursor update below (which would re-fetch the poison every hour). Skip + log; continue.
+                    try {
+                        $inbound->ingest($message);
+                    } catch (\Throwable $e) {
+                        Log::error('outreach.inbound.ingest_failed', [
+                            'mailbox' => $sync->email,
+                            'message_id' => $message->messageId,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
                 }
 
                 if ($result->cursor !== null) {

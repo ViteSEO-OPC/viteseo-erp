@@ -25,11 +25,16 @@ class InboundEmailService
      */
     public function ingest(InboundMessage $message): ?Email
     {
-        // Idempotency (layer 1): already-seen Message-ID → return the existing row, no duplicate.
-        if ($message->messageId !== null) {
+        // Idempotency key: the RFC Message-ID when present, else a deterministic surrogate derived from the
+        // provider's own stable message id (see dedupMessageId). This closes the null-Message-ID hole — both
+        // the layer-1 pre-check below and the layer-2 unique (provider, message_id) index now apply to it.
+        $messageId = $this->dedupMessageId($message);
+
+        // Idempotency (layer 1): already-seen id → return the existing row, no duplicate.
+        if ($messageId !== null) {
             $existing = Email::query()
                 ->where('provider', $message->provider)
-                ->where('message_id', $message->messageId)
+                ->where('message_id', $messageId)
                 ->first();
 
             if ($existing !== null) {
@@ -44,7 +49,7 @@ class InboundEmailService
         $isHumanReply = $leadId !== null && ! $this->isAutomated($message);
 
         try {
-            $email = DB::transaction(function () use ($message, $leadId, $threadId, $isHumanReply): Email {
+            $email = DB::transaction(function () use ($message, $messageId, $leadId, $threadId, $isHumanReply): Email {
                 $email = Email::create([
                     'lead_id' => $leadId,
                     'user_id' => null,
@@ -56,7 +61,7 @@ class InboundEmailService
                     'body' => $message->bodyText,
                     'provider' => $message->provider,
                     'provider_message_id' => $message->providerMessageId,
-                    'message_id' => $message->messageId,
+                    'message_id' => $messageId,
                     'in_reply_to' => $message->inReplyTo,
                     'references' => $message->references === [] ? null : implode(' ', $message->references),
                     'thread_id' => $threadId,
@@ -79,7 +84,7 @@ class InboundEmailService
                             'from' => $message->fromEmail,
                             'from_name' => $message->fromName,
                             'subject' => $message->subject,
-                            'message_id' => $message->messageId,
+                            'message_id' => $messageId,
                             'thread_id' => $threadId,
                         ],
                     ]);
@@ -90,10 +95,10 @@ class InboundEmailService
         } catch (QueryException $e) {
             // Idempotency (layer 2): lost a race on the unique (provider, message_id) index →
             // treat the winning row as the result rather than erroring the whole notification.
-            if ($message->messageId !== null) {
+            if ($messageId !== null) {
                 $winner = Email::query()
                     ->where('provider', $message->provider)
-                    ->where('message_id', $message->messageId)
+                    ->where('message_id', $messageId)
                     ->first();
 
                 if ($winner !== null) {
@@ -176,6 +181,29 @@ class InboundEmailService
 
         // 4. Unmatched — persisted with a null lead for later manual association; never dropped.
         return [null, $message->providerThreadId ?? $message->messageId, 'unmatched'];
+    }
+
+    /**
+     * The idempotency key for an inbound message: its RFC Message-ID when present, otherwise a deterministic,
+     * provider-scoped surrogate derived from the provider's own stable message id. Persisting this as
+     * `message_id` lets the existing (provider, message_id) dedup — the pre-check AND the unique index — hold
+     * for messages that arrive with no Message-ID header, so Pub/Sub redelivery can't duplicate them. The
+     * surrogate is namespaced (reserved prefix, no `@`) so it can never collide with a real Message-ID, and a
+     * message that lacked a real header is never referenced by a later In-Reply-To, so it never participates
+     * in thread matching. Returns null only when the provider id is also absent (unreachable for a fetched
+     * Gmail message) — that lone case persists undeduped, exactly as before.
+     */
+    private function dedupMessageId(InboundMessage $message): ?string
+    {
+        if ($message->messageId !== null && $message->messageId !== '') {
+            return $message->messageId;
+        }
+
+        if ($message->providerMessageId !== null && $message->providerMessageId !== '') {
+            return "{$message->provider}-nomid:{$message->providerMessageId}";
+        }
+
+        return null;
     }
 
     private function isAutomated(InboundMessage $message): bool
