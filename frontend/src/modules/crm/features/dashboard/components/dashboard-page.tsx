@@ -7,6 +7,7 @@ import { LeadPriorityOverview } from "@/modules/crm/features/dashboard/component
 import { RecentLeadsTable } from "@/modules/crm/features/dashboard/components/recent-leads-table";
 import { RecentActivityPanel } from "@/modules/crm/features/dashboard/components/recent-activity-panel";
 import { DashboardSplitRow } from "@/modules/crm/features/dashboard/components/dashboard-split-row";
+import { NearbyClientsPanel } from "@/modules/crm/features/dashboard/components/nearby-clients-panel";
 import { useHeaderSearch } from "@/modules/crm/providers/header-search-provider";
 
 export function DashboardPage() {
@@ -44,6 +45,7 @@ export function DashboardPage() {
         left={<RecentLeadsTable />}
         right={<RecentActivityPanel />}
       />
+      <NearbyClientsPanel />
     </div>
   );
 }
