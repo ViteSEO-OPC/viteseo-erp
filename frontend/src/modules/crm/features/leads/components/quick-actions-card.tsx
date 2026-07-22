@@ -13,7 +13,9 @@ import type { QuickAction, QuickActionKey } from "@/modules/crm/features/leads/t
 const iconMap: Record<string, typeof Mail> = { Mail, Calendar };
 
 const iconToneStyles: Record<string, string> = {
-  teal: "bg-[var(--qa-tile-teal)] text-teal-700",
+  // Both tile bg and glyph colour are theme tokens (--qa-tile-*/--qa-icon-*); the theme flips them
+  // on dark, so the component carries no dark: overrides.
+  teal: "bg-[var(--qa-tile-teal)] text-[var(--qa-icon-teal)]",
   amber: "bg-[var(--qa-tile-amber)] text-[var(--qa-icon-orange)]",
 };
 

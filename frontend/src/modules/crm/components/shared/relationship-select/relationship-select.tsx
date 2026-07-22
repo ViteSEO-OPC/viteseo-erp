@@ -130,7 +130,7 @@ export function RelationshipSelect({
         {footerAction ? (
           <>
             <SelectSeparator />
-            <SelectItem value={FOOTER_ACTION_VALUE} className="text-teal-600">
+            <SelectItem value={FOOTER_ACTION_VALUE} className="text-teal-600 dark:text-teal-400">
               {footerAction.label}
             </SelectItem>
           </>

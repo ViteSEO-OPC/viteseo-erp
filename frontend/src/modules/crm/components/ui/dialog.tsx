@@ -16,7 +16,24 @@ function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
 }
 
 function DialogPortal({ ...props }: DialogPrimitive.Portal.Props) {
-  return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
+  // Zerem scopes its theme (incl. dark) to a wrapper div (`.zerem-theme-scope`). Portals default
+  // to <body>, which is OUTSIDE that wrapper, so the dialog would render against the light :root
+  // tokens even in dark mode. Anchoring the portal to the theme scope lets the dialog inherit the
+  // active theme. Falls back to the default body portal wherever the scope is absent.
+  // Resolve the theme-scope element once, post-mount (client-only — the DOM must exist to query it,
+  // and it isn't reliably present during SSR/first render). The single setState here is intentional.
+  const [container, setContainer] = React.useState<HTMLElement | null>(null)
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time container resolution
+    setContainer(document.querySelector<HTMLElement>(".zerem-theme-scope"))
+  }, [])
+  return (
+    <DialogPrimitive.Portal
+      data-slot="dialog-portal"
+      container={container ?? undefined}
+      {...props}
+    />
+  )
 }
 
 function DialogClose({ ...props }: DialogPrimitive.Close.Props) {

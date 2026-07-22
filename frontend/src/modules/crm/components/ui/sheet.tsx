@@ -20,7 +20,24 @@ function SheetClose({ ...props }: SheetPrimitive.Close.Props) {
 }
 
 function SheetPortal({ ...props }: SheetPrimitive.Portal.Props) {
-  return <SheetPrimitive.Portal data-slot="sheet-portal" {...props} />
+  // Zerem scopes its theme (incl. dark) to a wrapper div (`.zerem-theme-scope`). Portals default
+  // to <body>, which is OUTSIDE that wrapper, so the sheet would render against the light :root
+  // tokens even in dark mode. Anchoring the portal to the theme scope lets the sheet inherit the
+  // active theme. Falls back to the default body portal wherever the scope is absent.
+  // Resolve the theme-scope element once, post-mount (client-only — the DOM must exist to query it,
+  // and it isn't reliably present during SSR/first render). The single setState here is intentional.
+  const [container, setContainer] = React.useState<HTMLElement | null>(null)
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time container resolution
+    setContainer(document.querySelector<HTMLElement>(".zerem-theme-scope"))
+  }, [])
+  return (
+    <SheetPrimitive.Portal
+      data-slot="sheet-portal"
+      container={container ?? undefined}
+      {...props}
+    />
+  )
 }
 
 function SheetOverlay({ className, ...props }: SheetPrimitive.Backdrop.Props) {

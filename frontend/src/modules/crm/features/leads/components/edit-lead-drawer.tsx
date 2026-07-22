@@ -19,11 +19,14 @@ import { useUpdateLead, useDeleteLead } from "@/modules/crm/features/leads/hooks
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 
+// Dark override mirrors the reference: fields sit one step ABOVE the drawer panel — card level
+// (#1C1C1C, neutral) rather than the blue-tinted --muted (#22262D) — with a subtler neutral
+// border. Light theme keeps bg-muted/border-border unchanged.
 const FIELD_STYLE =
-  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
+  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:border-white/8 dark:bg-card";
 
 const SELECT_STYLE =
-  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring";
+  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring dark:border-white/8 dark:bg-card";
 
 /** Presentation-only grouping wrapper — labels a related cluster of fields for scanability.
     Purely visual; introduces no state, validation, or field changes. */
@@ -53,7 +56,9 @@ export function EditLeadDrawer({ open, onOpenChange, lead, canDelete, onDeleted 
       <SheetContent
         side="right"
         showCloseButton={false}
-        className="flex w-full flex-col p-0 sm:max-w-md"
+        // Dark: drawer panel drops to page level (#141414) per the reference, so the card-level
+        // (#1C1C1C) input fields read as lifted. Light theme keeps bg-popover unchanged.
+        className="flex w-full flex-col p-0 sm:max-w-md dark:border-white/8 dark:bg-background"
       >
         {lead ? (
           <EditLeadForm
@@ -161,7 +166,7 @@ function EditLeadForm({
 
   return (
     <>
-      <SheetHeader className="border-b border-border-subtle px-5 py-4">
+      <SheetHeader className="border-b border-border-subtle dark:border-white/8 px-5 py-4">
         <div className="flex items-start justify-between">
           <div>
             <SheetTitle className="text-lg font-bold text-card-foreground">
@@ -174,7 +179,7 @@ function EditLeadForm({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-card dark:hover:bg-white/5"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -209,7 +214,10 @@ function EditLeadForm({
                   allowClear
                   // Matches SELECT_STYLE on this drawer's sibling fields (h-9 / bg-muted / px-3)
                   // and their focus: ring, which fires on click as well as keyboard focus.
-                  triggerClassName="h-9 w-full bg-muted px-3 focus:ring-2 focus:ring-ring"                />
+                  // dark:bg-card only — neutralises the trigger fill to match sibling inputs in dark
+                  // (styling passed from the drawer; the NicheSelect component/logic is untouched).
+                  triggerClassName="h-9 w-full bg-muted px-3 focus:ring-2 focus:ring-ring dark:bg-card"
+                />
               </FormField>
               <FormField label="Last Activity">
                 <input
@@ -234,7 +242,7 @@ function EditLeadForm({
             </FormField>
           </FormSection>
 
-          <div className="border-t border-border-subtle" />
+          <div className="border-t border-border-subtle dark:border-white/8" />
 
           <FormSection title="Contact">
             <FormField label="Contact Name">
@@ -269,7 +277,7 @@ function EditLeadForm({
             </FormFieldGrid>
           </FormSection>
 
-          <div className="border-t border-border-subtle" />
+          <div className="border-t border-border-subtle dark:border-white/8" />
 
           <FormSection title="Outreach & Status">
             <FormFieldGrid>
@@ -342,7 +350,7 @@ function EditLeadForm({
             </FormField>
           </FormSection>
 
-          <div className="border-t border-border-subtle" />
+          <div className="border-t border-border-subtle dark:border-white/8" />
 
           <FormSection title="Deal">
             <FormField label="Amount">
@@ -359,7 +367,7 @@ function EditLeadForm({
             </FormField>
           </FormSection>
 
-          <div className="border-t border-border-subtle" />
+          <div className="border-t border-border-subtle dark:border-white/8" />
 
           <FormSection title="Digital Presence">
             <FormFieldGrid>
@@ -409,7 +417,7 @@ function EditLeadForm({
             </FormFieldGrid>
           </FormSection>
 
-          <div className="border-t border-border-subtle" />
+          <div className="border-t border-border-subtle dark:border-white/8" />
 
           <FormSection title="Marketplace Presence">
             <FormFieldGrid>
@@ -461,20 +469,20 @@ function EditLeadForm({
 
           {canDelete ? (
             <>
-              <div className="border-t border-border-subtle" />
+              <div className="border-t border-border-subtle dark:border-white/8" />
               <DangerConfirmRegion onDelete={() => setConfirmOpen(true)} />
             </>
           ) : null}
         </div>
       </div>
 
-      <SheetFooter className="flex-col gap-2 border-t border-border-subtle px-5 py-4">
+      <SheetFooter className="flex-col gap-2 border-t border-border-subtle dark:border-white/8 px-5 py-4">
         {error ? <p className="w-full text-sm text-destructive">{error}</p> : null}
         <div className="flex w-full gap-3">
           <Button
             variant="outline"
             size="default"
-            className="flex-1"
+            className="flex-1 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
             onClick={onClose}
             disabled={updateLead.isPending}
           >

@@ -118,6 +118,9 @@
   /* Lead Details tokens — ⚠ sampled values, pending designer confirmation */
   --qa-icon-indigo: #9286DE;
   --qa-icon-orange: #E08A3C;
+  /* QA teal glyph — token so its dark value lives in the theme (dark override below), matching
+     the --qa-icon-orange pattern. Light value unchanged (was text-teal-700 in the component). */
+  --qa-icon-teal: var(--teal-700);
   --qa-tile-teal: #E3F9F8;
   --qa-tile-indigo: #EEF2FF;
   --qa-tile-amber: #FFF7E5;
@@ -350,6 +353,12 @@
   --color-ai-banner-bg: rgba(79, 216, 215, 0.10);   /* teal-400 @ 10% */
   --color-warning-bg: rgba(249, 199, 79, 0.12);      /* gold @ 12% */
 
+  /* Lead Detail quick-action icon tiles — light mint/cream surfaces become accent-tinted
+     panels on dark (the glyph text gets a dark: variant in the component). */
+  --qa-tile-teal: rgba(79, 216, 215, 0.12);    /* teal-400 @ 12% */
+  --qa-tile-amber: rgba(245, 166, 35, 0.12);   /* #F5A623 @ 12% */
+  --qa-icon-teal: var(--teal-400);             /* glyph brightens on dark (was dark:text-teal-400) */
+
   /* Copilot — the light mint/cream header gradient + chip surfaces become subtle teal-tinted
      panels that read on the dark card. FAB open state (#2F3E3E) already reads on dark, kept. */
   --copilot-top-accent: var(--teal-400);
@@ -359,6 +368,12 @@
   --copilot-chip-border: rgba(79, 216, 215, 0.30);
 
   /* Priority / lead / calendar / chart accents kept as brand hues (read on dark). */
+
+  /* Dashboard priority badge backgrounds — accent-tinted panels on dark (reference-matched).
+     The light #FDEAEC/#FBEFDA/#E6EEFE would otherwise render as bright pills on the dark card. */
+  --color-dashboard-priority-high-badge: rgba(239, 68, 68, 0.12);   /* red-500 @ 12% */
+  --color-dashboard-priority-medium-badge: rgba(245, 166, 35, 0.12); /* #F5A623 @ 12% */
+  --color-dashboard-priority-low-badge: rgba(59, 130, 246, 0.12);    /* #3B82F6 @ 12% */
 }
 
 
