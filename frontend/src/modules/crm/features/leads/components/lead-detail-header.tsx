@@ -34,7 +34,7 @@ export function LeadDetailHeader({ title, subtitle, canAssign, canDelete, assign
           <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           {canAssign ? (
             <Button variant="outline" size="sm" onClick={onAssign}>
               <UserPlus className="h-4 w-4" />

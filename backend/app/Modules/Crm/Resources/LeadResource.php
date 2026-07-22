@@ -43,7 +43,19 @@ class LeadResource extends JsonResource
             'placeId' => $this->place_id,
             'source' => $this->source,
             // Business website URL (fit-data) — the input the Website Intelligence service audits.
+            // Also surfaced as the editable "Website Domain" field on the Lead forms.
             'website' => $this->website,
+            // Digital Presence (social) + Marketplace Presence (e-commerce). Nullable/optional;
+            // exposed for display, clickable links, and future analytics / outreach / AI enrichment.
+            // `tiktok` (social) is distinct from `tiktokShop` (marketplace).
+            'facebook' => $this->facebook,
+            'instagram' => $this->instagram,
+            'tiktok' => $this->tiktok,
+            'linkedin' => $this->linkedin,
+            'shopee' => $this->shopee,
+            'lazada' => $this->lazada,
+            'tiktokShop' => $this->tiktok_shop,
+            'otherMarketplace' => $this->other_marketplace,
             // Ownership: the assigned BD. `assignedToId` is always present; the `assignedTo`
             // object is included when the relation is eager-loaded (list/detail).
             'assignedToId' => $this->assigned_to !== null ? (string) $this->assigned_to : null,

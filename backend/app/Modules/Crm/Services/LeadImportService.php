@@ -44,6 +44,20 @@ class LeadImportService
         'status' => ['update', 'update status'],
         // Business address (Excel) — persisted to leads.address; the Tier-3 dedup discriminator.
         'address' => ['address', 'business address', 'street address', 'location'],
+        // Website Domain → leads.website. NOT the bare "website" header (that stays the repurposed
+        // Priority source above, per P2); a domain column must be named explicitly.
+        'website' => ['website domain', 'domain', 'website url', 'web address', 'site url'],
+        // Digital Presence (social) — plain pass-through strings. A sheet WITHOUT these columns
+        // imports unchanged (values stored NULL); WITH them, values are captured. No translation.
+        'facebook' => ['facebook', 'facebook page', 'fb', 'facebook url'],
+        'instagram' => ['instagram', 'ig', 'instagram url', 'instagram handle'],
+        'tiktok' => ['tiktok', 'tik tok', 'tiktok url', 'tiktok handle'],
+        'linkedin' => ['linkedin', 'linked in', 'linkedin url'],
+        // Marketplace Presence (e-commerce) — plain pass-through strings; absent → NULL.
+        'shopee' => ['shopee', 'shopee store', 'shopee url'],
+        'lazada' => ['lazada', 'lazada store', 'lazada url'],
+        'tiktok_shop' => ['tiktok shop', 'tik tok shop', 'tiktok store'],
+        'other_marketplace' => ['other marketplace', 'other e commerce', 'other ecommerce', 'other e commerce store'],
     ];
 
     /** Human labels for the mapping preview (crmField). */
@@ -58,6 +72,15 @@ class LeadImportService
         'cold_calling' => 'Cold Calling',
         'status' => 'Update Status',
         'address' => 'Address',
+        'website' => 'Website Domain',
+        'facebook' => 'Facebook',
+        'instagram' => 'Instagram',
+        'tiktok' => 'TikTok',
+        'linkedin' => 'LinkedIn',
+        'shopee' => 'Shopee',
+        'lazada' => 'Lazada',
+        'tiktok_shop' => 'TikTok Shop',
+        'other_marketplace' => 'Other Marketplace',
     ];
 
     /** Columns whose raw text is translated to a CRM enum via the Shared Translation Engine. */

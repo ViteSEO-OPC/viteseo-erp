@@ -50,8 +50,8 @@ export function QuickActionsCard({
   outcomePending,
 }: Props) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-card">
-      <h3 className="mb-4 text-lg font-bold text-card-foreground">Quick Actions</h3>
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+      <h3 className="mb-5 text-lg font-bold text-card-foreground">Quick Actions</h3>
 
       {/* Lead Status */}
       <div className="mb-4">

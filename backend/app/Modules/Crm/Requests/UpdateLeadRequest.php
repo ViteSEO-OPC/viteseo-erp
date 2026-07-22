@@ -34,6 +34,18 @@ class UpdateLeadRequest extends FormRequest
             'region' => ['nullable', 'string', 'max:255'],
             'province' => ['nullable', 'string', 'max:255'],
             'city' => ['nullable', 'string', 'max:255'],
+            // Website Domain — the existing `website` column, now editable via update.
+            'website' => ['nullable', 'string', 'max:255'],
+            // Digital Presence (social) + Marketplace Presence (e-commerce). All nullable/optional;
+            // `tiktok` (social) is distinct from `tiktok_shop` (marketplace).
+            'facebook' => ['nullable', 'string', 'max:255'],
+            'instagram' => ['nullable', 'string', 'max:255'],
+            'tiktok' => ['nullable', 'string', 'max:255'],
+            'linkedin' => ['nullable', 'string', 'max:255'],
+            'shopee' => ['nullable', 'string', 'max:255'],
+            'lazada' => ['nullable', 'string', 'max:255'],
+            'tiktok_shop' => ['nullable', 'string', 'max:255'],
+            'other_marketplace' => ['nullable', 'string', 'max:255'],
             'assigned_to' => ['nullable', 'integer', 'exists:users,id'],
         ];
     }

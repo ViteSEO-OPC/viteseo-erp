@@ -91,6 +91,16 @@ function EditLeadForm({
   const [status, setStatus] = useState(lead.updateStatus);
   // Estimated Deal Value (prospect-stage) — leads.amount, NOT revenue.
   const [amount, setAmount] = useState(lead.amount !== null ? String(lead.amount) : "");
+  // Website Domain (leads.website) + Digital / Marketplace presence — all nullable/optional.
+  const [website, setWebsite] = useState(lead.website ?? "");
+  const [facebook, setFacebook] = useState(lead.facebook ?? "");
+  const [instagram, setInstagram] = useState(lead.instagram ?? "");
+  const [tiktok, setTiktok] = useState(lead.tiktok ?? "");
+  const [linkedin, setLinkedin] = useState(lead.linkedin ?? "");
+  const [shopee, setShopee] = useState(lead.shopee ?? "");
+  const [lazada, setLazada] = useState(lead.lazada ?? "");
+  const [tiktokShop, setTiktokShop] = useState(lead.tiktokShop ?? "");
+  const [otherMarketplace, setOtherMarketplace] = useState(lead.otherMarketplace ?? "");
   const [error, setError] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -114,6 +124,16 @@ function EditLeadForm({
           cold_calling: coldCalling,
           status,
           amount: amount.trim() === "" ? null : Number(amount),
+          // Website Domain + Digital / Marketplace presence — empty inputs persist as null.
+          website: website.trim() || null,
+          facebook: facebook.trim() || null,
+          instagram: instagram.trim() || null,
+          tiktok: tiktok.trim() || null,
+          linkedin: linkedin.trim() || null,
+          shopee: shopee.trim() || null,
+          lazada: lazada.trim() || null,
+          tiktok_shop: tiktokShop.trim() || null,
+          other_marketplace: otherMarketplace.trim() || null,
         },
       },
       {
@@ -194,6 +214,17 @@ function EditLeadForm({
                 />
               </FormField>
             </FormFieldGrid>
+
+            <FormField label="Website Domain">
+              <input
+                type="text"
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+                className={FIELD_STYLE}
+                placeholder="www.clientwebsite.com"
+                aria-label="Website Domain"
+              />
+            </FormField>
           </FormSection>
 
           <div className="border-t border-border-subtle" />
@@ -319,6 +350,106 @@ function EditLeadForm({
                 aria-label="Amount"
               />
             </FormField>
+          </FormSection>
+
+          <div className="border-t border-border-subtle" />
+
+          <FormSection title="Digital Presence">
+            <FormFieldGrid>
+              <FormField label="Facebook">
+                <input
+                  type="text"
+                  value={facebook}
+                  onChange={(e) => setFacebook(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="facebook.com/…"
+                  aria-label="Facebook"
+                />
+              </FormField>
+              <FormField label="Instagram">
+                <input
+                  type="text"
+                  value={instagram}
+                  onChange={(e) => setInstagram(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="instagram.com/…"
+                  aria-label="Instagram"
+                />
+              </FormField>
+            </FormFieldGrid>
+
+            <FormFieldGrid>
+              <FormField label="TikTok">
+                <input
+                  type="text"
+                  value={tiktok}
+                  onChange={(e) => setTiktok(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="tiktok.com/@…"
+                  aria-label="TikTok"
+                />
+              </FormField>
+              <FormField label="LinkedIn">
+                <input
+                  type="text"
+                  value={linkedin}
+                  onChange={(e) => setLinkedin(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="linkedin.com/company/…"
+                  aria-label="LinkedIn"
+                />
+              </FormField>
+            </FormFieldGrid>
+          </FormSection>
+
+          <div className="border-t border-border-subtle" />
+
+          <FormSection title="Marketplace Presence">
+            <FormFieldGrid>
+              <FormField label="Shopee">
+                <input
+                  type="text"
+                  value={shopee}
+                  onChange={(e) => setShopee(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="shopee.ph/…"
+                  aria-label="Shopee"
+                />
+              </FormField>
+              <FormField label="Lazada">
+                <input
+                  type="text"
+                  value={lazada}
+                  onChange={(e) => setLazada(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="lazada.com.ph/…"
+                  aria-label="Lazada"
+                />
+              </FormField>
+            </FormFieldGrid>
+
+            <FormFieldGrid>
+              <FormField label="TikTok Shop">
+                <input
+                  type="text"
+                  value={tiktokShop}
+                  onChange={(e) => setTiktokShop(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="tiktok.com/shop/…"
+                  aria-label="TikTok Shop"
+                />
+              </FormField>
+              <FormField label="Other Marketplace">
+                <input
+                  type="text"
+                  value={otherMarketplace}
+                  onChange={(e) => setOtherMarketplace(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="Any other store URL"
+                  aria-label="Other Marketplace"
+                />
+              </FormField>
+            </FormFieldGrid>
           </FormSection>
 
           {canDelete ? (

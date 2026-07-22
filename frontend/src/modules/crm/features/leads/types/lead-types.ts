@@ -31,6 +31,18 @@ export type Lead = {
   score: number;
   // Estimated Deal Value (prospect-stage) — NOT revenue (revenue lives on the Deal). Null until set.
   amount: number | null;
+  // Business website URL (leads.website) — the "Website Domain" field. Null until set.
+  website: string | null;
+  // Digital Presence (social) + Marketplace Presence (e-commerce). All nullable/optional. Plain
+  // strings today; ready for clickable links / analytics / outreach / AI enrichment.
+  facebook: string | null;
+  instagram: string | null;
+  tiktok: string | null;
+  linkedin: string | null;
+  shopee: string | null;
+  lazada: string | null;
+  tiktokShop: string | null;
+  otherMarketplace: string | null;
   // Ownership: the assigned BD. `assignedTo` is present when the API eager-loads it (list/detail).
   assignedToId: string | null;
   assignedTo: { id: string; name: string } | null;
@@ -51,6 +63,16 @@ export type LeadWritePayload = {
   status?: LeadStatus;
   // Estimated Deal Value (prospect-stage). Separate from Deal revenue.
   amount?: number | null;
+  // Website Domain (leads.website) + Digital/Marketplace presence — all nullable/optional.
+  website?: string | null;
+  facebook?: string | null;
+  instagram?: string | null;
+  tiktok?: string | null;
+  linkedin?: string | null;
+  shopee?: string | null;
+  lazada?: string | null;
+  tiktok_shop?: string | null;
+  other_marketplace?: string | null;
   assigned_to?: number | null;
 };
 

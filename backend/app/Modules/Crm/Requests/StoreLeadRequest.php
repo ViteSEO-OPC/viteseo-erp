@@ -36,6 +36,20 @@ class StoreLeadRequest extends FormRequest
             'region' => ['nullable', 'string', 'max:255'],
             'province' => ['nullable', 'string', 'max:255'],
             'city' => ['nullable', 'string', 'max:255'],
+            // Website Domain — the existing `website` column, now settable via create (previously
+            // written only by discovery ingest). Nullable/optional.
+            'website' => ['nullable', 'string', 'max:255'],
+            // Digital Presence (social) + Marketplace Presence (e-commerce). All nullable/optional
+            // plain strings — an existing lead or an import without these never fails. `tiktok`
+            // (social) is distinct from `tiktok_shop` (marketplace).
+            'facebook' => ['nullable', 'string', 'max:255'],
+            'instagram' => ['nullable', 'string', 'max:255'],
+            'tiktok' => ['nullable', 'string', 'max:255'],
+            'linkedin' => ['nullable', 'string', 'max:255'],
+            'shopee' => ['nullable', 'string', 'max:255'],
+            'lazada' => ['nullable', 'string', 'max:255'],
+            'tiktok_shop' => ['nullable', 'string', 'max:255'],
+            'other_marketplace' => ['nullable', 'string', 'max:255'],
             // Required for Admin/SA (they must pick the owning BD); optional for a BD creator
             // (auto-assigned to self in the controller). LeadImportService reuses these rules via
             // `new StoreLeadRequest` with NO bound user — the `(bool) $this->user()` guard keeps

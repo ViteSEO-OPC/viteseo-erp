@@ -12,6 +12,17 @@ export type LeadDetail = LeadRow & {
   // Estimated Deal Value (prospect-stage) — NOT revenue. Null until set.
   amount: number | null;
   assignedTo: { id: string; name: string } | null;
+  // Digital Presence (social) + Marketplace Presence (e-commerce) + Website Domain. All nullable.
+  // Surfaced on Lead Details only when a value exists; ready for clickable links / future analytics.
+  website: string | null;
+  facebook: string | null;
+  instagram: string | null;
+  tiktok: string | null;
+  linkedin: string | null;
+  shopee: string | null;
+  lazada: string | null;
+  tiktokShop: string | null;
+  otherMarketplace: string | null;
   chips: Array<{ type: "priority" | "status" | "website"; value: string }>;
 };
 
