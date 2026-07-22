@@ -16,6 +16,7 @@ import {
 import { useIsManager } from "@/core/auth/AuthProvider";
 import type { StatusKey } from "../../types";
 import { useProjectChannel } from "../../useProjectChannel";
+import { useForbiddenRedirect } from "../../useForbiddenRedirect";
 import {
   useGroups,
   useProject,
@@ -148,8 +149,31 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const memberBusy =
     projectMembers.add.isPending || projectMembers.remove.isPending;
 
+  // A member requesting a project they aren't assigned to gets a 403 from the
+  // API — send them to the access-denied screen instead of the generic error.
+  const forbidden = useForbiddenRedirect(projectQuery.error);
+
   const isError =
     projectQuery.isError || statusesQuery.isError || tasksQuery.isError;
+
+  if (forbidden) {
+    return (
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <p className="text-ink-soft">Redirecting…</p>
+      </div>
+    );
+  }
+
+  // Don't render the detail scaffold with placeholder data while the project is
+  // still loading — otherwise an unauthorized member sees a blank project page
+  // for a moment before the 403 arrives and redirects them.
+  if (projectQuery.isLoading) {
+    return (
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <p className="text-ink-soft">Loading project…</p>
+      </div>
+    );
+  }
 
   if (isError) {
     return (
@@ -168,8 +192,9 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-      {/* Header */}
-      {project && (
+      {/* Header — "Back to workspace" only for managers; members can't open the
+          workspace detail view, so the link would dead-end for them. */}
+      {isManager && project && (
         <Link
           href={`/sprintly/workspaces/${project.workspace_id}`}
           className="inline-flex items-center gap-1 text-sm font-semibold text-ink-soft hover:text-ink"

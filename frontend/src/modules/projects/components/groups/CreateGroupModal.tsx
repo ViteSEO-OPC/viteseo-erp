@@ -87,7 +87,7 @@ export function CreateGroupModal({ open, onClose, projectId: fixedProjectId }: C
       }
     >
       <form onSubmit={submit} className="space-y-4">
-        {/* {!fixedProjectId && (
+        {!fixedProjectId && (
           <Field label="Project" error={errors.project_id?.message}>
             <Select {...register('project_id')}>
               <option value="">Select a project…</option>
@@ -98,7 +98,7 @@ export function CreateGroupModal({ open, onClose, projectId: fixedProjectId }: C
               ))}
             </Select>
           </Field>
-        )} */}
+        )}
 
         <Field label="Name" error={errors.name?.message}>
           <Input placeholder="e.g. Frontend POD" {...register('name')} />
