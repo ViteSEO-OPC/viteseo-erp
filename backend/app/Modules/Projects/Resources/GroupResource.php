@@ -21,13 +21,21 @@ class GroupResource extends JsonResource
     {
         return [
             'id' => $this->uuid,
-            'project_id' => $this->project?->uuid,
             'name' => $this->name,
             'color' => $this->color,
             'archived' => (bool) $this->archived,
             'leader' => new UserResource($this->whenLoaded('leader')),
             'members_count' => $this->whenCounted('members'),
             'members' => UserResource::collection($this->whenLoaded('members')),
+            // A group can span many projects (attached when a project holds its
+            // whole roster). Lightweight embed — enough for list/detail display.
+            'projects' => $this->whenLoaded('projects', fn () => $this->projects->map(fn ($p) => [
+                'id' => $p->uuid,
+                'name' => $p->name,
+                'priority' => $p->priority,
+                'status' => $p->status?->value,
+            ])->all()),
+            'projects_count' => $this->whenCounted('projects'),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];
