@@ -126,16 +126,71 @@ class LeadController extends Controller
     }
 
     /**
+     * Website Opportunity buckets — lead counts / average score / share per `website_status`.
+     *
+     * This is the SINGLE source for the "Lead Priority Overview" cards on BOTH the Dashboard (the
+     * entry point) and the Leads page (the workspace), so the two can never drift apart again. It
+     * lives here, alongside {@see prioritySummary}, specifically to reuse {@see applyLeadListFilters}
+     * — the same filter logic the table uses — rather than duplicating it.
+     *
+     * Filter-aware: honours search / status / niche / priority so the workspace cards stay in step
+     * with the table. `applyWebsiteStatus: false` mirrors the Priority Summary's own-dimension rule,
+     * so drilling into one bucket never zeroes the other two.
+     *
+     * The Dashboard sends no filters, so its figures are identical to before this became
+     * filter-aware — the denominator collapses to "all visible leads" exactly as it did.
+     *
+     * Route path is unchanged (`/dashboard/priority-buckets`); only the controller moved.
+     */
+    public function websiteStatusBuckets(IndexLeadRequest $request): JsonResponse
+    {
+        $query = Lead::query()->active()->visibleTo($request->user());
+        $this->applyLeadListFilters($query, $request, applyPriority: true, applyWebsiteStatus: false);
+
+        $total = (clone $query)->count();
+
+        /** @var Collection<int, object{website_status: string, count: int, avg_score: float|null}> $rows */
+        $rows = (clone $query)
+            ->selectRaw('website_status, COUNT(*) as count, AVG(score) as avg_score')
+            ->groupBy('website_status')
+            ->get();
+
+        // Always emit all three buckets in render order, zero-filled — a stable card layout.
+        $buckets = collect(['no-website', 'needs-redesign', 'has-website'])
+            ->map(function (string $websiteStatus) use ($rows, $total): array {
+                $row = $rows->firstWhere('website_status', $websiteStatus);
+                $count = (int) ($row->count ?? 0);
+
+                return [
+                    'websiteStatus' => $websiteStatus,
+                    'count' => $count,
+                    'avgScore' => (int) round((float) ($row->avg_score ?? 0)),
+                    'pipelinePct' => $total > 0 ? (int) round($count / $total * 100) : 0,
+                ];
+            })->all();
+
+        return response()->json(['data' => $buckets]);
+    }
+
+    /**
      * Apply the shared Leads list filters to a visibleTo-scoped query so the list endpoint and the
      * Priority Summary cards ({@see prioritySummary}) always operate on the EXACT same dataset —
      * the table and the cards must never disagree. `$applyPriority` is false for the summary so
      * that drilling the table into one priority (?priority=high) never zeroes the other two cards:
      * the cards always show the full priority distribution of the current non-priority filters.
      *
+     * `$applyWebsiteStatus` is the same protection for the Website Opportunity cards
+     * ({@see websiteStatusBuckets}): false there so drilling into one website bucket never zeroes
+     * the other two. Defaults to true so the list endpoint keeps filtering on it as before.
+     *
      * @param  EloquentBuilder<Lead>  $query
      */
-    private function applyLeadListFilters(EloquentBuilder $query, IndexLeadRequest $request, bool $applyPriority): void
-    {
+    private function applyLeadListFilters(
+        EloquentBuilder $query,
+        IndexLeadRequest $request,
+        bool $applyPriority,
+        bool $applyWebsiteStatus = true,
+    ): void {
         $search = trim((string) $request->validated('search'));
         $priority = $request->validated('priority');
         $websiteStatus = $request->validated('website_status');
@@ -162,7 +217,7 @@ class LeadController extends Controller
             ->when($applyPriority && $priority, function (Builder $q) use ($priority): void {
                 $q->where('priority', $priority);
             })
-            ->when($websiteStatus, function (Builder $q) use ($websiteStatus): void {
+            ->when($applyWebsiteStatus && $websiteStatus, function (Builder $q) use ($websiteStatus): void {
                 $q->where('website_status', $websiteStatus);
             })
             ->when($statuses !== [], function (Builder $q) use ($statuses): void {

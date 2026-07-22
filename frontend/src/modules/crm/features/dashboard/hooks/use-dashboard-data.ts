@@ -92,18 +92,31 @@ export function useLeadStatusBreakdown() {
 // Static per-website_status card copy (from the approved Figma); merged with backend metrics.
 // `tone` is the existing colour/chip slot, kept so the cards look identical to before.
 const WEBSITE_STATUS_META: Record<WebsiteStatus, { title: string; description: string; tone: PriorityLevel }> = {
-  "no-website": { title: "No existing website", description: "Businesses without an online presence — highest conversion potential", tone: "high" },
-  "needs-redesign": { title: "Website needs improvement or redesign", description: "Existing sites that are outdated or underperforming", tone: "medium" },
-  "has-website": { title: "Has website, open to a new one", description: "Satisfied but receptive to better options", tone: "low" },
+  "no-website": { title: "No existing website", description: "Businesses with no web presence—ideal for full web and SEO packages.", tone: "high" },
+  "needs-redesign": { title: "Website needs improvement", description: "Outdated or slow sites. Ideal for redesign plus retainer-based SEO offers.", tone: "medium" },
+  "has-website": { title: "Has website, open to a new one", description: "Functional site owners exploring a refresh. Nurture with case studies.", tone: "low" },
 };
 
 type PriorityBucketApi = { websiteStatus: WebsiteStatus; count: number; avgScore: number; pipelinePct: number };
 
-// Name kept for Sprint 6 (rename deferred). Now returns website_status segmentation.
-export function usePriorityBuckets() {
+/**
+ * Website-opportunity buckets (GET /dashboard/priority-buckets) — the SINGLE source for the Lead
+ * Priority Overview cards on BOTH the Dashboard (entry point) and the Leads page (workspace).
+ *
+ * `filters` is optional: the Dashboard passes nothing and gets the unfiltered segmentation, while
+ * the Leads page passes its current table filters so the cards stay in step with the list. The
+ * endpoint deliberately ignores `website_status` itself, so drilling into one bucket never zeroes
+ * the other two.
+ */
+export function usePriorityBuckets(filters: Record<string, string> = {}) {
   const query = useQuery<PriorityBucketApi[]>({
-    queryKey: queryKeys.dashboard.priorityBuckets(),
-    queryFn: () => apiClient.get("/dashboard/priority-buckets").then((r) => r.data.data),
+    queryKey: queryKeys.dashboard.priorityBuckets(filters),
+    queryFn: () =>
+      apiClient
+        .get("/dashboard/priority-buckets", { params: filters })
+        .then((r) => r.data.data),
+    // Keep the previous counts on screen while a filter change refetches (no card flicker).
+    placeholderData: (prev) => prev,
   });
 
   const data: PriorityBucket[] | undefined = query.data?.map((bucket) => ({
@@ -280,7 +293,10 @@ export function useActivityFeed(limit?: number) {
 export function useRecentActivity() {
   // Only the real, ownership-scoped activity feed. The Copilot summary row was removed — it showed
   // fixed placeholder counts (no real AI-scoring run exists), and fabricated metrics must not appear.
-  const feed = useActivityFeed(3);
+  // Intentional dashboard scope: the 12 most-recent activities (GET /activities is newest-first).
+  // The fixed-height list shows ~5 and scrolls the rest; "Full history" remains the path to the
+  // complete Activity Logs. This is a deliberate widget cap, not a backend limit.
+  const feed = useActivityFeed(12);
 
   return {
     data: feed.data,

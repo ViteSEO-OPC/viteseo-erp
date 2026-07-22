@@ -234,7 +234,7 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::middleware('permission:crm.dashboard.view')->prefix('dashboard')->group(function () {
             Route::get('/kpis', [DashboardController::class, 'kpis']);
             Route::get('/copilot-summary', [DashboardController::class, 'copilotSummary']);
-            Route::get('/priority-buckets', [DashboardController::class, 'priorityBuckets']);
+            Route::get('/priority-buckets', [LeadController::class, 'websiteStatusBuckets']);
             Route::get('/recent-leads', [DashboardController::class, 'recentLeads']);
             Route::get('/lead-acquisition', [DashboardController::class, 'leadAcquisition']);
 

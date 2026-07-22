@@ -15,26 +15,25 @@ export function LeadsSummaryTabs() {
   const { data: items } = useLeadStatusSummary();
 
   return (
-    <div
-      className="inline-flex items-stretch overflow-hidden rounded-lg border border-border bg-card"
-      role="group"
-      aria-label="Lead status summary"
-    >
-      {items.map((item, index) => (
+    // Per the approved design: individually-bordered pills rather than one joined segmented
+    // control, with sentence-case labels and the count carrying the colour. Links, hrefs, active
+    // state, and the ?status= mechanism are unchanged.
+    <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Lead status summary">
+      {items.map((item) => (
         <Link
           key={item.key}
           href={item.href}
           aria-current={item.active ? "true" : undefined}
           className={cn(
-            "flex items-center gap-2 px-4 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-            index > 0 && "border-l border-border-subtle",
-            item.active && "bg-muted",
+            "flex items-center gap-2 rounded-lg border px-3.5 py-2 transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            item.active
+              ? "border-primary-accent/50 bg-primary/5"
+              : "border-border bg-card hover:bg-muted",
           )}
         >
-          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-            {item.label}
-          </span>
-          <span className={cn("text-sm font-bold", item.className)}>
+          <span className="text-sm font-medium text-secondary-foreground">{item.label}</span>
+          <span className={cn("text-sm font-bold tabular-nums", item.className)}>
             {item.count.toLocaleString()}
           </span>
         </Link>

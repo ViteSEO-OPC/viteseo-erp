@@ -4,8 +4,9 @@ import type { PriorityLevel } from "@/modules/crm/features/dashboard/types/dashb
 
 const toneColor: Record<PriorityLevel, string> = {
   high: "bg-red-500",
-  medium: "bg-chart-3",
-  low: "bg-teal-400",
+  medium: "bg-dashboard-priority-medium-fill",
+  // Low tone is rendered only by the Lead Priority Overview "low" card.
+  low: "bg-dashboard-priority-low-fill",
 };
 
 type Props = {

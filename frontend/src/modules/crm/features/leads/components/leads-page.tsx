@@ -112,12 +112,13 @@ export function LeadsPageLayout() {
     setSelectedIds(new Set());
   }
 
-  // Priority Summary cards mirror the table's dataset: pass the current filters MINUS `priority`
-  // (the drill-down — including it would zero the other two cards) and MINUS `sort` (order doesn't
-  // change which leads are counted). React Query hashes the key by value, so a fresh object per
-  // render is fine. Every list-invalidating mutation refreshes these cards via the shared key prefix.
+  // Lead Priority Overview cards mirror the table's dataset: pass the current filters MINUS
+  // `website_status` (the cards' own drill-down — including it would zero the other two) and MINUS
+  // `sort` (order doesn't change which leads are counted). The backend applies the same
+  // own-dimension rule, so this is belt-and-braces and also keeps the query key stable while
+  // drilling. React Query hashes the key by value, so a fresh object per render is fine.
   const summaryFilters: Record<string, string> = Object.fromEntries(
-    Object.entries(listParams).filter(([key]) => key !== "priority" && key !== "sort"),
+    Object.entries(listParams).filter(([key]) => key !== "website_status" && key !== "sort"),
   );
 
   // Niche distribution uses the API's real per-industry totals (industry_counts) — accurate and
@@ -196,6 +197,7 @@ export function LeadsPageLayout() {
             totalPages={totalPages}
             total={total}
             onPageChange={goToPage}
+            unit="leads"
           />
         </div>
       </div>

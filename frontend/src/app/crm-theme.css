@@ -19,6 +19,24 @@
   --color-priority-medium: var(--priority-medium);
   --color-priority-low: var(--priority-low);
 
+  /* Dashboard-specific semantic tokens (Figma-matched). Exact values preserved so the
+     generated utilities render pixel-identically to the raw hexes they replace. */
+  --color-dashboard-link: #0A807B;
+  --color-dashboard-priority-medium-fill: #F5A623;
+  --color-dashboard-priority-low-fill: #3B82F6;
+  /* Priority card borders — exact Figma values (accent hue @ 50% alpha), 1px. */
+  --color-dashboard-priority-high-border: #EF444480;
+  --color-dashboard-priority-medium-border: #F5A62380;
+  --color-dashboard-priority-low-border: #3B82F680;
+  /* Priority badge backgrounds — exact Figma values (tinted accent per tone).
+     Dark mode re-tints these to accent-on-dark below so they don't read as bright pills. */
+  --color-dashboard-priority-high-badge: #FDEAEC;
+  --color-dashboard-priority-medium-badge: #FBEFDA;
+  --color-dashboard-priority-low-badge: #E6EEFE;
+  /* KPI card label/caption — muted gray that flips with the caption ramp in dark
+     (previously referenced an undefined token, so labels inherited the card ink). */
+  --color-kpi-caption: var(--color-text-caption);
+
   --font-primary: "Exo", "Exo 2", sans-serif;
   --font-secondary: "Inter", sans-serif;
 

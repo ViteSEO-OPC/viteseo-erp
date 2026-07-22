@@ -21,6 +21,17 @@ export function formatActivityTimestamp(date: Date | string | null | undefined):
   return `${month} ${day}`;
 }
 
+/**
+ * Absolute date with the year — "Jun 27, 2026". Used by the Leads table, where rows span years and
+ * the relative/short forms above become ambiguous. Additive: existing formatters are unchanged.
+ */
+export function formatDateLong(date: Date | string | null | undefined): string {
+  if (!date) return "—";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 export function formatTimestamp(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
   const now = new Date();

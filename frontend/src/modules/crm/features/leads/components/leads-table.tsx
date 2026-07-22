@@ -16,7 +16,7 @@ import { StatusChip } from "@/modules/crm/components/shared/status-badge/status-
 import { Edit, Trash2, UserPlus } from "lucide-react";
 import { TableSkeleton } from "@/modules/crm/features/dashboard/components/table-skeleton";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
-import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
+import { formatDateLong } from "@/modules/crm/lib/formatters";
 import type { Lead, OutreachStatus, CallingStatus } from "@/modules/crm/features/leads/types/lead-types";
 
 // The Website column is hidden from the Leads list for Sprint 6 (BD workflow now uses
@@ -149,11 +149,11 @@ export function LeadsTable({
                   disabled={leads.length === 0}
                 />
               </TableHead>
-              <TableHead className={th}>Business</TableHead>
+              <TableHead className={th}>Business Name</TableHead>
               <TableHead className={th}>Contact</TableHead>
               <TableHead className={th}>Priority</TableHead>
               <TableHead className={th}>Email</TableHead>
-              <TableHead className={th}>Calling</TableHead>
+              <TableHead className={th}>Cold Call</TableHead>
               <TableHead className={th}>Status</TableHead>
               {canAssign ? <TableHead className={th}>Assigned BD</TableHead> : null}
               <TableHead className={th}>Last Activity</TableHead>
@@ -184,11 +184,35 @@ export function LeadsTable({
                     />
                   </span>
                 </TableCell>
-                <TableCell className={td + " font-semibold text-foreground"}>
-                  {lead.business}
+                {/* Business: avatar initial + name over industry, per the approved design.
+                    `industry` already ships on the Lead payload — no API change. */}
+                <TableCell className={td}>
+                  <div className="flex items-center gap-3">
+                    <span
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-secondary-foreground"
+                      aria-hidden
+                    >
+                      {lead.business.trim().charAt(0).toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-foreground">{lead.business}</p>
+                      {lead.industry && (
+                        <p className="truncate text-xs text-muted-foreground">{lead.industry}</p>
+                      )}
+                    </div>
+                  </div>
                 </TableCell>
-                <TableCell className={td + " text-secondary-foreground"}>
-                  {lead.contact}
+                {/* Contact: name, email, phone stacked — all three already on the payload. */}
+                <TableCell className={td}>
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-foreground">{lead.contact}</p>
+                    {lead.email && (
+                      <p className="truncate text-xs text-primary-accent">{lead.email}</p>
+                    )}
+                    {lead.phone && (
+                      <p className="truncate text-xs text-muted-foreground">{lead.phone}</p>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="px-3 py-3.5">
                   <PriorityChip priority={lead.priority} />
@@ -216,7 +240,7 @@ export function LeadsTable({
                   </TableCell>
                 ) : null}
                 <TableCell className={td + " text-muted-foreground"}>
-                  {formatActivityTimestamp(lead.lastActivity)}
+                  {formatDateLong(lead.lastActivity)}
                 </TableCell>
                 <TableCell className="px-3 py-3.5">
                   <div className="flex items-center justify-center gap-0.5">
