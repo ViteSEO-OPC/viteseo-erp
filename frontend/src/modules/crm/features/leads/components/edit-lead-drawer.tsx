@@ -14,6 +14,7 @@ import { FormField, FormFieldGrid } from "@/modules/crm/components/forms/form-fi
 import { DangerConfirmRegion } from "@/modules/crm/components/shared/confirm-dialog/danger-confirm-region";
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { Button } from "@/modules/crm/components/ui/button";
+import { NicheSelect } from "@/modules/crm/components/shared/niche-select/niche-select";
 import { useUpdateLead, useDeleteLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
@@ -195,14 +196,20 @@ function EditLeadForm({
             </FormField>
 
             <FormFieldGrid>
-              <FormField label="Niche">
-                <input
-                  type="text"
+              <FormField label="Business Niche">
+                {/* Freeze exception (PO-approved, scoped to this control only): the free-text input
+                    was how unregistered niche values entered the CRM. Replaced by the same shared
+                    selector the Create Lead wizard uses, so both forms offer one vocabulary. */}
+                <NicheSelect
                   value={industry}
-                  onChange={(e) => setIndustry(e.target.value)}
-                  className={FIELD_STYLE}
-                  aria-label="Niche"
-                />
+                  onChange={setIndustry}
+                  allowCreate
+                  // industry is nullable and the input this replaced could be emptied — keep the
+                  // niche unsettable. "" flows through the existing `industry.trim() || null`.
+                  allowClear
+                  // Matches SELECT_STYLE on this drawer's sibling fields (h-9 / bg-muted / px-3)
+                  // and their focus: ring, which fires on click as well as keyboard focus.
+                  triggerClassName="h-9 w-full bg-muted px-3 focus:ring-2 focus:ring-ring"                />
               </FormField>
               <FormField label="Last Activity">
                 <input

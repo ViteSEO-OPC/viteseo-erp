@@ -220,3 +220,69 @@ export function useBulkDeleteLeads() {
     },
   });
 }
+
+/** Outcome of a bulk niche assignment: which ids took the new niche and which failed. */
+export type BulkAssignResult = {
+  succeeded: string[];
+  failed: { id: string; reason: unknown }[];
+};
+
+/**
+ * Assign one or more leads to a niche — a single logical action that fans out over the SAME
+ * authoritative `PATCH /leads/{id}` route (once per lead) with `{ industry }`. Assigning a niche is
+ * canonically just setting `lead.industry` to the niche NAME (there is no niche_id / relationship),
+ * so this introduces no new backend or business logic — it reuses the update endpoint {@link
+ * useUpdateLead} already calls.
+ *
+ * `Promise.all` + per-request try/catch lets one failure NOT abort the rest; the caller keeps the
+ * failed ids selected. Because a reassignment rewrites `lead.industry`, EVERY surface that reads a
+ * lead's niche is refreshed on completion — the Leads lists + chips/dots, the niche registry counts
+ * (crm_niches.leadCount), the "Leads by niche" report, the Dashboard, My Performance and the feeds.
+ * One combined success / error toast replaces per-lead toasts.
+ */
+export function useAssignLeadsToNiche() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, niche }: { ids: string[]; niche: string }): Promise<BulkAssignResult> => {
+      const outcomes = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            await apiClient.patch(`/leads/${id}`, { industry: niche });
+            return { id, ok: true as const };
+          } catch (reason) {
+            return { id, ok: false as const, reason };
+          }
+        }),
+      );
+      const succeeded = outcomes.filter((o) => o.ok).map((o) => o.id);
+      const failed = outcomes
+        .filter((o) => !o.ok)
+        .map((o) => ({ id: o.id, reason: "reason" in o ? o.reason : undefined }));
+      return { succeeded, failed };
+    },
+    onSuccess: ({ succeeded, failed }, { niche }) => {
+      if (succeeded.length > 0) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
+        queryClient.invalidateQueries({ queryKey: queryKeys.niches.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.reports.industryBars() });
+        queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
+        toast.success(
+          `${succeeded.length} lead${succeeded.length === 1 ? "" : "s"} assigned to "${niche}"`,
+        );
+      }
+      if (failed.length > 0) {
+        toast.error(
+          getApiErrorMessage(
+            failed[0]?.reason,
+            `Failed to assign ${failed.length} lead${failed.length === 1 ? "" : "s"}`,
+          ),
+        );
+      }
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, "Failed to assign leads"));
+    },
+  });
+}

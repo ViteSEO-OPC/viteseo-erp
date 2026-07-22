@@ -42,6 +42,13 @@ export const queryKeys = {
     // rendered for this lead. Nested under detail(id).
     emailTemplates: (id: string) => [...queryKeys.leads.detail(id), "email-templates"] as const,
   },
+  niches: {
+    // Business Niche registry (GET /niches) — the vocabulary behind the shared Business Niche
+    // selector. ONE list key shared by every selector instance, so creating a niche from the
+    // Create Lead wizard also refreshes the one open in the Edit Lead drawer.
+    all: ["niches"] as const,
+    list: () => [...queryKeys.niches.all, "list"] as const,
+  },
   followUps: {
     all: ["follow-ups"] as const,
     lists: () => [...queryKeys.followUps.all, "list"] as const,

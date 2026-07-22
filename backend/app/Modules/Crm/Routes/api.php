@@ -14,6 +14,7 @@ use App\Modules\Crm\Controllers\LeadFollowUpController;
 use App\Modules\Crm\Controllers\LeadOutcomeController;
 use App\Modules\Crm\Controllers\LeadQualificationController;
 use App\Modules\Crm\Controllers\NearbyClientController;
+use App\Modules\Crm\Controllers\NicheController;
 use App\Modules\Crm\Controllers\NoteController;
 use App\Modules\Crm\Controllers\NotificationController;
 use App\Modules\Crm\Controllers\PlannerEventController;
@@ -108,6 +109,17 @@ Route::prefix('v1/crm')->group(function (): void {
             // Route::delete('/leads/{lead}/force', [LeadController::class, 'forceDestroy'])
             //     ->withTrashed()->can('forceDelete', 'lead');
         });
+
+        // Business Niche registry — the vocabulary behind the shared Business Niche selector and the
+        // Add Business Niche modal. Business CONFIGURATION, not lead data: no niche route touches a
+        // lead's status, score, priority or ownership. Available to any authenticated CRM user (PO
+        // decision for this milestone) — no dedicated permission. The built-in-immutable and
+        // still-in-use-can't-be-deleted rules are enforced in NicheController, not by middleware.
+        // Declared before the /leads/{lead} wildcards purely for grouping — the URIs never collide.
+        Route::get('/niches', [NicheController::class, 'index']);
+        Route::post('/niches', [NicheController::class, 'store']);
+        Route::patch('/niches/{niche}', [NicheController::class, 'update']);
+        Route::delete('/niches/{niche}', [NicheController::class, 'destroy']);
 
         Route::get('/leads/{lead}', [LeadController::class, 'show'])->can('view', 'lead');
         Route::match(['put', 'patch'], '/leads/{lead}', [LeadController::class, 'update'])->can('update', 'lead');

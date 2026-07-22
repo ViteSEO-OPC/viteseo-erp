@@ -17,6 +17,7 @@ import { WizardStepper } from "@/modules/crm/components/shared/wizard-stepper/wi
 import { useCreateLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
+import { NicheSelect } from "@/modules/crm/components/shared/niche-select/niche-select";
 import type { PriorityLevel } from "@/modules/crm/features/leads/types/lead-types";
 import { isAxiosError } from "axios";
 
@@ -185,21 +186,18 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
                   />
                 </FormField>
                 <FormField label="Business Niche" required>
-                  <SelectShell>
-                    <select
-                      className={SELECT}
-                      aria-required="true"
-                      value={niche}
-                      onChange={(e) => setNiche(e.target.value)}
-                    >
-                      <option value="" disabled>Select niche&hellip;</option>
-                      <option>Technology</option>
-                      <option>Food &amp; Beverage</option>
-                      <option>Healthcare</option>
-                      <option>Education</option>
-                      <option>Real Estate</option>
-                    </select>
-                  </SelectShell>
+                  {/* The shared registry-backed selector — the same component the Edit Lead drawer
+                      uses, replacing five hardcoded options. `allowCreate` puts the inline
+                      "+ Add Business Niche…" row at the bottom of the list. */}
+                  <NicheSelect
+                    value={niche}
+                    onChange={setNiche}
+                    allowCreate
+                    // Matches the SELECT constant on this wizard's sibling fields (h-10 /
+                    // bg-background / px-3.5) and their teal focus: ring. No clear option — the
+                    // field is marked required here.
+                    triggerClassName="h-10 w-full bg-background px-3.5 focus:border-teal-400 focus:ring-2 focus:ring-teal-400/30"
+                  />
                 </FormField>
               </FormFieldGrid>
 
