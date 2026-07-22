@@ -30,7 +30,7 @@ export function AvatarInitials({ src, initials, size = "sm" }: AvatarInitialsPro
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center rounded-full bg-primary font-semibold text-card-foreground",
+        "inline-flex items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground",
         sizeMap[size],
       )}
       aria-label={initials}

@@ -33,6 +33,10 @@ class AutomationSendEmailRequest extends FormRequest
             'workflow' => ['required', 'string', 'max:100'],
             // Server-side reply gate: when true, skip the send if the lead has already replied.
             'require_unreplied' => ['nullable', 'boolean'],
+            // Idempotency key — the CRM→n8n envelope `event_id` this send was triggered by. Pure
+            // orchestration metadata (no business meaning): it lets a retried call be recognised and
+            // answered from history instead of re-sending. Nullable so a manual/ad-hoc call still works.
+            'event_id' => ['nullable', 'uuid'],
         ];
     }
 }

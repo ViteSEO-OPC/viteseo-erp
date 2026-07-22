@@ -4,8 +4,10 @@ export const queryKeys = {
     kpis: () => [...queryKeys.dashboard.all, "kpis"] as const,
     copilotSummary: () =>
       [...queryKeys.dashboard.all, "copilot-summary"] as const,
-    priorityBuckets: () =>
-      [...queryKeys.dashboard.all, "priority-buckets"] as const,
+    // `filters` keeps the Leads workspace's filtered buckets cached separately from the Dashboard's
+    // unfiltered ones. The Dashboard passes nothing, so its key is unchanged.
+    priorityBuckets: (filters: Record<string, string> = {}) =>
+      [...queryKeys.dashboard.all, "priority-buckets", filters] as const,
     recentLeads: () =>
       [...queryKeys.dashboard.all, "recent-leads"] as const,
     recentActivity: () =>
@@ -41,6 +43,13 @@ export const queryKeys = {
     // Per-lead rendered email templates (GET /leads/{lead}/email-templates) — Purpose+Tone → Subject+Body
     // rendered for this lead. Nested under detail(id).
     emailTemplates: (id: string) => [...queryKeys.leads.detail(id), "email-templates"] as const,
+  },
+  niches: {
+    // Business Niche registry (GET /niches) — the vocabulary behind the shared Business Niche
+    // selector. ONE list key shared by every selector instance, so creating a niche from the
+    // Create Lead wizard also refreshes the one open in the Edit Lead drawer.
+    all: ["niches"] as const,
+    list: () => [...queryKeys.niches.all, "list"] as const,
   },
   followUps: {
     all: ["follow-ups"] as const,

@@ -28,6 +28,15 @@ class EmitProposalSentWebhook
             'purpose' => $email->purpose,
             'subject' => $email->subject,
             'sent_at' => $email->sent_at?->toIso8601String(),
+
+            // The follow-up cadence is business policy, so the CRM computes it (config
+            // `automation.follow_up`) and publishes the concrete values; n8n passes them through to
+            // POST /planner-events verbatim. Keeps the "when" a CRM decision and the workflow JSON free
+            // of business rules — and off n8n's host clock.
+            'follow_up_starts_at' => now()
+                ->addMinutes((int) config('automation.follow_up.delay_minutes', 4320))
+                ->toIso8601String(),
+            'follow_up_reminder_minutes' => (int) config('automation.follow_up.reminder_minutes', 60),
         ]);
     }
 }

@@ -17,6 +17,8 @@ import { WizardStepper } from "@/modules/crm/components/shared/wizard-stepper/wi
 import { useCreateLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
+import { NicheSelect } from "@/modules/crm/components/shared/niche-select/niche-select";
+import type { PriorityLevel } from "@/modules/crm/features/leads/types/lead-types";
 import { isAxiosError } from "axios";
 
 const FIELD =
@@ -61,6 +63,13 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
   const [phone, setPhone] = useState("");
   // Estimated Deal Value (prospect-stage) — persisted to leads.amount; NOT revenue.
   const [amount, setAmount] = useState("");
+  // Manual priority categorization. Default "medium" mirrors the leads.priority DB default, so an
+  // untouched wizard persists exactly what the backend applied before (no aggregate change); an
+  // explicit pick is now captured instead of silently dropped.
+  const [priority, setPriority] = useState<PriorityLevel>("medium");
+  // Lead Acquisition Channel (business "Source"). Bound to leads.acquisition_channel — NOT
+  // leads.source (discovery provenance). Empty = unset → omitted from the payload (nullable).
+  const [acquisitionChannel, setAcquisitionChannel] = useState("");
   const [error, setError] = useState("");
   const createLead = useCreateLead();
   // Admin/SA must pick the owning BD; BD creators auto-self on the backend (no selector).
@@ -78,6 +87,8 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
     setEmail("");
     setPhone("");
     setAmount("");
+    setPriority("medium");
+    setAcquisitionChannel("");
     setAssignedTo("");
     setError("");
     onOpenChange(false);
@@ -96,11 +107,15 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
       setStep((s) => Math.min(s + 1, STEPS.length));
       return;
     }
-    // Final step → create. Omitted fields (priority/status/website_status/…) use backend defaults.
+    // Final step → create. Remaining unbound inputs (website/address/position/source/notes) are not
+    // yet part of the create contract (no StoreLeadRequest rule / no column / separate notes API) —
+    // reported for a backend follow-up, deliberately not sent here.
     createLead.mutate(
       {
         business_name: businessName.trim(),
         contact_name: ownerName.trim(),
+        priority,
+        ...(acquisitionChannel ? { acquisition_channel: acquisitionChannel } : {}),
         ...(email.trim() ? { email: email.trim() } : {}),
         ...(phone.trim() ? { phone: phone.trim() } : {}),
         ...(niche.trim() ? { industry: niche.trim() } : {}),
@@ -171,21 +186,18 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
                   />
                 </FormField>
                 <FormField label="Business Niche" required>
-                  <SelectShell>
-                    <select
-                      className={SELECT}
-                      aria-required="true"
-                      value={niche}
-                      onChange={(e) => setNiche(e.target.value)}
-                    >
-                      <option value="" disabled>Select niche&hellip;</option>
-                      <option>Technology</option>
-                      <option>Food &amp; Beverage</option>
-                      <option>Healthcare</option>
-                      <option>Education</option>
-                      <option>Real Estate</option>
-                    </select>
-                  </SelectShell>
+                  {/* The shared registry-backed selector — the same component the Edit Lead drawer
+                      uses, replacing five hardcoded options. `allowCreate` puts the inline
+                      "+ Add Business Niche…" row at the bottom of the list. */}
+                  <NicheSelect
+                    value={niche}
+                    onChange={setNiche}
+                    allowCreate
+                    // Matches the SELECT constant on this wizard's sibling fields (h-10 /
+                    // bg-background / px-3.5) and their teal focus: ring. No clear option — the
+                    // field is marked required here.
+                    triggerClassName="h-10 w-full bg-background px-3.5 focus:border-teal-400 focus:ring-2 focus:ring-teal-400/30"
+                  />
                 </FormField>
               </FormFieldGrid>
 
@@ -260,22 +272,35 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
               <FormFieldGrid>
                 <FormField label="Source">
                   <SelectShell>
-                    <select className={SELECT} defaultValue="Cold outreach">
-                      <option>Cold outreach</option>
+                    <select
+                      className={SELECT}
+                      value={acquisitionChannel}
+                      onChange={(e) => setAcquisitionChannel(e.target.value)}
+                    >
+                      <option value="">Select channel&hellip;</option>
                       <option>Referral</option>
-                      <option>Inbound</option>
+                      <option>Facebook</option>
                       <option>Website</option>
+                      <option>Cold Outreach</option>
+                      <option>LinkedIn</option>
+                      <option>Walk-in</option>
                       <option>Event</option>
+                      <option>Partner</option>
+                      <option>Email Campaign</option>
                       <option>Other</option>
                     </select>
                   </SelectShell>
                 </FormField>
                 <FormField label="Priority">
                   <SelectShell>
-                    <select className={SELECT} defaultValue="High">
-                      <option>High</option>
-                      <option>Medium</option>
-                      <option>Low</option>
+                    <select
+                      className={SELECT}
+                      value={priority}
+                      onChange={(e) => setPriority(e.target.value as PriorityLevel)}
+                    >
+                      <option value="high">High</option>
+                      <option value="medium">Medium</option>
+                      <option value="low">Low</option>
                     </select>
                   </SelectShell>
                 </FormField>

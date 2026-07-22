@@ -13,7 +13,9 @@ import type { QuickAction, QuickActionKey } from "@/modules/crm/features/leads/t
 const iconMap: Record<string, typeof Mail> = { Mail, Calendar };
 
 const iconToneStyles: Record<string, string> = {
-  teal: "bg-[var(--qa-tile-teal)] text-teal-700",
+  // Both tile bg and glyph colour are theme tokens (--qa-tile-*/--qa-icon-*); the theme flips them
+  // on dark, so the component carries no dark: overrides.
+  teal: "bg-[var(--qa-tile-teal)] text-[var(--qa-icon-teal)]",
   amber: "bg-[var(--qa-tile-amber)] text-[var(--qa-icon-orange)]",
 };
 
@@ -50,8 +52,8 @@ export function QuickActionsCard({
   outcomePending,
 }: Props) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-card">
-      <h3 className="mb-4 text-lg font-bold text-card-foreground">Quick Actions</h3>
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
+      <h3 className="mb-5 text-lg font-bold text-card-foreground">Quick Actions</h3>
 
       {/* Lead Status */}
       <div className="mb-4">

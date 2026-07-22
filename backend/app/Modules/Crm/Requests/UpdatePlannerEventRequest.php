@@ -34,8 +34,8 @@ class UpdatePlannerEventRequest extends FormRequest
 
             'reminder_minutes' => ['sometimes', 'nullable', 'integer', 'min:0'],
 
-            'lead_id' => ['sometimes', 'nullable', 'integer', 'exists:leads,id'],
-            'deal_id' => ['sometimes', 'nullable', 'integer', 'exists:deals,id'],
+            'lead_id' => ['sometimes', 'nullable', 'integer', 'exists:crm_leads,id'],
+            'deal_id' => ['sometimes', 'nullable', 'integer', 'exists:crm_deals,id'],
             'company_id' => ['sometimes', 'nullable', 'integer'],
             'campaign_id' => ['sometimes', 'nullable', 'integer'],
 

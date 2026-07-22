@@ -11,6 +11,12 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class PlannerEventFactory extends Factory
 {
+    /**
+     * Set explicitly: the factory lives under App\Modules\Crm\, so Laravel's
+     * convention-based resolver cannot infer the model and guesses App\PlannerEvent.
+     */
+    protected $model = PlannerEvent::class;
+
     public function definition(): array
     {
         $type = fake()->randomElement(['email', 'call', 'meeting', 'task', 'follow-up']);

@@ -36,6 +36,10 @@ use Illuminate\Support\Carbon;
     // RC3 Outreach Automation Pack — business purpose of the send (e.g. proposal, introduction,
     // thank_you). Nullable; set only by the automation send path. Drives the `proposal.sent` event.
     'purpose',
+    // RC3 Outreach Automation Pack — the CRM→n8n envelope event_id that caused this automated send.
+    // Nullable; set only by the automation send path. unique(automation_event_id, purpose) makes an
+    // n8n retry idempotent instead of re-delivering the same customer email.
+    'automation_event_id',
     'provider',
     'provider_message_id',
     'message_id',

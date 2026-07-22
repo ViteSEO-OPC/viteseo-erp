@@ -22,7 +22,7 @@ export function InfoField({ label, icon, children, className }: InfoFieldProps) 
   if (icon) {
     return (
       <div className={cn("flex items-center gap-3", className)}>
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600 [&_svg]:h-[18px] [&_svg]:w-[18px]">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-teal-50 text-teal-600 dark:bg-teal-400/10 dark:text-teal-400 [&_svg]:h-[18px] [&_svg]:w-[18px]">
           {icon}
         </span>
         <div className="flex min-w-0 flex-col gap-0.5">{inner}</div>

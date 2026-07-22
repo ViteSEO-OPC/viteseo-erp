@@ -8,6 +8,7 @@ const COLUMNS: { header: string; value: (lead: Lead) => string | number | null }
   { header: "Email", value: (l) => l.email },
   { header: "Phone", value: (l) => l.phone },
   { header: "Industry", value: (l) => l.industry },
+  { header: "Acquisition Channel", value: (l) => l.acquisitionChannel },
   { header: "Website Status", value: (l) => l.websiteStatus },
   { header: "Priority", value: (l) => l.priority },
   { header: "Status", value: (l) => l.updateStatus },

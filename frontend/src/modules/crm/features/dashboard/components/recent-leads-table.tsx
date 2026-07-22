@@ -26,28 +26,29 @@ export function RecentLeadsTable() {
       <SectionHeader
         title="Recent Leads"
         linkText={total != null ? `View all ${total}` : "View all"}
-        linkHref="/leads"
+        linkHref="/zerem/leads"
+        linkClassName="text-dashboard-link"
       />
       {isLoading && <TableSkeleton />}
       {isError && <ErrorState message="Failed to load leads" />}
       {!isLoading && !isError && leads && leads.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-card">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card [&_[data-slot=table-container]]:h-[280px] [&_[data-slot=table-container]]:overflow-y-auto">
           <Table>
             <TableHeader>
               <TableRow className="border-b border-border-subtle bg-surface-table-header">
-                <TableHead className="h-10 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Business
                 </TableHead>
-                <TableHead className="h-10 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Industry
                 </TableHead>
-                <TableHead className="h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Score
                 </TableHead>
-                <TableHead className="h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Priority
                 </TableHead>
-                <TableHead className="h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                   Status
                 </TableHead>
               </TableRow>

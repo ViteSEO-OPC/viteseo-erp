@@ -5,7 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "crm-lead-qualified",
-        "responseMode": "onReceived",
+        "responseMode": "lastNode",
         "options": {
           "rawBody": true
         }
@@ -24,7 +24,7 @@
       "parameters": {
         "jsMode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "\nconst crypto = require('crypto');\nconst secret = String($env.N8N_WEBHOOK_SECRET || '');\nif (!secret) { throw new Error('N8N_WEBHOOK_SECRET is not configured in n8n'); }\nconst item = items[0];\nconst headers = item.json.headers || {};\nconst provided = String(headers['x-crm-signature'] || headers['X-CRM-Signature'] || '');\n// Raw body requires the CRM Webhook node \"Raw Body\" option (binary); fall back to canonical JSON.\nlet raw;\nif (item.binary && item.binary.data && item.binary.data.data) {\n  raw = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\n} else {\n  raw = JSON.stringify(item.json.body || {});\n}\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw, 'utf8').digest('hex');\nconst ok = provided.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));\nif (!ok) { throw new Error('Invalid X-CRM-Signature -- webhook rejected'); }\nconst env = JSON.parse(raw);\n// Idempotency: dedupe on the envelope event_id (at-least-once delivery).\nconst sd = $getWorkflowStaticData('global');\nsd.seen = sd.seen || {};\nif (env.event_id && sd.seen[env.event_id]) { return []; }\nif (env.event_id) { sd.seen[env.event_id] = Date.now(); }\nconst data = env.data || {};\nif (env.topic !== 'lead.qualified') { return []; }\n\nif (!data.lead_id || !data.assigned_to) { return []; }\nreturn [{ json: { lead_id: data.lead_id, assigned_to: data.assigned_to } }];\n"
+        "jsCode": "\nconst crypto = require('crypto');\nconst secret = String($env.N8N_WEBHOOK_SECRET || '');\nif (!secret) { throw new Error('N8N_WEBHOOK_SECRET is not configured in n8n'); }\nconst item = items[0];\nconst headers = item.json.headers || {};\nconst provided = String(headers['x-crm-signature'] || headers['X-CRM-Signature'] || '');\n\n// The HMAC must be verified over the EXACT bytes the CRM signed. Laravel's json_encode escapes forward\n// slashes and non-ASCII; JSON.stringify does not, so re-serializing the parsed body yields different\n// bytes and a false mismatch on any realistic payload. Fail loudly rather than silently reject.\nif (!(item.binary && item.binary.data && item.binary.data.data)) {\n  throw new Error('Raw body unavailable -- enable the \"Raw Body\" option on the CRM Webhook node. Refusing to verify the HMAC over a re-serialized body.');\n}\nconst raw = Buffer.from(item.binary.data.data, 'base64').toString('utf8');\n\nconst expected = 'sha256=' + crypto.createHmac('sha256', secret).update(raw, 'utf8').digest('hex');\nconst ok = provided.length === expected.length &&\n  crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));\nif (!ok) { throw new Error('Invalid X-CRM-Signature -- webhook rejected'); }\nconst env = JSON.parse(raw);\n\n// Topic guard first: the CRM routes each topic to its own path, so a foreign topic is a misconfiguration.\nif (env.topic !== 'lead.qualified') { return []; }\n\n// Replay window: a signed-but-stale envelope is rejected (dedupe alone cannot bound replay).\nconst MAX_AGE_MS = 15 * 60 * 1000;\nconst occurred = Date.parse(env.occurred_at || '');\nif (Number.isFinite(occurred) && (Date.now() - occurred) > MAX_AGE_MS) {\n  throw new Error('Envelope outside the replay window -- rejected');\n}\n\n// Idempotency: dedupe on the envelope event_id (at-least-once delivery). Entries are pruned on a TTL so\n// the static store cannot grow without bound.\nconst sd = $getWorkflowStaticData('global');\nconst TTL_MS = 24 * 60 * 60 * 1000;\nconst now = Date.now();\nsd.seen = sd.seen || {};\nfor (const k of Object.keys(sd.seen)) { if (now - sd.seen[k] > TTL_MS) { delete sd.seen[k]; } }\nif (env.event_id && sd.seen[env.event_id]) { return []; }\nif (env.event_id) { sd.seen[env.event_id] = now; }\n\nconst data = env.data || {};\nconst event_id = env.event_id || null;\nif (!data.lead_id || !data.assigned_to) { return []; }\nreturn [{ json: { lead_id: data.lead_id, assigned_to: data.assigned_to, event_id } }];\n"
       },
       "id": "n2-code",
       "name": "Verify signature",
@@ -38,12 +38,12 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.CRM_API_URL }}/api/planner-events",
+        "url": "={{ $env.CRM_API_URL }}/api/v1/crm/planner-events",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ title: 'Introduction email', event_type: 'email', source: 'outreach', lead_id: $json.lead_id, assigned_to: $json.assigned_to, starts_at: new Date().toISOString() }) }}",
+        "jsonBody": "={{ JSON.stringify({ title: 'Introduction email', event_type: 'email', source: 'outreach', lead_id: $json.lead_id, assigned_to: $json.assigned_to, starts_at: $now.toISO() }) }}",
         "options": {}
       },
       "id": "n2-http1",
@@ -68,12 +68,12 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.CRM_API_URL }}/api/automation/leads/{{ $json.lead_id }}/emails",
+        "url": "={{ $env.CRM_API_URL }}/api/v1/crm/automation/leads/{{ $('Verify signature').item.json.lead_id }}/emails",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ purpose: 'introduction', workflow: 'introduction' }) }}",
+        "jsonBody": "={{ JSON.stringify({ purpose: 'introduction', workflow: 'introduction', event_id: $('Verify signature').item.json.event_id }) }}",
         "options": {}
       },
       "id": "n2-http2",
@@ -138,6 +138,6 @@
   },
   "pinData": {},
   "meta": {
-    "description": "RC3 Outreach Automation Pack. n8n orchestrates only; Laravel decides. Enable N8N_ENABLED on the CRM + point N8N_WEBHOOK_URL here. Link the 'CRM Service Token' credential (php artisan n8n:token) and set CRM_API_URL + N8N_WEBHOOK_SECRET."
+    "description": "RC3 Outreach Automation Pack. n8n orchestrates only; Laravel decides. Enable N8N_ENABLED on the CRM + point N8N_WEBHOOK_URL at the n8n webhook BASE url (the CRM appends each topic's path from config('n8n.routes')). Link the 'CRM Service Token' credential (php artisan n8n:token) and set CRM_API_URL + N8N_WEBHOOK_SECRET. CRM_API_URL is the app root; workflows append /api/v1/crm/..."
   }
 }

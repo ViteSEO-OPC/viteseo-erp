@@ -6,6 +6,11 @@ type SectionHeaderProps = {
   linkText?: string;
   linkHref?: string;
   className?: string;
+  /**
+   * Optional override for the link's colour. Defaults to `text-primary-accent` so every existing
+   * caller is unchanged; a caller may pass e.g. `text-dashboard-link` to tint just its own link.
+   */
+  linkClassName?: string;
 };
 
 export function SectionHeader({
@@ -13,6 +18,7 @@ export function SectionHeader({
   linkText,
   linkHref,
   className,
+  linkClassName,
 }: SectionHeaderProps) {
   return (
     <div
@@ -27,7 +33,10 @@ export function SectionHeader({
       {linkText && linkHref && (
         <Link
           href={linkHref}
-          className="text-sm font-medium text-primary-accent transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            "text-sm font-medium transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            linkClassName ?? "text-primary-accent",
+          )}
         >
           {linkText} →
         </Link>

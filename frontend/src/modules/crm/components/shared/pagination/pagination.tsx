@@ -11,6 +11,11 @@ type PaginationProps = {
   onPageChange: (page: number) => void;
   /** Page size used only for the "Showing X–Y of Z" summary. */
   perPage?: number;
+  /**
+   * Optional noun appended to the summary — e.g. `unit="leads"` renders
+   * "Showing 1–7 of 2,847 leads". Omitted by default so existing callers are unchanged.
+   */
+  unit?: string;
   className?: string;
 };
 
@@ -69,6 +74,7 @@ export function Pagination({
   total,
   onPageChange,
   perPage = 10,
+  unit,
   className,
 }: PaginationProps) {
   const from = total === 0 ? 0 : page * perPage + 1;
@@ -76,8 +82,8 @@ export function Pagination({
   const items = getPageItems(page + 1, totalPages);
 
   const arrowClass = cn(
-    "flex h-8 w-8 items-center justify-center rounded-md text-sm transition-colors",
-    "text-muted-foreground hover:bg-muted hover:text-foreground",
+    "flex h-8 w-8 items-center justify-center rounded-md border border-border text-sm transition-colors",
+    "text-secondary-foreground hover:bg-muted hover:text-foreground",
     "disabled:pointer-events-none disabled:opacity-40",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
   );
@@ -93,7 +99,8 @@ export function Pagination({
       <p className="text-sm text-muted-foreground sm:justify-self-start">
         Showing <span className="font-medium text-foreground">{from}</span>–
         <span className="font-medium text-foreground">{to}</span> of{" "}
-        <span className="font-medium text-foreground">{total}</span>
+        <span className="font-medium text-foreground">{total.toLocaleString()}</span>
+        {unit ? ` ${unit}` : null}
       </p>
 
       <div className="flex items-center gap-1 sm:col-start-2 sm:justify-self-center">
@@ -122,11 +129,11 @@ export function Pagination({
               type="button"
               onClick={() => onPageChange(item - 1)}
               className={cn(
-                "flex h-8 min-w-8 items-center justify-center rounded-md px-2 text-sm transition-colors",
+                "flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-sm transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 item - 1 === page
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border text-secondary-foreground hover:bg-muted hover:text-foreground",
               )}
               aria-label={`Page ${item}`}
               aria-current={item - 1 === page ? "page" : undefined}

@@ -20,6 +20,16 @@ type LeadApiDetail = {
   updateStatus: "interested" | "awaiting-reply" | "declined" | "call-back-req";
   score: number;
   amount: number | null;
+  acquisitionChannel: string | null;
+  website: string | null;
+  facebook: string | null;
+  instagram: string | null;
+  tiktok: string | null;
+  linkedin: string | null;
+  shopee: string | null;
+  lazada: string | null;
+  tiktokShop: string | null;
+  otherMarketplace: string | null;
   assignedToId: string | null;
   assignedTo: { id: string; name: string } | null;
   lastActivity: string;
@@ -47,6 +57,15 @@ function mapToLeadDetail(api: LeadApiDetail): LeadDetail {
     status: api.updateStatus,
     assignedTo: api.assignedTo,
     lastActivity: api.lastActivity,
+    website: api.website,
+    facebook: api.facebook,
+    instagram: api.instagram,
+    tiktok: api.tiktok,
+    linkedin: api.linkedin,
+    shopee: api.shopee,
+    lazada: api.lazada,
+    tiktokShop: api.tiktokShop,
+    otherMarketplace: api.otherMarketplace,
     chips: [
       { type: "priority", value: api.priority },
       { type: "status", value: api.updateStatus },
@@ -70,6 +89,16 @@ function toEditableLead(api: LeadApiDetail): Lead {
     updateStatus: api.updateStatus,
     score: api.score,
     amount: api.amount,
+    acquisitionChannel: api.acquisitionChannel,
+    website: api.website,
+    facebook: api.facebook,
+    instagram: api.instagram,
+    tiktok: api.tiktok,
+    linkedin: api.linkedin,
+    shopee: api.shopee,
+    lazada: api.lazada,
+    tiktokShop: api.tiktokShop,
+    otherMarketplace: api.otherMarketplace,
     assignedToId: api.assignedToId,
     assignedTo: api.assignedTo,
     lastActivity: api.lastActivity,

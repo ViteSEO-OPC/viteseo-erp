@@ -23,7 +23,11 @@ class GmailWebhookController extends Controller
 {
     public function __invoke(Request $request): Response
     {
-        if (config('outreach.webhook.verify') && ! $this->verified($request)) {
+        // Verification is non-negotiable in production; the disable flag (outreach.webhook.verify) is a
+        // local/testing convenience only. Forcing it on in prod means a misconfigured GMAIL_WEBHOOK_VERIFY=false
+        // can never expose this public endpoint to unsigned/forged payloads.
+        $mustVerify = app()->isProduction() || config('outreach.webhook.verify');
+        if ($mustVerify && ! $this->verified($request)) {
             return response('', 403);
         }
 

@@ -14,15 +14,19 @@ import { FormField, FormFieldGrid } from "@/modules/crm/components/forms/form-fi
 import { DangerConfirmRegion } from "@/modules/crm/components/shared/confirm-dialog/danger-confirm-region";
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { Button } from "@/modules/crm/components/ui/button";
+import { NicheSelect } from "@/modules/crm/components/shared/niche-select/niche-select";
 import { useUpdateLead, useDeleteLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 
+// Dark override mirrors the reference: fields sit one step ABOVE the drawer panel — card level
+// (#1C1C1C, neutral) rather than the blue-tinted --muted (#22262D) — with a subtler neutral
+// border. Light theme keeps bg-muted/border-border unchanged.
 const FIELD_STYLE =
-  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring";
+  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:border-white/8 dark:bg-card";
 
 const SELECT_STYLE =
-  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring";
+  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring dark:border-white/8 dark:bg-card";
 
 /** Presentation-only grouping wrapper — labels a related cluster of fields for scanability.
     Purely visual; introduces no state, validation, or field changes. */
@@ -52,7 +56,9 @@ export function EditLeadDrawer({ open, onOpenChange, lead, canDelete, onDeleted 
       <SheetContent
         side="right"
         showCloseButton={false}
-        className="flex w-full flex-col p-0 sm:max-w-md"
+        // Dark: drawer panel drops to page level (#141414) per the reference, so the card-level
+        // (#1C1C1C) input fields read as lifted. Light theme keeps bg-popover unchanged.
+        className="flex w-full flex-col p-0 sm:max-w-md dark:border-white/8 dark:bg-background"
       >
         {lead ? (
           <EditLeadForm
@@ -91,6 +97,16 @@ function EditLeadForm({
   const [status, setStatus] = useState(lead.updateStatus);
   // Estimated Deal Value (prospect-stage) — leads.amount, NOT revenue.
   const [amount, setAmount] = useState(lead.amount !== null ? String(lead.amount) : "");
+  // Website Domain (leads.website) + Digital / Marketplace presence — all nullable/optional.
+  const [website, setWebsite] = useState(lead.website ?? "");
+  const [facebook, setFacebook] = useState(lead.facebook ?? "");
+  const [instagram, setInstagram] = useState(lead.instagram ?? "");
+  const [tiktok, setTiktok] = useState(lead.tiktok ?? "");
+  const [linkedin, setLinkedin] = useState(lead.linkedin ?? "");
+  const [shopee, setShopee] = useState(lead.shopee ?? "");
+  const [lazada, setLazada] = useState(lead.lazada ?? "");
+  const [tiktokShop, setTiktokShop] = useState(lead.tiktokShop ?? "");
+  const [otherMarketplace, setOtherMarketplace] = useState(lead.otherMarketplace ?? "");
   const [error, setError] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -114,6 +130,16 @@ function EditLeadForm({
           cold_calling: coldCalling,
           status,
           amount: amount.trim() === "" ? null : Number(amount),
+          // Website Domain + Digital / Marketplace presence — empty inputs persist as null.
+          website: website.trim() || null,
+          facebook: facebook.trim() || null,
+          instagram: instagram.trim() || null,
+          tiktok: tiktok.trim() || null,
+          linkedin: linkedin.trim() || null,
+          shopee: shopee.trim() || null,
+          lazada: lazada.trim() || null,
+          tiktok_shop: tiktokShop.trim() || null,
+          other_marketplace: otherMarketplace.trim() || null,
         },
       },
       {
@@ -140,7 +166,7 @@ function EditLeadForm({
 
   return (
     <>
-      <SheetHeader className="border-b border-border-subtle px-5 py-4">
+      <SheetHeader className="border-b border-border-subtle dark:border-white/8 px-5 py-4">
         <div className="flex items-start justify-between">
           <div>
             <SheetTitle className="text-lg font-bold text-card-foreground">
@@ -153,7 +179,7 @@ function EditLeadForm({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-card dark:hover:bg-white/5"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -175,13 +201,22 @@ function EditLeadForm({
             </FormField>
 
             <FormFieldGrid>
-              <FormField label="Niche">
-                <input
-                  type="text"
+              <FormField label="Business Niche">
+                {/* Freeze exception (PO-approved, scoped to this control only): the free-text input
+                    was how unregistered niche values entered the CRM. Replaced by the same shared
+                    selector the Create Lead wizard uses, so both forms offer one vocabulary. */}
+                <NicheSelect
                   value={industry}
-                  onChange={(e) => setIndustry(e.target.value)}
-                  className={FIELD_STYLE}
-                  aria-label="Niche"
+                  onChange={setIndustry}
+                  allowCreate
+                  // industry is nullable and the input this replaced could be emptied — keep the
+                  // niche unsettable. "" flows through the existing `industry.trim() || null`.
+                  allowClear
+                  // Matches SELECT_STYLE on this drawer's sibling fields (h-9 / bg-muted / px-3)
+                  // and their focus: ring, which fires on click as well as keyboard focus.
+                  // dark:bg-card only — neutralises the trigger fill to match sibling inputs in dark
+                  // (styling passed from the drawer; the NicheSelect component/logic is untouched).
+                  triggerClassName="h-9 w-full bg-muted px-3 focus:ring-2 focus:ring-ring dark:bg-card"
                 />
               </FormField>
               <FormField label="Last Activity">
@@ -194,9 +229,20 @@ function EditLeadForm({
                 />
               </FormField>
             </FormFieldGrid>
+
+            <FormField label="Website Domain">
+              <input
+                type="text"
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+                className={FIELD_STYLE}
+                placeholder="www.clientwebsite.com"
+                aria-label="Website Domain"
+              />
+            </FormField>
           </FormSection>
 
-          <div className="border-t border-border-subtle" />
+          <div className="border-t border-border-subtle dark:border-white/8" />
 
           <FormSection title="Contact">
             <FormField label="Contact Name">
@@ -231,7 +277,7 @@ function EditLeadForm({
             </FormFieldGrid>
           </FormSection>
 
-          <div className="border-t border-border-subtle" />
+          <div className="border-t border-border-subtle dark:border-white/8" />
 
           <FormSection title="Outreach & Status">
             <FormFieldGrid>
@@ -304,7 +350,7 @@ function EditLeadForm({
             </FormField>
           </FormSection>
 
-          <div className="border-t border-border-subtle" />
+          <div className="border-t border-border-subtle dark:border-white/8" />
 
           <FormSection title="Deal">
             <FormField label="Amount">
@@ -321,22 +367,122 @@ function EditLeadForm({
             </FormField>
           </FormSection>
 
+          <div className="border-t border-border-subtle dark:border-white/8" />
+
+          <FormSection title="Digital Presence">
+            <FormFieldGrid>
+              <FormField label="Facebook">
+                <input
+                  type="text"
+                  value={facebook}
+                  onChange={(e) => setFacebook(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="facebook.com/…"
+                  aria-label="Facebook"
+                />
+              </FormField>
+              <FormField label="Instagram">
+                <input
+                  type="text"
+                  value={instagram}
+                  onChange={(e) => setInstagram(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="instagram.com/…"
+                  aria-label="Instagram"
+                />
+              </FormField>
+            </FormFieldGrid>
+
+            <FormFieldGrid>
+              <FormField label="TikTok">
+                <input
+                  type="text"
+                  value={tiktok}
+                  onChange={(e) => setTiktok(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="tiktok.com/@…"
+                  aria-label="TikTok"
+                />
+              </FormField>
+              <FormField label="LinkedIn">
+                <input
+                  type="text"
+                  value={linkedin}
+                  onChange={(e) => setLinkedin(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="linkedin.com/company/…"
+                  aria-label="LinkedIn"
+                />
+              </FormField>
+            </FormFieldGrid>
+          </FormSection>
+
+          <div className="border-t border-border-subtle dark:border-white/8" />
+
+          <FormSection title="Marketplace Presence">
+            <FormFieldGrid>
+              <FormField label="Shopee">
+                <input
+                  type="text"
+                  value={shopee}
+                  onChange={(e) => setShopee(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="shopee.ph/…"
+                  aria-label="Shopee"
+                />
+              </FormField>
+              <FormField label="Lazada">
+                <input
+                  type="text"
+                  value={lazada}
+                  onChange={(e) => setLazada(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="lazada.com.ph/…"
+                  aria-label="Lazada"
+                />
+              </FormField>
+            </FormFieldGrid>
+
+            <FormFieldGrid>
+              <FormField label="TikTok Shop">
+                <input
+                  type="text"
+                  value={tiktokShop}
+                  onChange={(e) => setTiktokShop(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="tiktok.com/shop/…"
+                  aria-label="TikTok Shop"
+                />
+              </FormField>
+              <FormField label="Other Marketplace">
+                <input
+                  type="text"
+                  value={otherMarketplace}
+                  onChange={(e) => setOtherMarketplace(e.target.value)}
+                  className={FIELD_STYLE}
+                  placeholder="Any other store URL"
+                  aria-label="Other Marketplace"
+                />
+              </FormField>
+            </FormFieldGrid>
+          </FormSection>
+
           {canDelete ? (
             <>
-              <div className="border-t border-border-subtle" />
+              <div className="border-t border-border-subtle dark:border-white/8" />
               <DangerConfirmRegion onDelete={() => setConfirmOpen(true)} />
             </>
           ) : null}
         </div>
       </div>
 
-      <SheetFooter className="flex-col gap-2 border-t border-border-subtle px-5 py-4">
+      <SheetFooter className="flex-col gap-2 border-t border-border-subtle dark:border-white/8 px-5 py-4">
         {error ? <p className="w-full text-sm text-destructive">{error}</p> : null}
         <div className="flex w-full gap-3">
           <Button
             variant="outline"
             size="default"
-            className="flex-1"
+            className="flex-1 dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
             onClick={onClose}
             disabled={updateLead.isPending}
           >

@@ -48,7 +48,18 @@ class ProcessInboundNotificationJob implements ShouldQueue
         $result = $provider->fetchSince($notification->mailbox, $sync->sync_cursor);
 
         foreach ($result->messages as $message) {
-            $inbound->ingest($message);
+            // Per-message isolation: one message that fails to ingest must not abort the batch or block the
+            // cursor advance below — a thrown ingest would otherwise leave the cursor unmoved and re-fetch
+            // the same poison on every redelivery, stalling the whole mailbox.
+            try {
+                $inbound->ingest($message);
+            } catch (\Throwable $e) {
+                Log::error('outreach.inbound.ingest_failed', [
+                    'mailbox' => $notification->mailbox,
+                    'message_id' => $message->messageId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
 
         if ($result->cursor !== null) {

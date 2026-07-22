@@ -15,7 +15,10 @@ export function LeadsToolbar({ onImport, onCreate, onExport, exporting }: Props)
   const { can } = usePermissions();
 
   return (
-    <div className="flex items-center gap-2">
+    // `ml-auto` keeps the action group right-aligned even when the row wraps: `justify-between` on
+    // the parent aligns a lone wrapped item to the start, which left-aligned these buttons at ~1024px
+    // (sidebar still expanded, viewport not yet wide enough). No effect when both fit on one row.
+    <div className="ml-auto flex items-center gap-2">
       {can("leads.import") ? (
         <Button variant="outline" onClick={onImport}>
           Import

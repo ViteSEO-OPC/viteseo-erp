@@ -232,11 +232,13 @@ export type LeadStatusSummaryItem = {
 
 // Static tab metadata (unchanged UI) — count/active/href are derived from live data + URL below.
 const STATUS_SUMMARY_META: { key: string; label: string; className: string }[] = [
-  { key: "total", label: "TOTAL", className: "text-foreground" },
-  { key: "new", label: "NEW", className: "text-blue-500" },
-  { key: "contacted", label: "CONTACTED", className: "text-yellow-800" },
-  { key: "qualified", label: "QUALIFIED", className: "text-green-700" },
-  { key: "declined", label: "DECLINED", className: "text-red-500" },
+  // Sentence-case labels per the approved design (the previous all-caps form was applied in CSS).
+  // Display strings only — `key` drives the counts, the ?status= href, and the active state.
+  { key: "total", label: "Total", className: "text-foreground" },
+  { key: "new", label: "New", className: "text-blue-500" },
+  { key: "contacted", label: "Contacted", className: "text-yellow-800" },
+  { key: "qualified", label: "Qualified", className: "text-green-700" },
+  { key: "declined", label: "Declined", className: "text-red-500" },
 ];
 
 // ⚠ TEMPORARY presentation mapping (tab key → CRM status values) — pending BD terminology.
@@ -289,7 +291,7 @@ export function useLeadStatusSummary() {
       active: joined === currentStatus,
       // Bare drill-down: only ?status= (drops any active priority/search) so the table always
       // matches the displayed count — same overview→drill-down model as the Priority cards.
-      href: joined ? `/leads?status=${joined}` : "/leads",
+      href: joined ? `/zerem/leads?status=${joined}` : "/zerem/leads",
     };
   });
 

@@ -16,10 +16,35 @@ return [
     // Master switch — disabled by default; emitting is a no-op until turned on with a URL + secret.
     'enabled' => (bool) env('N8N_ENABLED', false),
 
-    // CRM → n8n webhook endpoint + HMAC signing secret (header: X-CRM-Signature: sha256=<hex>).
+    // CRM → n8n webhook BASE url + HMAC signing secret (header: X-CRM-Signature: sha256=<hex>).
+    // The base is the n8n webhook ingress (e.g. https://n8n.example/webhook); the per-topic path from
+    // `routes` below is appended to it. A topic with no mapped path is never emitted.
     'webhook_url' => env('N8N_WEBHOOK_URL'),
     'secret' => env('N8N_WEBHOOK_SECRET'),
     'timeout' => (int) env('N8N_WEBHOOK_TIMEOUT', 10),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Topic → n8n webhook path (delivery routing, NOT business logic)
+    |--------------------------------------------------------------------------
+    | Each workflow owns a distinct n8n webhook path. Posting every topic to one URL means only the
+    | single workflow sitting on that path ever fires and the rest are dead. Mapping topic → path makes
+    | every workflow reachable from one base URL without an extra hop.
+    |
+    | This is transport addressing only: which HTTP endpoint an already-decided event is delivered to.
+    | No decision, schedule, or business state is expressed here — the CRM still decides everything and
+    | n8n still only orchestrates. Each value must match the `path` of that workflow's Webhook node.
+    |
+    | A topic absent from this map is intentionally NOT delivered (no workflow consumes it) — e.g.
+    | `email.sent`, which is emitted for future consumers but has no workflow today.
+    */
+    'routes' => [
+        'proposal.sent' => env('N8N_PATH_PROPOSAL_SENT', 'crm-proposal-sent'),
+        'lead.qualified' => env('N8N_PATH_LEAD_QUALIFIED', 'crm-lead-qualified'),
+        'reminder.due' => env('N8N_PATH_REMINDER_DUE', 'crm-reminder-due'),
+        'follow-up.completed' => env('N8N_PATH_FOLLOW_UP_COMPLETED', 'crm-follow-up-completed'),
+        'deal.won' => env('N8N_PATH_DEAL_WON', 'crm-deal-won'),
+    ],
 
     // n8n → CRM scoped service account (provisioned by `php artisan n8n:token`).
     'service_account' => [
