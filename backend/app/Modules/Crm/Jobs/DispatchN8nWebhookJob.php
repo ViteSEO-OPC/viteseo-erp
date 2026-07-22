@@ -27,12 +27,14 @@ class DispatchN8nWebhookJob implements ShouldQueue
 
     /**
      * @param  array<string, mixed>  $envelope
+     * @param  string  $url  Fully-resolved delivery endpoint (base + the topic's workflow path),
+     *                       resolved by N8nWebhookEmitter so routing is decided once, at emit time.
      */
-    public function __construct(public readonly array $envelope) {}
+    public function __construct(public readonly array $envelope, public readonly string $url) {}
 
     public function handle(): void
     {
-        $url = (string) config('n8n.webhook_url');
+        $url = $this->url;
         if ($url === '') {
             return;
         }
