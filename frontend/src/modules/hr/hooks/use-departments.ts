@@ -15,6 +15,9 @@ import type { DepartmentInput } from "@/modules/hr/types/department";
 // One query key so every mutation can invalidate the list — that refetch IS how
 // the table refreshes after create/edit/delete (plan §5.5a).
 const DEPARTMENTS_KEY = ["hr", "departments"] as const;
+// Assigning employees to roles edits employee records, so their directory must
+// refetch too.
+const EMPLOYEES_KEY = ["hr", "employees"] as const;
 
 export function useDepartments() {
   return useQuery({
@@ -27,7 +30,10 @@ export function useCreateDepartment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: DepartmentInput) => createDepartment(input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: DEPARTMENTS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DEPARTMENTS_KEY });
+      qc.invalidateQueries({ queryKey: EMPLOYEES_KEY });
+    },
   });
 }
 
@@ -36,7 +42,10 @@ export function useUpdateDepartment() {
   return useMutation({
     mutationFn: ({ id, input }: { id: number; input: DepartmentInput }) =>
       updateDepartment(id, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: DEPARTMENTS_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DEPARTMENTS_KEY });
+      qc.invalidateQueries({ queryKey: EMPLOYEES_KEY });
+    },
   });
 }
 

@@ -12,7 +12,7 @@ class LeaveType extends Model
 
     protected $table = 'hr_leave_types';
 
-    protected $fillable = ['name', 'code', 'days_per_year', 'is_paid', 'color', 'allow_backdated', 'backdate_limit_days'];
+    protected $fillable = ['name', 'code', 'days_per_year', 'is_paid', 'color', 'description', 'allow_backdated', 'backdate_limit_days'];
 
     protected $casts = [
         // Paid leave is whole-day only (half-days are a separate unpaid request).

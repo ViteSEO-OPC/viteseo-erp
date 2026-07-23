@@ -25,6 +25,7 @@ class StoreLeaveTypeRequest extends FormRequest
             'days_per_year' => ['sometimes', 'integer', 'min:0', 'max:365'],
             'is_paid' => ['sometimes', 'boolean'],
             'color' => ['nullable', 'string', 'max:20'],
+            'description' => ['nullable', 'string', 'max:1000'],
             'allow_backdated' => ['sometimes', 'boolean'],
             // Only meaningful when backdating is allowed; NULL = no limit.
             'backdate_limit_days' => ['nullable', 'integer', 'min:1', 'max:365'],

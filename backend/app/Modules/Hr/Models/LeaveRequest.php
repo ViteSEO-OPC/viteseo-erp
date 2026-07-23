@@ -29,6 +29,7 @@ class LeaveRequest extends Model
         'cancelled_at',
         'cancelled_by',
         'cancel_reason',
+        'deducted_from',
     ];
 
     protected $casts = [
