@@ -14,9 +14,9 @@ import {
   useDeleteTask,
   useGroup,
   useGroups,
+  useProject,
   useUpdateSubtask,
   useUpdateTask,
-  useUsers,
 } from '../../hooks';
 import {
   activityLine,
@@ -278,8 +278,19 @@ export function ViewTaskBody({
   const update = useUpdateTask(projectId);
   const deleteTask = useDeleteTask(projectId);
   const deleteSubtask = useDeleteSubtask(task.id);
-  const usersQuery = useUsers();
-  const users = usersQuery.data ?? [];
+  // Assignees are restricted to this project's members — not the whole user
+  // directory. (Group tasks draw their roster from the group, see below.)
+  const projectQuery = useProject(projectId);
+  const users = useMemo(() => projectQuery.data?.members ?? [], [projectQuery.data]);
+  // Options for the individual-assignee picker: the project's members, plus the
+  // task's current assignee if they've since been removed from the project — so
+  // an existing assignment still renders instead of silently blanking out.
+  const individualAssigneeOptions = useMemo(() => {
+    if (task.assignee && !users.some((u) => u.id === task.assignee!.id)) {
+      return [task.assignee, ...users];
+    }
+    return users;
+  }, [users, task.assignee]);
 
   const [confirmDeleteTask, setConfirmDeleteTask] = useState(false);
   const [subtaskToDelete, setSubtaskToDelete] = useState<Subtask | null>(null);
@@ -379,7 +390,7 @@ export function ViewTaskBody({
   // individual assignee / group being picked; otherwise the task's current one.
   const workloadUser: User | null = editing
     ? assignmentType === 'individual' && !typeChanged
-      ? (users.find((u) => String(u.id) === String(assigneeId)) ?? null)
+      ? (individualAssigneeOptions.find((u) => String(u.id) === String(assigneeId)) ?? null)
       : null
     : (task.assignee ?? null);
   const workloadGroup = editing
@@ -893,7 +904,7 @@ export function ViewTaskBody({
                   onChange={(e) => setAssigneeId(e.target.value)}
                 >
                   <option value="">Unassigned</option>
-                  {users.map((u) => (
+                  {individualAssigneeOptions.map((u) => (
                     <option key={u.id} value={String(u.id)}>
                       {u.name}
                     </option>
