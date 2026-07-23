@@ -28,10 +28,12 @@ use App\Modules\Crm\Listeners\EmitReminderDueWebhook;
 use App\Modules\Crm\Listeners\EscalateUnansweredFollowUp;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
+use App\Modules\Crm\Models\Call;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\Note;
 use App\Modules\Crm\Models\PlannerEvent;
+use App\Modules\Crm\Policies\CallPolicy;
 use App\Modules\Crm\Policies\EmailPolicy;
 use App\Modules\Crm\Policies\LeadPolicy;
 use App\Modules\Crm\Policies\NotePolicy;
@@ -65,6 +67,7 @@ class CrmServiceProvider extends ServiceProvider
         Note::class => NotePolicy::class,
         Email::class => EmailPolicy::class,
         PlannerEvent::class => PlannerEventPolicy::class,
+        Call::class => CallPolicy::class,
         User::class => UserPolicy::class,
     ];
 

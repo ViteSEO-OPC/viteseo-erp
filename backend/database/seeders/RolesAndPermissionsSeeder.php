@@ -157,6 +157,9 @@ class RolesAndPermissionsSeeder extends Seeder
             'crm.reports.view', 'crm.reports.export',
             // Planner (module branded "Planner"; permission namespace stays `calendar`).
             'crm.calendar.view', 'crm.calendar.create', 'crm.calendar.edit', 'crm.calendar.delete',
+            // Calling Workspace — read Call History (crm.calls.view) and log/conclude a call
+            // (crm.calls.log). Calls are Planner-driven; see CallSessionService.
+            'crm.calls.view', 'crm.calls.log',
             'crm.dashboard.view',
             'crm.users.view', 'crm.users.create', 'crm.users.edit', 'crm.users.delete',
         ];
@@ -191,6 +194,8 @@ class RolesAndPermissionsSeeder extends Seeder
             'crm.lead.notes.create', 'crm.lead.notes.edit', 'crm.lead.notes.delete',
             'crm.follow-ups.view', 'crm.follow-ups.create', 'crm.follow-ups.edit',
             'crm.calendar.view', 'crm.calendar.create', 'crm.calendar.edit', 'crm.calendar.delete',
+            // A BD runs the Calling Workspace — logs calls and reads their own leads' Call History.
+            'crm.calls.view', 'crm.calls.log',
             'crm.dashboard.view',
         ]);
 

@@ -176,7 +176,9 @@ export type ActivityApi = {
     | "auth.logout"
     | "note.created"
     | "note.updated"
-    | "note.deleted";
+    | "note.deleted"
+    | "call.started"
+    | "call.completed";
   description: string;
   actor: string | null;
   changes: { changed?: string[]; from?: string; from_name?: string } | null;
@@ -193,6 +195,7 @@ export function activityIcon(event: ActivityApi["event"]): ActivityType {
   if (event === "email.sent" || event === "email.received") return "email";
   if (event === "auth.login" || event === "auth.logout") return "auth";
   if (event === "note.created" || event === "note.updated" || event === "note.deleted") return "note";
+  if (event === "call.started" || event === "call.completed") return "call";
 
   return "ai";
 }
@@ -227,6 +230,8 @@ const EVENT_VERBS: Record<string, string> = {
   "note.created": "added a note on",
   "note.updated": "edited a note on",
   "note.deleted": "deleted a note on",
+  "call.started": "started a call with",
+  "call.completed": "logged a call with",
 };
 
 function eventVerb(event: string): string {

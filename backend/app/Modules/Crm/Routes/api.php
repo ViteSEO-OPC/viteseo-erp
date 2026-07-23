@@ -4,6 +4,7 @@ use App\Modules\Crm\Controllers\ActivityController;
 use App\Modules\Crm\Controllers\Auth\MeController;
 use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
+use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
@@ -209,6 +210,24 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::match(['put', 'patch'], '/planner-events/{plannerEvent}', [PlannerEventController::class, 'update'])
             ->can('update', 'plannerEvent');
         Route::delete('/planner-events/{plannerEvent}', [PlannerEventController::class, 'destroy'])->can('delete', 'plannerEvent');
+
+        // Calling Workspace — call attempts are Planner-driven: every attempt belongs to a planner
+        // event (created on the fly for an ad-hoc call). ALL state changes route through
+        // CallSessionService; the controller never persists a Call. `crm.calls.view` gates reading (Call
+        // History), `crm.calls.log` gates logging/concluding. Read + start authorize on the parent lead
+        // or event (ownership); complete/discard authorize via CallPolicy@update. Domain-rule breaches
+        // (single-active-call, already-concluded) surface as 422 from the service.
+        Route::get('/leads/{lead}/calls', [CallController::class, 'index'])
+            ->middleware('permission:crm.calls.view')
+            ->can('view', 'lead');
+        Route::post('/leads/{lead}/calls', [CallController::class, 'storeForLead'])
+            ->middleware('permission:crm.calls.log')
+            ->can('view', 'lead');
+        Route::post('/planner-events/{plannerEvent}/calls', [CallController::class, 'storeForEvent'])
+            ->middleware('permission:crm.calls.log')
+            ->can('view', 'plannerEvent');
+        Route::patch('/calls/{call}/complete', [CallController::class, 'complete'])->can('update', 'call');
+        Route::patch('/calls/{call}/discard', [CallController::class, 'discard'])->can('update', 'call');
 
         // Team Accounts (user management). Policy-guarded (users.* permissions); Super Admin bypasses
         // via Gate::before. BD Manager has no users.* permission → 403.

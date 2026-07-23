@@ -192,6 +192,17 @@ class Lead extends Model
     }
 
     /**
+     * Every call attempt made to this lead across all its Planner Events — the source for the Lead
+     * Details "Call History" projection. Ordered newest-first (most recent attempt at the top).
+     *
+     * @return HasMany<Call, $this>
+     */
+    public function calls(): HasMany
+    {
+        return $this->hasMany(Call::class)->latest();
+    }
+
+    /**
      * Website Intelligence audit findings (1:1). Data-provider output only — availability, structure,
      * business info, and digital-presence observations. Never a Lead Score / Status / workflow field.
      *

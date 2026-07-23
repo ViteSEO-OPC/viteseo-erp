@@ -43,6 +43,10 @@ export const queryKeys = {
     // Per-lead rendered email templates (GET /leads/{lead}/email-templates) — Purpose+Tone → Subject+Body
     // rendered for this lead. Nested under detail(id).
     emailTemplates: (id: string) => [...queryKeys.leads.detail(id), "email-templates"] as const,
+    // Per-lead call attempts (GET /leads/{lead}/calls) — the Calling Workspace Call History AND the
+    // active-call session. Nested under detail(id), like activities/notes, so lead-detail invalidations
+    // cascade and call writes touch only this lead's data by prefix.
+    calls: (id: string) => [...queryKeys.leads.detail(id), "calls"] as const,
   },
   niches: {
     // Business Niche registry (GET /niches) — the vocabulary behind the shared Business Niche

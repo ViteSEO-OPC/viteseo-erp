@@ -14,8 +14,8 @@ import { ScheduleFollowUpModal } from "@/modules/crm/features/leads/components/s
 import { WonConfirmDialog } from "@/modules/crm/features/leads/components/won-confirm-dialog";
 import { LostConfirmDialog } from "@/modules/crm/features/leads/components/lost-confirm-dialog";
 import { DiscussionNotes } from "@/modules/crm/features/leads/components/discussion-notes";
-import { EmailThread } from "@/modules/crm/features/leads/components/email-thread";
-import { ActivityTimeline } from "@/modules/crm/features/leads/components/activity-timeline";
+import { ActiveCallPanel } from "@/modules/crm/features/leads/components/active-call-panel";
+import { LeadTimelinePanel } from "@/modules/crm/features/leads/components/lead-timeline-panel";
 import { EditLeadDrawer } from "@/modules/crm/features/leads/components/edit-lead-drawer";
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
@@ -73,11 +73,17 @@ export function LeadDetailPage() {
           onDelete={() => setConfirmOpen(true)}
         />
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[63fr_37fr] lg:gap-8">
+        {/* Dominant left content region + a narrow right sidebar, matching the reference proportions. */}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[76fr_24fr] lg:gap-6">
           <div className="flex flex-col gap-6">
             <LeadSummaryCard lead={lead} />
-            <EmailThread leadId={params.id} />
-            <DiscussionNotes leadId={params.id} />
+            {/* Internal Notes + the Calling Workspace share a row (reference layout): Notes dominant
+                (~71%), Active Call a narrow console (~29%). Stretches to equal height. Below xl the two
+                stack (Notes above Call) — the tablet layout — and collapse into the single mobile column. */}
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[71fr_29fr]">
+              <DiscussionNotes leadId={params.id} />
+              <ActiveCallPanel leadId={params.id} />
+            </div>
           </div>
           <div className="flex flex-col gap-6">
             <QuickActionsCard
@@ -97,10 +103,11 @@ export function LeadDetailPage() {
               onWon={() => setWonOpen(true)}
               onLost={() => setLostOpen(true)}
             />
-            <ActivityTimeline
-              events={activities.data}
-              isLoading={activities.isLoading}
-              isError={activities.isError}
+            <LeadTimelinePanel
+              leadId={params.id}
+              activities={activities.data}
+              activitiesLoading={activities.isLoading}
+              activitiesError={activities.isError}
             />
           </div>
         </div>
