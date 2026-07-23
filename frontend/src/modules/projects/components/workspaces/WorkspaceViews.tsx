@@ -3,7 +3,8 @@
 import { Suspense, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useIsManager } from "@/core/auth/AuthProvider";
+import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
+import { usePersistentState } from "@/core/use-persistent-state";
 import { celebrateTask } from "@/core/lib/confetti";
 import type { User } from "@/core/types";
 import {
@@ -62,7 +63,16 @@ function WorkspaceViewsInner({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [view, setView] = useState<ViewKey>("list");
+  const { user } = useAuth();
+  // Remember each user's last-picked board view (List / Kanban / Calendar).
+  const [storedView, setView] = usePersistentState<ViewKey>(
+    user ? `pm:board-view:${user.id}` : null,
+    "list",
+  );
+  // Guard against a stale/unknown persisted key so a bad value can't blank the board.
+  const view: ViewKey = VIEWS.some((v) => v.key === storedView)
+    ? storedView
+    : "list";
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [deadlineSort, setDeadlineSort] = useState<DeadlineSort>(null);
