@@ -1,3 +1,4 @@
+import { RequireManager } from '@/core/auth/RequireRole';
 import { WorkspaceDetailView } from '@/modules/projects/components/workspaces/WorkspaceDetailView';
 
 export default async function WorkspaceDetailPage({
@@ -6,5 +7,9 @@ export default async function WorkspaceDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  return <WorkspaceDetailView workspaceId={id} />;
+  return (
+    <RequireManager redirectTo="/sprintly/403">
+      <WorkspaceDetailView workspaceId={id} />
+    </RequireManager>
+  );
 }

@@ -28,6 +28,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Proposal Follow-up cadence (workflow #1)
+    |--------------------------------------------------------------------------
+    | How long after a proposal is sent the follow-up Planner event starts, and its reminder window.
+    | These are BUSINESS POLICY and therefore live here, not in the n8n workflow JSON: the CRM computes
+    | the concrete `starts_at` and publishes it on the `proposal.sent` event, and n8n passes that value
+    | straight through to POST /planner-events. Planner remains the sole scheduler (FROZEN #9) and n8n
+    | never decides a "when" — changing the cadence is a CRM config change, not a workflow re-import.
+    */
+    'follow_up' => [
+        // Minutes from the proposal send until the follow-up task starts. Default 4320 = 3 days.
+        'delay_minutes' => (int) env('AUTOMATION_FOLLOW_UP_DELAY_MINUTES', 4320),
+        'reminder_minutes' => (int) env('AUTOMATION_FOLLOW_UP_REMINDER_MINUTES', 60),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | No-Response Escalation (workflow #4)
     |--------------------------------------------------------------------------
     | When a follow-up completes without a reply, the CRM creates a Planner escalation task for the

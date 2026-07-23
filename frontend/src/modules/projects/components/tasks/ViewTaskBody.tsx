@@ -298,7 +298,7 @@ export function ViewTaskBody({
 
   const { user } = useAuth();
   const isManager = useIsManager();
-
+  console.log(isManager)
   // Group-assigned task → subtask assignees and co-assignees come from the group.
   const isGroupTask = task.assignment_type === 'group';
   const groupQuery = useGroup(isGroupTask ? task.group_id ?? '' : '');

@@ -43,8 +43,8 @@ class StorePlannerEventRequest extends FormRequest
 
             // Relationship seams. lead_id/deal_id are validated against existing tables;
             // company_id/campaign_id are accepted but NOT exists-validated (no table yet).
-            'lead_id' => ['nullable', 'integer', 'exists:leads,id'],
-            'deal_id' => ['nullable', 'integer', 'exists:deals,id'],
+            'lead_id' => ['nullable', 'integer', 'exists:crm_leads,id'],
+            'deal_id' => ['nullable', 'integer', 'exists:crm_deals,id'],
             'company_id' => ['nullable', 'integer'],
             'campaign_id' => ['nullable', 'integer'],
 

@@ -7,7 +7,7 @@
       "response": {
         "type": "navigate",
         "text": "Opening your **Dashboard** — live lead totals, the status breakdown, and recent activity. (Admins see the Management Dashboard; BDMs see their own.)",
-        "action": { "type": "navigate", "target": "/dashboard" }
+        "action": { "type": "navigate", "target": "/zerem/dashboard" }
       }
     },
     {
@@ -16,7 +16,7 @@
       "response": {
         "type": "navigate",
         "text": "Your live KPIs — **Total Leads**, **High Priority**, and **Interested** — are on the **Dashboard**. (Follow-ups Due and Conversion Rate are display-only placeholders until the KPI Engine ships.) Opening it…",
-        "action": { "type": "navigate", "target": "/dashboard" }
+        "action": { "type": "navigate", "target": "/zerem/dashboard" }
       }
     },
     {
@@ -33,7 +33,7 @@
       "response": {
         "type": "navigate",
         "text": "Your live weekly view is on the **Dashboard** — total leads, the *Leads by Status* breakdown, and recent activity. Opening it…",
-        "action": { "type": "navigate", "target": "/dashboard" }
+        "action": { "type": "navigate", "target": "/zerem/dashboard" }
       }
     },
     {
@@ -42,7 +42,7 @@
       "response": {
         "type": "navigate",
         "text": "The live lead counts and *Leads by Status* breakdown live on the **Dashboard**, and the full list is on **Leads**. Opening the Dashboard…",
-        "action": { "type": "navigate", "target": "/dashboard" }
+        "action": { "type": "navigate", "target": "/zerem/dashboard" }
       }
     },
     {
@@ -51,7 +51,7 @@
       "response": {
         "type": "navigate",
         "text": "Opening **Activity Logs** — the live, append-only feed of lead changes, emails, notes, and sign-ins (scoped to what you can see).",
-        "action": { "type": "navigate", "target": "/activity-logs" }
+        "action": { "type": "navigate", "target": "/zerem/activity-logs" }
       }
     },
 
@@ -60,7 +60,7 @@
       "keywords": ["show hot leads", "hot leads", "hottest leads", "who should i call today", "who should i call", "priority leads", "which prospect should i contact first", "which prospect should i contact", "who should i contact", "who should i contact first", "who to contact first", "who do i reach out to first", "who should i reach out to", "who to reach out to", "which lead should i prioritize", "who should i prioritize", "who should i focus on", "what should i work on first", "what should i work on", "who needs my attention today", "who needs my attention", "recommended contacts", "top priority leads", "prioritize leads"],
       "response": {
         "type": "lead_priority",
-        "action": { "type": "navigate", "target": "/leads?priority=high" }
+        "action": { "type": "navigate", "target": "/zerem/leads?priority=high" }
       }
     },
     {
@@ -69,7 +69,7 @@
       "response": {
         "type": "navigate",
         "text": "Opening **Leads** filtered to the *New* status…",
-        "action": { "type": "navigate", "target": "/leads?status=new" }
+        "action": { "type": "navigate", "target": "/zerem/leads?status=new" }
       }
     },
     {
@@ -78,7 +78,7 @@
       "response": {
         "type": "navigate",
         "text": "**Leads** is sorted newest-first by default — opening it…",
-        "action": { "type": "navigate", "target": "/leads" }
+        "action": { "type": "navigate", "target": "/zerem/leads" }
       }
     },
     {
@@ -86,7 +86,7 @@
       "keywords": ["highest score", "top score", "highest scoring", "best leads", "top leads"],
       "response": {
         "type": "lead_priority",
-        "action": { "type": "navigate", "target": "/leads?sort=score-desc" }
+        "action": { "type": "navigate", "target": "/zerem/leads?sort=score-desc" }
       }
     },
     {
@@ -95,7 +95,7 @@
       "response": {
         "type": "navigate",
         "text": "Leads with *No Website* are the highest-conversion segment — opening **Leads** filtered to that website status…",
-        "action": { "type": "navigate", "target": "/leads?website_status=no-website" }
+        "action": { "type": "navigate", "target": "/zerem/leads?website_status=no-website" }
       }
     },
     {
@@ -104,7 +104,7 @@
       "response": {
         "type": "navigate",
         "text": "Opening **Leads** filtered to the *Needs Redesign* website status…",
-        "action": { "type": "navigate", "target": "/leads?website_status=needs-redesign" }
+        "action": { "type": "navigate", "target": "/zerem/leads?website_status=needs-redesign" }
       }
     },
     {
@@ -113,7 +113,7 @@
       "response": {
         "type": "navigate",
         "text": "As a BDM, **Leads** already shows only the leads assigned to you (Admins see everyone's). There's no separate *assigned to me* filter — opening **Leads**…",
-        "action": { "type": "navigate", "target": "/leads" }
+        "action": { "type": "navigate", "target": "/zerem/leads" }
       }
     },
     {
@@ -130,7 +130,7 @@
       "response": {
         "type": "navigate",
         "text": "Open any lead from the **Leads** table to see its detail page — score, status, edit, **Assign**, discussion **Notes**, the **Activity Timeline**, and *Draft & send email*. Opening **Leads**…",
-        "action": { "type": "navigate", "target": "/leads" }
+        "action": { "type": "navigate", "target": "/zerem/leads" }
       }
     },
     {
@@ -147,7 +147,7 @@
       "response": {
         "type": "navigate",
         "text": "Each lead's detail page has its own **Activity Timeline**. For every event across the CRM, opening **Activity Logs**…",
-        "action": { "type": "navigate", "target": "/activity-logs" }
+        "action": { "type": "navigate", "target": "/zerem/activity-logs" }
       }
     },
 
@@ -157,7 +157,7 @@
       "response": {
         "type": "navigate",
         "text": "Opening **Outreach** — your lead inbox where you compose and send emails.",
-        "action": { "type": "navigate", "target": "/follow-ups" }
+        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
       }
     },
     {
@@ -166,7 +166,7 @@
       "response": {
         "type": "navigate",
         "text": "Saved **drafts** aren't available yet — the composer doesn't persist drafts (a future Outreach sprint). You can still write and send an email from **Outreach** — opening it…",
-        "action": { "type": "navigate", "target": "/follow-ups" }
+        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
       }
     },
     {
@@ -175,7 +175,7 @@
       "response": {
         "type": "navigate",
         "text": "**Outreach** groups your leads by where the conversation stands — *Awaiting Reply*, *Call-back Req.*, and so on. Opening it…",
-        "action": { "type": "navigate", "target": "/follow-ups" }
+        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
       }
     },
     {
@@ -184,7 +184,7 @@
       "response": {
         "type": "navigate",
         "text": "There's no combined sent-email history yet — sent emails appear in **Activity Logs** and on each lead's **Activity Timeline**. To write one, open **Outreach**…",
-        "action": { "type": "navigate", "target": "/follow-ups" }
+        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
       }
     },
     {
@@ -203,7 +203,7 @@
       "response": {
         "type": "navigate",
         "text": "Sending is real — you send from a lead's *Draft & send email* action or the **Outreach** composer, and it's logged to the activity feed. Opening **Outreach** so you can review and send…",
-        "action": { "type": "navigate", "target": "/follow-ups" }
+        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
       }
     },
 
@@ -230,7 +230,7 @@
       "response": {
         "type": "navigate",
         "text": "Opening **My Performance**. Live today: your *Assigned Leads* count and *Recent Activity*. Conversion, revenue, targets, and follow-up discipline are *Demo* placeholders until the KPI Engine ships.",
-        "action": { "type": "navigate", "target": "/my-performance" }
+        "action": { "type": "navigate", "target": "/zerem/my-performance" }
       }
     },
     {
@@ -256,7 +256,7 @@
       "response": {
         "type": "navigate",
         "text": "Opening **Leads** — search, filter by priority / status / website status / niche, and add, import, assign, or export.",
-        "action": { "type": "navigate", "target": "/leads" }
+        "action": { "type": "navigate", "target": "/zerem/leads" }
       }
     },
 

@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Providers;
 
 use App\Models\User;
+use App\Modules\Crm\Console\Commands\BackfillNichesCommand;
 use App\Modules\Crm\Console\Commands\MailboxWatchCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
@@ -158,6 +159,9 @@ class CrmServiceProvider extends ServiceProvider
                 RecomputeLeadScoresCommand::class,
                 N8nTokenCommand::class,
                 PruneReadNotifications::class,
+                // One-shot Business Niche registry backfill. Not scheduled — run manually once the
+                // canonical built-in list is approved and NicheSeeder has been run.
+                BackfillNichesCommand::class,
             ]);
         }
 

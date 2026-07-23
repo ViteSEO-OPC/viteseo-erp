@@ -13,13 +13,14 @@ export function RecentActivityPanel() {
       <SectionHeader
         title="Recent Activity"
         linkText="Full history"
-        linkHref="/activity-logs"
+        linkHref="/zerem/activity-logs"
+        linkClassName="text-dashboard-link"
       />
       {isLoading && <ActivitySkeleton />}
       {isError && <ErrorState message="Failed to load activity" />}
       {!isLoading && !isError && activities && activities.length > 0 && (
         <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card">
-          <ul className="divide-y divide-border-subtle">
+          <ul className="h-[280px] divide-y divide-border-subtle overflow-y-auto">
             {activities.map((item) => (
               <ActivityItem key={item.id} item={item} />
             ))}

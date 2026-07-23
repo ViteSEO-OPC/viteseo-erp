@@ -22,6 +22,14 @@ return [
     'inbound_provider' => env('OUTREACH_INBOUND_PROVIDER', 'gmail'),
     'mailbox' => env('OUTREACH_MAILBOX', env('MAIL_FROM_ADDRESS')),
 
+    // Inbound recovery (R5): when Gmail prunes the stored historyId (404 on the delta sync), the provider
+    // re-syncs the last N days of INBOX and re-baselines the cursor. Bounded so a long gap can't trigger an
+    // unbounded backfill; mail older than the window in such a gap is logged (outreach.inbound.cursor_expired),
+    // never silently dropped. Configuration only — no schema.
+    'inbound' => [
+        'resync_window_days' => (int) env('OUTREACH_RESYNC_WINDOW_DAYS', 7),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Gmail push provider

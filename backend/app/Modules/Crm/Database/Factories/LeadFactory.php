@@ -11,6 +11,12 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class LeadFactory extends Factory
 {
+    /**
+     * Set explicitly: the factory lives under App\Modules\Crm\, so Laravel's
+     * convention-based resolver cannot infer the model and guesses App\Lead.
+     */
+    protected $model = Lead::class;
+
     protected static ?array $businesses = [
         'Casa Verde Bistro', 'Ironline Auto Care', 'Serenity Spa Makati',
         'Molave Dental Clinic', 'Bluewave Travel & Tours', 'Golden Pacific Realty',

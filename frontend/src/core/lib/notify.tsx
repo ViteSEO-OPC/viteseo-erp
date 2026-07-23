@@ -1,28 +1,32 @@
 "use client";
 
 import { toast as sonner } from "sonner";
-import { Check, X, Info } from "lucide-react";
+import { AlertTriangle, Check, Info, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 /**
- * Figma toast (Components → Pop-ups 163:534): a shared light-teal container with
- * a teal border; only the icon badge + title color change per variant —
- * green for "Approved", red for "Declined", teal for neutral info. This replaces
- * sonner's default all-green look so approvals and declines read differently.
+ * CRM toast card. Each variant carries its own subtle background + border + solid icon badge
+ * (success = green, error = red, warning = amber, info = teal) so outcomes read distinctly.
  *
- * Drop-in for the old `import { toast } from "sonner"`: import as
- * `import { notify as toast } from "@/core/lib/notify"` — the .success/.error/
- * .info(message) call sites keep working, and an optional 2nd arg adds the
- * sub-line copy from the design.
+ * Contrast/theme note: the toast host is mounted in the root <body>, OUTSIDE the CRM's
+ * `.zerem-theme-scope` wrapper, so it always renders against the light `:root` tokens — in both
+ * light and dark app themes. The title therefore uses the dark-teal ink (>10:1 on every pale
+ * variant background) rather than the vibrant per-variant token (globals.css overrides those to
+ * bright values that would fail as text). Variant hue is carried by the badge/border/surface.
+ *
+ * Drop-in for `import { toast } from "sonner"` — import as
+ * `import { notify as toast } from "@/core/lib/notify"`; the .success/.error/.warning/.info
+ * (message, description?) call sites keep working unchanged, including sonner's animation.
  */
-type Variant = "approved" | "declined" | "info";
+type Variant = "success" | "error" | "warning" | "info";
 
-const VARIANTS: Record<Variant, { badge: string; title: string; Icon: LucideIcon }> = {
-  approved: { badge: "bg-success", title: "text-success", Icon: Check },
-  declined: { badge: "bg-danger", title: "text-danger", Icon: X },
-  info: { badge: "bg-brand", title: "text-dark-teal", Icon: Info },
+const VARIANTS: Record<Variant, { surface: string; badge: string; Icon: LucideIcon }> = {
+  success: { surface: "border-success bg-success-subtle", badge: "bg-success", Icon: Check },
+  error: { surface: "border-danger bg-danger-subtle", badge: "bg-danger", Icon: X },
+  warning: { surface: "border-warning bg-warning-subtle", badge: "bg-warning", Icon: AlertTriangle },
+  info: { surface: "border-brand bg-brand-subtle", badge: "bg-brand", Icon: Info },
 };
 
 function ToastCard({
@@ -36,23 +40,28 @@ function ToastCard({
   description?: React.ReactNode;
   toastId: string | number;
 }) {
-  const { badge, title: titleColor, Icon } = VARIANTS[variant];
+  const { surface, badge, Icon } = VARIANTS[variant];
   return (
-    <div className="flex w-[360px] max-w-[calc(100vw-2rem)] items-start gap-3 rounded-xl border border-brand bg-brand-subtle p-4 shadow-lg">
+    <div
+      className={cn(
+        "flex w-[360px] max-w-[calc(100vw-2rem)] items-start gap-3 rounded-xl border p-4 shadow-lg",
+        surface,
+      )}
+    >
       <span className={cn("mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md text-white", badge)}>
         <Icon className="size-5" strokeWidth={3} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className={cn("text-table font-bold leading-tight", titleColor)}>{title}</p>
+        <p className="text-table font-bold leading-tight text-dark-teal">{title}</p>
         {description ? (
-          <p className="mt-1 text-caption text-muted-foreground">{description}</p>
+          <p className="mt-1 text-caption text-dark-teal/70">{description}</p>
         ) : null}
       </div>
       <button
         type="button"
         onClick={() => sonner.dismiss(toastId)}
         aria-label="Dismiss"
-        className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
+        className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-dark-teal/60 transition-colors hover:text-dark-teal"
       >
         <X className="size-4" />
       </button>
@@ -67,10 +76,12 @@ function fire(variant: Variant, title: React.ReactNode, description?: React.Reac
 }
 
 export const notify = {
-  /** Green "Approved"-style toast (positive outcome). */
-  success: (title: React.ReactNode, description?: React.ReactNode) => fire("approved", title, description),
-  /** Red "Declined"-style toast (rejection or failure). */
-  error: (title: React.ReactNode, description?: React.ReactNode) => fire("declined", title, description),
-  /** Neutral teal info toast. */
+  /** Green success toast (positive outcome). */
+  success: (title: React.ReactNode, description?: React.ReactNode) => fire("success", title, description),
+  /** Red error toast (rejection or failure). */
+  error: (title: React.ReactNode, description?: React.ReactNode) => fire("error", title, description),
+  /** Amber warning toast (caution / no-op). */
+  warning: (title: React.ReactNode, description?: React.ReactNode) => fire("warning", title, description),
+  /** Teal info toast (neutral information). */
   info: (title: React.ReactNode, description?: React.ReactNode) => fire("info", title, description),
 };

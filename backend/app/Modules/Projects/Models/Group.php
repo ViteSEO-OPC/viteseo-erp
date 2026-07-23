@@ -29,7 +29,6 @@ class Group extends Model
     protected $table = 'pm_groups';
 
     protected $fillable = [
-        'project_id',
         'name',
         'color',
         'leader_id',
@@ -40,9 +39,11 @@ class Group extends Model
         'archived' => 'boolean',
     ];
 
-    public function project(): BelongsTo
+    /** Projects this group belongs to (a group can span many projects). */
+    public function projects(): BelongsToMany
     {
-        return $this->belongsTo(Project::class, 'project_id');
+        return $this->belongsToMany(Project::class, 'pm_project_group', 'group_id', 'project_id')
+            ->withPivot('created_at');
     }
 
     public function leader(): BelongsTo

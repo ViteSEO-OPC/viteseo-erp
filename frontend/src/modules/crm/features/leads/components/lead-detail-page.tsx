@@ -61,7 +61,7 @@ export function LeadDetailPage() {
 
   return (
     <>
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-6 lg:gap-8">
         <LeadDetailHeader
           title={lead.business}
           subtitle="Restaurant · Makati"
@@ -73,7 +73,7 @@ export function LeadDetailPage() {
           onDelete={() => setConfirmOpen(true)}
         />
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[62fr_38fr]">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[63fr_37fr] lg:gap-8">
           <div className="flex flex-col gap-6">
             <LeadSummaryCard lead={lead} />
             <EmailThread leadId={params.id} />

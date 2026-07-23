@@ -16,6 +16,7 @@ import {
 import { useIsManager } from "@/core/auth/AuthProvider";
 import type { StatusKey } from "../../types";
 import { useProjectChannel } from "../../useProjectChannel";
+import { useForbiddenRedirect } from "../../useForbiddenRedirect";
 import {
   useGroups,
   useProject,
@@ -148,8 +149,31 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const memberBusy =
     projectMembers.add.isPending || projectMembers.remove.isPending;
 
+  // A member requesting a project they aren't assigned to gets a 403 from the
+  // API — send them to the access-denied screen instead of the generic error.
+  const forbidden = useForbiddenRedirect(projectQuery.error);
+
   const isError =
     projectQuery.isError || statusesQuery.isError || tasksQuery.isError;
+
+  if (forbidden) {
+    return (
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <p className="text-ink-soft">Redirecting…</p>
+      </div>
+    );
+  }
+
+  // Don't render the detail scaffold with placeholder data while the project is
+  // still loading — otherwise an unauthorized member sees a blank project page
+  // for a moment before the 403 arrives and redirects them.
+  if (projectQuery.isLoading) {
+    return (
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <p className="text-ink-soft">Loading project…</p>
+      </div>
+    );
+  }
 
   if (isError) {
     return (
@@ -168,8 +192,9 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 
   return (
     <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-      {/* Header */}
-      {project && (
+      {/* Header — "Back to workspace" only for managers; members can't open the
+          workspace detail view, so the link would dead-end for them. */}
+      {isManager && project && (
         <Link
           href={`/sprintly/workspaces/${project.workspace_id}`}
           className="inline-flex items-center gap-1 text-sm font-semibold text-ink-soft hover:text-ink"
@@ -308,7 +333,8 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           </Card>
         </div>
 
-        {/* RIGHT COLUMN — Team Members */}
+        {/* RIGHT COLUMN — Team Members + Groups */}
+        <div className="space-y-6">
         <Card className="rounded-2xl p-6 sm:p-8">
           <h2 className="text-2xl font-bold text-ink">Team Members</h2>
           <div className="mt-6 space-y-1">
@@ -348,6 +374,43 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
             </button>
           )}
         </Card>
+
+        {/* Groups — auto-attached when all of a group's members are on this
+            project. Read-only here; managed on the Groups page. */}
+        <Card className="rounded-2xl p-6 sm:p-8">
+          <h2 className="text-2xl font-bold text-ink">Groups</h2>
+          <div className="mt-4 space-y-2">
+            {(project?.groups ?? []).length === 0 ? (
+              <p className="py-2 text-sm text-ink-soft">
+                No groups yet. A group joins automatically once every one of its
+                members is on this project.
+              </p>
+            ) : (
+              (project?.groups ?? []).map((g) => (
+                <div
+                  key={g.id}
+                  className="flex items-center gap-3 rounded-lg border border-line px-3 py-2.5"
+                >
+                  <span
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                    style={{ backgroundColor: g.color }}
+                    aria-hidden
+                  >
+                    {g.name.charAt(0).toUpperCase()}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold text-ink">{g.name}</p>
+                    <p className="truncate text-xs text-ink-soft">
+                      {g.members_count ?? g.members?.length ?? 0} members
+                      {g.leader ? ` · Led by ${g.leader.name}` : ""}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+        </div>
       </div>
 
       {isManager && (

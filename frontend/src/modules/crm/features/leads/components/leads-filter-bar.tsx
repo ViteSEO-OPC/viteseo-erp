@@ -94,8 +94,11 @@ export function LeadsFilterBar({
           />
         </button>
 
-        {/* Sort dropdown + Clear — always in the header row */}
+        {/* Clear then Sort — order per the approved design. Behaviour unchanged. */}
         <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={onClear} disabled={clearDisabled}>
+            Clear
+          </Button>
           <span className="text-sm text-muted-foreground">Sort</span>
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(buttonVariants({ variant: "outline" }), "gap-1.5")}>
@@ -112,9 +115,6 @@ export function LeadsFilterBar({
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="outline" onClick={onClear} disabled={clearDisabled}>
-            Clear
-          </Button>
         </div>
       </div>
 

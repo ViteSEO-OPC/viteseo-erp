@@ -1,26 +1,33 @@
-import { LeadsPriorityCard } from "@/modules/crm/features/leads/components/leads-priority-card";
+import { PriorityCard } from "@/modules/crm/features/dashboard/components/priority-card";
 import { PrioritySkeleton } from "@/modules/crm/features/dashboard/components/priority-skeleton";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
-// Leads-page Priority Summary cards: High/Medium/Low counts aggregated from leads.priority
-// (GET /leads/priority-summary) — the SAME column the table's Priority badge reads, so the cards
-// and the table can never disagree. Filter-aware via `filters` (the current table filters minus
-// priority), so the cards describe the same dataset the table shows.
-import { useLeadsPrioritySummary } from "@/modules/crm/features/leads/hooks/use-leads-priority-summary";
+import { usePriorityBuckets } from "@/modules/crm/features/dashboard/hooks/use-dashboard-data";
 
+/**
+ * Lead Priority Overview — the SAME component and the SAME data source the Dashboard renders
+ * (GET /dashboard/priority-buckets). The Dashboard is the entry point into this workspace, so a
+ * user clicking a card there must find the identical segmentation here, not a different report.
+ *
+ * `filters` carries the current table filters so the cards stay in step with the list. The endpoint
+ * deliberately ignores `website_status` itself, so drilling into one bucket never zeroes the
+ * other two.
+ */
 type Props = {
   filters: Record<string, string>;
 };
 
 export function LeadsKpiRow({ filters }: Props) {
-  const { data, isLoading, isError } = useLeadsPrioritySummary(filters);
+  const { data: buckets, isLoading, isError } = usePriorityBuckets(filters);
 
   if (isLoading) return <PrioritySkeleton />;
   if (isError) return <ErrorState message="Failed to load priority summary" />;
-  if (!data) return null;
+  if (!buckets) return null;
+
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-      {data.map((bucket) => (
-        <LeadsPriorityCard key={bucket.priority} bucket={bucket} />
+      {buckets.map((bucket) => (
+        // "Click to filter": on this page the card narrows the list instead of navigating away.
+        <PriorityCard key={bucket.websiteStatus} bucket={bucket} action="filter" />
       ))}
     </div>
   );

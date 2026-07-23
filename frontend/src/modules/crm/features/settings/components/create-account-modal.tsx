@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { X, RefreshCw, Copy, CheckCircle2 } from "lucide-react";
-import { toast } from "sonner";
+import { notify as toast } from "@/core/lib/notify";
 import {
   Dialog,
   DialogContent,

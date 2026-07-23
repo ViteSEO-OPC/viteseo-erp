@@ -127,6 +127,32 @@ export function CreateTaskBody({
   const removeDraftSubtask = (key: string) =>
     setSubtasks((prev) => prev.filter((s) => s.key !== key));
 
+  // --- Draft links: composed here, attached right after the task on submit. ---
+  const [links, setLinks] = useState<{ key: string; url: string }[]>([]);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkError, setLinkError] = useState('');
+  const linkKey = useRef(0);
+
+  const addDraftLink = () => {
+    const url = linkUrl.trim();
+    if (!url) return;
+    // Validate up front so a bad URL fails here, not after the task is created.
+    try {
+      new URL(url);
+    } catch {
+      setLinkError('Enter a valid URL (including https://).');
+      return;
+    }
+    setLinks((prev) => [...prev, { key: `l${linkKey.current++}`, url }]);
+    setLinkUrl('');
+    setLinkError('');
+    setLinkOpen(false);
+  };
+
+  const removeDraftLink = (key: string) =>
+    setLinks((prev) => prev.filter((l) => l.key !== key));
+
   const submit = handleSubmit(async (data) => {
     setSubtaskError('');
     const payload: CreateTaskPayload = {
@@ -145,7 +171,7 @@ export function CreateTaskBody({
     } else {
       payload.group_id = data.group_id;
     }
-    // Create the task first, then attach each draft sub-task to the new task.
+    // Create the task first, then attach each draft sub-task and link to it.
     const newTask = await create.mutateAsync(payload);
     try {
       for (const s of subtasks) {
@@ -158,15 +184,19 @@ export function CreateTaskBody({
           deadline: s.deadline,
         });
       }
+      for (const l of links) {
+        await projectsApi.addTaskLink(newTask.id, l.url);
+      }
     } catch {
       // The task exists; surface the partial failure and keep the modal open so
       // the remaining drafts aren't silently lost.
-      setSubtaskError('The task was created, but a sub-task could not be added.');
+      setSubtaskError('The task was created, but a sub-task or link could not be added.');
       return;
     }
     reset();
     setEffort(5);
     setSubtasks([]);
+    setLinks([]);
     onClose();
   });
 
@@ -241,17 +271,76 @@ export function CreateTaskBody({
             </div>
           )}
 
-          {/* Links attach after the task exists. */}
+          {/* Links — composed now, attached to the task on submit. */}
           <div>
             <p className={`mb-2 ${sectionLabel}`}>Links</p>
-            <button
-              type="button"
-              disabled
-              title="Add links after creating the task"
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-[#c9c9ba] py-3 text-sm font-semibold text-ink-soft"
-            >
-              <PlusIcon className="h-4 w-4" /> Add Link
-            </button>
+            {linkOpen ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  autoFocus
+                  value={linkUrl}
+                  onChange={(e) => {
+                    setLinkUrl(e.target.value);
+                    if (linkError) setLinkError('');
+                  }}
+                  placeholder="https://…"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addDraftLink();
+                    }
+                  }}
+                />
+                <Button type="button" size="sm" className={TEAL} onClick={addDraftLink}>
+                  Add
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setLinkUrl('');
+                    setLinkError('');
+                    setLinkOpen(false);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setLinkOpen(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line py-3 text-sm font-semibold text-ink-soft hover:border-brand hover:text-ink"
+              >
+                <PlusIcon className="h-4 w-4" /> Add Link
+              </button>
+            )}
+            {linkError && <p className="mt-1 text-sm text-danger">{linkError}</p>}
+            {links.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {links.map((l) => (
+                  <li key={l.key} className="flex items-center gap-2 text-sm">
+                    <a
+                      href={l.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="min-w-0 flex-1 truncate text-brand underline hover:text-brand-hover"
+                    >
+                      {l.url}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => removeDraftLink(l.key)}
+                      aria-label="Remove link"
+                      className="shrink-0 text-ink-faint transition-colors hover:text-danger"
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </DetailsPanel>
 

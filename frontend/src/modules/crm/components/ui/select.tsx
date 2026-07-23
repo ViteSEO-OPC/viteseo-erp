@@ -70,8 +70,19 @@ function SelectContent({
     SelectPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
   >) {
+  // Portals default to <body>, outside Zerem's `.zerem-theme-scope` theme wrapper, so the listbox
+  // would render against the light :root tokens in dark mode. Anchor the portal to the scope so it
+  // inherits the active theme; the Positioner still anchors the popup to its trigger. Falls back to
+  // the default body portal wherever the scope is absent.
+  // Resolve the theme-scope element once, post-mount (client-only — the DOM must exist to query it,
+  // and it isn't reliably present during SSR/first render). The single setState here is intentional.
+  const [container, setContainer] = React.useState<HTMLElement | null>(null)
+  React.useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time container resolution
+    setContainer(document.querySelector<HTMLElement>(".zerem-theme-scope"))
+  }, [])
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={container ?? undefined}>
       <SelectPrimitive.Positioner
         side={side}
         sideOffset={sideOffset}

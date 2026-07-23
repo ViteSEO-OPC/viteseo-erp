@@ -41,14 +41,18 @@ class GroupController extends Controller
 
         $group = $this->groupService->create($request->validated());
 
-        return new GroupResource($group->load('project', 'leader'));
+        return new GroupResource(
+            $group->load('projects', 'leader', 'members')->loadCount(['members', 'projects']),
+        );
     }
 
     public function show(Group $group): GroupResource
     {
         $this->authorize('view', $group);
 
-        return new GroupResource($group->load('project', 'leader', 'members'));
+        return new GroupResource(
+            $group->load('projects', 'leader', 'members')->loadCount(['members', 'projects']),
+        );
     }
 
     public function update(UpdateGroupRequest $request, Group $group): GroupResource
@@ -57,7 +61,9 @@ class GroupController extends Controller
 
         $group = $this->groupService->update($group, $request->validated());
 
-        return new GroupResource($group->load('project', 'leader'));
+        return new GroupResource(
+            $group->load('projects', 'leader', 'members')->loadCount(['members', 'projects']),
+        );
     }
 
     public function destroy(Group $group): Response
@@ -79,7 +85,9 @@ class GroupController extends Controller
 
         $group = $this->groupService->addMember($group, (int) $validated['user_id']);
 
-        return new GroupResource($group->load('project', 'leader', 'members'));
+        return new GroupResource(
+            $group->load('projects', 'leader', 'members')->loadCount(['members', 'projects']),
+        );
     }
 
     public function removeMember(Group $group, User $user): Response

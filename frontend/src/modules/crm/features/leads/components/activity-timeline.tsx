@@ -40,7 +40,7 @@ type Props = {
 
 export function ActivityTimeline({ events, isLoading, isError }: Props) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
       <h3 className="mb-5 text-lg font-bold text-card-foreground">
         Activity Timeline
       </h3>

@@ -11,6 +11,12 @@ use Illuminate\Database\Eloquent\Factories\Factory;
  */
 class DealFactory extends Factory
 {
+    /**
+     * Set explicitly: the factory lives under App\Modules\Crm\, so Laravel's
+     * convention-based resolver cannot infer the model and guesses App\Deal.
+     */
+    protected $model = Deal::class;
+
     public function definition(): array
     {
         return [

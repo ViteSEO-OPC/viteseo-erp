@@ -44,12 +44,14 @@ const iconMap = {
   note: StickyNote,
 };
 
+// Opaque light tiles (bg-*-100) do not flip via the semantic ramp, so dark: variants re-tint
+// them to accent-on-dark (matching the dark reference). call/auth use bg-muted, which flips.
 const bgMap: Record<ActivityType, string> = {
-  ai: "bg-teal-100 text-teal-700",
-  email: "bg-teal-100 text-teal-700",
+  ai: "bg-teal-100 text-teal-700 dark:bg-teal-400/10 dark:text-teal-400",
+  email: "bg-teal-100 text-teal-700 dark:bg-teal-400/10 dark:text-teal-400",
   call: "bg-muted text-secondary-foreground",
   auth: "bg-muted text-secondary-foreground",
-  note: "bg-indigo-100 text-indigo-600",
+  note: "bg-indigo-100 text-indigo-600 dark:bg-indigo-400/10 dark:text-indigo-400",
 };
 
 type Props = {

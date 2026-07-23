@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Resources;
 
+use App\Modules\Projects\Resources\GroupResource;
 use App\Modules\Projects\Resources\UserResource;
 use App\Modules\Projects\Models\Project;
 use Illuminate\Http\Request;
@@ -31,6 +32,10 @@ class ProjectResource extends JsonResource
             'statuses' => ProjectStatusResource::collection($this->whenLoaded('statuses')),
             'members' => UserResource::collection($this->whenLoaded('members')),
             'members_count' => $this->whenCounted('members'),
+            // Groups working on this project (auto-attached when the project holds
+            // the group's whole roster).
+            'groups' => GroupResource::collection($this->whenLoaded('groups')),
+            'groups_count' => $this->whenCounted('groups'),
             'tasks_count' => $this->whenCounted('tasks'),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),

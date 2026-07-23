@@ -80,7 +80,7 @@ export function EmailThread({ leadId }: Props) {
   const { data, hasMore, isLoading, isError } = useLeadEmails(leadId);
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5 shadow-card">
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
       <h3 className="mb-5 text-lg font-bold text-card-foreground">Email Conversation</h3>
       {isLoading ? (
         <div className="space-y-3">

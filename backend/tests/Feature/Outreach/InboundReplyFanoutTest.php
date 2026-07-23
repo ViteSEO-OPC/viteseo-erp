@@ -99,8 +99,8 @@ class InboundReplyFanoutTest extends TestCase
         $this->assertNotNull($lead->last_activity);
 
         // Activities: the received reply + the follow-up completion.
-        $this->assertDatabaseHas('activities', ['event' => 'email.received', 'subject_id' => $lead->id]);
-        $this->assertDatabaseHas('activities', ['event' => 'planner-event.completed', 'subject_id' => $lead->id]);
+        $this->assertDatabaseHas('crm_activities', ['event' => 'email.received', 'subject_id' => $lead->id]);
+        $this->assertDatabaseHas('crm_activities', ['event' => 'planner-event.completed', 'subject_id' => $lead->id]);
         $this->assertSame('completed', $followUp->refresh()->status);
 
         // Assigned BD notified exactly once.
@@ -144,7 +144,7 @@ class InboundReplyFanoutTest extends TestCase
         $lead->refresh();
         $this->assertSame('sent', $lead->email_outreach); // unchanged
         Notification::assertNothingSent();
-        $this->assertDatabaseMissing('activities', ['event' => 'planner-event.completed', 'subject_id' => $lead->id]);
+        $this->assertDatabaseMissing('crm_activities', ['event' => 'planner-event.completed', 'subject_id' => $lead->id]);
     }
 
     public function test_unmatched_reply_persists_but_does_not_fan_out(): void

@@ -1,0 +1,45 @@
+/*
+ * Zerem CRM dark theme — ISOLATED to the Zerem module.
+ *
+ * Scoped to the Zerem app-shell wrapper (`.zerem-theme-scope`, owned by the Zerem-only ThemeProvider)
+ * and imported ONLY from `src/app/zerem/layout.tsx`, so it is bundled/loaded only on `/zerem/*` routes.
+ * It therefore cannot affect HRIS, Sprintly, Admin, the launcher, the shared <html>, or the shared
+ * globals.css / crm-theme.css — those are untouched.
+ *
+ * WHY this file exists: the shadcn surface tokens the Zerem UI renders with (bg-background / bg-card /
+ * text-foreground / border / … → --background / --card / --foreground / …) are defined only in the
+ * SHARED globals.css :root as light values, with no dark counterpart. Rather than add a dark override
+ * to that shared file, we redeclare those tokens on the Zerem wrapper for dark mode. Because the wrapper
+ * is a descendant of <html>, its values win for the Zerem subtree purely by cascade proximity — the
+ * shared :root light values are never overridden, and no other app is affected.
+ *
+ * Light mode uses the shared :root values unchanged (this file only defines the dark scope). Values
+ * mirror the existing crm-theme.css dark surface ramp so the two token systems stay visually matched.
+ * Brand/accent hues (--primary, --ring, --destructive, --chart-*, --sidebar-*) already read on dark and
+ * are intentionally left to inherit from :root.
+ */
+.zerem-theme-scope[data-theme="dark"] {
+  --background: #141414;
+  --foreground: #dbdfe4;
+  --card: #1c1c1c;
+  --card-foreground: #dbdfe4;
+  --popover: #1c1c1c;
+  --popover-foreground: #dbdfe4;
+  --secondary: #22262d;
+  --secondary-foreground: #dbdfe4;
+  --muted: #22262d;
+  --muted-foreground: #8a9099;
+  --accent: #22262d;
+  --accent-foreground: #f3f5f7;
+  --border: #2c313a;
+  --input: #2c313a;
+
+  /* Redeclaring the tokens is not enough on its own: <body> sits OUTSIDE this scope, so its
+     `color` resolves `--foreground` against the shared light `:root` and that value is then
+     INHERITED down into Zerem. Components that set `text-foreground` explicitly are unaffected,
+     but any element relying on inherited color (e.g. the shadcn Select trigger, which is
+     deliberately `bg-transparent` with no color class) renders near-black on a dark surface.
+     Applying the tokens to the scope itself re-roots inheritance for the whole subtree. */
+  color: var(--foreground);
+  background-color: var(--background);
+}

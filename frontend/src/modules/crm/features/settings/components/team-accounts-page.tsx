@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Plus } from "lucide-react";
-import { toast } from "sonner";
+import { notify as toast } from "@/core/lib/notify";
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { AlertBanner } from "@/modules/crm/components/shared/alert-banner/alert-banner";

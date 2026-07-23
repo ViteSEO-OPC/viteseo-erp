@@ -9,11 +9,7 @@ export function LeadPriorityOverview() {
 
   return (
     <section>
-      <SectionHeader
-        title="Lead Priority Overview"
-        linkText="Open Smart Leads Prioritization"
-        linkHref="/leads"
-      />
+      <SectionHeader title="Lead Priority Overview" />
       {isLoading && <PrioritySkeleton />}
       {isError && <ErrorState message="Failed to load priority data" />}
       {!isLoading && !isError && buckets && buckets.length > 0 && (

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { MapPin } from "lucide-react";
-import { toast } from "sonner";
+import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/modules/crm/components/ui/button";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";

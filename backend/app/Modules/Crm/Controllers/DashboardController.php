@@ -28,7 +28,7 @@ class DashboardController extends Controller
     {
         $user = $request->user();
 
-        // Single status aggregation (reuses the groupBy pattern from priorityBuckets);
+        // Single status aggregation (same groupBy pattern as the website-status buckets);
         // powers both the `interested` KPI and the Lead Status Summary tab counts —
         // no duplicate aggregation, no new endpoint.
         $statusCounts = Lead::query()
@@ -74,43 +74,6 @@ class DashboardController extends Controller
                 'generatedAt' => '2026-07-03T11:20:00+00:00',
             ],
         ]);
-    }
-
-    /**
-     * Lead counts / average score / pipeline share per website_status (ownership-scoped).
-     *
-     * Sprint 6: the "Lead Priority Overview" cards are website-condition segmentation
-     * (No Website / Needs Redesign / Has Website), so they aggregate on website_status,
-     * not priority. Method + route names are intentionally left unchanged for the demo
-     * sprint — a rename is deferred to a dedicated follow-up refactor. Bucket order
-     * matches the order the cards are rendered.
-     */
-    public function priorityBuckets(Request $request): JsonResponse
-    {
-        $user = $request->user();
-        $total = Lead::query()->active()->visibleTo($user)->count();
-
-        /** @var Collection<int, object{website_status: string, count: int, avg_score: float|null}> $rows */
-        $rows = Lead::query()
-            ->active()
-            ->visibleTo($user)
-            ->selectRaw('website_status, COUNT(*) as count, AVG(score) as avg_score')
-            ->groupBy('website_status')
-            ->get();
-
-        $buckets = collect(['no-website', 'needs-redesign', 'has-website'])->map(function (string $websiteStatus) use ($rows, $total): array {
-            $row = $rows->firstWhere('website_status', $websiteStatus);
-            $count = (int) ($row->count ?? 0);
-
-            return [
-                'websiteStatus' => $websiteStatus,
-                'count' => $count,
-                'avgScore' => (int) round((float) ($row->avg_score ?? 0)),
-                'pipelinePct' => $total > 0 ? (int) round($count / $total * 100) : 0,
-            ];
-        })->all();
-
-        return response()->json(['data' => $buckets]);
     }
 
     /** Latest leads (newest first) — same newest-by-id ordering as the Leads list, so
