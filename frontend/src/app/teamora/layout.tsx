@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 
 import { RequireAuth, useAuth } from "@/core/auth-context";
 import { TeamoraShell } from "@/modules/hr/components/teamora-shell";
+import { ViewModeProvider } from "@/modules/hr/components/view-mode-context";
 
 /**
  * TeamOra (HRIS) shell — hosts BOTH the HR-management portal and the employee
@@ -14,8 +15,9 @@ import { TeamoraShell } from "@/modules/hr/components/teamora-shell";
  * - The HR-management pages require an HRIS-management role (`hr_officer`, or the
  *   all-access `super_admin`) — non-managers are bounced to the launcher.
  *
- * The sidebar nav set (`variant`) follows the user's role: HR managers get the
- * management nav, everyone else the employee nav.
+ * The sidebar nav set (`variant`) defaults to the user's role — HR managers get
+ * the management nav, everyone else the employee nav — but managers can flip it
+ * via the sidebar's "Switch to Employee view" toggle (see `ViewModeProvider`).
  */
 
 // Employee self-service sub-paths (open to any authenticated user). Everything
@@ -46,9 +48,9 @@ export default function TeamoraLayout({
 
   return (
     <RequireAuth role={requiredRole}>
-      <TeamoraShell variant={isManager ? "hr" : "employee"}>
-        {children}
-      </TeamoraShell>
+      <ViewModeProvider isManager={isManager}>
+        <TeamoraShell>{children}</TeamoraShell>
+      </ViewModeProvider>
     </RequireAuth>
   );
 }
