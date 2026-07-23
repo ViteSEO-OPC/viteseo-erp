@@ -59,9 +59,31 @@ export const workspaceSchema = z.object({
   description: descriptionSchema,
 });
 
-/** Create Group form. */
-export const groupSchema = z.object({
-  project_id: requiredString('Project is required'),
+/**
+ * Create Group form. A group isn't tied to a project — it's a reusable roster of
+ * people; membership drives which projects it belongs to. Members are picked
+ * directly and the leader must be one of the selected members.
+ */
+export const groupSchema = z
+  .object({
+    name: nameSchema,
+    color: hexColorSchema,
+    // User ids kept as strings in the form; converted to numbers on submit.
+    member_ids: z.array(z.string()).min(1, 'Select at least one member'),
+    leader_id: requiredString('Leader is required'),
+  })
+  .superRefine((val, ctx) => {
+    if (val.leader_id && !val.member_ids.includes(val.leader_id)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['leader_id'],
+        message: 'The leader must be one of the selected members',
+      });
+    }
+  });
+
+/** Edit Group form — name / color / leader only (members managed separately). */
+export const editGroupSchema = z.object({
   name: nameSchema,
   color: hexColorSchema,
   leader_id: requiredString('Leader is required'),

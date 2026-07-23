@@ -15,17 +15,15 @@ import {
   TrashIcon,
 } from "@/core/ui";
 import { useIsManager } from "@/core/auth/AuthProvider";
-import type { Group, Project } from "../../types";
+import type { Group } from "../../types";
 import {
   useDeleteGroup,
   useGroup,
   useGroupMembers,
   useGroups,
   useGroupWorkload,
-  useProject,
-  useProjects,
-  useTasks,
   useUsers,
+  useWorkspaceTasks,
 } from "../../hooks";
 import { GroupWorkloadBadge } from "../tasks/shared";
 import { CreateGroupModal } from "./CreateGroupModal";
@@ -68,17 +66,12 @@ function monthYear(dateStr?: string): string | null {
 export function GroupsView(): React.ReactElement {
   const groupsQuery = useGroups();
   const usersQuery = useUsers();
-  const projectsQuery = useProjects();
 
   const groups = useMemo(
     () => groupsQuery.data?.data ?? [],
     [groupsQuery.data],
   );
   const users = usersQuery.data ?? [];
-  const allProjects = useMemo(
-    () => projectsQuery.data?.data ?? [],
-    [projectsQuery.data],
-  );
 
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -103,20 +96,13 @@ export function GroupsView(): React.ReactElement {
   const groupWorkload = useGroupWorkload(effectiveSelectedId || null);
   const groupMembers = useGroupMembers(effectiveSelectedId);
 
-  // A group belongs to one project. The left-list row subtitle uses this map
-  // (best-effort; falls back gracefully when the project is on a later page).
-  const projectById = useMemo(() => {
-    const map = new Map<string, Project>();
-    for (const p of allProjects) map.set(p.id, p);
-    return map;
-  }, [allProjects]);
-
-  // For the DETAIL pane, fetch the group's project directly by id — a single
-  // fetch that isn't affected by the paginated useProjects() list, so the name
-  // + priority always resolve (e.g. projects beyond the first page).
-  const detailProjectQuery = useProject(selected?.project_id ?? "");
-  const selectedProject = detailProjectQuery.data;
-  const activeProjects = selectedProject ? [selectedProject] : [];
+  // The group's projects (it can belong to several). Used by the detail pane's
+  // Projects section and to scope the group's tasks across all of them.
+  const groupProjects = useMemo(() => selected?.projects ?? [], [selected]);
+  const projectIds = useMemo(
+    () => groupProjects.map((p) => p.id),
+    [groupProjects],
+  );
 
   const memberIds = useMemo(
     () => (selected?.members ?? []).map((m) => m.id),
@@ -128,14 +114,14 @@ export function GroupsView(): React.ReactElement {
   const membersCount =
     selected?.members?.length ?? selected?.members_count ?? 0;
 
-  // Active Tasks / Completed — derived from the project's real tasks, scoped to
-  // this group. useTasks returns Paginated<Task>; access via .data?.data.
-  const tasksQuery = useTasks(selected?.project_id ?? "");
-  const groupTasks = useMemo(() => {
-    const all = tasksQuery.data?.data ?? [];
-    return selected ? all.filter((t) => t.group_id === selected.id) : [];
-  }, [tasksQuery.data, selected]);
-  const tasksLoading = !!selected && tasksQuery.isLoading;
+  // Active Tasks / Completed — this group's tasks across ALL its projects.
+  const { tasks: projectTasks, isLoading: tasksLoadingRaw } =
+    useWorkspaceTasks(projectIds);
+  const groupTasks = useMemo(
+    () => (selected ? projectTasks.filter((t) => t.group_id === selected.id) : []),
+    [projectTasks, selected],
+  );
+  const tasksLoading = !!selected && projectIds.length > 0 && tasksLoadingRaw;
   const activeTasks = groupTasks.filter((t) => t.status?.key !== "done").length;
   const completed = groupTasks.filter((t) => t.status?.key === "done").length;
 
@@ -212,10 +198,8 @@ export function GroupsView(): React.ReactElement {
                         {g.name}
                       </p>
                       <p className="mt-0.5 truncate text-sm text-ink-soft">
-                        {g.members_count ?? 0} Members •{" "}
-                        {g.project_id
-                          ? (projectById.get(g.project_id)?.name ?? "Project")
-                          : "No project"}
+                        {g.members_count ?? 0} Members • {g.projects_count ?? 0}{" "}
+                        {(g.projects_count ?? 0) === 1 ? "Project" : "Projects"}
                       </p>
                     </div>
                     <GroupWorkloadBadge groupId={g.id} />
@@ -293,12 +277,12 @@ export function GroupsView(): React.ReactElement {
                     )}
                   </div>
 
-                  {/* Groups have no description field. Only render this line
-                      once the real project is known (it references its name). */}
-                  {selectedProject && (
+                  {/* Groups have no description field. Summarize reach instead. */}
+                  {groupProjects.length > 0 && (
                     <p className="mt-4 text-sm leading-relaxed text-ink-soft">
-                      A dedicated POD collaborating on the tasks of{" "}
-                      {selectedProject.name}.
+                      A dedicated POD collaborating across{" "}
+                      {groupProjects.length}{" "}
+                      {groupProjects.length === 1 ? "project" : "projects"}.
                     </p>
                   )}
 
@@ -332,15 +316,16 @@ export function GroupsView(): React.ReactElement {
                   </div>
 
                   <p className="mt-6 text-xs font-bold uppercase tracking-wide text-ink-soft">
-                    Project
+                    Projects
                   </p>
                   <div className="mt-3 space-y-2">
-                    {detailProjectQuery.isLoading ? (
-                      <p className="text-sm text-ink-soft">Loading project…</p>
-                    ) : activeProjects.length === 0 ? (
-                      <p className="text-sm text-ink-soft">No project.</p>
+                    {groupProjects.length === 0 ? (
+                      <p className="text-sm text-ink-soft">
+                        Not in any project yet — a group joins a project once all
+                        its members are on it.
+                      </p>
                     ) : (
-                      activeProjects.map((p) => (
+                      groupProjects.map((p) => (
                         <div
                           key={p.id}
                           className="flex items-center justify-between rounded-lg border border-line px-4 py-3"

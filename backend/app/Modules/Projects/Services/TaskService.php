@@ -297,7 +297,7 @@ class TaskService
     {
         $belongs = Group::query()
             ->whereKey($groupId)
-            ->where('project_id', $project->id)
+            ->whereHas('projects', fn ($q) => $q->whereKey($project->id))
             ->exists();
 
         if (! $belongs) {

@@ -13,19 +13,26 @@ use Illuminate\Database\Eloquent\Builder;
 
 class GroupService
 {
+    public function __construct(
+        private readonly GroupProjectReconciler $reconciler,
+    ) {}
+
     /**
      * @param  array<string, mixed>  $filters
      * @return LengthAwarePaginator<Group>
      */
     public function list(array $filters, ?string $sort, int $perPage): LengthAwarePaginator
     {
-        // Eager-load the project (for its public UUID) plus the leader and
+        // Eager-load the projects (for their public UUIDs) plus the leader and
         // members so clients can show each member's group membership.
-        $query = Group::query()->with(['project', 'leader', 'members'])->withCount('members');
+        $query = Group::query()
+            ->with(['projects', 'leader', 'members'])
+            ->withCount(['members', 'projects']);
 
         if (isset($filters['project_id']) && $filters['project_id'] !== '') {
-            // The client filters by the project's public UUID; resolve to the internal id.
-            $query->where('project_id', PublicId::toInternalId(Project::class, $filters['project_id']));
+            // Filter to groups belonging to the given project (public UUID → id).
+            $projectId = PublicId::toInternalId(Project::class, $filters['project_id']);
+            $query->whereHas('projects', fn (Builder $q) => $q->whereKey($projectId));
         }
 
         if (array_key_exists('archived', $filters) && $filters['archived'] !== '' && $filters['archived'] !== null) {
@@ -75,10 +82,23 @@ class GroupService
      */
     public function create(array $data): Group
     {
-        // A group is a team scoped to a single project.
-        Project::findOrFail($data['project_id']);
+        // Members are attached to the join table, not stored on the group row.
+        $memberIds = array_map('intval', (array) ($data['member_ids'] ?? []));
+        unset($data['member_ids'], $data['project_id']);
 
-        return Group::create($data);
+        $group = Group::create($data);
+
+        if ($memberIds !== []) {
+            $now = now();
+            $group->members()->sync(
+                array_fill_keys($memberIds, ['created_at' => $now]),
+            );
+        }
+
+        // Attach the group to any project that now contains its whole roster.
+        $this->reconciler->syncForGroup($group);
+
+        return $group;
     }
 
     /**
@@ -102,11 +122,17 @@ class GroupService
             $userId => ['created_at' => now()],
         ]);
 
+        // Roster changed → re-evaluate which projects this group belongs to.
+        $this->reconciler->syncForGroup($group);
+
         return $group;
     }
 
     public function removeMember(Group $group, User $user): void
     {
         $group->members()->detach($user->id);
+
+        // Roster changed → re-evaluate which projects this group belongs to.
+        $this->reconciler->syncForGroup($group);
     }
 }
