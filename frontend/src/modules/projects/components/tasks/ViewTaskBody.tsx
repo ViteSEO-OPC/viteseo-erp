@@ -548,7 +548,7 @@ export function ViewTaskBody({
   return (
     <div className="grid grid-cols-1 gap-6 p-4 sm:p-6 md:grid-cols-[1fr_320px] md:gap-8 max-h-[70vh] ">
       {/* LEFT */}
-      <div className="min-w-0 space-y-5">
+      <div className="min-w-0 space-y-5 pb-7">
         <div className="flex items-start justify-between gap-3">
           {editing ? (
             <Input
@@ -614,168 +614,168 @@ export function ViewTaskBody({
         )}
 
         <DetailsPanel>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className={`mb-1.5 ${sectionLabel}`}>Status</p>
-            {canEditStatus ? (
-              <Select
-                defaultValue={task.status_id ?? ''}
-                onChange={(e) => update.mutate({ id: task.id, payload: { status_id: e.target.value } })}
-              >
-                {task.status_id == null && (
-                  <option value="" disabled>
-                    No status
-                  </option>
-                )}
-                {statuses.map((s) => (
-                  <option key={s.id} value={String(s.id)}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            ) : (
-              <div className="flex h-10 items-center rounded-lg border border-line px-3 text-sm font-semibold text-ink">
-                {task.status?.name ?? 'No status'}
-              </div>
-            )}
-          </div>
-          <div>
-            <p className={`mb-1.5 ${sectionLabel}`}>Priority</p>
-            {canFullEdit ? (
-              <Select
-                defaultValue={task.priority}
-                onChange={(e) =>
-                  update.mutate({ id: task.id, payload: { priority: e.target.value as Priority } })
-                }
-              >
-                {PRIORITIES.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
-              </Select>
-            ) : (
-              <div className="flex h-10 items-center">
-                <PriorityBadge priority={task.priority} />
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className={`mb-1.5 ${sectionLabel}`}>Start Date</p>
-            {editing ? (
-              <Input
-                type="date"
-                value={startDate}
-                min={todayStr}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            ) : (
-              <div className="flex h-10 items-center rounded-lg border border-line px-3 text-sm text-ink">
-                {formatDate(task.start_date) === '—'
-                  ? formatDate(task.created_at)
-                  : formatDate(task.start_date)}
-              </div>
-            )}
-          </div>
-          <div>
-            <p className={`mb-1.5 ${sectionLabel}`}>Due Date</p>
-            {editing ? (
-              // Can't be before the start date (min); the past is enforced server-side.
-              <Input
-                type="date"
-                value={deadline}
-                min={startDate && startDate > todayStr ? startDate : todayStr}
-                onChange={(e) => setDeadline(e.target.value)}
-              />
-            ) : (
-              <div
-                className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-sm ${
-                  isOverdue(task.deadline, task.status?.key)
-                    ? 'border-danger/40 font-semibold text-danger'
-                    : 'border-line text-ink'
-                }`}
-              >
-                {formatDate(task.deadline)}
-                {isOverdue(task.deadline, task.status?.key) && (
-                  <span className="shrink-0" title="Overdue" aria-label="Overdue">
-                    ⚠
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* A parent task's own effort is disregarded once it has subtasks — its
-            workload is derived from the subtasks, so the score is hidden. */}
-        <div>
-          <p className={`mb-2 ${sectionLabel}`}>Effort Score</p>
-          {subtasks.length > 0 ? (
-            <p className="text-sm text-ink-faint">
-              Derived from sub-tasks — this task’s own effort is not counted.
-            </p>
-          ) : (
-            <EffortSlider
-              value={editing ? effort : (task.effort_score ?? 0)}
-              onChange={setEffort}
-              disabled={!editing}
-            />
-          )}
-        </div>
-
-        {update.isError && (
-          <p className="text-sm text-danger">Could not save the changes. Please try again.</p>
-        )}
-
-        {/* Links */}
-        <div>
-          <p className={`mb-2 ${sectionLabel}`}>Links</p>
-          {linkOpen ? (
-            <div className="flex items-center gap-2">
-              <Input
-                autoFocus
-                value={linkUrl}
-                onChange={(e) => setLinkUrl(e.target.value)}
-                placeholder="https://…"
-                onKeyDown={(e) => e.key === 'Enter' && submitLink()}
-              />
-              <Button type="button" size="sm" onClick={submitLink} disabled={addLink.isPending}>
-                {addLink.isPending ? 'Saving…' : 'Save'}
-              </Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setLinkOpen(false)}>
-                Cancel
-              </Button>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className={`mb-1.5 ${sectionLabel}`}>Status</p>
+              {canEditStatus ? (
+                <Select
+                  defaultValue={task.status_id ?? ''}
+                  onChange={(e) => update.mutate({ id: task.id, payload: { status_id: e.target.value } })}
+                >
+                  {task.status_id == null && (
+                    <option value="" disabled>
+                      No status
+                    </option>
+                  )}
+                  {statuses.map((s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <div className="flex h-10 items-center rounded-lg border border-line px-3 text-sm font-semibold text-ink">
+                  {task.status?.name ?? 'No status'}
+                </div>
+              )}
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setLinkOpen(true)}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line py-3 text-sm font-semibold text-ink-soft hover:border-brand hover:text-ink"
-            >
-              <PlusIcon className="h-4 w-4" /> Add Link
-            </button>
+            <div>
+              <p className={`mb-1.5 ${sectionLabel}`}>Priority</p>
+              {canFullEdit ? (
+                <Select
+                  defaultValue={task.priority}
+                  onChange={(e) =>
+                    update.mutate({ id: task.id, payload: { priority: e.target.value as Priority } })
+                  }
+                >
+                  {PRIORITIES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <div className="flex h-10 items-center">
+                  <PriorityBadge priority={task.priority} />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className={`mb-1.5 ${sectionLabel}`}>Start Date</p>
+              {editing ? (
+                <Input
+                  type="date"
+                  value={startDate}
+                  min={todayStr}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              ) : (
+                <div className="flex h-10 items-center rounded-lg border border-line px-3 text-sm text-ink">
+                  {formatDate(task.start_date) === '—'
+                    ? formatDate(task.created_at)
+                    : formatDate(task.start_date)}
+                </div>
+              )}
+            </div>
+            <div>
+              <p className={`mb-1.5 ${sectionLabel}`}>Due Date</p>
+              {editing ? (
+                // Can't be before the start date (min); the past is enforced server-side.
+                <Input
+                  type="date"
+                  value={deadline}
+                  min={startDate && startDate > todayStr ? startDate : todayStr}
+                  onChange={(e) => setDeadline(e.target.value)}
+                />
+              ) : (
+                <div
+                  className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-sm ${
+                    isOverdue(task.deadline, task.status?.key)
+                      ? 'border-danger/40 font-semibold text-danger'
+                      : 'border-line text-ink'
+                  }`}
+                >
+                  {formatDate(task.deadline)}
+                  {isOverdue(task.deadline, task.status?.key) && (
+                    <span className="shrink-0" title="Overdue" aria-label="Overdue">
+                      ⚠
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* A parent task's own effort is disregarded once it has subtasks — its
+              workload is derived from the subtasks, so the score is hidden. */}
+          <div>
+            <p className={`mb-2 ${sectionLabel}`}>Effort Score</p>
+            {subtasks.length > 0 ? (
+              <p className="text-sm text-ink-faint">
+                Derived from sub-tasks — this task’s own effort is not counted.
+              </p>
+            ) : (
+              <EffortSlider
+                value={editing ? effort : (task.effort_score ?? 0)}
+                onChange={setEffort}
+                disabled={!editing}
+              />
+            )}
+          </div>
+
+          {update.isError && (
+            <p className="text-sm text-danger">Could not save the changes. Please try again.</p>
           )}
-          {links.length > 0 && (
-            <ul className="mt-3 space-y-2">
-              {links.map((l) => (
-                <li key={l.id} className="flex items-center gap-2 text-sm">
-                  {l.user && <Avatar name={l.user.name} src={l.user.avatar} size={24} />}
-                  <a
-                    href={l.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="truncate text-brand underline hover:text-brand-hover"
-                  >
-                    {l.url}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+
+          {/* Links */}
+          <div>
+            <p className={`mb-2 ${sectionLabel}`}>Links</p>
+            {linkOpen ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  autoFocus
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  placeholder="https://…"
+                  onKeyDown={(e) => e.key === 'Enter' && submitLink()}
+                />
+                <Button type="button" size="sm" onClick={submitLink} disabled={addLink.isPending}>
+                  {addLink.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setLinkOpen(false)}>
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setLinkOpen(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line py-3 text-sm font-semibold text-ink-soft hover:border-brand hover:text-ink"
+              >
+                <PlusIcon className="h-4 w-4" /> Add Link
+              </button>
+            )}
+            {links.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {links.map((l) => (
+                  <li key={l.id} className="flex items-center gap-2 text-sm">
+                    {l.user && <Avatar name={l.user.name} src={l.user.avatar} size={24} />}
+                    <a
+                      href={l.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate text-brand underline hover:text-brand-hover"
+                    >
+                      {l.url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </DetailsPanel>
 
         {/* Sub-tasks — collapsible panel (open by default); the add form is
