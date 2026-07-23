@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils";
 import { Sidebar } from "@/core/components/sidebar";
 import { TopBar } from "@/core/components/top-bar";
 import { NotificationProvider } from "@/core/notifications-context";
-import type { ShellVariant } from "@/core/nav";
 import { TeamoraMobileTopBar } from "@/modules/hr/components/teamora-mobile-top-bar";
+import { useViewMode } from "@/modules/hr/components/view-mode-context";
 
 /**
  * TeamOra's responsive frame — an HR-local replacement for `core/AppShell`.
@@ -24,14 +24,9 @@ import { TeamoraMobileTopBar } from "@/modules/hr/components/teamora-mobile-top-
  * `core/layout/Sidebar.tsx`, the Projects shell that already does this —
  * worth consolidating the two once the platform merge lands.
  */
-export function TeamoraShell({
-  variant,
-  children,
-}: {
-  variant: ShellVariant;
-  children: React.ReactNode;
-}) {
+export function TeamoraShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { variant, toggle } = useViewMode();
 
   // Navigating from a drawer link should close the drawer behind you. Handled
   // by delegation rather than an effect on `pathname`: the nav links live
@@ -40,6 +35,20 @@ export function TeamoraShell({
   // the group expand/collapse buttons deliberately don't.
   const closeIfNavigating = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
+  };
+
+  // The "Switch to Employee/HR view" control lives inside the shared core
+  // `Sidebar`, which we don't edit. It only does `router.push("/teamora")`, so
+  // on its own it can't flip a role-derived view. Catch its click here in the
+  // capture phase (before the button's own handler runs) and toggle the view
+  // mode, so `/teamora` re-renders the correct portal. Matched by its label
+  // rather than a hook we can't add to the shared button.
+  const catchViewSwitch = (e: React.MouseEvent<HTMLElement>) => {
+    const btn = (e.target as HTMLElement).closest("button");
+    if (btn && /^switch to .+ view$/i.test((btn.textContent ?? "").trim())) {
+      toggle();
+      setMobileOpen(false);
+    }
   };
 
   useEffect(() => {
@@ -58,7 +67,7 @@ export function TeamoraShell({
           than pushing the whole page sideways.) */}
       <div className="fixed inset-0 flex overflow-hidden">
         {/* Desktop: the static column, unchanged from AppShell. */}
-        <div className="hidden lg:flex">
+        <div className="hidden lg:flex" onClickCapture={catchViewSwitch}>
           <Sidebar variant={variant} />
         </div>
 
@@ -76,6 +85,7 @@ export function TeamoraShell({
           aria-modal="true"
           aria-label="Navigation menu"
           onClick={closeIfNavigating}
+          onClickCapture={catchViewSwitch}
           className={cn(
             "fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out lg:hidden",
             // `invisible` (not just the off-screen transform) so the drawer's
