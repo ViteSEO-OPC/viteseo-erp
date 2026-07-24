@@ -3,14 +3,16 @@
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
-import { EVENT_TYPE_META } from "@/modules/crm/features/calendar/lib/event-type-meta";
+import { eventTypeMeta } from "@/modules/crm/features/calendar/lib/event-type-meta";
 import { formatBusiness } from "@/modules/crm/lib/timezone";
 import { cn } from "@/modules/crm/lib/utils";
 import type { PlannerEvent } from "@/modules/crm/features/calendar/types/calendar-types";
 
 /** Presentational card (no drag wiring) — reused by the draggable card and the DragOverlay. */
 export function BoardCardContent({ event, dragging }: { event: PlannerEvent; dragging?: boolean }) {
-  const meta = EVENT_TYPE_META[event.eventType];
+  // Resolved through the tolerant helper: `eventType` is runtime data, so a type newer than this
+  // build must degrade to a neutral tag — never crash the Board.
+  const meta = eventTypeMeta(event.eventType);
   const hint = event.startsAt
     ? formatBusiness(event.startsAt, event.allDay ? "MMM d" : "MMM d · h:mm a")
     : null;

@@ -116,9 +116,12 @@ function EventForm({
 
   const busy = create.isPending || update.isPending || remove.isPending;
   const canSave = title.trim().length > 0 && !busy;
-  // Offer 'follow-up' only when this event already is one (edit); never for new authoring.
+  // Authoring offers TYPES only. When EDITING, the event's own type is appended if it is not in that
+  // list — which covers 'follow-up' (never authored here, only ever edited) and, equally, any type
+  // newer than this build. Without it the select would hold a value absent from its options and a
+  // plain Save would silently REWRITE the event's type; preserving it keeps edits non-destructive.
   const typeOptions: EventType[] =
-    event?.eventType === "follow-up" ? [...TYPES, "follow-up"] : TYPES;
+    event && !TYPES.includes(event.eventType) ? [...TYPES, event.eventType] : TYPES;
 
   function buildDraft(): PlannerEventDraft {
     return {

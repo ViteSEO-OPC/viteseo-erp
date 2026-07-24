@@ -20,3 +20,28 @@ export const BOARD_COLUMNS: { status: PlannerEventStatus; label: string; dot: st
 export function isPlannerStatus(s: string): s is PlannerEventStatus {
   return s === "todo" || s === "scheduled" || s === "in_progress" || s === "completed";
 }
+
+/** Neutral gray presentation for a type this build does not recognize. */
+const UNKNOWN_EVENT_TYPE_META = { dot: "#9CA3AF", bg: "#F3F4F6", text: "#4B5563" } as const;
+
+/** `"follow-up"` → `"Follow Up"` — a readable label for a type we have no explicit copy for. */
+function humanizeEventType(type: string): string {
+  return type.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Presentation for an event type, **tolerant of types this build has never heard of**.
+ *
+ * `PlannerEvent.eventType` is typed `EventType`, but its value arrives from the API at runtime — so the
+ * backend can legitimately serve a type a deployed frontend predates (a new type is additive server-side
+ * and needs no client release). Indexing {@link EVENT_TYPE_META} directly returns `undefined` for those,
+ * and dereferencing it crashes the whole Planner Board rather than degrading one card.
+ *
+ * Always resolve runtime types through this function; index EVENT_TYPE_META directly ONLY for a
+ * hard-coded literal (e.g. the legend lists), where the key is guaranteed at compile time.
+ */
+export function eventTypeMeta(type: string): { label: string; dot: string; bg: string; text: string } {
+  return (
+    EVENT_TYPE_META[type as EventType] ?? { ...UNKNOWN_EVENT_TYPE_META, label: humanizeEventType(type) }
+  );
+}
