@@ -27,6 +27,8 @@ import {
   type MissingClockoutMode,
   type OvertimeMode,
   type UndertimeDeductionMode,
+  type ViolationRule,
+  type ViolationRules,
   type WorkSchedule,
 } from "@/modules/hr/types/rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
@@ -226,17 +228,44 @@ function peso(n: number): string {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(n);
 }
 
+// Read a level's threshold out of the stored violation ladder, falling back to default.
+function rungValue(
+  rules: ViolationRules | null | undefined,
+  category: keyof ViolationRules,
+  severity: ViolationRule["severity"],
+  key: "streak_min" | "monthly_min",
+  fallback: number,
+): number {
+  const rung = (rules?.[category] ?? []).find((r) => r.severity === severity);
+  return rung?.[key] ?? fallback;
+}
+
+// The four alert levels must strictly ascend. Returns an error message, or null if OK.
+function ladderError(late: number[], absent: number[]): string | null {
+  const ascends = (a: number[]) => a.every((v, i) => i === 0 || v > a[i - 1]);
+  if (!ascends(late)) return "Lateness levels must increase: Low < Caution < Warning < Critical.";
+  if (!ascends(absent)) return "Absence levels must increase: Low < Caution < Warning < Critical.";
+  return null;
+}
+
 function AttendancePolicyEditor() {
   const { data: policy } = useAttendancePolicy();
   const update = useUpdateAttendancePolicy();
   const preview = usePreviewDeductions();
 
-  // Flag thresholds + task format (existing).
-  const [lates, setLates] = useState(String(policy?.consecutive_lates_before_absence ?? 3));
   const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
-  const [awol, setAwol] = useState(String(policy?.awol_days_threshold ?? 3));
-  const [english, setEnglish] = useState(policy?.task_format?.require_english ?? true);
-  const [uppercase, setUppercase] = useState(policy?.task_format?.uppercase ?? true);
+
+  // Violation flags — the four alert levels HR configures, read out of the stored ladder.
+  // Lateness is by lates-this-month; absence by consecutive days. Reassembled on save.
+  const vr = policy?.violation_rules;
+  const [lateLow, setLateLow] = useState(String(rungValue(vr, "late", "green", "monthly_min", 1)));
+  const [lateCaution, setLateCaution] = useState(String(rungValue(vr, "late", "yellow", "monthly_min", 3)));
+  const [lateWarning, setLateWarning] = useState(String(rungValue(vr, "late", "orange", "monthly_min", 4)));
+  const [lateCritical, setLateCritical] = useState(String(rungValue(vr, "late", "red", "monthly_min", 6)));
+  const [absentLow, setAbsentLow] = useState(String(rungValue(vr, "absence", "green", "streak_min", 1)));
+  const [absentCaution, setAbsentCaution] = useState(String(rungValue(vr, "absence", "yellow", "streak_min", 2)));
+  const [absentWarning, setAbsentWarning] = useState(String(rungValue(vr, "absence", "orange", "streak_min", 3)));
+  const [absentCritical, setAbsentCritical] = useState(String(rungValue(vr, "absence", "red", "streak_min", 4)));
 
   // Tardiness pay deduction.
   const [lateMode, setLateMode] = useState<LateDeductionMode>(policy?.late_deduction_mode ?? "none");
@@ -265,12 +294,57 @@ function AttendancePolicyEditor() {
   // Break limit (flag only).
   const [maxBreak, setMaxBreak] = useState(String(policy?.max_break_minutes_per_day ?? 120));
 
-  function payload() {
+  // Which card is currently saving (so only its button shows a spinner).
+  const [saving, setSaving] = useState<string | null>(null);
+
+  // Save just ONE card's fields (partial update — the API only touches keys it's sent).
+  async function saveCard(key: string, fields: Record<string, unknown>, guard?: () => boolean) {
+    if (guard && !guard()) return;
+    setSaving(key);
+    try {
+      await update.mutateAsync(fields);
+      toast.success("Saved");
+    } catch {
+      toast.error("Could not save.");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  function guardLadder(): boolean {
+    const err = ladderError(
+      [lateLow, lateCaution, lateWarning, lateCritical].map(Number),
+      [absentLow, absentCaution, absentWarning, absentCritical].map(Number),
+    );
+    if (err) {
+      toast.error(err);
+      return false;
+    }
+    return true;
+  }
+
+  const violationFields = () => ({
+    monthly_late_reset: monthlyReset,
+    violation_rules: {
+      late: [
+        { monthly_min: Number(lateCritical), severity: "red" },
+        { monthly_min: Number(lateWarning), severity: "orange" },
+        { monthly_min: Number(lateCaution), severity: "yellow" },
+        { monthly_min: Number(lateLow), severity: "green" },
+      ],
+      absence: [
+        { streak_min: Number(absentCritical), severity: "red", type: "awol" },
+        { streak_min: Number(absentWarning), severity: "orange", type: "ua" },
+        { streak_min: Number(absentCaution), severity: "yellow", type: "ua" },
+        { streak_min: Number(absentLow), severity: "green", type: "ua" },
+      ],
+      missed_time_out: [{ occurrence_min: 1, severity: "green" }],
+    } satisfies ViolationRules,
+  });
+
+  // Preview reads the current (unsaved) deduction settings across all pay cards.
+  function deductionFields() {
     return {
-      consecutive_lates_before_absence: Number(lates),
-      monthly_late_reset: monthlyReset,
-      awol_days_threshold: Number(awol),
-      task_format: { require_english: english, uppercase },
       late_deduction_mode: lateMode,
       lates_per_deduction: Number(latesPerDeduction),
       undertime_deduction_mode: undertimeMode,
@@ -285,22 +359,12 @@ function AttendancePolicyEditor() {
       daily_rate_basis: rateBasis,
       annual_divisor: Number(divisor),
       hours_per_day_divisor: Number(hoursPerDay),
-      max_break_minutes_per_day: Number(maxBreak),
     };
-  }
-
-  async function save() {
-    try {
-      await update.mutateAsync(payload());
-      toast.success("Policy saved");
-    } catch {
-      toast.error("Could not save the policy.");
-    }
   }
 
   async function runPreview() {
     try {
-      await preview.mutateAsync(payload());
+      await preview.mutateAsync(deductionFields());
     } catch {
       toast.error("Could not run the preview.");
     }
@@ -308,33 +372,48 @@ function AttendancePolicyEditor() {
 
   return (
     <div className="w-full overflow-hidden rounded-card border border-border bg-card">
-      {/* Row: two flag thresholds split by a vertical rule. */}
-      <div className="flex flex-col md:flex-row">
-        <div className="flex-1 space-y-1.5 p-6">
-          <Label htmlFor="pol-lates">Consecutive lates before an absence</Label>
-          <Input id="pol-lates" type="number" min="1" max="30" value={lates} onChange={(e) => setLates(e.target.value)} />
-          <p className="text-xs text-muted-foreground">
-            After this many consecutive lates, the next one counts as an absence.
-          </p>
+      {/* Violation flags — the colour ladder HR sets. Uses the same four alert levels as
+          the Attendance modal legend (Low/Informational → Caution → Warning → Critical).
+          Disciplinary only; never pay. */}
+      <PolicySection
+        title="Violation flags"
+        description="The four alert levels shown in the Attendance modal — set what makes a late or an absence each colour. These are disciplinary flags; they never deduct pay."
+      >
+        <div className="space-y-3">
+          <p className="text-[13px] font-semibold text-foreground">Lateness — lates in a month</p>
+          <div className="flex flex-wrap items-end gap-4">
+            <NumberField id="pol-late-low" label="Low / Informational at" value={lateLow} onChange={setLateLow} min={0} max={31} dot="green" />
+            <NumberField id="pol-late-caution" label="Caution at" value={lateCaution} onChange={setLateCaution} min={Number(lateLow) + 1} max={31} dot="yellow" />
+            <NumberField id="pol-late-warning" label="Warning at" value={lateWarning} onChange={setLateWarning} min={Number(lateCaution) + 1} max={31} dot="orange" />
+            <NumberField id="pol-late-critical" label="Critical at" value={lateCritical} onChange={setLateCritical} min={Number(lateWarning) + 1} max={31} dot="red" />
+          </div>
         </div>
-        <div className="hidden w-px self-stretch bg-border md:block" />
-        <div className="flex-1 space-y-1.5 p-6">
-          <Label htmlFor="pol-awol">AWOL threshold (days)</Label>
-          <Input id="pol-awol" type="number" min="1" max="30" value={awol} onChange={(e) => setAwol(e.target.value)} />
-          <p className="text-xs text-muted-foreground">
-            Consecutive days without notice before it&apos;s flagged AWOL (red).
+        <div className="space-y-3">
+          <p className="text-[13px] font-semibold text-foreground">
+            Unauthorised absence — consecutive days with no approved leave
           </p>
+          <div className="flex flex-wrap items-end gap-4">
+            <NumberField id="pol-absent-low" label="Low / Informational at" value={absentLow} onChange={setAbsentLow} min={0} max={31} dot="green" />
+            <NumberField id="pol-absent-caution" label="Caution at" value={absentCaution} onChange={setAbsentCaution} min={Number(absentLow) + 1} max={31} dot="yellow" />
+            <NumberField id="pol-absent-warning" label="Warning at" value={absentWarning} onChange={setAbsentWarning} min={Number(absentCaution) + 1} max={31} dot="orange" />
+            <NumberField id="pol-absent-critical" label="Critical / AWOL at" value={absentCritical} onChange={setAbsentCritical} min={Number(absentWarning) + 1} max={31} dot="red" />
+          </div>
+          <Hint>
+            Counts only days with <strong>no leave of any kind</strong> — including unpaid leave
+            (LWOP). A day covered by any approved leave is never an unauthorised absence.
+          </Hint>
         </div>
-      </div>
-
-      {/* Reset-monthly toggle. */}
-      <div className="px-6 pb-5">
         <CheckBox
           checked={monthlyReset}
           onChange={setMonthlyReset}
           label="Reset the late tally each calendar month"
         />
-      </div>
+        <Hint>
+          Each level must use a higher number than the one before it (0 is allowed for the lowest).
+          These exact numbers appear in the Attendance modal&apos;s Alert Color Legend.
+        </Hint>
+        <SaveButton pending={saving === "violation"} onClick={() => saveCard("violation", violationFields(), guardLadder)} />
+      </PolicySection>
 
       <Divider />
 
@@ -365,6 +444,10 @@ function AttendancePolicyEditor() {
             <strong>₱56.82</strong> — the exact half-hour. Rounding is off by default.
           </Hint>
         )}
+        <SaveButton
+          pending={saving === "tardiness"}
+          onClick={() => saveCard("tardiness", { late_deduction_mode: lateMode, lates_per_deduction: Number(latesPerDeduction) })}
+        />
       </PolicySection>
 
       <Divider />
@@ -398,6 +481,10 @@ function AttendancePolicyEditor() {
           />
         </div>
         <Hint>A missing clock-out never counts as overtime.</Hint>
+        <SaveButton
+          pending={saving === "undertime"}
+          onClick={() => saveCard("undertime", { undertime_deduction_mode: undertimeMode, missing_clockout_mode: missingClockout })}
+        />
       </PolicySection>
 
       <Divider />
@@ -435,6 +522,10 @@ function AttendancePolicyEditor() {
           )}
         </div>
         <Hint>Overtime takes effect when overtime requests ship. A long clock reading is not overtime.</Hint>
+        <SaveButton
+          pending={saving === "early_ot"}
+          onClick={() => saveCard("early_ot", { early_arrival_mode: earlyArrival, overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
+        />
       </PolicySection>
 
       <Divider />
@@ -484,6 +575,10 @@ function AttendancePolicyEditor() {
           The cap guarantees no single day ever costs more than one day&apos;s pay. Arriving 08:20
           with 15-min grace counts as 20 min (from start) or 5 min (after grace).
         </Hint>
+        <SaveButton
+          pending={saving === "rounding"}
+          onClick={() => saveCard("rounding", { deduction_rounding: rounding, deduction_block_minutes: Number(block), late_minutes_from: lateFrom, daily_deduction_cap: Number(cap) })}
+        />
       </PolicySection>
 
       <Divider />
@@ -521,6 +616,10 @@ function AttendancePolicyEditor() {
             </p>
           </div>
         )}
+        <SaveButton
+          pending={saving === "basis"}
+          onClick={() => saveCard("basis", { daily_rate_basis: rateBasis, annual_divisor: Number(divisor), hours_per_day_divisor: Number(hoursPerDay) })}
+        />
       </PolicySection>
 
       <Divider />
@@ -532,19 +631,19 @@ function AttendancePolicyEditor() {
       >
         <NumberField id="pol-max-break" label="Max break minutes / day" value={maxBreak} onChange={setMaxBreak} min={0} max={1440} />
         <Hint>A day beyond this is flagged as a suspected forgotten punch, not fined.</Hint>
+        <SaveButton
+          pending={saving === "break"}
+          onClick={() => saveCard("break", { max_break_minutes_per_day: Number(maxBreak) })}
+        />
       </PolicySection>
 
       <Divider />
 
-      {/* Task checklist format + save. */}
-      <div className="space-y-4 p-6">
-        <h3 className="text-base font-bold text-foreground">Task checklist format</h3>
-        <div className="flex flex-wrap gap-8">
-          <CheckBox checked={english} onChange={setEnglish} label="Require English" />
-          <CheckBox checked={uppercase} onChange={setUppercase} label="Uppercase" />
-        </div>
-
-        {/* Dry-run preview (step 6b): what these settings WOULD cost last period. */}
+      {/* Dry-run preview (step 6b): what the current pay-deduction settings WOULD cost. */}
+      <PolicySection
+        title="Preview impact"
+        description="See what the pay-deduction settings above would have cost last period, before you rely on them. Nothing is saved."
+      >
         {preview.data && (
           <div className="rounded-lg border border-border bg-muted/40 p-4">
             {preview.data.employees_considered === 0 ? (
@@ -558,21 +657,15 @@ function AttendancePolicyEditor() {
                 :{" "}
                 <strong>{peso(preview.data.total_deduction)}</strong> total time-based deduction
                 across <strong>{preview.data.employees_affected}</strong> of{" "}
-                {preview.data.employees_considered} employees. Nothing has been saved.
+                {preview.data.employees_considered} employees.
               </p>
             )}
           </div>
         )}
-
-        <div className="flex flex-wrap gap-3">
-          <Button onClick={save} disabled={update.isPending}>
-            {update.isPending ? "Saving…" : "Save Policy"}
-          </Button>
-          <Button variant="outline" onClick={runPreview} disabled={preview.isPending}>
-            {preview.isPending ? "Calculating…" : "Preview impact"}
-          </Button>
-        </div>
-      </div>
+        <Button variant="outline" onClick={runPreview} disabled={preview.isPending}>
+          {preview.isPending ? "Calculating…" : "Preview impact"}
+        </Button>
+      </PolicySection>
     </div>
   );
 }
@@ -605,6 +698,17 @@ function Hint({ children }: { children: ReactNode }) {
   return <p className="text-xs text-muted-foreground">{children}</p>;
 }
 
+// Per-card save — each policy section saves only its own fields (partial update).
+function SaveButton({ onClick, pending }: { onClick: () => void; pending: boolean }) {
+  return (
+    <div className="pt-1">
+      <Button size="sm" onClick={onClick} disabled={pending}>
+        {pending ? "Saving…" : "Save"}
+      </Button>
+    </div>
+  );
+}
+
 function FieldSelect({
   id,
   label,
@@ -626,6 +730,15 @@ function FieldSelect({
   );
 }
 
+// Severity dot colours — the SAME classes the Attendance modal legend uses, so the
+// Rules card and the modal read as one system.
+const SEVERITY_DOT: Record<"green" | "yellow" | "orange" | "red", string> = {
+  green: "bg-success",
+  yellow: "bg-warning",
+  orange: "bg-severity-orange",
+  red: "bg-danger",
+};
+
 function NumberField({
   id,
   label,
@@ -634,6 +747,7 @@ function NumberField({
   min,
   max,
   step,
+  dot,
 }: {
   id: string;
   label: string;
@@ -642,10 +756,14 @@ function NumberField({
   min?: number;
   max?: number;
   step?: number;
+  dot?: keyof typeof SEVERITY_DOT;
 }) {
   return (
     <div className="w-48 space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id} className="flex items-center gap-1.5">
+        {dot && <span className={cn("size-2 shrink-0 rounded-full", SEVERITY_DOT[dot])} />}
+        {label}
+      </Label>
       <Input id={id} type="number" min={min} max={max} step={step} value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
   );

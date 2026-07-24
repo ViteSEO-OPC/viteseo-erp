@@ -14,9 +14,7 @@ class AttendancePolicyResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'consecutive_lates_before_absence' => (int) $this->consecutive_lates_before_absence,
             'monthly_late_reset' => (bool) $this->monthly_late_reset,
-            'awol_days_threshold' => (int) $this->awol_days_threshold,
             'late_deduction_mode' => $this->late_deduction_mode,
             'lates_per_deduction' => (int) $this->lates_per_deduction,
             'late_minutes_from' => $this->late_minutes_from,
