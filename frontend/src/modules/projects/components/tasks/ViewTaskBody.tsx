@@ -990,7 +990,7 @@ export function ViewTaskBody({
             </button>
           </div>
 
-          <ul className="mt-4 space-y-4">
+          <ul className="mt-4 h-64 space-y-4 overflow-y-auto pr-1">
             {comments.map((c) => (
               <li key={c.id} className="flex gap-2">
                 {c.author && <Avatar name={c.author.name} src={c.author.avatar} size={28} />}
@@ -1012,7 +1012,7 @@ export function ViewTaskBody({
         {/* History / activity log */}
         <div className="border-t border-line pt-4 pb-10">
           <p className={`mb-3 ${sectionLabel}`}>History</p>
-          <ul className="space-y-3">
+          <ul className="space-y-3 overflow-y-auto h-30">
             {activity.map((log) => (
               <li key={log.id} className="flex items-start gap-2 text-sm">
                 <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
