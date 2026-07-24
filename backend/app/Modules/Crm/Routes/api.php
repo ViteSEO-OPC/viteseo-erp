@@ -257,9 +257,11 @@ Route::prefix('v1/crm')->group(function (): void {
         // Admin only — Admin (CRM Manager) has NO access, per the approved Admin module list. This
         // route previously had no authorization at all (RBAC audit finding 3).
         //
-        // Admin keeps Target Service Area management, which is a separate registry below and stays
-        // Admin/SA-gated; its UI entry point moved to Settings so the capability follows the role
-        // rather than the page.
+        // The Target Service Area registry below is a SEPARATE surface and is unchanged — it stays
+        // Admin/SA-gated at the API. Its only UI entry point remains the Nearby Clients header action,
+        // so in practice only Super Admin reaches it once Admin loses this page. That consequence is
+        // deliberate and deferred: Target Areas is being reviewed under its own PDR (keep / redesign /
+        // retire), and this milestone makes no further change to it.
         Route::get('/nearby-clients', [NearbyClientController::class, 'index'])
             ->middleware('role:super_admin|crm_bd');
 

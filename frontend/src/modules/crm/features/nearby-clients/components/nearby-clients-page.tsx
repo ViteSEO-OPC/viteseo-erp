@@ -3,13 +3,16 @@
 import { useState } from "react";
 import { MapPin } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
+import { Button } from "@/modules/crm/components/ui/button";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
+import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { useNearbyClients } from "@/modules/crm/features/nearby-clients/hooks/use-nearby-clients";
 import { useQualifyProspect } from "@/modules/crm/features/nearby-clients/hooks/use-qualify-prospect";
 import { NearbyFilters } from "@/modules/crm/features/nearby-clients/components/nearby-filters";
 import { ClientsInRangeList } from "@/modules/crm/features/nearby-clients/components/clients-in-range-list";
 import { NearbyMap } from "@/modules/crm/features/nearby-clients/components/nearby-map";
 import { PlanVisitModal } from "@/modules/crm/features/nearby-clients/components/plan-visit-modal";
+import { TargetAreasDialog } from "@/modules/crm/features/nearby-clients/components/target-areas-dialog";
 import type { NearbyClient } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
 
 /**
@@ -19,6 +22,8 @@ import type { NearbyClient } from "@/modules/crm/features/nearby-clients/types/n
  * fills the viewport — only the client list scrolls; the map stays fixed beside it.
  */
 export function NearbyClientsPage() {
+  const { hasMinRole } = usePermissions();
+  const isManager = hasMinRole("crm_admin");
   const {
     clients,
     filters,
@@ -35,6 +40,7 @@ export function NearbyClientsPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [planClient, setPlanClient] = useState<NearbyClient | null>(null);
+  const [areasOpen, setAreasOpen] = useState(false);
 
   // The qualification bridge: accept a prospect into the CRM. On success it leaves the pool.
   const qualify = useQualifyProspect();
@@ -54,10 +60,7 @@ export function NearbyClientsPage() {
 
   return (
     <div className="flex flex-col gap-4 lg:h-full lg:min-h-0">
-      {/* Header row. Target Service Area management used to hang off this row as an Admin-only action;
-          it moved to Settings → Target Areas in RBAC R-2, because this page became a BD + Super Admin
-          workspace and the registry belongs to the CRM Manager. The BD-facing view is unchanged — that
-          action never rendered for a BD. */}
+      {/* Header row: context + admin registry access */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <MapPin className="h-4 w-4 text-teal-600" aria-hidden />
@@ -65,6 +68,11 @@ export function NearbyClientsPage() {
             Discovered businesses in your target areas.
           </span>
         </div>
+        {isManager && (
+          <Button variant="outline" size="sm" onClick={() => setAreasOpen(true)}>
+            Manage target areas
+          </Button>
+        )}
       </div>
 
       {/* Enterprise two-panel layout. The page fills <main> exactly (no page-level scroll): the left
@@ -127,6 +135,7 @@ export function NearbyClientsPage() {
         client={planClient}
       />
 
+      {isManager && <TargetAreasDialog open={areasOpen} onOpenChange={setAreasOpen} />}
     </div>
   );
 }

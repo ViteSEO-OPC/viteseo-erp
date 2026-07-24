@@ -17,9 +17,11 @@ use Tests\TestCase;
  * · Settings). The route previously carried no authorization at all — RBAC audit finding 3, where a BD
  * token returned 200 against an endpoint nobody had gated.
  *
- * The Target Service Area registry is deliberately NOT affected: it stays Admin/Super-Admin-only and is
- * asserted below, because removing Admin from this page must not remove the CRM Manager's own registry.
- * Its UI entry point moved to Settings; the API is unchanged.
+ * The Target Service Area registry is a SEPARATE surface and is deliberately NOT changed by this
+ * milestone: its API stays Admin/Super-Admin-only, asserted below so this milestone cannot silently
+ * widen or narrow it. Its only UI entry point remains the Nearby Clients header action, so in practice
+ * only Super Admin reaches it once Admin loses that page — a deliberate, deferred consequence. Target
+ * Areas is being reviewed under its own PDR (keep / redesign / retire).
  */
 class NearbyClientsAuthorizationTest extends TestCase
 {
