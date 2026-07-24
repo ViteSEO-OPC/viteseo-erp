@@ -31,6 +31,7 @@ class PayrollService
         private readonly AttendanceService $attendance,
         private readonly AuditService $audit,
         private readonly HolidayService $holidays,
+        private readonly AttendancePolicyService $attendancePolicy,
     ) {}
 
     /**
@@ -51,6 +52,7 @@ class PayrollService
         int $workingDaysInPeriod,
         array $dist,
         float $holidayPremium = 0.0,
+        ?UnpaidDaysResult $unpaidDetail = null,
     ): array {
         $monthlyBase = (float) $employee->base_salary;
         // The pay for THIS period: annual salary spread across the year's periods.
@@ -84,7 +86,32 @@ class PayrollService
         // the full monthly salary (PH bracket model), so `contribBase` is unchanged.
         $taxableMonthly = $periodsPerYear > 0 ? round($basePay * $periodsPerYear / 12, 2) : 0.0;
 
-        return $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium);
+        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium);
+
+        // Step 4b — persist how base_salary was derived, so the payslip explains itself.
+        // The minute-level portion is all-zero until a deduction mode is enabled.
+        $slip['working_days'] = $workingDaysInPeriod;
+        $slip['daily_rate'] = $dailyRate;
+        $slip['unpaid_days'] = round($unpaidDays, 2);
+        $slip['late_minutes'] = $unpaidDetail?->lateMinutes ?? 0;
+        $slip['undertime_minutes'] = $unpaidDetail?->undertimeMinutes ?? 0;
+        $slip['late_deduction'] = round(($unpaidDetail?->lateDays ?? 0.0) * $dailyRate, 2);
+        $slip['undertime_deduction'] = round(($unpaidDetail?->undertimeDays ?? 0.0) * $dailyRate, 2);
+
+        return $slip;
+    }
+
+    /** The deduction-relevant policy fields, captured onto a run for reproducibility (4b). */
+    private function policySnapshot(): array
+    {
+        $p = $this->attendancePolicy->get();
+
+        return $p->only([
+            'late_deduction_mode', 'lates_per_deduction', 'late_minutes_from', 'late_tiers',
+            'undertime_deduction_mode', 'missing_clockout_mode',
+            'deduction_rounding', 'deduction_block_minutes', 'daily_deduction_cap',
+            'daily_rate_basis', 'annual_divisor', 'hours_per_day_divisor',
+        ]);
     }
 
     /** How much of a MONTHLY deduction lands on this period, per the timing setting. */
@@ -413,14 +440,14 @@ class PayrollService
                 // scheduled workdays drive the daily rate; unpaid days (absences +
                 // missing records on past workdays, minus approved leave) prorate pay.
                 $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $cycleStart, $cycleEnd);
-                // Management staff are on a FIXED salary — the unpaidDaysFor()/holidayPremiumFor()
+                // Management staff are on a FIXED salary — the unpaidDaysDetailFor()/holidayPremiumFor()
                 // helpers themselves return 0 for management, so pay is never prorated by attendance.
-                $unpaidDays = $this->attendance->unpaidDaysFor($employee, $cycleStart, $cycleEnd);
+                $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd);
 
                 // Premium for working on a (non-working) holiday in this cycle.
                 $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap);
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium);
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail);
 
                 Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],
@@ -464,6 +491,9 @@ class PayrollService
                 'employee_count' => $count,
                 'run_at' => now(),
                 'run_by' => $runner->id,
+                // Step 4b — the attendance policy as it stood when this run executed, so a
+                // later policy change never silently re-prices these payslips.
+                'policy_snapshot' => $this->policySnapshot(),
             ]);
 
             // Audit trail: who ran (or re-ran) which pay cycle, for how many people.
