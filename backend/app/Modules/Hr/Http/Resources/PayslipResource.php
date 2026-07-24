@@ -34,6 +34,15 @@ class PayslipResource extends JsonResource
             'status' => $this->status,
             // The HR officer who ran this payroll — for the payslip signature line.
             'processed_by' => $this->payrollRun?->runner?->name,
+            // Attendance basis (step 4b/7): how base_salary was derived, so the payslip
+            // explains itself. All zero on payslips generated before this shipped.
+            'working_days' => (int) $this->working_days,
+            'daily_rate' => (float) $this->daily_rate,
+            'unpaid_days' => (float) $this->unpaid_days,
+            'late_minutes' => (int) $this->late_minutes,
+            'undertime_minutes' => (int) $this->undertime_minutes,
+            'late_deduction' => (float) $this->late_deduction,
+            'undertime_deduction' => (float) $this->undertime_deduction,
         ];
     }
 }
