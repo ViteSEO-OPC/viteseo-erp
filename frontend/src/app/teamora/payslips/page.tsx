@@ -38,7 +38,7 @@ import {
 import { PayrollInquiryDialog } from "@/modules/hr/components/payroll-inquiry-dialog";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
 import { SimpleSelect } from "@/modules/hr/ui/select";
-import type { PayslipSummary } from "@/modules/hr/types/payroll";
+import type { Payslip, PayslipSummary } from "@/modules/hr/types/payroll";
 import type { PayslipRequest } from "@/modules/hr/types/request";
 
 function cycleLabel(start: string, end: string) {
@@ -186,6 +186,8 @@ export default function PayslipsPage() {
                 <Row label="Reimbursement" value={formatPeso(detail.payslip.reimbursements)} />
               )}
             </Section>
+
+            <AttendanceBasis payslip={detail.payslip} />
 
             <Section title="Deductions">
               <Row label="SSS" value={formatPeso(detail.payslip.sss)} negative />
@@ -521,6 +523,45 @@ function PayslipCopyDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Attendance basis (step 7): explains how base salary was derived — working days, daily
+// rate, and any late/undertime that reduced it. Base salary already reflects these, so
+// this is shown as context, not extra deductions. Hidden on older payslips (no data).
+function AttendanceBasis({ payslip }: { payslip: Payslip }) {
+  if (payslip.working_days <= 0) return null;
+
+  const hasReductions =
+    payslip.unpaid_days > 0 || payslip.late_minutes > 0 || payslip.undertime_minutes > 0;
+
+  return (
+    <Section title="Attendance basis">
+      <Row label="Working days this period" value={String(payslip.working_days)} />
+      <Row label="Daily rate" value={formatPeso(payslip.daily_rate)} />
+      {payslip.unpaid_days > 0 && (
+        <Row label="Unpaid days" value={payslip.unpaid_days.toFixed(2)} />
+      )}
+      {payslip.late_minutes > 0 && (
+        <Row
+          label={`Late (${payslip.late_minutes} min)`}
+          value={formatPeso(payslip.late_deduction)}
+          negative
+        />
+      )}
+      {payslip.undertime_minutes > 0 && (
+        <Row
+          label={`Undertime (${payslip.undertime_minutes} min)`}
+          value={formatPeso(payslip.undertime_deduction)}
+          negative
+        />
+      )}
+      {hasReductions && (
+        <p className="pt-1 text-xs text-muted-foreground">
+          Your base salary above already reflects these. Questions? File a payroll inquiry below.
+        </p>
+      )}
+    </Section>
   );
 }
 

@@ -59,6 +59,23 @@
         <tr><td><strong>Gross</strong></td><td class="amt"><strong>{{ $peso($p['gross']) }}</strong></td></tr>
     </table>
 
+    @if (($p['working_days'] ?? 0) > 0)
+    <h2>Attendance basis</h2>
+    <table>
+        <tr><td>Working days this period</td><td class="amt">{{ $p['working_days'] }}</td></tr>
+        <tr><td>Daily rate</td><td class="amt">{{ $peso($p['daily_rate']) }}</td></tr>
+        @if (($p['unpaid_days'] ?? 0) > 0)
+            <tr><td>Unpaid days</td><td class="amt">{{ number_format((float) $p['unpaid_days'], 2) }}</td></tr>
+        @endif
+        @if (($p['late_minutes'] ?? 0) > 0)
+            <tr><td>Late ({{ $p['late_minutes'] }} min)</td><td class="amt neg">− {{ $peso($p['late_deduction']) }}</td></tr>
+        @endif
+        @if (($p['undertime_minutes'] ?? 0) > 0)
+            <tr><td>Undertime ({{ $p['undertime_minutes'] }} min)</td><td class="amt neg">− {{ $peso($p['undertime_deduction']) }}</td></tr>
+        @endif
+    </table>
+    @endif
+
     <h2>Deductions</h2>
     <table>
         <tr><td>SSS</td><td class="amt neg">− {{ $peso($p['sss']) }}</td></tr>

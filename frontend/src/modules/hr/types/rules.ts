@@ -72,9 +72,7 @@ export interface ViolationRules {
 
 export interface AttendancePolicy {
   id: number;
-  consecutive_lates_before_absence: number;
   monthly_late_reset: boolean;
-  awol_days_threshold: number;
 
   // Payroll: how accumulated lates translate into a pay deduction.
   late_deduction_mode: LateDeductionMode;
@@ -107,6 +105,14 @@ export interface AttendancePolicy {
   violation_rules: ViolationRules | null;
 
   task_format: { require_english?: boolean; uppercase?: boolean };
+}
+
+/** Dry-run result (step 6b): impact of a proposed policy over the last completed period. */
+export interface DeductionPreview {
+  period: { start: string; end: string };
+  employees_affected: number;
+  employees_considered: number;
+  total_deduction: number;
 }
 
 export interface EffectiveSchedule {

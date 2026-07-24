@@ -9,9 +9,7 @@ class AttendancePolicy extends Model
     protected $table = 'hr_attendance_policies';
 
     protected $fillable = [
-        'consecutive_lates_before_absence',
         'monthly_late_reset',
-        'awol_days_threshold',
         'late_deduction_mode',
         'lates_per_deduction',
         'late_minutes_from',
@@ -34,9 +32,7 @@ class AttendancePolicy extends Model
     ];
 
     protected $casts = [
-        'consecutive_lates_before_absence' => 'integer',
         'monthly_late_reset' => 'boolean',
-        'awol_days_threshold' => 'integer',
         'lates_per_deduction' => 'integer',
         'late_tiers' => 'array',
         'overtime_threshold_minutes' => 'integer',

@@ -20,10 +20,12 @@ import {
 import { cn } from "@/lib/utils";
 import { toManilaTimeInput, formatDate } from "@/core/lib/format";
 import { useAdjustAttendance, useViolations, useResolveViolation } from "@/modules/hr/hooks/use-attendance";
+import { useAttendancePolicy } from "@/modules/hr/hooks/use-rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { TimePicker } from "@/modules/hr/ui/time-picker";
 import { SEVERITY_LABEL } from "@/modules/hr/types/attendance";
 import type { HrAttendanceRow, Severity, Violation } from "@/modules/hr/types/attendance";
+import type { ViolationRules } from "@/modules/hr/types/rules";
 
 const DOT: Record<Severity, string> = {
   green: "bg-success",
@@ -32,13 +34,39 @@ const DOT: Record<Severity, string> = {
   red: "bg-danger",
 };
 
-// The alert-level ladder shown in the legend (and used for the current level).
-const ALERT_LEVELS: { sev: Severity; label: string; desc: string }[] = [
-  { sev: "green", label: SEVERITY_LABEL.green, desc: "1st lateness; 1st–2nd Tardiness / month" },
-  { sev: "yellow", label: SEVERITY_LABEL.yellow, desc: "2nd lateness; 3rd Tardiness / month; 1-Day UA (1st)" },
-  { sev: "orange", label: SEVERITY_LABEL.orange, desc: "3 Consecutive Lates; 4th Tardiness / month; 2-Day UA (1st)" },
-  { sev: "red", label: SEVERITY_LABEL.red, desc: "2-Day UA (2nd); 3+ Days Without Notice (AWOL)" },
-];
+// Severity order for the legend (worst last), label pulled from SEVERITY_LABEL.
+const SEVERITY_ORDER: Severity[] = ["green", "yellow", "orange", "red"];
+
+/** A level's threshold from the ladder (monthly_min for late, streak_min for absence). */
+function threshold(rules: ViolationRules | null | undefined, category: keyof ViolationRules, severity: Severity, key: "monthly_min" | "streak_min", fallback: number): number {
+  return (rules?.[category] ?? []).find((r) => r.severity === severity)?.[key] ?? fallback;
+}
+
+/**
+ * Build the legend descriptions from the CONFIGURED ladder (Company → Rules), so the
+ * numbers HR set there are exactly what shows here. Each level shows its late-count band
+ * and its absence-days band. Falls back to today's defaults when the policy isn't loaded.
+ */
+function legendDescriptions(rules: ViolationRules | null | undefined): Record<Severity, string> {
+  const lLow = threshold(rules, "late", "green", "monthly_min", 1);
+  const lCaution = threshold(rules, "late", "yellow", "monthly_min", 3);
+  const lWarning = threshold(rules, "late", "orange", "monthly_min", 4);
+  const lCritical = threshold(rules, "late", "red", "monthly_min", 6);
+  const aLow = threshold(rules, "absence", "green", "streak_min", 1);
+  const aCaution = threshold(rules, "absence", "yellow", "streak_min", 2);
+  const aWarning = threshold(rules, "absence", "orange", "streak_min", 3);
+  const aCritical = threshold(rules, "absence", "red", "streak_min", 4);
+
+  const band = (from: number, to: number, unit: string) =>
+    from >= to ? `${from}+ ${unit}` : `${from}–${to} ${unit}`;
+
+  return {
+    green: `${band(lLow, lCaution - 1, "lates/mo")}; ${band(aLow, aCaution - 1, "unauth. days")}; missed clock-out`,
+    yellow: `${band(lCaution, lWarning - 1, "lates/mo")}; ${band(aCaution, aWarning - 1, "unauth. days")}`,
+    orange: `${band(lWarning, lCritical - 1, "lates/mo")}; ${band(aWarning, aCritical - 1, "unauth. days")}`,
+    red: `${lCritical}+ lates/mo; ${aCritical}+ consecutive days, no leave (AWOL)`,
+  };
+}
 
 const STATUS_PILL: Record<string, { cls: string; label: string }> = {
   present: { cls: "bg-success-subtle text-success", label: "Checked in" },
@@ -142,6 +170,7 @@ function Details({
 
   // Violation history: fetch ALL months, filter client-side by an optional period.
   const { data: violations } = useViolations(row.employee_id);
+  const { data: policy } = useAttendancePolicy();
   const allViolations = useMemo(() => violations ?? [], [violations]);
 
   const currentYear = manilaYear();
@@ -177,7 +206,10 @@ function Details({
     }
   }
 
-  const level = ALERT_LEVELS.find((l) => l.sev === (row.flag?.severity ?? "green")) ?? ALERT_LEVELS[0];
+  const currentSev: Severity = row.flag?.severity ?? "green";
+  const level = { sev: currentSev, label: SEVERITY_LABEL[currentSev] };
+  // Legend descriptions reflect the thresholds HR configured (Company → Rules).
+  const legendDesc = useMemo(() => legendDescriptions(policy?.violation_rules), [policy]);
   const pill = STATUS_PILL[derivedStatus] ?? { cls: "bg-muted text-muted-foreground", label: titleCase(derivedStatus) };
 
   // Violation-history table columns (unresolved float to the top via `needsAction`).
@@ -348,14 +380,14 @@ function Details({
           )}
         </Section>
 
-        {/* Alert color legend */}
+        {/* Alert color legend — thresholds come from Company → Rules (Violation flags). */}
         <Section title="Alert Color Legend">
           <div className="space-y-2">
-            {ALERT_LEVELS.map((l) => (
-              <div key={l.sev} className="flex items-start gap-3 text-sm">
-                <span className={cn("mt-1.5 size-2.5 shrink-0 rounded-full", DOT[l.sev])} />
-                <span className="w-40 shrink-0 font-medium text-foreground">{l.label}</span>
-                <span className="text-muted-foreground">{l.desc}</span>
+            {SEVERITY_ORDER.map((sev) => (
+              <div key={sev} className="flex items-start gap-3 text-sm">
+                <span className={cn("mt-1.5 size-2.5 shrink-0 rounded-full", DOT[sev])} />
+                <span className="w-40 shrink-0 font-medium text-foreground">{SEVERITY_LABEL[sev]}</span>
+                <span className="text-muted-foreground">{legendDesc[sev]}</span>
               </div>
             ))}
           </div>

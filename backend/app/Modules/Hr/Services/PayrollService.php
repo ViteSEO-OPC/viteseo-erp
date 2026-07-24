@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Services;
 
 use App\Models\User;
 use App\Modules\Hr\Http\Resources\PayslipResource;
+use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
@@ -33,6 +34,86 @@ class PayrollService
         private readonly HolidayService $holidays,
         private readonly AttendancePolicyService $attendancePolicy,
     ) {}
+
+    /**
+     * Dry-run (step 6b): what a PROPOSED attendance policy would deduct if it had been
+     * active last period — WITHOUT saving the policy or a run. Reuses the same
+     * DeductionService as a real run (a second caller, not new math), pricing only the
+     * NEW minute-based portion (late + undertime) so HR sees the impact of the switch
+     * before flipping it.
+     *
+     * @param  array<string, mixed>  $proposed  policy fields to preview (merged over current)
+     * @return array{period:array{start:string,end:string}, employees_affected:int, total_deduction:float, employees_considered:int}
+     */
+    public function previewDeductions(array $proposed): array
+    {
+        $setting = PayrollSetting::query()->first();
+        if (! $setting) {
+            return ['period' => ['start' => '', 'end' => ''], 'employees_affected' => 0, 'employees_considered' => 0, 'total_deduction' => 0.0];
+        }
+
+        // The most recent COMPLETED period for the company default frequency: the period
+        // immediately before the one covering today.
+        $tz = config('app.timezone_local');
+        $current = $this->schedule->currentPeriodFor($setting->frequency, $setting->anchor_date, $setting->pay_delay_days ?? 0);
+        $prevRef = Carbon::parse($current['start'], $tz)->subDay();
+        $prev = $this->schedule->currentPeriodFor($setting->frequency, $setting->anchor_date, $setting->pay_delay_days ?? 0, $prevRef);
+        [$start, $end] = [$prev['start'], $prev['end']];
+
+        // A transient, UNSAVED policy carrying the proposed values over today's policy.
+        $policy = $this->attendancePolicy->get()->replicate();
+        $policy->fill($proposed);
+
+        $total = 0.0;
+        $affected = 0;
+        $considered = 0;
+
+        $employees = Employee::whereNull('separation_type')
+            ->where('is_management', false)
+            ->whereDate('hire_date', '<=', $end)
+            ->get();
+
+        foreach ($employees as $employee) {
+            $considered++;
+            $frequency = $employee->pay_frequency ?: $setting->frequency;
+            $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
+            $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $start, $end);
+
+            $dailyRate = $this->previewDailyRate($employee, $policy, $periodsPerYear, $workingDays);
+            $detail = $this->attendance->unpaidDaysDetailFor($employee, $start, $end, $policy);
+
+            // Only the NEW minute-based cost (the switch being previewed); absence/leave
+            // are unchanged, so they aren't part of "what will this switch cost".
+            $deduction = round(($detail->lateDays + $detail->undertimeDays) * $dailyRate, 2);
+            if ($deduction > 0) {
+                $affected++;
+                $total += $deduction;
+            }
+        }
+
+        return [
+            'period' => ['start' => $start, 'end' => $end],
+            'employees_affected' => $affected,
+            'employees_considered' => $considered,
+            'total_deduction' => round($total, 2),
+        ];
+    }
+
+    /** The daily rate under a (possibly proposed) policy — mirrors payslipFor's basis logic. */
+    private function previewDailyRate(Employee $employee, AttendancePolicy $policy, int $periodsPerYear, int $workingDays): float
+    {
+        $monthly = (float) $employee->base_salary;
+
+        if ($policy->daily_rate_basis === 'fixed_divisor') {
+            $divisor = max(1, (int) $policy->annual_divisor);
+
+            return round(($monthly * 12) / $divisor, 2);
+        }
+
+        $perPeriodBase = $periodsPerYear > 0 ? round(($monthly * 12) / $periodsPerYear, 2) : 0.0;
+
+        return $workingDays > 0 ? round($perPeriodBase / $workingDays, 2) : 0.0;
+    }
 
     /**
      * Full per-employee payslip for one pay period. Base pay is the per-period slice

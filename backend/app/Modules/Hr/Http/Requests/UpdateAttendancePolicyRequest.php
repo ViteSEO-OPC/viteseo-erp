@@ -2,10 +2,14 @@
 
 namespace App\Modules\Hr\Http\Requests;
 
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateAttendancePolicyRequest extends FormRequest
 {
+    /** Severity order for the monotonic-threshold guard. */
+    private const SEVERITY_RANK = ['green' => 0, 'yellow' => 1, 'orange' => 2, 'red' => 3];
+
     public function authorize(): bool
     {
         return true;
@@ -17,9 +21,7 @@ class UpdateAttendancePolicyRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'consecutive_lates_before_absence' => ['sometimes', 'integer', 'min:1', 'max:30'],
             'monthly_late_reset' => ['sometimes', 'boolean'],
-            'awol_days_threshold' => ['sometimes', 'integer', 'min:1', 'max:30'],
             'late_deduction_mode' => ['sometimes', 'in:none,per_lates,per_hour,tiered'],
             'lates_per_deduction' => ['sometimes', 'integer', 'min:1', 'max:30'],
             'late_minutes_from' => ['sometimes', 'in:start_time,after_grace'],
@@ -54,14 +56,53 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'violation_rules.absence' => ['sometimes', 'array'],
             'violation_rules.missed_time_out' => ['sometimes', 'array'],
             'violation_rules.*.*.severity' => ['required', 'in:green,yellow,orange,red'],
-            'violation_rules.*.*.streak_min' => ['sometimes', 'integer', 'min:1', 'max:365'],
-            'violation_rules.*.*.monthly_min' => ['sometimes', 'integer', 'min:1', 'max:365'],
-            'violation_rules.*.*.occurrence_min' => ['sometimes', 'integer', 'min:1', 'max:365'],
+            'violation_rules.*.*.streak_min' => ['sometimes', 'integer', 'min:0', 'max:365'],
+            'violation_rules.*.*.monthly_min' => ['sometimes', 'integer', 'min:0', 'max:365'],
+            'violation_rules.*.*.occurrence_min' => ['sometimes', 'integer', 'min:0', 'max:365'],
             'violation_rules.*.*.type' => ['sometimes', 'string', 'max:40'],
 
             'task_format' => ['sometimes', 'array'],
             'task_format.require_english' => ['sometimes', 'boolean'],
             'task_format.uppercase' => ['sometimes', 'boolean'],
         ];
+    }
+
+    /**
+     * The alert levels must strictly ascend: a higher-severity level can't trigger at the
+     * same or a lower threshold than a milder one (e.g. Low 2 ⇒ Caution must be > 2).
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $v) {
+            foreach (['late', 'absence'] as $category) {
+                $rungs = $this->input("violation_rules.{$category}");
+                if (! is_array($rungs)) {
+                    continue;
+                }
+
+                // (severity rank → threshold) for each rung, then check ascending.
+                $byRank = [];
+                foreach ($rungs as $rung) {
+                    $rank = self::SEVERITY_RANK[$rung['severity'] ?? ''] ?? null;
+                    $threshold = $rung['monthly_min'] ?? $rung['streak_min'] ?? $rung['occurrence_min'] ?? null;
+                    if ($rank !== null && $threshold !== null) {
+                        $byRank[$rank] = (int) $threshold;
+                    }
+                }
+                ksort($byRank);
+
+                $prev = null;
+                foreach ($byRank as $threshold) {
+                    if ($prev !== null && $threshold <= $prev) {
+                        $v->errors()->add(
+                            "violation_rules.{$category}",
+                            'Each alert level must use a higher number than the level below it.',
+                        );
+                        break;
+                    }
+                    $prev = $threshold;
+                }
+            }
+        });
     }
 }
