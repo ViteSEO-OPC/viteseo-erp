@@ -10,6 +10,7 @@ import {
   MapPin,
   History,
   Settings,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 import { SidebarNavItem } from "@/modules/crm/components/layout/sidebar/sidebar-nav-item";
@@ -29,24 +30,28 @@ const NAV_ITEMS: {
   // Management Dashboard for Admin/SA) — see app/(dashboard)/dashboard/page.tsx.
   { label: "Dashboard", icon: LayoutDashboard, href: "/zerem/dashboard", minRole: "crm_bd" },
   { label: "Leads", icon: Users, href: "/zerem/leads", minRole: "crm_bd" },
-  // Nearby Clients — territory/location surface. Data foundation live; interactive map deferred
-  // until Lead Enrichment + geocoding supply coordinates. Target-area management is Admin-only.
-  { label: "Nearby Clients", icon: MapPin, href: "/zerem/nearby-clients", minRole: "crm_bd" },
+  // Nearby Clients + Outreach — Business Development workspaces (🔒 PO decision 2026-07-24, RBAC R-3).
+  // Admin (CRM Manager) is limited to Dashboard · Leads · Reports & Performance · Activity Logs ·
+  // Settings, so both use an explicit allow-list: `minRole` is inherit-upward and was handing them to
+  // Admin. Super Admin is listed explicitly — it has full system access and must not be excluded.
+  //
+  // Nearby Clients — territory/location surface. Data foundation live; interactive map deferred until
+  // Lead Enrichment + geocoding supply coordinates.
+  { label: "Nearby Clients", icon: MapPin, href: "/zerem/nearby-clients", allowedRoles: ["crm_bd", "super_admin"] },
   // Outreach: badge = real count of pending "Follow-ups Pending" items (the shared
   // `isPendingOutreachEvent` definition over the Planner query — see useSidebarBadges). No badge when
   // the count is zero.
-  { label: "Outreach", icon: Clock, href: "/zerem/follow-ups", minRole: "crm_bd" },
+  { label: "Outreach", icon: Clock, href: "/zerem/follow-ups", allowedRoles: ["crm_bd", "super_admin"] },
   // Planner (personal BD workspace) — first consumer of the generic `allowedRoles` allow-list:
   // shown ONLY to Business Development Managers, hidden from Admin/Super Admin. Badge = real count of
   // actionable (dated, not-completed) Planner items for the current user; no badge when zero.
   { label: "Planner", icon: CalendarCheck, href: "/zerem/planner", allowedRoles: ["crm_bd"] },
-  // Reports (/reports) is temporarily HIDDEN for the demo: the module is still mock (not wired to a
-  // backend), so it must not be reachable/visible. The route remains but is unlinked. Re-enable and
-  // wire it in a dedicated post-demo milestone.
-  // { label: "Reports", icon: BarChart3, href: "/zerem/reports", minRole: "crm_admin" },
-  // My Performance — the BD-facing personal surface (S1). Visible to every role; content is
-  // ownership-scoped so each BD sees only their own data (BD-PERF-FE-ARCH-REVIEW OQ-FE-1).
-  { label: "My Performance", icon: Target, href: "/zerem/my-performance", minRole: "crm_bd" },
+  // Reports & Performance — Management analytics (Admin/Super Admin only). Reuses the My Performance
+  // widgets with an All-Reports / per-BD scope selector.
+  { label: "Reports & Performance", icon: BarChart3, href: "/zerem/reports", minRole: "crm_admin" },
+  // My Performance — BD-exclusive personal surface; ownership-scoped server-side. Admin/SA use
+  // Reports & Performance above (not this), so it is role-locked to BDs.
+  { label: "My Performance", icon: Target, href: "/zerem/my-performance", allowedRoles: ["crm_bd"] },
   { label: "Activity Logs", icon: History, href: "/zerem/activity-logs", minRole: "crm_bd" },
   // "Settings" resolves per role: BDs get their self-service profile (/profile, role-exclusive like
   // Planner); Admin/Super Admin get the admin Settings module (/settings). Mutually exclusive, so a

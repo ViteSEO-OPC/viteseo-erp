@@ -28,7 +28,7 @@ export function CredentialsModal({ open, onOpenChange, user }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onOpenChange(false); }}>
-      <DialogContent showCloseButton={false} className="flex w-full flex-col p-0 sm:max-w-[420px]">
+      <DialogContent showCloseButton={false} className="flex w-full flex-col gap-0 p-0 sm:max-w-[420px]">
         <DialogHeader className="border-b border-border-subtle px-6 py-4">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-lg font-bold text-card-foreground">Sign-in details</DialogTitle>

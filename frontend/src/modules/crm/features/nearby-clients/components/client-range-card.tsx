@@ -37,7 +37,7 @@ export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDir
       onClick={onSelect}
       className={cn(
         "cursor-pointer rounded-xl border p-4 transition-colors",
-        selected ? "border-teal-400 bg-teal-50/50" : "border-border bg-card hover:border-teal-200",
+        selected ? "border-teal-400 bg-teal-50/50 dark:bg-teal-950/40" : "border-border bg-card hover:border-teal-200",
       )}
     >
       <div className="flex items-start justify-between gap-2">

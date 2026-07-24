@@ -7,6 +7,7 @@ import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import type {
   PlannerEvent,
+  ConsultationOutcome,
   EventType,
   PlannerEventStatus,
   PlannerEventPriority,
@@ -24,6 +25,8 @@ export type PlannerEventDraft = {
   title: string;
   eventType: EventType;
   status: PlannerEventStatus;
+  /** Consultation only. `null` clears it; omit to leave it untouched. */
+  outcome?: ConsultationOutcome | null;
   priority: PlannerEventPriority;
   startsAt: string | null;
   endsAt: string | null;
@@ -44,6 +47,7 @@ function toApiPayload(d: Partial<PlannerEventDraft>): Record<string, unknown> {
   if (d.title !== undefined) p.title = d.title;
   if (d.eventType !== undefined) p.event_type = d.eventType;
   if (d.status !== undefined) p.status = d.status;
+  if (d.outcome !== undefined) p.outcome = d.outcome;
   if (d.priority !== undefined) p.priority = d.priority;
   if (d.startsAt !== undefined) p.starts_at = d.startsAt;
   if (d.endsAt !== undefined) p.ends_at = d.endsAt;
@@ -76,6 +80,7 @@ export function useCreatePlannerEvent(options?: { successMessage?: string }) {
         title: draft.title,
         eventType: draft.eventType,
         status: draft.status,
+        outcome: draft.outcome ?? null,
         priority: draft.priority,
         startsAt: draft.startsAt,
         endsAt: draft.endsAt,

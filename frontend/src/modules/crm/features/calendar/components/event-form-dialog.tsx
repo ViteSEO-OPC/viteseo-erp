@@ -29,7 +29,9 @@ import {
   type PlannerEventDraft,
 } from "@/modules/crm/features/calendar/hooks/use-planner-mutations";
 import { usePlannerLeads } from "@/modules/crm/features/calendar/hooks/use-planner-leads";
+import { CONSULTATION_OUTCOME_META } from "@/modules/crm/features/calendar/lib/event-type-meta";
 import type {
+  ConsultationOutcome,
   PlannerEvent,
   EventType,
   PlannerEventStatus,
@@ -40,13 +42,16 @@ import type {
 // single FollowUpScheduler (Cold Calling → Scheduled, or the Lead Details "Schedule follow-up"
 // Quick Action → POST /leads/{id}/follow-ups). It stays selectable only when EDITING an event that
 // already is one (see typeOptions in the component), so no new follow-up gains a second birth path.
-const TYPES: EventType[] = ["email", "call", "meeting", "task"];
+const TYPES: EventType[] = ["email", "call", "meeting", "task", "consultation"];
 const STATUSES: PlannerEventStatus[] = ["todo", "scheduled", "in_progress", "completed"];
 const PRIORITIES: PlannerEventPriority[] = ["low", "medium", "high"];
 const NO_LEAD = "none";
+/** Sentinel for "outcome not recorded yet" — Radix Select cannot hold an empty-string value. */
+const NO_OUTCOME = "none";
 
 const LABELS: Record<string, string> = {
   "follow-up": "Follow-up",
+  consultation: "Consultation",
   todo: "To Do",
   scheduled: "Scheduled",
   in_progress: "In Progress",
@@ -72,7 +77,7 @@ type EventFormDialogProps = {
 export function EventFormDialog({ open, onOpenChange, event, defaultStatus }: EventFormDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
+      <DialogContent className="flex max-h-[85vh] w-full flex-col gap-0 p-0 sm:max-w-[480px]">
         {open && (
           <EventForm
             event={event ?? null}
@@ -112,13 +117,25 @@ function EventForm({
     event?.endsAt ? utcIsoToBusinessLocalInput(event.endsAt) : "",
   );
   const [leadId, setLeadId] = useState<string>(event?.leadId ?? NO_LEAD);
+  const [outcome, setOutcome] = useState<ConsultationOutcome | null>(event?.outcome ?? null);
   const [description, setDescription] = useState(event?.description ?? "");
 
+  const isConsultation = eventType === "consultation";
+  // A consultation must always carry a lead — the KPI counts DISTINCT leads, so an unlinked one could
+  // never be counted. Enforced server-side too; mirrored here so the BD sees it before saving.
+  const consultationNeedsLead = isConsultation && leadId === NO_LEAD;
+  // Completed + no outcome = the "awaiting outcome" state this dialog exists to resolve.
+  const outcomeMissing = isConsultation && status === "completed" && !outcome;
+
   const busy = create.isPending || update.isPending || remove.isPending;
-  const canSave = title.trim().length > 0 && !busy;
-  // Offer 'follow-up' only when this event already is one (edit); never for new authoring.
+  const canSave = title.trim().length > 0 && !busy && !consultationNeedsLead && !outcomeMissing;
+  const canComplete = !busy && (!isConsultation || Boolean(outcome));
+  // Authoring offers TYPES only. When EDITING, the event's own type is appended if it is not in that
+  // list — which covers 'follow-up' (never authored here, only ever edited) and, equally, any type
+  // newer than this build. Without it the select would hold a value absent from its options and a
+  // plain Save would silently REWRITE the event's type; preserving it keeps edits non-destructive.
   const typeOptions: EventType[] =
-    event?.eventType === "follow-up" ? [...TYPES, "follow-up"] : TYPES;
+    event && !TYPES.includes(event.eventType) ? [...TYPES, event.eventType] : TYPES;
 
   function buildDraft(): PlannerEventDraft {
     return {
@@ -132,6 +149,9 @@ function EventForm({
       allDay,
       leadId: leadId === NO_LEAD ? null : leadId,
       description: description.trim() ? description.trim() : null,
+      // Consultation-only vocabulary. Sent as null for every other type so switching a consultation
+      // to another type clears a stranded outcome instead of tripping the server's 422.
+      outcome: isConsultation ? outcome : null,
     };
   }
 
@@ -145,9 +165,21 @@ function EventForm({
     }
   }
 
+  /**
+   * Completing a consultation ALWAYS carries its outcome. A consultation with no recorded result is an
+   * incomplete business state, not an assumption of attendance — the system never infers one (frozen:
+   * a connected call means "we spoke", not "it went well"), so the BD states it explicitly here.
+   */
   function handleComplete() {
     if (!event) return;
-    update.mutate({ id: event.id, patch: { status: "completed" } }, { onSuccess: onDone });
+    if (isConsultation && !outcome) return; // guarded by canComplete; belt and braces
+    update.mutate(
+      {
+        id: event.id,
+        patch: isConsultation ? { status: "completed", outcome } : { status: "completed" },
+      },
+      { onSuccess: onDone },
+    );
   }
 
   function handleDelete() {
@@ -157,7 +189,7 @@ function EventForm({
 
   return (
     <>
-      <DialogHeader>
+      <DialogHeader className="px-6 pt-6">
         <DialogTitle>{isEdit ? "Edit event" : "New task"}</DialogTitle>
         <DialogDescription>
           {isEdit
@@ -166,7 +198,7 @@ function EventForm({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="space-y-4 py-2">
+      <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
         <Field label="Title">
           <Input
             value={title}
@@ -203,6 +235,47 @@ function EventForm({
           </Field>
         </div>
 
+        {isConsultation && (
+          <div className="space-y-2 rounded-lg border border-border-subtle bg-secondary/40 p-3">
+            <Field label="Consultation outcome">
+              <Select
+                value={outcome ?? NO_OUTCOME}
+                onValueChange={(v) =>
+                  setOutcome(v === NO_OUTCOME ? null : (v as ConsultationOutcome))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_OUTCOME}>Not recorded yet</SelectItem>
+                  {CONSULTATION_OUTCOME_META.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label} — {o.hint}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            {outcomeMissing ? (
+              <p className="text-xs font-medium text-amber-600">
+                This consultation is completed but has no recorded outcome, so it is not counted in
+                reporting yet. Record what actually happened to close it.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Only “Successful” and “Not Interested” count as a consultation the lead attended.
+              </p>
+            )}
+          </div>
+        )}
+
+        {consultationNeedsLead && (
+          <p className="text-xs font-medium text-amber-600">
+            A consultation must be linked to a lead — reporting counts consultations per lead.
+          </p>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="Starts">
             <Input type="datetime-local" value={startsLocal} onChange={(e) => setStartsLocal(e.target.value)} />
@@ -227,7 +300,7 @@ function EventForm({
         </Field>
       </div>
 
-      <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+      <DialogFooter className="mx-0 mb-0 flex-col-reverse gap-2 border-t px-6 py-4 sm:flex-row sm:justify-between">
         {isEdit ? (
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={handleDelete} disabled={busy}>
@@ -235,7 +308,7 @@ function EventForm({
               Delete
             </Button>
             {status !== "completed" && (
-              <Button variant="secondary" size="sm" onClick={handleComplete} disabled={busy}>
+              <Button variant="secondary" size="sm" onClick={handleComplete} disabled={!canComplete}>
                 <CheckCircle2 className="h-4 w-4" />
                 Complete
               </Button>

@@ -14,21 +14,14 @@ export type PerfKpiIcon =
 
 export type PerfKpiValueTone = "accent" | "neutral";
 
-export type PerfKpiDelta = {
-  direction: "up" | "down";
-  text: string;
-  tone: "positive" | "negative";
-};
-
 export type PerfKpiCard = {
   id: string;
   label: string;
   icon: PerfKpiIcon;
   value: string;
   valueTone: PerfKpiValueTone;
-  /** Footer variant A — a coloured trend chip. */
-  delta?: PerfKpiDelta;
-  /** Footer variant B — a plain descriptive caption. */
+  /** A plain descriptive caption under the value. (No period-over-period delta chips — those wait on a
+   *  real business computation; the delta variant was intentionally removed.) */
   caption?: string;
   /** true → the metric awaits a backend dependency; render a "Pending" badge, never a number. */
   pending?: boolean;

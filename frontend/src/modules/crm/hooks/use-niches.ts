@@ -76,7 +76,7 @@ export function useRenameNiche() {
     onSuccess: (niche) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.niches.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.reports.industryBars() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reports.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
       toast.success(`Renamed to "${niche.name}"`);
     },

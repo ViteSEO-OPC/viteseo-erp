@@ -133,7 +133,7 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex max-h-[90vh] w-full flex-col p-0 sm:max-w-[520px]"
+        className="flex max-h-[90vh] w-full flex-col gap-0 p-0 sm:max-w-[520px]"
       >
         {/* Header */}
         <DialogHeader className="border-b border-border-subtle px-6 py-4">
@@ -230,7 +230,7 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
         </div>
 
         {/* Footer */}
-        <DialogFooter className="border-t border-border-subtle px-6 py-4">
+        <DialogFooter className="mx-0 mb-0 border-t border-border-subtle px-6 py-4">
           <div className="flex w-full items-center justify-end gap-3">
             <Button
               variant="outline"

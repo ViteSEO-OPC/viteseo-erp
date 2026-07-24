@@ -1,9 +1,12 @@
 <?php
 
+use App\Models\User;
 use App\Modules\Crm\Controllers\ActivityController;
 use App\Modules\Crm\Controllers\Auth\MeController;
 use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
+use App\Modules\Crm\Controllers\BusinessRuleController;
+use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
@@ -23,7 +26,6 @@ use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
-use App\Models\User;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -112,14 +114,34 @@ Route::prefix('v1/crm')->group(function (): void {
 
         // Business Niche registry — the vocabulary behind the shared Business Niche selector and the
         // Add Business Niche modal. Business CONFIGURATION, not lead data: no niche route touches a
-        // lead's status, score, priority or ownership. Available to any authenticated CRM user (PO
-        // decision for this milestone) — no dedicated permission. The built-in-immutable and
-        // still-in-use-can't-be-deleted rules are enforced in NicheController, not by middleware.
+        // lead's status, score, priority or ownership.
+        //
+        // 🔒 AUTHORIZATION (PO decision 2026-07-24, corrected — SUPERSEDES both the original "any
+        // authenticated CRM user" rule and R-1's briefly-applied "BD read-only"):
+        //
+        //   read + create + rename → every CRM role, INCLUDING Business Development. A BD classifies
+        //                            leads as they work, so authoring a niche is part of their job.
+        //   delete                 → Super Admin + Admin ONLY. Deletion is the destructive, tenant-wide
+        //                            action: the registry is shared, so removing a niche affects every
+        //                            lead filed under it. This is the restriction that matters.
+        //
+        // Roles are listed explicitly rather than relying on "any authenticated user", so a future role
+        // does not silently inherit write access to shared configuration.
+        //
+        // Role middleware, not a Policy: a niche has no ownership or per-instance rules, so there is
+        // nothing for a Policy to decide — this matches how the other management-only routes here are
+        // gated. The built-in-immutable and still-in-use-can't-be-deleted rules remain business rules
+        // enforced in NicheController; they are not authorization.
+        //
         // Declared before the /leads/{lead} wildcards purely for grouping — the URIs never collide.
-        Route::get('/niches', [NicheController::class, 'index']);
-        Route::post('/niches', [NicheController::class, 'store']);
-        Route::patch('/niches/{niche}', [NicheController::class, 'update']);
-        Route::delete('/niches/{niche}', [NicheController::class, 'destroy']);
+        Route::get('/niches', [NicheController::class, 'index'])
+            ->middleware('permission:crm.leads.view');
+        Route::middleware('role:super_admin|crm_admin|crm_bd')->group(function () {
+            Route::post('/niches', [NicheController::class, 'store']);
+            Route::patch('/niches/{niche}', [NicheController::class, 'update']);
+        });
+        Route::delete('/niches/{niche}', [NicheController::class, 'destroy'])
+            ->middleware('role:super_admin|crm_admin');
 
         Route::get('/leads/{lead}', [LeadController::class, 'show'])->can('view', 'lead');
         Route::match(['put', 'patch'], '/leads/{lead}', [LeadController::class, 'update'])->can('update', 'lead');
@@ -210,6 +232,24 @@ Route::prefix('v1/crm')->group(function (): void {
             ->can('update', 'plannerEvent');
         Route::delete('/planner-events/{plannerEvent}', [PlannerEventController::class, 'destroy'])->can('delete', 'plannerEvent');
 
+        // Calling Workspace — call attempts are Planner-driven: every attempt belongs to a planner
+        // event (created on the fly for an ad-hoc call). ALL state changes route through
+        // CallSessionService; the controller never persists a Call. `crm.calls.view` gates reading (Call
+        // History), `crm.calls.log` gates logging/concluding. Read + start authorize on the parent lead
+        // or event (ownership); complete/discard authorize via CallPolicy@update. Domain-rule breaches
+        // (single-active-call, already-concluded) surface as 422 from the service.
+        Route::get('/leads/{lead}/calls', [CallController::class, 'index'])
+            ->middleware('permission:crm.calls.view')
+            ->can('view', 'lead');
+        Route::post('/leads/{lead}/calls', [CallController::class, 'storeForLead'])
+            ->middleware('permission:crm.calls.log')
+            ->can('view', 'lead');
+        Route::post('/planner-events/{plannerEvent}/calls', [CallController::class, 'storeForEvent'])
+            ->middleware('permission:crm.calls.log')
+            ->can('view', 'plannerEvent');
+        Route::patch('/calls/{call}/complete', [CallController::class, 'complete'])->can('update', 'call');
+        Route::patch('/calls/{call}/discard', [CallController::class, 'discard'])->can('update', 'call');
+
         // Team Accounts (user management). Policy-guarded (users.* permissions); Super Admin bypasses
         // via Gate::before. BD Manager has no users.* permission → 403.
         Route::get('/users', [UserController::class, 'index'])->can('viewAny', User::class);
@@ -217,10 +257,21 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::match(['put', 'patch'], '/users/{user}', [UserController::class, 'update'])->can('update', 'user');
         Route::delete('/users/{user}', [UserController::class, 'destroy'])->can('delete', 'user');
 
-        // Nearby Clients — discovered-business prospect pool (BD-facing). A shared prospecting surface
-        // of leads landed by a discovery provider; every CRM role (BDM+) sees it. Data only, and
-        // provider-agnostic (the supplying provider is never exposed).
-        Route::get('/nearby-clients', [NearbyClientController::class, 'index']);
+        // Nearby Clients — discovered-business prospect pool. A shared prospecting surface of leads
+        // landed by a discovery provider. Data only, and provider-agnostic (the supplying provider is
+        // never exposed).
+        //
+        // 🔒 BD workspace (PO decision 2026-07-24, RBAC Hardening R-2): Business Development + Super
+        // Admin only — Admin (CRM Manager) has NO access, per the approved Admin module list. This
+        // route previously had no authorization at all (RBAC audit finding 3).
+        //
+        // The Target Service Area registry below is a SEPARATE surface and is unchanged — it stays
+        // Admin/SA-gated at the API. Its only UI entry point remains the Nearby Clients header action,
+        // so in practice only Super Admin reaches it once Admin loses this page. That consequence is
+        // deliberate and deferred: Target Areas is being reviewed under its own PDR (keep / redesign /
+        // retire), and this milestone makes no further change to it.
+        Route::get('/nearby-clients', [NearbyClientController::class, 'index'])
+            ->middleware('role:super_admin|crm_bd');
 
         // Nearby Clients — Service-Area Registry (target service locations for the frozen Target
         // Location +10 signal). Business configuration owned by Admin/Super Admin; supplies data only,
@@ -246,6 +297,11 @@ Route::prefix('v1/crm')->group(function (): void {
             // breakdown. Ownership-scoped in the controller; dashboard.view already gates the group.
             Route::get('/kpi-metrics', [DashboardController::class, 'kpiMetrics']);
 
+            // Reports & Performance management analytics (funnel / status-mix / outreach-by-channel /
+            // niche / follow-through / pending-follow-ups). Same scope seam as performance-summary
+            // (All Reports, or one BD via ?user_id — the latter authorized to crm.reports.view holders).
+            Route::get('/reports-analytics', [DashboardController::class, 'reportsAnalytics']);
+
             // Management Dashboard "BD Performance Overview" — Admin/Super Admin only. Aggregates
             // one live row per active Business Development Manager (BDs have dashboard.view but must
             // not see the team roster, so this is restricted beyond the group's permission gate).
@@ -256,6 +312,36 @@ Route::prefix('v1/crm')->group(function (): void {
             // Admin/Super-Admin only; the response is labelled Interim (R-10).
             Route::middleware('role:super_admin|crm_admin')
                 ->get('/bd-ranking', [DashboardController::class, 'bdRanking']);
+        });
+
+        // Settings → Business Rules (Business Rules Administration). The single administration surface
+        // for configurable business computations — configuration only, never computed results. `{module}`
+        // is constrained to the enabled modules (v1: lead_scoring); reserved modules (kpi/ranking) 404
+        // until approved. Reads gate on crm.business_rules.view, writes on crm.business_rules.manage.
+        // Publish/rollback endpoints arrive with the Publish/Rollback integration step.
+        Route::prefix('settings/business-rules')->whereIn('module', ['lead_scoring'])->group(function () {
+            Route::middleware('permission:crm.business_rules.view')->group(function () {
+                Route::get('/{module}/active', [BusinessRuleController::class, 'active']);
+                Route::get('/{module}/draft', [BusinessRuleController::class, 'draft']);
+                Route::get('/{module}/versions', [BusinessRuleController::class, 'versions']);
+                Route::get('/{module}/versions/{version}', [BusinessRuleController::class, 'version'])->whereNumber('version');
+                Route::get('/{module}/audit', [BusinessRuleController::class, 'audit']);
+            });
+
+            Route::middleware('permission:crm.business_rules.manage')->group(function () {
+                Route::post('/{module}/draft', [BusinessRuleController::class, 'ensureDraft']);
+                Route::delete('/{module}/draft', [BusinessRuleController::class, 'discardDraft']);
+                // `/rules/order` is declared BEFORE `/rules/{ruleKey}` so "order" is never captured as a key.
+                Route::patch('/{module}/rules/order', [BusinessRuleController::class, 'reorder']);
+                Route::patch('/{module}/rules/{ruleKey}', [BusinessRuleController::class, 'updateRule']);
+                Route::post('/{module}/rules/{ruleKey}/enable', [BusinessRuleController::class, 'enableRule']);
+                Route::post('/{module}/rules/{ruleKey}/disable', [BusinessRuleController::class, 'disableRule']);
+
+                // Lifecycle: publish the draft; forward-only rollback to a prior published version. Both
+                // invalidate the provider cache and dispatch a version-pinned recompute AFTER commit.
+                Route::post('/{module}/publish', [BusinessRuleController::class, 'publish']);
+                Route::post('/{module}/rollback', [BusinessRuleController::class, 'rollback']);
+            });
         });
     });
 });

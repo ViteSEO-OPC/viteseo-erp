@@ -157,6 +157,9 @@ class RolesAndPermissionsSeeder extends Seeder
             'crm.reports.view', 'crm.reports.export',
             // Planner (module branded "Planner"; permission namespace stays `calendar`).
             'crm.calendar.view', 'crm.calendar.create', 'crm.calendar.edit', 'crm.calendar.delete',
+            // Calling Workspace — read Call History (crm.calls.view) and log/conclude a call
+            // (crm.calls.log). Calls are Planner-driven; see CallSessionService.
+            'crm.calls.view', 'crm.calls.log',
             'crm.dashboard.view',
             'crm.users.view', 'crm.users.create', 'crm.users.edit', 'crm.users.delete',
         ];
@@ -181,7 +184,7 @@ class RolesAndPermissionsSeeder extends Seeder
         $crmAdmin->syncPermissions(array_values(array_diff($crmPermissions, ['crm.users.delete'])));
 
         // crm_bd (Business Development Manager) — business modules + self-import.
-        // No export, no delete, no reports, no user management.
+        // No export, no delete, no reports, no user management. Deliberately NO Business Rules access.
         $crmBd->syncPermissions([
             'crm.leads.view', 'crm.leads.create', 'crm.leads.edit', 'crm.leads.import',
             // A BD qualifies discovered prospects (Nearby Clients) into their own CRM pipeline.
@@ -191,8 +194,27 @@ class RolesAndPermissionsSeeder extends Seeder
             'crm.lead.notes.create', 'crm.lead.notes.edit', 'crm.lead.notes.delete',
             'crm.follow-ups.view', 'crm.follow-ups.create', 'crm.follow-ups.edit',
             'crm.calendar.view', 'crm.calendar.create', 'crm.calendar.edit', 'crm.calendar.delete',
+            // A BD runs the Calling Workspace — logs calls and reads their own leads' Call History.
+            'crm.calls.view', 'crm.calls.log',
             'crm.dashboard.view',
         ]);
+
+        // --- Business Rules Administration (Settings → Business Rules) ---
+        // Two permissions: `.view` (read rules + version history + audit history) and `.manage`
+        // (edit / enable-disable / reorder / publish / rollback / discard — a superset of `.view`).
+        // Kept OUT of the shared $crmPermissions so the grant to each role is explicit and the temporary
+        // Admin grant below is a single, easily-revertible line. Production owner: super_admin.
+        $businessRulesPermissions = ['crm.business_rules.view', 'crm.business_rules.manage'];
+        foreach ($businessRulesPermissions as $name) {
+            Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
+        }
+        $superAdmin->givePermissionTo($businessRulesPermissions);
+
+        // TEMPORARY — development/testing only. Granted to Admin (crm_admin) solely because no super_admin
+        // account is available during development. This is the single, clearly-marked grant to REMOVE OR
+        // NARROW BEFORE PRODUCTION (added after crm_admin's syncPermissions so it is additive). crm_bd and
+        // the Business Development Manager get no access.
+        $crmAdmin->givePermissionTo($businessRulesPermissions);
 
         // Demo login users + their employee records are created by the HR module's
         // EmployeeDemoSeeder (via EmployeeService, so they also get leave balances).

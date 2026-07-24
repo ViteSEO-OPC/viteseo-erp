@@ -3,6 +3,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import {
+  scopeKey,
+  scopeToParams,
+  usePerformanceScope,
+} from "@/modules/crm/features/performance/lib/performance-scope";
 
 /**
  * One operational KPI from the BD KPI Engine catalog (M-01…M-06), exactly as the backend computes it.
@@ -26,11 +31,12 @@ export type KpiMetric = {
  * they must not re-derive any formula in the frontend.
  */
 export function useKpiMetrics() {
+  const scope = usePerformanceScope();
   return useQuery<KpiMetric[]>({
-    queryKey: queryKeys.dashboard.kpiMetrics(),
+    queryKey: queryKeys.dashboard.kpiMetrics(scopeKey(scope)),
     queryFn: () =>
       apiClient
-        .get("/dashboard/kpi-metrics")
+        .get("/dashboard/kpi-metrics", { params: scopeToParams(scope) })
         .then((r) => r.data.data.metrics as KpiMetric[]),
   });
 }

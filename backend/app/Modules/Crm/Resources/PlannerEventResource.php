@@ -23,6 +23,9 @@ class PlannerEventResource extends JsonResource
             'title' => $this->title,
             'eventType' => $this->event_type,
             'status' => $this->status,
+            // Business result, separate from the lifecycle above. Null until concluded, and null for
+            // every event type except `consultation` (ConsultationOutcome).
+            'outcome' => $this->outcome,
             'priority' => $this->priority,
 
             'startsAt' => $this->starts_at?->toIso8601String(),

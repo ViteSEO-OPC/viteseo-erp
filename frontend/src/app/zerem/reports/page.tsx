@@ -1,5 +1,5 @@
-import { ReportsGrid } from "@/modules/crm/features/reports/components/reports-grid";
+import { ReportsPerformancePage } from "@/modules/crm/features/reports/components/reports-performance-page";
 
 export default function ReportsPage() {
-  return <ReportsGrid />;
+  return <ReportsPerformancePage />;
 }

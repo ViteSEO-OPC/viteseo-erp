@@ -5,6 +5,10 @@ import { PendingBadge } from "@/modules/crm/components/shared/pending-badge/pend
 import { cn } from "@/modules/crm/lib/utils";
 import { useMyPerformanceSummary } from "@/modules/crm/features/performance/hooks/use-my-performance";
 import { useKpiMetrics, findMetric } from "@/modules/crm/features/performance/hooks/use-kpi-metrics";
+import {
+  scopeCopy,
+  usePerformanceScope,
+} from "@/modules/crm/features/performance/lib/performance-scope";
 
 function Meter({ pct, barClass }: { pct: number; barClass: string }) {
   return (
@@ -29,6 +33,7 @@ function Meter({ pct, barClass }: { pct: number; barClass: string }) {
 export function OutreachTargetCard({ className }: { className?: string }) {
   const { data: s, isLoading: summaryLoading } = useMyPerformanceSummary();
   const { data: metrics, isLoading: kpiLoading } = useKpiMetrics();
+  const copy = scopeCopy(usePerformanceScope());
 
   const isLoading = summaryLoading || kpiLoading;
 
@@ -52,9 +57,7 @@ export function OutreachTargetCard({ className }: { className?: string }) {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="text-sm font-bold text-card-foreground">Outreach Progress</h3>
-              <p className="text-xs text-muted-foreground">
-                Assigned leads you have contacted by email or call.
-              </p>
+              <p className="text-xs text-muted-foreground">{copy.outreachSubtitle}</p>
             </div>
             {isLoading ? (
               <span className="h-6 w-12 shrink-0 animate-pulse rounded bg-muted" />
@@ -79,9 +82,7 @@ export function OutreachTargetCard({ className }: { className?: string }) {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="text-sm font-bold text-card-foreground">Personal Target</h3>
-              <p className="text-xs text-muted-foreground">
-                Converted leads against your monthly goal.
-              </p>
+              <p className="text-xs text-muted-foreground">{copy.targetSubtitle}</p>
             </div>
             <PendingBadge reason="Pending configuration — no monthly target has been set" />
           </div>

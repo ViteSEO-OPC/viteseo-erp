@@ -15,6 +15,24 @@ use Illuminate\Support\Facades\Auth;
  */
 class PlannerEventObserver
 {
+    /**
+     * Stamp the real completion time on the transition into `completed`, and clear it if the event is
+     * reopened — the single source of `completed_at` (never `updated_at`). Runs before every save
+     * (create or update), so every completion path (Planner update, FollowUpScheduler, CallSession's
+     * event completion) is covered without each one remembering to set it. A no-op edit to an
+     * already-completed event preserves its original completion time.
+     */
+    public function saving(PlannerEvent $event): void
+    {
+        if ($event->status === 'completed') {
+            if ($event->completed_at === null) {
+                $event->completed_at = now();
+            }
+        } elseif ($event->completed_at !== null) {
+            $event->completed_at = null;
+        }
+    }
+
     public function created(PlannerEvent $event): void
     {
         $this->log($event, 'planner-event.created', 'Event scheduled');

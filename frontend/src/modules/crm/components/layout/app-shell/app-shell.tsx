@@ -16,7 +16,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/zerem/follow-ups": "Outreach",
   "/zerem/planner": "Planner",
   "/zerem/calendar": "Planner",
-  "/zerem/reports": "Reports",
+  "/zerem/reports": "Reports & Performance",
   "/zerem/my-performance": "My Performance",
   "/zerem/activity-logs": "Activity Logs",
   "/zerem/settings": "Settings",

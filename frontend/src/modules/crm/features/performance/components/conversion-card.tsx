@@ -6,6 +6,10 @@ import {
   useMyPerformanceSummary,
   formatConversionRate,
 } from "@/modules/crm/features/performance/hooks/use-my-performance";
+import {
+  scopeCopy,
+  usePerformanceScope,
+} from "@/modules/crm/features/performance/lib/performance-scope";
 
 /**
  * Conversion donut — LIVE. Shows the ownership-scoped conversion rate (converted ÷ engaged) from
@@ -14,6 +18,7 @@ import {
  */
 export function ConversionCard({ className }: { className?: string }) {
   const { data: s, isLoading, isError } = useMyPerformanceSummary();
+  const copy = scopeCopy(usePerformanceScope());
 
   const rate = s?.conversionRate ?? null; // null → undefined (no engaged leads)
   const converted = s?.convertedLeads ?? 0;
@@ -27,7 +32,7 @@ export function ConversionCard({ className }: { className?: string }) {
   return (
     <ChartCard
       title="Conversion"
-      subtitle="Leads converted into won business"
+      subtitle={copy.conversionSubtitle}
       className={className}
       isLoading={isLoading}
       isError={isError}

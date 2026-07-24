@@ -264,7 +264,7 @@ export function useAssignLeadsToNiche() {
       if (succeeded.length > 0) {
         queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
         queryClient.invalidateQueries({ queryKey: queryKeys.niches.all });
-        queryClient.invalidateQueries({ queryKey: queryKeys.reports.industryBars() });
+        queryClient.invalidateQueries({ queryKey: queryKeys.reports.all });
         queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
         queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
         queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });

@@ -28,15 +28,18 @@ use App\Modules\Crm\Listeners\EmitReminderDueWebhook;
 use App\Modules\Crm\Listeners\EscalateUnansweredFollowUp;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
+use App\Modules\Crm\Models\Call;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\Note;
 use App\Modules\Crm\Models\PlannerEvent;
+use App\Modules\Crm\Policies\CallPolicy;
 use App\Modules\Crm\Policies\EmailPolicy;
 use App\Modules\Crm\Policies\LeadPolicy;
 use App\Modules\Crm\Policies\NotePolicy;
 use App\Modules\Crm\Policies\PlannerEventPolicy;
 use App\Modules\Crm\Policies\UserPolicy;
+use App\Modules\Crm\Services\BusinessRules\ScoringConfigProvider;
 use App\Modules\Crm\Services\Kpi\KpiConfig;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\Contracts\MailboxSyncProvider;
@@ -65,15 +68,22 @@ class CrmServiceProvider extends ServiceProvider
         Note::class => NotePolicy::class,
         Email::class => EmailPolicy::class,
         PlannerEvent::class => PlannerEventPolicy::class,
+        Call::class => CallPolicy::class,
         User::class => UserPolicy::class,
     ];
 
     public function register(): void
     {
-        // Personal Lead Score parameters (weights/windows/caps) from config/scoring.php.
-        $this->app->singleton(ScoringConfig::class, fn ($app): ScoringConfig => ScoringConfig::fromArray(
-            is_array($config = $app['config']->get('scoring', [])) ? $config : [],
-        ));
+        // Personal Lead Score parameters — resolved through the Configuration Provider, the SINGLE source
+        // of ScoringConfig (Business Rules Administration §6). The provider reads the active database
+        // configuration version, validates it, and merges its editable point values over the file-backed
+        // structural caps/windows — falling back to config/scoring.php on any absence, invalidity, or error.
+        // The engine stays unaware of the source. Bound as a lazy singleton (built once per request, only
+        // when a score is first computed) so the app never fails to boot if the tables are unavailable.
+        $this->app->singleton(
+            ScoringConfig::class,
+            fn ($app): ScoringConfig => $app->make(ScoringConfigProvider::class)->resolve(),
+        );
 
         // BD KPI Engine parameters (status sets + rolling window) from config/kpi.php.
         $this->app->singleton(KpiConfig::class, fn ($app): KpiConfig => KpiConfig::fromArray(

@@ -2,7 +2,9 @@
 
 namespace App\Modules\Crm\Requests;
 
+use App\Modules\Crm\Enums\ConsultationOutcome;
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -25,8 +27,14 @@ class StorePlannerEventRequest extends FormRequest
     {
         return [
             'title' => ['required', 'string', 'max:255'],
-            'event_type' => ['required', Rule::in(['email', 'call', 'meeting', 'task', 'follow-up'])],
+            // `consultation` (PDR-002) is directly authorable, unlike `follow-up` — which the controller
+            // still restricts to FollowUpScheduler so it keeps a single birth path.
+            'event_type' => ['required', Rule::in(['email', 'call', 'meeting', 'task', 'follow-up', 'consultation'])],
             'status' => ['sometimes', Rule::in(['todo', 'scheduled', 'in_progress', 'completed'])],
+            // Business result — separate axis from `status` (PDR-002 §4b). Only a consultation defines
+            // values; sending it for any other type is rejected in withValidator() rather than silently
+            // stored, so the column cannot accumulate meaningless values.
+            'outcome' => ['sometimes', 'nullable', Rule::in(ConsultationOutcome::values())],
             'priority' => ['sometimes', Rule::in(['low', 'medium', 'high'])],
 
             'starts_at' => ['nullable', 'date'],
@@ -43,7 +51,14 @@ class StorePlannerEventRequest extends FormRequest
 
             // Relationship seams. lead_id/deal_id are validated against existing tables;
             // company_id/campaign_id are accepted but NOT exists-validated (no table yet).
-            'lead_id' => ['nullable', 'integer', 'exists:crm_leads,id'],
+            //
+            // `lead_id` is REQUIRED for a consultation (PDR-002 §8 Q3): the Successful Consultations KPI
+            // counts DISTINCT leads, so a consultation with no lead could never be counted and would be
+            // silently invisible to reporting. Every other event type keeps it optional.
+            'lead_id' => [
+                Rule::requiredIf(fn (): bool => $this->input('event_type') === 'consultation'),
+                'nullable', 'integer', 'exists:crm_leads,id',
+            ],
             'deal_id' => ['nullable', 'integer', 'exists:crm_deals,id'],
             'company_id' => ['nullable', 'integer'],
             'campaign_id' => ['nullable', 'integer'],
@@ -57,5 +72,15 @@ class StorePlannerEventRequest extends FormRequest
                 'nullable', 'integer', 'exists:users,id', new MustBeBusinessDeveloper,
             ],
         ];
+    }
+
+    /** An outcome is consultation-only vocabulary — no other event type may carry one. */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if (filled($this->input('outcome')) && $this->input('event_type') !== 'consultation') {
+                $validator->errors()->add('outcome', 'Only a consultation can record an outcome.');
+            }
+        });
     }
 }

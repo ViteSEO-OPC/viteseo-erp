@@ -5,6 +5,7 @@ namespace Tests\Feature\Crm;
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\Niche;
+use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -15,14 +16,26 @@ use Tests\TestCase;
  * The two data-integrity rules are the point of these tests: a built-in niche is immutable, and a
  * niche still used by any lead cannot be deleted. Both are enforced server-side so they hold even
  * when the API is called directly, not only when the modal disables a button.
+ *
+ * AUTHORIZATION (🔒 PO decision 2026-07-24 — niches are administrative data): Super Admin and Admin
+ * have full CRUD; a Business Development Manager is READ-ONLY. Covered in {@see NicheAuthorizationTest};
+ * the management cases here therefore act as an Admin, which is who performs them in practice.
  */
 class NicheRegistryTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(RolesAndPermissionsSeeder::class);
+    }
+
+    /** The registry's manager — these cases exercise business rules, not authorization. */
     private function actingAsCrmUser(): User
     {
-        $user = User::factory()->create();
+        $user = User::factory()->create(['status' => 'active']);
+        $user->assignRole('crm_admin');
         Sanctum::actingAs($user);
 
         return $user;

@@ -21,7 +21,12 @@ export type PlannerView = "month" | "week" | "day" | "year" | "schedule";
 export type CalendarEvent = {
   id: string;
   title: string;
-  type: "email" | "call" | "meeting" | "task" | "follow-up";
+  /**
+   * The owning module's event-type vocabulary. Kept a plain `string` — this grid is a SHARED
+   * presentational component and must not need editing every time a module adds a type. Unknown
+   * values render with a documented fallback tint (see TYPE_CONFIG in calendar-grid-inner).
+   */
+  type: string;
   start: string; // ISO8601
   end?: string | null; // ISO8601
   allDay: boolean;

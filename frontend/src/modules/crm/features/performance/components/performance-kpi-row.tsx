@@ -6,17 +6,23 @@ import {
   formatPeso,
   formatConversionRate,
 } from "@/modules/crm/features/performance/hooks/use-my-performance";
+import {
+  scopeCopy,
+  usePerformanceScope,
+} from "@/modules/crm/features/performance/lib/performance-scope";
 import type { PerfKpiCard } from "@/modules/crm/features/performance/types/performance-types";
 
 /**
  * The KPI row. Live from the ownership-scoped performance summary: Conversion Rate, Converted Leads,
  * Overall Revenue (Σ deals.amount), **Estimated Pipeline Value** (Σ leads.amount — prospect estimate,
- * distinct from revenue), Active Leads, Assigned Leads. "Completed Follow-ups" is **Pending Planner
- * integration** — no follow-up/appointment module yet, so it shows a Pending badge and no value. No
- * trend chips — real values carry no invented month-over-month delta. All values are server-computed.
+ * distinct from revenue), Active Leads, Assigned Leads, and "Completed Follow-ups" (follow-up Planner
+ * events completed this calendar month, from the real `completed_at` stamp). No trend chips — real
+ * values carry no invented month-over-month delta. All values are server-computed. Copy is
+ * scope-aware, so the same row serves My Performance and the Reports & Performance BD scorecard.
  */
 export function PerformanceKpiRow() {
   const { data: s, isLoading } = useMyPerformanceSummary();
+  const copy = scopeCopy(usePerformanceScope());
 
   const liveCards: PerfKpiCard[] = [
     {
@@ -65,21 +71,18 @@ export function PerformanceKpiRow() {
       icon: "assigned",
       value: s ? String(s.assignedLeads) : "—",
       valueTone: "neutral",
-      caption: "Leads assigned to you",
+      caption: copy.assignedCaption,
     },
   ];
 
-  // Pending — no follow-up/appointment module exists yet (an outbound email is not a follow-up).
-  // Shown as Pending Planner integration, with no fabricated value.
+  // LIVE — follow-up Planner events completed this calendar month (real `completed_at`, ownership-scoped).
   const followUpsCard: PerfKpiCard = {
     id: "completed-follow-ups",
     label: "Completed Follow-ups",
     icon: "followups",
-    value: "—",
+    value: s ? String(s.completedFollowUps) : "—",
     valueTone: "neutral",
-    caption: "Awaiting Planner module",
-    pending: true,
-    pendingReason: "Pending Planner integration — no follow-up/appointment module yet",
+    caption: "This month",
   };
 
   const cards = [...liveCards, followUpsCard];

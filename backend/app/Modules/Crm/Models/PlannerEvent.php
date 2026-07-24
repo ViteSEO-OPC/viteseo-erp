@@ -3,15 +3,15 @@
 namespace App\Modules\Crm\Models;
 
 use App\Models\User;
-
-use App\Modules\Crm\Observers\PlannerEventObserver;
 use App\Modules\Crm\Database\Factories\PlannerEventFactory;
+use App\Modules\Crm\Observers\PlannerEventObserver;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
@@ -41,6 +41,10 @@ use Illuminate\Support\Carbon;
     'title',
     'event_type',
     'status',
+    // Business result of a concluded event, separate from the `status` lifecycle. Consultation is the
+    // only type defining values today ({@see ConsultationOutcome}); kept a plain string like
+    // `status`/`event_type` so another type can adopt its own vocabulary later.
+    'outcome',
     'priority',
     'starts_at',
     'ends_at',
@@ -86,6 +90,7 @@ class PlannerEvent extends Model
         return [
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
+            'completed_at' => 'datetime',
             'all_day' => 'boolean',
             'reminder_minutes' => 'integer',
         ];
@@ -125,6 +130,17 @@ class PlannerEvent extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    /**
+     * The call attempts made against this event — the 1:many workflow where a BD may retry a
+     * scheduled call several times. Ordered newest-first so the most recent attempt reads first.
+     *
+     * @return HasMany<Call, $this>
+     */
+    public function calls(): HasMany
+    {
+        return $this->hasMany(Call::class)->latest();
     }
 
     /**
