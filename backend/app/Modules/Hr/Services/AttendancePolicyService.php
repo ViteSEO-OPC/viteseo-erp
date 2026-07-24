@@ -40,12 +40,57 @@ class AttendancePolicyService
         'hours_per_day_divisor' => 8,
         'max_break_minutes_per_day' => 120,
         'over_max_break_action' => 'flag_only',
+        'violation_rules' => self::DEFAULT_VIOLATION_RULES,
         'task_format' => ['require_english' => true, 'uppercase' => true],
+    ];
+
+    /**
+     * The violation colour ladder (step 3c / finding P1-5). These values are TODAY'S
+     * hard-coded literals from ViolationService::recompute() (:167-168, :183, :186, :196),
+     * lifted into data so HR can change them — seeding them here keeps the engine's
+     * behaviour identical until ViolationService is taught to read this column.
+     *
+     * Evaluated TOP-DOWN, first match wins (so list most-severe first). An empty list for
+     * a category means "never flag it". Severity names must stay green|yellow|orange|red —
+     * Violation::SEVERITY_RANK and the UI badges depend on them.
+     *
+     * @var array<string, array<int, array<string, mixed>>>
+     */
+    public const DEFAULT_VIOLATION_RULES = [
+        // :167-168 — streak of 3, or a 4th late this month → orange; 3rd → yellow; else green.
+        'late' => [
+            ['streak_min' => 3, 'severity' => 'orange'],
+            ['monthly_min' => 4, 'severity' => 'orange'],
+            ['monthly_min' => 3, 'severity' => 'yellow'],
+            ['monthly_min' => 1, 'severity' => 'green'],
+        ],
+        // :183-188 — 3 consecutive absences → red (AWOL); 2 → orange; 1 → yellow.
+        'absence' => [
+            ['streak_min' => 3, 'severity' => 'red', 'type' => 'awol'],
+            ['streak_min' => 2, 'severity' => 'orange', 'type' => 'ua'],
+            ['streak_min' => 1, 'severity' => 'yellow', 'type' => 'ua'],
+        ],
+        // :196 — clocked in but never out: always green today.
+        'missed_time_out' => [
+            ['occurrence_min' => 1, 'severity' => 'green'],
+        ],
     ];
 
     public function get(): AttendancePolicy
     {
         return AttendancePolicy::firstOrCreate([], self::DEFAULTS);
+    }
+
+    /**
+     * The violation colour ladder, with a null column meaning "today's behaviour".
+     * ViolationService should read the ladder through HERE, never off the column, so a
+     * policy row predating the feature can never yield an empty ladder (= no flags at all).
+     *
+     * @return array<string, array<int, array<string, mixed>>>
+     */
+    public function violationRules(): array
+    {
+        return $this->get()->violation_rules ?: self::DEFAULT_VIOLATION_RULES;
     }
 
     /** @param array<string, mixed> $data */

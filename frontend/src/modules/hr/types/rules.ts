@@ -50,6 +50,26 @@ export interface LateTier {
   hours: number;
 }
 
+export type ViolationSeverity = "green" | "yellow" | "orange" | "red";
+
+/**
+ * One rung of the violation colour ladder. Evaluated top-down, first match wins —
+ * so list most-severe first. Flags are disciplinary; they never move pay.
+ */
+export interface ViolationRule {
+  severity: ViolationSeverity;
+  streak_min?: number; // consecutive days
+  monthly_min?: number; // occurrences this month
+  occurrence_min?: number;
+  type?: string; // e.g. "awol" | "ua" for the absence ladder
+}
+
+export interface ViolationRules {
+  late?: ViolationRule[];
+  absence?: ViolationRule[];
+  missed_time_out?: ViolationRule[];
+}
+
 export interface AttendancePolicy {
   id: number;
   consecutive_lates_before_absence: number;
@@ -82,6 +102,9 @@ export interface AttendancePolicy {
   // Breaks are FLAGGED, never deducted.
   max_break_minutes_per_day: number;
   over_max_break_action: "flag_only";
+
+  // Violation colour ladder (disciplinary flags — never a pay deduction).
+  violation_rules: ViolationRules | null;
 
   task_format: { require_english?: boolean; uppercase?: boolean };
 }

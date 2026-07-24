@@ -18,10 +18,20 @@ class Payslip extends Model
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
         'total_deductions', 'net_pay', 'status',
+        // Step 4b — how base_salary was derived, so a payslip can explain itself.
+        'working_days', 'daily_rate', 'unpaid_days',
+        'late_minutes', 'undertime_minutes', 'late_deduction', 'undertime_deduction',
     ];
 
     protected $casts = [
         'base_salary' => 'decimal:2',
+        'working_days' => 'integer',
+        'daily_rate' => 'decimal:2',
+        'unpaid_days' => 'decimal:2',
+        'late_minutes' => 'integer',
+        'undertime_minutes' => 'integer',
+        'late_deduction' => 'decimal:2',
+        'undertime_deduction' => 'decimal:2',
         'reimbursements' => 'decimal:2',
         'allowances' => 'decimal:2',
         'holiday_premium' => 'decimal:2',

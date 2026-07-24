@@ -20,6 +20,7 @@ class AttendanceService
         private readonly ScheduleService $schedule,
         private readonly ViolationService $violations,
         private readonly AttendancePolicyService $policy,
+        private readonly AuditService $audit,
     ) {}
 
     private function localNow(): Carbon
@@ -183,6 +184,18 @@ class AttendanceService
             'work_date' => $workDate,
         ]);
 
+        // F-7: capture the row BEFORE it is overwritten. An HR edit to time_in is an edit
+        // to someone's attendance record — and once minutes become money, to their pay.
+        // adjust() overwrites in place, so without this the old values are destroyed.
+        $wasExisting = $att->exists;
+        $before = $wasExisting ? [
+            'time_in' => $att->time_in?->toIso8601String(),
+            'time_out' => $att->time_out?->toIso8601String(),
+            'status' => $att->status,
+            'hours_worked' => (float) $att->hours_worked,
+            'note' => $att->note,
+        ] : null;
+
         // Status is DERIVED from the times, never sent by the client: no time-in means
         // absent; otherwise present vs late is decided against the employee's effective
         // schedule (start + grace) for that day — the same rule as a live clock-in.
@@ -219,6 +232,25 @@ class AttendanceService
         // and the nightly management job will now leave it alone.
         $att->source = Attendance::SOURCE_MANUAL;
         $att->save();
+
+        // F-7: log the correction with before/after. Every other service in the module
+        // audit-logs its writes; this one silently rewrote attendance until now.
+        $employee->loadMissing('user');
+        $name = $employee->user?->name ?? $employee->name;
+        $this->audit->log(
+            $wasExisting ? 'updated' : 'created',
+            'Attendance',
+            ($wasExisting ? 'Adjusted' : 'Created') . " attendance for {$name} on {$workDate}",
+            $att,
+            $before,
+            [
+                'time_in' => $att->time_in?->toIso8601String(),
+                'time_out' => $att->time_out?->toIso8601String(),
+                'status' => $att->status,
+                'hours_worked' => (float) $att->hours_worked,
+                'note' => $att->note,
+            ],
+        );
 
         // A correction can change someone's flags — keep them in sync.
         $this->violations->recompute();

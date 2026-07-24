@@ -39,6 +39,7 @@ class AttendancePolicyResource extends JsonResource
 
             'max_break_minutes_per_day' => (int) $this->max_break_minutes_per_day,
             'over_max_break_action' => $this->over_max_break_action,
+            'violation_rules' => $this->violation_rules,
 
             'task_format' => $this->task_format,
         ];

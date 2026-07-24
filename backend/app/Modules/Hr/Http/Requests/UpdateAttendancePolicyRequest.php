@@ -47,6 +47,18 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'max_break_minutes_per_day' => ['sometimes', 'integer', 'min:0', 'max:1440'],
             'over_max_break_action' => ['sometimes', 'in:flag_only'],
 
+            // Violation colour ladder (step 3c). Rungs are evaluated top-down, first match
+            // wins. Severity names are fixed — Violation::SEVERITY_RANK depends on them.
+            'violation_rules' => ['sometimes', 'array'],
+            'violation_rules.late' => ['sometimes', 'array'],
+            'violation_rules.absence' => ['sometimes', 'array'],
+            'violation_rules.missed_time_out' => ['sometimes', 'array'],
+            'violation_rules.*.*.severity' => ['required', 'in:green,yellow,orange,red'],
+            'violation_rules.*.*.streak_min' => ['sometimes', 'integer', 'min:1', 'max:365'],
+            'violation_rules.*.*.monthly_min' => ['sometimes', 'integer', 'min:1', 'max:365'],
+            'violation_rules.*.*.occurrence_min' => ['sometimes', 'integer', 'min:1', 'max:365'],
+            'violation_rules.*.*.type' => ['sometimes', 'string', 'max:40'],
+
             'task_format' => ['sometimes', 'array'],
             'task_format.require_english' => ['sometimes', 'boolean'],
             'task_format.uppercase' => ['sometimes', 'boolean'],

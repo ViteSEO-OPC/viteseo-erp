@@ -29,6 +29,7 @@ class AttendancePolicy extends Model
         'hours_per_day_divisor',
         'max_break_minutes_per_day',
         'over_max_break_action',
+        'violation_rules',
         'task_format',
     ];
 
@@ -44,6 +45,7 @@ class AttendancePolicy extends Model
         'annual_divisor' => 'integer',
         'hours_per_day_divisor' => 'integer',
         'max_break_minutes_per_day' => 'integer',
+        'violation_rules' => 'array',
         'task_format' => 'array',
     ];
 }
