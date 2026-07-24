@@ -10,6 +10,7 @@ import {
   MapPin,
   History,
   Settings,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 import { SidebarNavItem } from "@/modules/crm/components/layout/sidebar/sidebar-nav-item";
@@ -40,13 +41,12 @@ const NAV_ITEMS: {
   // shown ONLY to Business Development Managers, hidden from Admin/Super Admin. Badge = real count of
   // actionable (dated, not-completed) Planner items for the current user; no badge when zero.
   { label: "Planner", icon: CalendarCheck, href: "/zerem/planner", allowedRoles: ["crm_bd"] },
-  // Reports (/reports) is temporarily HIDDEN for the demo: the module is still mock (not wired to a
-  // backend), so it must not be reachable/visible. The route remains but is unlinked. Re-enable and
-  // wire it in a dedicated post-demo milestone.
-  // { label: "Reports", icon: BarChart3, href: "/zerem/reports", minRole: "crm_admin" },
-  // My Performance — the BD-facing personal surface (S1). Visible to every role; content is
-  // ownership-scoped so each BD sees only their own data (BD-PERF-FE-ARCH-REVIEW OQ-FE-1).
-  { label: "My Performance", icon: Target, href: "/zerem/my-performance", minRole: "crm_bd" },
+  // Reports & Performance — Management analytics (Admin/Super Admin only). Reuses the My Performance
+  // widgets with an All-Reports / per-BD scope selector.
+  { label: "Reports & Performance", icon: BarChart3, href: "/zerem/reports", minRole: "crm_admin" },
+  // My Performance — BD-exclusive personal surface; ownership-scoped server-side. Admin/SA use
+  // Reports & Performance above (not this), so it is role-locked to BDs.
+  { label: "My Performance", icon: Target, href: "/zerem/my-performance", allowedRoles: ["crm_bd"] },
   { label: "Activity Logs", icon: History, href: "/zerem/activity-logs", minRole: "crm_bd" },
   // "Settings" resolves per role: BDs get their self-service profile (/profile, role-exclusive like
   // Planner); Admin/Super Admin get the admin Settings module (/settings). Mutually exclusive, so a

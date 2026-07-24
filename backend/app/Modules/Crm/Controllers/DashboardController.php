@@ -3,11 +3,12 @@
 namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
-
-use App\Modules\Crm\Resources\LeadResource;
+use App\Models\User;
 use App\Modules\Crm\Models\Deal;
 use App\Modules\Crm\Models\Lead;
-use App\Models\User;
+use App\Modules\Crm\Models\PlannerEvent;
+use App\Modules\Crm\Requests\PerformanceScopeRequest;
+use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Services\Kpi\BdKpiService;
 use App\Modules\Crm\Services\Kpi\KpiMetric;
 use App\Modules\Crm\Services\Ranking\BdRankingRow;
@@ -16,7 +17,6 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Illuminate\Support\Collection;
 
 class DashboardController extends Controller
 {
@@ -204,13 +204,18 @@ class DashboardController extends Controller
      *                       null when engagedLeads == 0 (undefined — never 0%, frozen edge rule)
      *
      * Converted/revenue come from the `deals` table (approved conversion record) — the frozen Lead
-     * Status enum is untouched. "Completed Follow-ups", outreach/target, and follow-up discipline
-     * are NOT computed here (no follow-up/appointment/target module exists) — they stay Demo on the
-     * frontend. No proxy or invented business rule.
+     * Status enum is untouched. Completed Follow-ups + Follow-up discipline are now computed from the
+     * Planner module (real events, real `completed_at`); Personal Target stays a placeholder (no monthly
+     * goal source — PO decision) and outreach coverage stays the KPI Engine's M-04. No proxy or invented
+     * business rule.
+     *
+     * Scope: resolved by {@see PerformanceScopeRequest}. Default = the requester's own portfolio (a BD's
+     * My Performance; an Admin/SA's "All Reports" aggregate). `?user_id` drills into one BD and is
+     * management-only (`crm.reports.view`). The whole method body scopes through the resolved subject.
      */
-    public function performanceSummary(Request $request): JsonResponse
+    public function performanceSummary(PerformanceScopeRequest $request): JsonResponse
     {
-        $user = $request->user();
+        $user = $request->scope()->subject;
 
         // Frozen ACTIVE_SET (BD-PERF-COMP-SPEC R-1): all statuses except `declined`.
         $activeSet = ['new', 'interested', 'awaiting-reply', 'call-back-req'];
@@ -242,6 +247,28 @@ class DashboardController extends Controller
             ? round($convertedLeads / $engagedLeads * 100, 1)
             : null;
 
+        // Planner-based follow-up metrics — scoped exactly like the lead metrics, via
+        // PlannerEvent::visibleTo (a BD sees their own events, Admin/SA all).
+        //
+        // Follow-up discipline (PO-frozen rule): "missed" = an event whose `starts_at` is in the past
+        // and whose `status` is not `completed` — grouped by event_type (follow-up / meeting / call).
+        $missedFor = fn (string $type): int => PlannerEvent::query()
+            ->visibleTo($user)
+            ->where('event_type', $type)
+            ->whereNotNull('starts_at')
+            ->where('starts_at', '<', now())
+            ->where('status', '!=', 'completed')
+            ->count();
+
+        // Completed Follow-ups — count for the CURRENT month, timestamped by the real `completed_at`
+        // (never `updated_at`). Rows completed before `completed_at` existed carry null and are excluded.
+        $completedFollowUps = PlannerEvent::query()
+            ->visibleTo($user)
+            ->where('event_type', 'follow-up')
+            ->where('status', 'completed')
+            ->where('completed_at', '>=', now()->startOfMonth())
+            ->count();
+
         return response()->json(['data' => [
             'assignedLeads' => $assignedLeads,
             'activeLeads' => $activeLeads,
@@ -250,6 +277,196 @@ class DashboardController extends Controller
             'overallRevenue' => $overallRevenue,
             'estimatedPipelineValue' => $estimatedPipelineValue,
             'conversionRate' => $conversionRate,
+            'completedFollowUps' => $completedFollowUps,
+            'followUpDiscipline' => [
+                'missedFollowUps' => $missedFor('follow-up'),
+                'missedMeetings' => $missedFor('meeting'),
+                'missedCalls' => $missedFor('call'),
+            ],
+        ]]);
+    }
+
+    /**
+     * Reports & Performance management analytics — the deeper aggregate the Management surface renders
+     * below the KPI row (Admin/SA see the whole-CRM aggregate; a BD would see only their own portfolio).
+     * ONE ownership-scoped read (same {@link PerformanceScopeRequest} seam as performanceSummary — All
+     * Reports, or one BD via `?user_id`); every figure is a real, server-computed aggregate over the
+     * subject's visible leads / Planner events. No fabricated numbers, and — per the frozen Business
+     * Decision — **no goals or targets are invented**: `followThrough.targetsPending` is surfaced so the
+     * UI shows the live counts without a made-up denominator (Goal Management is a later sprint).
+     *
+     * Stage/channel definitions are documented inline because the mockup labels don't map 1:1 to the
+     * frozen `status` enum — each is derived from a concrete, existing lead field:
+     *   Funnel  Added=all active leads · Contacted=outreach started or called (M-04 engagement) ·
+     *           Interested=`status=interested` · Consultation=`cold_calling=scheduled` (a booked slot) ·
+     *           Confirmed=has ≥1 Deal (won).
+     *   Outreach Email  completed=`replied` · in-progress=`sent`+`opened` · not-started=`none`.
+     *           Call   completed=`called` · in-progress=`scheduled` · not-started=`not-called`.
+     */
+    public function reportsAnalytics(PerformanceScopeRequest $request): JsonResponse
+    {
+        $user = $request->scope()->subject;
+
+        // Fresh scoped lead query per use (the `active()` set — every status incl. declined — visible to the subject).
+        $leads = fn (): Builder => Lead::query()->active()->visibleTo($user);
+
+        // ---- Conversion funnel — a true SURVIVAL funnel: each qualification stage is a subset of the
+        // one before it (cumulative AND filters), so the funnel narrows monotonically and each bar reads
+        // as "leads that progressed at least this far". Definitions in the method docblock. ----
+        $engaged = fn (): Builder => $leads()
+            ->where(fn (Builder $q) => $q->where('email_outreach', '!=', 'none')
+                ->orWhere('cold_calling', '!=', 'not-called'));
+        // "In active conversation" statuses (responded / progressing) — engaged beyond `new`, excl. `declined`.
+        $activeConversation = ['interested', 'awaiting-reply', 'call-back-req'];
+
+        $added = $leads()->count();
+        $contacted = $engaged()->count();
+        $interested = $engaged()->whereIn('status', $activeConversation)->count();
+        $consultation = $engaged()->whereIn('status', $activeConversation)->where('cold_calling', 'scheduled')->count();
+        // Confirmed = realized won business (Σ leads with ≥1 Deal) — the true outcome total. It may include
+        // leads that converted through a path outside the modeled qualification signals, so it is NOT nested.
+        $confirmed = $leads()->has('deals')->count();
+
+        $funnelStages = [
+            ['key' => 'added', 'label' => 'Added', 'value' => $added],
+            ['key' => 'contacted', 'label' => 'Contacted', 'value' => $contacted],
+            ['key' => 'interested', 'label' => 'Interested', 'value' => $interested],
+            ['key' => 'consultation', 'label' => 'Consultation', 'value' => $consultation],
+            ['key' => 'confirmed', 'label' => 'Confirmed', 'value' => $confirmed],
+        ];
+
+        // Biggest consecutive stage-to-stage drop-off (largest % loss) — presentation over the real counts.
+        $biggestDropOff = null;
+        for ($i = 1; $i < count($funnelStages); $i++) {
+            $prev = $funnelStages[$i - 1];
+            $cur = $funnelStages[$i];
+            if ($prev['value'] <= 0) {
+                continue;
+            }
+            $dropPct = (int) round(($cur['value'] - $prev['value']) / $prev['value'] * 100);
+            if ($biggestDropOff === null || $dropPct < $biggestDropOff['dropPct']) {
+                $biggestDropOff = ['from' => $prev['label'], 'to' => $cur['label'], 'dropPct' => $dropPct];
+            }
+        }
+
+        // ---- Lead status mix (GROUP BY status) — raw counts; the frontend maps labels/colors from the
+        // central LEAD_STATUS_CONFIG so the taxonomy stays single-sourced. ----
+        $statusMix = $leads()
+            ->selectRaw('status, COUNT(*) as c')
+            ->groupBy('status')
+            ->pluck('c', 'status');
+
+        // ---- Outreach progress by channel (real field distributions) ----
+        $emailCounts = $leads()->selectRaw('email_outreach, COUNT(*) as c')->groupBy('email_outreach')->pluck('c', 'email_outreach');
+        $callCounts = $leads()->selectRaw('cold_calling, COUNT(*) as c')->groupBy('cold_calling')->pluck('c', 'cold_calling');
+
+        $emailCompleted = (int) ($emailCounts['replied'] ?? 0);
+        $emailInProgress = (int) (($emailCounts['sent'] ?? 0) + ($emailCounts['opened'] ?? 0));
+        $emailNotStarted = (int) ($emailCounts['none'] ?? 0);
+        $emailTotal = $emailCompleted + $emailInProgress + $emailNotStarted;
+
+        $callCompleted = (int) ($callCounts['called'] ?? 0);
+        $callInProgress = (int) ($callCounts['scheduled'] ?? 0);
+        $callNotStarted = (int) ($callCounts['not-called'] ?? 0);
+        $callTotal = $callCompleted + $callInProgress + $callNotStarted;
+
+        $outreachByChannel = [
+            'email' => ['completed' => $emailCompleted, 'inProgress' => $emailInProgress, 'notStarted' => $emailNotStarted, 'total' => $emailTotal],
+            'call' => ['completed' => $callCompleted, 'inProgress' => $callInProgress, 'notStarted' => $callNotStarted, 'total' => $callTotal],
+        ];
+
+        // ---- Leads by niche (GROUP BY industry — industry IS the niche; no taxonomy mapping) ----
+        $niche = $leads()
+            ->whereNotNull('industry')
+            ->where('industry', '!=', '')
+            ->selectRaw('industry, COUNT(*) as c')
+            ->groupBy('industry')
+            ->orderByDesc('c')
+            ->limit(8)
+            ->get()
+            ->map(fn ($r): array => ['niche' => (string) $r->industry, 'value' => (int) $r->c])
+            ->values();
+
+        // ---- Quarter follow-through — live counts only. The PO-frozen rule: no fabricated targets, so
+        // the goal denominators are omitted (`targetsPending`) and the UI shows the raw numerators. ----
+        $missedFor = fn (string $type): int => PlannerEvent::query()
+            ->visibleTo($user)
+            ->where('event_type', $type)
+            ->whereNotNull('starts_at')
+            ->where('starts_at', '<', now())
+            ->where('status', '!=', 'completed')
+            ->count();
+
+        $outreachCompletionPct = ($emailTotal + $callTotal) > 0
+            ? (int) round(($emailCompleted + $callCompleted) / ($emailTotal + $callTotal) * 100)
+            : null;
+
+        $followThrough = [
+            'leadsContacted' => $contacted,
+            'consultations' => $consultation,
+            'confirmedClients' => $confirmed,
+            'missedFollowUps' => $missedFor('follow-up'),
+            'missedMeetings' => $missedFor('meeting'),
+            'missedCalls' => $missedFor('call'),
+            'outreachCompletionPct' => $outreachCompletionPct,
+            // No goals invented — Goal Management is a later sprint (frozen Business Decision).
+            'targetsPending' => true,
+        ];
+
+        // ---- Pending follow-ups — the team's action queue. Overdue/today/upcoming by the Asia/Manila
+        // day boundary (dates stored UTC, day computed in Manila — the platform rule). ----
+        $tz = 'Asia/Manila';
+        $todayStart = now($tz)->startOfDay()->utc();
+        $todayEnd = now($tz)->startOfDay()->addDay()->utc();
+
+        $pending = fn (): Builder => PlannerEvent::query()
+            ->visibleTo($user)
+            ->where('event_type', 'follow-up')
+            ->where('status', '!=', 'completed')
+            ->whereNotNull('starts_at');
+
+        $rows = $pending()
+            ->with('lead:id,business_name')
+            ->orderBy('starts_at')
+            ->limit(10)
+            ->get()
+            ->map(function (PlannerEvent $e) use ($todayStart, $todayEnd): array {
+                $status = $e->starts_at < $todayStart
+                    ? 'overdue'
+                    : ($e->starts_at < $todayEnd ? 'today' : 'upcoming');
+
+                return [
+                    'id' => $e->id,
+                    'status' => $status,
+                    'company' => $e->lead?->business_name ?? '—',
+                    'description' => $e->title,
+                    'dueDate' => $e->starts_at?->toIso8601String(),
+                ];
+            })
+            ->values();
+
+        $pendingFollowUps = [
+            'counts' => [
+                // Half-open [start, end) windows — identical to the row classifier above, so an event
+                // landing exactly on the Manila midnight boundary is counted once (in `upcoming`),
+                // never in two buckets. The three counts always sum to the pending total.
+                'overdue' => (clone $pending())->where('starts_at', '<', $todayStart)->count(),
+                'today' => (clone $pending())
+                    ->where('starts_at', '>=', $todayStart)
+                    ->where('starts_at', '<', $todayEnd)
+                    ->count(),
+                'upcoming' => (clone $pending())->where('starts_at', '>=', $todayEnd)->count(),
+            ],
+            'rows' => $rows,
+        ];
+
+        return response()->json(['data' => [
+            'funnel' => ['stages' => $funnelStages, 'biggestDropOff' => $biggestDropOff],
+            'statusMix' => $statusMix,
+            'outreachByChannel' => $outreachByChannel,
+            'niche' => $niche,
+            'followThrough' => $followThrough,
+            'pendingFollowUps' => $pendingFollowUps,
         ]]);
     }
 
@@ -260,9 +477,11 @@ class DashboardController extends Controller
      * see all visible). A metric with no computable value (e.g. a zero denominator) is returned as
      * `evaluable: false` with a `reason` and a null value — never a fabricated number.
      */
-    public function kpiMetrics(Request $request, BdKpiService $kpi): JsonResponse
+    public function kpiMetrics(PerformanceScopeRequest $request, BdKpiService $kpi): JsonResponse
     {
-        $result = $kpi->forUser($request->user());
+        // Scope resolved by PerformanceScopeRequest (default self/all; `?user_id` = one BD, Admin/SA only).
+        // BdKpiService::forUser already computes M-01…M-06 for any subject via scopeVisibleTo — no new logic.
+        $result = $kpi->forUser($request->scope()->subject);
 
         return response()->json(['data' => [
             'metrics' => array_map(fn (KpiMetric $m): array => [

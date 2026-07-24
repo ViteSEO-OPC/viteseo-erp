@@ -281,10 +281,16 @@ export function mapActivity(api: ActivityApi): ActivityItem {
  * Management Dashboard widget; the shared query key keeps it in sync with lead/outreach
  * mutation invalidations.
  */
-export function useActivityFeed(limit?: number) {
+// `userId` scopes the feed to one BD for the Reports & Performance "Recent Activity" widget (Admin/SA
+// only, enforced server-side). Dashboard/My-Performance callers omit it → the requester's own feed,
+// unchanged. Keyed by the scope so per-BD feeds never collide with the default.
+export function useActivityFeed(limit?: number, userId?: string) {
   const query = useQuery<{ data: ActivityApi[] }>({
-    queryKey: queryKeys.dashboard.recentActivity(),
-    queryFn: () => apiClient.get("/activities").then((r) => r.data),
+    queryKey: queryKeys.dashboard.recentActivity(userId ? `bd:${userId}` : "self"),
+    queryFn: () =>
+      apiClient
+        .get("/activities", { params: userId ? { user_id: userId } : {} })
+        .then((r) => r.data),
   });
 
   const rows = query.data?.data;

@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\User;
 use App\Modules\Crm\Controllers\ActivityController;
 use App\Modules\Crm\Controllers\Auth\MeController;
 use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
@@ -24,7 +25,6 @@ use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
-use App\Models\User;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -264,6 +264,11 @@ Route::prefix('v1/crm')->group(function (): void {
             // BD KPI Engine — the operational KPI catalog (M-01…M-07) with an explainable, per-metric
             // breakdown. Ownership-scoped in the controller; dashboard.view already gates the group.
             Route::get('/kpi-metrics', [DashboardController::class, 'kpiMetrics']);
+
+            // Reports & Performance management analytics (funnel / status-mix / outreach-by-channel /
+            // niche / follow-through / pending-follow-ups). Same scope seam as performance-summary
+            // (All Reports, or one BD via ?user_id — the latter authorized to crm.reports.view holders).
+            Route::get('/reports-analytics', [DashboardController::class, 'reportsAnalytics']);
 
             // Management Dashboard "BD Performance Overview" — Admin/Super Admin only. Aggregates
             // one live row per active Business Development Manager (BDs have dashboard.view but must

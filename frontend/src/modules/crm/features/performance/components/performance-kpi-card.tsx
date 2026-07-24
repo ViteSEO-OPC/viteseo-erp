@@ -60,19 +60,8 @@ export function PerformanceKpiCard({ card, isLoading }: Props) {
           </span>
         )}
 
-        {card.delta ? (
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 text-xs font-medium",
-              card.delta.tone === "positive" ? "text-green-700" : "text-red-700",
-            )}
-          >
-            <span className="text-[10px]" aria-hidden>
-              {card.delta.direction === "up" ? "▲" : "▼"}
-            </span>
-            {card.delta.text}
-          </span>
-        ) : card.caption ? (
+        {/* No period-over-period delta chips — those wait on a real business computation (PO). */}
+        {card.caption ? (
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {card.caption}
           </span>

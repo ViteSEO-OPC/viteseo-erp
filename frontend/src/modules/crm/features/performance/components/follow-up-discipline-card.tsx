@@ -1,26 +1,55 @@
+"use client";
+
 import { ChartCard } from "@/modules/crm/components/shared/chart-card/chart-card";
-import { PendingBadge } from "@/modules/crm/components/shared/pending-badge/pending-badge";
+import { cn } from "@/modules/crm/lib/utils";
+import { useMyPerformanceSummary } from "@/modules/crm/features/performance/hooks/use-my-performance";
 
 /**
- * Follow-up discipline — **Pending Planner integration.** Missed follow-ups, appointments, and calls
- * require the Planner module (implemented in a separate workstream) to expose missed/overdue events.
- * Those APIs are not available to this surface yet, so nothing is fabricated — the card shows a
- * Pending state until the Planner integration lands.
+ * Follow-up discipline — LIVE. Missed follow-ups / appointments / calls from the Planner module, using
+ * the PO-frozen rule: an event is "missed" when its `starts_at` is in the past and it is not completed
+ * (grouped by follow-up / meeting / call). Ownership-scoped via the performance summary. No fabricated
+ * period-over-period deltas — those wait on a real business computation.
  */
+const ROWS = [
+  { key: "missedFollowUps", label: "Missed follow-ups", color: "bg-amber-400" },
+  { key: "missedMeetings", label: "Missed appointments", color: "bg-red-400" },
+  { key: "missedCalls", label: "Missed calls", color: "bg-blue-400" },
+] as const;
+
 export function FollowUpDisciplineCard({ className }: { className?: string }) {
+  const { data: s, isLoading, isError } = useMyPerformanceSummary();
+  const discipline = s?.followUpDiscipline;
+  const max = discipline
+    ? Math.max(1, discipline.missedFollowUps, discipline.missedMeetings, discipline.missedCalls)
+    : 1;
+
   return (
     <ChartCard
       title="Follow-up discipline"
-      subtitle="Missed follow-ups, appointments, and calls this month"
-      filter={<PendingBadge reason="Pending Planner integration — missed-event data not yet available" />}
+      subtitle="Missed follow-ups, appointments, and calls"
       className={className}
+      isLoading={isLoading}
+      isError={isError}
     >
-      <div className="flex h-full min-h-[8rem] flex-col items-center justify-center gap-1 text-center">
-        <p className="text-sm font-semibold text-card-foreground">Pending Planner integration</p>
-        <p className="max-w-xs text-xs text-muted-foreground">
-          Missed follow-ups, calls, and appointments will appear once the Planner module exposes
-          overdue events.
-        </p>
+      <div className="flex flex-col gap-5">
+        {ROWS.map((row) => {
+          const value = discipline?.[row.key] ?? 0;
+          const width = value === 0 ? 0 : Math.max(6, Math.round((value / max) * 100));
+          return (
+            <div key={row.key}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className={cn("h-2.5 w-2.5 rounded-full", row.color)} aria-hidden />
+                  <span className="text-sm font-semibold text-card-foreground">{row.label}</span>
+                </div>
+                <span className="text-lg font-bold tabular-nums text-card-foreground">{value}</span>
+              </div>
+              <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-secondary">
+                <div className={cn("h-full rounded-full", row.color)} style={{ width: `${width}%` }} />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </ChartCard>
   );

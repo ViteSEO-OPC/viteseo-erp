@@ -3,11 +3,10 @@
 namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
-
-use App\Modules\Crm\Resources\ActivityResource;
 use App\Modules\Crm\Models\Activity;
 use App\Modules\Crm\Models\Lead;
-use Illuminate\Http\Request;
+use App\Modules\Crm\Requests\PerformanceScopeRequest;
+use App\Modules\Crm\Resources\ActivityResource;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class ActivityController extends Controller
@@ -25,11 +24,15 @@ class ActivityController extends Controller
      * activity visibility. Admin/SA see the full CRM feed; a BD sees only their own
      * activities and activities on the leads they own. Every consumer (Dashboard widget,
      * Activity Logs page, future surfaces) reads this same scoped query.
+     *
+     * The Reports & Performance "Recent Activity" widget may pass `?user_id` to scope the feed to one
+     * BD — resolved (and management-gated) by PerformanceScopeRequest. Absent → the requester's own
+     * scope, i.e. the identical feed every other consumer already gets.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(PerformanceScopeRequest $request): AnonymousResourceCollection
     {
         $activities = Activity::query()
-            ->visibleTo($request->user())
+            ->visibleTo($request->scope()->subject)
             ->forCrmReporting() // exclude unqualified-prospect activity (Nearby pool) from CRM reporting
             ->with([
                 'causer',

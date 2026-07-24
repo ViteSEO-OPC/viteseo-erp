@@ -10,14 +10,18 @@ export const queryKeys = {
       [...queryKeys.dashboard.all, "priority-buckets", filters] as const,
     recentLeads: () =>
       [...queryKeys.dashboard.all, "recent-leads"] as const,
-    recentActivity: () =>
-      [...queryKeys.dashboard.all, "recent-activity"] as const,
+    // `scope` keeps the Reports & Performance per-BD / All-Reports feeds cached separately from the
+    // Dashboard's own (default "self"). Existing callers pass nothing → unchanged behavior.
+    recentActivity: (scope: string = "self") =>
+      [...queryKeys.dashboard.all, "recent-activity", scope] as const,
     bdPerformance: () =>
       [...queryKeys.dashboard.all, "bd-performance"] as const,
     leadAcquisition: () =>
       [...queryKeys.dashboard.all, "lead-acquisition"] as const,
-    // BD KPI Engine operational catalog (M-01…M-06) — GET /dashboard/kpi-metrics.
-    kpiMetrics: () => [...queryKeys.dashboard.all, "kpi-metrics"] as const,
+    // BD KPI Engine operational catalog (M-01…M-06) — GET /dashboard/kpi-metrics. `scope` separates the
+    // Reports & Performance per-BD / All-Reports catalogs (default "self").
+    kpiMetrics: (scope: string = "self") =>
+      [...queryKeys.dashboard.all, "kpi-metrics", scope] as const,
   },
   leads: {
     all: ["leads"] as const,
@@ -79,17 +83,18 @@ export const queryKeys = {
   },
   performance: {
     all: ["performance"] as const,
-    // "My Performance" personal KPI summary (GET /dashboard/performance-summary).
-    summary: () => [...queryKeys.performance.all, "summary"] as const,
+    // Personal / reporting KPI summary (GET /dashboard/performance-summary). `scope` separates My
+    // Performance ("self") from Reports & Performance "All Reports" ("all") and each BD ("bd:<id>").
+    summary: (scope: string = "self") =>
+      [...queryKeys.performance.all, "summary", scope] as const,
   },
   reports: {
     all: ["reports"] as const,
-    kpis: () => [...queryKeys.reports.all, "kpis"] as const,
-    statusBars: () => [...queryKeys.reports.all, "status-bars"] as const,
-    priorityDonut: () => [...queryKeys.reports.all, "priority-donut"] as const,
-    outreachLine: () => [...queryKeys.reports.all, "outreach-line"] as const,
-    conversionBars: () => [...queryKeys.reports.all, "conversion-bars"] as const,
-    industryBars: () => [...queryKeys.reports.all, "industry-bars"] as const,
+    // Management analytics aggregate (GET /dashboard/reports-analytics). Scoped like the performance
+    // summary: "all" (All Reports) or "bd:<id>" (one BD) — cached separately per scope. Lead/niche
+    // mutations invalidate the `reports.all` prefix so every cached scope refreshes together.
+    analytics: (scope: string = "self") =>
+      [...queryKeys.reports.all, "analytics", scope] as const,
   },
   planner: {
     all: ["planner"] as const,

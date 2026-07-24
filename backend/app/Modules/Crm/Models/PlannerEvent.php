@@ -3,9 +3,8 @@
 namespace App\Modules\Crm\Models;
 
 use App\Models\User;
-
-use App\Modules\Crm\Observers\PlannerEventObserver;
 use App\Modules\Crm\Database\Factories\PlannerEventFactory;
+use App\Modules\Crm\Observers\PlannerEventObserver;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
@@ -87,6 +86,7 @@ class PlannerEvent extends Model
         return [
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
+            'completed_at' => 'datetime',
             'all_day' => 'boolean',
             'reminder_minutes' => 'integer',
         ];

@@ -124,8 +124,9 @@ export const PAGE_ACCESS: PageAccess[] = [
   // Temporary backward-compat alias — `/calendar` redirects to `/planner`; gated identically so
   // Admin/SA are bounced before the redirect. Remove with the alias page.
   { href: "/zerem/calendar", allowedRoles: ["crm_bd"] },
-  // My Performance — BD-facing personal surface; content is ownership-scoped server-side.
-  { href: "/zerem/my-performance", minRole: "crm_bd" },
+  // My Performance — BD-exclusive personal surface. Admin/Super Admin use Reports & Performance
+  // (/zerem/reports), which shows the same widgets with an All-Reports / per-BD scope selector.
+  { href: "/zerem/my-performance", allowedRoles: ["crm_bd"] },
   { href: "/zerem/activity-logs", minRole: "crm_bd" },
   // BD self-service profile ("Settings" in the BD sidebar) — role-exclusive, like Planner: visible
   // ONLY to Business Development Managers. Admin/Super Admin have the separate admin Settings module
