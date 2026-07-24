@@ -26,6 +26,9 @@ class AttendanceResource extends JsonResource
             'hours_worked' => (float) $this->hours_worked,
             'status' => $this->status,
             'state' => $this->state,
+            // 'manual' (a person entered it) vs 'system' (generated for exempt
+            // management staff) — an audit has to be able to tell them apart.
+            'source' => $this->source,
             'on_lunch' => $this->lunch_started_at !== null,
             'on_break' => $this->break_started_at !== null,
             'tasks' => $this->tasks ?? [],
