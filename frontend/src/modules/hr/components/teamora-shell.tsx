@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -14,8 +15,8 @@ import { useViewMode } from "@/modules/hr/components/view-mode-context";
  * TeamOra's responsive frame — an HR-local replacement for `core/AppShell`.
  *
  * `AppShell` renders the sidebar as a permanent 256px column, which leaves a
- * 375px phone ~119px for content. This wraps the *unmodified* core `Sidebar`
- * and `TopBar` instead of forking them: below `lg` the sidebar becomes an
+ * 375px phone ~119px for content. This wraps the shared core `Sidebar` and
+ * `TopBar` instead of forking them: below `lg` the sidebar becomes an
  * off-canvas drawer opened by a hamburger, at `lg`+ it is the static column
  * exactly as before.
  *
@@ -26,7 +27,8 @@ import { useViewMode } from "@/modules/hr/components/view-mode-context";
  */
 export function TeamoraShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { variant, toggle } = useViewMode();
+  const router = useRouter();
+  const { variant, canSwitch, toggle } = useViewMode();
 
   // Navigating from a drawer link should close the drawer behind you. Handled
   // by delegation rather than an effect on `pathname`: the nav links live
@@ -37,18 +39,15 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
     if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
   };
 
-  // The "Switch to Employee/HR view" control lives inside the shared core
-  // `Sidebar`, which we don't edit. It only does `router.push("/teamora")`, so
-  // on its own it can't flip a role-derived view. Catch its click here in the
-  // capture phase (before the button's own handler runs) and toggle the view
-  // mode, so `/teamora` re-renders the correct portal. Matched by its label
-  // rather than a hook we can't add to the shared button.
-  const catchViewSwitch = (e: React.MouseEvent<HTMLElement>) => {
-    const btn = (e.target as HTMLElement).closest("button");
-    if (btn && /^switch to .+ view$/i.test((btn.textContent ?? "").trim())) {
-      toggle();
-      setMobileOpen(false);
-    }
+  // The "Switch to Employee/HR view" control lives in the shared core `Sidebar`,
+  // but the policy is ours: `useViewMode` decides who may switch and what
+  // switching does, and the button just calls back. Always land on `/teamora` —
+  // the one route both navs share — since the page you were on (say
+  // `/teamora/employees`) may not exist in the portal you are switching into.
+  const switchView = () => {
+    toggle();
+    setMobileOpen(false);
+    router.push("/teamora");
   };
 
   useEffect(() => {
@@ -67,8 +66,12 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
           than pushing the whole page sideways.) */}
       <div className="fixed inset-0 flex overflow-hidden">
         {/* Desktop: the static column, unchanged from AppShell. */}
-        <div className="hidden lg:flex" onClickCapture={catchViewSwitch}>
-          <Sidebar variant={variant} />
+        <div className="hidden lg:flex">
+          <Sidebar
+            variant={variant}
+            canSwitchView={canSwitch}
+            onSwitchView={switchView}
+          />
         </div>
 
         {/* Mobile: backdrop + off-canvas drawer. */}
@@ -85,7 +88,6 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
           aria-modal="true"
           aria-label="Navigation menu"
           onClick={closeIfNavigating}
-          onClickCapture={catchViewSwitch}
           className={cn(
             "fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out lg:hidden",
             // `invisible` (not just the off-screen transform) so the drawer's
@@ -93,7 +95,11 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
             mobileOpen ? "visible translate-x-0" : "invisible -translate-x-full",
           )}
         >
-          <Sidebar variant={variant} />
+          <Sidebar
+            variant={variant}
+            canSwitchView={canSwitch}
+            onSwitchView={switchView}
+          />
           <button
             type="button"
             onClick={() => setMobileOpen(false)}
