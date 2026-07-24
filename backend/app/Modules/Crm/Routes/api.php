@@ -336,6 +336,11 @@ Route::prefix('v1/crm')->group(function (): void {
                 Route::patch('/{module}/rules/{ruleKey}', [BusinessRuleController::class, 'updateRule']);
                 Route::post('/{module}/rules/{ruleKey}/enable', [BusinessRuleController::class, 'enableRule']);
                 Route::post('/{module}/rules/{ruleKey}/disable', [BusinessRuleController::class, 'disableRule']);
+
+                // Lifecycle: publish the draft; forward-only rollback to a prior published version. Both
+                // invalidate the provider cache and dispatch a version-pinned recompute AFTER commit.
+                Route::post('/{module}/publish', [BusinessRuleController::class, 'publish']);
+                Route::post('/{module}/rollback', [BusinessRuleController::class, 'rollback']);
             });
         });
     });

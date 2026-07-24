@@ -4,7 +4,9 @@ namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Crm\Enums\BusinessRuleModule;
+use App\Modules\Crm\Requests\PublishBusinessRulesRequest;
 use App\Modules\Crm\Requests\ReorderBusinessRulesRequest;
+use App\Modules\Crm\Requests\RollbackBusinessRulesRequest;
 use App\Modules\Crm\Requests\UpdateBusinessRuleRequest;
 use App\Modules\Crm\Resources\BusinessRuleAuditResource;
 use App\Modules\Crm\Resources\BusinessRuleResource;
@@ -122,6 +124,34 @@ class BusinessRuleController extends Controller
         return new BusinessRuleVersionResource(
             $this->service->reorderRules($this->module($module), $order, $request->user()),
         );
+    }
+
+    /**
+     * Publish the current draft. Returns the resulting active version with an explicit 200 (a state
+     * transition, not a new sub-resource — kept consistent with rollback); recompute runs asynchronously.
+     */
+    public function publish(PublishBusinessRulesRequest $request, string $module): JsonResponse
+    {
+        $version = $this->service->publish($this->module($module), $request->user(), $request->validated('reason'));
+
+        return (new BusinessRuleVersionResource($version))->response()->setStatusCode(200);
+    }
+
+    /**
+     * Forward-only rollback to a previously published version. Returns the resulting active version with an
+     * explicit 200 so the lifecycle endpoints report a consistent status (rollback creates a new version row,
+     * which would otherwise auto-report 201).
+     */
+    public function rollback(RollbackBusinessRulesRequest $request, string $module): JsonResponse
+    {
+        $version = $this->service->rollback(
+            $this->module($module),
+            (int) $request->validated('target_version'),
+            $request->user(),
+            $request->validated('reason'),
+        );
+
+        return (new BusinessRuleVersionResource($version))->response()->setStatusCode(200);
     }
 
     /** Resolve the route's module string to the enum. The route constraint guarantees an enabled module. */

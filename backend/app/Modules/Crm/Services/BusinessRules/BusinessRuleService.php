@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Modules\Crm\Enums\BusinessRuleAuditAction;
 use App\Modules\Crm\Enums\BusinessRuleModule;
 use App\Modules\Crm\Enums\BusinessRuleState;
+use App\Modules\Crm\Jobs\RecomputeLeadScoresJob;
 use App\Modules\Crm\Models\BusinessRule;
 use App\Modules\Crm\Models\BusinessRuleAudit;
 use App\Modules\Crm\Models\BusinessRuleVersion;
@@ -37,6 +38,17 @@ use Illuminate\Validation\ValidationException;
  */
 final class BusinessRuleService
 {
+    /**
+     * @param  ScoringConfigProvider  $provider  Used ONLY for its write-only cache `invalidate()` after a
+     *         publish/rollback commits (§5.7). The service never reads scoring configuration through it.
+     * @param  BaselineValidator  $validator  Shared, stateless completeness check reused to confirm a draft
+     *         (before publish) or a target (before rollback) is publishable (§5.6).
+     */
+    public function __construct(
+        private readonly ScoringConfigProvider $provider,
+        private readonly BaselineValidator $validator,
+    ) {}
+
     // ── Reads (no transaction, no audit) ──────────────────────────────────────────────────────
 
     /** The active version and its rules — the admin read view / the source the provider validates. */
@@ -248,7 +260,160 @@ final class BusinessRuleService
         });
     }
 
+    // ── Publish / rollback (transactional transition; side effects only AFTER commit) ─────────
+
+    /**
+     * Publish the current draft: archive the prior active version, promote the draft to active, and audit —
+     * all in ONE transaction. Only after it commits are the side effects run: invalidate the provider cache
+     * and dispatch the version-pinned recompute (§5.7/§5.8/§6a). No partial configuration is ever visible.
+     */
+    public function publish(BusinessRuleModule $module, User $actor, ?string $reason = null): BusinessRuleVersion
+    {
+        $published = DB::transaction(function () use ($module, $actor, $reason): BusinessRuleVersion {
+            $this->lockModule($module);
+
+            $draft = $this->findDraft($module);
+            if ($draft === null) {
+                throw ValidationException::withMessages(['draft' => 'There is no draft to publish.']);
+            }
+            $this->assertPublishable($draft); // completeness gate (§5.6) — never publish a partial ruleset.
+
+            $active = $this->getActiveConfiguration($module);
+            if ($active !== null) {
+                $active->state = BusinessRuleState::ARCHIVED;
+                $active->save();
+            }
+
+            $draft->state = BusinessRuleState::ACTIVE;
+            $draft->published_by = $actor->getKey();
+            $draft->published_at = now();
+            if ($reason !== null) {
+                $draft->reason_for_change = $reason;
+            }
+            $draft->save();
+
+            $this->audit($module, BusinessRuleAuditAction::PUBLISH, $draft, $actor, [
+                'previous_value' => $active !== null ? 'active v'.$active->version_number : null,
+                'new_value' => 'published v'.$draft->version_number,
+                'reason' => $reason,
+            ]);
+
+            return $draft;
+        });
+
+        $this->afterActiveVersionChanged($published->version_number);
+
+        return $published->load('rules');
+    }
+
+    /**
+     * Forward-only rollback: create a NEW active version that copies a previously published version's rules
+     * (never re-activating the archived row), archive the current active, and audit — atomically. The target
+     * must be a published version (not a draft), not the already-active one, and must itself validate.
+     * History stays append-only; the restore takes the next monotonic version number. Cache invalidation and
+     * recompute dispatch happen only after commit (§6b).
+     */
+    public function rollback(BusinessRuleModule $module, int $targetVersionNumber, User $actor, ?string $reason = null): BusinessRuleVersion
+    {
+        $created = DB::transaction(function () use ($module, $targetVersionNumber, $actor, $reason): BusinessRuleVersion {
+            $this->lockModule($module);
+
+            $target = $this->versionQuery($module)
+                ->where('version_number', $targetVersionNumber)
+                ->with('rules')
+                ->first();
+
+            if ($target === null) {
+                throw ValidationException::withMessages(['target_version' => 'Target version not found.']);
+            }
+            if ($target->state === BusinessRuleState::DRAFT) {
+                throw ValidationException::withMessages(['target_version' => 'Cannot roll back to a draft; only a previously published version.']);
+            }
+
+            $active = $this->getActiveConfiguration($module);
+            if ($active !== null && $active->version_number === $targetVersionNumber) {
+                throw ValidationException::withMessages(['target_version' => 'That version is already active.']);
+            }
+
+            $this->assertPublishable($target); // never roll back to a corrupt/incomplete version.
+
+            // Forward-only: a NEW active version that copies the target's rules (a fresh identity).
+            $restored = new BusinessRuleVersion();
+            $restored->module = $module;
+            $restored->version_number = $this->nextVersionNumber($module);
+            $restored->state = BusinessRuleState::ACTIVE;
+            $restored->computation_spec_version = $target->computation_spec_version;
+            $restored->reason_for_change = $reason ?? 'Rollback to v'.$target->version_number;
+            $restored->created_by = $actor->getKey();
+            $restored->published_by = $actor->getKey();
+            $restored->published_at = now();
+            $restored->save();
+
+            foreach ($target->rules as $source) {
+                $copy = new BusinessRule();
+                $copy->version_id = $restored->getKey();
+                $copy->rule_key = $source->rule_key;
+                $copy->description = $source->description;
+                $copy->category = $source->category;
+                $copy->point_value = $source->point_value;
+                $copy->is_enabled = $source->is_enabled;
+                $copy->display_order = $source->display_order;
+                $copy->save();
+            }
+
+            if ($active !== null) {
+                $active->state = BusinessRuleState::ARCHIVED;
+                $active->save();
+            }
+
+            $this->audit($module, BusinessRuleAuditAction::ROLLBACK, $restored, $actor, [
+                'previous_value' => json_encode(['source_active_version' => $active?->version_number]),
+                'new_value' => json_encode(['target_version' => $target->version_number, 'resulting_version' => $restored->version_number]),
+                'reason' => $reason,
+            ]);
+
+            return $restored;
+        });
+
+        $this->afterActiveVersionChanged($created->version_number);
+
+        return $created->load('rules');
+    }
+
     // ── Internals ─────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Post-commit side effects for a change to the ACTIVE version (§5.7/§5.8). Runs OUTSIDE and AFTER the
+     * transaction: invalidate the provider cache so the next resolution serves the new active version, then
+     * dispatch the version-pinned recompute. Never invoked on a rolled-back transaction.
+     */
+    private function afterActiveVersionChanged(int $resultingVersionNumber): void
+    {
+        $this->provider->invalidate();
+        RecomputeLeadScoresJob::dispatch($resultingVersionNumber);
+    }
+
+    /**
+     * Confirm a version is a complete, publishable ruleset (§5.6), reusing the shared stateless validator so
+     * "complete" is defined once (and matches what the provider requires at read time). Throws a 422 with the
+     * specific reason if not.
+     */
+    private function assertPublishable(BusinessRuleVersion $version): void
+    {
+        $requiredKeys = array_keys(config('scoring.points', []));
+        $result = $this->validator->validate(
+            collect([$version->loadMissing('rules')]),
+            $requiredKeys,
+            ScoringConfigProvider::EXPECTED_COMPUTATION_SPEC,
+        );
+
+        if (! $result->valid) {
+            throw ValidationException::withMessages([
+                'configuration' => 'The configuration is not publishable ('.$result->reason.').',
+            ]);
+        }
+    }
+
 
     private function setEnabled(BusinessRuleModule $module, string $ruleKey, bool $enabled, User $actor): BusinessRule
     {

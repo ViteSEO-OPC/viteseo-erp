@@ -8,6 +8,7 @@ use App\Modules\Crm\Enums\BusinessRuleModule;
 use App\Modules\Crm\Enums\BusinessRuleState;
 use App\Modules\Crm\Models\BusinessRuleVersion;
 use App\Modules\Crm\Services\Scoring\ScoringConfig;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -39,12 +40,24 @@ use Throwable;
 final class ScoringConfigProvider
 {
     /** The computation-spec contract the frozen engine expects (matches the seeded baseline). */
-    private const EXPECTED_COMPUTATION_SPEC = 'v1.0.0';
+    public const EXPECTED_COMPUTATION_SPEC = 'v1.0.0';
+
+    /** Cross-request application cache key for the validated active lead_scoring parameters (§6.2). */
+    private const CACHE_KEY = 'crm.business_rules.scoring_config.lead_scoring';
+
+    /** Bounded TTL — a safety net so a missed invalidation can never serve stale params forever (§6.2). */
+    private const CACHE_TTL_SECONDS = 3600;
 
     public function __construct(private readonly BaselineValidator $validator) {}
 
     public function resolve(): ScoringConfig
     {
+        // CACHE hit — a previously VALIDATED database configuration (§6.3). No database read.
+        $cached = Cache::get(self::CACHE_KEY);
+        if (is_array($cached)) {
+            return ScoringConfig::fromArray($cached);
+        }
+
         $fileConfig = $this->fileConfig();
 
         try {
@@ -75,6 +88,10 @@ final class ScoringConfigProvider
                 'caps' => $fileConfig['caps'] ?? [],
             ];
 
+            // Cache ONLY a fully validated database configuration (§6.2). A fallback is never cached, so the
+            // provider re-attempts the database on the next resolution rather than latching to the file.
+            Cache::put(self::CACHE_KEY, $merged, self::CACHE_TTL_SECONDS);
+
             $this->logLoaded($version->version_number);
 
             return ScoringConfig::fromArray($merged);
@@ -85,6 +102,21 @@ final class ScoringConfigProvider
 
             return ScoringConfig::fromArray($fileConfig);
         }
+    }
+
+    /**
+     * Clear the cached active configuration so the next resolution re-reads and re-validates from the
+     * database (§5.7 / §6.2). This is the SINGLE sanctioned link from BusinessRuleService into the provider:
+     * a one-way, write-only invalidation signal, called ONLY after a publish/rollback transaction commits.
+     * The provider never calls back into the service.
+     */
+    public function invalidate(): void
+    {
+        Cache::forget(self::CACHE_KEY);
+        Log::debug('business_rules.cache_invalidated', [
+            'event' => 'business_rules.cache_invalidated',
+            'module' => 'lead_scoring',
+        ]);
     }
 
     /**
