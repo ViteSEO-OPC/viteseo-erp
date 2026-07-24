@@ -35,10 +35,16 @@ class ReimbursementController extends Controller
             );
         }
 
+        // Accept `receipts[]` (multi-file) and a lone legacy `receipt`, in order.
+        $receipts = array_merge(
+            $request->file('receipts', []),
+            array_filter([$request->file('receipt')]),
+        );
+
         $claim = $this->service->create(
             $employee,
             $request->validated(),
-            $request->file('receipt'),
+            $receipts,
         );
 
         return ReimbursementResource::make($claim)

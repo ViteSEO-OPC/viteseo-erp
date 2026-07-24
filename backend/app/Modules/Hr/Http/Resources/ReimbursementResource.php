@@ -13,6 +13,12 @@ class ReimbursementResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        // Absolute URLs so the frontend can link/preview each receipt directly.
+        $receiptUrls = array_map(
+            static fn (string $path): string => Storage::disk('public')->url($path),
+            $this->allReceiptPaths(),
+        );
+
         return [
             'id' => $this->id,
             'employee' => [
@@ -23,10 +29,9 @@ class ReimbursementResource extends JsonResource
             'amount' => $this->amount,
             'expense_date' => $this->expense_date?->format('Y-m-d'),
             'description' => $this->description,
-            // Absolute URL so the frontend can link/preview it directly.
-            'receipt_url' => $this->receipt_path
-                ? Storage::disk('public')->url($this->receipt_path)
-                : null,
+            'receipt_urls' => $receiptUrls,
+            // Kept for back-compat: the first receipt, or null.
+            'receipt_url' => $receiptUrls[0] ?? null,
             'status' => $this->status,
             'reviewed_at' => $this->reviewed_at,
             'reviewed_by' => $this->reviewer?->name,
