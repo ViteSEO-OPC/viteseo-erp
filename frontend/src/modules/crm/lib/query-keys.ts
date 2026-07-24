@@ -133,4 +133,14 @@ export const queryKeys = {
     list: () => [...queryKeys.notifications.all, "list"] as const,
     unreadCount: () => [...queryKeys.notifications.all, "unread-count"] as const,
   },
+  businessRules: {
+    // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved
+    // kpi/ranking modules stay cached separately. `all` prefix lets a single mutation invalidate the
+    // active config, draft, versions, and audit together (any publish/rollback/edit changes several).
+    all: (module: string) => ["business-rules", module] as const,
+    active: (module: string) => [...queryKeys.businessRules.all(module), "active"] as const,
+    draft: (module: string) => [...queryKeys.businessRules.all(module), "draft"] as const,
+    versions: (module: string) => [...queryKeys.businessRules.all(module), "versions"] as const,
+    audit: (module: string) => [...queryKeys.businessRules.all(module), "audit"] as const,
+  },
 } as const;

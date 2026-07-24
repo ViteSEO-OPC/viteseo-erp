@@ -7,11 +7,13 @@ import {
   Archive,
   Users,
   Lock,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
+import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 
-type NavItem = { label: string; href: string; icon: LucideIcon };
+type NavItem = { label: string; href: string; icon: LucideIcon; permission?: string };
 type NavGroup = { heading?: string; items: NavItem[] };
 
 const GROUPS: NavGroup[] = [
@@ -29,12 +31,20 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: "Team Accounts", href: "/zerem/settings/team-accounts", icon: Users },
       { label: "Rules & Permissions", href: "/zerem/settings/rules-permissions", icon: Lock },
+      // Business Rules Administration — gated by the read permission (Super Admin + temporary Admin).
+      {
+        label: "Business Rules",
+        href: "/zerem/settings/business-rules",
+        icon: SlidersHorizontal,
+        permission: "crm.business_rules.view",
+      },
     ],
   },
 ];
 
 export function SettingsNav() {
   const pathname = usePathname();
+  const { can } = usePermissions();
   const isActive = (href: string) =>
     href === "/settings" ? pathname === "/zerem/settings" : pathname.startsWith(href);
 
@@ -51,7 +61,9 @@ export function SettingsNav() {
             </p>
           ) : null}
           <div className="flex flex-col gap-0.5">
-            {group.items.map((item) => {
+            {group.items
+              .filter((item) => !item.permission || can(item.permission))
+              .map((item) => {
               const active = isActive(item.href);
               const Icon = item.icon;
               return (
