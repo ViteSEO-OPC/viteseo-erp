@@ -77,7 +77,7 @@ type EventFormDialogProps = {
 export function EventFormDialog({ open, onOpenChange, event, defaultStatus }: EventFormDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
+      <DialogContent className="flex max-h-[85vh] w-full flex-col gap-0 p-0 sm:max-w-[480px]">
         {open && (
           <EventForm
             event={event ?? null}
@@ -189,7 +189,7 @@ function EventForm({
 
   return (
     <>
-      <DialogHeader>
+      <DialogHeader className="px-6 pt-6">
         <DialogTitle>{isEdit ? "Edit event" : "New task"}</DialogTitle>
         <DialogDescription>
           {isEdit
@@ -198,7 +198,7 @@ function EventForm({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="space-y-4 py-2">
+      <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
         <Field label="Title">
           <Input
             value={title}
@@ -300,7 +300,7 @@ function EventForm({
         </Field>
       </div>
 
-      <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+      <DialogFooter className="mx-0 mb-0 flex-col-reverse gap-2 border-t px-6 py-4 sm:flex-row sm:justify-between">
         {isEdit ? (
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={handleDelete} disabled={busy}>

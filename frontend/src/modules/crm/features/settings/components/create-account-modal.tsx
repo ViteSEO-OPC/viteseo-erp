@@ -82,7 +82,7 @@ export function CreateAccountModal({ open, onOpenChange, assignableRoles, defaul
 
   return (
     <Dialog open={open} onOpenChange={(val) => { if (!val) handleClose(); }}>
-      <DialogContent showCloseButton={false} className="flex w-full flex-col p-0 sm:max-w-[440px]">
+      <DialogContent showCloseButton={false} className="flex w-full flex-col gap-0 p-0 sm:max-w-[440px]">
         {created ? (
           <div className="flex flex-col p-6">
             <div className="mb-4 flex items-start gap-3">
@@ -183,7 +183,7 @@ export function CreateAccountModal({ open, onOpenChange, assignableRoles, defaul
               </p>
             </div>
 
-            <DialogFooter className="flex-row justify-end gap-3 border-t border-border-subtle px-6 py-4">
+            <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-3 border-t border-border-subtle px-6 py-4">
               <Button variant="outline" size="sm" onClick={handleClose} disabled={createUser.isPending}>
                 Cancel
               </Button>

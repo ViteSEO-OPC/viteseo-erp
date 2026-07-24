@@ -41,7 +41,7 @@ export function AssignLeadModal({ open, onOpenChange, lead }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onOpenChange(false); }}>
-      <DialogContent showCloseButton={false} className="flex w-full flex-col p-0 sm:max-w-[420px]">
+      <DialogContent showCloseButton={false} className="flex w-full flex-col gap-0 p-0 sm:max-w-[420px]">
         <DialogHeader className="border-b border-border-subtle px-6 py-4">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-lg font-bold text-card-foreground">
@@ -73,7 +73,7 @@ export function AssignLeadModal({ open, onOpenChange, lead }: Props) {
           </FormField>
         </div>
 
-        <DialogFooter className="flex-row justify-end gap-3 border-t border-border-subtle px-6 py-4">
+        <DialogFooter className="mx-0 mb-0 flex-row justify-end gap-3 border-t border-border-subtle px-6 py-4">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={assignLead.isPending}>
             Cancel
           </Button>
