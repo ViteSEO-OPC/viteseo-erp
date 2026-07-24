@@ -6,6 +6,7 @@ namespace App\Modules\Projects\Services;
 
 use App\Models\User;
 use App\Modules\Projects\Enums\AssignmentType;
+use App\Modules\Projects\Enums\UserRole;
 use App\Modules\Projects\Events\NotificationCreated;
 use App\Modules\Projects\Models\Comment;
 use App\Modules\Projects\Models\Notification;
@@ -15,7 +16,8 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Creates in-app notifications and broadcasts them on the recipient's private
- * user channel. Scope is intentionally minimal: task assignment + task comments.
+ * user channel. Scope: task assignment + task comments (to the assignee /
+ * commenters) and task status changes (to the project's managers).
  */
 class NotificationService
 {
@@ -70,6 +72,38 @@ class NotificationService
                 'data' => [
                     'title' => $task->title,
                     'snippet' => str($comment->content)->limit(80)->value(),
+                ],
+            ]);
+
+            $this->dispatch($notification);
+        }
+    }
+
+    /**
+     * A task's status changed — notify the project's managers (PM tier) so they
+     * can track progress, excluding whoever made the change (a manager moving a
+     * card doesn't notify themselves).
+     */
+    public function notifyTaskStatusChanged(Task $task, User $actor, string $newStatusName): void
+    {
+        $recipientIds = $task->project
+            ->members()
+            ->role(UserRole::managerRoles())
+            ->pluck('users.id')
+            ->map(fn ($id): int => (int) $id)
+            ->reject(fn (int $id): bool => $id === (int) $actor->id)
+            ->values();
+
+        foreach ($recipientIds as $recipientId) {
+            $notification = Notification::create([
+                'user_id' => $recipientId,
+                'actor_id' => $actor->id,
+                'type' => 'task.status_changed',
+                'project_id' => $task->project_id,
+                'task_id' => $task->id,
+                'data' => [
+                    'title' => $task->title,
+                    'status' => $newStatusName,
                 ],
             ]);
 
