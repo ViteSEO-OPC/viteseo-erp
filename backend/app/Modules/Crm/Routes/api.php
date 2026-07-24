@@ -113,14 +113,27 @@ Route::prefix('v1/crm')->group(function (): void {
 
         // Business Niche registry — the vocabulary behind the shared Business Niche selector and the
         // Add Business Niche modal. Business CONFIGURATION, not lead data: no niche route touches a
-        // lead's status, score, priority or ownership. Available to any authenticated CRM user (PO
-        // decision for this milestone) — no dedicated permission. The built-in-immutable and
-        // still-in-use-can't-be-deleted rules are enforced in NicheController, not by middleware.
+        // lead's status, score, priority or ownership.
+        //
+        // 🔒 ADMINISTRATIVE DATA (PO decision 2026-07-24, RBAC Hardening R-1 — SUPERSEDES the earlier
+        // "any authenticated CRM user" decision): Super Admin + Admin have full CRUD; a Business
+        // Development Manager is READ-ONLY. The registry is tenant-wide, so an unauthorized rename or
+        // delete re-segments every lead filed under that niche — the audit reproduced exactly that as a
+        // BD (create 201 / rename 200 / delete 204) before this gate existed.
+        //
+        // Role middleware, not a Policy: a niche has no ownership or per-instance rules, so there is
+        // nothing for a Policy to decide — this matches how the other management-only routes here are
+        // gated. The built-in-immutable and still-in-use-can't-be-deleted rules remain business rules
+        // enforced in NicheController; they are not authorization.
+        //
         // Declared before the /leads/{lead} wildcards purely for grouping — the URIs never collide.
-        Route::get('/niches', [NicheController::class, 'index']);
-        Route::post('/niches', [NicheController::class, 'store']);
-        Route::patch('/niches/{niche}', [NicheController::class, 'update']);
-        Route::delete('/niches/{niche}', [NicheController::class, 'destroy']);
+        Route::get('/niches', [NicheController::class, 'index'])
+            ->middleware('permission:crm.leads.view');
+        Route::middleware('role:super_admin|crm_admin')->group(function () {
+            Route::post('/niches', [NicheController::class, 'store']);
+            Route::patch('/niches/{niche}', [NicheController::class, 'update']);
+            Route::delete('/niches/{niche}', [NicheController::class, 'destroy']);
+        });
 
         Route::get('/leads/{lead}', [LeadController::class, 'show'])->can('view', 'lead');
         Route::match(['put', 'patch'], '/leads/{lead}', [LeadController::class, 'update'])->can('update', 'lead');
