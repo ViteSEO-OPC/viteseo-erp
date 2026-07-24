@@ -19,7 +19,7 @@ class AttendancePolicyService
      *
      * @var array<string, mixed>
      */
-    private const DEFAULTS = [
+    public const DEFAULTS = [
         'consecutive_lates_before_absence' => 3,
         'monthly_late_reset' => true,
         'awol_days_threshold' => 3,
