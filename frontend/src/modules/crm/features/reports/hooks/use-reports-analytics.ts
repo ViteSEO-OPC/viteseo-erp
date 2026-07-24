@@ -37,13 +37,28 @@ export type PendingFollowUpRow = {
 
 export type ReportsAnalytics = {
   funnel: { stages: FunnelStage[]; biggestDropOff: BiggestDropOff };
+  /**
+   * 🔒 Unique leads that actually underwent a consultation — a completed consultation Planner event
+   * whose outcome says the lead attended (`successful` / `not_interested`). Counted once per lead.
+   * NOT the funnel's `consultation` stage, which still counts *scheduled* slots.
+   */
+  consultationsHeld: number;
+  /**
+   * Operational queue, **not a KPI**: consultations concluded with no outcome recorded yet (e.g.
+   * completed by a connected call). `null` means awaiting business completion — never attendance — so
+   * these are excluded from `consultationsHeld` until a BD records the real result.
+   */
+  consultationsAwaitingOutcome: number;
   /** Raw counts keyed by status; the UI maps labels/colors from the central LEAD_STATUS_CONFIG. */
   statusMix: Record<string, number>;
   outreachByChannel: { email: OutreachChannel; call: OutreachChannel };
   niche: { niche: string; value: number }[];
   followThrough: {
     leadsContacted: number;
+    /** Same frozen rule as `consultationsHeld` — consultations actually held, unique leads. */
     consultations: number;
+    /** Mirrors `consultationsAwaitingOutcome` — surfaced as an operational tile, not a target. */
+    consultationsAwaitingOutcome: number;
     confirmedClients: number;
     missedFollowUps: number;
     missedMeetings: number;

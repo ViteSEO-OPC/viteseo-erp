@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Modules\Crm\Enums\ConsultationOutcome;
 use App\Modules\Crm\Models\Deal;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -300,6 +301,10 @@ class DashboardController extends Controller
      *   Funnel  Added=all active leads · Contacted=outreach started or called (M-04 engagement) ·
      *           Interested=`status=interested` · Consultation=`cold_calling=scheduled` (a booked slot) ·
      *           Confirmed=has ≥1 Deal (won).
+     *           NOTE: the funnel's `consultation` stage still measures SCHEDULED slots — a different
+     *           question from `consultationsHeld` below (consultations actually held, per PDR-002).
+     *           The funnel is deliberately untouched pending the Funnel Review milestone, which
+     *           redesigns every stage together rather than changing one in isolation.
      *   Outreach Email  completed=`replied` · in-progress=`sent`+`opened` · not-started=`none`.
      *           Call   completed=`called` · in-progress=`scheduled` · not-started=`not-called`.
      */
@@ -401,9 +406,37 @@ class DashboardController extends Controller
             ? (int) round(($emailCompleted + $callCompleted) / ($emailTotal + $callTotal) * 100)
             : null;
 
+        // ---- Consultations — 🔒 FROZEN business rule (PDR-002 §4b) ----------------------------------
+        //
+        // A consultation is a Planner event; it counts once its lifecycle is `completed` AND its business
+        // outcome says the lead actually attended. The attended set is owned by ConsultationOutcome —
+        // NEVER re-list the values here, or the rule silently drifts from the enum.
+        //
+        // Restricted to leads in the Active CRM set so this shares the page's denominator (the unqualified
+        // Nearby prospect pool is excluded everywhere else too).
+        $consultations = fn (): Builder => PlannerEvent::query()
+            ->visibleTo($user)
+            ->where('event_type', 'consultation')
+            ->where('status', 'completed')
+            ->whereHas('lead', fn (Builder $q) => $q->active());
+
+        // KPI — UNIQUE LEADS that underwent a consultation (many consultations on one lead → 1).
+        $consultationsHeld = $consultations()
+            ->whereIn('outcome', ConsultationOutcome::attendedValues())
+            ->distinct()
+            ->count('lead_id');
+
+        // OPERATIONAL QUEUE (not a KPI) — consultations concluded but with no outcome recorded yet, e.g.
+        // completed by a connected call. `null` means AWAITING BUSINESS COMPLETION, never attendance, so
+        // these are excluded from the KPI above and surfaced here as work for the BD. Counted as EVENTS,
+        // not distinct leads: each row is one record that still needs a result.
+        $consultationsAwaitingOutcome = $consultations()->whereNull('outcome')->count();
+
         $followThrough = [
             'leadsContacted' => $contacted,
-            'consultations' => $consultation,
+            // Consultations actually HELD (frozen rule) — not the funnel's scheduled-slot stage.
+            'consultations' => $consultationsHeld,
+            'consultationsAwaitingOutcome' => $consultationsAwaitingOutcome,
             'confirmedClients' => $confirmed,
             'missedFollowUps' => $missedFor('follow-up'),
             'missedMeetings' => $missedFor('meeting'),
@@ -462,6 +495,10 @@ class DashboardController extends Controller
 
         return response()->json(['data' => [
             'funnel' => ['stages' => $funnelStages, 'biggestDropOff' => $biggestDropOff],
+            // Unique leads that underwent a consultation. Distinct from the funnel's `consultation`
+            // stage, which still measures SCHEDULED slots and is untouched pending the Funnel Review.
+            'consultationsHeld' => $consultationsHeld,
+            'consultationsAwaitingOutcome' => $consultationsAwaitingOutcome,
             'statusMix' => $statusMix,
             'outreachByChannel' => $outreachByChannel,
             'niche' => $niche,

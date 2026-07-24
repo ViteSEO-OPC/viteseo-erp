@@ -24,7 +24,10 @@ export function ManagementKpiRow() {
   const stages = analytics?.funnel.stages ?? [];
   const added = stages.find((s) => s.key === "added")?.value;
   const contacted = stages.find((s) => s.key === "contacted")?.value;
-  const consultation = stages.find((s) => s.key === "consultation")?.value;
+  // Consultations HELD — the frozen business rule (unique leads with a completed consultation the lead
+  // attended). Deliberately NOT the funnel's `consultation` stage, which counts scheduled slots and is
+  // untouched pending the Funnel Review, so the two legitimately differ.
+  const consultation = analytics?.consultationsHeld;
   const contactedPct =
     added && added > 0 && contacted !== undefined ? Math.round((contacted / added) * 100) : undefined;
 
@@ -56,7 +59,7 @@ export function ManagementKpiRow() {
       label: "Consultations",
       icon: "consultations",
       value: consultation !== undefined ? String(consultation) : "—",
-      caption: "Consultations scheduled",
+      caption: "Leads consulted",
     },
     {
       id: "overall-revenue",

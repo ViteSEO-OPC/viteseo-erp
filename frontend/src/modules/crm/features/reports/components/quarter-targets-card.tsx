@@ -8,7 +8,7 @@ import { useReportsAnalytics } from "@/modules/crm/features/reports/hooks/use-re
 /**
  * Quarter targets & follow-through. The RIGHT tiles are LIVE: missed follow-ups / appointments / calls
  * (the PO-frozen "missed" rule) and outreach completion %. The LEFT column shows the real progress
- * counts (leads contacted, consultations, confirmed) but carries a **Pending** marker instead of a
+ * counts (leads contacted, consultations actually held, confirmed) but carries a **Pending** marker instead of a
  * fabricated goal bar — targets arrive with Goal Management (frozen Business Decision: no hardcoded
  * goals). Every number here is server-computed; nothing is invented to fill the mockup.
  */
@@ -26,6 +26,10 @@ export function QuarterTargetsCard({ className }: { className?: string }) {
     { label: "Missed follow-ups", value: f?.missedFollowUps, tone: "text-red-500" },
     { label: "Missed calls", value: f?.missedCalls, tone: "text-amber-500" },
     { label: "Missed appointments", value: f?.missedMeetings, tone: "text-red-500" },
+    // Operational queue, NOT a target: consultations concluded with no outcome recorded yet. They are
+    // excluded from the Consultations KPI until a BD records the real result, so this is the work
+    // queue that keeps that exclusion visible instead of silent.
+    { label: "Awaiting outcome", value: f?.consultationsAwaitingOutcome, tone: "text-amber-500" },
     {
       label: "Outreach completion",
       value: f?.outreachCompletionPct,

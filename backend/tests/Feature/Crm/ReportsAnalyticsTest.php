@@ -3,6 +3,7 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
+use App\Modules\Crm\Enums\ConsultationOutcome;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
 use Database\Seeders\RolesAndPermissionsSeeder;
@@ -42,6 +43,8 @@ class ReportsAnalyticsTest extends TestCase
             ->assertOk()
             ->assertJsonStructure(['data' => [
                 'funnel' => ['stages', 'biggestDropOff'],
+                'consultationsHeld',
+                'consultationsAwaitingOutcome',
                 'statusMix',
                 'outreachByChannel' => ['email' => ['completed', 'inProgress', 'notStarted', 'total'], 'call'],
                 'niche',
@@ -59,6 +62,140 @@ class ReportsAnalyticsTest extends TestCase
 
         // No goals are ever invented — the honest "targets pending" contract.
         $this->assertTrue($data['followThrough']['targetsPending']);
+    }
+
+    /** @param array<string, mixed> $attrs */
+    private function consultation(User $bd, Lead $lead, ?string $outcome, string $status = 'completed'): PlannerEvent
+    {
+        return PlannerEvent::factory()->assignedTo($bd)->create([
+            'event_type' => 'consultation',
+            'status' => $status,
+            'outcome' => $outcome,
+            'lead_id' => $lead->id,
+            'created_by' => $bd->id,
+        ]);
+    }
+
+    /**
+     * 🔒 The frozen consultation rule (PDR-002 §4b), asserted straight off the enum: EVERY outcome is
+     * exercised and expected to count if — and only if — `ConsultationOutcome::attended()` says so.
+     * Written this way deliberately: a hardcoded expectation list could drift from the enum, which is
+     * exactly the class of bug this milestone exists to eliminate.
+     */
+    public function test_every_outcome_counts_exactly_as_the_enum_declares(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+
+        $expected = 0;
+        foreach (ConsultationOutcome::cases() as $case) {
+            $lead = Lead::factory()->create(['assigned_to' => $bd->id, 'created_by' => $bd->id]);
+            $this->consultation($bd, $lead, $case->value);
+            if ($case->attended()) {
+                $expected++;
+            }
+        }
+
+        Sanctum::actingAs($admin);
+        $data = $this->getJson('/api/v1/crm/dashboard/reports-analytics')->assertOk()->json('data');
+
+        $this->assertSame($expected, $data['consultationsHeld']);
+        $this->assertSame($expected, $data['followThrough']['consultations']);
+        // Sanity: the enum really does split the set, so this test is not vacuously true.
+        $this->assertGreaterThan(0, $expected);
+        $this->assertLessThan(count(ConsultationOutcome::cases()), $expected);
+    }
+
+    /** A lead counts ONCE however many consultations it underwent. */
+    public function test_consultations_held_counts_unique_leads(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+        $lead = Lead::factory()->create(['assigned_to' => $bd->id, 'created_by' => $bd->id]);
+
+        $this->consultation($bd, $lead, 'successful');
+        $this->consultation($bd, $lead, 'successful');
+        $this->consultation($bd, $lead, 'not_interested');
+
+        Sanctum::actingAs($admin);
+        $this->assertSame(1, $this->getJson('/api/v1/crm/dashboard/reports-analytics')->json('data.consultationsHeld'));
+    }
+
+    /** A consultation that has not concluded is not a consultation held, whatever its outcome column says. */
+    public function test_an_unfinished_consultation_is_never_counted(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+        $lead = Lead::factory()->create(['assigned_to' => $bd->id, 'created_by' => $bd->id]);
+
+        $this->consultation($bd, $lead, 'successful', status: 'scheduled');
+
+        Sanctum::actingAs($admin);
+        $this->assertSame(0, $this->getJson('/api/v1/crm/dashboard/reports-analytics')->json('data.consultationsHeld'));
+    }
+
+    /**
+     * `outcome = null` is AWAITING BUSINESS COMPLETION, never attendance. It is excluded from the KPI
+     * and surfaced instead as an operational queue — counted as EVENTS, since each row needs a result.
+     */
+    public function test_null_outcome_is_excluded_from_the_kpi_and_surfaced_as_a_queue(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+        $lead = Lead::factory()->create(['assigned_to' => $bd->id, 'created_by' => $bd->id]);
+
+        // Two unresolved consultations on ONE lead — e.g. both completed by a connected call.
+        $this->consultation($bd, $lead, null);
+        $this->consultation($bd, $lead, null);
+
+        Sanctum::actingAs($admin);
+        $data = $this->getJson('/api/v1/crm/dashboard/reports-analytics')->assertOk()->json('data');
+
+        $this->assertSame(0, $data['consultationsHeld']);
+        $this->assertSame(2, $data['consultationsAwaitingOutcome']);   // events, not distinct leads
+        $this->assertSame(2, $data['followThrough']['consultationsAwaitingOutcome']);
+    }
+
+    /** Consultation metrics ride the same ownership scope seam as every other figure on the page. */
+    public function test_consultation_metrics_are_scope_aware(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+        $other = $this->user('crm_bd');
+
+        foreach ([$bd, $other] as $owner) {
+            $lead = Lead::factory()->create(['assigned_to' => $owner->id, 'created_by' => $owner->id]);
+            $this->consultation($owner, $lead, 'successful');
+        }
+
+        Sanctum::actingAs($admin);
+        $this->assertSame(2, $this->getJson('/api/v1/crm/dashboard/reports-analytics')->json('data.consultationsHeld'));
+        $this->assertSame(
+            1,
+            $this->getJson("/api/v1/crm/dashboard/reports-analytics?user_id={$bd->id}")->json('data.consultationsHeld'),
+        );
+    }
+
+    /** The funnel is untouched by this milestone — it still measures SCHEDULED slots. */
+    public function test_the_funnel_consultation_stage_is_unchanged(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+
+        // A held consultation on a lead that is NOT in a scheduled-call state: it lifts the KPI but
+        // must leave the funnel stage alone.
+        $lead = Lead::factory()->create([
+            'assigned_to' => $bd->id, 'created_by' => $bd->id,
+            'status' => 'interested', 'cold_calling' => 'called', 'email_outreach' => 'sent',
+        ]);
+        $this->consultation($bd, $lead, 'successful');
+
+        Sanctum::actingAs($admin);
+        $data = $this->getJson('/api/v1/crm/dashboard/reports-analytics')->assertOk()->json('data');
+
+        $stage = collect($data['funnel']['stages'])->firstWhere('key', 'consultation');
+        $this->assertSame(0, $stage['value']);        // scheduled-slot rule → still zero
+        $this->assertSame(1, $data['consultationsHeld']); // held rule → one
     }
 
     public function test_admin_drill_matches_the_bds_own_scope(): void
