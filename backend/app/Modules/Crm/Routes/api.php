@@ -249,10 +249,19 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::match(['put', 'patch'], '/users/{user}', [UserController::class, 'update'])->can('update', 'user');
         Route::delete('/users/{user}', [UserController::class, 'destroy'])->can('delete', 'user');
 
-        // Nearby Clients — discovered-business prospect pool (BD-facing). A shared prospecting surface
-        // of leads landed by a discovery provider; every CRM role (BDM+) sees it. Data only, and
-        // provider-agnostic (the supplying provider is never exposed).
-        Route::get('/nearby-clients', [NearbyClientController::class, 'index']);
+        // Nearby Clients — discovered-business prospect pool. A shared prospecting surface of leads
+        // landed by a discovery provider. Data only, and provider-agnostic (the supplying provider is
+        // never exposed).
+        //
+        // 🔒 BD workspace (PO decision 2026-07-24, RBAC Hardening R-2): Business Development + Super
+        // Admin only — Admin (CRM Manager) has NO access, per the approved Admin module list. This
+        // route previously had no authorization at all (RBAC audit finding 3).
+        //
+        // Admin keeps Target Service Area management, which is a separate registry below and stays
+        // Admin/SA-gated; its UI entry point moved to Settings so the capability follows the role
+        // rather than the page.
+        Route::get('/nearby-clients', [NearbyClientController::class, 'index'])
+            ->middleware('role:super_admin|crm_bd');
 
         // Nearby Clients — Service-Area Registry (target service locations for the frozen Target
         // Location +10 signal). Business configuration owned by Admin/Super Admin; supplies data only,

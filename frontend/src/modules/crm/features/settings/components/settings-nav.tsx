@@ -7,6 +7,7 @@ import {
   Archive,
   Users,
   Lock,
+  MapPin,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
@@ -29,6 +30,10 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: "Team Accounts", href: "/zerem/settings/team-accounts", icon: Users },
       { label: "Rules & Permissions", href: "/zerem/settings/rules-permissions", icon: Lock },
+      // Target Service Areas — relocated here from the Nearby Clients header action (RBAC R-2).
+      // Nearby Clients became a BD + Super Admin workspace, so hosting an Admin-only registry there
+      // would have stranded the CRM Manager. The registry is unchanged; only its entry point moved.
+      { label: "Target Areas", href: "/zerem/settings/target-areas", icon: MapPin },
     ],
   },
 ];
