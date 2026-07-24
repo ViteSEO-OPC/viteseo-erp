@@ -10,16 +10,20 @@ use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /**
- * 🔒 RBAC Hardening R-1 — authorization for the Business Niche registry (PO decision 2026-07-24).
+ * 🔒 RBAC Hardening — authorization for the Business Niche registry (PO decision 2026-07-24, corrected).
  *
- * Niches are ADMINISTRATIVE data: Super Admin and Admin have full CRUD; a Business Development Manager
- * is READ-ONLY. The registry is tenant-wide, so an unauthorized rename or delete re-segments every lead
- * filed under that niche.
+ *   read · create · rename → every CRM role, INCLUDING Business Development. A BD classifies leads as
+ *                            they work, so authoring a niche is part of that job.
+ *   delete                 → Super Admin + Admin ONLY. Deletion is the destructive, tenant-wide action:
+ *                            the registry is shared, so removing a niche affects every lead under it.
  *
- * This regression exists because the RBAC audit REPRODUCED the gap: with a genuine BD token the API
- * returned 201 on create, 200 on rename and 204 on delete. Every one of those is asserted 403 below, so
- * the hole cannot silently reopen. Business rules (built-ins immutable, in-use niches undeletable) are
- * covered separately in {@see NicheRegistryTest} — they are data integrity, not authorization.
+ * The registry originally had NO authorization at all — the RBAC audit reproduced that against the
+ * running API with a real BD token (create 201 / rename 200 / delete 204). R-1 first closed it by making
+ * BD read-only; the PO then corrected the rule to the split above. Only DELETE is asserted forbidden for
+ * a BD, and it is asserted explicitly so the destructive path cannot silently reopen.
+ *
+ * Business rules (built-ins immutable, in-use niches undeletable) are covered separately in
+ * {@see NicheRegistryTest} — they are data integrity, not authorization.
  */
 class NicheAuthorizationTest extends TestCase
 {
@@ -54,21 +58,34 @@ class NicheAuthorizationTest extends TestCase
         }
     }
 
+    /** A BD authors niches as part of classifying leads — create and rename are theirs. */
+    public function test_a_business_developer_can_create_and_rename_a_niche(): void
+    {
+        $this->actingAsRole('crm_bd');
+
+        $id = $this->postJson('/api/v1/crm/niches', ['name' => 'Boutique Fitness'])
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->patchJson("/api/v1/crm/niches/{$id}", ['name' => 'Boutique Gyms'])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Boutique Gyms');
+
+        $this->assertDatabaseHas('crm_niches', ['id' => $id, 'name' => 'Boutique Gyms']);
+    }
+
     /**
-     * The exact three calls the audit exploited as a BD. All must now be refused.
+     * The one restriction that matters: deletion is tenant-wide and destructive, so it stays with
+     * management. A BD must be refused, and the niche must survive the attempt.
      */
-    public function test_a_business_developer_cannot_mutate_the_registry(): void
+    public function test_a_business_developer_cannot_delete_a_niche(): void
     {
         $niche = $this->customNiche();
         $this->actingAsRole('crm_bd');
 
-        $this->postJson('/api/v1/crm/niches', ['name' => 'RBAC Probe'])->assertForbidden();
-        $this->patchJson("/api/v1/crm/niches/{$niche->id}", ['name' => 'Renamed'])->assertForbidden();
         $this->deleteJson("/api/v1/crm/niches/{$niche->id}")->assertForbidden();
 
-        // Nothing leaked through: the registry is untouched.
         $this->assertDatabaseHas('crm_niches', ['id' => $niche->id, 'name' => 'Boutique Fitness']);
-        $this->assertDatabaseMissing('crm_niches', ['name' => 'RBAC Probe']);
     }
 
     public function test_an_admin_has_full_crud(): void
