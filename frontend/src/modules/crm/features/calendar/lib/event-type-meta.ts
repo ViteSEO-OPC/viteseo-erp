@@ -1,4 +1,8 @@
-import type { EventType, PlannerEventStatus } from "@/modules/crm/features/calendar/types/calendar-types";
+import type {
+  ConsultationOutcome,
+  EventType,
+  PlannerEventStatus,
+} from "@/modules/crm/features/calendar/types/calendar-types";
 
 /** Shared per-type presentation (legend, Board card tags). One source for type colors/labels. */
 export const EVENT_TYPE_META: Record<EventType, { label: string; dot: string; bg: string; text: string }> = {
@@ -7,7 +11,40 @@ export const EVENT_TYPE_META: Record<EventType, { label: string; dot: string; bg
   meeting: { label: "Meeting", dot: "#F9C74F", bg: "#FEF8EE", text: "#8A6D1F" },
   task: { label: "Task", dot: "#F08080", bg: "#FFEEEE", text: "#9B3B3B" },
   "follow-up": { label: "Follow-up", dot: "#A78BFA", bg: "#F1ECFE", text: "#5B3FA6" },
+  // Brand teal — a consultation is the highest-value session type, and deliberately distinct from
+  // Meeting's amber so the two are never confused at a glance on the Board or calendar.
+  consultation: { label: "Consultation", dot: "#14B8A6", bg: "#E0F7F5", text: "#0F5F5C" },
 };
+
+/**
+ * 🔒 Frozen consultation outcomes (PDR-002 §4b), in the order a BD sees them. `attended` mirrors
+ * `ConsultationOutcome::attended()` on the backend — the two must never drift, because it decides
+ * what the Successful Consultations KPI counts.
+ */
+export const CONSULTATION_OUTCOME_META: {
+  value: ConsultationOutcome;
+  label: string;
+  hint: string;
+  attended: boolean;
+}[] = [
+  { value: "successful", label: "Successful", hint: "Held — the client engaged positively", attended: true },
+  { value: "not_interested", label: "Not Interested", hint: "Held — the client attended but declined", attended: true },
+  { value: "no_show", label: "No Show", hint: "The client did not turn up", attended: false },
+  { value: "cancelled", label: "Cancelled", hint: "Called off before it happened", attended: false },
+];
+
+/**
+ * A consultation is only fully closed for reporting once its real result is recorded. `null` is an
+ * INCOMPLETE business state — never read as attendance (frozen: the system must not infer an outcome,
+ * e.g. from a connected call). Until the BD records one, the consultation does not count toward the KPI.
+ */
+export function awaitsConsultationOutcome(event: {
+  eventType: string;
+  status: string;
+  outcome: string | null;
+}): boolean {
+  return event.eventType === "consultation" && event.status === "completed" && !event.outcome;
+}
 
 /** The four Board columns, in order — the `PlannerEvent.status` value each one groups. */
 export const BOARD_COLUMNS: { status: PlannerEventStatus; label: string; dot: string }[] = [

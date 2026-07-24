@@ -3,7 +3,10 @@
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
-import { eventTypeMeta } from "@/modules/crm/features/calendar/lib/event-type-meta";
+import {
+  awaitsConsultationOutcome,
+  eventTypeMeta,
+} from "@/modules/crm/features/calendar/lib/event-type-meta";
 import { formatBusiness } from "@/modules/crm/lib/timezone";
 import { cn } from "@/modules/crm/lib/utils";
 import type { PlannerEvent } from "@/modules/crm/features/calendar/types/calendar-types";
@@ -38,6 +41,14 @@ export function BoardCardContent({ event, dragging }: { event: PlannerEvent; dra
       </div>
       <p className="text-sm font-semibold leading-snug text-foreground">{event.title}</p>
       {leadLine && <p className="mt-0.5 text-xs text-muted-foreground">{leadLine}</p>}
+      {/* A completed consultation with no recorded result is an INCOMPLETE business state — it does not
+          count toward the KPI. Surfaced here so it reads as outstanding work rather than silently
+          missing from reporting. */}
+      {awaitsConsultationOutcome(event) && (
+        <p className="mt-1.5 inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700">
+          Outcome needed
+        </p>
+      )}
       {event.owner && (
         <div className="mt-2 flex items-center gap-1.5">
           <AvatarInitials initials={event.owner.name} size="sm" />

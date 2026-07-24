@@ -21,6 +21,7 @@ const TYPE_CONFIG: Record<string, { dot: string; bg: string }> = {
   meeting: { dot: "#F9C74F", bg: "#FEF8EE" },
   task: { dot: "#F08080", bg: "#FFEEEE" },
   "follow-up": { dot: "#A78BFA", bg: "#F1ECFE" },
+  consultation: { dot: "#14B8A6", bg: "#E0F7F5" },
 };
 // Concrete literal (not an index access) so it is never `undefined` — unknown types fall back to
 // the task tint.
