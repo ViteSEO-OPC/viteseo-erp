@@ -2,8 +2,8 @@
 
 namespace App\Modules\Hr\Database\Seeders;
 
-use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\WorkSchedule;
+use App\Modules\Hr\Services\AttendancePolicyService;
 use Illuminate\Database\Seeder;
 
 /**
@@ -51,11 +51,8 @@ class WorkScheduleSeeder extends Seeder
             ],
         );
 
-        AttendancePolicy::firstOrCreate([], [
-            'consecutive_lates_before_absence' => 3,
-            'monthly_late_reset' => true,
-            'awol_days_threshold' => 3,
-            'task_format' => ['require_english' => true, 'uppercase' => true],
-        ]);
+        // Single source of truth for the policy defaults (incl. the deduction switches,
+        // which all seed to their current-behaviour value = a no-op).
+        app(AttendancePolicyService::class)->get();
     }
 }

@@ -32,16 +32,57 @@ export interface WorkScheduleInput {
   is_default: boolean;
 }
 
-export type LateDeductionMode = "none" | "per_lates";
+export type LateDeductionMode = "none" | "per_lates" | "per_hour" | "tiered";
+export type LateMinutesFrom = "start_time" | "after_grace";
+export type UndertimeDeductionMode = "none" | "per_hour";
+export type MissingClockoutMode =
+  | "no_deduction_flag_for_review"
+  | "treat_as_undertime_to_now"
+  | "treat_as_absent";
+export type EarlyArrivalMode = "none" | "offset_undertime" | "overtime_eligible";
+export type OvertimeMode = "none" | "approved_only" | "auto_after_threshold";
+export type DeductionRounding = "exact" | "round_up" | "round_nearest" | "round_down";
+export type DailyRateBasis = "period_workdays" | "fixed_divisor";
+
+/** One rung of the `tiered` late ladder: over N minutes late ⇒ charge H hours. */
+export interface LateTier {
+  over: number;
+  hours: number;
+}
 
 export interface AttendancePolicy {
   id: number;
   consecutive_lates_before_absence: number;
   monthly_late_reset: boolean;
   awol_days_threshold: number;
+
   // Payroll: how accumulated lates translate into a pay deduction.
   late_deduction_mode: LateDeductionMode;
   lates_per_deduction: number; // per_lates: every N lates = 1 day deducted
+  late_minutes_from: LateMinutesFrom; // count late minutes from start, or from end of grace
+  late_tiers: LateTier[] | null; // `tiered` mode only
+
+  undertime_deduction_mode: UndertimeDeductionMode;
+  missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct
+
+  early_arrival_mode: EarlyArrivalMode;
+  overtime_mode: OvertimeMode; // takes effect when OT requests ship
+  overtime_threshold_minutes: number;
+
+  // `exact` is proportionate (the legal default); round_* is a warned opt-in.
+  deduction_rounding: DeductionRounding;
+  deduction_block_minutes: number;
+  daily_deduction_cap: number; // in days — a day can never cost more than this
+
+  // How a day is priced; the hourly rate is dailyRate ÷ hours_per_day_divisor (DOLE 8).
+  daily_rate_basis: DailyRateBasis;
+  annual_divisor: number; // 261 Mon–Fri · 313 Mon–Sat · 365 all-days · or custom
+  hours_per_day_divisor: number;
+
+  // Breaks are FLAGGED, never deducted.
+  max_break_minutes_per_day: number;
+  over_max_break_action: "flag_only";
+
   task_format: { require_english?: boolean; uppercase?: boolean };
 }
 
