@@ -17,6 +17,7 @@ import {
   Tabs,
 } from "@/core/ui";
 import { useIsManager } from "@/core/auth/AuthProvider";
+import { useForbiddenRedirect } from "../../useForbiddenRedirect";
 import {
   useProjects,
   useUsers,
@@ -213,6 +214,16 @@ export function WorkspaceDetailView({
   const emptyCounts: StatusCounts = { todo: 0, in_progress: 0, done: 0 };
   const usersQuery = useUsers();
   const boardMembers = usersQuery.data ?? [];
+
+  // Safety net: if the API rejects the workspace with 403, go to access-denied.
+  const forbidden = useForbiddenRedirect(workspaceQuery.error);
+  if (forbidden) {
+    return (
+      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+        <p className="text-ink-soft">Redirecting…</p>
+      </div>
+    );
+  }
 
   if (workspaceQuery.isLoading) {
     return (

@@ -81,6 +81,8 @@ class ScheduleService
             'custom_start_time' => $data['custom_start_time'] ?? null,
             'custom_end_time' => $data['custom_end_time'] ?? null,
             'custom_grace_minutes' => $data['custom_grace_minutes'] ?? null,
+            'custom_unpaid_break_minutes' => $data['custom_unpaid_break_minutes'] ?? null,
+            'custom_paid_break_minutes' => $data['custom_paid_break_minutes'] ?? null,
         ]);
 
         $employee->loadMissing('user');
@@ -94,7 +96,7 @@ class ScheduleService
      * The effective schedule for an employee (optionally on a given date). This is
      * the one method Slice 16's violation engine calls.
      *
-     * @return array{workdays:array<int>, start_time:?string, end_time:?string, grace_minutes:int, source:string, schedule_name:?string, is_workday:?bool}
+     * @return array{workdays:array<int>, start_time:?string, end_time:?string, grace_minutes:int, unpaid_break_minutes:int, paid_break_minutes:int, expected_minutes:?int, am_start_time:?string, am_end_time:?string, pm_start_time:?string, pm_end_time:?string, source:string, schedule_name:?string, is_workday:?bool}
      */
     public function effectiveFor(Employee $employee, ?Carbon $date = null): array
     {
@@ -102,19 +104,40 @@ class ScheduleService
         $hasOverride = $employee->custom_workdays !== null
             || $employee->custom_start_time !== null
             || $employee->custom_end_time !== null
-            || $employee->custom_grace_minutes !== null;
+            || $employee->custom_grace_minutes !== null
+            || $employee->custom_unpaid_break_minutes !== null
+            || $employee->custom_paid_break_minutes !== null;
 
         $workdays = $employee->custom_workdays ?? $schedule?->workdays ?? [1, 2, 3, 4, 5];
         $grace = $date !== null ? $this->dailyOverrides->graceForDate($date) : null;
         $grace ??= $employee->custom_grace_minutes ?? $schedule?->grace_minutes ?? 0;
 
+        $startTime = $this->hm($employee->custom_start_time ?? $schedule?->start_time);
+        $endTime = $this->hm($employee->custom_end_time ?? $schedule?->end_time);
+
+        // Break minutes coalesce like every other field: employee override → schedule → default.
+        $unpaidBreak = (int) ($employee->custom_unpaid_break_minutes ?? $schedule?->unpaid_break_minutes ?? 60);
+        $paidBreak = (int) ($employee->custom_paid_break_minutes ?? $schedule?->paid_break_minutes ?? 20);
+
+        // The paid day: full span minus the unpaid meal period. Null when the window is unknown.
+        $span = $this->spanMinutes($startTime, $endTime);
+        $expectedMinutes = $span !== null ? max(0, $span - $unpaidBreak) : null;
+
         $source = $hasOverride ? 'employee_override' : ($employee->workSchedule ? 'assigned' : 'default');
 
         return [
             'workdays' => array_values(array_map('intval', $workdays)),
-            'start_time' => $this->hm($employee->custom_start_time ?? $schedule?->start_time),
-            'end_time' => $this->hm($employee->custom_end_time ?? $schedule?->end_time),
+            'start_time' => $startTime,
+            'end_time' => $endTime,
             'grace_minutes' => (int) $grace,
+            'unpaid_break_minutes' => $unpaidBreak,
+            'paid_break_minutes' => $paidBreak,
+            'expected_minutes' => $expectedMinutes,
+            // Half-day windows are template-only (no custom_* override this pass).
+            'am_start_time' => $this->hm($schedule?->am_start_time),
+            'am_end_time' => $this->hm($schedule?->am_end_time),
+            'pm_start_time' => $this->hm($schedule?->pm_start_time),
+            'pm_end_time' => $this->hm($schedule?->pm_end_time),
             'source' => $source,
             'schedule_name' => $schedule?->name,
             'is_workday' => $date ? in_array($date->isoWeekday(), array_map('intval', $workdays), true) : null,
@@ -141,6 +164,12 @@ class ScheduleService
             'start_time' => $data['start_time'],
             'end_time' => $data['end_time'],
             'grace_minutes' => $data['grace_minutes'] ?? 0,
+            'unpaid_break_minutes' => $data['unpaid_break_minutes'] ?? 60,
+            'paid_break_minutes' => $data['paid_break_minutes'] ?? 20,
+            'am_start_time' => $data['am_start_time'] ?? null,
+            'am_end_time' => $data['am_end_time'] ?? null,
+            'pm_start_time' => $data['pm_start_time'] ?? null,
+            'pm_end_time' => $data['pm_end_time'] ?? null,
             // is_default is handled by syncDefault so we never clear the last one.
             'is_default' => $data['is_default'] ?? false,
         ];
@@ -150,5 +179,18 @@ class ScheduleService
     private function hm(?string $time): ?string
     {
         return $time ? substr($time, 0, 5) : null;
+    }
+
+    /** Minutes between two HH:MM times, or null if either is missing/invalid. */
+    private function spanMinutes(?string $start, ?string $end): ?int
+    {
+        if (! $start || ! $end) {
+            return null;
+        }
+        [$sh, $sm] = array_map('intval', explode(':', substr($start, 0, 5)));
+        [$eh, $em] = array_map('intval', explode(':', substr($end, 0, 5)));
+        $span = ($eh * 60 + $em) - ($sh * 60 + $sm);
+
+        return $span > 0 ? $span : null;
     }
 }

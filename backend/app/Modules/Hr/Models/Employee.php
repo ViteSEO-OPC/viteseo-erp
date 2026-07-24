@@ -50,6 +50,8 @@ class Employee extends Model
         'custom_start_time',
         'custom_end_time',
         'custom_grace_minutes',
+        'custom_unpaid_break_minutes',
+        'custom_paid_break_minutes',
         // Expanded personal record.
         'first_name',
         'middle_name',
@@ -80,6 +82,8 @@ class Employee extends Model
         'is_management' => 'boolean',
         'custom_workdays' => 'array',
         'custom_grace_minutes' => 'integer',
+        'custom_unpaid_break_minutes' => 'integer',
+        'custom_paid_break_minutes' => 'integer',
     ];
 
     /** Management staff: fixed salary + exempt from attendance. */

@@ -9,6 +9,8 @@ export interface LeaveType {
   days_per_year: number;
   is_paid: boolean;
   color: string | null;
+  /** Optional HR-facing blurb describing the leave type. */
+  description: string | null;
   /** Whether this type may be filed for past dates at all. */
   allow_backdated: boolean;
   /** Max days a past-dated request may reach back; null = no limit (only when allow_backdated). */
@@ -20,6 +22,21 @@ export interface HalfDayRequest {
   id: number;
   work_date: string;
   period: "AM" | "PM";
+  reason: string;
+  status: string;
+  review_note: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  employee: { id: number; name: string | null };
+  created_at: string;
+}
+
+// Early-out (undertime) requests — separate from leave, always unpaid: the employee
+// leaves before their scheduled end. Payroll deducts the proportional undertime.
+export interface EarlyOutRequest {
+  id: number;
+  work_date: string;
+  early_out_time: string; // HH:MM (24h)
   reason: string;
   status: string;
   review_note: string | null;

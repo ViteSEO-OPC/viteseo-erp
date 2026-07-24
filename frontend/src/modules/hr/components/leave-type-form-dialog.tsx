@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/core/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -20,16 +21,40 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/core/ui/select";
+import { cn } from "@/lib/utils";
+import {
   useCreateLeaveType,
   useUpdateLeaveType,
 } from "@/modules/hr/hooks/use-leave-config";
 import type { LeaveType } from "@/modules/hr/types/leave";
+
+// Quick-pick palette for the Color dropdown. `color` is stored as a hex string,
+// so these ARE data values (mirrors the leave-type seeder), not styling tokens.
+const COLOR_OPTIONS = [
+  { name: "Teal", value: "#4FDBD7" },
+  { name: "Green", value: "#22C55E" },
+  { name: "Blue", value: "#2563EB" },
+  { name: "Amber", value: "#F0A608" },
+  { name: "Red", value: "#EF4444" },
+  { name: "Purple", value: "#8B5CF6" },
+  { name: "Pink", value: "#EC4899" },
+  { name: "Gray", value: "#6B7280" },
+] as const;
+
+const DEFAULT_COLOR = "#4FDBD7";
 
 const schema = z.object({
   name: z.string().min(1, "Name is required").max(255),
   code: z.string().min(1, "Code is required").max(50),
   is_paid: z.boolean(),
   color: z.string().max(20).optional(),
+  description: z.string().max(1000).optional(),
   allow_backdated: z.boolean(),
   // Kept as the raw text-input value; "" = no limit. Parsed to number | null on submit.
   backdate_limit_days: z
@@ -70,7 +95,8 @@ export function LeaveTypeFormDialog({
       name: "",
       code: "",
       is_paid: true,
-      color: "#4FDBD7",
+      color: DEFAULT_COLOR,
+      description: "",
       allow_backdated: false,
       backdate_limit_days: "",
     },
@@ -78,14 +104,19 @@ export function LeaveTypeFormDialog({
 
   // Show the day-cap input only when backdated filing is allowed.
   const allowBackdated = watch("allow_backdated");
+  const isPaid = watch("is_paid");
+  const color = watch("color") || DEFAULT_COLOR;
 
-  // The swatch and the hex text box are two views of ONE field. Both read this
-  // value and write it via setValue, so picking a color in the swatch updates
-  // the hex box (and vice-versa) — and Save always submits what you see.
-  const color = watch("color") ?? "";
-  const swatchValue = /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#000000";
-  const setColor = (value: string) =>
-    setValue("color", value, { shouldValidate: true, shouldDirty: true });
+  // Fold any stored hex that isn't a preset into the list so it stays selectable
+  // and displays with its own swatch (no data loss on edit).
+  const colorOptions = useMemo(() => {
+    const known = COLOR_OPTIONS.some(
+      (c) => c.value.toLowerCase() === color.toLowerCase(),
+    );
+    return known
+      ? COLOR_OPTIONS
+      : [{ name: "Custom", value: color }, ...COLOR_OPTIONS];
+  }, [color]);
 
   useEffect(() => {
     if (open) {
@@ -95,7 +126,8 @@ export function LeaveTypeFormDialog({
               name: leaveType.name,
               code: leaveType.code,
               is_paid: leaveType.is_paid,
-              color: leaveType.color ?? "#4FDBD7",
+              color: leaveType.color ?? DEFAULT_COLOR,
+              description: leaveType.description ?? "",
               allow_backdated: leaveType.allow_backdated,
               backdate_limit_days: leaveType.backdate_limit_days ?? "",
             }
@@ -103,7 +135,8 @@ export function LeaveTypeFormDialog({
               name: "",
               code: "",
               is_paid: true,
-              color: "#4FDBD7",
+              color: DEFAULT_COLOR,
+              description: "",
               allow_backdated: false,
               backdate_limit_days: "",
             },
@@ -117,6 +150,7 @@ export function LeaveTypeFormDialog({
       code: values.code,
       is_paid: values.is_paid,
       color: values.color || null,
+      description: values.description?.trim() ? values.description.trim() : null,
       allow_backdated: values.allow_backdated,
       // No cap (or backdating off) → null.
       backdate_limit_days:
@@ -147,62 +181,95 @@ export function LeaveTypeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit leave type" : "Add leave type"}</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit Leave Type" : "Add Leave Type"}</DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Update this leave type. Set the default credits per employment status in the allotment defaults table."
-              : "Create a leave type. Set its default credits per employment status in the allotment defaults table."}
+              ? "Update this leave type. Set its default credits per employment status in the allotment defaults table below."
+              : "Create a new leave type for employees. Set its default credits per employment status in the allotment defaults table below."}
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-          <div className="space-y-1.5">
-            <Label htmlFor="lt-name">Name</Label>
-            <Input id="lt-name" placeholder="Annual Leave" aria-invalid={!!errors.name} {...register("name")} />
-            {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="lt-code">Code</Label>
-            <Input id="lt-code" placeholder="ANL" aria-invalid={!!errors.code} {...register("code")} />
-            {errors.code && <p className="text-xs text-destructive">{errors.code.message}</p>}
-          </div>
-
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 rounded border-input accent-brand"
-              {...register("is_paid")}
-            />
-            <span>
-              Paid leave
-              <span className="block text-xs text-muted-foreground">
-                Uncheck for unpaid leave (LWOP) — payroll deducts these days at the daily rate.
-              </span>
-            </span>
-          </label>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="lt-color">Color</Label>
-            <div className="flex items-center gap-2">
-              <input
-                id="lt-color"
-                type="color"
-                className="h-9 w-12 rounded border border-input bg-transparent"
-                value={swatchValue}
-                onChange={(e) => setColor(e.target.value)}
-              />
-              <Input
-                className="flex-1"
-                placeholder="#4FDBD7"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-              />
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
+          {/* Name · Code */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="lt-name">Leave type name</Label>
+              <Input id="lt-name" placeholder="e.g. Annual Leave" aria-invalid={!!errors.name} {...register("name")} />
+              {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lt-code">Code</Label>
+              <Input id="lt-code" placeholder="e.g. AL" aria-invalid={!!errors.code} {...register("code")} />
+              {errors.code && <p className="text-xs text-destructive">{errors.code.message}</p>}
             </div>
           </div>
 
+          {/* Color */}
+          <div className="space-y-1.5">
+            <Label htmlFor="lt-color">Color</Label>
+            <Select
+              value={color}
+              onValueChange={(v) => setValue("color", v, { shouldDirty: true })}
+            >
+              <SelectTrigger id="lt-color" className="w-full">
+                <SelectValue placeholder="Select a color" />
+              </SelectTrigger>
+              <SelectContent>
+                {colorOptions.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>
+                    <span className="flex items-center gap-2">
+                      <span
+                        className="size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: c.value }}
+                      />
+                      {c.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Pay type */}
+          <div className="space-y-2">
+            <Label>Pay type</Label>
+            <div className="flex gap-2.5">
+              <PayChip
+                label="Paid"
+                active={isPaid}
+                onClick={() => setValue("is_paid", true, { shouldDirty: true })}
+              />
+              <PayChip
+                label="Unpaid"
+                active={!isPaid}
+                onClick={() => setValue("is_paid", false, { shouldDirty: true })}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Unpaid leave (LWOP) is deducted from pay by payroll at the daily rate.
+            </p>
+          </div>
+
+          {/* Description */}
+          <div className="space-y-1.5">
+            <Label htmlFor="lt-description">
+              Description <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Textarea
+              id="lt-description"
+              rows={3}
+              placeholder="Enter leave type description..."
+              aria-invalid={!!errors.description}
+              {...register("description")}
+            />
+            {errors.description && (
+              <p className="text-xs text-destructive">{errors.description.message}</p>
+            )}
+          </div>
+
+          {/* Backdated filing (kept — drives past-date validation on filing) */}
           <div className="rounded-lg border border-border p-3">
             <label className="flex items-start gap-2 text-sm">
               <input
@@ -245,14 +312,41 @@ export function LeaveTypeFormDialog({
 
           <DialogFooter>
             <DialogClose asChild>
-              <Button type="button" variant="outline">Cancel</Button>
+              <Button type="button" variant="ghost">Cancel</Button>
             </DialogClose>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Saving…" : isEdit ? "Save changes" : "Create"}
+              {isSubmitting ? "Saving…" : isEdit ? "Save changes" : "Add leave type"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PayChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "rounded-full border bg-background px-4 py-1.5 text-sm transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        active
+          ? "border-2 border-brand font-bold text-foreground"
+          : "border-border font-normal text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
   );
 }

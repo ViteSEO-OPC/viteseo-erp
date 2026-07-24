@@ -29,7 +29,17 @@ class UpdateDepartmentRequest extends FormRequest
                 'max:50',
                 Rule::unique('hr_departments', 'code')->ignore($departmentId),
             ],
+            'description' => ['nullable', 'string', 'max:1000'],
             'is_active' => ['boolean'],
+            'head_id' => ['nullable', 'integer', 'exists:hr_employees,id'],
+            // Roles/positions within this department (e.g. Business Developer).
+            'positions' => ['sometimes', 'array'],
+            'positions.*' => ['string', 'max:255', 'distinct'],
+            // Employees assigned to a role in this department. Assigning moves the
+            // employee into this department and sets their role.
+            'assignments' => ['sometimes', 'array'],
+            'assignments.*.employee_id' => ['required', 'integer', 'exists:hr_employees,id'],
+            'assignments.*.role' => ['required', 'string', 'max:255'],
         ];
     }
 }

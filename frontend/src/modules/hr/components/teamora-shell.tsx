@@ -1,21 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Sidebar } from "@/core/components/sidebar";
 import { TopBar } from "@/core/components/top-bar";
 import { NotificationProvider } from "@/core/notifications-context";
-import type { ShellVariant } from "@/core/nav";
 import { TeamoraMobileTopBar } from "@/modules/hr/components/teamora-mobile-top-bar";
+import { useViewMode } from "@/modules/hr/components/view-mode-context";
 
 /**
  * TeamOra's responsive frame — an HR-local replacement for `core/AppShell`.
  *
  * `AppShell` renders the sidebar as a permanent 256px column, which leaves a
- * 375px phone ~119px for content. This wraps the *unmodified* core `Sidebar`
- * and `TopBar` instead of forking them: below `lg` the sidebar becomes an
+ * 375px phone ~119px for content. This wraps the shared core `Sidebar` and
+ * `TopBar` instead of forking them: below `lg` the sidebar becomes an
  * off-canvas drawer opened by a hamburger, at `lg`+ it is the static column
  * exactly as before.
  *
@@ -24,14 +25,10 @@ import { TeamoraMobileTopBar } from "@/modules/hr/components/teamora-mobile-top-
  * `core/layout/Sidebar.tsx`, the Projects shell that already does this —
  * worth consolidating the two once the platform merge lands.
  */
-export function TeamoraShell({
-  variant,
-  children,
-}: {
-  variant: ShellVariant;
-  children: React.ReactNode;
-}) {
+export function TeamoraShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const router = useRouter();
+  const { variant, canSwitch, toggle } = useViewMode();
 
   // Navigating from a drawer link should close the drawer behind you. Handled
   // by delegation rather than an effect on `pathname`: the nav links live
@@ -40,6 +37,17 @@ export function TeamoraShell({
   // the group expand/collapse buttons deliberately don't.
   const closeIfNavigating = (e: React.MouseEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
+  };
+
+  // The "Switch to Employee/HR view" control lives in the shared core `Sidebar`,
+  // but the policy is ours: `useViewMode` decides who may switch and what
+  // switching does, and the button just calls back. Always land on `/teamora` —
+  // the one route both navs share — since the page you were on (say
+  // `/teamora/employees`) may not exist in the portal you are switching into.
+  const switchView = () => {
+    toggle();
+    setMobileOpen(false);
+    router.push("/teamora");
   };
 
   useEffect(() => {
@@ -59,7 +67,11 @@ export function TeamoraShell({
       <div className="fixed inset-0 flex overflow-hidden">
         {/* Desktop: the static column, unchanged from AppShell. */}
         <div className="hidden lg:flex">
-          <Sidebar variant={variant} />
+          <Sidebar
+            variant={variant}
+            canSwitchView={canSwitch}
+            onSwitchView={switchView}
+          />
         </div>
 
         {/* Mobile: backdrop + off-canvas drawer. */}
@@ -83,7 +95,11 @@ export function TeamoraShell({
             mobileOpen ? "visible translate-x-0" : "invisible -translate-x-full",
           )}
         >
-          <Sidebar variant={variant} />
+          <Sidebar
+            variant={variant}
+            canSwitchView={canSwitch}
+            onSwitchView={switchView}
+          />
           <button
             type="button"
             onClick={() => setMobileOpen(false)}

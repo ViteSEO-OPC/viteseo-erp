@@ -31,7 +31,16 @@ import {
   useApproveHalfDayRequest,
   useRejectHalfDayRequest,
 } from "@/modules/hr/hooks/use-half-day";
-import type { LeaveRequest, HalfDayRequest } from "@/modules/hr/types/leave";
+import {
+  useEarlyOutRequests,
+  useApproveEarlyOutRequest,
+  useRejectEarlyOutRequest,
+} from "@/modules/hr/hooks/use-early-out";
+import type {
+  LeaveRequest,
+  HalfDayRequest,
+  EarlyOutRequest,
+} from "@/modules/hr/types/leave";
 
 // Pending / Approved / Rejected are the leave + half-day lifecycle states.
 const REQUEST_STATUS_OPTIONS: StatusFilterOption[] = [
@@ -221,6 +230,8 @@ export default function TimeLeavePage() {
       />
 
       <HalfDaySection />
+
+      <EarlyOutSection />
     </div>
   );
 }
@@ -324,6 +335,112 @@ function HalfDaySection() {
         onOpenChange={(o) => !o && setReview(null)}
         mode={review?.mode ?? "approve"}
         subject={review ? `${review.r.employee.name}'s half-day (${formatDate(review.r.work_date)} ${review.r.period})` : ""}
+        onConfirm={onConfirm}
+      />
+    </div>
+  );
+}
+
+// ---- Early-out requests (undertime — separate from leave, always unpaid) ----
+
+function EarlyOutSection() {
+  const { data: requests, isLoading } = useEarlyOutRequests();
+  const approveMut = useApproveEarlyOutRequest();
+  const rejectMut = useRejectEarlyOutRequest();
+  const [review, setReview] = useState<{ mode: "approve" | "reject"; r: EarlyOutRequest } | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(requests ?? [], status);
+
+  async function onConfirm(reason: string) {
+    if (!review) return;
+    const { mode, r } = review;
+    try {
+      if (mode === "approve") {
+        await approveMut.mutateAsync(r.id);
+        toast.success(`Approved ${r.employee.name}'s early-out`);
+      } else {
+        await rejectMut.mutateAsync({ id: r.id, reason });
+        toast.error(`Declined ${r.employee.name}'s early-out`);
+      }
+    } catch {
+      toast.error("Action failed. Please try again.");
+    }
+  }
+
+  const busyId =
+    (approveMut.isPending && approveMut.variables) ||
+    (rejectMut.isPending && rejectMut.variables?.id) ||
+    null;
+
+  const columns: Column<EarlyOutRequest>[] = [
+    {
+      header: "Employee",
+      cell: (r) => (
+        <div className="flex items-center gap-2.5">
+          <Avatar name={r.employee.name ?? "?"} colorSeed={r.employee.id} size="sm" />
+          <span className="font-semibold text-foreground">{r.employee.name}</span>
+        </div>
+      ),
+    },
+    { header: "Date", cell: (r) => formatDate(r.work_date) },
+    { header: "Leaves at", cell: (r) => r.early_out_time },
+    { header: "Pay", cell: () => <span className="text-danger">Unpaid · undertime</span> },
+    { header: "Reason", cell: (r) => <span className="text-muted-foreground">{r.reason}</span> },
+    { header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
+    {
+      header: "Action",
+      align: "right",
+      cell: (r) =>
+        r.status === "pending" ? (
+          <div className="flex justify-end gap-1.5">
+            <Button size="sm" variant="success" disabled={busyId === r.id} onClick={() => setReview({ mode: "approve", r })}>
+              <Check />
+              Approve
+            </Button>
+            <Button size="sm" variant="destructive" disabled={busyId === r.id} onClick={() => setReview({ mode: "reject", r })}>
+              <X />
+              Reject
+            </Button>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+  ];
+
+  return (
+    <div className="mt-10">
+      <h2 className="text-h3 font-bold text-foreground">Early-Out Requests</h2>
+      <p className="mt-1 text-caption text-muted-foreground">
+        Undertime — leaving before the scheduled end. Always unpaid; approving deducts
+        the proportional undertime from that pay period.
+      </p>
+      <div className="mt-4">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading early-out requests…</p>
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={visible}
+            rowKey={(r) => r.id}
+            needsAction={(r) => r.status === "pending"}
+            getSearchText={(r) =>
+              `${r.employee.name ?? ""} ${r.early_out_time} ${r.reason} ${r.status}`
+            }
+            searchPlaceholder="Search employee, reason…"
+            toolbar={
+              <StatusFilter options={REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
+            }
+            empty="No early-out requests yet."
+          />
+        )}
+      </div>
+
+      <ReviewDialog
+        open={!!review}
+        onOpenChange={(o) => !o && setReview(null)}
+        mode={review?.mode ?? "approve"}
+        subject={review ? `${review.r.employee.name}'s early-out (${formatDate(review.r.work_date)} ${review.r.early_out_time})` : ""}
         onConfirm={onConfirm}
       />
     </div>

@@ -1,11 +1,21 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, AlertTriangle } from "lucide-react";
+import { AxiosError } from "axios";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -165,8 +175,18 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
   // and stable — no snap-back while the switch/backfill is in flight.
   const mode: AllotmentMode = setting?.allotment_mode ?? "not_shared";
 
-  async function changeMode(next: AllotmentMode) {
+  // Switching the model mid-year is significant (it changes how everyone's leave
+  // is tracked), so we confirm first. `pendingMode` holds the target until then.
+  const [pendingMode, setPendingMode] = useState<AllotmentMode | null>(null);
+
+  function requestChange(next: AllotmentMode) {
     if (next === mode) return;
+    setPendingMode(next);
+  }
+
+  async function confirmChange() {
+    if (!pendingMode) return;
+    const next = pendingMode;
     try {
       await updateMode.mutateAsync(next);
       toast.success(
@@ -174,8 +194,17 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
           ? "Switched to a shared leave pool."
           : "Switched to per-leave-type credits.",
       );
-    } catch {
-      toast.error("Could not change the allotment mode.");
+    } catch (err) {
+      // The server blocks a switch while requests are pending (guardrail) — surface
+      // that exact message. The optimistic toggle rolls back on its own.
+      const msg =
+        err instanceof AxiosError
+          ? (err.response?.data?.errors?.allotment_mode?.[0] ??
+            err.response?.data?.message)
+          : undefined;
+      toast.error(msg ?? "Could not change the allotment mode.");
+    } finally {
+      setPendingMode(null);
     }
   }
 
@@ -189,7 +218,7 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
             affects future hires — existing employees keep their own credits.
           </p>
         </div>
-        <AllotmentModeToggle mode={mode} onChange={changeMode} />
+        <AllotmentModeToggle mode={mode} onChange={requestChange} />
       </div>
 
       {mode === "not_shared" ? (
@@ -197,7 +226,77 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
       ) : (
         <SharedGrid types={types} />
       )}
+
+      <SwitchModeConfirmDialog
+        open={pendingMode !== null}
+        target={pendingMode}
+        pending={updateMode.isPending}
+        onOpenChange={(o) => !o && setPendingMode(null)}
+        onConfirm={confirmChange}
+      />
     </section>
+  );
+}
+
+/**
+ * Confirms switching the company-wide allotment model. Warns that it changes how
+ * every employee's leave is tracked and is best done at a year boundary; the
+ * server additionally blocks the switch while any request is pending.
+ */
+function SwitchModeConfirmDialog({
+  open,
+  target,
+  pending,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean;
+  target: AllotmentMode | null;
+  pending: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const toShared = target === "shared";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2.5">
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-warning-subtle text-warning">
+              <AlertTriangle className="size-4" />
+            </span>
+            {toShared ? "Switch to a shared leave pool?" : "Switch to per-type credits?"}
+          </DialogTitle>
+          <DialogDescription>
+            {toShared
+              ? "Every employee's leave will be tracked as one shared pool instead of separate per-type credits."
+              : "Every employee's leave will be tracked as separate per-type credits instead of one shared pool."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+          <li>
+            This changes how the whole company's leave is counted for the year — best
+            done at the start of a leave year.
+          </li>
+          <li>
+            Days already used don&apos;t carry across, so switching mid-year can hand
+            back credits someone has already spent.
+          </li>
+          <li>You can&apos;t switch while any leave request is still pending.</li>
+        </ul>
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="outline">Keep current model</Button>
+          </DialogClose>
+          <Button onClick={onConfirm} disabled={pending}>
+            {pending ? "Switching…" : "Switch model"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

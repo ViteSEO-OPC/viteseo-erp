@@ -1,9 +1,9 @@
 'use client';
 
-import { groupSchema, useValidatedForm } from '@/core/forms';
+import { editGroupSchema, useValidatedForm } from '@/core/forms';
 import { Button, Field, Input, Modal, Select } from '@/core/ui';
 import type { Group } from '../../types';
-import { useProject, useUpdateGroup } from '../../hooks';
+import { useUpdateGroup } from '../../hooks';
 
 // Same preset swatches as CreateGroupModal; the chosen hex is stored on the form.
 const COLOR_PRESETS = [
@@ -18,9 +18,9 @@ const COLOR_PRESETS = [
 ];
 
 /**
- * Edit a group's name / color / leader (Admin/PM). A group's project is
- * immutable, so it's shown read-only. Render only while editing so the form
- * mounts fresh with the group's values as defaults.
+ * Edit a group's name / color / leader (Admin/PM). Members are managed
+ * separately (Add Member), so the leader is chosen from the group's current
+ * members. Render only while editing so the form mounts fresh with defaults.
  */
 export function EditGroupModal({
   group,
@@ -30,9 +30,7 @@ export function EditGroupModal({
   onClose: () => void;
 }): React.ReactElement {
   const update = useUpdateGroup();
-  // Leader options come from the group's project members.
-  const projectQuery = useProject(group.project_id);
-  const members = projectQuery.data?.members ?? [];
+  const members = group.members ?? [];
 
   const {
     register,
@@ -40,9 +38,8 @@ export function EditGroupModal({
     watch,
     setValue,
     formState: { errors },
-  } = useValidatedForm(groupSchema, {
+  } = useValidatedForm(editGroupSchema, {
     defaultValues: {
-      project_id: group.project_id,
       name: group.name,
       color: group.color,
       leader_id: group.leader ? String(group.leader.id) : '',
@@ -81,10 +78,6 @@ export function EditGroupModal({
       }
     >
       <form onSubmit={submit} className="space-y-4">
-        <Field label="Project">
-          <Input value={projectQuery.data?.name ?? '—'} disabled readOnly />
-        </Field>
-
         <Field label="Name" error={errors.name?.message}>
           <Input placeholder="e.g. Frontend POD" {...register('name')} />
         </Field>
@@ -111,13 +104,9 @@ export function EditGroupModal({
         </Field>
 
         <Field label="Leader" error={errors.leader_id?.message}>
-          <Select {...register('leader_id')} disabled={projectQuery.isLoading}>
+          <Select {...register('leader_id')} disabled={members.length === 0}>
             <option value="">
-              {projectQuery.isLoading
-                ? 'Loading members…'
-                : members.length === 0
-                  ? 'No members on this project'
-                  : 'Select a leader…'}
+              {members.length === 0 ? 'No members in this group' : 'Select a leader…'}
             </option>
             {members.map((m) => (
               <option key={m.id} value={String(m.id)}>

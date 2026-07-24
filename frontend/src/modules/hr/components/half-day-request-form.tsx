@@ -55,14 +55,7 @@ export function HalfDayRequestForm() {
   }
 
   return (
-    <div className="rounded-card border border-border bg-card p-6">
-      <h2 className="text-h3 font-bold text-foreground">Request Half-Day</h2>
-      <p className="mt-1 text-caption text-muted-foreground">
-        A half-day off for part of a day. Half-days are unpaid — the half is deducted
-        from your pay once HR approves.
-      </p>
-
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-4 space-y-4" noValidate>
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="space-y-1.5">
             <Label>Date</Label>
@@ -121,7 +114,9 @@ export function HalfDayRequestForm() {
         <Button type="submit" className="h-10 w-full" disabled={isSubmitting}>
           {isSubmitting ? "Submitting…" : "Submit Half-Day Request"}
         </Button>
-      </form>
-    </div>
+        <p className="text-center text-caption text-muted-foreground">
+          Your manager will be notified of this request immediately.
+        </p>
+    </form>
   );
 }

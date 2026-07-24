@@ -173,6 +173,7 @@ export function EmployeeFormDialog({
     handleSubmit,
     reset,
     setError,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: EMPTY });
 
@@ -318,6 +319,12 @@ export function EmployeeFormDialog({
 
   // Managers = everyone except the person being edited (no self-management).
   const managerOptions = (allEmployees ?? []).filter((e) => e.id !== employee?.id);
+
+  // Employee role options come from the selected department's positions catalog.
+  // Falls back to a free-text input when that department has no positions yet.
+  const selectedDeptId = watch("department_id");
+  const positionOptions =
+    (departments ?? []).find((d) => String(d.id) === selectedDeptId)?.positions ?? [];
 
   // When creating, show every section; when editing, only the chosen tab's fields.
   const show = (key: EmployeeEditSection) => !isEdit || section === key;
@@ -509,7 +516,35 @@ export function EmployeeFormDialog({
                   />
                 </Field>
                 <Field label="Employee role">
-                  <Input placeholder="Senior Product Manager" {...register("employee_role")} />
+                  {positionOptions.length > 0 ? (
+                    <Controller
+                      control={control}
+                      name="employee_role"
+                      render={({ field }) => {
+                        // Keep a legacy/free-text value selectable so editing an
+                        // existing employee never silently drops their role.
+                        const extra =
+                          field.value &&
+                          !positionOptions.some((p) => p.name === field.value)
+                            ? [{ value: field.value, label: `${field.value} (current)` }]
+                            : [];
+                        return (
+                          <SimpleSelect
+                            value={field.value || "none"}
+                            onValueChange={(v) => field.onChange(v === "none" ? "" : v)}
+                            placeholder="Select…"
+                            options={[
+                              { value: "none", label: "None" },
+                              ...positionOptions.map((p) => ({ value: p.name, label: p.name })),
+                              ...extra,
+                            ]}
+                          />
+                        );
+                      }}
+                    />
+                  ) : (
+                    <Input placeholder="Senior Product Manager" {...register("employee_role")} />
+                  )}
                 </Field>
                 <Field label="Location">
                   <Input placeholder="Manila HQ · Hybrid" {...register("work_location")} />

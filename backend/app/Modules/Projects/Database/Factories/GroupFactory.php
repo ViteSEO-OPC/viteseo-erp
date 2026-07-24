@@ -6,7 +6,6 @@ namespace App\Modules\Projects\Database\Factories;
 
 use App\Models\User;
 use App\Modules\Projects\Models\Group;
-use App\Modules\Projects\Models\Project;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -19,7 +18,6 @@ class GroupFactory extends Factory
     public function definition(): array
     {
         return [
-            'project_id' => Project::factory(),
             'name' => fake()->words(2, true),
             'color' => fake()->hexColor(),
             'leader_id' => User::factory(),

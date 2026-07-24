@@ -119,10 +119,7 @@ export function LeaveRequestForm({
   }
 
   return (
-    <div className="rounded-card border border-border bg-card p-6">
-      <h2 className="text-h3 font-bold text-foreground">Request Leave</h2>
-
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-4 space-y-4" noValidate>
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
         <div className="space-y-1.5">
           <Label>Leave Type</Label>
           <Controller
@@ -243,7 +240,6 @@ export function LeaveRequestForm({
         <p className="text-center text-caption text-muted-foreground">
           Your manager will be notified of this request immediately.
         </p>
-      </form>
-    </div>
+    </form>
   );
 }

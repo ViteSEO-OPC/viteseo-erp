@@ -24,7 +24,7 @@ class DepartmentController extends Controller
     // GET /api/v1/hr/departments/{department}
     public function show(Department $department): JsonResponse
     {
-        return DepartmentResource::make($department)->response();
+        return DepartmentResource::make($department->load(['head.user', 'positions', 'employees.user']))->response();
     }
 
     // POST /api/v1/hr/departments — hr_officer only.

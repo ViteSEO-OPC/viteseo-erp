@@ -88,6 +88,12 @@ function Editor({
   const [grace, setGrace] = useState(
     initial.custom_grace_minutes != null ? String(initial.custom_grace_minutes) : "",
   );
+  const [unpaidBreak, setUnpaidBreak] = useState(
+    initial.custom_unpaid_break_minutes != null ? String(initial.custom_unpaid_break_minutes) : "",
+  );
+  const [paidBreak, setPaidBreak] = useState(
+    initial.custom_paid_break_minutes != null ? String(initial.custom_paid_break_minutes) : "",
+  );
 
   if (readOnly) {
     return (
@@ -111,6 +117,8 @@ function Editor({
         custom_start_time: start || null,
         custom_end_time: end || null,
         custom_grace_minutes: grace !== "" ? Number(grace) : null,
+        custom_unpaid_break_minutes: unpaidBreak !== "" ? Number(unpaidBreak) : null,
+        custom_paid_break_minutes: paidBreak !== "" ? Number(paidBreak) : null,
       });
       toast.success("Schedule updated");
     } catch {
@@ -175,6 +183,18 @@ function Editor({
           <Input id="ov-grace" type="number" min="0" max="240" value={grace} onChange={(e) => setGrace(e.target.value)} />
         </div>
       </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="ov-unpaid-break">Override lunch / unpaid break (min)</Label>
+          <Input id="ov-unpaid-break" type="number" min="0" max="480" value={unpaidBreak} onChange={(e) => setUnpaidBreak(e.target.value)} />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ov-paid-break">Override paid break (min)</Label>
+          <Input id="ov-paid-break" type="number" min="0" max="480" value={paidBreak} onChange={(e) => setPaidBreak(e.target.value)} />
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">Leave break fields blank to use the assigned schedule&apos;s breaks. Half-day windows are set on the schedule, not per employee.</p>
 
       <Button size="sm" onClick={save} disabled={update.isPending}>
         {update.isPending ? "Saving…" : "Save schedule"}

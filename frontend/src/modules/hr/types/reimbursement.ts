@@ -17,7 +17,8 @@ export interface Reimbursement {
   amount: string; // raw decimal; format for display
   expense_date: string;
   description: string;
-  receipt_url: string | null;
+  receipt_urls: string[];
+  receipt_url: string | null; // first receipt, or null (back-compat)
   status: ReimbursementStatus;
   review_note: string | null;
   reviewed_at: string | null;

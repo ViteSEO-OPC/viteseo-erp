@@ -14,6 +14,7 @@ import { LeaveBalanceCard } from "@/modules/hr/components/leave-balance-card";
 import { LeaveTypesListCard } from "@/modules/hr/components/leave-types-list-card";
 import { LeaveRequestForm } from "@/modules/hr/components/leave-request-form";
 import { HalfDayRequestForm } from "@/modules/hr/components/half-day-request-form";
+import { EarlyOutRequestForm } from "@/modules/hr/components/early-out-request-form";
 import { TimeOffCalendar } from "@/modules/hr/components/time-off-calendar";
 import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
 import {
@@ -23,12 +24,21 @@ import {
   useCancelLeaveRequest,
 } from "@/modules/hr/hooks/use-leave";
 import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
+import { useEarlyOutRequests } from "@/modules/hr/hooks/use-early-out";
 import { SimpleSelect } from "@/modules/hr/ui/select";
+
+type RequestTab = "leave" | "half" | "early";
+
+const REQUEST_TITLES: Record<RequestTab, string> = {
+  leave: "Request Leave",
+  half: "Request Half-Day",
+  early: "Request Early-Out",
+};
 
 interface HistItem {
   key: string;
   id: number;
-  kind: "leave" | "half";
+  kind: "leave" | "half" | "early";
   title: string;
   date: string;
   status: string;
@@ -38,12 +48,61 @@ interface HistItem {
   cancellable: boolean;
 }
 
+/**
+ * Figma "segmented-toggle": a light-gray track holding three equal pills; the
+ * active one is a white, subtly-shadowed pill with bold ink text. Picks which
+ * kind of time-off request the single card shows.
+ */
+function RequestTabs({
+  value,
+  onChange,
+}: {
+  value: RequestTab;
+  onChange: (tab: RequestTab) => void;
+}) {
+  const tabs: { value: RequestTab; label: string }[] = [
+    { value: "leave", label: "Leave" },
+    { value: "half", label: "Half-Day" },
+    { value: "early", label: "Early Out" },
+  ];
+
+  return (
+    <div
+      role="tablist"
+      className="flex w-full shrink-0 gap-1 rounded-xl bg-muted p-1 sm:w-[360px]"
+    >
+      {tabs.map((t) => {
+        const active = value === t.value;
+        return (
+          <button
+            key={t.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(t.value)}
+            className={cn(
+              "flex-1 rounded-lg py-2 text-center text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              active
+                ? "bg-card font-bold text-foreground shadow-sm"
+                : "font-semibold text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function TimeOffPage() {
   const { data: summary } = useMyLeaveSummary();
   const { data: types } = useLeaveTypes();
   const { data: requests } = useLeaveRequests();
   const { data: halfDays } = useHalfDayRequests();
+  const { data: earlyOuts } = useEarlyOutRequests();
   const cancelMut = useCancelLeaveRequest();
+  const [tab, setTab] = useState<RequestTab>("leave");
   const [declined, setDeclined] = useState<HistItem | null>(null);
   const [cancelTarget, setCancelTarget] = useState<HistItem | null>(null);
   const [page, setPage] = useState(1);
@@ -76,7 +135,8 @@ export default function TimeOffPage() {
 
   const pendingCount =
     (requests ?? []).filter((r) => r.status === "pending").length +
-    (halfDays ?? []).filter((h) => h.status === "pending").length;
+    (halfDays ?? []).filter((h) => h.status === "pending").length +
+    (earlyOuts ?? []).filter((e) => e.status === "pending").length;
 
   // Combined leave + half-day history, newest first.
   const history: HistItem[] = [
@@ -103,6 +163,17 @@ export default function TimeOffPage() {
       status: h.status,
       at: h.created_at,
       reason: h.review_note,
+      cancellable: false,
+    })),
+    ...(earlyOuts ?? []).map((e) => ({
+      key: `e${e.id}`,
+      id: e.id,
+      kind: "early" as const,
+      title: `Early-out (${e.early_out_time})`,
+      date: `${formatDate(e.work_date)} · Unpaid`,
+      status: e.status,
+      at: e.created_at,
+      reason: e.review_note,
       cancellable: false,
     })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
@@ -137,8 +208,13 @@ export default function TimeOffPage() {
       {/* Balance summary: (pool in shared) · leave-types list · pending */}
       <div
         className={cn(
-          "mt-6 grid grid-cols-1 gap-4",
-          mode === "shared" ? "sm:grid-cols-3" : "sm:grid-cols-2",
+          "mt-6 grid grid-cols-1",
+          // Not-shared: mirror the request row below (lg:grid-cols-2 + gap-6) so the
+          // Leave Types card is exactly the request-form card's width; Pending sits
+          // content-sized in the second cell. Shared: three left-packed cards.
+          mode === "shared"
+            ? "gap-4 sm:grid-cols-[18rem_20rem_auto] sm:justify-start"
+            : "gap-6 lg:grid-cols-2",
         )}
       >
         {mode === "shared" &&
@@ -164,23 +240,44 @@ export default function TimeOffPage() {
           }
         />
 
-        <StatCard label="Pending Requests" value={pendingCount} subNote="Awaiting HR decision" />
+        <StatCard
+          label="Pending Requests"
+          value={pendingCount}
+          subNote="Awaiting HR decision"
+          className="justify-self-start min-w-[18rem]"
+        />
       </div>
 
-      {/* Left: the two request cards · Right: calendar + history */}
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="space-y-6">
-          <LeaveRequestForm
-            types={types ?? []}
-            balances={balances}
-            mode={mode}
-            pool={pool}
-          />
-          <HalfDayRequestForm />
+      {/* Left: one tabbed request card · Right: calendar + history */}
+      <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+        <div className="self-start rounded-card border border-border bg-card p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-h3 font-bold text-foreground">{REQUEST_TITLES[tab]}</h2>
+            <RequestTabs value={tab} onChange={setTab} />
+          </div>
+
+          <div className="mt-6">
+            {tab === "leave" ? (
+              <LeaveRequestForm
+                types={types ?? []}
+                balances={balances}
+                mode={mode}
+                pool={pool}
+              />
+            ) : tab === "half" ? (
+              <HalfDayRequestForm />
+            ) : (
+              <EarlyOutRequestForm />
+            )}
+          </div>
         </div>
 
         <div className="space-y-6">
-          <TimeOffCalendar leaves={requests ?? []} halfDays={halfDays ?? []} />
+          <TimeOffCalendar
+            leaves={requests ?? []}
+            halfDays={halfDays ?? []}
+            earlyOuts={earlyOuts ?? []}
+          />
 
           <div className="rounded-card border border-border bg-card p-6">
             <div className="mb-4 flex items-center justify-between">
@@ -275,7 +372,13 @@ export default function TimeOffPage() {
       <RejectionReasonDialog
         open={!!declined}
         onOpenChange={(o) => !o && setDeclined(null)}
-        title={declined?.key.startsWith("h") ? "Half-day declined" : "Leave declined"}
+        title={
+          declined?.kind === "half"
+            ? "Half-day declined"
+            : declined?.kind === "early"
+              ? "Early-out declined"
+              : "Leave declined"
+        }
         subject={declined ? `${declined.title} · ${declined.date}` : undefined}
         reason={declined?.reason ?? null}
       />

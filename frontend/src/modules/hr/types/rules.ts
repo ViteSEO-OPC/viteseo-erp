@@ -7,6 +7,13 @@ export interface WorkSchedule {
   start_time: string; // "HH:MM"
   end_time: string;
   grace_minutes: number;
+  unpaid_break_minutes: number; // meal period — shortens the paid day
+  paid_break_minutes: number; // short break — inside the paid day (flag threshold)
+  am_start_time: string | null; // half-day windows ("HH:MM") — nullable
+  am_end_time: string | null;
+  pm_start_time: string | null;
+  pm_end_time: string | null;
+  expected_minutes: number | null; // derived: (end − start) − unpaid_break
   is_default: boolean;
 }
 
@@ -16,19 +23,89 @@ export interface WorkScheduleInput {
   start_time: string;
   end_time: string;
   grace_minutes: number;
+  unpaid_break_minutes: number;
+  paid_break_minutes: number;
+  am_start_time?: string | null;
+  am_end_time?: string | null;
+  pm_start_time?: string | null;
+  pm_end_time?: string | null;
   is_default: boolean;
 }
 
-export type LateDeductionMode = "none" | "per_lates";
+export type LateDeductionMode = "none" | "per_lates" | "per_hour" | "tiered";
+export type LateMinutesFrom = "start_time" | "after_grace";
+export type UndertimeDeductionMode = "none" | "per_hour";
+export type MissingClockoutMode =
+  | "no_deduction_flag_for_review"
+  | "treat_as_undertime_to_now"
+  | "treat_as_absent";
+export type EarlyArrivalMode = "none" | "offset_undertime" | "overtime_eligible";
+export type OvertimeMode = "none" | "approved_only" | "auto_after_threshold";
+export type DeductionRounding = "exact" | "round_up" | "round_nearest" | "round_down";
+export type DailyRateBasis = "period_workdays" | "fixed_divisor";
+
+/** One rung of the `tiered` late ladder: over N minutes late ⇒ charge H hours. */
+export interface LateTier {
+  over: number;
+  hours: number;
+}
+
+export type ViolationSeverity = "green" | "yellow" | "orange" | "red";
+
+/**
+ * One rung of the violation colour ladder. Evaluated top-down, first match wins —
+ * so list most-severe first. Flags are disciplinary; they never move pay.
+ */
+export interface ViolationRule {
+  severity: ViolationSeverity;
+  streak_min?: number; // consecutive days
+  monthly_min?: number; // occurrences this month
+  occurrence_min?: number;
+  type?: string; // e.g. "awol" | "ua" for the absence ladder
+}
+
+export interface ViolationRules {
+  late?: ViolationRule[];
+  absence?: ViolationRule[];
+  missed_time_out?: ViolationRule[];
+}
 
 export interface AttendancePolicy {
   id: number;
   consecutive_lates_before_absence: number;
   monthly_late_reset: boolean;
   awol_days_threshold: number;
+
   // Payroll: how accumulated lates translate into a pay deduction.
   late_deduction_mode: LateDeductionMode;
   lates_per_deduction: number; // per_lates: every N lates = 1 day deducted
+  late_minutes_from: LateMinutesFrom; // count late minutes from start, or from end of grace
+  late_tiers: LateTier[] | null; // `tiered` mode only
+
+  undertime_deduction_mode: UndertimeDeductionMode;
+  missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct
+
+  early_arrival_mode: EarlyArrivalMode;
+  overtime_mode: OvertimeMode; // takes effect when OT requests ship
+  overtime_threshold_minutes: number;
+
+  // `exact` is proportionate (the legal default); round_* is a warned opt-in.
+  deduction_rounding: DeductionRounding;
+  deduction_block_minutes: number;
+  daily_deduction_cap: number; // in days — a day can never cost more than this
+
+  // How a day is priced; the hourly rate is dailyRate ÷ hours_per_day_divisor (DOLE 8).
+  daily_rate_basis: DailyRateBasis;
+  annual_divisor: number; // 261 Mon–Fri · 313 Mon–Sat · 365 all-days · or custom
+  hours_per_day_divisor: number;
+
+  // Breaks are FLAGGED, never deducted.
+  max_break_minutes_per_day: number;
+  over_max_break_action: "flag_only";
+
+  // Violation colour ladder (disciplinary flags — never a pay deduction).
+  violation_rules: ViolationRules | null;
+
   task_format: { require_english?: boolean; uppercase?: boolean };
 }
 
@@ -37,6 +114,13 @@ export interface EffectiveSchedule {
   start_time: string | null;
   end_time: string | null;
   grace_minutes: number;
+  unpaid_break_minutes: number;
+  paid_break_minutes: number;
+  expected_minutes: number | null;
+  am_start_time: string | null;
+  am_end_time: string | null;
+  pm_start_time: string | null;
+  pm_end_time: string | null;
   source: "default" | "assigned" | "employee_override";
   schedule_name: string | null;
   is_workday: boolean | null;
@@ -48,6 +132,8 @@ export interface EmployeeSchedule {
   custom_start_time: string | null;
   custom_end_time: string | null;
   custom_grace_minutes: number | null;
+  custom_unpaid_break_minutes: number | null;
+  custom_paid_break_minutes: number | null;
   effective: EffectiveSchedule;
 }
 
@@ -57,6 +143,8 @@ export interface EmployeeScheduleInput {
   custom_start_time?: string | null;
   custom_end_time?: string | null;
   custom_grace_minutes?: number | null;
+  custom_unpaid_break_minutes?: number | null;
+  custom_paid_break_minutes?: number | null;
 }
 
 // ISO weekday numbers with short labels, for day pickers.

@@ -15,6 +15,10 @@ use Illuminate\Support\Facades\DB;
 
 class ProjectService
 {
+    public function __construct(
+        private readonly GroupProjectReconciler $reconciler,
+    ) {}
+
     /**
      * Paginate projects with optional filtering and sorting.
      *
@@ -102,12 +106,18 @@ class ProjectService
             $user->getKey() => ['created_at' => now()],
         ]);
 
+        // A newly-complete group roster auto-joins the project (and vice-versa).
+        $this->reconciler->syncForProject($project);
+
         return $project;
     }
 
     public function removeMember(Project $project, User $user): Project
     {
         $project->members()->detach($user->getKey());
+
+        // Removing a member may break a group's roster → it leaves the project.
+        $this->reconciler->syncForProject($project);
 
         return $project;
     }

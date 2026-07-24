@@ -27,6 +27,7 @@ use App\Modules\Hr\Database\Seeders\RequestsDemoSeeder;
 use App\Modules\Hr\Database\Seeders\WorkScheduleSeeder;
 use App\Modules\Crm\Database\Seeders\CrmDemoSeeder;
 use App\Modules\Crm\Database\Seeders\EmailTemplateSeeder;
+use App\Modules\Projects\Database\Seeders\ProjectsDemoSeeder;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
@@ -81,6 +82,9 @@ class DatabaseSeeder extends Seeder
             HolidayDemoSeeder::class,
             // Backfill representative audit-trail history for the Audit report.
             AuditDemoSeeder::class,
+            // PMS (Projects) demo: reuses the HR users, grants PMS roles, and
+            // builds a workspace with projects/groups/tasks/subtasks/etc.
+            ProjectsDemoSeeder::class,
         ]);
     }
 }
