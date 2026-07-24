@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -24,7 +25,7 @@ class UpdatePlannerEventRequest extends FormRequest
     {
         return [
             'title' => ['sometimes', 'required', 'string', 'max:255'],
-            'event_type' => ['sometimes', 'required', Rule::in(['email', 'call', 'meeting', 'task', 'follow-up'])],
+            'event_type' => ['sometimes', 'required', Rule::in(['email', 'call', 'meeting', 'task', 'follow-up', 'consultation'])],
             'status' => ['sometimes', 'required', Rule::in(['todo', 'scheduled', 'in_progress', 'completed'])],
             'priority' => ['sometimes', 'required', Rule::in(['low', 'medium', 'high'])],
 
@@ -34,6 +35,9 @@ class UpdatePlannerEventRequest extends FormRequest
 
             'reminder_minutes' => ['sometimes', 'nullable', 'integer', 'min:0'],
 
+            // Consultation's lead requirement is enforced in withValidator() against the RESULTING state,
+            // not with requiredIf here: a Board drag patches `status` alone, and an implicit required rule
+            // would reject that perfectly valid partial update.
             'lead_id' => ['sometimes', 'nullable', 'integer', 'exists:crm_leads,id'],
             'deal_id' => ['sometimes', 'nullable', 'integer', 'exists:crm_deals,id'],
             'company_id' => ['sometimes', 'nullable', 'integer'],
@@ -44,5 +48,32 @@ class UpdatePlannerEventRequest extends FormRequest
             // Reassignment (Admin/SA typically). Must reference a Business Developer.
             'assigned_to' => ['sometimes', 'nullable', 'integer', 'exists:users,id', new MustBeBusinessDeveloper],
         ];
+    }
+
+    /**
+     * A consultation must always be linked to a lead (PDR-002 §8 Q3) — the Successful Consultations KPI
+     * counts DISTINCT leads, so an unlinked consultation could never be counted and would be silently
+     * invisible to reporting.
+     *
+     * Validated against the state the event would have AFTER this patch, which blocks both routes to a
+     * lead-less consultation: nulling out an existing consultation's lead, and converting a lead-less
+     * event into a consultation. A partial patch that touches neither field (the Board's lone `status`
+     * drag) is unaffected.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            $event = $this->route('plannerEvent');
+
+            $resultingType = $this->input('event_type', $event?->event_type);
+            if ($resultingType !== 'consultation') {
+                return;
+            }
+
+            $resultingLeadId = $this->has('lead_id') ? $this->input('lead_id') : $event?->lead_id;
+            if (blank($resultingLeadId)) {
+                $validator->errors()->add('lead_id', 'A consultation must be linked to a lead.');
+            }
+        });
     }
 }

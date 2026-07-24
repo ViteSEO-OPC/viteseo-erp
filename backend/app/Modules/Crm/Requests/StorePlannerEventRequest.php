@@ -25,7 +25,9 @@ class StorePlannerEventRequest extends FormRequest
     {
         return [
             'title' => ['required', 'string', 'max:255'],
-            'event_type' => ['required', Rule::in(['email', 'call', 'meeting', 'task', 'follow-up'])],
+            // `consultation` (PDR-002) is directly authorable, unlike `follow-up` — which the controller
+            // still restricts to FollowUpScheduler so it keeps a single birth path.
+            'event_type' => ['required', Rule::in(['email', 'call', 'meeting', 'task', 'follow-up', 'consultation'])],
             'status' => ['sometimes', Rule::in(['todo', 'scheduled', 'in_progress', 'completed'])],
             'priority' => ['sometimes', Rule::in(['low', 'medium', 'high'])],
 
@@ -43,7 +45,14 @@ class StorePlannerEventRequest extends FormRequest
 
             // Relationship seams. lead_id/deal_id are validated against existing tables;
             // company_id/campaign_id are accepted but NOT exists-validated (no table yet).
-            'lead_id' => ['nullable', 'integer', 'exists:crm_leads,id'],
+            //
+            // `lead_id` is REQUIRED for a consultation (PDR-002 §8 Q3): the Successful Consultations KPI
+            // counts DISTINCT leads, so a consultation with no lead could never be counted and would be
+            // silently invisible to reporting. Every other event type keeps it optional.
+            'lead_id' => [
+                Rule::requiredIf(fn (): bool => $this->input('event_type') === 'consultation'),
+                'nullable', 'integer', 'exists:crm_leads,id',
+            ],
             'deal_id' => ['nullable', 'integer', 'exists:crm_deals,id'],
             'company_id' => ['nullable', 'integer'],
             'campaign_id' => ['nullable', 'integer'],
