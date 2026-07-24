@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Requests;
 
+use App\Modules\Crm\Enums\ConsultationOutcome;
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -27,6 +28,8 @@ class UpdatePlannerEventRequest extends FormRequest
             'title' => ['sometimes', 'required', 'string', 'max:255'],
             'event_type' => ['sometimes', 'required', Rule::in(['email', 'call', 'meeting', 'task', 'follow-up', 'consultation'])],
             'status' => ['sometimes', 'required', Rule::in(['todo', 'scheduled', 'in_progress', 'completed'])],
+            // Business result — a separate axis from `status` (PDR-002 §4b), consultation-only.
+            'outcome' => ['sometimes', 'nullable', Rule::in(ConsultationOutcome::values())],
             'priority' => ['sometimes', 'required', Rule::in(['low', 'medium', 'high'])],
 
             'starts_at' => ['sometimes', 'nullable', 'date'],
@@ -73,6 +76,18 @@ class UpdatePlannerEventRequest extends FormRequest
             $resultingLeadId = $this->has('lead_id') ? $this->input('lead_id') : $event?->lead_id;
             if (blank($resultingLeadId)) {
                 $validator->errors()->add('lead_id', 'A consultation must be linked to a lead.');
+            }
+        });
+
+        // An outcome is consultation-only vocabulary, judged on the resulting type — so it cannot be
+        // attached to another type, nor stranded on an event being converted away from a consultation.
+        $validator->after(function (Validator $validator): void {
+            $event = $this->route('plannerEvent');
+            $resultingType = $this->input('event_type', $event?->event_type);
+            $resultingOutcome = $this->has('outcome') ? $this->input('outcome') : $event?->outcome;
+
+            if (filled($resultingOutcome) && $resultingType !== 'consultation') {
+                $validator->errors()->add('outcome', 'Only a consultation can record an outcome.');
             }
         });
     }

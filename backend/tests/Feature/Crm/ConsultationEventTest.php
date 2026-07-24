@@ -156,6 +156,93 @@ class ConsultationEventTest extends TestCase
         ])->assertOk()->assertJsonPath('data.eventType', 'consultation');
     }
 
+    /**
+     * 🔒 The frozen outcome vocabulary (PDR-002 §4b) lives on its own axis. `status` is untouched, so a
+     * cancelled consultation is a COMPLETED event carrying a `cancelled` outcome — exactly how a
+     * cancelled call is already recorded on crm_calls.
+     */
+    public function test_a_consultation_records_an_outcome_without_touching_its_lifecycle(): void
+    {
+        $bd = $this->bd();
+        $lead = $this->ownedLead($bd);
+        $event = PlannerEvent::factory()->assignedTo($bd)->create([
+            'event_type' => 'consultation',
+            'status' => 'scheduled',
+            'lead_id' => $lead->id,
+            'created_by' => $bd->id,
+        ]);
+        Sanctum::actingAs($bd);
+
+        $this->patchJson("/api/v1/crm/planner-events/{$event->id}", [
+            'status' => 'completed',
+            'outcome' => 'cancelled',
+        ])->assertOk()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.outcome', 'cancelled');
+    }
+
+    public function test_every_approved_outcome_is_accepted_and_anything_else_is_rejected(): void
+    {
+        $bd = $this->bd();
+        $lead = $this->ownedLead($bd);
+        Sanctum::actingAs($bd);
+
+        foreach (['successful', 'not_interested', 'no_show', 'cancelled'] as $outcome) {
+            $this->postJson('/api/v1/crm/planner-events', $this->payload([
+                'lead_id' => $lead->id,
+                'status' => 'completed',
+                'outcome' => $outcome,
+            ]))->assertCreated()->assertJsonPath('data.outcome', $outcome);
+        }
+
+        // 'rescheduled' is a scheduling action, not a result — it must never be storable as one.
+        foreach (['rescheduled', 'follow_up_required', 'confirmed'] as $rejected) {
+            $this->postJson('/api/v1/crm/planner-events', $this->payload([
+                'lead_id' => $lead->id,
+                'outcome' => $rejected,
+            ]))->assertUnprocessable()->assertJsonValidationErrors('outcome');
+        }
+    }
+
+    /** Outcome is consultation-only vocabulary — it must not leak onto other event types. */
+    public function test_other_event_types_cannot_record_an_outcome(): void
+    {
+        $bd = $this->bd();
+        $lead = $this->ownedLead($bd);
+        Sanctum::actingAs($bd);
+
+        $this->postJson('/api/v1/crm/planner-events', $this->payload([
+            'event_type' => 'meeting',
+            'lead_id' => $lead->id,
+            'outcome' => 'successful',
+        ]))->assertUnprocessable()->assertJsonValidationErrors('outcome');
+    }
+
+    /** Converting a consultation away from its type must not strand its outcome. */
+    public function test_an_outcome_cannot_be_stranded_by_changing_the_event_type(): void
+    {
+        $bd = $this->bd();
+        $lead = $this->ownedLead($bd);
+        $event = PlannerEvent::factory()->assignedTo($bd)->create([
+            'event_type' => 'consultation',
+            'status' => 'completed',
+            'outcome' => 'successful',
+            'lead_id' => $lead->id,
+            'created_by' => $bd->id,
+        ]);
+        Sanctum::actingAs($bd);
+
+        $this->patchJson("/api/v1/crm/planner-events/{$event->id}", ['event_type' => 'meeting'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('outcome');
+
+        // Clearing the outcome in the same patch makes the conversion legitimate.
+        $this->patchJson("/api/v1/crm/planner-events/{$event->id}", [
+            'event_type' => 'meeting',
+            'outcome' => null,
+        ])->assertOk()->assertJsonPath('data.outcome', null);
+    }
+
     /** An unknown type is still rejected — the enum was extended, not opened up. */
     public function test_an_unknown_event_type_is_still_rejected(): void
     {

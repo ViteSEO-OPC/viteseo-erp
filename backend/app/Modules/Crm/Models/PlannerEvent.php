@@ -41,6 +41,10 @@ use Illuminate\Support\Carbon;
     'title',
     'event_type',
     'status',
+    // Business result of a concluded event, separate from the `status` lifecycle. Consultation is the
+    // only type defining values today ({@see ConsultationOutcome}); kept a plain string like
+    // `status`/`event_type` so another type can adopt its own vocabulary later.
+    'outcome',
     'priority',
     'starts_at',
     'ends_at',
