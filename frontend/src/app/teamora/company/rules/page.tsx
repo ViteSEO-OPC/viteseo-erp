@@ -240,6 +240,31 @@ function rungValue(
   return rung?.[key] ?? fallback;
 }
 
+// A plain-language rounding choice that folds the rounding rule + block minutes together.
+type RoundPreset = "exact" | "up_hour" | "up_half" | "down_hour";
+
+function roundPresetFrom(rounding: DeductionRounding, block: number): RoundPreset {
+  if (rounding === "round_up") return block === 30 ? "up_half" : "up_hour";
+  if (rounding === "round_down") return "down_hour";
+  return "exact"; // exact + the rarely-used round_nearest both show as Exact
+}
+
+function roundingParts(preset: RoundPreset): {
+  deduction_rounding: DeductionRounding;
+  deduction_block_minutes: number;
+} {
+  switch (preset) {
+    case "up_hour":
+      return { deduction_rounding: "round_up", deduction_block_minutes: 60 };
+    case "up_half":
+      return { deduction_rounding: "round_up", deduction_block_minutes: 30 };
+    case "down_hour":
+      return { deduction_rounding: "round_down", deduction_block_minutes: 60 };
+    default:
+      return { deduction_rounding: "exact", deduction_block_minutes: 60 };
+  }
+}
+
 // The four alert levels must strictly ascend. Returns an error message, or null if OK.
 function ladderError(late: number[], absent: number[]): string | null {
   const ascends = (a: number[]) => a.every((v, i) => i === 0 || v > a[i - 1]);
@@ -280,9 +305,11 @@ function AttendancePolicyEditor() {
   const [overtimeMode, setOvertimeMode] = useState<OvertimeMode>(policy?.overtime_mode ?? "approved_only");
   const [overtimeThreshold, setOvertimeThreshold] = useState(String(policy?.overtime_threshold_minutes ?? 0));
 
-  // Rounding, grace basis & cap.
-  const [rounding, setRounding] = useState<DeductionRounding>(policy?.deduction_rounding ?? "exact");
-  const [block, setBlock] = useState(String(policy?.deduction_block_minutes ?? 60));
+  // How missed time is charged. `roundPreset` folds the rounding rule + block into one
+  // plain choice (e.g. "Round up to the hour" = round_up, 60-min block).
+  const [roundPreset, setRoundPreset] = useState<RoundPreset>(
+    roundPresetFrom(policy?.deduction_rounding ?? "exact", Number(policy?.deduction_block_minutes ?? 60)),
+  );
   const [lateFrom, setLateFrom] = useState(policy?.late_minutes_from ?? "start_time");
   const [cap, setCap] = useState(String(policy?.daily_deduction_cap ?? 1));
 
@@ -352,8 +379,7 @@ function AttendancePolicyEditor() {
       early_arrival_mode: earlyArrival,
       overtime_mode: overtimeMode,
       overtime_threshold_minutes: Number(overtimeThreshold),
-      deduction_rounding: rounding,
-      deduction_block_minutes: Number(block),
+      ...roundingParts(roundPreset),
       late_minutes_from: lateFrom,
       daily_deduction_cap: Number(cap),
       daily_rate_basis: rateBasis,
@@ -417,73 +443,120 @@ function AttendancePolicyEditor() {
 
       <Divider />
 
-      {/* Tardiness pay deduction. */}
+      {/* Time-based pay deductions — lateness + undertime + how they round. */}
       <PolicySection
-        title="Tardiness pay deduction"
-        description="How lateness reduces pay when payroll runs. Deducts only the actual time missed unless you turn on rounding below."
+        title="Time-based pay deductions"
+        description="How missed time (lateness and leaving early) reduces pay when payroll runs. Deducts only the actual time missed unless you turn on rounding."
       >
+        {/* Lateness */}
+        <SubHeading>When someone is late</SubHeading>
         <div className="flex flex-wrap items-end gap-4">
           <FieldSelect
             id="pol-late-mode"
-            label="Mode"
+            label="Deduct pay for lateness?"
             value={lateMode}
             onChange={(v) => setLateMode(v as LateDeductionMode)}
             options={[
-              { value: "none", label: "No deduction" },
-              { value: "per_lates", label: "Deduct a day every N lates" },
-              { value: "per_hour", label: "Deduct actual time late (proportionate)" },
+              { value: "none", label: "No — don't deduct for lateness" },
+              { value: "per_hour", label: "Yes — deduct for the time they were late" },
+              { value: "per_lates", label: "Yes — deduct a full day for every N lates" },
             ]}
           />
           {lateMode === "per_lates" && (
             <NumberField id="pol-late-n" label="Lates per 1-day deduction" value={latesPerDeduction} onChange={setLatesPerDeduction} min={1} max={30} />
           )}
         </div>
-        {lateMode === "per_hour" && (
-          <Hint>
-            Example: 30 minutes late, on a ₱909/day (9-hour) schedule, costs ₱909 ÷ 8 ÷ 2 ≈{" "}
-            <strong>₱56.82</strong> — the exact half-hour. Rounding is off by default.
-          </Hint>
-        )}
-        <SaveButton
-          pending={saving === "tardiness"}
-          onClick={() => saveCard("tardiness", { late_deduction_mode: lateMode, lates_per_deduction: Number(latesPerDeduction) })}
-        />
-      </PolicySection>
 
-      <Divider />
+        <SubDivider />
 
-      {/* Undertime & missing clock-out. */}
-      <PolicySection
-        title="Undertime &amp; missing clock-out"
-        description="Leaving before the scheduled end, and what to do when someone forgets to clock out."
-      >
+        {/* Undertime & missing clock-out */}
+        <SubHeading>When someone leaves early</SubHeading>
         <div className="flex flex-wrap items-end gap-4">
           <FieldSelect
             id="pol-undertime-mode"
-            label="Undertime deduction"
+            label="Deduct pay for leaving early?"
             value={undertimeMode}
             onChange={(v) => setUndertimeMode(v as UndertimeDeductionMode)}
             options={[
-              { value: "none", label: "No deduction (leaving early is free)" },
-              { value: "per_hour", label: "Deduct actual time short (proportionate)" },
+              { value: "none", label: "No — leaving early is free" },
+              { value: "per_hour", label: "Yes — deduct for the time they left short" },
             ]}
           />
           <FieldSelect
             id="pol-missing-clockout"
-            label="Forgot to clock out"
+            label="If they forget to clock out"
             value={missingClockout}
             onChange={(v) => setMissingClockout(v as MissingClockoutMode)}
             options={[
               { value: "no_deduction_flag_for_review", label: "Flag for review, don't deduct" },
-              { value: "treat_as_undertime_to_now", label: "Treat as undertime" },
+              { value: "treat_as_undertime_to_now", label: "Treat as leaving early" },
               { value: "treat_as_absent", label: "Treat as absent" },
             ]}
           />
         </div>
         <Hint>A missing clock-out never counts as overtime.</Hint>
+
+        {/* How the missed time is charged — only relevant when a per-time deduction is on. */}
+        {(lateMode === "per_hour" || undertimeMode === "per_hour") && (
+          <>
+            <SubDivider />
+            <SubHeading>How is the missed time charged?</SubHeading>
+            <div className="flex flex-wrap items-end gap-4">
+              <FieldSelect
+                id="pol-rounding"
+                label="Charge the time as"
+                value={roundPreset}
+                onChange={(v) => setRoundPreset(v as RoundPreset)}
+                options={[
+                  { value: "exact", label: "Exact time missed" },
+                  { value: "up_hour", label: "Round up to the hour (30 min late = 1 hour)" },
+                  { value: "up_half", label: "Round up to the half-hour" },
+                  { value: "down_hour", label: "Round down to the hour" },
+                ]}
+              />
+              <FieldSelect
+                id="pol-late-from"
+                label="Start counting late from"
+                value={lateFrom}
+                onChange={(v) => setLateFrom(v as "start_time" | "after_grace")}
+                options={[
+                  { value: "start_time", label: "Scheduled start time" },
+                  { value: "after_grace", label: "End of the grace period" },
+                ]}
+              />
+              <NumberField id="pol-cap" label="Max days deducted / day" value={cap} onChange={setCap} min={0} max={1} step={0.25} />
+            </div>
+            {roundPreset === "exact" ? (
+              <Hint>
+                Exact charges only the minutes missed — e.g. 30 min late on a ₱909/day (9-hour)
+                schedule costs ₱909 ÷ 8 ÷ 2 ≈ <strong>₱56.82</strong>.
+              </Hint>
+            ) : (
+              <div className="rounded-lg border border-destructive bg-destructive/5 p-3">
+                <p className="text-xs text-destructive">
+                  Rounding charges more than the exact time missed (e.g. 30 min → a full hour ≈
+                  ₱113.64). This may be an unlawful penalty under Labor Code Art. 113 — enable only
+                  with legal review.
+                </p>
+              </div>
+            )}
+            <Hint>The cap guarantees no single day ever costs more than one day&apos;s pay.</Hint>
+          </>
+        )}
+
         <SaveButton
-          pending={saving === "undertime"}
-          onClick={() => saveCard("undertime", { undertime_deduction_mode: undertimeMode, missing_clockout_mode: missingClockout })}
+          pending={saving === "time_deductions"}
+          onClick={() =>
+            saveCard("time_deductions", {
+              late_deduction_mode: lateMode,
+              lates_per_deduction: Number(latesPerDeduction),
+              undertime_deduction_mode: undertimeMode,
+              missing_clockout_mode: missingClockout,
+              ...roundingParts(roundPreset),
+              late_minutes_from: lateFrom,
+              daily_deduction_cap: Number(cap),
+            })
+          }
         />
       </PolicySection>
 
@@ -527,61 +600,6 @@ function AttendancePolicyEditor() {
           onClick={() => saveCard("early_ot", { early_arrival_mode: earlyArrival, overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
         />
       </PolicySection>
-
-      <Divider />
-
-      {/* Rounding, grace basis & cap. */}
-      <PolicySection
-        title="Deduction rounding &amp; cap"
-        description="How time-based deductions are rounded, and a safety limit per day."
-      >
-        <div className="flex flex-wrap items-end gap-4">
-          <FieldSelect
-            id="pol-rounding"
-            label="Rounding"
-            value={rounding}
-            onChange={(v) => setRounding(v as DeductionRounding)}
-            options={[
-              { value: "exact", label: "Exact (proportionate)" },
-              { value: "round_up", label: "Round up" },
-              { value: "round_nearest", label: "Round to nearest" },
-              { value: "round_down", label: "Round down" },
-            ]}
-          />
-          {rounding !== "exact" && (
-            <NumberField id="pol-block" label="Block (minutes)" value={block} onChange={setBlock} min={1} max={480} />
-          )}
-          <FieldSelect
-            id="pol-late-from"
-            label="Count late from"
-            value={lateFrom}
-            onChange={(v) => setLateFrom(v as "start_time" | "after_grace")}
-            options={[
-              { value: "start_time", label: "Scheduled start" },
-              { value: "after_grace", label: "End of grace period" },
-            ]}
-          />
-          <NumberField id="pol-cap" label="Max days deducted / day" value={cap} onChange={setCap} min={0} max={1} step={0.25} />
-        </div>
-        {rounding !== "exact" && (
-          <div className="rounded-lg border border-destructive bg-destructive/5 p-3">
-            <p className="text-xs text-destructive">
-              Deducting more than the exact time missed may be an unlawful penalty under Labor Code
-              Art. 113. Enable only with legal review.
-            </p>
-          </div>
-        )}
-        <Hint>
-          The cap guarantees no single day ever costs more than one day&apos;s pay. Arriving 08:20
-          with 15-min grace counts as 20 min (from start) or 5 min (after grace).
-        </Hint>
-        <SaveButton
-          pending={saving === "rounding"}
-          onClick={() => saveCard("rounding", { deduction_rounding: rounding, deduction_block_minutes: Number(block), late_minutes_from: lateFrom, daily_deduction_cap: Number(cap) })}
-        />
-      </PolicySection>
-
-      <Divider />
 
       {/* Daily-rate basis. */}
       <PolicySection
@@ -696,6 +714,16 @@ function PolicySection({
 
 function Hint({ children }: { children: ReactNode }) {
   return <p className="text-xs text-muted-foreground">{children}</p>;
+}
+
+// Subsection heading inside a combined policy card.
+function SubHeading({ children }: { children: ReactNode }) {
+  return <p className="text-[13px] font-semibold text-foreground">{children}</p>;
+}
+
+// Light divider between subsections of one card.
+function SubDivider() {
+  return <div className="h-px w-full bg-border" />;
 }
 
 // Per-card save — each policy section saves only its own fields (partial update).
