@@ -5,6 +5,7 @@ use App\Modules\Crm\Controllers\ActivityController;
 use App\Modules\Crm\Controllers\Auth\MeController;
 use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
+use App\Modules\Crm\Controllers\BusinessRuleController;
 use App\Modules\Crm\Controllers\CallController;
 use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
@@ -311,6 +312,31 @@ Route::prefix('v1/crm')->group(function (): void {
             // Admin/Super-Admin only; the response is labelled Interim (R-10).
             Route::middleware('role:super_admin|crm_admin')
                 ->get('/bd-ranking', [DashboardController::class, 'bdRanking']);
+        });
+
+        // Settings → Business Rules (Business Rules Administration). The single administration surface
+        // for configurable business computations — configuration only, never computed results. `{module}`
+        // is constrained to the enabled modules (v1: lead_scoring); reserved modules (kpi/ranking) 404
+        // until approved. Reads gate on crm.business_rules.view, writes on crm.business_rules.manage.
+        // Publish/rollback endpoints arrive with the Publish/Rollback integration step.
+        Route::prefix('settings/business-rules')->whereIn('module', ['lead_scoring'])->group(function () {
+            Route::middleware('permission:crm.business_rules.view')->group(function () {
+                Route::get('/{module}/active', [BusinessRuleController::class, 'active']);
+                Route::get('/{module}/draft', [BusinessRuleController::class, 'draft']);
+                Route::get('/{module}/versions', [BusinessRuleController::class, 'versions']);
+                Route::get('/{module}/versions/{version}', [BusinessRuleController::class, 'version'])->whereNumber('version');
+                Route::get('/{module}/audit', [BusinessRuleController::class, 'audit']);
+            });
+
+            Route::middleware('permission:crm.business_rules.manage')->group(function () {
+                Route::post('/{module}/draft', [BusinessRuleController::class, 'ensureDraft']);
+                Route::delete('/{module}/draft', [BusinessRuleController::class, 'discardDraft']);
+                // `/rules/order` is declared BEFORE `/rules/{ruleKey}` so "order" is never captured as a key.
+                Route::patch('/{module}/rules/order', [BusinessRuleController::class, 'reorder']);
+                Route::patch('/{module}/rules/{ruleKey}', [BusinessRuleController::class, 'updateRule']);
+                Route::post('/{module}/rules/{ruleKey}/enable', [BusinessRuleController::class, 'enableRule']);
+                Route::post('/{module}/rules/{ruleKey}/disable', [BusinessRuleController::class, 'disableRule']);
+            });
         });
     });
 });
