@@ -19,12 +19,20 @@ class WorkSchedule extends Model
         'end_time',
         'grace_minutes',
         'is_default',
+        'unpaid_break_minutes',
+        'paid_break_minutes',
+        'am_start_time',
+        'am_end_time',
+        'pm_start_time',
+        'pm_end_time',
     ];
 
     protected $casts = [
         'workdays' => 'array',
         'grace_minutes' => 'integer',
         'is_default' => 'boolean',
+        'unpaid_break_minutes' => 'integer',
+        'paid_break_minutes' => 'integer',
     ];
 
     public function employees(): HasMany

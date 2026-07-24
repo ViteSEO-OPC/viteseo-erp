@@ -101,12 +101,18 @@ export default function RulesPage() {
 // Column widths shared by the header and every row so they line up. Matches the
 // Figma frame (Schedule / Workdays / Hours / Grace / Actions).
 const COL = {
-  schedule: "w-[30%] min-w-[150px]",
-  workdays: "flex-1 min-w-[160px]",
-  hours: "w-[130px]",
+  schedule: "w-[26%] min-w-[150px]",
+  workdays: "flex-1 min-w-[140px]",
+  hours: "w-[120px]",
+  paid: "w-[120px]",
   grace: "w-[90px]",
   actions: "w-[80px]",
 };
+
+function paidDayLabel(mins: number | null): string {
+  if (mins == null) return "—";
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
 
 function SchedulesTable({
   rows,
@@ -120,12 +126,13 @@ function SchedulesTable({
   return (
     <div className="w-full overflow-hidden rounded-lg border border-border bg-card">
       <div className="overflow-x-auto">
-        <div className="min-w-[720px]">
+        <div className="min-w-[820px]">
           {/* Header strip — shaded, uppercase gray labels. */}
           <div className="flex items-center gap-4 border-b border-border bg-muted/60 px-5 py-3 text-label font-bold uppercase tracking-wide text-muted-foreground">
             <div className={COL.schedule}>Schedule</div>
             <div className={COL.workdays}>Workdays</div>
             <div className={COL.hours}>Hours</div>
+            <div className={COL.paid}>Paid day</div>
             <div className={COL.grace}>Grace</div>
             <div className={cn(COL.actions, "text-right")}>Actions</div>
           </div>
@@ -153,6 +160,12 @@ function SchedulesTable({
                 </div>
                 <div className={cn(COL.hours, "text-sm text-foreground")}>
                   {s.start_time}–{s.end_time}
+                </div>
+                <div className={cn(COL.paid, "text-sm text-foreground")}>
+                  {paidDayLabel(s.expected_minutes)}
+                  <span className="block text-xs text-muted-foreground">
+                    {s.unpaid_break_minutes}m lunch
+                  </span>
                 </div>
                 <div className={cn(COL.grace, "text-sm text-foreground")}>
                   {s.grace_minutes} min
