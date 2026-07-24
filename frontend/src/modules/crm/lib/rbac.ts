@@ -115,8 +115,13 @@ export const PAGE_ACCESS: PageAccess[] = [
   // vs Management Dashboard) — chosen in the page, not by routing.
   { href: "/zerem/dashboard", minRole: "crm_bd" },
   { href: "/zerem/leads", minRole: "crm_bd" },
-  { href: "/zerem/nearby-clients", minRole: "crm_bd" },
-  { href: "/zerem/follow-ups", minRole: "crm_bd" },
+  // Nearby Clients + Outreach are Business Development workspaces (🔒 PO decision 2026-07-24, RBAC R-3).
+  // Admin (CRM Manager) is limited to Dashboard · Leads · Reports & Performance · Activity Logs ·
+  // Settings, so these use an explicit allow-list rather than `minRole` — which is inherit-upward and
+  // therefore handed them to Admin. Super Admin is listed explicitly because it has full system access
+  // and must NOT be excluded by the allow-list.
+  { href: "/zerem/nearby-clients", allowedRoles: ["crm_bd", "super_admin"] },
+  { href: "/zerem/follow-ups", allowedRoles: ["crm_bd", "super_admin"] },
   // Planner (personal BD workspace) — first consumer of the `allowedRoles` allow-list: visible
   // ONLY to Business Development Managers; hidden from Admin/Super Admin (who outrank but do not
   // own a Planner). The backend `calendar.*` permissions + PlannerEvent ownership are unchanged.

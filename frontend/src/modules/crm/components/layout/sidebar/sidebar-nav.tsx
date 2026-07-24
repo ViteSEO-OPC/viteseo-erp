@@ -30,13 +30,18 @@ const NAV_ITEMS: {
   // Management Dashboard for Admin/SA) — see app/(dashboard)/dashboard/page.tsx.
   { label: "Dashboard", icon: LayoutDashboard, href: "/zerem/dashboard", minRole: "crm_bd" },
   { label: "Leads", icon: Users, href: "/zerem/leads", minRole: "crm_bd" },
-  // Nearby Clients — territory/location surface. Data foundation live; interactive map deferred
-  // until Lead Enrichment + geocoding supply coordinates. Target-area management is Admin-only.
-  { label: "Nearby Clients", icon: MapPin, href: "/zerem/nearby-clients", minRole: "crm_bd" },
+  // Nearby Clients + Outreach — Business Development workspaces (🔒 PO decision 2026-07-24, RBAC R-3).
+  // Admin (CRM Manager) is limited to Dashboard · Leads · Reports & Performance · Activity Logs ·
+  // Settings, so both use an explicit allow-list: `minRole` is inherit-upward and was handing them to
+  // Admin. Super Admin is listed explicitly — it has full system access and must not be excluded.
+  //
+  // Nearby Clients — territory/location surface. Data foundation live; interactive map deferred until
+  // Lead Enrichment + geocoding supply coordinates.
+  { label: "Nearby Clients", icon: MapPin, href: "/zerem/nearby-clients", allowedRoles: ["crm_bd", "super_admin"] },
   // Outreach: badge = real count of pending "Follow-ups Pending" items (the shared
   // `isPendingOutreachEvent` definition over the Planner query — see useSidebarBadges). No badge when
   // the count is zero.
-  { label: "Outreach", icon: Clock, href: "/zerem/follow-ups", minRole: "crm_bd" },
+  { label: "Outreach", icon: Clock, href: "/zerem/follow-ups", allowedRoles: ["crm_bd", "super_admin"] },
   // Planner (personal BD workspace) — first consumer of the generic `allowedRoles` allow-list:
   // shown ONLY to Business Development Managers, hidden from Admin/Super Admin. Badge = real count of
   // actionable (dated, not-completed) Planner items for the current user; no badge when zero.
