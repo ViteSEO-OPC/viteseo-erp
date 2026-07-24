@@ -41,13 +41,15 @@ class ReimbursementService
 
     /**
      * @param  array<string, mixed>  $data
+     * @param  array<int, UploadedFile>  $receipts
      */
-    public function create(Employee $employee, array $data, ?UploadedFile $receipt = null): Reimbursement
+    public function create(Employee $employee, array $data, array $receipts = []): Reimbursement
     {
-        // Store the receipt on the public disk so it's viewable via /storage.
-        $path = $receipt
-            ? $receipt->store('receipts', 'public')
-            : null;
+        // Store each receipt on the public disk so it's viewable via /storage.
+        $paths = array_values(array_map(
+            static fn (UploadedFile $file): string => $file->store('receipts', 'public'),
+            $receipts,
+        ));
 
         $claim = Reimbursement::create([
             'employee_id' => $employee->id,
@@ -55,7 +57,7 @@ class ReimbursementService
             'amount' => $data['amount'],
             'expense_date' => $data['expense_date'],
             'description' => $data['description'],
-            'receipt_path' => $path,
+            'receipt_paths' => $paths ?: null,
             'status' => 'pending',
         ])->load(['employee.user']);
 

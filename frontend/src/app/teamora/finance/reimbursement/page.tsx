@@ -85,17 +85,22 @@ export default function ReimbursementPage() {
       cell: (c) => (
         <span className="flex items-center gap-1.5 text-muted-foreground">
           {c.description}
-          {c.receipt_url && (
+          {c.receipt_urls.map((url, i) => (
             <a
-              href={c.receipt_url}
+              key={url}
+              href={url}
               target="_blank"
               rel="noopener noreferrer"
               className="text-brand hover:opacity-80"
-              title="View receipt"
+              title={
+                c.receipt_urls.length > 1
+                  ? `View receipt ${i + 1} of ${c.receipt_urls.length}`
+                  : "View receipt"
+              }
             >
               <Paperclip className="size-3.5" />
             </a>
-          )}
+          ))}
         </span>
       ),
     },

@@ -17,7 +17,11 @@ import {
   useAttendancePolicy,
   useUpdateAttendancePolicy,
 } from "@/modules/hr/hooks/use-rules";
-import { formatWorkdays, type WorkSchedule } from "@/modules/hr/types/rules";
+import {
+  formatWorkdays,
+  type LateDeductionMode,
+  type WorkSchedule,
+} from "@/modules/hr/types/rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
 export default function RulesPage() {
@@ -218,7 +222,7 @@ function AttendancePolicyEditor() {
   const [lates, setLates] = useState(String(policy?.consecutive_lates_before_absence ?? 3));
   const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
   const [awol, setAwol] = useState(String(policy?.awol_days_threshold ?? 3));
-  const [lateMode, setLateMode] = useState<"none" | "per_lates">(policy?.late_deduction_mode ?? "none");
+  const [lateMode, setLateMode] = useState<LateDeductionMode>(policy?.late_deduction_mode ?? "none");
   const [latesPerDeduction, setLatesPerDeduction] = useState(String(policy?.lates_per_deduction ?? 3));
   const [english, setEnglish] = useState(policy?.task_format?.require_english ?? true);
   const [uppercase, setUppercase] = useState(policy?.task_format?.uppercase ?? true);

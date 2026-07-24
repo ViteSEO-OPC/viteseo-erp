@@ -20,6 +20,7 @@ class Reimbursement extends Model
         'expense_date',
         'description',
         'receipt_path',
+        'receipt_paths',
         'status',
         'payroll_run_id',
         'reviewed_at',
@@ -31,7 +32,25 @@ class Reimbursement extends Model
         'amount' => 'decimal:2',
         'expense_date' => 'date',
         'reviewed_at' => 'datetime',
+        'receipt_paths' => 'array',
     ];
+
+    /**
+     * All stored receipt paths for this claim, merging the legacy single-path
+     * column with the multi-file array. Older rows only have `receipt_path`.
+     *
+     * @return array<int, string>
+     */
+    public function allReceiptPaths(): array
+    {
+        $paths = $this->receipt_paths ?? [];
+
+        if ($this->receipt_path) {
+            array_unshift($paths, $this->receipt_path);
+        }
+
+        return array_values(array_unique(array_filter($paths)));
+    }
 
     public function employee(): BelongsTo
     {

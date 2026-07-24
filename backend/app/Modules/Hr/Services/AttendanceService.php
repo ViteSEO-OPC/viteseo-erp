@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\Attendance;
+use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\EarlyOutRequest;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\HalfDayRequest;
@@ -20,6 +21,8 @@ class AttendanceService
         private readonly ScheduleService $schedule,
         private readonly ViolationService $violations,
         private readonly AttendancePolicyService $policy,
+        private readonly AuditService $audit,
+        private readonly DeductionService $deduction,
     ) {}
 
     private function localNow(): Carbon
@@ -183,6 +186,18 @@ class AttendanceService
             'work_date' => $workDate,
         ]);
 
+        // F-7: capture the row BEFORE it is overwritten. An HR edit to time_in is an edit
+        // to someone's attendance record — and once minutes become money, to their pay.
+        // adjust() overwrites in place, so without this the old values are destroyed.
+        $wasExisting = $att->exists;
+        $before = $wasExisting ? [
+            'time_in' => $att->time_in?->toIso8601String(),
+            'time_out' => $att->time_out?->toIso8601String(),
+            'status' => $att->status,
+            'hours_worked' => (float) $att->hours_worked,
+            'note' => $att->note,
+        ] : null;
+
         // Status is DERIVED from the times, never sent by the client: no time-in means
         // absent; otherwise present vs late is decided against the employee's effective
         // schedule (start + grace) for that day — the same rule as a live clock-in.
@@ -219,6 +234,25 @@ class AttendanceService
         // and the nightly management job will now leave it alone.
         $att->source = Attendance::SOURCE_MANUAL;
         $att->save();
+
+        // F-7: log the correction with before/after. Every other service in the module
+        // audit-logs its writes; this one silently rewrote attendance until now.
+        $employee->loadMissing('user');
+        $name = $employee->user?->name ?? $employee->name;
+        $this->audit->log(
+            $wasExisting ? 'updated' : 'created',
+            'Attendance',
+            ($wasExisting ? 'Adjusted' : 'Created') . " attendance for {$name} on {$workDate}",
+            $att,
+            $before,
+            [
+                'time_in' => $att->time_in?->toIso8601String(),
+                'time_out' => $att->time_out?->toIso8601String(),
+                'status' => $att->status,
+                'hours_worked' => (float) $att->hours_worked,
+                'note' => $att->note,
+            ],
+        );
 
         // A correction can change someone's flags — keep them in sync.
         $this->violations->recompute();
@@ -433,11 +467,21 @@ class AttendanceService
      */
     public function unpaidDaysFor(Employee $employee, string $start, string $end): float
     {
+        return $this->unpaidDaysDetailFor($employee, $start, $end)->unpaidDays;
+    }
+
+    /**
+     * Like unpaidDaysFor(), but also returns the minute-level late/undertime breakdown so
+     * the payslip can explain its deduction (step 4b). The total is identical to
+     * unpaidDaysFor(); the breakdown is all-zero until a per-hour/tiered mode is enabled.
+     */
+    public function unpaidDaysDetailFor(Employee $employee, string $start, string $end): UnpaidDaysResult
+    {
         // Management staff are on a FIXED salary — they never accrue unpaid days,
         // regardless of the caller. Guarding here (not only in PayrollService) keeps
         // any future caller correct.
         if ($employee->isManagement()) {
-            return 0.0;
+            return new UnpaidDaysResult(0.0);
         }
 
         $tz = config('app.timezone_local');
@@ -456,13 +500,13 @@ class AttendanceService
             ->whereDate('end_date', '>=', $start)
             ->get();
 
-        // Approved half-day requests per date (AM + PM on one day → 2 halves = a full day).
-        $halfDayCounts = HalfDayRequest::where('employee_id', $employee->id)
+        // Approved half-day requests per date, keeping the AM/PM period (F-3 needs to know
+        // which half was worked). AM + PM on one day → 2 halves = a full day.
+        $halfDays = HalfDayRequest::where('employee_id', $employee->id)
             ->where('status', 'approved')
             ->whereBetween('work_date', [$start, $end])
             ->get()
-            ->groupBy(fn ($h) => $h->work_date->toDateString())
-            ->map->count();
+            ->groupBy(fn ($h) => $h->work_date->toDateString());
 
         // Approved early-out (undertime) requests per date — each deducts a fraction of
         // a day (undertime hours ÷ scheduled hours), applied only to days actually worked.
@@ -472,8 +516,19 @@ class AttendanceService
             ->get()
             ->groupBy(fn ($e) => $e->work_date->toDateString());
 
+        $policy = $this->policy->get();
+        // Fast path: with no per-minute mode on, DeductionService always returns zero, so
+        // skip building any context — the loop then behaves exactly as it did pre-Slice-2.
+        $deductionsActive = in_array($policy->late_deduction_mode, ['per_hour', 'tiered'], true)
+            || $policy->undertime_deduction_mode === 'per_hour';
+
         $unpaid = 0.0;
         $lateCount = 0;
+        $lateMinutes = 0;
+        $undertimeMinutes = 0;
+        $lateDays = 0.0;
+        $undertimeDays = 0.0;
+        $flags = [];
 
         for ($d = Carbon::parse($start, $tz)->startOfDay(); $d->lte($last); $d->addDay()) {
             $eff = $this->schedule->effectiveFor($employee, $d);
@@ -495,26 +550,58 @@ class AttendanceService
                 continue;
             }
 
-            // Approved half-day request(s): 0.5 each — deducted from pay, the other
-            // half is assumed worked/paid, so skip the attendance classification.
-            if ($halves = ($halfDayCounts[$dateStr] ?? 0)) {
-                $unpaid += 0.5 * $halves;
+            $row = $rows->get($dateStr);
 
-                continue;
+            // Approved half-day request(s): 0.5 each. With two halves the whole day is off.
+            // With one half off, the employee is expected to work the OTHER half — so a
+            // per-minute mode still prices late/undertime against that half (F-3).
+            if ($dayHalves = ($halfDays[$dateStr] ?? null)) {
+                $halfUnpaid = 0.5 * $dayHalves->count();
+                $unpaid += $halfUnpaid;
+
+                if ($deductionsActive && $dayHalves->count() === 1 && $row && $row->time_in) {
+                    $ded = $this->deduction->forDay(
+                        $this->deductionCtx($row, $eff, $policy, (string) $dayHalves->first()->period, 1.0 - $halfUnpaid, isset($earlyOuts[$dateStr])),
+                        $policy,
+                    );
+                    $unpaid += $ded->unpaidFraction;
+                    $lateMinutes += $ded->lateMinutes;
+                    $undertimeMinutes += $ded->undertimeMinutes;
+                    $lateDays += $ded->lateFraction;
+                    $undertimeDays += $ded->undertimeFraction;
+                    $flags = array_merge($flags, $ded->flags);
+                }
+
+                continue; // the half-day itself is handled; skip absence classification
             }
 
-            $row = $rows->get($dateStr);
             if ($row && $row->status === 'late') {
                 $lateCount++;
             }
             if ($row && $row->time_in) {
-                // Present/late day is paid, but an approved early-out that day deducts
-                // the undertime fraction (capped so one day never exceeds a day's pay).
-                $frac = 0.0;
+                // Present/late day is paid. An approved early-out deducts its undertime
+                // fraction (unchanged, ÷ scheduled span); clock-derived late/undertime is
+                // priced by DeductionService (÷ 8) only when a mode is on. The two never
+                // double-charge — DeductionService skips a day an early-out governs.
+                $eoFrac = 0.0;
                 foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
-                    $frac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
                 }
-                $unpaid += min(1.0, $frac);
+                $eoFrac = min(1.0, $eoFrac);
+                $unpaid += $eoFrac;
+
+                if ($deductionsActive) {
+                    $ded = $this->deduction->forDay(
+                        $this->deductionCtx($row, $eff, $policy, null, 1.0 - $eoFrac, isset($earlyOuts[$dateStr])),
+                        $policy,
+                    );
+                    $unpaid += $ded->unpaidFraction;
+                    $lateMinutes += $ded->lateMinutes;
+                    $undertimeMinutes += $ded->undertimeMinutes;
+                    $lateDays += $ded->lateFraction;
+                    $undertimeDays += $ded->undertimeFraction;
+                    $flags = array_merge($flags, $ded->flags);
+                }
 
                 continue; // present or late → the day itself is paid
             }
@@ -530,12 +617,70 @@ class AttendanceService
         }
 
         // Tardiness penalty: every N lates in the range costs one day's pay.
-        $policy = $this->policy->get();
         if ($policy->late_deduction_mode === 'per_lates' && $policy->lates_per_deduction > 0) {
             $unpaid += intdiv($lateCount, (int) $policy->lates_per_deduction);
         }
 
-        return $unpaid;
+        return new UnpaidDaysResult(
+            unpaidDays: $unpaid,
+            lateMinutes: $lateMinutes,
+            undertimeMinutes: $undertimeMinutes,
+            lateDays: round($lateDays, 6),
+            undertimeDays: round($undertimeDays, 6),
+            flags: array_values(array_unique($flags)),
+        );
+    }
+
+    /**
+     * Build the DeductionService context for one worked day: schedule window + break
+     * facts + the clock times as Manila minute-of-day.
+     *
+     * @param  array<string, mixed>  $eff
+     * @return array<string, mixed>
+     */
+    private function deductionCtx(Attendance $row, array $eff, AttendancePolicy $policy, ?string $halfDayOff, float $capRemaining, bool $governedByEarlyOut): array
+    {
+        return [
+            'start_min' => $this->hmToMinutes($eff['start_time'] ?? null),
+            'end_min' => $this->hmToMinutes($eff['end_time'] ?? null),
+            'grace_min' => (int) ($eff['grace_minutes'] ?? 0),
+            'am_start_min' => $this->hmToMinutes($eff['am_start_time'] ?? null),
+            'am_end_min' => $this->hmToMinutes($eff['am_end_time'] ?? null),
+            'pm_start_min' => $this->hmToMinutes($eff['pm_start_time'] ?? null),
+            'pm_end_min' => $this->hmToMinutes($eff['pm_end_time'] ?? null),
+            'time_in_min' => $this->clockToMinutes($row->time_in),
+            'time_out_min' => $this->clockToMinutes($row->time_out),
+            'half_day_off' => $halfDayOff,
+            'governed_by_early_out' => $governedByEarlyOut,
+            // Force-majeure amnesty needs a new hr_daily_overrides.deduction_amnesty column
+            // (audit §9) — not built yet, so no day is amnestied. Follow-up before enabling.
+            'amnesty' => false,
+            'cap_remaining' => $capRemaining,
+            'break_minutes' => (int) $row->break_minutes,
+            'lunch_minutes' => (int) $row->lunch_minutes,
+        ];
+    }
+
+    /** 'HH:MM' → minute-of-day, or null. */
+    private function hmToMinutes(?string $hm): ?int
+    {
+        if (! $hm) {
+            return null;
+        }
+        [$h, $m] = array_map('intval', explode(':', substr($hm, 0, 5)));
+
+        return $h * 60 + $m;
+    }
+
+    /** A stored (UTC) clock time → Manila minute-of-day, or null. */
+    private function clockToMinutes(?Carbon $dt): ?int
+    {
+        if (! $dt) {
+            return null;
+        }
+        $local = $dt->copy()->setTimezone(config('app.timezone_local'));
+
+        return $local->hour * 60 + $local->minute;
     }
 
     // --- helpers ---

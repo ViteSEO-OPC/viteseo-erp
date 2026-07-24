@@ -18,12 +18,15 @@ class PayrollRun extends Model
         'cycle_start', 'cycle_end', 'frequency', 'status',
         'total_gross', 'total_deductions', 'total_net',
         'employee_count', 'run_at', 'run_by',
+        // Step 4b — the attendance policy as it stood when this run executed.
+        'policy_snapshot',
     ];
 
     protected $casts = [
         'cycle_start' => 'date',
         'cycle_end' => 'date',
         'run_at' => 'datetime',
+        'policy_snapshot' => 'array',
         'total_gross' => 'decimal:2',
         'total_deductions' => 'decimal:2',
         'total_net' => 'decimal:2',
