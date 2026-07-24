@@ -16,6 +16,7 @@ import {
   useDeleteWorkSchedule,
   useAttendancePolicy,
   useUpdateAttendancePolicy,
+  usePreviewDeductions,
 } from "@/modules/hr/hooks/use-rules";
 import {
   formatWorkdays,
@@ -221,9 +222,14 @@ function AttendancePolicyForm() {
   );
 }
 
+function peso(n: number): string {
+  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(n);
+}
+
 function AttendancePolicyEditor() {
   const { data: policy } = useAttendancePolicy();
   const update = useUpdateAttendancePolicy();
+  const preview = usePreviewDeductions();
 
   // Flag thresholds + task format (existing).
   const [lates, setLates] = useState(String(policy?.consecutive_lates_before_absence ?? 3));
@@ -259,32 +265,44 @@ function AttendancePolicyEditor() {
   // Break limit (flag only).
   const [maxBreak, setMaxBreak] = useState(String(policy?.max_break_minutes_per_day ?? 120));
 
+  function payload() {
+    return {
+      consecutive_lates_before_absence: Number(lates),
+      monthly_late_reset: monthlyReset,
+      awol_days_threshold: Number(awol),
+      task_format: { require_english: english, uppercase },
+      late_deduction_mode: lateMode,
+      lates_per_deduction: Number(latesPerDeduction),
+      undertime_deduction_mode: undertimeMode,
+      missing_clockout_mode: missingClockout,
+      early_arrival_mode: earlyArrival,
+      overtime_mode: overtimeMode,
+      overtime_threshold_minutes: Number(overtimeThreshold),
+      deduction_rounding: rounding,
+      deduction_block_minutes: Number(block),
+      late_minutes_from: lateFrom,
+      daily_deduction_cap: Number(cap),
+      daily_rate_basis: rateBasis,
+      annual_divisor: Number(divisor),
+      hours_per_day_divisor: Number(hoursPerDay),
+      max_break_minutes_per_day: Number(maxBreak),
+    };
+  }
+
   async function save() {
     try {
-      await update.mutateAsync({
-        consecutive_lates_before_absence: Number(lates),
-        monthly_late_reset: monthlyReset,
-        awol_days_threshold: Number(awol),
-        task_format: { require_english: english, uppercase },
-        late_deduction_mode: lateMode,
-        lates_per_deduction: Number(latesPerDeduction),
-        undertime_deduction_mode: undertimeMode,
-        missing_clockout_mode: missingClockout,
-        early_arrival_mode: earlyArrival,
-        overtime_mode: overtimeMode,
-        overtime_threshold_minutes: Number(overtimeThreshold),
-        deduction_rounding: rounding,
-        deduction_block_minutes: Number(block),
-        late_minutes_from: lateFrom,
-        daily_deduction_cap: Number(cap),
-        daily_rate_basis: rateBasis,
-        annual_divisor: Number(divisor),
-        hours_per_day_divisor: Number(hoursPerDay),
-        max_break_minutes_per_day: Number(maxBreak),
-      });
+      await update.mutateAsync(payload());
       toast.success("Policy saved");
     } catch {
       toast.error("Could not save the policy.");
+    }
+  }
+
+  async function runPreview() {
+    try {
+      await preview.mutateAsync(payload());
+    } catch {
+      toast.error("Could not run the preview.");
     }
   }
 
@@ -525,9 +543,35 @@ function AttendancePolicyEditor() {
           <CheckBox checked={english} onChange={setEnglish} label="Require English" />
           <CheckBox checked={uppercase} onChange={setUppercase} label="Uppercase" />
         </div>
-        <Button onClick={save} disabled={update.isPending}>
-          {update.isPending ? "Saving…" : "Save Policy"}
-        </Button>
+
+        {/* Dry-run preview (step 6b): what these settings WOULD cost last period. */}
+        {preview.data && (
+          <div className="rounded-lg border border-border bg-muted/40 p-4">
+            {preview.data.employees_considered === 0 ? (
+              <p className="text-sm text-muted-foreground">No completed pay period to preview yet.</p>
+            ) : (
+              <p className="text-sm text-foreground">
+                If these settings had been active for{" "}
+                <strong>
+                  {preview.data.period.start} – {preview.data.period.end}
+                </strong>
+                :{" "}
+                <strong>{peso(preview.data.total_deduction)}</strong> total time-based deduction
+                across <strong>{preview.data.employees_affected}</strong> of{" "}
+                {preview.data.employees_considered} employees. Nothing has been saved.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-3">
+          <Button onClick={save} disabled={update.isPending}>
+            {update.isPending ? "Saving…" : "Save Policy"}
+          </Button>
+          <Button variant="outline" onClick={runPreview} disabled={preview.isPending}>
+            {preview.isPending ? "Calculating…" : "Preview impact"}
+          </Button>
+        </div>
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import type {
   WorkSchedule,
   WorkScheduleInput,
   AttendancePolicy,
+  DeductionPreview,
   EmployeeSchedule,
   EmployeeScheduleInput,
 } from "@/modules/hr/types/rules";
@@ -42,6 +43,14 @@ export async function updateAttendancePolicy(
   input: Partial<Omit<AttendancePolicy, "id">>,
 ): Promise<AttendancePolicy> {
   const res = await apiClient.put("/hr/attendance-policy", input);
+  return res.data.data;
+}
+
+// Dry-run: what the PROPOSED policy would have deducted last period (nothing saved).
+export async function previewDeductions(
+  input: Partial<Omit<AttendancePolicy, "id">>,
+): Promise<DeductionPreview> {
+  const res = await apiClient.post("/hr/attendance-policy/preview", input);
   return res.data.data;
 }
 

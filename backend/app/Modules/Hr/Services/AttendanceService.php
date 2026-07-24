@@ -475,7 +475,7 @@ class AttendanceService
      * the payslip can explain its deduction (step 4b). The total is identical to
      * unpaidDaysFor(); the breakdown is all-zero until a per-hour/tiered mode is enabled.
      */
-    public function unpaidDaysDetailFor(Employee $employee, string $start, string $end): UnpaidDaysResult
+    public function unpaidDaysDetailFor(Employee $employee, string $start, string $end, ?AttendancePolicy $policyOverride = null): UnpaidDaysResult
     {
         // Management staff are on a FIXED salary — they never accrue unpaid days,
         // regardless of the caller. Guarding here (not only in PayrollService) keeps
@@ -516,7 +516,9 @@ class AttendanceService
             ->get()
             ->groupBy(fn ($e) => $e->work_date->toDateString());
 
-        $policy = $this->policy->get();
+        // A transient policy (preview/dry-run) can be passed to price a period under
+        // PROPOSED values without touching the saved singleton (step 6b).
+        $policy = $policyOverride ?? $this->policy->get();
         // Fast path: with no per-minute mode on, DeductionService always returns zero, so
         // skip building any context — the loop then behaves exactly as it did pre-Slice-2.
         $deductionsActive = in_array($policy->late_deduction_mode, ['per_hour', 'tiered'], true)
