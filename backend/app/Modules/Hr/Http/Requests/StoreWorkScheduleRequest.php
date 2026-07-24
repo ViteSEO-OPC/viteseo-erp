@@ -24,6 +24,12 @@ class StoreWorkScheduleRequest extends FormRequest
             'start_time' => ['required', 'date_format:H:i'],
             'end_time' => ['required', 'date_format:H:i'],
             'grace_minutes' => ['nullable', 'integer', 'min:0', 'max:240'],
+            'unpaid_break_minutes' => ['nullable', 'integer', 'min:0', 'max:480'],
+            'paid_break_minutes' => ['nullable', 'integer', 'min:0', 'max:480'],
+            'am_start_time' => ['nullable', 'date_format:H:i'],
+            'am_end_time' => ['nullable', 'date_format:H:i'],
+            'pm_start_time' => ['nullable', 'date_format:H:i'],
+            'pm_end_time' => ['nullable', 'date_format:H:i'],
             'is_default' => ['boolean'],
         ];
     }

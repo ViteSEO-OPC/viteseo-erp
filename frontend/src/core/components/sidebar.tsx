@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { Zap, User, LogOut, ChevronUp, ChevronDown, Repeat, LayoutGrid } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -135,13 +135,26 @@ function NavGroupItem({
   );
 }
 
-export function Sidebar({ variant }: { variant: ShellVariant }) {
+export function Sidebar({
+  variant,
+  canSwitchView = false,
+  onSwitchView,
+}: {
+  variant: ShellVariant;
+  /**
+   * Whether to offer the HR ⇄ employee view toggle. The owning portal decides —
+   * this used to be a `hasRole("hr_officer")` check here, which disagreed with the
+   * portal's own rule and hid the control from super admins. One authority only:
+   * TeamOra passes `useViewMode().canSwitch`.
+   */
+  canSwitchView?: boolean;
+  /** Perform the switch. Without it the control does nothing, so it isn't shown. */
+  onSwitchView?: () => void;
+}) {
   const pathname = usePathname();
-  const router = useRouter();
   const { user, roles, permissions, employee, logout, hasRole } = useAuth();
   const { navBadges } = useNotificationCenter();
   const [menuOpen, setMenuOpen] = useState(false);
-  const canSwitchView = hasRole("hr_officer");
   // Multi-system users get a "Switch app" jump back to the launcher.
   const canSwitchApp =
     getAccessibleModules(roles as unknown as string[], permissions).length > 1;
@@ -209,12 +222,12 @@ export function Sidebar({ variant }: { variant: ShellVariant }) {
                   Switch app
                 </Link>
               )}
-              {canSwitchView && (
+              {canSwitchView && onSwitchView && (
                 <button
                   type="button"
                   onClick={() => {
                     setMenuOpen(false);
-                    router.push("/teamora");
+                    onSwitchView();
                   }}
                   className="flex w-full items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted"
                 >

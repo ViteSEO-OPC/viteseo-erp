@@ -28,12 +28,29 @@ import { TimePicker } from "@/modules/hr/ui/time-picker";
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+const OPT_TIME = z.string().regex(TIME_RE, "Use HH:MM").or(z.literal(""));
+
+function toMinutes(hm: string): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(hm);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+function formatDuration(mins: number): string {
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
 const schema = z.object({
   name: z.string().min(1, "Name is required").max(255),
   workdays: z.array(z.number()).min(1, "Pick at least one workday"),
   start_time: z.string().regex(TIME_RE, "Use HH:MM"),
   end_time: z.string().regex(TIME_RE, "Use HH:MM"),
   grace_minutes: z.coerce.number().min(0).max(240),
+  unpaid_break_minutes: z.coerce.number().min(0).max(480),
+  paid_break_minutes: z.coerce.number().min(0).max(480),
+  am_start_time: OPT_TIME,
+  am_end_time: OPT_TIME,
+  pm_start_time: OPT_TIME,
+  pm_end_time: OPT_TIME,
   is_default: z.boolean(),
 });
 
@@ -42,9 +59,15 @@ type FormValues = z.input<typeof schema>;
 const DEFAULTS: FormValues = {
   name: "",
   workdays: [1, 2, 3, 4, 5],
-  start_time: "09:00",
+  start_time: "08:00",
   end_time: "18:00",
   grace_minutes: 15,
+  unpaid_break_minutes: 60,
+  paid_break_minutes: 20,
+  am_start_time: "",
+  am_end_time: "",
+  pm_start_time: "",
+  pm_end_time: "",
   is_default: false,
 };
 
@@ -66,8 +89,18 @@ export function WorkScheduleFormDialog({
     handleSubmit,
     reset,
     control,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: DEFAULTS });
+
+  // Live "paid day" = (end − start) − unpaid meal. Null when the window is incomplete.
+  const startMin = toMinutes(watch("start_time") ?? "");
+  const endMin = toMinutes(watch("end_time") ?? "");
+  const unpaidBreak = Number(watch("unpaid_break_minutes")) || 0;
+  const paidMinutes =
+    startMin !== null && endMin !== null && endMin > startMin
+      ? Math.max(0, endMin - startMin - unpaidBreak)
+      : null;
 
   useEffect(() => {
     if (open) {
@@ -79,6 +112,12 @@ export function WorkScheduleFormDialog({
               start_time: schedule.start_time,
               end_time: schedule.end_time,
               grace_minutes: schedule.grace_minutes,
+              unpaid_break_minutes: schedule.unpaid_break_minutes,
+              paid_break_minutes: schedule.paid_break_minutes,
+              am_start_time: schedule.am_start_time ?? "",
+              am_end_time: schedule.am_end_time ?? "",
+              pm_start_time: schedule.pm_start_time ?? "",
+              pm_end_time: schedule.pm_end_time ?? "",
               is_default: schedule.is_default,
             }
           : DEFAULTS,
@@ -93,6 +132,12 @@ export function WorkScheduleFormDialog({
       start_time: values.start_time,
       end_time: values.end_time,
       grace_minutes: Number(values.grace_minutes),
+      unpaid_break_minutes: Number(values.unpaid_break_minutes),
+      paid_break_minutes: Number(values.paid_break_minutes),
+      am_start_time: values.am_start_time || null,
+      am_end_time: values.am_end_time || null,
+      pm_start_time: values.pm_start_time || null,
+      pm_end_time: values.pm_end_time || null,
       is_default: values.is_default,
     };
     try {
@@ -201,6 +246,65 @@ export function WorkScheduleFormDialog({
               <Label htmlFor="ws-grace">Grace (min)</Label>
               <Input id="ws-grace" type="number" min="0" max="240" {...register("grace_minutes")} />
             </div>
+          </div>
+
+          {/* Breaks — the unpaid meal shortens the paid day; the paid break sits inside it. */}
+          <div className="space-y-1.5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="ws-unpaid-break">Lunch / unpaid break (min)</Label>
+                <Input id="ws-unpaid-break" type="number" min="0" max="480" {...register("unpaid_break_minutes")} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ws-paid-break">Paid break (min)</Label>
+                <Input id="ws-paid-break" type="number" min="0" max="480" {...register("paid_break_minutes")} />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Lunch is unpaid and shortens the paid day. The paid break stays inside it (used only to
+              flag over-long breaks, never to deduct pay).
+              {paidMinutes !== null && (
+                <>
+                  {" "}
+                  <span className="font-medium text-foreground">Paid day: {formatDuration(paidMinutes)}.</span>
+                </>
+              )}
+            </p>
+          </div>
+
+          {/* Half-day windows — optional; when set they let a half-day's hours be known, not guessed. */}
+          <div className="space-y-1.5">
+            <Label>Half-day windows (optional)</Label>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {(
+                [
+                  ["am_start_time", "AM start"],
+                  ["am_end_time", "AM end"],
+                  ["pm_start_time", "PM start"],
+                  ["pm_end_time", "PM end"],
+                ] as const
+              ).map(([fieldName, label]) => (
+                <div key={fieldName} className="space-y-1.5">
+                  <Label htmlFor={`ws-${fieldName}`} className="text-xs text-muted-foreground">
+                    {label}
+                  </Label>
+                  <Controller
+                    control={control}
+                    name={fieldName}
+                    render={({ field }) => (
+                      <TimePicker
+                        id={`ws-${fieldName}`}
+                        value={field.value ?? ""}
+                        onChange={field.onChange}
+                      />
+                    )}
+                  />
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              e.g. AM 08:00–12:00, PM 13:00–18:00. Leave blank to keep the default half-day handling.
+            </p>
           </div>
 
           <div className="flex items-center gap-2">

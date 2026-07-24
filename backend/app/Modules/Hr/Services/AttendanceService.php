@@ -215,6 +215,9 @@ class AttendanceService
         }
 
         $att->note = $data['note'] ?? null;
+        // A human just attested to this row, so it is no longer system-generated —
+        // and the nightly management job will now leave it alone.
+        $att->source = Attendance::SOURCE_MANUAL;
         $att->save();
 
         // A correction can change someone's flags — keep them in sync.
@@ -369,6 +372,8 @@ class AttendanceService
                     'flag' => $flags[$emp->id] ?? null,
                     'tasks' => $att?->tasks ?? [],
                     'note' => $att?->note,
+                    // Lets HR see at a glance which rows the platform generated.
+                    'source' => $att?->source,
                 ];
             })
             ->sortBy('name')

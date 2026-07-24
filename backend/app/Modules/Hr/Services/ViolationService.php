@@ -110,10 +110,14 @@ class ViolationService
 
         $latesBeforeAbsence = $this->policy->get()->consecutive_lates_before_absence;
 
-        // The earliest attendance record anywhere is our proxy for when the org began
-        // tracking attendance — nobody can be "absent" for a day before tracking existed.
-        // (Swap for an explicit go-live/config date if one is ever added.)
-        $trackingStart = Attendance::min('work_date');
+        // The earliest HUMAN-ENTERED attendance record anywhere is our proxy for when the
+        // org began tracking attendance — nobody can be "absent" for a day before tracking
+        // existed. (Swap for an explicit go-live/config date if one is ever added.)
+        //
+        // System-generated rows are excluded deliberately: a management backfill reaching
+        // further back than the real records would drag this floor with it and turn every
+        // untracked day before go-live into an absence for EVERY employee.
+        $trackingStart = Attendance::where('source', Attendance::SOURCE_MANUAL)->min('work_date');
 
         // Approved leaves overlapping the scanned range, grouped by employee.
         $leaves = LeaveRequest::where('status', 'approved')
@@ -200,14 +204,17 @@ class ViolationService
 
     /**
      * Build the full violation history: recompute every month from the org's tracking
-     * start (earliest attendance record) up to the current month. Idempotent and
-     * persisted, so the "All time" history view has data for every month, not just the
-     * ones that happen to have been opened. No attendance anywhere → nothing to do.
+     * start (earliest human-entered attendance record) up to the current month. Idempotent
+     * and persisted, so the "All time" history view has data for every month, not just the
+     * ones that happen to have been opened. No real attendance anywhere → nothing to do.
+     *
+     * Same reason as recompute() for ignoring system-generated rows: they must not decide
+     * how far back the history sweep reaches.
      */
     public function recomputeHistory(): void
     {
         $tz = config('app.timezone_local');
-        $earliest = Attendance::min('work_date');
+        $earliest = Attendance::where('source', Attendance::SOURCE_MANUAL)->min('work_date');
         if (! $earliest) {
             return;
         }

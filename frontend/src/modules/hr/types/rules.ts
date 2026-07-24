@@ -7,6 +7,13 @@ export interface WorkSchedule {
   start_time: string; // "HH:MM"
   end_time: string;
   grace_minutes: number;
+  unpaid_break_minutes: number; // meal period — shortens the paid day
+  paid_break_minutes: number; // short break — inside the paid day (flag threshold)
+  am_start_time: string | null; // half-day windows ("HH:MM") — nullable
+  am_end_time: string | null;
+  pm_start_time: string | null;
+  pm_end_time: string | null;
+  expected_minutes: number | null; // derived: (end − start) − unpaid_break
   is_default: boolean;
 }
 
@@ -16,6 +23,12 @@ export interface WorkScheduleInput {
   start_time: string;
   end_time: string;
   grace_minutes: number;
+  unpaid_break_minutes: number;
+  paid_break_minutes: number;
+  am_start_time?: string | null;
+  am_end_time?: string | null;
+  pm_start_time?: string | null;
+  pm_end_time?: string | null;
   is_default: boolean;
 }
 
@@ -37,6 +50,13 @@ export interface EffectiveSchedule {
   start_time: string | null;
   end_time: string | null;
   grace_minutes: number;
+  unpaid_break_minutes: number;
+  paid_break_minutes: number;
+  expected_minutes: number | null;
+  am_start_time: string | null;
+  am_end_time: string | null;
+  pm_start_time: string | null;
+  pm_end_time: string | null;
   source: "default" | "assigned" | "employee_override";
   schedule_name: string | null;
   is_workday: boolean | null;
@@ -48,6 +68,8 @@ export interface EmployeeSchedule {
   custom_start_time: string | null;
   custom_end_time: string | null;
   custom_grace_minutes: number | null;
+  custom_unpaid_break_minutes: number | null;
+  custom_paid_break_minutes: number | null;
   effective: EffectiveSchedule;
 }
 
@@ -57,6 +79,8 @@ export interface EmployeeScheduleInput {
   custom_start_time?: string | null;
   custom_end_time?: string | null;
   custom_grace_minutes?: number | null;
+  custom_unpaid_break_minutes?: number | null;
+  custom_paid_break_minutes?: number | null;
 }
 
 // ISO weekday numbers with short labels, for day pickers.
