@@ -110,13 +110,6 @@ export interface AttendancePolicy {
   task_format: { require_english?: boolean; uppercase?: boolean };
 }
 
-/** Dry-run result (step 6b): impact of a proposed policy over the last completed period. */
-export interface DeductionPreview {
-  period: { start: string; end: string };
-  employees_affected: number;
-  employees_considered: number;
-  total_deduction: number;
-}
 
 export interface EffectiveSchedule {
   workdays: number[];

@@ -36,76 +36,12 @@ class PayrollService
     ) {}
 
     /**
-     * Dry-run (step 6b): what a PROPOSED attendance policy would deduct if it had been
-     * active last period — WITHOUT saving the policy or a run. Reuses the same
-     * DeductionService as a real run (a second caller, not new math), pricing only the
-     * NEW minute-based portion (late + undertime) so HR sees the impact of the switch
-     * before flipping it.
-     *
-     * @param  array<string, mixed>  $proposed  policy fields to preview (merged over current)
-     * @return array{period:array{start:string,end:string}, employees_affected:int, total_deduction:float, employees_considered:int}
-     */
-    public function previewDeductions(array $proposed): array
-    {
-        $setting = PayrollSetting::query()->first();
-        if (! $setting) {
-            return ['period' => ['start' => '', 'end' => ''], 'employees_affected' => 0, 'employees_considered' => 0, 'total_deduction' => 0.0];
-        }
-
-        // The most recent COMPLETED period for the company default frequency: the period
-        // immediately before the one covering today.
-        $tz = config('app.timezone_local');
-        $current = $this->schedule->currentPeriodFor($setting->frequency, $setting->anchor_date, $setting->pay_delay_days ?? 0);
-        $prevRef = Carbon::parse($current['start'], $tz)->subDay();
-        $prev = $this->schedule->currentPeriodFor($setting->frequency, $setting->anchor_date, $setting->pay_delay_days ?? 0, $prevRef);
-        [$start, $end] = [$prev['start'], $prev['end']];
-
-        // A transient, UNSAVED policy carrying the proposed values over today's policy.
-        $policy = $this->attendancePolicy->get()->replicate();
-        $policy->fill($proposed);
-
-        $total = 0.0;
-        $affected = 0;
-        $considered = 0;
-
-        $employees = Employee::whereNull('separation_type')
-            ->where('is_management', false)
-            ->whereDate('hire_date', '<=', $end)
-            ->get();
-
-        foreach ($employees as $employee) {
-            $considered++;
-            $frequency = $employee->pay_frequency ?: $setting->frequency;
-            $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
-            $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $start, $end);
-
-            $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
-            $detail = $this->attendance->unpaidDaysDetailFor($employee, $start, $end, $policy);
-
-            // Only the NEW minute-based cost (the switch being previewed); absence/leave
-            // are unchanged, so they aren't part of "what will this switch cost".
-            $deduction = round(($detail->lateDays + $detail->undertimeDays) * $dailyRate, 2);
-            if ($deduction > 0) {
-                $affected++;
-                $total += $deduction;
-            }
-        }
-
-        return [
-            'period' => ['start' => $start, 'end' => $end],
-            'employees_affected' => $affected,
-            'employees_considered' => $considered,
-            'total_deduction' => round($total, 2),
-        ];
-    }
-
-    /**
      * The canonical daily rate, honoring the attendance policy's daily-rate basis:
      *   - fixed_divisor   → base × 12 ÷ annual_divisor (constant all year, DOLE-style)
      *   - period_workdays → this period's pay ÷ its scheduled workdays (the default)
-     * Single source of truth (Slice A, 2026-07-27): payslipFor(), holidayPremiumFor(), and
-     * previewDeductions() all price a day through here, so absence, late/undertime, and
-     * holiday premium can never disagree. Default basis reproduces the pre-Slice-A number.
+     * Single source of truth (Slice A, 2026-07-27): payslipFor() and holidayPremiumFor() both
+     * price a day through here, so absence, late/undertime, and holiday premium can never
+     * disagree. Default basis reproduces the pre-Slice-A number.
      */
     private function dailyRateFor(Employee $employee, AttendancePolicy $policy, int $periodsPerYear, int $workingDays): float
     {

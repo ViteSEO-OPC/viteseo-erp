@@ -9,7 +9,6 @@ import {
   deleteWorkSchedule,
   getAttendancePolicy,
   updateAttendancePolicy,
-  previewDeductions,
   getEmployeeSchedule,
   updateEmployeeSchedule,
 } from "@/modules/hr/api/rules";
@@ -67,14 +66,6 @@ export function useUpdateAttendancePolicy() {
     mutationFn: (input: Partial<Omit<AttendancePolicy, "id">>) =>
       updateAttendancePolicy(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: POLICY_KEY }),
-  });
-}
-
-// Dry-run preview — never touches the saved policy, so no cache invalidation.
-export function usePreviewDeductions() {
-  return useMutation({
-    mutationFn: (input: Partial<Omit<AttendancePolicy, "id">>) =>
-      previewDeductions(input),
   });
 }
 
