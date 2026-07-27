@@ -227,7 +227,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'employees/{employee}/schedule', [WorkScheduleController::class, 'updateEmployeeSchedule']);
         Route::get('attendance-policy', [AttendancePolicyController::class, 'show']);
         Route::match(['put', 'patch'], 'attendance-policy', [AttendancePolicyController::class, 'update']);
-        Route::post('attendance-policy/preview', [AttendancePolicyController::class, 'preview']);
 
         // Requests → Document + Profile-change queues (HR only).
         Route::get('document-requests', [DocumentRequestController::class, 'index']);

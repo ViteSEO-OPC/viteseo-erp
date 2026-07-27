@@ -16,14 +16,13 @@ import {
   useDeleteWorkSchedule,
   useAttendancePolicy,
   useUpdateAttendancePolicy,
-  usePreviewDeductions,
 } from "@/modules/hr/hooks/use-rules";
 import {
   formatWorkdays,
   type DailyRateBasis,
-  type DeductionRounding,
   type EarlyArrivalMode,
   type LateDeductionMode,
+  type LateTier,
   type MissingClockoutMode,
   type OvertimeMode,
   type UndertimeDeductionMode,
@@ -224,10 +223,6 @@ function AttendancePolicyForm() {
   );
 }
 
-function peso(n: number): string {
-  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(n);
-}
-
 // Read a level's threshold out of the stored violation ladder, falling back to default.
 function rungValue(
   rules: ViolationRules | null | undefined,
@@ -240,29 +235,16 @@ function rungValue(
   return rung?.[key] ?? fallback;
 }
 
-// A plain-language rounding choice that folds the rounding rule + block minutes together.
-type RoundPreset = "exact" | "up_hour" | "up_half" | "down_hour";
+// How lateness is charged. "exact" bills the precise minutes late; "custom" is a single
+// threshold rule — if late by MORE than `over` minutes, charge a flat `charge` minutes —
+// stored as a one-row late_tiers ladder (late_deduction_mode = 'tiered').
+type ChargeMode = "exact" | "custom";
 
-function roundPresetFrom(rounding: DeductionRounding, block: number): RoundPreset {
-  if (rounding === "round_up") return block === 30 ? "up_half" : "up_hour";
-  if (rounding === "round_down") return "down_hour";
-  return "exact"; // exact + the rarely-used round_nearest both show as Exact
-}
-
-function roundingParts(preset: RoundPreset): {
-  deduction_rounding: DeductionRounding;
-  deduction_block_minutes: number;
-} {
-  switch (preset) {
-    case "up_hour":
-      return { deduction_rounding: "round_up", deduction_block_minutes: 60 };
-    case "up_half":
-      return { deduction_rounding: "round_up", deduction_block_minutes: 30 };
-    case "down_hour":
-      return { deduction_rounding: "round_down", deduction_block_minutes: 60 };
-    default:
-      return { deduction_rounding: "exact", deduction_block_minutes: 60 };
-  }
+// The single threshold rung the UI edits, read out of the stored late_tiers (minutes).
+function thresholdFrom(tiers: LateTier[] | null | undefined): { over: number; charge: number } {
+  const row = tiers?.[0];
+  if (!row) return { over: 15, charge: 60 }; // sensible starting point
+  return { over: Number(row.over ?? 15), charge: Math.round(Number(row.hours ?? 1) * 60) };
 }
 
 // The four alert levels must strictly ascend. Returns an error message, or null if OK.
@@ -276,9 +258,6 @@ function ladderError(late: number[], absent: number[]): string | null {
 function AttendancePolicyEditor() {
   const { data: policy } = useAttendancePolicy();
   const update = useUpdateAttendancePolicy();
-  const preview = usePreviewDeductions();
-
-  const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
 
   // Violation flags — the four alert levels HR configures, read out of the stored ladder.
   // Lateness is by lates-this-month; absence by consecutive days. Reassembled on save.
@@ -292,8 +271,11 @@ function AttendancePolicyEditor() {
   const [absentWarning, setAbsentWarning] = useState(String(rungValue(vr, "absence", "orange", "streak_min", 3)));
   const [absentCritical, setAbsentCritical] = useState(String(rungValue(vr, "absence", "red", "streak_min", 4)));
 
-  // Tardiness pay deduction.
-  const [lateMode, setLateMode] = useState<LateDeductionMode>(policy?.late_deduction_mode ?? "none");
+  // Tardiness pay deduction — two INDEPENDENT switches that can both be on:
+  //   • lateChargeOn       = deduct for the actual time late (exact minutes, or a threshold rule)
+  //   • latePenaltyEnabled = deduct 1 extra full day for every N lates in the pay period
+  const [lateChargeOn, setLateChargeOn] = useState((policy?.late_deduction_mode ?? "none") !== "none");
+  const [latePenaltyEnabled, setLatePenaltyEnabled] = useState(policy?.late_penalty_enabled ?? false);
   const [latesPerDeduction, setLatesPerDeduction] = useState(String(policy?.lates_per_deduction ?? 3));
 
   // Undertime & missing clock-out.
@@ -305,13 +287,15 @@ function AttendancePolicyEditor() {
   const [overtimeMode, setOvertimeMode] = useState<OvertimeMode>(policy?.overtime_mode ?? "approved_only");
   const [overtimeThreshold, setOvertimeThreshold] = useState(String(policy?.overtime_threshold_minutes ?? 0));
 
-  // How missed time is charged. `roundPreset` folds the rounding rule + block into one
-  // plain choice (e.g. "Round up to the hour" = round_up, 60-min block).
-  const [roundPreset, setRoundPreset] = useState<RoundPreset>(
-    roundPresetFrom(policy?.deduction_rounding ?? "exact", Number(policy?.deduction_block_minutes ?? 60)),
-  );
+  // How lateness is charged: "exact" (precise minutes) or "custom" (a single threshold rule).
+  // Custom is stored as a one-row late_tiers ladder — see chargeFields() below.
+  const th = thresholdFrom(policy?.late_tiers);
+  const [chargeMode, setChargeMode] = useState<ChargeMode>(policy?.late_deduction_mode === "tiered" ? "custom" : "exact");
+  const [thresholdOver, setThresholdOver] = useState(String(th.over));
+  const [thresholdCharge, setThresholdCharge] = useState(String(th.charge));
   const [lateFrom, setLateFrom] = useState(policy?.late_minutes_from ?? "start_time");
-  const [cap, setCap] = useState(String(policy?.daily_deduction_cap ?? 1));
+  // daily_deduction_cap is fixed at 1.0 (a day can never cost more than a day's pay) and not
+  // HR-editable — a sub-1 cap only ever mattered with rounding and just confused users.
 
   // Daily-rate basis.
   const [rateBasis, setRateBasis] = useState<DailyRateBasis>(policy?.daily_rate_basis ?? "period_workdays");
@@ -351,7 +335,6 @@ function AttendancePolicyEditor() {
   }
 
   const violationFields = () => ({
-    monthly_late_reset: monthlyReset,
     violation_rules: {
       late: [
         { monthly_min: Number(lateCritical), severity: "red" },
@@ -369,32 +352,85 @@ function AttendancePolicyEditor() {
     } satisfies ViolationRules,
   });
 
-  // Preview reads the current (unsaved) deduction settings across all pay cards.
-  function deductionFields() {
-    return {
-      late_deduction_mode: lateMode,
-      lates_per_deduction: Number(latesPerDeduction),
-      undertime_deduction_mode: undertimeMode,
-      missing_clockout_mode: missingClockout,
-      early_arrival_mode: earlyArrival,
-      overtime_mode: overtimeMode,
-      overtime_threshold_minutes: Number(overtimeThreshold),
-      ...roundingParts(roundPreset),
-      late_minutes_from: lateFrom,
-      daily_deduction_cap: Number(cap),
-      daily_rate_basis: rateBasis,
-      annual_divisor: Number(divisor),
-      hours_per_day_divisor: Number(hoursPerDay),
-    };
-  }
+  // Lateness charge → policy fields. When on: "exact" = per_hour (bill the precise minutes),
+  // "custom" = a one-row tiered ladder (charge Y min once more than X min late). Rounding
+  // stays exact — undertime is always billed to the exact minute. late_tiers clears otherwise.
+  const lateMode: LateDeductionMode = !lateChargeOn ? "none" : chargeMode === "custom" ? "tiered" : "per_hour";
+  const chargeFields = () => ({
+    late_deduction_mode: lateMode,
+    late_tiers: lateMode === "tiered" ? [{ over: Number(thresholdOver), hours: Number(thresholdCharge) / 60 }] : null,
+    deduction_rounding: "exact" as const,
+    deduction_block_minutes: 60,
+    late_minutes_from: lateFrom,
+  });
 
-  async function runPreview() {
-    try {
-      await preview.mutateAsync(deductionFields());
-    } catch {
-      toast.error("Could not run the preview.");
-    }
-  }
+  // The lateness charge controls, shown when the per-time switch is on. "Start counting late
+  // from" comes first, then how the time is charged: Exact, or a single threshold rule.
+  const chargeControls = () => (
+    <div className="ml-7 space-y-3 border-l-2 border-border pl-4">
+      <div className="flex flex-wrap items-end gap-4">
+        <FieldSelect
+          id="pol-late-from"
+          label="Start counting late from"
+          value={lateFrom}
+          onChange={(v) => setLateFrom(v as "start_time" | "after_grace")}
+          options={[
+            { value: "start_time", label: "Scheduled start time" },
+            { value: "after_grace", label: "End of the grace period" },
+          ]}
+        />
+        <FieldSelect
+          id="pol-charge-mode"
+          label="Charge the time as"
+          value={chargeMode}
+          onChange={(v) => setChargeMode(v as ChargeMode)}
+          options={[
+            { value: "exact", label: "Exact time missed" },
+            { value: "custom", label: "Custom — threshold rule" },
+          ]}
+        />
+      </div>
+
+      {chargeMode === "custom" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-foreground">If late by more than</span>
+          <Input
+            id="pol-th-over"
+            type="number"
+            min={0}
+            max={480}
+            value={thresholdOver}
+            onChange={(e) => setThresholdOver(e.target.value)}
+            className="w-20"
+          />
+          <span className="text-sm text-foreground">minutes, charge</span>
+          <Input
+            id="pol-th-charge"
+            type="number"
+            min={0}
+            max={480}
+            value={thresholdCharge}
+            onChange={(e) => setThresholdCharge(e.target.value)}
+            className="w-20"
+          />
+          <span className="text-sm text-foreground">minutes&apos; pay.</span>
+        </div>
+      )}
+
+      {chargeMode === "exact" ? (
+        <Hint>Exact charges only the minutes late — the proportionate, Art. 113-safe default.</Hint>
+      ) : (
+        <div className="rounded-lg border border-destructive bg-destructive/5 p-3">
+          <p className="text-xs text-destructive">
+            A threshold rule charges a flat amount that can exceed the actual minutes late (e.g. 16 min late
+            → a full hour docked). This may be an unlawful penalty under Labor Code Art. 113 — enable only
+            with legal review.
+          </p>
+        </div>
+      )}
+      <Hint>Leaving early is always billed to the exact minute. A single day can never cost more than one day&apos;s pay.</Hint>
+    </div>
+  );
 
   return (
     <div className="w-full overflow-hidden rounded-card border border-border bg-card">
@@ -429,11 +465,7 @@ function AttendancePolicyEditor() {
             (LWOP). A day covered by any approved leave is never an unauthorised absence.
           </Hint>
         </div>
-        <CheckBox
-          checked={monthlyReset}
-          onChange={setMonthlyReset}
-          label="Reset the late tally each calendar month"
-        />
+        <Hint>The late tally resets at the start of each calendar month.</Hint>
         <Hint>
           Each level must use a higher number than the one before it (0 is allowed for the lowest).
           These exact numbers appear in the Attendance modal&apos;s Alert Color Legend.
@@ -443,29 +475,55 @@ function AttendancePolicyEditor() {
 
       <Divider />
 
-      {/* Time-based pay deductions — lateness + undertime + how they round. */}
+      {/* Time-based pay deductions — lateness (two independent switches) + undertime. */}
       <PolicySection
         title="Time-based pay deductions"
-        description="How missed time (lateness and leaving early) reduces pay when payroll runs. Deducts only the actual time missed unless you turn on rounding."
+        description="How missed time (lateness and leaving early) reduces pay when payroll runs. Deducts only the actual time missed unless you set a threshold rule for lateness."
       >
-        {/* Lateness */}
+        {/* Lateness — two switches that can BOTH be on. */}
         <SubHeading>When someone is late</SubHeading>
-        <div className="flex flex-wrap items-end gap-4">
-          <FieldSelect
-            id="pol-late-mode"
-            label="Deduct pay for lateness?"
-            value={lateMode}
-            onChange={(v) => setLateMode(v as LateDeductionMode)}
-            options={[
-              { value: "none", label: "No — don't deduct for lateness" },
-              { value: "per_hour", label: "Yes — deduct for the time they were late" },
-              { value: "per_lates", label: "Yes — deduct a full day for every N lates" },
-            ]}
-          />
-          {lateMode === "per_lates" && (
-            <NumberField id="pol-late-n" label="Lates per 1-day deduction" value={latesPerDeduction} onChange={setLatesPerDeduction} min={1} max={30} />
-          )}
-        </div>
+
+        {/* Switch 1 — deduct the actual minutes late. */}
+        <CheckBox
+          checked={lateChargeOn}
+          onChange={setLateChargeOn}
+          label="Deduct pay for the actual time they were late"
+        />
+        {lateChargeOn && chargeControls()}
+
+        {/* Switch 2 — extra full-day penalty per N lates (independent of the charge above). */}
+        <SubDivider />
+        <CheckBox
+          checked={latePenaltyEnabled}
+          onChange={setLatePenaltyEnabled}
+          label="Add an extra full-day penalty for repeated lates"
+        />
+        {latePenaltyEnabled && (
+          <div className="ml-7 flex flex-wrap items-center gap-2 border-l-2 border-border pl-4">
+            <span className="text-sm text-foreground">Deduct 1 full day for every</span>
+            <Input
+              id="pol-late-n"
+              type="number"
+              min={1}
+              max={30}
+              value={latesPerDeduction}
+              onChange={(e) => setLatesPerDeduction(e.target.value)}
+              className="w-20"
+            />
+            <span className="text-sm text-foreground">lates in a pay period.</span>
+          </div>
+        )}
+
+        {/* Both on = the same lateness is charged twice. Intentional stacking, flagged. */}
+        {lateChargeOn && latePenaltyEnabled && (
+          <div className="rounded-lg border border-warning bg-warning-subtle p-3">
+            <p className="text-xs text-foreground">
+              Both lateness deductions are on, so a single late arrival is charged{" "}
+              <strong>twice</strong> — once as the actual time, and again toward the full-day penalty.
+              This is deliberate stacking; confirm it against your handbook and Labor Code Art. 113.
+            </p>
+          </div>
+        )}
 
         <SubDivider />
 
@@ -487,6 +545,7 @@ function AttendancePolicyEditor() {
             label="If they forget to clock out"
             value={missingClockout}
             onChange={(v) => setMissingClockout(v as MissingClockoutMode)}
+            disabled
             options={[
               { value: "no_deduction_flag_for_review", label: "Flag for review, don't deduct" },
               { value: "treat_as_undertime_to_now", label: "Treat as leaving early" },
@@ -494,67 +553,22 @@ function AttendancePolicyEditor() {
             ]}
           />
         </div>
-        <Hint>A missing clock-out never counts as overtime.</Hint>
-
-        {/* How the missed time is charged — only relevant when a per-time deduction is on. */}
-        {(lateMode === "per_hour" || undertimeMode === "per_hour") && (
-          <>
-            <SubDivider />
-            <SubHeading>How is the missed time charged?</SubHeading>
-            <div className="flex flex-wrap items-end gap-4">
-              <FieldSelect
-                id="pol-rounding"
-                label="Charge the time as"
-                value={roundPreset}
-                onChange={(v) => setRoundPreset(v as RoundPreset)}
-                options={[
-                  { value: "exact", label: "Exact time missed" },
-                  { value: "up_hour", label: "Round up to the hour (30 min late = 1 hour)" },
-                  { value: "up_half", label: "Round up to the half-hour" },
-                  { value: "down_hour", label: "Round down to the hour" },
-                ]}
-              />
-              <FieldSelect
-                id="pol-late-from"
-                label="Start counting late from"
-                value={lateFrom}
-                onChange={(v) => setLateFrom(v as "start_time" | "after_grace")}
-                options={[
-                  { value: "start_time", label: "Scheduled start time" },
-                  { value: "after_grace", label: "End of the grace period" },
-                ]}
-              />
-              <NumberField id="pol-cap" label="Max days deducted / day" value={cap} onChange={setCap} min={0} max={1} step={0.25} />
-            </div>
-            {roundPreset === "exact" ? (
-              <Hint>
-                Exact charges only the minutes missed — e.g. 30 min late on a ₱909/day (9-hour)
-                schedule costs ₱909 ÷ 8 ÷ 2 ≈ <strong>₱56.82</strong>.
-              </Hint>
-            ) : (
-              <div className="rounded-lg border border-destructive bg-destructive/5 p-3">
-                <p className="text-xs text-destructive">
-                  Rounding charges more than the exact time missed (e.g. 30 min → a full hour ≈
-                  ₱113.64). This may be an unlawful penalty under Labor Code Art. 113 — enable only
-                  with legal review.
-                </p>
-              </div>
-            )}
-            <Hint>The cap guarantees no single day ever costs more than one day&apos;s pay.</Hint>
-          </>
-        )}
+        <Hint>
+          Leaving early is billed to the exact minute. The &ldquo;forgot to clock out&rdquo; handling isn&apos;t
+          active yet — a missing clock-out is always flagged for review for now, whatever this shows, and never
+          counts as overtime.
+        </Hint>
 
         <SaveButton
           pending={saving === "time_deductions"}
           onClick={() =>
             saveCard("time_deductions", {
-              late_deduction_mode: lateMode,
+              ...chargeFields(),
+              late_penalty_enabled: latePenaltyEnabled,
               lates_per_deduction: Number(latesPerDeduction),
               undertime_deduction_mode: undertimeMode,
               missing_clockout_mode: missingClockout,
-              ...roundingParts(roundPreset),
-              late_minutes_from: lateFrom,
-              daily_deduction_cap: Number(cap),
+              daily_deduction_cap: 1,
             })
           }
         />
@@ -573,6 +587,7 @@ function AttendancePolicyEditor() {
             label="Early arrival"
             value={earlyArrival}
             onChange={(v) => setEarlyArrival(v as EarlyArrivalMode)}
+            disabled
             options={[
               { value: "none", label: "Ignore early minutes" },
               { value: "offset_undertime", label: "Offset same-day undertime" },
@@ -594,7 +609,10 @@ function AttendancePolicyEditor() {
             <NumberField id="pol-ot-threshold" label="Threshold (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
           )}
         </div>
-        <Hint>Overtime takes effect when overtime requests ship. A long clock reading is not overtime.</Hint>
+        <Hint>
+          Early-arrival handling isn&apos;t active yet — early minutes are always ignored for now, whatever this
+          shows. Overtime takes effect when overtime requests ship; a long clock reading is not overtime.
+        </Hint>
         <SaveButton
           pending={saving === "early_ot"}
           onClick={() => saveCard("early_ot", { early_arrival_mode: earlyArrival, overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
@@ -655,35 +673,6 @@ function AttendancePolicyEditor() {
         />
       </PolicySection>
 
-      <Divider />
-
-      {/* Dry-run preview (step 6b): what the current pay-deduction settings WOULD cost. */}
-      <PolicySection
-        title="Preview impact"
-        description="See what the pay-deduction settings above would have cost last period, before you rely on them. Nothing is saved."
-      >
-        {preview.data && (
-          <div className="rounded-lg border border-border bg-muted/40 p-4">
-            {preview.data.employees_considered === 0 ? (
-              <p className="text-sm text-muted-foreground">No completed pay period to preview yet.</p>
-            ) : (
-              <p className="text-sm text-foreground">
-                If these settings had been active for{" "}
-                <strong>
-                  {preview.data.period.start} – {preview.data.period.end}
-                </strong>
-                :{" "}
-                <strong>{peso(preview.data.total_deduction)}</strong> total time-based deduction
-                across <strong>{preview.data.employees_affected}</strong> of{" "}
-                {preview.data.employees_considered} employees.
-              </p>
-            )}
-          </div>
-        )}
-        <Button variant="outline" onClick={runPreview} disabled={preview.isPending}>
-          {preview.isPending ? "Calculating…" : "Preview impact"}
-        </Button>
-      </PolicySection>
     </div>
   );
 }
@@ -743,17 +732,19 @@ function FieldSelect({
   value,
   onChange,
   options,
+  disabled,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  disabled?: boolean;
 }) {
   return (
     <div className="w-full max-w-[360px] space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      <SimpleSelect id={id} className="h-10" value={value} onValueChange={onChange} options={options} />
+      <SimpleSelect id={id} className="h-10" value={value} onValueChange={onChange} options={options} disabled={disabled} />
     </div>
   );
 }

@@ -22,7 +22,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
     {
         return [
             'monthly_late_reset' => ['sometimes', 'boolean'],
-            'late_deduction_mode' => ['sometimes', 'in:none,per_lates,per_hour,tiered'],
+            // Per-time charging only. The per-N-lates penalty is now its own independent
+            // switch (`late_penalty_enabled`), so the two can be combined.
+            'late_deduction_mode' => ['sometimes', 'in:none,per_hour,tiered'],
+            'late_penalty_enabled' => ['sometimes', 'boolean'],
             'lates_per_deduction' => ['sometimes', 'integer', 'min:1', 'max:30'],
             'late_minutes_from' => ['sometimes', 'in:start_time,after_grace'],
             'late_tiers' => ['sometimes', 'nullable', 'array'],

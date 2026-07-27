@@ -36,71 +36,14 @@ class PayrollService
     ) {}
 
     /**
-     * Dry-run (step 6b): what a PROPOSED attendance policy would deduct if it had been
-     * active last period — WITHOUT saving the policy or a run. Reuses the same
-     * DeductionService as a real run (a second caller, not new math), pricing only the
-     * NEW minute-based portion (late + undertime) so HR sees the impact of the switch
-     * before flipping it.
-     *
-     * @param  array<string, mixed>  $proposed  policy fields to preview (merged over current)
-     * @return array{period:array{start:string,end:string}, employees_affected:int, total_deduction:float, employees_considered:int}
+     * The canonical daily rate, honoring the attendance policy's daily-rate basis:
+     *   - fixed_divisor   → base × 12 ÷ annual_divisor (constant all year, DOLE-style)
+     *   - period_workdays → this period's pay ÷ its scheduled workdays (the default)
+     * Single source of truth (Slice A, 2026-07-27): payslipFor() and holidayPremiumFor() both
+     * price a day through here, so absence, late/undertime, and holiday premium can never
+     * disagree. Default basis reproduces the pre-Slice-A number.
      */
-    public function previewDeductions(array $proposed): array
-    {
-        $setting = PayrollSetting::query()->first();
-        if (! $setting) {
-            return ['period' => ['start' => '', 'end' => ''], 'employees_affected' => 0, 'employees_considered' => 0, 'total_deduction' => 0.0];
-        }
-
-        // The most recent COMPLETED period for the company default frequency: the period
-        // immediately before the one covering today.
-        $tz = config('app.timezone_local');
-        $current = $this->schedule->currentPeriodFor($setting->frequency, $setting->anchor_date, $setting->pay_delay_days ?? 0);
-        $prevRef = Carbon::parse($current['start'], $tz)->subDay();
-        $prev = $this->schedule->currentPeriodFor($setting->frequency, $setting->anchor_date, $setting->pay_delay_days ?? 0, $prevRef);
-        [$start, $end] = [$prev['start'], $prev['end']];
-
-        // A transient, UNSAVED policy carrying the proposed values over today's policy.
-        $policy = $this->attendancePolicy->get()->replicate();
-        $policy->fill($proposed);
-
-        $total = 0.0;
-        $affected = 0;
-        $considered = 0;
-
-        $employees = Employee::whereNull('separation_type')
-            ->where('is_management', false)
-            ->whereDate('hire_date', '<=', $end)
-            ->get();
-
-        foreach ($employees as $employee) {
-            $considered++;
-            $frequency = $employee->pay_frequency ?: $setting->frequency;
-            $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
-            $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $start, $end);
-
-            $dailyRate = $this->previewDailyRate($employee, $policy, $periodsPerYear, $workingDays);
-            $detail = $this->attendance->unpaidDaysDetailFor($employee, $start, $end, $policy);
-
-            // Only the NEW minute-based cost (the switch being previewed); absence/leave
-            // are unchanged, so they aren't part of "what will this switch cost".
-            $deduction = round(($detail->lateDays + $detail->undertimeDays) * $dailyRate, 2);
-            if ($deduction > 0) {
-                $affected++;
-                $total += $deduction;
-            }
-        }
-
-        return [
-            'period' => ['start' => $start, 'end' => $end],
-            'employees_affected' => $affected,
-            'employees_considered' => $considered,
-            'total_deduction' => round($total, 2),
-        ];
-    }
-
-    /** The daily rate under a (possibly proposed) policy — mirrors payslipFor's basis logic. */
-    private function previewDailyRate(Employee $employee, AttendancePolicy $policy, int $periodsPerYear, int $workingDays): float
+    private function dailyRateFor(Employee $employee, AttendancePolicy $policy, int $periodsPerYear, int $workingDays): float
     {
         $monthly = (float) $employee->base_salary;
 
@@ -134,11 +77,14 @@ class PayrollService
         array $dist,
         float $holidayPremium = 0.0,
         ?UnpaidDaysResult $unpaidDetail = null,
+        ?AttendancePolicy $policy = null,
     ): array {
+        $policy ??= $this->attendancePolicy->get();
         $monthlyBase = (float) $employee->base_salary;
         // The pay for THIS period: annual salary spread across the year's periods.
         $perPeriodBase = $periodsPerYear > 0 ? round(($monthlyBase * 12) / $periodsPerYear, 2) : 0.0;
-        $dailyRate = $workingDaysInPeriod > 0 ? round($perPeriodBase / $workingDaysInPeriod, 2) : 0.0;
+        // Daily rate via the policy basis (Slice A) — the one helper every pricing path uses.
+        $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDaysInPeriod);
         $basePay = max(0, round($perPeriodBase - $unpaidDays * $dailyRate, 2));
 
         // Allowances (food + transport + load) are monthly, non-taxable de-minimis pay.
@@ -188,7 +134,7 @@ class PayrollService
         $p = $this->attendancePolicy->get();
 
         return $p->only([
-            'late_deduction_mode', 'lates_per_deduction', 'late_minutes_from', 'late_tiers',
+            'late_deduction_mode', 'lates_per_deduction', 'late_penalty_enabled', 'late_minutes_from', 'late_tiers',
             'undertime_deduction_mode', 'missing_clockout_mode',
             'deduction_rounding', 'deduction_block_minutes', 'daily_deduction_cap',
             'daily_rate_basis', 'annual_divisor', 'hours_per_day_divisor',
@@ -344,7 +290,7 @@ class PayrollService
      *
      * @param  array<string, string>  $holidayMap  date 'Y-m-d' => type
      */
-    private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap): float
+    private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null): float
     {
         // Management staff are on a FIXED salary — no holiday premium, regardless of caller.
         if ($employee->isManagement()) {
@@ -355,8 +301,9 @@ class PayrollService
             return 0.0;
         }
 
-        $perPeriodBase = $periodsPerYear > 0 ? round(((float) $employee->base_salary * 12) / $periodsPerYear, 2) : 0.0;
-        $dailyRate = round($perPeriodBase / $workingDays, 2);
+        // Same daily-rate basis as absence/late (Slice A) — priced through the shared helper.
+        $policy ??= $this->attendancePolicy->get();
+        $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
 
         $worked = array_flip($this->attendance->workedDatesBetween($employee, $start, $end));
 
@@ -492,6 +439,9 @@ class PayrollService
             // Holidays in this cycle (date => type), fetched once for the whole run.
             $holidayMap = $this->holidays->typedHolidaysBetween(Carbon::parse($cycleStart), Carbon::parse($cycleEnd));
 
+            // The attendance policy drives the daily-rate basis (Slice A) — fetch once, reuse.
+            $policy = $this->attendancePolicy->get();
+
             foreach ($employees as $employee) {
                 // Double-pay guard: if this employee already has a payslip in ANOTHER run
                 // whose period overlaps this cycle (e.g. their pay_frequency changed after
@@ -526,9 +476,9 @@ class PayrollService
                 $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd);
 
                 // Premium for working on a (non-working) holiday in this cycle.
-                $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap);
+                $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail);
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy);
 
                 Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],

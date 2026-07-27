@@ -17,6 +17,7 @@ class AttendancePolicyResource extends JsonResource
             'monthly_late_reset' => (bool) $this->monthly_late_reset,
             'late_deduction_mode' => $this->late_deduction_mode,
             'lates_per_deduction' => (int) $this->lates_per_deduction,
+            'late_penalty_enabled' => (bool) $this->late_penalty_enabled,
             'late_minutes_from' => $this->late_minutes_from,
             'late_tiers' => $this->late_tiers,
 

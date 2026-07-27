@@ -461,9 +461,10 @@ class AttendanceService
      * only). An approved HALF-DAY request deducts 0.5 (two on one day → 1.0). Returns
      * a float so half-days survive.
      *
-     * Tardiness adds an EXTRA penalty per the attendance policy: in 'per_lates' mode,
-     * every N lates in the range deducts one more day (a late day is still paid on its
-     * own — the deduction is the accumulated penalty, so there's no double-counting).
+     * Tardiness adds an EXTRA penalty per the attendance policy: when late_penalty_enabled
+     * is on, every N lates in the range deducts one more day. This is now an INDEPENDENT
+     * switch, so it can stack on top of a per-time (per_hour/tiered) charge — that stacking
+     * is deliberate and surfaced in the UI as a double-charge warning.
      */
     public function unpaidDaysFor(Employee $employee, string $start, string $end): float
     {
@@ -618,8 +619,9 @@ class AttendanceService
             }
         }
 
-        // Tardiness penalty: every N lates in the range costs one day's pay.
-        if ($policy->late_deduction_mode === 'per_lates' && $policy->lates_per_deduction > 0) {
+        // Tardiness penalty: every N lates in the range costs one day's pay. Now an
+        // INDEPENDENT switch, so it can stack on top of the per-time (`per_hour`) charge.
+        if ($policy->late_penalty_enabled && $policy->lates_per_deduction > 0) {
             $unpaid += intdiv($lateCount, (int) $policy->lates_per_deduction);
         }
 
