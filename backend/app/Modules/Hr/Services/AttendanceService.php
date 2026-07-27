@@ -618,8 +618,9 @@ class AttendanceService
             }
         }
 
-        // Tardiness penalty: every N lates in the range costs one day's pay.
-        if ($policy->late_deduction_mode === 'per_lates' && $policy->lates_per_deduction > 0) {
+        // Tardiness penalty: every N lates in the range costs one day's pay. Now an
+        // INDEPENDENT switch, so it can stack on top of the per-time (`per_hour`) charge.
+        if ($policy->late_penalty_enabled && $policy->lates_per_deduction > 0) {
             $unpaid += intdiv($lateCount, (int) $policy->lates_per_deduction);
         }
 

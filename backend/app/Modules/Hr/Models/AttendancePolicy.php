@@ -12,6 +12,7 @@ class AttendancePolicy extends Model
         'monthly_late_reset',
         'late_deduction_mode',
         'lates_per_deduction',
+        'late_penalty_enabled',
         'late_minutes_from',
         'late_tiers',
         'undertime_deduction_mode',
@@ -34,6 +35,7 @@ class AttendancePolicy extends Model
     protected $casts = [
         'monthly_late_reset' => 'boolean',
         'lates_per_deduction' => 'integer',
+        'late_penalty_enabled' => 'boolean',
         'late_tiers' => 'array',
         'overtime_threshold_minutes' => 'integer',
         'deduction_block_minutes' => 'integer',

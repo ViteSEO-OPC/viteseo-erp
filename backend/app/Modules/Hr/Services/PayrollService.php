@@ -188,7 +188,7 @@ class PayrollService
         $p = $this->attendancePolicy->get();
 
         return $p->only([
-            'late_deduction_mode', 'lates_per_deduction', 'late_minutes_from', 'late_tiers',
+            'late_deduction_mode', 'lates_per_deduction', 'late_penalty_enabled', 'late_minutes_from', 'late_tiers',
             'undertime_deduction_mode', 'missing_clockout_mode',
             'deduction_rounding', 'deduction_block_minutes', 'daily_deduction_cap',
             'daily_rate_basis', 'annual_divisor', 'hours_per_day_divisor',

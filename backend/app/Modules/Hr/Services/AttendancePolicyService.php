@@ -23,6 +23,7 @@ class AttendancePolicyService
         'monthly_late_reset' => true,
         'late_deduction_mode' => 'none',
         'lates_per_deduction' => 3,
+        'late_penalty_enabled' => false,
         'late_minutes_from' => 'start_time',
         'late_tiers' => null,
         'undertime_deduction_mode' => 'none',
