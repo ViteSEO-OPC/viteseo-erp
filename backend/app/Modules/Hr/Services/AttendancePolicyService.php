@@ -20,11 +20,10 @@ class AttendancePolicyService
      * @var array<string, mixed>
      */
     public const DEFAULTS = [
-        'consecutive_lates_before_absence' => 3,
         'monthly_late_reset' => true,
-        'awol_days_threshold' => 3,
         'late_deduction_mode' => 'none',
         'lates_per_deduction' => 3,
+        'late_penalty_enabled' => false,
         'late_minutes_from' => 'start_time',
         'late_tiers' => null,
         'undertime_deduction_mode' => 'none',
@@ -57,20 +56,21 @@ class AttendancePolicyService
      * @var array<string, array<int, array<string, mixed>>>
      */
     public const DEFAULT_VIOLATION_RULES = [
-        // :167-168 — streak of 3, or a 4th late this month → orange; 3rd → yellow; else green.
+        // Four ascending alert levels, matching the Attendance modal legend
+        // (green Low → yellow Caution → orange Warning → red Critical). Lateness is by
+        // count of lates this month; absence by consecutive days. Evaluated top-down.
         'late' => [
-            ['streak_min' => 3, 'severity' => 'orange'],
+            ['monthly_min' => 6, 'severity' => 'red'],
             ['monthly_min' => 4, 'severity' => 'orange'],
             ['monthly_min' => 3, 'severity' => 'yellow'],
             ['monthly_min' => 1, 'severity' => 'green'],
         ],
-        // :183-188 — 3 consecutive absences → red (AWOL); 2 → orange; 1 → yellow.
         'absence' => [
-            ['streak_min' => 3, 'severity' => 'red', 'type' => 'awol'],
-            ['streak_min' => 2, 'severity' => 'orange', 'type' => 'ua'],
-            ['streak_min' => 1, 'severity' => 'yellow', 'type' => 'ua'],
+            ['streak_min' => 4, 'severity' => 'red', 'type' => 'awol'],
+            ['streak_min' => 3, 'severity' => 'orange', 'type' => 'ua'],
+            ['streak_min' => 2, 'severity' => 'yellow', 'type' => 'ua'],
+            ['streak_min' => 1, 'severity' => 'green', 'type' => 'ua'],
         ],
-        // :196 — clocked in but never out: always green today.
         'missed_time_out' => [
             ['occurrence_min' => 1, 'severity' => 'green'],
         ],

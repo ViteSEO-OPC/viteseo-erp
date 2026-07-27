@@ -108,7 +108,9 @@ class ViolationService
         // Never scan past today — the current month is only complete up to today.
         $scanEnd = $monthEnd->gt($today) ? $today->copy() : $monthEnd;
 
-        $latesBeforeAbsence = $this->policy->get()->consecutive_lates_before_absence;
+        // The colour ladder HR configures (Company → Rules). Constant across this month's
+        // scan; a null column falls back to today's literals, so this is a no-op by default.
+        $rules = $this->policy->violationRules();
 
         // The earliest HUMAN-ENTERED attendance record anywhere is our proxy for when the
         // org began tracking attendance — nobody can be "absent" for a day before tracking
@@ -164,13 +166,11 @@ class ViolationService
                     $lateStreak++;
                     $absentStreak = 0;
 
-                    $sev = ($lateStreak >= 3 || $monthlyLate >= 4) ? 'orange'
-                        : ($monthlyLate >= 3 ? 'yellow' : 'green');
-                    $note = $lateStreak > $latesBeforeAbsence
-                        ? "Late #{$monthlyLate} this month — beyond {$latesBeforeAbsence} consecutive, counts as an absence"
-                        : "Late arrival (#{$monthlyLate} this month)";
-
-                    $computed[] = $this->incident($emp->id, 'late', $sev, $dateStr, $note);
+                    // Severity comes from HR's `late` ladder (streak_min / monthly_min rungs).
+                    $match = self::ladderMatch($rules, 'late', ['streak' => $lateStreak, 'monthly' => $monthlyLate]);
+                    if ($match) {
+                        $computed[] = $this->incident($emp->id, 'late', $match['severity'], $dateStr, "Late arrival (#{$monthlyLate} this month)");
+                    }
                 } elseif ($isPast && ! $onLeave && ! $clockedIn && $dateStr >= $absenceFloor) {
                     // Unauthorised absence: a past scheduled workday (at/after the org's
                     // tracking start and the employee's hire date) with no approved leave
@@ -180,12 +180,15 @@ class ViolationService
                     $absentStreak++;
                     $lateStreak = 0;
 
-                    if ($absentStreak >= 3) {
-                        $computed[] = $this->incident($emp->id, 'awol', 'red', $dateStr, "AWOL — {$absentStreak} consecutive days without notice");
-                    } else {
-                        $sev = $absentStreak >= 2 ? 'orange' : 'yellow';
-                        $note = 'Unauthorised absence' . ($absentStreak >= 2 ? " ({$absentStreak} consecutive days)" : '');
-                        $computed[] = $this->incident($emp->id, 'ua', $sev, $dateStr, $note);
+                    // The `absence` ladder decides the colour AND the type ('awol' at the red
+                    // rung, 'ua' below) — so the AWOL threshold is just that rung's streak_min.
+                    $match = self::ladderMatch($rules, 'absence', ['streak' => $absentStreak]);
+                    if ($match) {
+                        $type = $match['type'] ?? 'ua';
+                        $note = $type === 'awol'
+                            ? "AWOL — {$absentStreak} consecutive days without notice"
+                            : 'Unauthorised absence' . ($absentStreak >= 2 ? " ({$absentStreak} consecutive days)" : '');
+                        $computed[] = $this->incident($emp->id, $type, $match['severity'], $dateStr, $note);
                     }
                 } else {
                     // Present / on-time / on approved leave — clears the streaks.
@@ -193,7 +196,10 @@ class ViolationService
                     $absentStreak = 0;
 
                     if ($row && $row->time_in && ! $row->time_out && $isPast) {
-                        $computed[] = $this->incident($emp->id, 'missed_time_out', 'green', $dateStr, 'Clocked in but never clocked out');
+                        $match = self::ladderMatch($rules, 'missed_time_out', ['occurrence' => 1]);
+                        if ($match) {
+                            $computed[] = $this->incident($emp->id, 'missed_time_out', $match['severity'], $dateStr, 'Clocked in but never clocked out');
+                        }
                     }
                 }
             }
@@ -241,6 +247,37 @@ class ViolationService
         $start = Carbon::parse("{$month}-01", $tz)->startOfMonth();
 
         return [$start->toDateString(), $start->copy()->endOfMonth()->toDateString()];
+    }
+
+    /**
+     * The first ladder rung (top-down, most-severe first) whose thresholds are ALL met.
+     * A rung matches when every threshold it declares (streak_min / monthly_min /
+     * occurrence_min) is satisfied by the context. Returns null when no rung matches —
+     * which a category with an empty ladder uses to mean "never flag this".
+     *
+     * Pure (static) so the money-adjacent severity logic is unit-testable without a DB.
+     *
+     * @param  array<string, array<int, array<string, mixed>>>  $rules
+     * @param  array{streak?:int, monthly?:int, occurrence?:int}  $ctx
+     * @return array{severity:string, type:?string}|null
+     */
+    public static function ladderMatch(array $rules, string $category, array $ctx): ?array
+    {
+        foreach ($rules[$category] ?? [] as $rung) {
+            if (isset($rung['streak_min']) && ($ctx['streak'] ?? 0) < (int) $rung['streak_min']) {
+                continue;
+            }
+            if (isset($rung['monthly_min']) && ($ctx['monthly'] ?? 0) < (int) $rung['monthly_min']) {
+                continue;
+            }
+            if (isset($rung['occurrence_min']) && ($ctx['occurrence'] ?? 0) < (int) $rung['occurrence_min']) {
+                continue;
+            }
+
+            return ['severity' => $rung['severity'], 'type' => $rung['type'] ?? null];
+        }
+
+        return null;
     }
 
     /** @return array{employee_id:int, type:string, severity:string, work_date:string, details:string} */

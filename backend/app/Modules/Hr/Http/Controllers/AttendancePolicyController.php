@@ -11,7 +11,9 @@ use Illuminate\Http\JsonResponse;
 // Company → Rules (attendance policy + task format). hr_officer-only.
 class AttendancePolicyController extends Controller
 {
-    public function __construct(private readonly AttendancePolicyService $service) {}
+    public function __construct(
+        private readonly AttendancePolicyService $service,
+    ) {}
 
     // GET /hr/attendance-policy
     public function show(): JsonResponse

@@ -32,7 +32,9 @@ export interface WorkScheduleInput {
   is_default: boolean;
 }
 
-export type LateDeductionMode = "none" | "per_lates" | "per_hour" | "tiered";
+// Per-time charging only. The per-N-lates full-day penalty is a separate, independent
+// switch (`late_penalty_enabled`), so the two can be combined.
+export type LateDeductionMode = "none" | "per_hour" | "tiered";
 export type LateMinutesFrom = "start_time" | "after_grace";
 export type UndertimeDeductionMode = "none" | "per_hour";
 export type MissingClockoutMode =
@@ -72,13 +74,12 @@ export interface ViolationRules {
 
 export interface AttendancePolicy {
   id: number;
-  consecutive_lates_before_absence: number;
   monthly_late_reset: boolean;
-  awol_days_threshold: number;
 
   // Payroll: how accumulated lates translate into a pay deduction.
-  late_deduction_mode: LateDeductionMode;
-  lates_per_deduction: number; // per_lates: every N lates = 1 day deducted
+  late_deduction_mode: LateDeductionMode; // per-time charge for the minutes late
+  late_penalty_enabled: boolean; // independent: every N lates = 1 extra day deducted
+  lates_per_deduction: number; // N for the penalty above
   late_minutes_from: LateMinutesFrom; // count late minutes from start, or from end of grace
   late_tiers: LateTier[] | null; // `tiered` mode only
 
@@ -108,6 +109,7 @@ export interface AttendancePolicy {
 
   task_format: { require_english?: boolean; uppercase?: boolean };
 }
+
 
 export interface EffectiveSchedule {
   workdays: number[];

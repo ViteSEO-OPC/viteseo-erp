@@ -81,6 +81,14 @@ export interface Payslip {
   net_pay: number;
   status: string;
   processed_by: string | null;
+  // Attendance basis — how base_salary was derived (0 on older payslips).
+  working_days: number;
+  daily_rate: number;
+  unpaid_days: number;
+  late_minutes: number;
+  undertime_minutes: number;
+  late_deduction: number;
+  undertime_deduction: number;
 }
 
 export interface PayslipYtd {

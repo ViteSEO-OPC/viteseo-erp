@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Services;
 
 use App\Models\User;
 use App\Modules\Hr\Http\Resources\PayslipResource;
+use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
@@ -35,6 +36,29 @@ class PayrollService
     ) {}
 
     /**
+     * The canonical daily rate, honoring the attendance policy's daily-rate basis:
+     *   - fixed_divisor   → base × 12 ÷ annual_divisor (constant all year, DOLE-style)
+     *   - period_workdays → this period's pay ÷ its scheduled workdays (the default)
+     * Single source of truth (Slice A, 2026-07-27): payslipFor() and holidayPremiumFor() both
+     * price a day through here, so absence, late/undertime, and holiday premium can never
+     * disagree. Default basis reproduces the pre-Slice-A number.
+     */
+    private function dailyRateFor(Employee $employee, AttendancePolicy $policy, int $periodsPerYear, int $workingDays): float
+    {
+        $monthly = (float) $employee->base_salary;
+
+        if ($policy->daily_rate_basis === 'fixed_divisor') {
+            $divisor = max(1, (int) $policy->annual_divisor);
+
+            return round(($monthly * 12) / $divisor, 2);
+        }
+
+        $perPeriodBase = $periodsPerYear > 0 ? round(($monthly * 12) / $periodsPerYear, 2) : 0.0;
+
+        return $workingDays > 0 ? round($perPeriodBase / $workingDays, 2) : 0.0;
+    }
+
+    /**
      * Full per-employee payslip for one pay period. Base pay is the per-period slice
      * of the annual salary (monthly base × 12 ÷ periods/year), prorated by unpaid days
      * against the employee's scheduled workdays in the period.
@@ -53,11 +77,14 @@ class PayrollService
         array $dist,
         float $holidayPremium = 0.0,
         ?UnpaidDaysResult $unpaidDetail = null,
+        ?AttendancePolicy $policy = null,
     ): array {
+        $policy ??= $this->attendancePolicy->get();
         $monthlyBase = (float) $employee->base_salary;
         // The pay for THIS period: annual salary spread across the year's periods.
         $perPeriodBase = $periodsPerYear > 0 ? round(($monthlyBase * 12) / $periodsPerYear, 2) : 0.0;
-        $dailyRate = $workingDaysInPeriod > 0 ? round($perPeriodBase / $workingDaysInPeriod, 2) : 0.0;
+        // Daily rate via the policy basis (Slice A) — the one helper every pricing path uses.
+        $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDaysInPeriod);
         $basePay = max(0, round($perPeriodBase - $unpaidDays * $dailyRate, 2));
 
         // Allowances (food + transport + load) are monthly, non-taxable de-minimis pay.
@@ -107,7 +134,7 @@ class PayrollService
         $p = $this->attendancePolicy->get();
 
         return $p->only([
-            'late_deduction_mode', 'lates_per_deduction', 'late_minutes_from', 'late_tiers',
+            'late_deduction_mode', 'lates_per_deduction', 'late_penalty_enabled', 'late_minutes_from', 'late_tiers',
             'undertime_deduction_mode', 'missing_clockout_mode',
             'deduction_rounding', 'deduction_block_minutes', 'daily_deduction_cap',
             'daily_rate_basis', 'annual_divisor', 'hours_per_day_divisor',
@@ -263,7 +290,7 @@ class PayrollService
      *
      * @param  array<string, string>  $holidayMap  date 'Y-m-d' => type
      */
-    private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap): float
+    private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null): float
     {
         // Management staff are on a FIXED salary — no holiday premium, regardless of caller.
         if ($employee->isManagement()) {
@@ -274,8 +301,9 @@ class PayrollService
             return 0.0;
         }
 
-        $perPeriodBase = $periodsPerYear > 0 ? round(((float) $employee->base_salary * 12) / $periodsPerYear, 2) : 0.0;
-        $dailyRate = round($perPeriodBase / $workingDays, 2);
+        // Same daily-rate basis as absence/late (Slice A) — priced through the shared helper.
+        $policy ??= $this->attendancePolicy->get();
+        $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
 
         $worked = array_flip($this->attendance->workedDatesBetween($employee, $start, $end));
 
@@ -411,6 +439,9 @@ class PayrollService
             // Holidays in this cycle (date => type), fetched once for the whole run.
             $holidayMap = $this->holidays->typedHolidaysBetween(Carbon::parse($cycleStart), Carbon::parse($cycleEnd));
 
+            // The attendance policy drives the daily-rate basis (Slice A) — fetch once, reuse.
+            $policy = $this->attendancePolicy->get();
+
             foreach ($employees as $employee) {
                 // Double-pay guard: if this employee already has a payslip in ANOTHER run
                 // whose period overlaps this cycle (e.g. their pay_frequency changed after
@@ -445,9 +476,9 @@ class PayrollService
                 $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd);
 
                 // Premium for working on a (non-working) holiday in this cycle.
-                $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap);
+                $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail);
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy);
 
                 Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],
