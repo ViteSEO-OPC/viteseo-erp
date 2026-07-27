@@ -39,6 +39,17 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'overtime_mode' => ['sometimes', 'in:none,approved_only,auto_after_threshold'],
             'overtime_threshold_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
 
+            // Premium & overtime rates (Premium Pay epic, Phase 0). Whole-percent multipliers of the
+            // hourly/daily rate; each HARD-FLOORED at its DOLE minimum (editable UP, never below).
+            // night_diff_pct is the add-on percent (min +10%).
+            'premium_rest_day_pct' => ['sometimes', 'integer', 'min:130', 'max:1000'],
+            'premium_special_day_pct' => ['sometimes', 'integer', 'min:130', 'max:1000'],
+            'premium_regular_holiday_pct' => ['sometimes', 'integer', 'min:200', 'max:1000'],
+            'overtime_ordinary_pct' => ['sometimes', 'integer', 'min:125', 'max:1000'],
+            'overtime_rest_special_pct' => ['sometimes', 'integer', 'min:169', 'max:1000'],
+            'overtime_regular_holiday_pct' => ['sometimes', 'integer', 'min:260', 'max:1000'],
+            'night_diff_pct' => ['sometimes', 'integer', 'min:10', 'max:100'],
+
             // `exact` is the legally safe default; the round_* modes are a warned opt-in (§9).
             'deduction_rounding' => ['sometimes', 'in:exact,round_up,round_nearest,round_down'],
             'deduction_block_minutes' => ['sometimes', 'integer', 'min:1', 'max:480'],

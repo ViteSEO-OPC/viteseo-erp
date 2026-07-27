@@ -90,6 +90,17 @@ export interface AttendancePolicy {
   overtime_mode: OvertimeMode; // takes effect when OT requests ship
   overtime_threshold_minutes: number;
 
+  // Premium & overtime rates (whole-percent multipliers; HR-editable, hard-floored at the DOLE
+  // minimum). night_diff_pct is the add-on percent (10 = +10%). Consumers land in later phases;
+  // holiday premium reads the two holiday rates now (no-op at the seeded defaults).
+  premium_rest_day_pct: number; // floor 130
+  premium_special_day_pct: number; // floor 130
+  premium_regular_holiday_pct: number; // floor 200
+  overtime_ordinary_pct: number; // floor 125
+  overtime_rest_special_pct: number; // floor 169
+  overtime_regular_holiday_pct: number; // floor 260
+  night_diff_pct: number; // floor 10 (add-on)
+
   // `exact` is proportionate (the legal default); round_* is a warned opt-in.
   deduction_rounding: DeductionRounding;
   deduction_block_minutes: number;

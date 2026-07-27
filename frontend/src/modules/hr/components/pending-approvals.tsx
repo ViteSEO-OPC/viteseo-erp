@@ -96,7 +96,7 @@ export function PendingApprovals() {
         id: l.id,
         name: l.employee.name ?? "—",
         createdAt: l.created_at,
-        href: "/teamora/requests/leave",
+        href: "/teamora/requests/work-schedule",
       })),
     ...(claims ?? [])
       .filter((c) => c.status === "pending")

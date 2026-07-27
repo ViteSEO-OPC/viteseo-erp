@@ -20,6 +20,7 @@ use App\Modules\Hr\Http\Controllers\HalfDayRequestController;
 use App\Modules\Hr\Http\Controllers\EarlyOutRequestController;
 use App\Modules\Hr\Http\Controllers\LeaveController;
 use App\Modules\Hr\Http\Controllers\NotificationController;
+use App\Modules\Hr\Http\Controllers\OvertimeRequestController;
 use App\Modules\Hr\Http\Controllers\MeetingController;
 use App\Modules\Hr\Http\Controllers\PayrollController;
 use App\Modules\Hr\Http\Controllers\PayrollInquiryController;
@@ -67,6 +68,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // files + views own; service scopes by role.
     Route::get('early-out-requests', [EarlyOutRequestController::class, 'index']);
     Route::post('early-out-requests', [EarlyOutRequestController::class, 'store']);
+    Route::get('overtime-requests', [OvertimeRequestController::class, 'index']);
+    Route::get('overtime-requests/settings', [OvertimeRequestController::class, 'settings']);
+    Route::get('overtime-requests/classify', [OvertimeRequestController::class, 'classify']);
+    Route::post('overtime-requests', [OvertimeRequestController::class, 'store']);
 
     // Attendance — the caller clocks their own time; HR sees the roster.
     Route::get('me/attendance', [AttendanceController::class, 'me']);
@@ -161,6 +166,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // Approve/decline early-out requests (HR only).
         Route::post('early-out-requests/{earlyOutRequest}/approve', [EarlyOutRequestController::class, 'approve']);
         Route::post('early-out-requests/{earlyOutRequest}/reject', [EarlyOutRequestController::class, 'reject']);
+        Route::post('overtime-requests/{overtimeRequest}/approve', [OvertimeRequestController::class, 'approve']);
+        Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
         Route::post('departments', [DepartmentController::class, 'store']);
         Route::match(['put', 'patch'], 'departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);

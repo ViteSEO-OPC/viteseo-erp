@@ -293,6 +293,15 @@ function AttendancePolicyEditor() {
   const [overtimeMode, setOvertimeMode] = useState<OvertimeMode>(policy?.overtime_mode ?? "approved_only");
   const [overtimeThreshold, setOvertimeThreshold] = useState(String(policy?.overtime_threshold_minutes ?? 0));
 
+  // Premium & overtime rates (Phase 0) — whole-percent, floored at the DOLE minimum (UI + server).
+  const [premRestDay, setPremRestDay] = useState(String(policy?.premium_rest_day_pct ?? 130));
+  const [premSpecialDay, setPremSpecialDay] = useState(String(policy?.premium_special_day_pct ?? 130));
+  const [premRegHoliday, setPremRegHoliday] = useState(String(policy?.premium_regular_holiday_pct ?? 200));
+  const [otOrdinary, setOtOrdinary] = useState(String(policy?.overtime_ordinary_pct ?? 125));
+  const [otRestSpecial, setOtRestSpecial] = useState(String(policy?.overtime_rest_special_pct ?? 169));
+  const [otRegHoliday, setOtRegHoliday] = useState(String(policy?.overtime_regular_holiday_pct ?? 260));
+  const [nightDiff, setNightDiff] = useState(String(policy?.night_diff_pct ?? 10));
+
   // How lateness is charged: "exact" (precise minutes) or "custom" (a single threshold rule).
   // Custom is stored as a one-row late_tiers ladder — see chargeFields() below.
   const th = thresholdFrom(policy?.late_tiers);
@@ -629,16 +638,83 @@ function AttendancePolicyEditor() {
             ]}
           />
           {overtimeMode === "auto_after_threshold" && (
-            <NumberField id="pol-ot-threshold" label="Threshold (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
+            <NumberField id="pol-ot-threshold" label="Minimum overtime (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
           )}
         </div>
+        {overtimeMode === "auto_after_threshold" && (
+          <div className="rounded-lg border border-warning bg-warning-subtle p-3">
+            <p className="text-xs text-foreground">
+              Auto mode pays overtime from the <strong>time clock alone</strong> — staying past the
+              scheduled end by at least this many minutes is paid without anyone approving it. Philippine
+              practice is that overtime should be <strong>authorised</strong>; &ldquo;Only when approved&rdquo;
+              is the safer setting. A day&apos;s whole overrun is paid once it passes the minimum, and a
+              missing clock-out never counts as overtime.
+            </p>
+          </div>
+        )}
         <Hint>
-          Early-arrival handling isn&apos;t active yet — early minutes are always ignored for now, whatever this
-          shows. Overtime takes effect when overtime requests ship; a long clock reading is not overtime.
+          Early-arrival handling isn&apos;t active yet — early minutes are always ignored for now, whatever
+          this shows. Overtime is live: <strong>Only when approved</strong> pays each approved overtime
+          request; <strong>No overtime</strong> switches it off. Rest-day work is paid only through an
+          approved request, never auto-detected.
         </Hint>
         <SaveButton
           pending={saving === "early_ot"}
           onClick={() => saveCard("early_ot", { early_arrival_mode: earlyArrival, overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
+        />
+      </PolicySection>
+
+      <Divider />
+
+      {/* Premium & overtime rates (Premium Pay epic, Phase 0). Editable, floored at DOLE minimums. */}
+      <PolicySection
+        title="Premium &amp; overtime rates"
+        description="Legal pay multipliers for overtime, holidays, rest days and night work. Raise any of them, but never below the DOLE minimum."
+      >
+        <div className="space-y-3">
+          <SubHeading>Working a premium day (first 8 hours)</SubHeading>
+          <div className="flex flex-wrap items-end gap-4">
+            <NumberField id="pol-prem-rest" label="Rest day worked %" value={premRestDay} onChange={setPremRestDay} min={130} max={1000} />
+            <NumberField id="pol-prem-special" label="Special day worked %" value={premSpecialDay} onChange={setPremSpecialDay} min={130} max={1000} />
+            <NumberField id="pol-prem-holiday" label="Regular holiday worked %" value={premRegHoliday} onChange={setPremRegHoliday} min={200} max={1000} />
+          </div>
+        </div>
+        <div className="space-y-3">
+          <SubHeading>Overtime (hours beyond 8)</SubHeading>
+          <div className="flex flex-wrap items-end gap-4">
+            <NumberField id="pol-ot-ordinary" label="Ordinary day OT %" value={otOrdinary} onChange={setOtOrdinary} min={125} max={1000} />
+            <NumberField id="pol-ot-restspecial" label="Rest / special day OT %" value={otRestSpecial} onChange={setOtRestSpecial} min={169} max={1000} />
+            <NumberField id="pol-ot-holiday" label="Regular holiday OT %" value={otRegHoliday} onChange={setOtRegHoliday} min={260} max={1000} />
+          </div>
+        </div>
+        <div className="space-y-3">
+          <SubHeading>Night differential</SubHeading>
+          <NumberField id="pol-night" label="Night differential (+%)" value={nightDiff} onChange={setNightDiff} min={10} max={100} />
+        </div>
+        <div className="rounded-lg border border-warning bg-warning-subtle p-3">
+          <p className="text-xs text-foreground">
+            Minimums (DOLE): rest/special worked <strong>130%</strong>, regular holiday <strong>200%</strong>;
+            overtime <strong>125%</strong> ordinary / <strong>169%</strong> rest·special / <strong>260%</strong>{" "}
+            regular holiday; night differential <strong>+10%</strong>. The server rejects anything below these.
+          </p>
+        </div>
+        <Hint>
+          Only <strong>holiday premium</strong> reads these today; the overtime, rest-day and night rates take
+          effect as those features ship (Phases 1–3).
+        </Hint>
+        <SaveButton
+          pending={saving === "premium_rates"}
+          onClick={() =>
+            saveCard("premium_rates", {
+              premium_rest_day_pct: Number(premRestDay),
+              premium_special_day_pct: Number(premSpecialDay),
+              premium_regular_holiday_pct: Number(premRegHoliday),
+              overtime_ordinary_pct: Number(otOrdinary),
+              overtime_rest_special_pct: Number(otRestSpecial),
+              overtime_regular_holiday_pct: Number(otRegHoliday),
+              night_diff_pct: Number(nightDiff),
+            })
+          }
         />
       </PolicySection>
 

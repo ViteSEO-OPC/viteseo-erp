@@ -36,10 +36,16 @@ import {
   useApproveEarlyOutRequest,
   useRejectEarlyOutRequest,
 } from "@/modules/hr/hooks/use-early-out";
+import {
+  useOvertimeRequests,
+  useApproveOvertimeRequest,
+  useRejectOvertimeRequest,
+} from "@/modules/hr/hooks/use-overtime";
 import type {
   LeaveRequest,
   HalfDayRequest,
   EarlyOutRequest,
+  OvertimeRequest,
 } from "@/modules/hr/types/leave";
 
 // Pending / Approved / Rejected are the leave + half-day lifecycle states.
@@ -169,8 +175,8 @@ export default function TimeLeavePage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Time & Leave"
-        subtitle="Review and decide on employee leave requests."
+        title="Work Schedule"
+        subtitle="Review and decide on leave, half-day, early-out and overtime requests."
       />
 
       {/* Automation explainer */}
@@ -232,6 +238,8 @@ export default function TimeLeavePage() {
       <HalfDaySection />
 
       <EarlyOutSection />
+
+      <OvertimeSection />
     </div>
   );
 }
@@ -441,6 +449,114 @@ function EarlyOutSection() {
         onOpenChange={(o) => !o && setReview(null)}
         mode={review?.mode ?? "approve"}
         subject={review ? `${review.r.employee.name}'s early-out (${formatDate(review.r.work_date)} ${review.r.early_out_time})` : ""}
+        onConfirm={onConfirm}
+      />
+    </div>
+  );
+}
+
+// ---- Overtime requests (hours BEYOND the schedule — approving ADDS pay) ----
+
+function OvertimeSection() {
+  const { data: requests, isLoading } = useOvertimeRequests();
+  const approveMut = useApproveOvertimeRequest();
+  const rejectMut = useRejectOvertimeRequest();
+  const [review, setReview] = useState<{ mode: "approve" | "reject"; r: OvertimeRequest } | null>(null);
+  const [status, setStatus] = useState("all");
+  const visible = filterByStatus(requests ?? [], status);
+
+  async function onConfirm(reason: string) {
+    if (!review) return;
+    const { mode, r } = review;
+    try {
+      if (mode === "approve") {
+        await approveMut.mutateAsync(r.id);
+        toast.success(`Approved ${r.employee.name}'s overtime`);
+      } else {
+        await rejectMut.mutateAsync({ id: r.id, reason });
+        toast.error(`Declined ${r.employee.name}'s overtime`);
+      }
+    } catch {
+      toast.error("Action failed. Please try again.");
+    }
+  }
+
+  const busyId =
+    (approveMut.isPending && approveMut.variables) ||
+    (rejectMut.isPending && rejectMut.variables?.id) ||
+    null;
+
+  const columns: Column<OvertimeRequest>[] = [
+    {
+      header: "Employee",
+      cell: (r) => (
+        <div className="flex items-center gap-2.5">
+          <Avatar name={r.employee.name ?? "?"} colorSeed={r.employee.id} size="sm" />
+          <span className="font-semibold text-foreground">{r.employee.name}</span>
+        </div>
+      ),
+    },
+    { header: "Date", cell: (r) => formatDate(r.work_date) },
+    {
+      header: "Window",
+      cell: (r) => (r.time_from && r.time_to ? `${r.time_from}–${r.time_to}` : "—"),
+    },
+    { header: "Hours", cell: (r) => `${r.hours.toFixed(1)} hrs` },
+    { header: "Pay", cell: () => <span className="text-success">Paid · overtime</span> },
+    { header: "Reason", cell: (r) => <span className="text-muted-foreground">{r.reason}</span> },
+    { header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
+    {
+      header: "Action",
+      align: "right",
+      cell: (r) =>
+        r.status === "pending" ? (
+          <div className="flex justify-end gap-1.5">
+            <Button size="sm" variant="success" disabled={busyId === r.id} onClick={() => setReview({ mode: "approve", r })}>
+              <Check />
+              Approve
+            </Button>
+            <Button size="sm" variant="destructive" disabled={busyId === r.id} onClick={() => setReview({ mode: "reject", r })}>
+              <X />
+              Reject
+            </Button>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
+    },
+  ];
+
+  return (
+    <div className="mt-10">
+      <h2 className="text-h3 font-bold text-foreground">Overtime Requests</h2>
+      <p className="mt-1 text-caption text-muted-foreground">
+        Hours worked beyond the schedule. Approving ADDS pay for that period, at the company&apos;s
+        overtime rate for that day (regular / rest day / special day / regular holiday).
+      </p>
+      <div className="mt-4">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading overtime requests…</p>
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={visible}
+            rowKey={(r) => r.id}
+            needsAction={(r) => r.status === "pending"}
+            getSearchText={(r) => `${r.employee.name ?? ""} ${r.hours} ${r.reason} ${r.status}`}
+            searchPlaceholder="Search employee, reason…"
+            toolbar={
+              <StatusFilter options={REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
+            }
+            empty="No overtime requests yet."
+          />
+        )}
+      </div>
+
+      <ReviewDialog
+        open={!!review}
+        onOpenChange={(o) => !o && setReview(null)}
+        mode={review?.mode ?? "approve"}
+        subject={review ? `${review.r.employee.name}'s overtime (${formatDate(review.r.work_date)} · ${review.r.hours.toFixed(1)} hrs)` : ""}
         onConfirm={onConfirm}
       />
     </div>
