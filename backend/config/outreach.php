@@ -79,4 +79,25 @@ return [
         'address' => env('OUTREACH_FROM_ADDRESS', env('MAIL_FROM_ADDRESS', 'hello@crm-enterprise.com')),
         'name' => env('OUTREACH_FROM_NAME', env('MAIL_FROM_NAME', 'CRM Enterprise')),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Internal notification channels (INTERNAL staff mail — never customer mail)
+    |--------------------------------------------------------------------------
+    | Additional delivery channels for INTERNAL CRM notifications, on top of the
+    | always-on in-app database notification. These carry staff alerts to a CRM
+    | user's own company mailbox (users.email, e.g. bruce@viteseo.ph) — they are
+    | NOT part of customer communication, which continues to flow exclusively
+    | through the shared outreach mailbox (see `from` + `mailbox` above).
+    |
+    | `mail`  off by default: no internal mail is sent until it is switched on, so
+    |         enabling SMTP alone can never start emailing staff unexpectedly.
+    |
+    | Future channels (slack/teams/sms/whatsapp) are added as additional keys here
+    | and a channel branch in the delivery dispatcher — the inbound business layer
+    | (InboundEmailService / InboundReplyProcessor) never changes.
+    */
+    'internal_notifications' => [
+        'mail' => (bool) env('CRM_INTERNAL_REPLY_MAIL', false),
+    ],
 ];

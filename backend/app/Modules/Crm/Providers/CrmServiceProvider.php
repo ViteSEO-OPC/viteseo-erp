@@ -10,6 +10,7 @@ use App\Modules\Crm\Console\Commands\PruneReadNotifications;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
 use App\Modules\Crm\Events\DealWon;
 use App\Modules\Crm\Events\FollowUpCompleted;
+use App\Modules\Crm\Events\InboundReplyReceived;
 use App\Modules\Crm\Events\LeadQualified;
 use App\Modules\Crm\Events\OutboundEmailSent;
 use App\Modules\Crm\Events\PlannerReminderDue;
@@ -26,6 +27,7 @@ use App\Modules\Crm\Listeners\EmitOutboundEmailSentWebhook;
 use App\Modules\Crm\Listeners\EmitProposalSentWebhook;
 use App\Modules\Crm\Listeners\EmitReminderDueWebhook;
 use App\Modules\Crm\Listeners\EscalateUnansweredFollowUp;
+use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
 use App\Modules\Crm\Models\Call;
@@ -160,6 +162,12 @@ class CrmServiceProvider extends ServiceProvider
         // No-Response Escalation (workflow #4) — a follow-up completed without a reply creates a
         // Planner escalation task for the assigned BD (decided & executed server-side).
         Event::listen(FollowUpCompleted::class, EscalateUnansweredFollowUp::class);
+
+        // Multi-Channel Internal Notifications — the delivery subsystem for inbound-reply alerts on
+        // channels beyond the always-on in-app notification (mail today, gated by
+        // `outreach.internal_notifications.mail`; slack/teams/sms later). Internal staff alerts only —
+        // customer communication continues to flow through the shared outreach mailbox.
+        Event::listen(InboundReplyReceived::class, InboundReplyDeliveryDispatcher::class);
 
         // Console commands + inbound-sync maintenance schedule. Registering the schedule is inert
         // until a scheduler/queue worker runs at deploy (and Gmail creds are configured).

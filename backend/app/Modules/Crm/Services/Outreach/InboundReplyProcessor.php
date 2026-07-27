@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Services\Outreach;
 
+use App\Modules\Crm\Events\InboundReplyReceived;
+use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Notifications\InboundReplyNotification;
@@ -18,6 +20,11 @@ use Illuminate\Support\Facades\Log;
  * Reuse-first: every step routes through an EXISTING owner — Planner (`FollowUpScheduler`) completes
  * the follow-up, the KPI Engine (`LeadScorer`) refreshes the score with the frozen formula, and the
  * standard Laravel Notifiable delivers the BD notification. This service adds no business rules.
+ *
+ * Additional INTERNAL notification channels (mail today; slack/teams/sms later) are NOT delivered here:
+ * this service emits {@see InboundReplyReceived} and the delivery subsystem
+ * ({@see InboundReplyDeliveryDispatcher}) owns them, so a new channel never
+ * edits this fan-out. Customer communication is unaffected — it stays on the shared outreach mailbox.
  *
  * Lifecycle boundary (PO-approved 2026-07-15): inbound email touches the COMMUNICATION lifecycle only
  * — `leads.email_outreach` (Email Outreach Status) and `leads.last_activity`. It NEVER writes
@@ -53,8 +60,14 @@ class InboundReplyProcessor
             $this->scorer->refresh($lead);
         }
 
-        // 4. Notify the assigned BD (first production notification). No assignee → nothing to deliver.
+        // 4. Notify the assigned BD in-app (first production notification). No assignee → nothing to
+        //    deliver. Always-on and unchanged: the in-app notification is the baseline channel.
         $lead->assignedTo?->notify(new InboundReplyNotification($lead, $email));
+
+        // 5. Announce the reply so the DELIVERY subsystem can alert the assigned user on any additional
+        //    ENABLED internal channel (mail today; slack/teams/sms later). Emitted last so a channel can
+        //    never affect steps 1–4, and kept as an event so adding a channel touches no business logic.
+        event(new InboundReplyReceived($lead, $email));
 
         Log::info('outreach.inbound.fanout', [
             'lead_id' => $lead->id,
