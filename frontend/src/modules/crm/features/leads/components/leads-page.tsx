@@ -15,6 +15,9 @@ import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/co
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { useLeads, LEAD_UNASSIGNED } from "@/modules/crm/features/leads/hooks/use-leads-data";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
+import { ReportsScopeSelector } from "@/modules/crm/features/reports/components/reports-scope-selector";
+import { ALL_SCOPE } from "@/modules/crm/features/performance/lib/performance-scope";
+import type { PerformanceScope } from "@/modules/crm/features/performance/lib/performance-scope";
 import { useNicheDistribution } from "@/modules/crm/features/leads/hooks/use-niche-distribution";
 import { useExportLeads } from "@/modules/crm/features/leads/hooks/use-export-leads";
 import { useDeleteLead, useBulkDeleteLeads } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
@@ -123,6 +126,27 @@ export function LeadsPageLayout() {
     [bdUsers],
   );
 
+  /**
+   * Admin/Super Admin scope tabs, rendered with the Reports & Performance selector rather than a
+   * second implementation. The scope is derived from — and written back to — the SAME `assigned_to`
+   * URL param the Assigned BD column filter uses, so the tabs add no state, no extra request and no
+   * second table: they are another way to set one existing server-side filter.
+   *
+   * `assigned_to=unassigned` (reachable from the column filter) maps to a scope matching no chip, so
+   * nothing is highlighted — marking "All Leads" active there would show a filtered table as unfiltered.
+   */
+  const leadsScope: PerformanceScope =
+    assignedTo === ""
+      ? ALL_SCOPE
+      : {
+          mode: "bd",
+          userId: assignedTo,
+          name: bdUsers.find((user) => user.id === assignedTo)?.name ?? "",
+        };
+
+  const handleScopeChange = (next: PerformanceScope) =>
+    setAssignedTo(next.mode === "bd" ? next.userId : "");
+
   // Select-all / clear targets the leads currently on screen ("current filtered results").
   const toggleSelectAll = (checked: boolean) => {
     setSelectedIds(checked ? new Set((data ?? []).map((lead) => lead.id)) : new Set());
@@ -146,6 +170,16 @@ export function LeadsPageLayout() {
   // drilling. React Query hashes the key by value, so a fresh object per render is fine.
   const summaryFilters: Record<string, string> = Object.fromEntries(
     Object.entries(listParams).filter(([key]) => key !== "website_status" && key !== "sort"),
+  );
+
+  /**
+   * Filters for the status tabs: everything the list is using except `status` — which the endpoint
+   * deliberately ignores so the tabs stay a switcher — and `sort`, which changes ordering but never
+   * the set. Dropping both keeps one cache entry per real dataset instead of refetching identical
+   * counts on every tab click and sort change.
+   */
+  const statusSummaryFilters: Record<string, string> = Object.fromEntries(
+    Object.entries(listParams).filter(([key]) => key !== "status" && key !== "sort"),
   );
 
   // Niche distribution uses the API's real per-industry totals (industry_counts) — accurate and
@@ -182,10 +216,25 @@ export function LeadsPageLayout() {
   return (
     <>
       <div className="flex flex-col gap-6">
-        <LeadsKpiRow filters={summaryFilters} />
+        {/* Lead Priority Overview (website-status cards) — BD only. The approved Admin/Super Admin
+            layout leads with the BD tabs instead, so the cards are not rendered for that audience;
+            not rendering them also skips their /dashboard/priority-buckets request. The BD page is
+            unchanged, and the Dashboard keeps its own copy of these cards either way. */}
+        {canAssign ? null : <LeadsKpiRow filters={summaryFilters} />}
         <div className="flex flex-col gap-4">
+          {/* Admin/Super Admin only — a BD never mounts this, so their Leads page is unchanged. */}
+          {canAssign ? (
+            <ReportsScopeSelector
+              scope={leadsScope}
+              onChange={handleScopeChange}
+              allLabel="All Leads"
+              ariaLabel="Filter leads by assigned Business Development Manager"
+            />
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <LeadsSummaryTabs />
+            {/* Admin/Super Admin: counts follow the list filters (BD tabs included). A BD passes
+                nothing, so their tabs behave exactly as before. */}
+            <LeadsSummaryTabs scopeParams={canAssign ? statusSummaryFilters : undefined} />
             <LeadsToolbar
               onCreate={() => setCreateOpen(true)}
               onImport={() => setImportOpen(true)}

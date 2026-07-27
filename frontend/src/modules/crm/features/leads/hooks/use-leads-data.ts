@@ -390,28 +390,61 @@ function statusTabCount(key: string, kpi: KpiStatusApi): number {
   return (STATUS_TAB_MAP[key] ?? []).reduce((sum, st) => sum + (counts[st] ?? 0), 0);
 }
 
-export function useLeadStatusSummary() {
+/**
+ * Lead Summary status counts.
+ *
+ * Two modes, chosen by the caller:
+ *
+ * - `scopeParams` omitted (Business Development) — unchanged: the counts come from the shared
+ *   /dashboard/kpis aggregation and each tab links to a bare ?status= drill-down.
+ *
+ * - `scopeParams` provided (Admin/Super Admin) — the counts come from GET /leads/status-summary,
+ *   computed server-side over the SAME filters the list is using, so selecting a BD narrows the
+ *   table and the tabs together. Aggregation stays in SQL; nothing is summed in the browser. The
+ *   tab links carry the current filters forward (overriding only `status`), so switching tabs
+ *   cannot silently drop the selected BD and desynchronise the two.
+ */
+export function useLeadStatusSummary(scopeParams?: Record<string, string>) {
   const searchParams = useSearchParams();
-  // Reuse the extended /dashboard/kpis aggregation. The shared query key dedupes with the
-  // Dashboard's useDashboardKpis (one request). No new endpoint, no duplicate aggregation.
+  const scoped = scopeParams !== undefined;
+
   const query = useQuery<KpiStatusApi>({
-    queryKey: queryKeys.dashboard.kpis(),
-    queryFn: () => apiClient.get("/dashboard/kpis").then((r) => r.data.data),
+    queryKey: scoped
+      ? queryKeys.leads.statusSummary(scopeParams)
+      : queryKeys.dashboard.kpis(),
+    queryFn: () =>
+      scoped
+        ? apiClient.get("/leads/status-summary", { params: scopeParams }).then((r) => r.data.data)
+        : apiClient.get("/dashboard/kpis").then((r) => r.data.data),
   });
 
   const currentStatus = normalizeStatus(searchParams.get("status"));
 
   const data: LeadStatusSummaryItem[] = STATUS_SUMMARY_META.map((meta) => {
     const joined = (STATUS_TAB_MAP[meta.key] ?? []).join(",");
+
+    let href: string;
+    if (scoped) {
+      // Preserve every active filter and change only the status, so the tab the user lands on
+      // describes the same dataset the counts were computed from.
+      const params = new URLSearchParams(searchParams.toString());
+      if (joined) params.set("status", joined);
+      else params.delete("status");
+      const qs = params.toString();
+      href = qs ? `/zerem/leads?${qs}` : "/zerem/leads";
+    } else {
+      // Bare drill-down: only ?status= (drops any active priority/search) so the table always
+      // matches the displayed count — same overview→drill-down model as the Priority cards.
+      href = joined ? `/zerem/leads?status=${joined}` : "/zerem/leads";
+    }
+
     return {
       key: meta.key,
       label: meta.label,
       className: meta.className,
       count: query.data ? statusTabCount(meta.key, query.data) : 0,
       active: joined === currentStatus,
-      // Bare drill-down: only ?status= (drops any active priority/search) so the table always
-      // matches the displayed count — same overview→drill-down model as the Priority cards.
-      href: joined ? `/zerem/leads?status=${joined}` : "/zerem/leads",
+      href,
     };
   });
 

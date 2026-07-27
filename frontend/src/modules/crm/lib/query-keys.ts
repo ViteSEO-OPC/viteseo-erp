@@ -33,6 +33,11 @@ export const queryKeys = {
     // refreshes the cards by prefix match — the cards can never drift from the table.
     prioritySummary: (filters: Record<string, unknown>) =>
       [...queryKeys.leads.lists(), "priority-summary", filters] as const,
+    // Status Summary tabs (GET /leads/status-summary). Nested under lists() for the same reason as
+    // the cards above: every mutation that invalidates leads.lists() also refreshes the tabs by
+    // prefix match, so the counts can never drift from the table they describe.
+    statusSummary: (filters: Record<string, unknown>) =>
+      [...queryKeys.leads.lists(), "status-summary", filters] as const,
     details: () => [...queryKeys.leads.all, "detail"] as const,
     detail: (id: string) => [...queryKeys.leads.details(), id] as const,
     // Per-lead activity timeline. Nested under detail(id) so the existing

@@ -63,6 +63,10 @@ Route::prefix('v1/crm')->group(function (): void {
         // ownership-scoped, mirroring the list. Declared before the /leads/{lead} wildcards so the
         // static `priority-summary` segment is not captured as a {lead} route-model-binding id.
         Route::get('/leads/priority-summary', [LeadController::class, 'prioritySummary'])->can('viewAny', Lead::class);
+        // Leads-page status tabs: Total/New/Contacted/Qualified/Declined counts over the SAME filtered,
+        // ownership-scoped dataset as the list, so the tabs can never disagree with the table.
+        // Declared before the /leads/{lead} wildcards, like priority-summary above.
+        Route::get('/leads/status-summary', [LeadController::class, 'statusSummary'])->can('viewAny', Lead::class);
         Route::post('/leads/import', [LeadController::class, 'import'])->can('import', Lead::class);
         // Programmatic enrichment ingest — a discovery provider (Python Scraper) submits normalized
         // discovered businesses as JSON. Same `import` permission; lands fit-data only, assigns no owner.

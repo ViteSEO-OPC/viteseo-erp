@@ -126,6 +126,48 @@ class LeadController extends Controller
     }
 
     /**
+     * Lead Status summary for the Leads-page tabs (Total / New / Contacted / Qualified / Declined).
+     *
+     * Exists so the tabs can be computed from the SAME dataset the table is showing. The counts are
+     * aggregated in SQL over {@see applyLeadListFilters} — the identical filter logic the list uses —
+     * so selecting a BD (`assigned_to`) narrows the table and these counts together and the two can
+     * never disagree. Ownership-scoped by `visibleTo`, exactly like the list.
+     *
+     * Every list filter is honoured EXCEPT `status` itself: the tabs ARE the status switcher, so
+     * applying the active status would leave one tab holding the whole count and the rest at zero.
+     * This mirrors {@see prioritySummary}, which excludes `priority` for the same reason.
+     *
+     * The response shape matches the `statusCounts` block the Leads tabs already consume, so the
+     * frontend's existing tab→status mapping and counting are unchanged.
+     */
+    public function statusSummary(IndexLeadRequest $request): JsonResponse
+    {
+        $query = Lead::query()->active()->visibleTo($request->user());
+        $this->applyLeadListFilters($query, $request, applyPriority: true, applyStatus: false);
+
+        /** @var array<string, int> $counts */
+        $counts = (clone $query)
+            ->groupBy('status')
+            ->selectRaw('status, COUNT(*) as aggregate')
+            ->pluck('aggregate', 'status')
+            ->map(static fn ($count): int => (int) $count)
+            ->all();
+
+        // Every status is present (0 when absent) so a tab never renders a blank instead of a zero.
+        $statusCounts = [];
+        foreach (['new', 'interested', 'awaiting-reply', 'call-back-req', 'declined'] as $status) {
+            $statusCounts[$status] = $counts[$status] ?? 0;
+        }
+
+        return response()->json(['data' => [
+            // Total is the sum of the filtered dataset, NOT a global count — it is what the table's
+            // own "Showing N of M" reports for the same filters.
+            'totalLeads' => array_sum($counts),
+            'statusCounts' => $statusCounts,
+        ]]);
+    }
+
+    /**
      * Website Opportunity buckets — lead counts / average score / share per `website_status`.
      *
      * This is the SINGLE source for the "Lead Priority Overview" cards on BOTH the Dashboard (the
@@ -190,6 +232,10 @@ class LeadController extends Controller
         IndexLeadRequest $request,
         bool $applyPriority,
         bool $applyWebsiteStatus = true,
+        // Excluded by the status summary, so its tabs stay a switcher OVER the filtered dataset
+        // rather than collapsing to the single status already selected — the same reason
+        // prioritySummary excludes `priority`.
+        bool $applyStatus = true,
     ): void {
         $search = trim((string) $request->validated('search'));
         $priority = $request->validated('priority');
@@ -227,7 +273,7 @@ class LeadController extends Controller
             ->when($applyWebsiteStatus && $websiteStatus, function (Builder $q) use ($websiteStatus): void {
                 $q->where('website_status', $websiteStatus);
             })
-            ->when($statuses !== [], function (Builder $q) use ($statuses): void {
+            ->when($applyStatus && $statuses !== [], function (Builder $q) use ($statuses): void {
                 $q->whereIn('status', $statuses);
             })
             ->when($emailOutreach, function (Builder $q) use ($emailOutreach): void {

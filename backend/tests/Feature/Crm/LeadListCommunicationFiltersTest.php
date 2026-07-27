@@ -278,6 +278,200 @@ class LeadListCommunicationFiltersTest extends TestCase
         }
     }
 
+    /**
+     * The status tabs must describe the dataset the table is showing. These pin that the summary
+     * narrows with the list filters, and that it deliberately ignores `status` itself so the tabs stay
+     * a switcher rather than collapsing to the selected status.
+     */
+    public function test_status_summary_narrows_with_the_assigned_bd_filter(): void
+    {
+        $this->actingAsAdmin();
+        $bd = $this->businessDeveloper();
+        Lead::factory()->create(['assigned_to' => $bd->id, 'status' => 'new']);
+        Lead::factory()->create(['assigned_to' => $bd->id, 'status' => 'declined']);
+        // Belongs to someone else — must not appear in the selected BD's summary.
+        Lead::factory()->create(['assigned_to' => $this->businessDeveloper()->id, 'status' => 'new']);
+
+        $all = $this->getJson('/api/v1/crm/leads/status-summary')->assertOk()->json('data');
+        $this->assertSame(3, $all['totalLeads']);
+        $this->assertSame(2, $all['statusCounts']['new']);
+
+        $scoped = $this->getJson('/api/v1/crm/leads/status-summary?'.http_build_query([
+            'assigned_to' => (string) $bd->id,
+        ]))->assertOk()->json('data');
+
+        $this->assertSame(2, $scoped['totalLeads']);
+        $this->assertSame(1, $scoped['statusCounts']['new']);
+        $this->assertSame(1, $scoped['statusCounts']['declined']);
+    }
+
+    public function test_status_summary_matches_the_list_total_for_the_same_filters(): void
+    {
+        $this->actingAsAdmin();
+        $bd = $this->businessDeveloper();
+        Lead::factory()->count(3)->create(['assigned_to' => $bd->id]);
+        Lead::factory()->count(2)->create(['assigned_to' => $this->businessDeveloper()->id]);
+
+        $params = ['assigned_to' => (string) $bd->id];
+
+        $listTotal = $this->getJson('/api/v1/crm/leads?'.http_build_query($params))
+            ->assertOk()->json('meta.total');
+        $summaryTotal = $this->getJson('/api/v1/crm/leads/status-summary?'.http_build_query($params))
+            ->assertOk()->json('data.totalLeads');
+
+        // The guarantee the tabs rely on: same filters in, same dataset described.
+        $this->assertSame($listTotal, $summaryTotal);
+        $this->assertSame(3, $summaryTotal);
+    }
+
+    public function test_status_summary_ignores_the_status_filter_itself(): void
+    {
+        $this->actingAsAdmin();
+        Lead::factory()->create(['status' => 'new']);
+        Lead::factory()->create(['status' => 'declined']);
+
+        // Selecting a tab must not zero the other tabs — they remain the switcher.
+        $data = $this->getJson('/api/v1/crm/leads/status-summary?status=new')->assertOk()->json('data');
+
+        $this->assertSame(2, $data['totalLeads']);
+        $this->assertSame(1, $data['statusCounts']['new']);
+        $this->assertSame(1, $data['statusCounts']['declined']);
+    }
+
+    public function test_status_summary_is_ownership_scoped(): void
+    {
+        // A BD sees only their own leads, exactly as the list does — the summary cannot widen access.
+        $bd = User::factory()->create(['status' => 'active']);
+        $bd->assignRole('crm_bd');
+        Sanctum::actingAs($bd);
+
+        Lead::factory()->create(['assigned_to' => $bd->id, 'status' => 'new']);
+        Lead::factory()->create(['assigned_to' => null, 'status' => 'new']);
+
+        $data = $this->getJson('/api/v1/crm/leads/status-summary')->assertOk()->json('data');
+
+        $this->assertSame(1, $data['totalLeads']);
+    }
+
+    /**
+     * Fixture for the cross-filter sync check: three leads that differ on every filterable axis, so
+     * each filter below genuinely narrows the set rather than trivially matching everything.
+     *
+     * @return array{0: User, 1: User}
+     */
+    private function seedFilterMatrix(): array
+    {
+        $bdOne = $this->businessDeveloper();
+        $bdTwo = $this->businessDeveloper();
+
+        Lead::factory()->create([
+            'business_name' => 'Zzqq Alpha Widgets',
+            'assigned_to' => $bdOne->id,
+            'priority' => 'high',
+            'email_outreach' => 'replied',
+            'cold_calling' => 'called',
+            'website_status' => 'no-website',
+            'industry' => 'Retail',
+            'status' => 'new',
+        ]);
+        Lead::factory()->create([
+            'business_name' => 'Beta Corp',
+            'assigned_to' => $bdTwo->id,
+            'priority' => 'low',
+            'email_outreach' => 'none',
+            'cold_calling' => 'not-called',
+            'website_status' => 'has-website',
+            'industry' => 'Legal',
+            'status' => 'declined',
+        ]);
+        Lead::factory()->create([
+            'business_name' => 'Gamma Ltd',
+            'assigned_to' => $bdOne->id,
+            'priority' => 'medium',
+            'email_outreach' => 'sent',
+            'cold_calling' => 'scheduled',
+            'website_status' => 'needs-redesign',
+            'industry' => 'Retail',
+            'status' => 'interested',
+        ]);
+
+        return [$bdOne, $bdTwo];
+    }
+
+    /**
+     * The contract the Admin status tabs depend on: for EVERY supported list filter, the summary
+     * describes the same dataset as the table. Asserted by comparing the summary's total against the
+     * list's own meta.total for identical params, and requiring the filter to actually narrow (so a
+     * filter silently doing nothing on both sides cannot pass).
+     */
+    public function test_status_summary_matches_the_list_for_every_supported_filter(): void
+    {
+        $this->actingAsAdmin();
+        [$bdOne] = $this->seedFilterMatrix();
+
+        $unfiltered = $this->getJson('/api/v1/crm/leads/status-summary')->assertOk()->json('data.totalLeads');
+        $this->assertSame(3, $unfiltered);
+
+        $cases = [
+            'search' => ['search' => 'Zzqq'],
+            'assigned_to' => ['assigned_to' => (string) $bdOne->id],
+            'priority' => ['priority' => 'high'],
+            'email_outreach' => ['email_outreach' => 'replied'],
+            'cold_calling' => ['cold_calling' => 'scheduled'],
+            'website_status' => ['website_status' => 'has-website'],
+            'industry' => ['industry' => 'Retail'],
+        ];
+
+        foreach ($cases as $label => $params) {
+            $qs = http_build_query($params);
+
+            $listTotal = $this->getJson("/api/v1/crm/leads?{$qs}")->assertOk()->json('meta.total');
+            $summaryTotal = $this->getJson("/api/v1/crm/leads/status-summary?{$qs}")
+                ->assertOk()->json('data.totalLeads');
+
+            $this->assertSame($listTotal, $summaryTotal, "Summary and list disagree for filter: {$label}");
+            $this->assertLessThan($unfiltered, $summaryTotal, "Filter did not narrow anything: {$label}");
+        }
+    }
+
+    /** Filters must also stay in sync when several are combined, not only one at a time. */
+    public function test_status_summary_matches_the_list_for_combined_filters(): void
+    {
+        $this->actingAsAdmin();
+        [$bdOne] = $this->seedFilterMatrix();
+
+        $qs = http_build_query([
+            'assigned_to' => (string) $bdOne->id,
+            'priority' => 'medium',
+            'cold_calling' => 'scheduled',
+            'industry' => 'Retail',
+        ]);
+
+        $listTotal = $this->getJson("/api/v1/crm/leads?{$qs}")->assertOk()->json('meta.total');
+        $summaryTotal = $this->getJson("/api/v1/crm/leads/status-summary?{$qs}")
+            ->assertOk()->json('data.totalLeads');
+
+        $this->assertSame(1, $listTotal);
+        $this->assertSame($listTotal, $summaryTotal);
+    }
+
+    /**
+     * The single intentional exception. `status` narrows the table but NOT the summary, so the tabs
+     * keep working as a switcher instead of collapsing to the selected status.
+     */
+    public function test_status_is_the_only_filter_the_summary_ignores(): void
+    {
+        $this->actingAsAdmin();
+        $this->seedFilterMatrix();
+
+        $listTotal = $this->getJson('/api/v1/crm/leads?status=new')->assertOk()->json('meta.total');
+        $summaryTotal = $this->getJson('/api/v1/crm/leads/status-summary?status=new')
+            ->assertOk()->json('data.totalLeads');
+
+        $this->assertSame(1, $listTotal, 'status should narrow the table');
+        $this->assertSame(3, $summaryTotal, 'status must NOT narrow the summary');
+    }
+
     public function test_priority_summary_honours_the_new_filters(): void
     {
         $this->actingAsAdmin();
