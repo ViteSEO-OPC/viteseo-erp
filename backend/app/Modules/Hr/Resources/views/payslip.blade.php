@@ -59,6 +59,9 @@
         @if (($p['night_diff_pay'] ?? 0) > 0)
             <tr><td>Night differential ({{ number_format(($p['night_diff_minutes'] ?? 0) / 60, 1) }} hrs)</td><td class="amt">{{ $peso($p['night_diff_pay']) }}</td></tr>
         @endif
+        @if (($p['rest_day_premium'] ?? 0) > 0)
+            <tr><td>Rest day worked ({{ number_format(($p['rest_day_minutes'] ?? 0) / 60, 1) }} hrs)</td><td class="amt">{{ $peso($p['rest_day_premium']) }}</td></tr>
+        @endif
         @if ($p['reimbursements'] > 0)
             <tr><td>Reimbursement</td><td class="amt">{{ $peso($p['reimbursements']) }}</td></tr>
         @endif

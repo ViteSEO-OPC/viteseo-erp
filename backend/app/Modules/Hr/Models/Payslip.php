@@ -17,6 +17,7 @@ class Payslip extends Model
         'base_salary', 'reimbursements', 'allowances', 'holiday_premium', 'gross',
         // Positive pay lines (OT-1 / ND-1) — must be fillable or run()'s updateOrCreate drops them.
         'overtime_pay', 'overtime_minutes', 'night_diff_pay', 'night_diff_minutes',
+        'rest_day_premium', 'rest_day_minutes',
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
         'total_deductions', 'net_pay', 'status',
@@ -41,6 +42,8 @@ class Payslip extends Model
         'overtime_minutes' => 'integer',
         'night_diff_pay' => 'decimal:2',
         'night_diff_minutes' => 'integer',
+        'rest_day_premium' => 'decimal:2',
+        'rest_day_minutes' => 'integer',
         'gross' => 'decimal:2',
         'sss' => 'decimal:2',
         'philhealth' => 'decimal:2',

@@ -76,6 +76,8 @@ export interface Payslip {
   overtime_minutes: number;
   night_diff_pay: number;
   night_diff_minutes: number;
+  rest_day_premium: number;
+  rest_day_minutes: number;
   gross: number;
   sss: number;
   philhealth: number;

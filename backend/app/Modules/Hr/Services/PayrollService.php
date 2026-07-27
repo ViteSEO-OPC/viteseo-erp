@@ -84,6 +84,8 @@ class PayrollService
         int $overtimeMinutes = 0,
         float $nightDiffPay = 0.0,
         int $nightDiffMinutes = 0,
+        float $restDayPremium = 0.0,
+        int $restDayMinutes = 0,
     ): array {
         $policy ??= $this->attendancePolicy->get();
         $monthlyBase = (float) $employee->base_salary;
@@ -119,7 +121,7 @@ class PayrollService
         // the full monthly salary (PH bracket model), so `contribBase` is unchanged.
         $taxableMonthly = $periodsPerYear > 0 ? round($basePay * $periodsPerYear / 12, 2) : 0.0;
 
-        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay);
+        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium);
 
         // Step 4b — persist how base_salary was derived, so the payslip explains itself.
         // The minute-level portion is all-zero until a deduction mode is enabled.
@@ -130,6 +132,7 @@ class PayrollService
         $slip['undertime_minutes'] = $unpaidDetail?->undertimeMinutes ?? 0;
         $slip['overtime_minutes'] = $overtimeMinutes;
         $slip['night_diff_minutes'] = $nightDiffMinutes;
+        $slip['rest_day_minutes'] = $restDayMinutes;
         $slip['late_deduction'] = round(($unpaidDetail?->lateDays ?? 0.0) * $dailyRate, 2);
         $slip['undertime_deduction'] = round(($unpaidDetail?->undertimeDays ?? 0.0) * $dailyRate, 2);
 
@@ -172,7 +175,7 @@ class PayrollService
      * @param  array{index:int, count:int, deduction_timing:string, tax_timing:string}  $dist
      * @return array<string, float>
      */
-    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0): array
+    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0): array
     {
         // SSS/PhilHealth/Pag-IBIG are MONTHLY amounts (on the monthly base); the
         // timing setting decides which cutoff(s) in the month they land on.
@@ -202,7 +205,7 @@ class PayrollService
 
         // Holiday premium is added to gross (taxable in reality, but — like the rest of
         // this simplified engine — it isn't fed back into the withholding base above).
-        $gross = round($basePay + $allowances + $reimb + $holidayPremium + $overtimePay + $nightDiffPay, 2);
+        $gross = round($basePay + $allowances + $reimb + $holidayPremium + $overtimePay + $nightDiffPay + $restDayPremium, 2);
         $totalDeductions = round($sss + $philhealth + $pagibig + $wht, 2);
 
         return [
@@ -212,6 +215,7 @@ class PayrollService
             'holiday_premium' => round($holidayPremium, 2),
             'overtime_pay' => round($overtimePay, 2),
             'night_diff_pay' => round($nightDiffPay, 2),
+            'rest_day_premium' => round($restDayPremium, 2),
             'gross' => $gross,
             'sss' => $sss,
             'philhealth' => $philhealth,
@@ -440,21 +444,83 @@ class PayrollService
         return ['pay' => round($pay, 2), 'minutes' => $minutes];
     }
 
+    /** A full 8-hour day in minutes — the line between rest-day premium and rest-day overtime. */
+    private const REST_DAY_PREMIUM_CAP_MIN = 8 * 60;
+
+    /**
+     * Rest-day premium (RD-1): pay for WORKING a scheduled rest day — the first 8 hours at
+     * `premium_rest_day_pct`. Hours past the 8th are rest-day OVERTIME instead (see the cap in
+     * overtimeMinutesByDate), so one rest day is never paid through both lines.
+     *
+     * FULL RATE vs PREMIUM-ONLY: under the default `period_workdays` basis (and the 261/313 divisors)
+     * the salary is spread over SCHEDULED WORKDAYS only — a rest day isn't in it at all, so working one
+     * earns the whole 130%. Only when the divisor counts every day (365) is the day already inside the
+     * salary, and then just the +30% portion is owed on top.
+     *
+     * @param  array<string, int>  $restByDate  date => minutes worked on a rest day
+     * @return array{pay: float, minutes: int}
+     */
+    private function restDayPremiumFor(Employee $employee, int $periodsPerYear, int $workingDays, array $restByDate, ?AttendancePolicy $policy = null): array
+    {
+        if ($restByDate === []) {
+            return ['pay' => 0.0, 'minutes' => 0];
+        }
+
+        $policy ??= $this->attendancePolicy->get();
+        $hourly = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays)
+            / max(1, (int) $policy->hours_per_day_divisor);
+
+        $pct = (int) $policy->premium_rest_day_pct;
+        $salaryCoversRestDays = $policy->daily_rate_basis === 'fixed_divisor'
+            && (int) $policy->annual_divisor >= 365;
+        $rate = ($salaryCoversRestDays ? max(0, $pct - 100) : $pct) / 100;
+
+        $pay = 0.0;
+        $minutes = 0;
+        foreach ($restByDate as $worked) {
+            $premiumMinutes = min(self::REST_DAY_PREMIUM_CAP_MIN, $worked);
+            $pay += ($premiumMinutes / 60) * $hourly * $rate;
+            $minutes += $premiumMinutes;
+        }
+
+        return ['pay' => round($pay, 2), 'minutes' => $minutes];
+    }
+
     /**
      * Which minutes count as overtime, per date — the mode's source of truth, shared by the overtime
      * pay line and the night differential (which compounds onto the OT rate for night OT minutes).
      *
+     * @param  array<string, int>  $restByDate  worked rest days, whose first 8h are paid as a premium
      * @return array<string, array{minutes:int, night:int}>
      */
-    private function overtimeMinutesByDate(Employee $employee, string $start, string $end, AttendancePolicy $policy): array
+    private function overtimeMinutesByDate(Employee $employee, string $start, string $end, AttendancePolicy $policy, array $restByDate = []): array
     {
-        return match ($policy->overtime_mode) {
+        $map = match ($policy->overtime_mode) {
             'approved_only' => $this->approvedOvertimeMinutes($employee, $start, $end),
             'auto_after_threshold' => $this->attendance->autoOvertimeMinutesFor(
                 $employee, $start, $end, (int) $policy->overtime_threshold_minutes,
             ),
             default => [],
         };
+
+        // On a worked rest day the first 8 hours are the rest-day PREMIUM, so only the excess can be
+        // overtime. (A rest day with no attendance row isn't in $restByDate — no premium is paid for
+        // it, so an approved request there still pays in full.)
+        foreach ($restByDate as $date => $worked) {
+            if (! isset($map[$date])) {
+                continue;
+            }
+            $cap = max(0, $worked - self::REST_DAY_PREMIUM_CAP_MIN);
+            if ($map[$date]['minutes'] > $cap) {
+                $map[$date]['minutes'] = $cap;
+                $map[$date]['night'] = min($map[$date]['night'], $cap);
+            }
+            if ($map[$date]['minutes'] <= 0) {
+                unset($map[$date]);
+            }
+        }
+
+        return $map;
     }
 
     /**
@@ -672,12 +738,15 @@ class PayrollService
 
                 // Premium for working on a (non-working) holiday in this cycle.
                 $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
+                // Rest days worked feed BOTH the rest-day premium and the overtime cap below.
+                $restByDate = $this->attendance->restDayWorkedMinutesFor($employee, $cycleStart, $cycleEnd, $holidayMap);
+                $restDay = $this->restDayPremiumFor($employee, $periodsPerYear, $workingDays, $restByDate, $policy);
                 // One overtime source, shared by the OT line and the night differential.
-                $otByDate = $this->overtimeMinutesByDate($employee, $cycleStart, $cycleEnd, $policy);
+                $otByDate = $this->overtimeMinutesByDate($employee, $cycleStart, $cycleEnd, $policy, $restByDate);
                 $overtime = $this->overtimePayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
                 $nightDiff = $this->nightDiffPayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes']);
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
 
                 Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],
@@ -858,11 +927,11 @@ class PayrollService
     {
         $run->loadMissing(['payslips.employee.user', 'payslips.employee.department']);
 
-        $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'nd' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
+        $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'nd' => 0.0, 'rd' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
 
         $out = fopen('php://temp', 'r+');
         fputcsv($out, [
-            'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Night Diff', 'Reimbursements', 'Gross',
+            'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Night Diff', 'Rest Day', 'Reimbursements', 'Gross',
             'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Total Deductions', 'Net Pay',
             'Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Status',
         ], ',', '"', '');
@@ -873,6 +942,7 @@ class PayrollService
             $sum['holiday'] += (float) $p->holiday_premium;
             $sum['ot'] += (float) $p->overtime_pay;
             $sum['nd'] += (float) $p->night_diff_pay;
+            $sum['rd'] += (float) $p->rest_day_premium;
             $sum['reimb'] += (float) $p->reimbursements;
             $sum['sss'] += (float) $p->sss;
             $sum['ph'] += (float) $p->philhealth;
@@ -885,7 +955,7 @@ class PayrollService
             fputcsv($out, [
                 $p->employee->user?->name ?? $p->employee->name,
                 $p->employee->department?->name,
-                $p->base_salary, $p->allowances, $p->holiday_premium, $p->overtime_pay, $p->night_diff_pay, $p->reimbursements, $p->gross,
+                $p->base_salary, $p->allowances, $p->holiday_premium, $p->overtime_pay, $p->night_diff_pay, $p->rest_day_premium, $p->reimbursements, $p->gross,
                 $p->sss, $p->philhealth, $p->pagibig, $p->withholding_tax,
                 $p->total_deductions, $p->net_pay,
                 $p->employer_sss, $p->employer_philhealth, $p->employer_pagibig, $p->status,
@@ -894,7 +964,7 @@ class PayrollService
 
         fputcsv($out, [
             'TOTAL', '',
-            round($sum['base'], 2), round($sum['allow'], 2), round($sum['holiday'], 2), round($sum['ot'], 2), round($sum['nd'], 2), round($sum['reimb'], 2), (float) $run->total_gross,
+            round($sum['base'], 2), round($sum['allow'], 2), round($sum['holiday'], 2), round($sum['ot'], 2), round($sum['nd'], 2), round($sum['rd'], 2), round($sum['reimb'], 2), (float) $run->total_gross,
             round($sum['sss'], 2), round($sum['ph'], 2), round($sum['pg'], 2), round($sum['wht'], 2),
             (float) $run->total_deductions, (float) $run->total_net,
             round($sum['er_sss'], 2), round($sum['er_ph'], 2), round($sum['er_pg'], 2), '',

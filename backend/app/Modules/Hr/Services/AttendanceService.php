@@ -426,6 +426,61 @@ class AttendanceService
      *
      * @return array<int, string>
      */
+    /**
+     * Minutes actually WORKED on a scheduled rest day (RD-1), per date — the basis for the rest-day
+     * premium. A rest day is any date the employee's effective schedule says is not a workday; the
+     * salary doesn't cover it, so working it is extra work.
+     *
+     * Dates that are also HOLIDAYS are excluded: holidayPremiumFor() already pays those, and stacking
+     * both premiums on one day is the double-premium case left to a later refinement.
+     *
+     * Worked minutes = the clock window minus the unpaid meal. Needs both punches; management earns none.
+     *
+     * @param  array<string, string>  $holidayMap  date => holiday type (to exclude)
+     * @return array<string, int> date 'Y-m-d' => worked minutes
+     */
+    public function restDayWorkedMinutesFor(Employee $employee, string $start, string $end, array $holidayMap = []): array
+    {
+        if ($employee->isManagement()) {
+            return [];
+        }
+
+        $tz = config('app.timezone_local');
+        $rows = Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->whereNotNull('time_in')
+            ->whereNotNull('time_out')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $day = Carbon::parse($row->work_date, $tz);
+            $date = $day->toDateString();
+            if (isset($holidayMap[$date])) {
+                continue; // the holiday premium covers this day
+            }
+            if ($this->schedule->effectiveFor($employee, $day)['is_workday'] ?? true) {
+                continue; // an ordinary scheduled workday
+            }
+
+            $inMin = $this->clockToMinutes($row->time_in);
+            $outMin = $this->clockToMinutes($row->time_out);
+            if ($inMin === null || $outMin === null) {
+                continue;
+            }
+            if ($outMin < $inMin) {
+                $outMin += 24 * 60;
+            }
+
+            $worked = ($outMin - $inMin) - (int) $row->lunch_minutes;
+            if ($worked > 0) {
+                $out[$date] = $worked;
+            }
+        }
+
+        return $out;
+    }
+
     /** The night-differential window (Manila): 22:00 → 06:00. */
     public const NIGHT_START_MIN = 22 * 60;
 

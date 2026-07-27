@@ -194,6 +194,12 @@ export default function PayslipsPage() {
                   value={formatPeso(detail.payslip.night_diff_pay)}
                 />
               )}
+              {detail.payslip.rest_day_premium > 0 && (
+                <Row
+                  label={`Rest day worked (${(detail.payslip.rest_day_minutes / 60).toFixed(1)} hrs)`}
+                  value={formatPeso(detail.payslip.rest_day_premium)}
+                />
+              )}
               {detail.payslip.reimbursements > 0 && (
                 <Row label="Reimbursement" value={formatPeso(detail.payslip.reimbursements)} />
               )}
