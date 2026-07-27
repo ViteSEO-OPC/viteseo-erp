@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Hr\Http\Resources\PayslipResource;
 use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Models\Payslip;
@@ -33,6 +34,7 @@ class PayrollService
         private readonly AuditService $audit,
         private readonly HolidayService $holidays,
         private readonly AttendancePolicyService $attendancePolicy,
+        private readonly ScheduleService $workSchedule,
     ) {}
 
     /**
@@ -78,6 +80,8 @@ class PayrollService
         float $holidayPremium = 0.0,
         ?UnpaidDaysResult $unpaidDetail = null,
         ?AttendancePolicy $policy = null,
+        float $overtimePay = 0.0,
+        int $overtimeMinutes = 0,
     ): array {
         $policy ??= $this->attendancePolicy->get();
         $monthlyBase = (float) $employee->base_salary;
@@ -113,7 +117,7 @@ class PayrollService
         // the full monthly salary (PH bracket model), so `contribBase` is unchanged.
         $taxableMonthly = $periodsPerYear > 0 ? round($basePay * $periodsPerYear / 12, 2) : 0.0;
 
-        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium);
+        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay);
 
         // Step 4b — persist how base_salary was derived, so the payslip explains itself.
         // The minute-level portion is all-zero until a deduction mode is enabled.
@@ -122,6 +126,7 @@ class PayrollService
         $slip['unpaid_days'] = round($unpaidDays, 2);
         $slip['late_minutes'] = $unpaidDetail?->lateMinutes ?? 0;
         $slip['undertime_minutes'] = $unpaidDetail?->undertimeMinutes ?? 0;
+        $slip['overtime_minutes'] = $overtimeMinutes;
         $slip['late_deduction'] = round(($unpaidDetail?->lateDays ?? 0.0) * $dailyRate, 2);
         $slip['undertime_deduction'] = round(($unpaidDetail?->undertimeDays ?? 0.0) * $dailyRate, 2);
 
@@ -164,7 +169,7 @@ class PayrollService
      * @param  array{index:int, count:int, deduction_timing:string, tax_timing:string}  $dist
      * @return array<string, float>
      */
-    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0): array
+    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0): array
     {
         // SSS/PhilHealth/Pag-IBIG are MONTHLY amounts (on the monthly base); the
         // timing setting decides which cutoff(s) in the month they land on.
@@ -194,7 +199,7 @@ class PayrollService
 
         // Holiday premium is added to gross (taxable in reality, but — like the rest of
         // this simplified engine — it isn't fed back into the withholding base above).
-        $gross = round($basePay + $allowances + $reimb + $holidayPremium, 2);
+        $gross = round($basePay + $allowances + $reimb + $holidayPremium + $overtimePay, 2);
         $totalDeductions = round($sss + $philhealth + $pagibig + $wht, 2);
 
         return [
@@ -202,6 +207,7 @@ class PayrollService
             'reimbursements' => round($reimb, 2),
             'allowances' => round($allowances, 2),
             'holiday_premium' => round($holidayPremium, 2),
+            'overtime_pay' => round($overtimePay, 2),
             'gross' => $gross,
             'sss' => $sss,
             'philhealth' => $philhealth,
@@ -331,6 +337,67 @@ class PayrollService
             'regular' => max(0, (int) $policy->premium_regular_holiday_pct - 100) / 100,
             'special_non_working' => max(0, (int) $policy->premium_special_day_pct - 100) / 100,
             default => 0.0, // special_working — a normal working day, no premium
+        };
+    }
+
+    /**
+     * Overtime pay for the cycle (OT-3): each APPROVED overtime request's hours × the hourly rate ×
+     * the OT rate for that day's type (from the editable rate table). Stacks with holiday premium
+     * WITHOUT double-counting — the premium pays the regular-day hours worked on a holiday, OT pays
+     * the *extra* approved hours. Management → 0. Paid only in `approved_only` mode (auto detection is
+     * OT-5; `none` = off). No-op until an OT request is approved, so wiring it changes no pesos today.
+     *
+     * @param  array<string, string>  $holidayMap  date 'Y-m-d' => type
+     * @return array{pay: float, minutes: int}
+     */
+    private function overtimePayFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null): array
+    {
+        if ($employee->isManagement()) {
+            return ['pay' => 0.0, 'minutes' => 0];
+        }
+
+        $policy ??= $this->attendancePolicy->get();
+        if ($policy->overtime_mode !== 'approved_only') {
+            return ['pay' => 0.0, 'minutes' => 0]; // 'auto_after_threshold' = OT-5; 'none' = off
+        }
+
+        $requests = OvertimeRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get(['work_date', 'hours']);
+        if ($requests->isEmpty()) {
+            return ['pay' => 0.0, 'minutes' => 0];
+        }
+
+        $hourly = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays)
+            / max(1, (int) $policy->hours_per_day_divisor);
+
+        $pay = 0.0;
+        $minutes = 0;
+        foreach ($requests as $req) {
+            $date = $req->work_date->toDateString();
+            $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, $req->work_date)['is_workday'] ?? true);
+            $ratePct = self::overtimeMultiplierPct($holidayMap[$date] ?? null, $isWorkday, $policy);
+            $pay += (float) $req->hours * $hourly * ($ratePct / 100);
+            $minutes += (int) round((float) $req->hours * 60);
+        }
+
+        return ['pay' => round($pay, 2), 'minutes' => $minutes];
+    }
+
+    /**
+     * The OT rate (whole percent) for a day, from the editable rate table (P0-1): regular holiday and
+     * special-day from the holiday map; a non-workday that isn't a holiday is a REST day; otherwise an
+     * ordinary day. Pure + static so it is unit-testable without a DB.
+     */
+    public static function overtimeMultiplierPct(?string $holidayType, bool $isWorkday, AttendancePolicy $policy): int
+    {
+        return match ($holidayType) {
+            'regular' => (int) $policy->overtime_regular_holiday_pct,
+            'special_non_working' => (int) $policy->overtime_rest_special_pct,
+            default => $isWorkday
+                ? (int) $policy->overtime_ordinary_pct
+                : (int) $policy->overtime_rest_special_pct, // rest day (non-workday, non-holiday)
         };
     }
 
@@ -489,8 +556,9 @@ class PayrollService
 
                 // Premium for working on a (non-working) holiday in this cycle.
                 $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
+                $overtime = $this->overtimePayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy);
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes']);
 
                 Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],
