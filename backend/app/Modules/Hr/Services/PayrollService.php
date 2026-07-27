@@ -312,14 +312,26 @@ class PayrollService
             if (! isset($worked[$date])) {
                 continue;
             }
-            $premium += $dailyRate * match ($type) {
-                'regular' => 1.0,
-                'special_non_working' => 0.3,
-                default => 0.0, // special_working — a normal working day
-            };
+            $premium += $dailyRate * self::holidayPremiumMultiplier($type, $policy);
         }
 
         return round($premium, 2);
+    }
+
+    /**
+     * The add-on multiple of the daily rate for WORKING a holiday of this type (P0-2). Reads the
+     * HR-editable rate columns instead of hardcoded literals: a "total %" column (e.g. 200) becomes
+     * an add-on of (pct − 100) ÷ 100 on top of the day's normal pay. At the DOLE-minimum defaults
+     * (regular 200 → +1.0, special 130 → +0.3) this reproduces the old hardcoded behaviour exactly.
+     * Pure + static so it is unit-testable without a DB (mirrors ViolationService::ladderMatch).
+     */
+    public static function holidayPremiumMultiplier(string $type, AttendancePolicy $policy): float
+    {
+        return match ($type) {
+            'regular' => max(0, (int) $policy->premium_regular_holiday_pct - 100) / 100,
+            'special_non_working' => max(0, (int) $policy->premium_special_day_pct - 100) / 100,
+            default => 0.0, // special_working — a normal working day, no premium
+        };
     }
 
     /**

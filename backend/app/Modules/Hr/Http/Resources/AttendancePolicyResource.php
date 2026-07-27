@@ -28,6 +28,14 @@ class AttendancePolicyResource extends JsonResource
             'overtime_mode' => $this->overtime_mode,
             'overtime_threshold_minutes' => (int) $this->overtime_threshold_minutes,
 
+            'premium_rest_day_pct' => (int) $this->premium_rest_day_pct,
+            'premium_special_day_pct' => (int) $this->premium_special_day_pct,
+            'premium_regular_holiday_pct' => (int) $this->premium_regular_holiday_pct,
+            'overtime_ordinary_pct' => (int) $this->overtime_ordinary_pct,
+            'overtime_rest_special_pct' => (int) $this->overtime_rest_special_pct,
+            'overtime_regular_holiday_pct' => (int) $this->overtime_regular_holiday_pct,
+            'night_diff_pct' => (int) $this->night_diff_pct,
+
             'deduction_rounding' => $this->deduction_rounding,
             'deduction_block_minutes' => (int) $this->deduction_block_minutes,
             'daily_deduction_cap' => (float) $this->daily_deduction_cap,
