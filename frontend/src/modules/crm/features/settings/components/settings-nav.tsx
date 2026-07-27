@@ -46,7 +46,7 @@ export function SettingsNav() {
   const pathname = usePathname();
   const { can } = usePermissions();
   const isActive = (href: string) =>
-    href === "/settings" ? pathname === "/zerem/settings" : pathname.startsWith(href);
+    href === "/zerem/settings" ? pathname === "/zerem/settings" : pathname.startsWith(href);
 
   return (
     <nav

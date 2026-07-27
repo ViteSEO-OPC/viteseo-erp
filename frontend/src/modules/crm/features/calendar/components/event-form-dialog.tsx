@@ -190,7 +190,7 @@ function EventForm({
   return (
     <>
       <DialogHeader className="px-6 pt-6">
-        <DialogTitle>{isEdit ? "Edit event" : "New task"}</DialogTitle>
+        <DialogTitle>{isEdit ? "Edit event" : "New Task"}</DialogTitle>
         <DialogDescription>
           {isEdit
             ? "Update, complete, reschedule, or delete this event."

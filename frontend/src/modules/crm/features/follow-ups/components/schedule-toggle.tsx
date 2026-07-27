@@ -9,13 +9,9 @@ type ScheduleToggleProps = {
 
 export function ScheduleToggle({ checked, onChange }: ScheduleToggleProps) {
   return (
-    <label
-      className="flex cursor-pointer items-center gap-2 text-sm whitespace-nowrap text-muted-foreground"
-      role="switch"
-      aria-checked={checked}
-    >
+    <label className="flex cursor-pointer items-center gap-2 text-sm whitespace-nowrap text-muted-foreground">
       <span>Schedule for later</span>
-      <Switch checked={checked} onCheckedChange={onChange} />
+      <Switch checked={checked} onCheckedChange={onChange} aria-label="Schedule for later" />
     </label>
   );
 }

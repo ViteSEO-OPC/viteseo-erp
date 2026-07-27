@@ -18,7 +18,7 @@ export function Sidebar({ variant = "full", className }: SidebarProps) {
 
   return (
     <aside
-      aria-label="Primary"
+      aria-label="Sidebar"
       className={cn(
         "flex h-full flex-col overflow-y-auto border-r border-sidebar-border bg-sidebar",
         variant === "full" && "w-[288px]",

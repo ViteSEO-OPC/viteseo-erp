@@ -16,10 +16,10 @@ export function LeadAcquisitionCard({ className }: { className?: string }) {
       filter={
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-teal-400" />New leads
+            <span className="h-2 w-2 rounded-full bg-teal-400" aria-hidden />New leads
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-0 w-3 border-t border-dashed border-gray-400" />Average
+            <span className="h-0 w-3 border-t border-dashed border-gray-400" aria-hidden />Average
           </span>
         </div>
       }

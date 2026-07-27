@@ -64,7 +64,7 @@ export function LeadDetailPage() {
       <div className="flex flex-col gap-6 lg:gap-8">
         <LeadDetailHeader
           title={lead.business}
-          subtitle="Restaurant · Makati"
+          subtitle={lead.industry}
           canAssign={canAssign}
           canDelete={canDelete}
           assigned={!!lead.assignedTo}

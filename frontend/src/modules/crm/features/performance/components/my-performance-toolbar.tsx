@@ -22,7 +22,7 @@ export function MyPerformanceToolbar() {
   return (
     <div className="flex items-center justify-between gap-3">
       <Select value={range} onValueChange={(v) => setRange(v ?? range)}>
-        <SelectTrigger className="w-40">
+        <SelectTrigger className="w-40" aria-label="Date range">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
