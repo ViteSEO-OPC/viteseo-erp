@@ -16,7 +16,6 @@ import {
   useDeleteWorkSchedule,
   useAttendancePolicy,
   useUpdateAttendancePolicy,
-  usePreviewDeductions,
 } from "@/modules/hr/hooks/use-rules";
 import {
   formatWorkdays,
@@ -224,10 +223,6 @@ function AttendancePolicyForm() {
   );
 }
 
-function peso(n: number): string {
-  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(n);
-}
-
 // Read a level's threshold out of the stored violation ladder, falling back to default.
 function rungValue(
   rules: ViolationRules | null | undefined,
@@ -263,9 +258,6 @@ function ladderError(late: number[], absent: number[]): string | null {
 function AttendancePolicyEditor() {
   const { data: policy } = useAttendancePolicy();
   const update = useUpdateAttendancePolicy();
-  const preview = usePreviewDeductions();
-
-  const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
 
   // Violation flags — the four alert levels HR configures, read out of the stored ladder.
   // Lateness is by lates-this-month; absence by consecutive days. Reassembled on save.
@@ -343,7 +335,6 @@ function AttendancePolicyEditor() {
   }
 
   const violationFields = () => ({
-    monthly_late_reset: monthlyReset,
     violation_rules: {
       late: [
         { monthly_min: Number(lateCritical), severity: "red" },
@@ -372,32 +363,6 @@ function AttendancePolicyEditor() {
     deduction_block_minutes: 60,
     late_minutes_from: lateFrom,
   });
-
-  // Preview reads the current (unsaved) deduction settings across all pay cards.
-  function deductionFields() {
-    return {
-      ...chargeFields(),
-      late_penalty_enabled: latePenaltyEnabled,
-      lates_per_deduction: Number(latesPerDeduction),
-      undertime_deduction_mode: undertimeMode,
-      missing_clockout_mode: missingClockout,
-      early_arrival_mode: earlyArrival,
-      overtime_mode: overtimeMode,
-      overtime_threshold_minutes: Number(overtimeThreshold),
-      daily_deduction_cap: 1,
-      daily_rate_basis: rateBasis,
-      annual_divisor: Number(divisor),
-      hours_per_day_divisor: Number(hoursPerDay),
-    };
-  }
-
-  async function runPreview() {
-    try {
-      await preview.mutateAsync(deductionFields());
-    } catch {
-      toast.error("Could not run the preview.");
-    }
-  }
 
   // The lateness charge controls, shown when the per-time switch is on. "Start counting late
   // from" comes first, then how the time is charged: Exact, or a single threshold rule.
@@ -500,11 +465,7 @@ function AttendancePolicyEditor() {
             (LWOP). A day covered by any approved leave is never an unauthorised absence.
           </Hint>
         </div>
-        <CheckBox
-          checked={monthlyReset}
-          onChange={setMonthlyReset}
-          label="Reset the late tally each calendar month"
-        />
+        <Hint>The late tally resets at the start of each calendar month.</Hint>
         <Hint>
           Each level must use a higher number than the one before it (0 is allowed for the lowest).
           These exact numbers appear in the Attendance modal&apos;s Alert Color Legend.
@@ -584,6 +545,7 @@ function AttendancePolicyEditor() {
             label="If they forget to clock out"
             value={missingClockout}
             onChange={(v) => setMissingClockout(v as MissingClockoutMode)}
+            disabled
             options={[
               { value: "no_deduction_flag_for_review", label: "Flag for review, don't deduct" },
               { value: "treat_as_undertime_to_now", label: "Treat as leaving early" },
@@ -591,7 +553,11 @@ function AttendancePolicyEditor() {
             ]}
           />
         </div>
-        <Hint>A missing clock-out never counts as overtime. Leaving early is billed to the exact minute.</Hint>
+        <Hint>
+          Leaving early is billed to the exact minute. The &ldquo;forgot to clock out&rdquo; handling isn&apos;t
+          active yet — a missing clock-out is always flagged for review for now, whatever this shows, and never
+          counts as overtime.
+        </Hint>
 
         <SaveButton
           pending={saving === "time_deductions"}
@@ -621,6 +587,7 @@ function AttendancePolicyEditor() {
             label="Early arrival"
             value={earlyArrival}
             onChange={(v) => setEarlyArrival(v as EarlyArrivalMode)}
+            disabled
             options={[
               { value: "none", label: "Ignore early minutes" },
               { value: "offset_undertime", label: "Offset same-day undertime" },
@@ -642,7 +609,10 @@ function AttendancePolicyEditor() {
             <NumberField id="pol-ot-threshold" label="Threshold (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
           )}
         </div>
-        <Hint>Overtime takes effect when overtime requests ship. A long clock reading is not overtime.</Hint>
+        <Hint>
+          Early-arrival handling isn&apos;t active yet — early minutes are always ignored for now, whatever this
+          shows. Overtime takes effect when overtime requests ship; a long clock reading is not overtime.
+        </Hint>
         <SaveButton
           pending={saving === "early_ot"}
           onClick={() => saveCard("early_ot", { early_arrival_mode: earlyArrival, overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
@@ -703,35 +673,6 @@ function AttendancePolicyEditor() {
         />
       </PolicySection>
 
-      <Divider />
-
-      {/* Dry-run preview (step 6b): what the current pay-deduction settings WOULD cost. */}
-      <PolicySection
-        title="Preview impact"
-        description="See what the pay-deduction settings above would have cost last period, before you rely on them. Nothing is saved."
-      >
-        {preview.data && (
-          <div className="rounded-lg border border-border bg-muted/40 p-4">
-            {preview.data.employees_considered === 0 ? (
-              <p className="text-sm text-muted-foreground">No completed pay period to preview yet.</p>
-            ) : (
-              <p className="text-sm text-foreground">
-                If these settings had been active for{" "}
-                <strong>
-                  {preview.data.period.start} – {preview.data.period.end}
-                </strong>
-                :{" "}
-                <strong>{peso(preview.data.total_deduction)}</strong> total time-based deduction
-                across <strong>{preview.data.employees_affected}</strong> of{" "}
-                {preview.data.employees_considered} employees.
-              </p>
-            )}
-          </div>
-        )}
-        <Button variant="outline" onClick={runPreview} disabled={preview.isPending}>
-          {preview.isPending ? "Calculating…" : "Preview impact"}
-        </Button>
-      </PolicySection>
     </div>
   );
 }
@@ -791,17 +732,19 @@ function FieldSelect({
   value,
   onChange,
   options,
+  disabled,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  disabled?: boolean;
 }) {
   return (
     <div className="w-full max-w-[360px] space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      <SimpleSelect id={id} className="h-10" value={value} onValueChange={onChange} options={options} />
+      <SimpleSelect id={id} className="h-10" value={value} onValueChange={onChange} options={options} disabled={disabled} />
     </div>
   );
 }
