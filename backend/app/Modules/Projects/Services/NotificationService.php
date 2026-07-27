@@ -44,8 +44,9 @@ class NotificationService
     }
 
     /**
-     * A comment was posted on a task — notify the task's individual assignee and
-     * everyone who previously commented, excluding the comment's author.
+     * A comment was posted on a task — notify the task's individual assignee,
+     * everyone who previously commented, and the project's managers (PM tier),
+     * excluding the comment's author.
      */
     public function notifyTaskComment(Comment $comment, Task $task, User $author): void
     {
@@ -55,8 +56,17 @@ class NotificationService
             $recipientIds->push((int) $task->assignee_id);
         }
 
+        // Project managers hear about every comment so they can track discussion
+        // on tasks they don't own (mirrors notifyTaskStatusChanged's recipients).
+        $managerIds = $task->project
+            ->members()
+            ->role(UserRole::managerRoles())
+            ->pluck('users.id')
+            ->map(fn ($id): int => (int) $id);
+
         $recipientIds = $recipientIds
             ->merge($task->comments()->pluck('author_id')->map(fn ($id): int => (int) $id))
+            ->merge($managerIds)
             ->unique()
             ->reject(fn (int $id): bool => $id === (int) $author->id)
             ->values();
