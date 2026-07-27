@@ -638,12 +638,25 @@ function AttendancePolicyEditor() {
             ]}
           />
           {overtimeMode === "auto_after_threshold" && (
-            <NumberField id="pol-ot-threshold" label="Threshold (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
+            <NumberField id="pol-ot-threshold" label="Minimum overtime (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
           )}
         </div>
+        {overtimeMode === "auto_after_threshold" && (
+          <div className="rounded-lg border border-warning bg-warning-subtle p-3">
+            <p className="text-xs text-foreground">
+              Auto mode pays overtime from the <strong>time clock alone</strong> — staying past the
+              scheduled end by at least this many minutes is paid without anyone approving it. Philippine
+              practice is that overtime should be <strong>authorised</strong>; &ldquo;Only when approved&rdquo;
+              is the safer setting. A day&apos;s whole overrun is paid once it passes the minimum, and a
+              missing clock-out never counts as overtime.
+            </p>
+          </div>
+        )}
         <Hint>
-          Early-arrival handling isn&apos;t active yet — early minutes are always ignored for now, whatever this
-          shows. Overtime takes effect when overtime requests ship; a long clock reading is not overtime.
+          Early-arrival handling isn&apos;t active yet — early minutes are always ignored for now, whatever
+          this shows. Overtime is live: <strong>Only when approved</strong> pays each approved overtime
+          request; <strong>No overtime</strong> switches it off. Rest-day work is paid only through an
+          approved request, never auto-detected.
         </Hint>
         <SaveButton
           pending={saving === "early_ot"}

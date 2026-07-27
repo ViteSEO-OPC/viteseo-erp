@@ -78,7 +78,7 @@ export const hrNav: NavEntry[] = [
     label: "Request",
     icon: Inbox,
     children: [
-      { label: "Leave", href: "/teamora/requests/leave", icon: CalendarDays },
+      { label: "Work Schedule", href: "/teamora/requests/work-schedule", icon: CalendarDays },
       { label: "Document", href: "/teamora/requests/document", icon: FileText, stub: true },
       { label: "Payroll", href: "/teamora/requests/payroll", icon: Wallet, stub: true },
       { label: "Concern", href: "/teamora/requests/concern", icon: ShieldAlert, stub: true },
@@ -102,7 +102,7 @@ export const hrNav: NavEntry[] = [
 // Employee portal nav (matches emp-Overview 170:4263) — stays flat.
 export const employeeNav: NavEntry[] = [
   { label: "Overview", href: "/teamora", icon: LayoutGrid },
-  { label: "Time Off", href: "/teamora/time-off", icon: CalendarDays },
+  { label: "Work Schedule", href: "/teamora/work-schedule", icon: CalendarDays },
   { label: "Payslips", href: "/teamora/payslips", icon: FileText },
   { label: "Claims", href: "/teamora/claims", icon: Wallet },
   { label: "Concerns", href: "/teamora/concerns", icon: ShieldAlert },

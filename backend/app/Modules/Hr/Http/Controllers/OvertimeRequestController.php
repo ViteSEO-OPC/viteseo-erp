@@ -21,6 +21,28 @@ class OvertimeRequestController extends Controller
         return OvertimeRequestResource::collection($this->service->list($request->user()))->response();
     }
 
+    // GET /api/v1/hr/overtime-requests/settings — whether overtime can be REQUESTED at all, so the
+    // form can explain itself when the company runs overtime off or fully automatic.
+    public function settings(): JsonResponse
+    {
+        return response()->json(['data' => $this->service->settings()]);
+    }
+
+    // GET /api/v1/hr/overtime-requests/classify?date=YYYY-MM-DD — how that date's overtime would be
+    // classified for the CALLER (regular / rest day / special day / regular holiday) + its rate, so
+    // the filing form can show it live. Display only; payroll re-derives the rate at run time.
+    public function classify(Request $request): JsonResponse
+    {
+        $data = $request->validate(['date' => ['required', 'date']]);
+        $employee = $request->user()->employee;
+
+        if (! $employee) {
+            return response()->json(['message' => 'Only employees can file an overtime request.'], Response::HTTP_FORBIDDEN);
+        }
+
+        return response()->json(['data' => $this->service->classify($employee, $data['date'])]);
+    }
+
     // POST /api/v1/hr/overtime-requests — the caller files their own overtime request.
     public function store(StoreOvertimeRequestRequest $request): JsonResponse
     {

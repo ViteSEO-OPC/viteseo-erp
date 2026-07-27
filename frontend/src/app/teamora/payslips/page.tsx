@@ -182,6 +182,12 @@ export default function PayslipsPage() {
               {detail.payslip.holiday_premium > 0 && (
                 <Row label="Holiday premium" value={formatPeso(detail.payslip.holiday_premium)} />
               )}
+              {detail.payslip.overtime_pay > 0 && (
+                <Row
+                  label={`Overtime (${(detail.payslip.overtime_minutes / 60).toFixed(1)} hrs)`}
+                  value={formatPeso(detail.payslip.overtime_pay)}
+                />
+              )}
               {detail.payslip.reimbursements > 0 && (
                 <Row label="Reimbursement" value={formatPeso(detail.payslip.reimbursements)} />
               )}

@@ -69,6 +69,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('early-out-requests', [EarlyOutRequestController::class, 'index']);
     Route::post('early-out-requests', [EarlyOutRequestController::class, 'store']);
     Route::get('overtime-requests', [OvertimeRequestController::class, 'index']);
+    Route::get('overtime-requests/settings', [OvertimeRequestController::class, 'settings']);
+    Route::get('overtime-requests/classify', [OvertimeRequestController::class, 'classify']);
     Route::post('overtime-requests', [OvertimeRequestController::class, 'store']);
 
     // Attendance — the caller clocks their own time; HR sees the roster.

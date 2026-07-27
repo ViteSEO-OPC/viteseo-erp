@@ -357,32 +357,57 @@ class PayrollService
         }
 
         $policy ??= $this->attendancePolicy->get();
-        if ($policy->overtime_mode !== 'approved_only') {
-            return ['pay' => 0.0, 'minutes' => 0]; // 'auto_after_threshold' = OT-5; 'none' = off
-        }
 
-        $requests = OvertimeRequest::where('employee_id', $employee->id)
-            ->where('status', 'approved')
-            ->whereBetween('work_date', [$start, $end])
-            ->get(['work_date', 'hours']);
-        if ($requests->isEmpty()) {
+        // WHICH minutes count is the mode's job (OT-5); pricing them is shared below.
+        //   approved_only        → the hours on each APPROVED request (the safe, authorised default)
+        //   auto_after_threshold → clock minutes past the scheduled end (opt-in, warned in the UI)
+        //   none                 → overtime is switched off entirely
+        $byDate = match ($policy->overtime_mode) {
+            'approved_only' => $this->approvedOvertimeMinutes($employee, $start, $end),
+            'auto_after_threshold' => $this->attendance->autoOvertimeMinutesFor(
+                $employee, $start, $end, (int) $policy->overtime_threshold_minutes,
+            ),
+            default => [],
+        };
+        if ($byDate === []) {
             return ['pay' => 0.0, 'minutes' => 0];
         }
 
+        $tz = config('app.timezone_local');
         $hourly = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays)
             / max(1, (int) $policy->hours_per_day_divisor);
 
         $pay = 0.0;
         $minutes = 0;
-        foreach ($requests as $req) {
-            $date = $req->work_date->toDateString();
-            $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, $req->work_date)['is_workday'] ?? true);
+        foreach ($byDate as $date => $mins) {
+            $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
             $ratePct = self::overtimeMultiplierPct($holidayMap[$date] ?? null, $isWorkday, $policy);
-            $pay += (float) $req->hours * $hourly * ($ratePct / 100);
-            $minutes += (int) round((float) $req->hours * 60);
+            $pay += ($mins / 60) * $hourly * ($ratePct / 100);
+            $minutes += $mins;
         }
 
         return ['pay' => round($pay, 2), 'minutes' => $minutes];
+    }
+
+    /**
+     * Approved-request overtime as date => minutes (the `approved_only` source).
+     *
+     * @return array<string, int>
+     */
+    private function approvedOvertimeMinutes(Employee $employee, string $start, string $end): array
+    {
+        $out = [];
+        $requests = OvertimeRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get(['work_date', 'hours']);
+
+        foreach ($requests as $req) {
+            $date = $req->work_date->toDateString();
+            $out[$date] = ($out[$date] ?? 0) + (int) round((float) $req->hours * 60);
+        }
+
+        return $out;
     }
 
     /**
@@ -739,11 +764,11 @@ class PayrollService
     {
         $run->loadMissing(['payslips.employee.user', 'payslips.employee.department']);
 
-        $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
+        $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
 
         $out = fopen('php://temp', 'r+');
         fputcsv($out, [
-            'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Reimbursements', 'Gross',
+            'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Reimbursements', 'Gross',
             'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Total Deductions', 'Net Pay',
             'Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Status',
         ], ',', '"', '');
@@ -752,6 +777,7 @@ class PayrollService
             $sum['base'] += (float) $p->base_salary;
             $sum['allow'] += (float) $p->allowances;
             $sum['holiday'] += (float) $p->holiday_premium;
+            $sum['ot'] += (float) $p->overtime_pay;
             $sum['reimb'] += (float) $p->reimbursements;
             $sum['sss'] += (float) $p->sss;
             $sum['ph'] += (float) $p->philhealth;
@@ -764,7 +790,7 @@ class PayrollService
             fputcsv($out, [
                 $p->employee->user?->name ?? $p->employee->name,
                 $p->employee->department?->name,
-                $p->base_salary, $p->allowances, $p->holiday_premium, $p->reimbursements, $p->gross,
+                $p->base_salary, $p->allowances, $p->holiday_premium, $p->overtime_pay, $p->reimbursements, $p->gross,
                 $p->sss, $p->philhealth, $p->pagibig, $p->withholding_tax,
                 $p->total_deductions, $p->net_pay,
                 $p->employer_sss, $p->employer_philhealth, $p->employer_pagibig, $p->status,
@@ -773,7 +799,7 @@ class PayrollService
 
         fputcsv($out, [
             'TOTAL', '',
-            round($sum['base'], 2), round($sum['allow'], 2), round($sum['holiday'], 2), round($sum['reimb'], 2), (float) $run->total_gross,
+            round($sum['base'], 2), round($sum['allow'], 2), round($sum['holiday'], 2), round($sum['ot'], 2), round($sum['reimb'], 2), (float) $run->total_gross,
             round($sum['sss'], 2), round($sum['ph'], 2), round($sum['pg'], 2), round($sum['wht'], 2),
             (float) $run->total_deductions, (float) $run->total_net,
             round($sum['er_sss'], 2), round($sum['er_ph'], 2), round($sum['er_pg'], 2), '',

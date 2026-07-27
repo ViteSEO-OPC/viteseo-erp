@@ -426,6 +426,57 @@ class AttendanceService
      *
      * @return array<int, string>
      */
+    /**
+     * Auto-detected overtime (OT-5): minutes clocked out PAST the scheduled end, per date. Counted
+     * only on scheduled workdays that have BOTH punches — a missing clock-out is credited to the
+     * scheduled end (slice B) and can never become overtime. A day whose overrun is under
+     * `thresholdMinutes` is ignored, so trivial overruns don't create pay. Management earns none.
+     *
+     * Rest-day work is deliberately NOT auto-detected: there is no shift to be "beyond", and pricing
+     * a whole worked rest day belongs to the rest-day premium (Phase 3). File it as an OT request.
+     *
+     * @return array<string, int> date 'Y-m-d' => overtime minutes
+     */
+    public function autoOvertimeMinutesFor(Employee $employee, string $start, string $end, int $thresholdMinutes = 0): array
+    {
+        if ($employee->isManagement()) {
+            return [];
+        }
+
+        $tz = config('app.timezone_local');
+        $rows = Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->whereNotNull('time_in')
+            ->whereNotNull('time_out')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $day = Carbon::parse($row->work_date, $tz);
+            $eff = $this->schedule->effectiveFor($employee, $day);
+            if (! ($eff['is_workday'] ?? false)) {
+                continue; // rest day — see the note above
+            }
+
+            $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
+            $inMin = $this->clockToMinutes($row->time_in);
+            $outMin = $this->clockToMinutes($row->time_out);
+            if ($endMin === null || $inMin === null || $outMin === null) {
+                continue;
+            }
+            if ($outMin < $inMin) {
+                $outMin += 24 * 60; // clocked out after midnight
+            }
+
+            $minutes = $outMin - $endMin;
+            if ($minutes > 0 && $minutes >= max(0, $thresholdMinutes)) {
+                $out[$day->toDateString()] = $minutes;
+            }
+        }
+
+        return $out;
+    }
+
     public function workedDatesBetween(Employee $employee, string $start, string $end): array
     {
         return Attendance::where('employee_id', $employee->id)

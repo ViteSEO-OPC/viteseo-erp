@@ -15,6 +15,7 @@ import { LeaveTypesListCard } from "@/modules/hr/components/leave-types-list-car
 import { LeaveRequestForm } from "@/modules/hr/components/leave-request-form";
 import { HalfDayRequestForm } from "@/modules/hr/components/half-day-request-form";
 import { EarlyOutRequestForm } from "@/modules/hr/components/early-out-request-form";
+import { OvertimeRequestForm } from "@/modules/hr/components/overtime-request-form";
 import { TimeOffCalendar } from "@/modules/hr/components/time-off-calendar";
 import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
 import {
@@ -25,20 +26,22 @@ import {
 } from "@/modules/hr/hooks/use-leave";
 import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
 import { useEarlyOutRequests } from "@/modules/hr/hooks/use-early-out";
+import { useOvertimeRequests } from "@/modules/hr/hooks/use-overtime";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
-type RequestTab = "leave" | "half" | "early";
+type RequestTab = "leave" | "half" | "early" | "overtime";
 
 const REQUEST_TITLES: Record<RequestTab, string> = {
   leave: "Request Leave",
   half: "Request Half-Day",
   early: "Request Early-Out",
+  overtime: "Request overtime",
 };
 
 interface HistItem {
   key: string;
   id: number;
-  kind: "leave" | "half" | "early";
+  kind: "leave" | "half" | "early" | "overtime";
   title: string;
   date: string;
   status: string;
@@ -64,12 +67,13 @@ function RequestTabs({
     { value: "leave", label: "Leave" },
     { value: "half", label: "Half-Day" },
     { value: "early", label: "Early Out" },
+    { value: "overtime", label: "Overtime" },
   ];
 
   return (
     <div
       role="tablist"
-      className="flex w-full shrink-0 gap-1 rounded-xl bg-muted p-1 sm:w-[360px]"
+      className="flex w-full shrink-0 gap-1 rounded-xl bg-muted p-1 sm:w-[440px]"
     >
       {tabs.map((t) => {
         const active = value === t.value;
@@ -101,6 +105,7 @@ export default function TimeOffPage() {
   const { data: requests } = useLeaveRequests();
   const { data: halfDays } = useHalfDayRequests();
   const { data: earlyOuts } = useEarlyOutRequests();
+  const { data: overtimes } = useOvertimeRequests();
   const cancelMut = useCancelLeaveRequest();
   const [tab, setTab] = useState<RequestTab>("leave");
   const [declined, setDeclined] = useState<HistItem | null>(null);
@@ -136,7 +141,8 @@ export default function TimeOffPage() {
   const pendingCount =
     (requests ?? []).filter((r) => r.status === "pending").length +
     (halfDays ?? []).filter((h) => h.status === "pending").length +
-    (earlyOuts ?? []).filter((e) => e.status === "pending").length;
+    (earlyOuts ?? []).filter((e) => e.status === "pending").length +
+    (overtimes ?? []).filter((o) => o.status === "pending").length;
 
   // Combined leave + half-day history, newest first.
   const history: HistItem[] = [
@@ -176,6 +182,17 @@ export default function TimeOffPage() {
       reason: e.review_note,
       cancellable: false,
     })),
+    ...(overtimes ?? []).map((o) => ({
+      key: `o${o.id}`,
+      id: o.id,
+      kind: "overtime" as const,
+      title: `Overtime (${o.hours.toFixed(1)} hrs)`,
+      date: `${formatDate(o.work_date)} · Paid`,
+      status: o.status,
+      at: o.created_at,
+      reason: o.review_note,
+      cancellable: false,
+    })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
   const pageSizes = [6, 12, 24, 48];
@@ -201,8 +218,8 @@ export default function TimeOffPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Time Off"
-        subtitle="Request leave and track your remaining balance."
+        title="Work Schedule"
+        subtitle="Request leave, half-days, early-outs and overtime — and track your balance."
       />
 
       {/* Balance summary: (pool in shared) · leave-types list · pending */}
@@ -266,8 +283,10 @@ export default function TimeOffPage() {
               />
             ) : tab === "half" ? (
               <HalfDayRequestForm />
-            ) : (
+            ) : tab === "early" ? (
               <EarlyOutRequestForm />
+            ) : (
+              <OvertimeRequestForm />
             )}
           </div>
         </div>

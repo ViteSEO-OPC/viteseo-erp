@@ -15,6 +15,9 @@ class OvertimeRequestResource extends JsonResource
         return [
             'id' => $this->id,
             'work_date' => $this->work_date?->format('Y-m-d'),
+            // Normalise to HH:MM regardless of how MySQL returns a TIME column.
+            'time_from' => $this->time_from ? substr((string) $this->time_from, 0, 5) : null,
+            'time_to' => $this->time_to ? substr((string) $this->time_to, 0, 5) : null,
             'hours' => (float) $this->hours,
             'reason' => $this->reason,
             'status' => $this->status,

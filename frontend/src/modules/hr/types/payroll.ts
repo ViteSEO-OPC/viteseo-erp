@@ -72,6 +72,8 @@ export interface Payslip {
   reimbursements: number;
   allowances: number;
   holiday_premium: number;
+  overtime_pay: number;
+  overtime_minutes: number;
   gross: number;
   sss: number;
   philhealth: number;
