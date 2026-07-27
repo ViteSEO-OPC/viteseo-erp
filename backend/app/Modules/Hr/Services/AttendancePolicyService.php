@@ -71,7 +71,11 @@ class AttendancePolicyService
             ['streak_min' => 2, 'severity' => 'yellow', 'type' => 'ua'],
             ['streak_min' => 1, 'severity' => 'green', 'type' => 'ua'],
         ],
+        // Missed clock-outs this month — a count ladder, like `late` (HR-configurable, step B).
         'missed_time_out' => [
+            ['occurrence_min' => 4, 'severity' => 'red'],
+            ['occurrence_min' => 3, 'severity' => 'orange'],
+            ['occurrence_min' => 2, 'severity' => 'yellow'],
             ['occurrence_min' => 1, 'severity' => 'green'],
         ],
     ];

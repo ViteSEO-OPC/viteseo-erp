@@ -23,7 +23,6 @@ import {
   type EarlyArrivalMode,
   type LateDeductionMode,
   type LateTier,
-  type MissingClockoutMode,
   type OvertimeMode,
   type UndertimeDeductionMode,
   type ViolationRule,
@@ -228,7 +227,7 @@ function rungValue(
   rules: ViolationRules | null | undefined,
   category: keyof ViolationRules,
   severity: ViolationRule["severity"],
-  key: "streak_min" | "monthly_min",
+  key: "streak_min" | "monthly_min" | "occurrence_min",
   fallback: number,
 ): number {
   const rung = (rules?.[category] ?? []).find((r) => r.severity === severity);
@@ -248,10 +247,11 @@ function thresholdFrom(tiers: LateTier[] | null | undefined): { over: number; ch
 }
 
 // The four alert levels must strictly ascend. Returns an error message, or null if OK.
-function ladderError(late: number[], absent: number[]): string | null {
+function ladderError(late: number[], absent: number[], missed: number[]): string | null {
   const ascends = (a: number[]) => a.every((v, i) => i === 0 || v > a[i - 1]);
   if (!ascends(late)) return "Lateness levels must increase: Low < Caution < Warning < Critical.";
   if (!ascends(absent)) return "Absence levels must increase: Low < Caution < Warning < Critical.";
+  if (!ascends(missed)) return "Missed clock-out levels must increase: Low < Caution < Warning < Critical.";
   return null;
 }
 
@@ -270,6 +270,13 @@ function AttendancePolicyEditor() {
   const [absentCaution, setAbsentCaution] = useState(String(rungValue(vr, "absence", "yellow", "streak_min", 2)));
   const [absentWarning, setAbsentWarning] = useState(String(rungValue(vr, "absence", "orange", "streak_min", 3)));
   const [absentCritical, setAbsentCritical] = useState(String(rungValue(vr, "absence", "red", "streak_min", 4)));
+  // Missed clock-out — by count of missed clock-outs this month (like lateness).
+  const [missedLow, setMissedLow] = useState(String(rungValue(vr, "missed_time_out", "green", "occurrence_min", 1)));
+  const [missedCaution, setMissedCaution] = useState(String(rungValue(vr, "missed_time_out", "yellow", "occurrence_min", 2)));
+  const [missedWarning, setMissedWarning] = useState(String(rungValue(vr, "missed_time_out", "orange", "occurrence_min", 3)));
+  const [missedCritical, setMissedCritical] = useState(String(rungValue(vr, "missed_time_out", "red", "occurrence_min", 4)));
+  // Whether the late tally resets each calendar month (on) or carries over (off).
+  const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
 
   // Tardiness pay deduction — two INDEPENDENT switches that can both be on:
   //   • lateChargeOn       = deduct for the actual time late (exact minutes, or a threshold rule)
@@ -278,9 +285,8 @@ function AttendancePolicyEditor() {
   const [latePenaltyEnabled, setLatePenaltyEnabled] = useState(policy?.late_penalty_enabled ?? false);
   const [latesPerDeduction, setLatesPerDeduction] = useState(String(policy?.lates_per_deduction ?? 3));
 
-  // Undertime & missing clock-out.
+  // Undertime.
   const [undertimeMode, setUndertimeMode] = useState<UndertimeDeductionMode>(policy?.undertime_deduction_mode ?? "none");
-  const [missingClockout, setMissingClockout] = useState<MissingClockoutMode>(policy?.missing_clockout_mode ?? "no_deduction_flag_for_review");
 
   // Early arrival & overtime.
   const [earlyArrival, setEarlyArrival] = useState<EarlyArrivalMode>(policy?.early_arrival_mode ?? "none");
@@ -326,6 +332,7 @@ function AttendancePolicyEditor() {
     const err = ladderError(
       [lateLow, lateCaution, lateWarning, lateCritical].map(Number),
       [absentLow, absentCaution, absentWarning, absentCritical].map(Number),
+      [missedLow, missedCaution, missedWarning, missedCritical].map(Number),
     );
     if (err) {
       toast.error(err);
@@ -335,6 +342,7 @@ function AttendancePolicyEditor() {
   }
 
   const violationFields = () => ({
+    monthly_late_reset: monthlyReset,
     violation_rules: {
       late: [
         { monthly_min: Number(lateCritical), severity: "red" },
@@ -348,7 +356,12 @@ function AttendancePolicyEditor() {
         { streak_min: Number(absentCaution), severity: "yellow", type: "ua" },
         { streak_min: Number(absentLow), severity: "green", type: "ua" },
       ],
-      missed_time_out: [{ occurrence_min: 1, severity: "green" }],
+      missed_time_out: [
+        { occurrence_min: Number(missedCritical), severity: "red" },
+        { occurrence_min: Number(missedWarning), severity: "orange" },
+        { occurrence_min: Number(missedCaution), severity: "yellow" },
+        { occurrence_min: Number(missedLow), severity: "green" },
+      ],
     } satisfies ViolationRules,
   });
 
@@ -439,7 +452,7 @@ function AttendancePolicyEditor() {
           Disciplinary only; never pay. */}
       <PolicySection
         title="Violation flags"
-        description="The four alert levels shown in the Attendance modal — set what makes a late or an absence each colour. These are disciplinary flags; they never deduct pay."
+        description="The four alert levels shown in the Attendance modal — set what makes a late, an absence, or a missed clock-out each colour. These are disciplinary flags; they never deduct pay."
       >
         <div className="space-y-3">
           <p className="text-[13px] font-semibold text-foreground">Lateness — lates in a month</p>
@@ -465,7 +478,30 @@ function AttendancePolicyEditor() {
             (LWOP). A day covered by any approved leave is never an unauthorised absence.
           </Hint>
         </div>
-        <Hint>The late tally resets at the start of each calendar month.</Hint>
+        <div className="space-y-3">
+          <p className="text-[13px] font-semibold text-foreground">
+            Missed clock-out — times this month
+          </p>
+          <div className="flex flex-wrap items-end gap-4">
+            <NumberField id="pol-missed-low" label="Low / Informational at" value={missedLow} onChange={setMissedLow} min={0} max={31} dot="green" />
+            <NumberField id="pol-missed-caution" label="Caution at" value={missedCaution} onChange={setMissedCaution} min={Number(missedLow) + 1} max={31} dot="yellow" />
+            <NumberField id="pol-missed-warning" label="Warning at" value={missedWarning} onChange={setMissedWarning} min={Number(missedCaution) + 1} max={31} dot="orange" />
+            <NumberField id="pol-missed-critical" label="Critical at" value={missedCritical} onChange={setMissedCritical} min={Number(missedWarning) + 1} max={31} dot="red" />
+          </div>
+          <Hint>
+            A forgotten clock-out is auto-credited to the scheduled end time — it never docks pay and
+            never counts as overtime; these levels only set its colour in the Attendance flags.
+          </Hint>
+        </div>
+        <CheckBox
+          checked={monthlyReset}
+          onChange={setMonthlyReset}
+          label="Reset the late tally at the start of each calendar month"
+        />
+        <Hint>
+          Off = the late count carries over month to month, coming down only when HR marks a
+          violation resolved.
+        </Hint>
         <Hint>
           Each level must use a higher number than the one before it (0 is allowed for the lowest).
           These exact numbers appear in the Attendance modal&apos;s Alert Color Legend.
@@ -540,23 +576,11 @@ function AttendancePolicyEditor() {
               { value: "per_hour", label: "Yes — deduct for the time they left short" },
             ]}
           />
-          <FieldSelect
-            id="pol-missing-clockout"
-            label="If they forget to clock out"
-            value={missingClockout}
-            onChange={(v) => setMissingClockout(v as MissingClockoutMode)}
-            disabled
-            options={[
-              { value: "no_deduction_flag_for_review", label: "Flag for review, don't deduct" },
-              { value: "treat_as_undertime_to_now", label: "Treat as leaving early" },
-              { value: "treat_as_absent", label: "Treat as absent" },
-            ]}
-          />
         </div>
         <Hint>
-          Leaving early is billed to the exact minute. The &ldquo;forgot to clock out&rdquo; handling isn&apos;t
-          active yet — a missing clock-out is always flagged for review for now, whatever this shows, and never
-          counts as overtime.
+          Leaving early is billed to the exact minute. A <strong>forgotten clock-out</strong> is
+          auto-credited to the scheduled end time — it never docks pay and never counts as overtime; it&apos;s
+          flagged in Violation history (set its alert levels under <strong>Violation flags</strong> above).
         </Hint>
 
         <SaveButton
@@ -567,7 +591,6 @@ function AttendancePolicyEditor() {
               late_penalty_enabled: latePenaltyEnabled,
               lates_per_deduction: Number(latesPerDeduction),
               undertime_deduction_mode: undertimeMode,
-              missing_clockout_mode: missingClockout,
               daily_deduction_cap: 1,
             })
           }
