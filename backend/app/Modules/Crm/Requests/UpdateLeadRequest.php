@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Requests;
 
+use App\Modules\Crm\Enums\LeadColdCalling;
+use App\Modules\Crm\Enums\LeadEmailOutreach;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -23,8 +25,9 @@ class UpdateLeadRequest extends FormRequest
             'industry' => ['nullable', 'string', 'max:255'],
             'website_status' => ['sometimes', 'required', Rule::in(['has-website', 'no-website', 'needs-redesign'])],
             'priority' => ['sometimes', 'required', Rule::in(['high', 'medium', 'low'])],
-            'email_outreach' => ['sometimes', 'required', Rule::in(['sent', 'opened', 'replied', 'none'])],
-            'cold_calling' => ['sometimes', 'required', Rule::in(['called', 'scheduled', 'not-called'])],
+            // Validated against the enums that own these two columns — same source as the read filter.
+            'email_outreach' => ['sometimes', 'required', Rule::enum(LeadEmailOutreach::class)],
+            'cold_calling' => ['sometimes', 'required', Rule::enum(LeadColdCalling::class)],
             'status' => ['sometimes', 'required', Rule::in(['interested', 'awaiting-reply', 'declined', 'call-back-req', 'new'])],
             'last_activity' => ['nullable', 'date'],
             'score' => ['nullable', 'integer', 'min:0', 'max:100'],

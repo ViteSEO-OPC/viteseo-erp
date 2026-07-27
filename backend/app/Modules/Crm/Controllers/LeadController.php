@@ -194,6 +194,13 @@ class LeadController extends Controller
         $search = trim((string) $request->validated('search'));
         $priority = $request->validated('priority');
         $websiteStatus = $request->validated('website_status');
+        // Communication-lifecycle filters. Applied to every consumer of this method (list, Priority
+        // Summary, Website Status buckets) so the cards keep filtering over the IDENTICAL dataset the
+        // table shows — the same contract `status`, `search` and `industry` already follow.
+        $emailOutreach = $request->validated('email_outreach');
+        $coldCalling = $request->validated('cold_calling');
+        // Ownership filter: the UNASSIGNED sentinel means `assigned_to IS NULL`, otherwise a user id.
+        $assignedTo = (string) $request->validated('assigned_to');
         // Status may be a comma-separated list (e.g. a summary tab mapping to multiple statuses).
         $statuses = array_values(array_filter(array_map('trim', explode(',', (string) $request->validated('status')))));
         // Raw industry filter — comma-separated free-text values (the frontend derives these from
@@ -222,6 +229,18 @@ class LeadController extends Controller
             })
             ->when($statuses !== [], function (Builder $q) use ($statuses): void {
                 $q->whereIn('status', $statuses);
+            })
+            ->when($emailOutreach, function (Builder $q) use ($emailOutreach): void {
+                $q->where('email_outreach', $emailOutreach);
+            })
+            ->when($coldCalling, function (Builder $q) use ($coldCalling): void {
+                $q->where('cold_calling', $coldCalling);
+            })
+            ->when($assignedTo === IndexLeadRequest::UNASSIGNED, function (Builder $q): void {
+                $q->whereNull('assigned_to');
+            })
+            ->when($assignedTo !== '' && $assignedTo !== IndexLeadRequest::UNASSIGNED, function (Builder $q) use ($assignedTo): void {
+                $q->where('assigned_to', $assignedTo);
             })
             ->when($industries !== [], function (Builder $q) use ($industries): void {
                 $q->whereIn(DB::raw('LOWER(industry)'), $industries);

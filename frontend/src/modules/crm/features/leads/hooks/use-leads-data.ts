@@ -20,7 +20,37 @@ type LeadApiResponse = {
   industry_counts?: Record<string, number>;
 };
 
-const VALID_STATUSES = ["interested", "awaiting-reply", "declined", "call-back-req", "new"];
+// Canonical filter values — these mirror the backend whitelists EXACTLY and are the only values any
+// filter UI may offer:
+//   status   → IndexLeadRequest::STATUSES
+//   priority → IndexLeadRequest::rules()['priority'] (Rule::in)
+// Exported so the column filters render their options from this single source rather than restating
+// them. If the backend whitelist changes, changing it here updates every filter surface at once.
+export const LEAD_STATUS_VALUES = [
+  "interested",
+  "awaiting-reply",
+  "declined",
+  "call-back-req",
+  "new",
+] as const;
+
+export const LEAD_PRIORITY_VALUES = ["high", "medium", "low"] as const;
+
+// Communication-lifecycle columns. Same contract: these mirror IndexLeadRequest's `email_outreach`
+// and `cold_calling` rules, which in turn reuse the write-side whitelists in
+// StoreLeadRequest/UpdateLeadRequest. Single-value filters, like `priority`.
+export const LEAD_EMAIL_OUTREACH_VALUES = ["sent", "opened", "replied", "none"] as const;
+
+export const LEAD_COLD_CALLING_VALUES = ["called", "scheduled", "not-called"] as const;
+
+// Sentinel for "no owner" on the assigned_to filter, mirroring IndexLeadRequest::UNASSIGNED.
+// Maps to `assigned_to IS NULL`, which the table already renders as "Unassigned".
+export const LEAD_UNASSIGNED = "unassigned";
+
+const VALID_STATUSES: readonly string[] = LEAD_STATUS_VALUES;
+const VALID_PRIORITIES: readonly string[] = LEAD_PRIORITY_VALUES;
+const VALID_EMAIL_OUTREACH: readonly string[] = LEAD_EMAIL_OUTREACH_VALUES;
+const VALID_COLD_CALLING: readonly string[] = LEAD_COLD_CALLING_VALUES;
 
 // Sort options for the toolbar dropdown. `value` keys MUST match the backend whitelist
 // (IndexLeadRequest::SORTS + LeadController@index mapping). `recent` is the default and is
@@ -76,7 +106,7 @@ export function useLeads() {
 
   // Priority filter — URL-driven & reactive. Still supported independently (e.g. toolbar/other links).
   const rawPriority = searchParams.get("priority") ?? "";
-  const priority = ["high", "medium", "low"].includes(rawPriority) ? rawPriority : "";
+  const priority = VALID_PRIORITIES.includes(rawPriority) ? rawPriority : "";
 
   // Website-status filter — URL-driven & reactive (the overview cards link to
   // /leads?website_status=<status>). Independent of the priority filter above.
@@ -88,6 +118,20 @@ export function useLeads() {
   // Status filter — URL-driven & reactive; supports a comma-separated list so a summary tab can
   // map to multiple statuses (CONTACTED = awaiting-reply,call-back-req).
   const status = normalizeStatus(searchParams.get("status"));
+
+  // Email Outreach / Cold Calling filters — URL-driven & reactive, single-value like priority.
+  const rawEmailOutreach = searchParams.get("email_outreach") ?? "";
+  const emailOutreach = VALID_EMAIL_OUTREACH.includes(rawEmailOutreach) ? rawEmailOutreach : "";
+
+  const rawColdCalling = searchParams.get("cold_calling") ?? "";
+  const coldCalling = VALID_COLD_CALLING.includes(rawColdCalling) ? rawColdCalling : "";
+
+  // Assigned BD filter — a user id or the UNASSIGNED sentinel. The valid ids are not a fixed
+  // whitelist (they are live accounts), so this accepts the sentinel or any numeric id and lets the
+  // API reject an unknown one, exactly as it does for a hand-edited URL.
+  const rawAssignedTo = (searchParams.get("assigned_to") ?? "").trim();
+  const assignedTo =
+    rawAssignedTo === LEAD_UNASSIGNED || /^\d+$/.test(rawAssignedTo) ? rawAssignedTo : "";
 
   // Niche filter — URL-driven & reactive. SINGLE-SELECT this phase (the chip list is derived from
   // the filtered dataset, so it naturally collapses to one industry once selected — see sprint
@@ -104,6 +148,68 @@ export function useLeads() {
       const params = new URLSearchParams(window.location.search);
       if ((params.get("industry") ?? "").trim() === industry) params.delete("industry");
       else params.set("industry", industry);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname],
+  );
+
+  // Column-filter setters for Priority and Status. Same URL-driven contract as setSort/setSearch —
+  // the URL stays the single source of truth, so the column filters, the Priority Summary cards and
+  // the Status Summary tabs all read and write the SAME params and can never disagree.
+  // Empty value clears the param (the "All" option).
+  // Shared writer for the single-value column filters. A value outside the whitelist (including the
+  // empty "All" selection) clears the param, so an unknown value can never reach the API.
+  const setSingleValueParam = useCallback(
+    (key: string, value: string, allowed: readonly string[]) => {
+      if (typeof window === "undefined") return;
+      const params = new URLSearchParams(window.location.search);
+      if (allowed.includes(value)) params.set(key, value);
+      else params.delete(key);
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname],
+  );
+
+  const setPriority = useCallback(
+    (value: string) => setSingleValueParam("priority", value, VALID_PRIORITIES),
+    [setSingleValueParam],
+  );
+
+  const setEmailOutreach = useCallback(
+    (value: string) => setSingleValueParam("email_outreach", value, VALID_EMAIL_OUTREACH),
+    [setSingleValueParam],
+  );
+
+  const setColdCalling = useCallback(
+    (value: string) => setSingleValueParam("cold_calling", value, VALID_COLD_CALLING),
+    [setSingleValueParam],
+  );
+
+  // Owner ids are live data, not a fixed whitelist, so this can't reuse setSingleValueParam.
+  // Anything that is neither the sentinel nor a numeric id clears the param ("All").
+  const setAssignedTo = useCallback(
+    (value: string) => {
+      if (typeof window === "undefined") return;
+      const params = new URLSearchParams(window.location.search);
+      if (value === LEAD_UNASSIGNED || /^\d+$/.test(value)) params.set("assigned_to", value);
+      else params.delete("assigned_to");
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [router, pathname],
+  );
+
+  // Status accepts a comma-separated list (the backend validates each token), which is what lets a
+  // summary tab map to several statuses. Normalized here so an invalid token can never be sent.
+  const setStatus = useCallback(
+    (value: string) => {
+      if (typeof window === "undefined") return;
+      const params = new URLSearchParams(window.location.search);
+      const normalized = normalizeStatus(value);
+      if (normalized) params.set("status", normalized);
+      else params.delete("status");
       const qs = params.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     },
@@ -129,7 +235,7 @@ export function useLeads() {
 
   // Reset to page 1 whenever any filter (search/priority/status/website_status) changes — "adjust
   // state during render", React's recommended alternative to a state-setting effect.
-  const filterSig = `${priority}|${status}|${search}|${websiteStatus}|${sort}|${industryKey}`;
+  const filterSig = `${priority}|${status}|${search}|${websiteStatus}|${sort}|${industryKey}|${emailOutreach}|${coldCalling}|${assignedTo}`;
   const [pagedFilters, setPagedFilters] = useState(filterSig);
   if (filterSig !== pagedFilters) {
     setPagedFilters(filterSig);
@@ -146,12 +252,15 @@ export function useLeads() {
     ...(status ? { status } : {}),
     ...(websiteStatus ? { website_status: websiteStatus } : {}),
     ...(sort !== DEFAULT_LEAD_SORT ? { sort } : {}),
+    ...(emailOutreach ? { email_outreach: emailOutreach } : {}),
+    ...(coldCalling ? { cold_calling: coldCalling } : {}),
+    ...(assignedTo ? { assigned_to: assignedTo } : {}),
     // Industry = Niche: the selected value is the raw industry; send it directly.
     ...(selectedIndustries.length > 0 ? { industry: industryKey } : {}),
   };
 
   const query = useQuery<LeadApiResponse>({
-    queryKey: queryKeys.leads.list({ page: page + 1, perPage: 10, search: trimmedSearch, priority, status, websiteStatus, sort, industry: industryKey }),
+    queryKey: queryKeys.leads.list({ page: page + 1, perPage: 10, search: trimmedSearch, priority, status, websiteStatus, sort, industry: industryKey, emailOutreach, coldCalling, assignedTo }),
     queryFn: () =>
       apiClient
         .get("/leads", { params: { page: page + 1, per_page: 10, ...listParams } })
@@ -188,7 +297,10 @@ export function useLeads() {
     status.length > 0 ||
     websiteStatus.length > 0 ||
     sort !== DEFAULT_LEAD_SORT ||
-    selectedIndustries.length > 0;
+    selectedIndustries.length > 0 ||
+    emailOutreach.length > 0 ||
+    coldCalling.length > 0 ||
+    assignedTo.length > 0;
 
   return {
     data,
@@ -207,7 +319,15 @@ export function useLeads() {
     selectedIndustries,
     toggleIndustry,
     priority,
+    setPriority,
     status,
+    setStatus,
+    emailOutreach,
+    setEmailOutreach,
+    coldCalling,
+    setColdCalling,
+    assignedTo,
+    setAssignedTo,
     isLoading: query.isLoading,
     isError: query.isError,
     retry: () => query.refetch(),

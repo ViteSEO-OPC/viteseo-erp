@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LeadsKpiRow } from "@/modules/crm/features/leads/components/leads-kpi-row";
 import { LeadsSummaryTabs } from "@/modules/crm/features/leads/components/leads-summary-tabs";
 import { LeadsToolbar } from "@/modules/crm/features/leads/components/leads-toolbar";
@@ -13,7 +13,8 @@ import { EditLeadDrawer } from "@/modules/crm/features/leads/components/edit-lea
 import { AssignLeadModal } from "@/modules/crm/features/leads/components/assign-lead-modal";
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
-import { useLeads } from "@/modules/crm/features/leads/hooks/use-leads-data";
+import { useLeads, LEAD_UNASSIGNED } from "@/modules/crm/features/leads/hooks/use-leads-data";
+import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
 import { useNicheDistribution } from "@/modules/crm/features/leads/hooks/use-niche-distribution";
 import { useExportLeads } from "@/modules/crm/features/leads/hooks/use-export-leads";
 import { useDeleteLead, useBulkDeleteLeads } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
@@ -90,11 +91,37 @@ export function LeadsPageLayout() {
     selectedIndustries,
     toggleIndustry,
     priority,
+    setPriority,
     status,
+    setStatus,
+    emailOutreach,
+    setEmailOutreach,
+    coldCalling,
+    setColdCalling,
+    assignedTo,
+    setAssignedTo,
     isLoading,
     isError,
     retry,
   } = useLeads();
+
+  // Assigned BD filter options — live accounts from the shared useBdUsers hook (the same source the
+  // Assign modal uses), so no owner name is ever invented. Guarded by `canAssign`: only Admin/SA see
+  // the column, and only they can read GET /users. Labels reuse the column's own cell styling.
+  const { bdUsers } = useBdUsers(canAssign);
+  const bdOptions = useMemo(
+    () => [
+      ...bdUsers.map((user) => ({
+        value: user.id,
+        label: <span className="text-secondary-foreground">{user.name}</span>,
+      })),
+      {
+        value: LEAD_UNASSIGNED,
+        label: <span className="text-muted-foreground italic">Unassigned</span>,
+      },
+    ],
+    [bdUsers],
+  );
 
   // Select-all / clear targets the leads currently on screen ("current filtered results").
   const toggleSelectAll = (checked: boolean) => {
@@ -180,7 +207,14 @@ export function LeadsPageLayout() {
             isLoading={isLoading}
             isError={isError}
             onRetry={retry}
-            searchActive={search.trim().length > 0 || priority.length > 0 || status.length > 0}
+            searchActive={
+              search.trim().length > 0 ||
+              priority.length > 0 ||
+              status.length > 0 ||
+              emailOutreach.length > 0 ||
+              coldCalling.length > 0 ||
+              assignedTo.length > 0
+            }
             onEdit={(lead) => setEditLead(lead)}
             onDelete={(lead) => setDeleteTarget(lead)}
             canAssign={canAssign}
@@ -191,6 +225,17 @@ export function LeadsPageLayout() {
             onClearSelection={clearSelection}
             onBulkDelete={() => setBulkOpen(true)}
             bulkDeleting={bulkDelete.isPending}
+            priorityFilter={priority}
+            onPriorityChange={setPriority}
+            statusFilter={status}
+            onStatusChange={setStatus}
+            emailFilter={emailOutreach}
+            onEmailChange={setEmailOutreach}
+            callFilter={coldCalling}
+            onCallChange={setColdCalling}
+            assignedToFilter={assignedTo}
+            onAssignedToChange={setAssignedTo}
+            bdOptions={bdOptions}
           />
           <Pagination
             page={page}
