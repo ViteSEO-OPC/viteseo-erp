@@ -330,7 +330,7 @@ function EditLeadForm({
                 >
                   <option value="called">Called</option>
                   <option value="scheduled">Scheduled</option>
-                  <option value="not-called">Not Started</option>
+                  <option value="not-called">Not Called</option>
                 </select>
               </FormField>
             </FormFieldGrid>

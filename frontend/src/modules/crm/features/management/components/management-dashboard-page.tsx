@@ -26,7 +26,7 @@ export function ManagementDashboardPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-end">
         <Select value={range} onValueChange={(v) => setRange(v ?? range)}>
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-44" aria-label="Date range">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

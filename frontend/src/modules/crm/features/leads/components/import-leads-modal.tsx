@@ -143,7 +143,7 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
                 Import Leads
               </DialogTitle>
               <DialogDescription className="mt-0.5 text-sm text-muted-foreground">
-                Upload CSV or XLSX file to bulk import leads into Vite SEO
+                Upload CSV or XLSX file to bulk import leads into Viteseo
               </DialogDescription>
             </div>
             <button

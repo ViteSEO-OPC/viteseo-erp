@@ -129,7 +129,7 @@ export function LeadSummaryCard({ lead }: Props) {
           {/* Estimated Deal Value (prospect-stage) — NOT revenue (revenue is on the Deal). */}
           <InfoField label="AMOUNT" icon={<Wallet />}>
             {lead.amount !== null ? (
-              lead.amount.toLocaleString("en-US")
+              `₱${lead.amount.toLocaleString("en-PH")}`
             ) : (
               <span className="text-muted-foreground italic">Not set</span>
             )}

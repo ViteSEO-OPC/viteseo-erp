@@ -52,11 +52,11 @@ export function DraftsList({ drafts, isLoading, onOpen, onSend, onDiscard, pendi
                 </p>
               </button>
               <div className="flex shrink-0 gap-2">
-                <Button variant="outline" size="sm" onClick={() => onSend(draft.id)} disabled={pending}>
+                <Button variant="outline" size="sm" onClick={() => onSend(draft.id)} disabled={pending} aria-label="Send">
                   <SendIcon className="h-3.5 w-3.5" />
                   <span className="hidden md:inline">Send</span>
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => onDiscard(draft.id)} disabled={pending}>
+                <Button variant="outline" size="sm" onClick={() => onDiscard(draft.id)} disabled={pending} aria-label="Discard">
                   <Trash2 className="h-3.5 w-3.5" />
                   <span className="hidden md:inline">Discard</span>
                 </Button>

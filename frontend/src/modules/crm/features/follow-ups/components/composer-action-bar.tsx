@@ -39,6 +39,7 @@ export function ComposerActionBar({
         variant="outline"
         onClick={onSaveDraft}
         disabled={savingDraft}
+        aria-label="Save Draft"
         className="min-h-11 md:min-h-0"
       >
         <Bookmark className="h-4 w-4" />
@@ -48,6 +49,7 @@ export function ComposerActionBar({
         variant="outline"
         onClick={onMarkDone}
         disabled={markingDone || !onMarkDone}
+        aria-label="Mark Done"
         title={!onMarkDone ? "No follow-up to complete for this lead" : undefined}
         className="min-h-11 border-teal-500 text-teal-600 hover:bg-teal-50 hover:text-teal-700 md:min-h-0"
       >
@@ -57,7 +59,7 @@ export function ComposerActionBar({
 
       <div className="ml-auto flex w-full items-center justify-end gap-4 md:w-auto">
         <ScheduleToggle checked={scheduleEnabled} onChange={onScheduleToggle} />
-        <Button variant="default" onClick={onSend} disabled={sending} className="min-h-11 md:min-h-0">
+        <Button variant="default" onClick={onSend} disabled={sending} aria-label="Send" className="min-h-11 md:min-h-0">
           <span className="hidden md:inline">{sending ? "Sending…" : "Send"}</span>
           <SendIcon className="h-4 w-4" />
         </Button>

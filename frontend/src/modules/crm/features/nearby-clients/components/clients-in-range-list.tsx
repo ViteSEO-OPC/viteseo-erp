@@ -27,7 +27,7 @@ export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit,
         </div>
         <p className="mt-0.5 text-xs text-muted-foreground">
           {nearest !== null ? `Nearest ${nearest.toFixed(1)} km · ` : ""}
-          {activeCount} active · 0 planned visits
+          {activeCount} active
         </p>
       </div>
 

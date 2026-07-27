@@ -21,7 +21,7 @@ const LEGEND = [
   { label: "Not started", color: "var(--muted)" },
 ] as const;
 
-/** Four evenly-spaced axis ticks 0 → total, matching the mockup's baseline scale under the bars. */
+/** Five evenly-spaced axis ticks 0 → total, matching the mockup's baseline scale under the bars. */
 function AxisTicks({ total }: { total: number }) {
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(total * f));
   return (
@@ -81,6 +81,8 @@ export function OutreachByChannelCard({ className }: { className?: string }) {
   const email = data?.outreachByChannel.email;
   const call = data?.outreachByChannel.call;
   const empty = !isLoading && (email?.total ?? 0) === 0 && (call?.total ?? 0) === 0;
+  // Axis scale must span the larger channel; `??` would pick email's 0 over a non-zero call total.
+  const axisTotal = Math.max(email?.total ?? 0, call?.total ?? 0);
 
   return (
     <ChartCard
@@ -108,7 +110,7 @@ export function OutreachByChannelCard({ className }: { className?: string }) {
       <div className="flex flex-col gap-5 pt-1">
         {email && <ChannelRow name="Email outreach" channel={email} />}
         {call && <ChannelRow name="Cold calling" channel={call} />}
-        {(email?.total ?? call?.total) ? <AxisTicks total={email?.total ?? call?.total ?? 0} /> : null}
+        {axisTotal > 0 ? <AxisTicks total={axisTotal} /> : null}
         <p className="text-xs text-muted-foreground">
           One figure, two answers: progress made and workload remaining per channel.
         </p>
