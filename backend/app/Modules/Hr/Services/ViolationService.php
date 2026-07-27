@@ -139,6 +139,7 @@ class ViolationService
             $lateStreak = 0;
             $absentStreak = 0;
             $monthlyLate = 0;
+            $monthlyMissedClockout = 0;
 
             // An absence can't predate the employee's hire, the org's tracking start,
             // or the scanned month. Below this floor, a missing record is "not tracked",
@@ -196,9 +197,14 @@ class ViolationService
                     $absentStreak = 0;
 
                     if ($row && $row->time_in && ! $row->time_out && $isPast) {
-                        $match = self::ladderMatch($rules, 'missed_time_out', ['occurrence' => 1]);
+                        // Auto-credited to the scheduled end for PAY (no undertime, never OT);
+                        // here it's a disciplinary flag whose colour escalates by the monthly
+                        // count (step B), the same way lateness does.
+                        $monthlyMissedClockout++;
+                        $match = self::ladderMatch($rules, 'missed_time_out', ['occurrence' => $monthlyMissedClockout]);
                         if ($match) {
-                            $computed[] = $this->incident($emp->id, 'missed_time_out', $match['severity'], $dateStr, 'Clocked in but never clocked out');
+                            $note = "Clocked in but never clocked out (#{$monthlyMissedClockout} this month)";
+                            $computed[] = $this->incident($emp->id, 'missed_time_out', $match['severity'], $dateStr, $note);
                         }
                     }
                 }

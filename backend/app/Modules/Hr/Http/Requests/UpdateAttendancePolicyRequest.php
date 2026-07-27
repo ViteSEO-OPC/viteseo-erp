@@ -77,7 +77,7 @@ class UpdateAttendancePolicyRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $v) {
-            foreach (['late', 'absence'] as $category) {
+            foreach (['late', 'absence', 'missed_time_out'] as $category) {
                 $rungs = $this->input("violation_rules.{$category}");
                 if (! is_array($rungs)) {
                     continue;
