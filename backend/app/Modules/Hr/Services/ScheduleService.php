@@ -20,6 +20,16 @@ class ScheduleService
         private readonly AuditService $audit,
     ) {}
 
+    /**
+     * Per-instance memo of the default schedule (F / F-10). effectiveFor() falls back to
+     * default() for every schedule-less employee, once per day — a payroll run hit this
+     * single, unchanging row thousands of times. The service is resolved once per run; any
+     * write (create/update/delete) clears the memo, so it can never go stale within a request.
+     */
+    private ?WorkSchedule $defaultSchedule = null;
+
+    private bool $defaultResolved = false;
+
     public function list(): Collection
     {
         return WorkSchedule::orderByDesc('is_default')->orderBy('name')->get();
@@ -27,13 +37,19 @@ class ScheduleService
 
     public function default(): ?WorkSchedule
     {
-        return WorkSchedule::where('is_default', true)->first()
-            ?? WorkSchedule::orderBy('id')->first();
+        if (! $this->defaultResolved) {
+            $this->defaultSchedule = WorkSchedule::where('is_default', true)->first()
+                ?? WorkSchedule::orderBy('id')->first();
+            $this->defaultResolved = true;
+        }
+
+        return $this->defaultSchedule;
     }
 
     /** @param array<string, mixed> $data */
     public function create(array $data): WorkSchedule
     {
+        $this->defaultResolved = false; // a new schedule may change the default fallback
         return DB::transaction(function () use ($data) {
             $schedule = WorkSchedule::create($this->clean($data));
             $this->syncDefault($schedule, $data['is_default'] ?? false);
@@ -47,6 +63,7 @@ class ScheduleService
     /** @param array<string, mixed> $data */
     public function update(WorkSchedule $schedule, array $data): WorkSchedule
     {
+        $this->defaultResolved = false; // is_default may flip
         return DB::transaction(function () use ($schedule, $data) {
             $schedule->update($this->clean($data));
             $this->syncDefault($schedule, $data['is_default'] ?? $schedule->is_default);
@@ -64,6 +81,7 @@ class ScheduleService
             throw new \RuntimeException('Cannot delete the default schedule. Set another as default first.');
         }
         $schedule->delete();
+        $this->defaultResolved = false; // removed row may change the default fallback
 
         $this->audit->log('removed', 'Schedules', "Removed schedule '{$schedule->name}'", $schedule);
     }
