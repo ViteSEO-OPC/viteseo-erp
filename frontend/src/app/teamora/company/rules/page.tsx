@@ -275,6 +275,8 @@ function AttendancePolicyEditor() {
   const [missedCaution, setMissedCaution] = useState(String(rungValue(vr, "missed_time_out", "yellow", "occurrence_min", 2)));
   const [missedWarning, setMissedWarning] = useState(String(rungValue(vr, "missed_time_out", "orange", "occurrence_min", 3)));
   const [missedCritical, setMissedCritical] = useState(String(rungValue(vr, "missed_time_out", "red", "occurrence_min", 4)));
+  // Whether the late tally resets each calendar month (on) or carries over (off).
+  const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
 
   // Tardiness pay deduction — two INDEPENDENT switches that can both be on:
   //   • lateChargeOn       = deduct for the actual time late (exact minutes, or a threshold rule)
@@ -340,6 +342,7 @@ function AttendancePolicyEditor() {
   }
 
   const violationFields = () => ({
+    monthly_late_reset: monthlyReset,
     violation_rules: {
       late: [
         { monthly_min: Number(lateCritical), severity: "red" },
@@ -490,7 +493,15 @@ function AttendancePolicyEditor() {
             never counts as overtime; these levels only set its colour in the Attendance flags.
           </Hint>
         </div>
-        <Hint>The late tally resets at the start of each calendar month.</Hint>
+        <CheckBox
+          checked={monthlyReset}
+          onChange={setMonthlyReset}
+          label="Reset the late tally at the start of each calendar month"
+        />
+        <Hint>
+          Off = the late count carries over month to month, coming down only when HR marks a
+          violation resolved.
+        </Hint>
         <Hint>
           Each level must use a higher number than the one before it (0 is allowed for the lowest).
           These exact numbers appear in the Attendance modal&apos;s Alert Color Legend.

@@ -110,7 +110,24 @@ class ViolationService
 
         // The colour ladder HR configures (Company → Rules). Constant across this month's
         // scan; a null column falls back to today's literals, so this is a no-op by default.
-        $rules = $this->policy->violationRules();
+        $policy = $this->policy->get();
+        $rules = $policy->violation_rules ?: AttendancePolicyService::DEFAULT_VIOLATION_RULES;
+
+        // Step D: `monthly_late_reset` OFF ⇒ the LATE tally CARRIES OVER month to month (it only
+        // comes down when HR resolves a violation). ON (default) ⇒ each month starts at zero.
+        $carryOver = ! $policy->monthly_late_reset;
+
+        // Step D: a resolved LATE violation has been actioned by HR, so it never counts toward
+        // escalation — not in this month, not in the carry-over seed. Keyed "employeeId|Y-m-d"
+        // across all history up to the scan end.
+        $resolvedLate = [];
+        foreach (
+            Violation::where('type', 'late')->where('resolved', true)
+                ->whereDate('work_date', '<=', $scanEnd->toDateString())
+                ->get(['employee_id', 'work_date']) as $rv
+        ) {
+            $resolvedLate["{$rv->employee_id}|" . $rv->work_date->toDateString()] = true;
+        }
 
         // The earliest HUMAN-ENTERED attendance record anywhere is our proxy for when the
         // org began tracking attendance — nobody can be "absent" for a day before tracking
@@ -141,6 +158,23 @@ class ViolationService
             $monthlyLate = 0;
             $monthlyMissedClockout = 0;
 
+            // Carry-over seed (step D): with the monthly reset OFF, this month's late tally starts
+            // from the count of PRIOR *unresolved* lates (since hire / tracking start), so the
+            // colour keeps climbing across months until HR resolves. Self-contained per call, so
+            // recomputing one month in isolation still reconstructs the running total.
+            $carryFloor = max(array_filter([$emp->hire_date?->toDateString(), $trackingStart]));
+            if ($carryOver && $carryFloor && $carryFloor < $monthStart->toDateString()) {
+                $priorLates = Attendance::where('employee_id', $emp->id)
+                    ->where('status', 'late')
+                    ->whereBetween('work_date', [$carryFloor, $monthStart->copy()->subDay()->toDateString()])
+                    ->pluck('work_date');
+                foreach ($priorLates as $wd) {
+                    if (! isset($resolvedLate["{$emp->id}|" . $wd->toDateString()])) {
+                        $monthlyLate++;
+                    }
+                }
+            }
+
             // An absence can't predate the employee's hire, the org's tracking start,
             // or the scanned month. Below this floor, a missing record is "not tracked",
             // not an absence — otherwise every empty pre-hire/pre-go-live day is an AWOL.
@@ -163,14 +197,22 @@ class ViolationService
                 $clockedIn = $row && $row->time_in !== null;
 
                 if ($row && $row->status === 'late') {
-                    $monthlyLate++;
-                    $lateStreak++;
                     $absentStreak = 0;
 
-                    // Severity comes from HR's `late` ladder (streak_min / monthly_min rungs).
-                    $match = self::ladderMatch($rules, 'late', ['streak' => $lateStreak, 'monthly' => $monthlyLate]);
-                    if ($match) {
-                        $computed[] = $this->incident($emp->id, 'late', $match['severity'], $dateStr, "Late arrival (#{$monthlyLate} this month)");
+                    // A resolved late has been actioned by HR — it doesn't count toward the tally
+                    // and isn't re-flagged (step D). The resolved row is preserved by sync().
+                    if (isset($resolvedLate["{$emp->id}|{$dateStr}"])) {
+                        $lateStreak = 0;
+                    } else {
+                        $monthlyLate++;
+                        $lateStreak++;
+
+                        // Severity comes from HR's `late` ladder (streak_min / monthly_min rungs).
+                        $match = self::ladderMatch($rules, 'late', ['streak' => $lateStreak, 'monthly' => $monthlyLate]);
+                        if ($match) {
+                            $scope = $carryOver ? 'running total' : 'this month';
+                            $computed[] = $this->incident($emp->id, 'late', $match['severity'], $dateStr, "Late arrival (#{$monthlyLate} {$scope})");
+                        }
                     }
                 } elseif ($isPast && ! $onLeave && ! $clockedIn && $dateStr >= $absenceFloor) {
                     // Unauthorised absence: a past scheduled workday (at/after the org's
