@@ -188,6 +188,12 @@ export default function PayslipsPage() {
                   value={formatPeso(detail.payslip.overtime_pay)}
                 />
               )}
+              {detail.payslip.night_diff_pay > 0 && (
+                <Row
+                  label={`Night differential (${(detail.payslip.night_diff_minutes / 60).toFixed(1)} hrs)`}
+                  value={formatPeso(detail.payslip.night_diff_pay)}
+                />
+              )}
               {detail.payslip.reimbursements > 0 && (
                 <Row label="Reimbursement" value={formatPeso(detail.payslip.reimbursements)} />
               )}

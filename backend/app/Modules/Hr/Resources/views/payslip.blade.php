@@ -53,6 +53,12 @@
         @if (($p['holiday_premium'] ?? 0) > 0)
             <tr><td>Holiday premium</td><td class="amt">{{ $peso($p['holiday_premium']) }}</td></tr>
         @endif
+        @if (($p['overtime_pay'] ?? 0) > 0)
+            <tr><td>Overtime ({{ number_format(($p['overtime_minutes'] ?? 0) / 60, 1) }} hrs)</td><td class="amt">{{ $peso($p['overtime_pay']) }}</td></tr>
+        @endif
+        @if (($p['night_diff_pay'] ?? 0) > 0)
+            <tr><td>Night differential ({{ number_format(($p['night_diff_minutes'] ?? 0) / 60, 1) }} hrs)</td><td class="amt">{{ $peso($p['night_diff_pay']) }}</td></tr>
+        @endif
         @if ($p['reimbursements'] > 0)
             <tr><td>Reimbursement</td><td class="amt">{{ $peso($p['reimbursements']) }}</td></tr>
         @endif

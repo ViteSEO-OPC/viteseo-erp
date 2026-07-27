@@ -26,6 +26,8 @@ class PayslipResource extends JsonResource
             'holiday_premium' => (float) $this->holiday_premium,
             'overtime_pay' => (float) $this->overtime_pay,
             'overtime_minutes' => (int) $this->overtime_minutes,
+            'night_diff_pay' => (float) $this->night_diff_pay,
+            'night_diff_minutes' => (int) $this->night_diff_minutes,
             'gross' => (float) $this->gross,
             'sss' => (float) $this->sss,
             'philhealth' => (float) $this->philhealth,
