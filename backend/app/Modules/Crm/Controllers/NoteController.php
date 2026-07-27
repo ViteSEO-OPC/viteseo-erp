@@ -9,6 +9,7 @@ use App\Modules\Crm\Requests\UpdateNoteRequest;
 use App\Modules\Crm\Resources\NoteResource;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\Note;
+use App\Modules\Crm\Services\LeadNoteCreator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -27,12 +28,15 @@ class NoteController extends Controller
         );
     }
 
-    /** Add a note (author = current user). Logs `note.created`. */
-    public function store(StoreNoteRequest $request, Lead $lead): JsonResponse
+    /**
+     * Add a note (author = current user). Logs `note.created`.
+     *
+     * Delegates to {@see LeadNoteCreator}, the shared writer the Create Lead wizard's initial note
+     * also uses, so both entry points attach a note identically.
+     */
+    public function store(StoreNoteRequest $request, Lead $lead, LeadNoteCreator $notes): JsonResponse
     {
-        $note = $lead->notes()->make(['body' => (string) $request->validated()['body']]);
-        $note->author()->associate($request->user());
-        $note->save();
+        $note = $notes->create($lead, (string) $request->validated()['body'], $request->user());
 
         return (new NoteResource($note->load('author')))->response()->setStatusCode(201);
     }

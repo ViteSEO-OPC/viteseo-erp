@@ -70,6 +70,12 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
   // Lead Acquisition Channel (business "Source"). Bound to leads.acquisition_channel — NOT
   // leads.source (discovery provenance). Empty = unset → omitted from the payload (nullable).
   const [acquisitionChannel, setAcquisitionChannel] = useState("");
+  // Website Domain → leads.website. The column and the StoreLeadRequest rule already existed; the
+  // input was simply never bound, so anything typed here used to be discarded.
+  const [website, setWebsite] = useState("");
+  // Optional first internal note. Sent as `note` and persisted as a crm_notes row by the backend —
+  // NOT a column on the lead — so it shows up in Lead Details → Internal Notes like any other note.
+  const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const createLead = useCreateLead();
   // Admin/SA must pick the owning BD; BD creators auto-self on the backend (no selector).
@@ -90,6 +96,8 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
     setPriority("medium");
     setAcquisitionChannel("");
     setAssignedTo("");
+    setWebsite("");
+    setNotes("");
     setError("");
     onOpenChange(false);
   };
@@ -107,9 +115,10 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
       setStep((s) => Math.min(s + 1, STEPS.length));
       return;
     }
-    // Final step → create. Remaining unbound inputs (website/address/position/source/notes) are not
-    // yet part of the create contract (no StoreLeadRequest rule / no column / separate notes API) —
-    // reported for a backend follow-up, deliberately not sent here.
+    // Final step → create. `website` and `notes` are now bound and sent; the remaining unbound inputs
+    // (address/position/source) are still outside the create contract — `position` has no column at
+    // all, and `address`/`source` have columns but no StoreLeadRequest rule — so they stay out until
+    // that is decided.
     createLead.mutate(
       {
         business_name: businessName.trim(),
@@ -121,6 +130,8 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
         ...(niche.trim() ? { industry: niche.trim() } : {}),
         ...(amount.trim() ? { amount: Number(amount) } : {}),
         ...(assignedTo ? { assigned_to: Number(assignedTo) } : {}),
+        ...(website.trim() ? { website: website.trim() } : {}),
+        ...(notes.trim() ? { note: notes.trim() } : {}),
       },
       {
         onSuccess: handleClose,
@@ -206,6 +217,8 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
                   type="url"
                   placeholder="https://globaltech.com"
                   className={FIELD}
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
                 />
               </FormField>
 
@@ -341,6 +354,9 @@ export function CreateLeadWizard({ open, onOpenChange }: Props) {
                 <textarea
                   placeholder="Anything useful about this lead&hellip;"
                   className={TEXTAREA}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  maxLength={5000}
                 />
               </FormField>
             </div>

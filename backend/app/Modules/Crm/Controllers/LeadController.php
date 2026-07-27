@@ -19,6 +19,7 @@ use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Models\Activity;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
+use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Services\LeadImportService;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
@@ -293,21 +294,16 @@ class LeadController extends Controller
             });
     }
 
-    public function store(StoreLeadRequest $request): JsonResponse
+    public function store(StoreLeadRequest $request, LeadCreator $creator): JsonResponse
     {
-        $user = $request->user();
         $data = $request->validated();
 
-        // BD-created leads auto-assign to the creator (BDs own their own leads); Admin/SA must
-        // select the owning BD (enforced by StoreLeadRequest).
-        if ($user->hasRole('crm_bd')) {
-            $data['assigned_to'] = $user->id;
-        }
+        // `note` is not a lead column — it is the optional first internal note, created alongside the
+        // lead in one transaction by the service (which also owns the BD auto-assign rule).
+        $initialNote = $data['note'] ?? null;
+        unset($data['note']);
 
-        $lead = Lead::create([
-            ...$data,
-            'created_by' => $user->id,
-        ]);
+        $lead = $creator->create($data, $request->user(), $initialNote);
 
         return response()->json([
             'data' => new LeadResource($lead->load('assignedTo')),
