@@ -143,6 +143,7 @@ function WorkspaceViewsInner({
             // It's the member's own subtask → keep it in their filtered board.
             assigneeId: lockedAssigneeId,
             groupName: null,
+            groupColor: null,
             deadline: s.deadline,
             hasMySubtask: true,
             leadsMyGroup: false,
@@ -176,6 +177,7 @@ function WorkspaceViewsInner({
       assignee: t.assignee,
       assigneeId: t.assignee_id,
       groupName: t.group?.name ?? null,
+      groupColor: t.group?.color ?? null,
       deadline: t.deadline,
       hasMySubtask: t.has_my_subtask ?? false,
       leadsMyGroup,

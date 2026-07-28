@@ -24,6 +24,8 @@ export interface WorkItem {
   assignee?: { name: string; avatar?: string | null } | null;
   assigneeId: number | null;
   groupName?: string | null;
+  // The owning group's hex, shown as a swatch beside its name on group tasks.
+  groupColor?: string | null;
   deadline: string | null;
   hasMySubtask: boolean;
   // The item is a group task whose group the requesting user leads — the leader

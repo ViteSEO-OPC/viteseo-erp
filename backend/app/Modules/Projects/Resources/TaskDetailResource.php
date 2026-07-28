@@ -39,6 +39,7 @@ class TaskDetailResource extends JsonResource
             'group' => $this->whenLoaded('group', fn (): array => [
                 'id' => $this->group->uuid,
                 'name' => $this->group->name,
+                'color' => $this->group->color,
             ]),
             'assignee_id' => $this->assignee_id,
             'assignee' => new UserResource($this->whenLoaded('assignee')),

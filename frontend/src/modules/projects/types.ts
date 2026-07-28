@@ -78,7 +78,7 @@ export interface Task {
   description: string | null;
   assignment_type: AssignmentType;
   group_id: string | null;
-  group?: { id: string; name: string } | null;
+  group?: { id: string; name: string; color?: string | null } | null;
   assignee_id: number | null;
   assignee?: User | null;
   /** Who set the current assignment (null when unassigned). */
