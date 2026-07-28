@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ArrowUpIcon, Avatar, Badge, Button, ConfirmDialog, Field, Input, PencilIcon, PlusIcon, PriorityBadge, SegmentedControl, SegmentedItem, Select, Textarea, TrashIcon } from '@/core/ui';
+import { ArrowUpIcon, Avatar, Badge, Button, CalendarIcon, ConfirmDialog, Field, Input, LinkIcon, PencilIcon, PlusIcon, PriorityBadge, SegmentedControl, SegmentedItem, Select, Textarea, TrashIcon } from '@/core/ui';
 import { useAuth, useIsManager } from '@/core/auth/AuthProvider';
 import type { User } from '@/core/types';
 import type { AssignmentType, CreateTaskPayload, Priority, ProjectStatus, Subtask, Task } from '../../types';
@@ -28,8 +28,12 @@ import {
   formatDate,
   formatDateTime,
   groupRoster,
+  PILL_SELECT,
   PRIORITIES,
+  priorityPill,
+  readonlyField,
   sectionLabel,
+  statusPill,
   statusTone,
   GroupWorkloadIndicator,
   SubtaskFields,
@@ -616,9 +620,10 @@ export function ViewTaskBody({
         <DetailsPanel>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className={`mb-1.5 ${sectionLabel}`}>Status</p>
+              <p className={`mb-2 ${sectionLabel}`}>Status:</p>
               {canEditStatus ? (
                 <Select
+                  className={`${PILL_SELECT} ${statusPill}`}
                   defaultValue={task.status_id ?? ''}
                   onChange={(e) => update.mutate({ id: task.id, payload: { status_id: e.target.value } })}
                 >
@@ -634,15 +639,18 @@ export function ViewTaskBody({
                   ))}
                 </Select>
               ) : (
-                <div className="flex h-10 items-center rounded-lg border border-line px-3 text-sm font-semibold text-ink">
+                <span
+                  className={`inline-flex rounded-lg px-2.5 py-2 text-[11px] font-bold uppercase ${statusPill}`}
+                >
                   {task.status?.name ?? 'No status'}
-                </div>
+                </span>
               )}
             </div>
             <div>
-              <p className={`mb-1.5 ${sectionLabel}`}>Priority</p>
+              <p className={`mb-2 ${sectionLabel}`}>Priority:</p>
               {canFullEdit ? (
                 <Select
+                  className={`${PILL_SELECT} ${priorityPill(task.priority)}`}
                   defaultValue={task.priority}
                   onChange={(e) =>
                     update.mutate({ id: task.id, payload: { priority: e.target.value as Priority } })
@@ -655,7 +663,7 @@ export function ViewTaskBody({
                   ))}
                 </Select>
               ) : (
-                <div className="flex h-10 items-center">
+                <div className="flex items-center">
                   <PriorityBadge priority={task.priority} />
                 </div>
               )}
@@ -664,7 +672,7 @@ export function ViewTaskBody({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className={`mb-1.5 ${sectionLabel}`}>Start Date</p>
+              <p className={`mb-2 ${sectionLabel}`}>Start Date:</p>
               {editing ? (
                 <Input
                   type="date"
@@ -673,7 +681,8 @@ export function ViewTaskBody({
                   onChange={(e) => setStartDate(e.target.value)}
                 />
               ) : (
-                <div className="flex h-10 items-center rounded-lg border border-line px-3 text-sm text-ink">
+                <div className={readonlyField}>
+                  <CalendarIcon className="h-4 w-4 shrink-0 text-ink-faint" />
                   {formatDate(task.start_date) === '—'
                     ? formatDate(task.created_at)
                     : formatDate(task.start_date)}
@@ -681,7 +690,7 @@ export function ViewTaskBody({
               )}
             </div>
             <div>
-              <p className={`mb-1.5 ${sectionLabel}`}>Due Date</p>
+              <p className={`mb-2 ${sectionLabel}`}>Due Date:</p>
               {editing ? (
                 // Can't be before the start date (min); the past is enforced server-side.
                 <Input
@@ -692,12 +701,17 @@ export function ViewTaskBody({
                 />
               ) : (
                 <div
-                  className={`flex h-10 items-center gap-2 rounded-lg border px-3 text-sm ${
+                  className={`${readonlyField} ${
                     isOverdue(task.deadline, task.status?.key)
                       ? 'border-danger/40 font-semibold text-danger'
-                      : 'border-line text-ink'
+                      : ''
                   }`}
                 >
+                  <CalendarIcon
+                    className={`h-4 w-4 shrink-0 ${
+                      isOverdue(task.deadline, task.status?.key) ? 'text-danger' : 'text-ink-faint'
+                    }`}
+                  />
                   {formatDate(task.deadline)}
                   {isOverdue(task.deadline, task.status?.key) && (
                     <span className="shrink-0" title="Overdue" aria-label="Overdue">
@@ -712,7 +726,7 @@ export function ViewTaskBody({
           {/* A parent task's own effort is disregarded once it has subtasks — its
               workload is derived from the subtasks, so the score is hidden. */}
           <div>
-            <p className={`mb-2 ${sectionLabel}`}>Effort Score</p>
+            <p className={`mb-2 ${sectionLabel}`}>Effort Score:</p>
             {subtasks.length > 0 ? (
               <p className="text-sm text-ink-faint">
                 Derived from sub-tasks — this task’s own effort is not counted.
@@ -753,7 +767,7 @@ export function ViewTaskBody({
               <button
                 type="button"
                 onClick={() => setLinkOpen(true)}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-line py-3 text-sm font-semibold text-ink-soft hover:border-brand hover:text-ink"
+                className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-dashed border-ink py-3 text-sm font-semibold text-ink-soft transition-colors hover:bg-ink/5 hover:text-ink"
               >
                 <PlusIcon className="h-4 w-4" /> Add Link
               </button>
@@ -761,13 +775,14 @@ export function ViewTaskBody({
             {links.length > 0 && (
               <ul className="mt-3 space-y-2">
                 {links.map((l) => (
-                  <li key={l.id} className="flex items-center gap-2 text-sm">
-                    {l.user && <Avatar name={l.user.name} src={l.user.avatar} size={24} />}
+                  <li key={l.id} className="flex items-center gap-3 text-sm">
+                    {l.user && <Avatar name={l.user.name} src={l.user.avatar} size={28} />}
+                    <LinkIcon className="h-4 w-4 shrink-0 text-ink-faint" />
                     <a
                       href={l.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="truncate text-brand underline hover:text-brand-hover"
+                      className="truncate text-[#0f766e] underline hover:text-[#0d655e]"
                     >
                       {l.url}
                     </a>
