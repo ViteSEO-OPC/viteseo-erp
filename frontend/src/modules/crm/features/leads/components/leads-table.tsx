@@ -123,7 +123,10 @@ const BD_COLUMN_ORDER: readonly LeadColumnKey[] = [
 
 // Rows shown before the list starts scrolling. Presentation only — it does not cap what is
 // fetched or rendered, so pagination, selection and export still see every row on the page.
-const MAX_VISIBLE_ROWS = 5;
+// BD-only: the Admin/SA table has no internal vertical scroll and grows with its (larger) page.
+// Exported so the page can tell whether this table is scrolling — the pager's summary is shown
+// whenever the list doesn't display every row at once, scrolled or paged.
+export const MAX_VISIBLE_ROWS = 5;
 
 // Subtle scrollbar reused from the existing CRM surfaces (activity timeline, call history,
 // email thread) so this introduces no new scrollbar design.
@@ -153,6 +156,10 @@ type LeadsTableProps = {
   onBulkDelete: () => void;
   /** True while a bulk delete is in flight — locks the checkboxes + bar. */
   bulkDeleting: boolean;
+  /** Open the Assign BD confirmation for the selected leads. Rendered only when `canAssign`. */
+  onBulkAssign: () => void;
+  /** True while a bulk assign is in flight — locks the checkboxes + bar, same as a bulk delete. */
+  bulkAssigning: boolean;
   /**
    * Column filters. Values and setters come from the single useLeads instance, so they map onto the
    * URL params the API already accepts (`?priority=`, `?status=`) and stay in lockstep with the
@@ -198,6 +205,8 @@ export function LeadsTable({
   onClearSelection,
   onBulkDelete,
   bulkDeleting,
+  onBulkAssign,
+  bulkAssigning,
   priorityFilter,
   onPriorityChange,
   statusFilter,
@@ -219,7 +228,9 @@ export function LeadsTable({
   const [maxHeight, setMaxHeight] = useState<number>();
 
   const rowCount = leads?.length ?? 0;
-  const scrollable = rowCount > MAX_VISIBLE_ROWS;
+  // BD keeps the capped, scrolling list exactly as before. Admin/SA opted out: their page holds up
+  // to 10 rows and is meant to grow naturally, so no height cap is measured or applied for them.
+  const scrollable = !canAssign && rowCount > MAX_VISIBLE_ROWS;
 
   // Cap the list at exactly MAX_VISIBLE_ROWS. The height is measured rather than hard-coded because
   // row height is not uniform — the Contact cell stacks name / email / phone and each is optional,
@@ -265,6 +276,9 @@ export function LeadsTable({
   const selectedCount = leads.reduce((n, lead) => (selectedIds.has(lead.id) ? n + 1 : n), 0);
   const allSelected = leads.length > 0 && selectedCount === leads.length;
   const someSelected = selectedCount > 0 && !allSelected;
+  // Either bulk action locks the whole bar + the row checkboxes, so the selection can't be edited
+  // out from under a request that is already running against it.
+  const bulkBusy = bulkDeleting || bulkAssigning;
 
   const columnOrder = canAssign ? ADMIN_COLUMN_ORDER : BD_COLUMN_ORDER;
   // +1 for the leading selection checkbox column, which sits outside the order list.
@@ -353,6 +367,7 @@ export function LeadsTable({
     // untouched for every other CRM table. `[&>div]:overflow-visible` neutralises that inner
     // container: its `overflow-x: auto` computes `overflow-y` to `auto`, which would otherwise make
     // it the scroll container and stop the header sticking to this one.
+    // `scrollable` is BD-only, so Admin/SA always take the plain (naturally growing) branch.
     <div
       ref={scrollRef}
       style={scrollable && maxHeight ? { maxHeight } : undefined}
@@ -374,7 +389,7 @@ export function LeadsTable({
                   checked={allSelected}
                   indeterminate={someSelected}
                   onCheckedChange={onToggleSelectAll}
-                  disabled={bulkDeleting}
+                  disabled={bulkBusy}
                 />
               </TableHead>
               <TableHead colSpan={totalCols - 1} className="h-10 px-3">
@@ -387,20 +402,30 @@ export function LeadsTable({
                     variant="destructive"
                     size="sm"
                     onClick={onBulkDelete}
-                    disabled={bulkDeleting}
+                    disabled={bulkBusy}
                   >
                     Delete Selected
                   </Button>
-                  {/* Assign BD is intentionally disabled for now (bulk assign not yet wired). */}
-                  <Button type="button" variant="outline" size="sm" disabled>
-                    Assign BD
-                  </Button>
+                  {/* Bulk ownership assignment is Admin/SA only — same `canAssign` gate as the
+                      per-row Assign action and the Assigned BD column, so a BD never sees it (and
+                      the PATCH /leads/{id}/assign route would reject them anyway). */}
+                  {canAssign ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={onBulkAssign}
+                      disabled={bulkBusy}
+                    >
+                      {bulkAssigning ? "Assigning…" : "Assign BD"}
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={onClearSelection}
-                    disabled={bulkDeleting}
+                    disabled={bulkBusy}
                   >
                     Clear Selection
                   </Button>
@@ -583,7 +608,7 @@ export function LeadsTable({
                         aria-label={`Select ${lead.business}`}
                         checked={selectedIds.has(lead.id)}
                         onCheckedChange={() => onToggleSelect(lead.id)}
-                        disabled={bulkDeleting}
+                        disabled={bulkBusy}
                       />
                     </span>
                   </TableCell>

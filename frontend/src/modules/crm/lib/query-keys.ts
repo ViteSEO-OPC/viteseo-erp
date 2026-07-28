@@ -49,6 +49,10 @@ export const queryKeys = {
     // Per-lead email conversation (GET /leads/{lead}/emails). Nested under detail(id) so future
     // email writes (e.g. an inbound reply landing) invalidate only this lead's thread by prefix.
     emails: (id: string) => [...queryKeys.leads.detail(id), "emails"] as const,
+    // Per-lead attachments (GET /leads/{lead}/attachments). Nested under detail(id), like notes,
+    // so the cache is keyed BY LEAD — one lead's files can never be served from another's entry,
+    // and an upload/delete invalidates only this lead.
+    attachments: (id: string) => [...queryKeys.leads.detail(id), "attachments"] as const,
     // Per-lead rendered email templates (GET /leads/{lead}/email-templates) — Purpose+Tone → Subject+Body
     // rendered for this lead. Nested under detail(id).
     emailTemplates: (id: string) => [...queryKeys.leads.detail(id), "email-templates"] as const,

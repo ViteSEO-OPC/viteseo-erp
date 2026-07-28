@@ -153,6 +153,9 @@ class RolesAndPermissionsSeeder extends Seeder
             // Deal bounded context — creating a Deal ("Mark as Won"). BD sales workflow.
             'crm.deals.create',
             'crm.lead.notes.create', 'crm.lead.notes.edit', 'crm.lead.notes.delete',
+            // Lead Attachments — upload/delete a file on a lead. Listing and downloading are NOT
+            // permissions: they reuse `view` on the lead, the same ownership boundary as opening it.
+            'crm.lead.attachments.create', 'crm.lead.attachments.delete',
             'crm.follow-ups.view', 'crm.follow-ups.create', 'crm.follow-ups.edit',
             'crm.reports.view', 'crm.reports.export',
             // Planner (module branded "Planner"; permission namespace stays `calendar`).
@@ -192,6 +195,9 @@ class RolesAndPermissionsSeeder extends Seeder
             // BD closes their own deals (Mark as Won).
             'crm.deals.create',
             'crm.lead.notes.create', 'crm.lead.notes.edit', 'crm.lead.notes.delete',
+            // A BD attaches documents to their own leads (proposals, quotations, permits) and can
+            // remove ones they uploaded — LeadAttachmentPolicy restricts delete to uploader/Admin.
+            'crm.lead.attachments.create', 'crm.lead.attachments.delete',
             'crm.follow-ups.view', 'crm.follow-ups.create', 'crm.follow-ups.edit',
             'crm.calendar.view', 'crm.calendar.create', 'crm.calendar.edit', 'crm.calendar.delete',
             // A BD runs the Calling Workspace — logs calls and reads their own leads' Call History.

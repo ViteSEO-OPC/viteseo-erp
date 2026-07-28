@@ -33,10 +33,12 @@ use App\Modules\Crm\Listeners\SendDueScheduledEmail;
 use App\Modules\Crm\Models\Call;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Models\LeadAttachment;
 use App\Modules\Crm\Models\Note;
 use App\Modules\Crm\Models\PlannerEvent;
 use App\Modules\Crm\Policies\CallPolicy;
 use App\Modules\Crm\Policies\EmailPolicy;
+use App\Modules\Crm\Policies\LeadAttachmentPolicy;
 use App\Modules\Crm\Policies\LeadPolicy;
 use App\Modules\Crm\Policies\NotePolicy;
 use App\Modules\Crm\Policies\PlannerEventPolicy;
@@ -67,6 +69,7 @@ class CrmServiceProvider extends ServiceProvider
     /** @var array<class-string, class-string> */
     private array $policies = [
         Lead::class => LeadPolicy::class,
+        LeadAttachment::class => LeadAttachmentPolicy::class,
         Note::class => NotePolicy::class,
         Email::class => EmailPolicy::class,
         PlannerEvent::class => PlannerEventPolicy::class,

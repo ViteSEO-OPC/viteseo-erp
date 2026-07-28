@@ -5,7 +5,7 @@ import { LeadsKpiRow } from "@/modules/crm/features/leads/components/leads-kpi-r
 import { LeadsSummaryTabs } from "@/modules/crm/features/leads/components/leads-summary-tabs";
 import { LeadsToolbar } from "@/modules/crm/features/leads/components/leads-toolbar";
 import { LeadsFilterBar } from "@/modules/crm/features/leads/components/leads-filter-bar";
-import { LeadsTable } from "@/modules/crm/features/leads/components/leads-table";
+import { LeadsTable, MAX_VISIBLE_ROWS } from "@/modules/crm/features/leads/components/leads-table";
 import { Pagination } from "@/modules/crm/components/shared/pagination/pagination";
 import { ImportLeadsModal } from "@/modules/crm/features/leads/components/import-leads-modal";
 import { CreateLeadWizard } from "@/modules/crm/features/leads/components/create-lead-wizard";
@@ -21,7 +21,12 @@ import { ALL_SCOPE } from "@/modules/crm/features/performance/lib/performance-sc
 import type { PerformanceScope } from "@/modules/crm/features/performance/lib/performance-scope";
 import { useNicheDistribution } from "@/modules/crm/features/leads/hooks/use-niche-distribution";
 import { useExportLeads } from "@/modules/crm/features/leads/hooks/use-export-leads";
-import { useDeleteLead, useBulkDeleteLeads } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
+import { BulkAssignBdModal } from "@/modules/crm/features/leads/components/bulk-assign-bd-modal";
+import {
+  useDeleteLead,
+  useBulkDeleteLeads,
+  useBulkAssignLeads,
+} from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { useHeaderSearch } from "@/modules/crm/providers/header-search-provider";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
@@ -35,8 +40,13 @@ export function LeadsPageLayout() {
   // page — the reset effect below clears it whenever the page or filters change.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  // Bulk Assign BD is a two-step flow: confirm the intent, THEN pick the BD. Two flags rather than
+  // one so Cancel on the confirmation never opens the picker.
+  const [bulkAssignConfirmOpen, setBulkAssignConfirmOpen] = useState(false);
+  const [bulkAssignPickerOpen, setBulkAssignPickerOpen] = useState(false);
   const deleteLead = useDeleteLead();
   const bulkDelete = useBulkDeleteLeads();
+  const bulkAssign = useBulkAssignLeads();
   // Assign/Reassign ownership is Admin/SA only (leads.assign is not held by BD).
   const { hasMinRole } = usePermissions();
   const canAssign = hasMinRole("crm_admin");
@@ -75,6 +85,26 @@ export function LeadsPageLayout() {
       },
     });
   };
+
+  const handleBulkAssign = (bdId: string, bdName: string) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    bulkAssign.mutate(
+      { ids, assignedTo: bdId, bdName },
+      {
+        // Mirrors the bulk delete: drop only the ids that actually took the new owner, so any that
+        // failed stay selected for a retry instead of silently disappearing from the selection.
+        onSuccess: ({ succeeded }) => {
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            succeeded.forEach((id) => next.delete(id));
+            return next;
+          });
+          setBulkAssignPickerOpen(false);
+        },
+      },
+    );
+  };
   // Single source of truth for the list: one useLeads instance drives the
   // table (results) and the pager, and receives the search term from the
   // global header search.
@@ -82,6 +112,7 @@ export function LeadsPageLayout() {
     data,
     total,
     page,
+    perPage,
     totalPages,
     goToPage,
     clearFilters,
@@ -108,6 +139,11 @@ export function LeadsPageLayout() {
     isError,
     retry,
   } = useLeads();
+
+  // More than one page of results → page controls. BD's table also caps its viewport at
+  // MAX_VISIBLE_ROWS and scrolls beyond that, which is the other case where the summary is useful.
+  const paginated = total > perPage;
+  const scrolled = !canAssign && (data?.length ?? 0) > MAX_VISIBLE_ROWS;
 
   // Single-lead PDF export, shared with Lead Details — one hook, one endpoint, one implementation.
   const { exportLeadPdf, exportingId } = useExportLeadPdf();
@@ -278,6 +314,8 @@ export function LeadsPageLayout() {
             onClearSelection={clearSelection}
             onBulkDelete={() => setBulkOpen(true)}
             bulkDeleting={bulkDelete.isPending}
+            onBulkAssign={() => setBulkAssignConfirmOpen(true)}
+            bulkAssigning={bulkAssign.isPending}
             priorityFilter={priority}
             onPriorityChange={setPriority}
             statusFilter={status}
@@ -292,13 +330,23 @@ export function LeadsPageLayout() {
             onExportPdf={(lead) => exportLeadPdf(lead.id, lead.business)}
             exportingPdfId={exportingId}
           />
-          <Pagination
-            page={page}
-            totalPages={totalPages}
-            total={total}
-            onPageChange={goToPage}
-            unit="leads"
-          />
+          {/* Page controls appear only once the result set outgrows a single page. The "Showing
+              X–Y of Z" summary appears a step earlier — as soon as the list stops showing every row
+              at once, which for BD also covers a page that fits but scrolls inside its ~5-row
+              viewport. Admin/SA never scroll, so for them the two conditions coincide and the whole
+              pager still appears only above `perPage` — unchanged. Both read the API's filtered
+              `total`, so they re-evaluate on every search/filter change. */}
+          {paginated || scrolled ? (
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              perPage={perPage}
+              onPageChange={goToPage}
+              showControls={paginated}
+              unit="leads"
+            />
+          ) : null}
         </div>
       </div>
 
@@ -328,6 +376,34 @@ export function LeadsPageLayout() {
             if (!o) setAssignLead(null);
           }}
           lead={assignLead}
+        />
+      ) : null}
+
+      {/* Step 1 of Bulk Assign BD: confirm the intent before any picker or request. Cancel simply
+          closes — nothing is opened and no lead is touched. */}
+      <ConfirmDialog
+        open={bulkAssignConfirmOpen}
+        onOpenChange={setBulkAssignConfirmOpen}
+        title="Assign Selected Leads"
+        description="Are you sure you want to assign the selected leads to a Business Development representative?"
+        confirmLabel="Assign"
+        onConfirm={() => {
+          setBulkAssignConfirmOpen(false);
+          setBulkAssignPickerOpen(true);
+        }}
+      />
+
+      {/* Step 2: pick the one BD who takes ownership. Mounted only while open so the picker starts
+          empty on every run (no stale selection, and no key needed to force that). */}
+      {bulkAssignPickerOpen ? (
+        <BulkAssignBdModal
+          open
+          onOpenChange={(o) => {
+            if (!o) setBulkAssignPickerOpen(false);
+          }}
+          count={selectedIds.size}
+          onConfirm={handleBulkAssign}
+          pending={bulkAssign.isPending}
         />
       ) : null}
 

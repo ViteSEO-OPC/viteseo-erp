@@ -16,6 +16,12 @@ type PaginationProps = {
    * "Showing 1–7 of 2,847 leads". Omitted by default so existing callers are unchanged.
    */
   unit?: string;
+  /**
+   * Page controls (arrows + numbers). Set false to render the "Showing X–Y of Z" summary on its own
+   * — for a list that fits on one page but still doesn't show every row at once (e.g. a viewport
+   * that scrolls internally). Defaults to true, so every existing caller is unchanged.
+   */
+  showControls?: boolean;
   className?: string;
 };
 
@@ -75,6 +81,7 @@ export function Pagination({
   onPageChange,
   perPage = 10,
   unit,
+  showControls = true,
   className,
 }: PaginationProps) {
   const from = total === 0 ? 0 : page * perPage + 1;
@@ -103,6 +110,7 @@ export function Pagination({
         {unit ? ` ${unit}` : null}
       </p>
 
+      {showControls ? (
       <div className="flex items-center gap-1 sm:col-start-2 sm:justify-self-center">
         <button
           type="button"
@@ -153,6 +161,7 @@ export function Pagination({
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
+      ) : null}
     </nav>
   );
 }

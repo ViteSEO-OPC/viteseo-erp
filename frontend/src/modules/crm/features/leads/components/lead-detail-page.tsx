@@ -15,6 +15,7 @@ import { ScheduleFollowUpModal } from "@/modules/crm/features/leads/components/s
 import { WonConfirmDialog } from "@/modules/crm/features/leads/components/won-confirm-dialog";
 import { LostConfirmDialog } from "@/modules/crm/features/leads/components/lost-confirm-dialog";
 import { DiscussionNotes } from "@/modules/crm/features/leads/components/discussion-notes";
+import { LeadAttachmentsModal } from "@/modules/crm/features/leads/components/lead-attachments-modal";
 import { ActiveCallPanel } from "@/modules/crm/features/leads/components/active-call-panel";
 import { LeadTimelinePanel } from "@/modules/crm/features/leads/components/lead-timeline-panel";
 import { EditLeadDrawer } from "@/modules/crm/features/leads/components/edit-lead-drawer";
@@ -30,6 +31,7 @@ export function LeadDetailPage() {
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [wonOpen, setWonOpen] = useState(false);
   const [lostOpen, setLostOpen] = useState(false);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const { lead, editableLead, quickActions, isLoading, isError } = useLeadDetail(params.id);
   const activities = useLeadActivities(params.id);
   const deleteLead = useDeleteLead();
@@ -38,6 +40,8 @@ export function LeadDetailPage() {
   const canAssign = hasMinRole("crm_admin");
   // Mirror the backend authorization: DELETE /leads/{id} requires leads.delete (BDMs lack it).
   const canDelete = can("leads.delete");
+  // Attachments are not permission-gated in the UI: Admin and BD have identical rights over the
+  // files on a lead they can already open, so the modal renders the same controls for both.
   // Shared with the BD table's row action — one hook, one endpoint, one PDF implementation.
   const { exportLeadPdf, exportingId } = useExportLeadPdf();
 
@@ -76,12 +80,15 @@ export function LeadDetailPage() {
           onDelete={() => setConfirmOpen(true)}
           onExportPdf={() => exportLeadPdf(lead.id, lead.business)}
           exportingPdf={exportingId === lead.id}
+          onAttachments={() => setAttachmentsOpen(true)}
         />
 
         {/* Dominant left content region + a narrow right sidebar, matching the reference proportions. */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[76fr_24fr] lg:gap-6">
           <div className="flex flex-col gap-6">
             <LeadSummaryCard lead={lead} />
+            {/* Attachments are deliberately NOT surfaced on the page: the header's Attachment action
+                is the single entry point, and files live inside that modal. */}
             {/* Internal Notes + the Calling Workspace share a row (reference layout): Notes dominant
                 (~71%), Active Call a narrow console (~29%). Stretches to equal height. Below xl the two
                 stack (Notes above Call) — the tablet layout — and collapse into the single mobile column. */}
@@ -117,6 +124,17 @@ export function LeadDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Deliberately NOT keyed by lead id. It holds no local state — `open` lives here and the file
+          list comes from a query already keyed per lead — so a remount would buy nothing, and the
+          key collided with AssignLeadModal's below (both resolve to the same lead id, and sibling
+          keys must be unique). */}
+      <LeadAttachmentsModal
+        open={attachmentsOpen}
+        onOpenChange={setAttachmentsOpen}
+        leadId={params.id}
+        leadName={lead.business}
+      />
 
       <EditLeadDrawer
         open={drawerOpen}

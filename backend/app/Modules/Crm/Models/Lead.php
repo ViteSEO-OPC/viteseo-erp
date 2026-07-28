@@ -180,6 +180,18 @@ class Lead extends Model
     }
 
     /**
+     * Files uploaded against this lead — the source for the Lead Details "Attachments" card.
+     * Newest-first, the order the card renders (and the order the composite
+     * (lead_id, created_at) index serves).
+     *
+     * @return HasMany<LeadAttachment, $this>
+     */
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(LeadAttachment::class)->latest();
+    }
+
+    /**
      * The full email conversation (both directions) with this lead — the read-only source for the
      * Lead Details "Email Thread" panel. Ordered chronologically by when each message actually
      * happened (inbound receipt / outbound send), falling back to row creation.
