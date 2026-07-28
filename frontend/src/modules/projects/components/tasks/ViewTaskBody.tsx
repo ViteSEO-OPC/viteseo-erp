@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { ArrowUpIcon, Avatar, Badge, Button, ConfirmDialog, Field, Input, PencilIcon, PlusIcon, PriorityBadge, Select, Textarea, TrashIcon } from '@/core/ui';
+import { ArrowUpIcon, Avatar, Badge, Button, ConfirmDialog, Field, Input, PencilIcon, PlusIcon, PriorityBadge, SegmentedControl, SegmentedItem, Select, Textarea, TrashIcon } from '@/core/ui';
 import { useAuth, useIsManager } from '@/core/auth/AuthProvider';
 import type { User } from '@/core/types';
 import type { AssignmentType, CreateTaskPayload, Priority, ProjectStatus, Subtask, Task } from '../../types';
@@ -879,22 +879,18 @@ export function ViewTaskBody({
              create-task modal's layout. */
           <div className="space-y-3">
             <p className={sectionLabel}>Assignment</p>
-            <div className="inline-flex rounded-lg border border-line p-1">
+            <SegmentedControl>
               {(['individual', 'group'] as const).map((t) => (
-                <button
+                <SegmentedItem
                   key={t}
-                  type="button"
+                  active={assignmentType === t}
                   onClick={() => setAssignmentType(t)}
-                  className={`rounded-md px-4 py-1.5 text-sm font-bold capitalize transition-colors ${
-                    assignmentType === t
-                      ? 'bg-white text-[#0f766e] shadow-sm'
-                      : 'text-ink-soft hover:text-ink'
-                  }`}
+                  className="capitalize"
                 >
                   {t}
-                </button>
+                </SegmentedItem>
               ))}
-            </div>
+            </SegmentedControl>
 
             {assignmentType === 'individual' ? (
               <Field label="Assignee">
