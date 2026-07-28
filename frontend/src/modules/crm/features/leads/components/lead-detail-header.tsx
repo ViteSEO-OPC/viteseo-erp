@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Download, Edit3, Loader2, Trash2, UserPlus } from "lucide-react";
+import { ArrowLeft, Download, Edit3, Loader2, Paperclip, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/modules/crm/components/ui/button";
 
 type Props = {
@@ -16,6 +16,8 @@ type Props = {
   /** Download this lead's PDF profile (server-rendered). */
   onExportPdf?: () => void;
   exportingPdf?: boolean;
+  /** Open the Attachments modal for this lead. */
+  onAttachments?: () => void;
 };
 
 export function LeadDetailHeader({
@@ -29,6 +31,7 @@ export function LeadDetailHeader({
   onDelete,
   onExportPdf,
   exportingPdf,
+  onAttachments,
 }: Props) {
   return (
     <div>
@@ -80,6 +83,17 @@ export function LeadDetailHeader({
               <Download className="h-4 w-4" />
             )}
             Export PDF
+          </Button>
+          {/* Between Export PDF and Edit Lead — the approved header order. Opens the upload modal;
+              the files themselves are listed by the Attachments card on the page. */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onAttachments}
+            title="Upload and manage files for this lead"
+          >
+            <Paperclip className="h-4 w-4" />
+            Attachment
           </Button>
           <Button variant="default" size="sm" onClick={onEdit}>
             <Edit3 className="h-4 w-4" />

@@ -15,6 +15,8 @@ import { ScheduleFollowUpModal } from "@/modules/crm/features/leads/components/s
 import { WonConfirmDialog } from "@/modules/crm/features/leads/components/won-confirm-dialog";
 import { LostConfirmDialog } from "@/modules/crm/features/leads/components/lost-confirm-dialog";
 import { DiscussionNotes } from "@/modules/crm/features/leads/components/discussion-notes";
+import { LeadAttachmentsCard } from "@/modules/crm/features/leads/components/lead-attachments-card";
+import { LeadAttachmentsModal } from "@/modules/crm/features/leads/components/lead-attachments-modal";
 import { ActiveCallPanel } from "@/modules/crm/features/leads/components/active-call-panel";
 import { LeadTimelinePanel } from "@/modules/crm/features/leads/components/lead-timeline-panel";
 import { EditLeadDrawer } from "@/modules/crm/features/leads/components/edit-lead-drawer";
@@ -30,6 +32,7 @@ export function LeadDetailPage() {
   const [followUpOpen, setFollowUpOpen] = useState(false);
   const [wonOpen, setWonOpen] = useState(false);
   const [lostOpen, setLostOpen] = useState(false);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const { lead, editableLead, quickActions, isLoading, isError } = useLeadDetail(params.id);
   const activities = useLeadActivities(params.id);
   const deleteLead = useDeleteLead();
@@ -38,6 +41,14 @@ export function LeadDetailPage() {
   const canAssign = hasMinRole("crm_admin");
   // Mirror the backend authorization: DELETE /leads/{id} requires leads.delete (BDMs lack it).
   const canDelete = can("leads.delete");
+  // Mirror LeadAttachmentPolicy@delete: the permission is necessary but not sufficient — the
+  // backend also restricts deletion to the uploader (or an Admin), so this only hides a control
+  // the user could never use; it is not the authorization boundary.
+  //
+  // Fully qualified (`crm.` prefix) because `can()` exact-matches the names in UserResource, which
+  // are the raw permission records. Some older call sites omit the prefix and therefore never
+  // match — pre-existing, tracked separately, and deliberately not copied here.
+  const canDeleteAttachments = can("crm.lead.attachments.delete");
   // Shared with the BD table's row action — one hook, one endpoint, one PDF implementation.
   const { exportLeadPdf, exportingId } = useExportLeadPdf();
 
@@ -76,12 +87,17 @@ export function LeadDetailPage() {
           onDelete={() => setConfirmOpen(true)}
           onExportPdf={() => exportLeadPdf(lead.id, lead.business)}
           exportingPdf={exportingId === lead.id}
+          onAttachments={() => setAttachmentsOpen(true)}
         />
 
         {/* Dominant left content region + a narrow right sidebar, matching the reference proportions. */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[76fr_24fr] lg:gap-6">
           <div className="flex flex-col gap-6">
             <LeadSummaryCard lead={lead} />
+            {/* Attachments sit directly below Lead Information and above Internal Notes. Scoped to
+                this lead id — the card fetches its own per-lead query, so it can never render
+                another lead's files. */}
+            <LeadAttachmentsCard leadId={params.id} canDelete={canDeleteAttachments} />
             {/* Internal Notes + the Calling Workspace share a row (reference layout): Notes dominant
                 (~71%), Active Call a narrow console (~29%). Stretches to equal height. Below xl the two
                 stack (Notes above Call) — the tablet layout — and collapse into the single mobile column. */}
@@ -117,6 +133,17 @@ export function LeadDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* `key` remounts the modal per lead, so navigating between leads never carries over the
+          previous lead's dialog state. */}
+      <LeadAttachmentsModal
+        key={params.id}
+        open={attachmentsOpen}
+        onOpenChange={setAttachmentsOpen}
+        leadId={params.id}
+        leadName={lead.business}
+        canDelete={canDeleteAttachments}
+      />
 
       <EditLeadDrawer
         open={drawerOpen}
