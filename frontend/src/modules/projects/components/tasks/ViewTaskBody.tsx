@@ -773,7 +773,7 @@ export function ViewTaskBody({
               <button
                 type="button"
                 onClick={() => setLinkOpen(true)}
-                className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-dashed border-ink py-3 text-sm font-semibold text-ink-soft transition-colors hover:bg-ink/5 hover:text-ink"
+                className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-dashed border-ink py-2 text-sm font-semibold text-ink-soft transition-colors hover:bg-ink/5 hover:text-ink"
               >
                 <PlusIcon className="h-4 w-4" /> Add Link
               </button>

@@ -404,7 +404,7 @@ export function CollapsiblePanel({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-xl bg-[#fbfbef] p-3">
+    <div className="rounded-xl bg-[#FAFAF7] p-3">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

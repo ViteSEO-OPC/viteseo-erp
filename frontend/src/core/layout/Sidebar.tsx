@@ -227,7 +227,7 @@ export function Sidebar() {
           onClick={toggleCollapsed}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-expanded={!collapsed}
-          className="absolute -right-3 top-7 z-10 hidden h-6 w-6 items-center justify-center rounded-full border border-line-dark bg-sidebar text-sidebar-ink/60 shadow transition-colors hover:text-sidebar-ink lg:flex"
+          className="absolute -right-3 top-15 z-10 hidden h-7 w-7 items-center justify-center rounded-full bg-brand text-sidebar-surface hover:text-sidebar-ink shadow transition-colors lg:flex"
         >
           {collapsed ? (
             <ChevronRightIcon className="h-4 w-4" />
