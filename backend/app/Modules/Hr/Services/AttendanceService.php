@@ -23,7 +23,28 @@ class AttendanceService
         private readonly AttendancePolicyService $policy,
         private readonly AuditService $audit,
         private readonly DeductionService $deduction,
+        private readonly HolidayService $holidays,
     ) {}
+
+    /**
+     * Non-working holidays in an inclusive range, as date 'Y-m-d' => type. Fetched ONCE per
+     * caller (never per day) — the day loops below run per employee per date.
+     *
+     * `special_working` is filtered out on purpose: it is an ordinary working day and must keep
+     * behaving like one. Unclassified holidays (type NULL — HR hasn't set them yet) are also
+     * excluded: we never guess whether an unclassified date is a non-working day.
+     *
+     * @return array<string, string>
+     */
+    private function nonWorkingHolidays(string $start, string $end): array
+    {
+        $tz = config('app.timezone_local');
+
+        return array_filter(
+            $this->holidays->typedHolidaysBetween(Carbon::parse($start, $tz), Carbon::parse($end, $tz)),
+            fn ($type) => in_array($type, HolidayService::NON_WORKING_TYPES, true),
+        );
+    }
 
     private function localNow(): Carbon
     {
@@ -288,6 +309,8 @@ class AttendanceService
         $employees = Employee::with('workSchedule')->get();
         $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
         $onLeaveIds = $this->onLeaveIds($date);
+        // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
+        $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
 
         $s = [
             'checked_in' => 0, 'not_checked_in' => 0, 'on_leave' => 0,
@@ -319,10 +342,11 @@ class AttendanceService
                 $s['checked_in']++;
                 $cat = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)['category'];
                 $s[$cat === 'early' ? 'early_arrivals' : ($cat === 'late' ? 'late_arrivals' : 'on_time')]++;
-            } elseif (! $isOnLeave && $eff['is_workday']) {
+            } elseif (! $isOnLeave && $eff['is_workday'] && ! $isHoliday) {
                 // No clock-in on a workday: it's a true absence only once the day has
                 // passed (or HR explicitly marked it absent). During today the employee
                 // can still clock in, so it's "not checked in" — mirrors allForDate().
+                // A non-working holiday is neither: nobody was expected in.
                 if ($isPast || ($row && $row->status === 'absent')) {
                     $s['absent']++;
                 } else {
@@ -353,10 +377,12 @@ class AttendanceService
 
         $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
         $leaveMap = $this->onLeaveMap($date);
+        // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
+        $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
 
         return Employee::with(['user', 'department', 'workSchedule'])
             ->get()
-            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast) {
+            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday) {
                 $att = $rows->get($emp->id);
                 $eff = $this->schedule->effectiveFor($emp, $dateCarbon);
                 $leaveName = $leaveMap->get($emp->id);
@@ -369,6 +395,9 @@ class AttendanceService
                     $status = $att->status; // present | late
                 } elseif ($leaveName) {
                     $status = 'on_leave';
+                } elseif ($isHoliday && ($eff['is_workday'] ?? false)) {
+                    // Non-working holiday on what would have been a workday — not an absence.
+                    $status = 'holiday';
                 } elseif ($emp->isManagement()) {
                     // Management is exempt from attendance — auto-present on a scheduled
                     // workday, rest day otherwise. Never absent/not-checked-in.
@@ -706,6 +735,9 @@ class AttendanceService
         $deductionsActive = in_array($policy->late_deduction_mode, ['per_hour', 'tiered'], true)
             || $policy->undertime_deduction_mode === 'per_hour';
 
+        // Non-working holidays in the cycle (Slice 1). One query for the whole range.
+        $holidays = $this->nonWorkingHolidays($start, $end);
+
         $unpaid = 0.0;
         $lateCount = 0;
         $lateMinutes = 0;
@@ -713,6 +745,10 @@ class AttendanceService
         $lateDays = 0.0;
         $undertimeDays = 0.0;
         $flags = [];
+        // DOLE: holiday pay for a REGULAR holiday is forfeited when the employee was absent
+        // without pay on the workday immediately before it. Null = no prior workday seen yet
+        // in this range, in which case we don't know and pay the holiday (employee-favourable).
+        $prevWorkdayUnpaid = null;
 
         for ($d = Carbon::parse($start, $tz)->startOfDay(); $d->lte($last); $d->addDay()) {
             $eff = $this->schedule->effectiveFor($employee, $d);
@@ -722,14 +758,42 @@ class AttendanceService
 
             $dateStr = $d->toDateString();
 
+            // --- Non-working holiday (Slice 1) -------------------------------------------
+            // The monthly salary already covers a regular / special non-working holiday, so
+            // NOT working one is never an absence. Before this, every unworked holiday was
+            // charged a full day's pay (verified: Independence Day cost one day).
+            //
+            // A holiday that WAS worked falls through to the normal paid-day path below, so
+            // late/undertime still price normally and PayrollService::holidayPremiumFor()
+            // pays the premium on top. Only the unworked case short-circuits here.
+            $holidayType = $holidays[$dateStr] ?? null;
+            if ($holidayType !== null) {
+                $holidayRow = $rows->get($dateStr);
+                if (! ($holidayRow && $holidayRow->time_in)) {
+                    // Regular holidays are forfeited after an unpaid absence the workday
+                    // before; special non-working days carry no such condition.
+                    if ($holidayType === 'regular' && $prevWorkdayUnpaid === true) {
+                        $unpaid += 1.0;
+                    }
+
+                    // A holiday is not a workday for this purpose — it can neither break nor
+                    // extend the "absent the day before" chain, so leave the flag as it was.
+                    continue;
+                }
+            }
+
             // Approved leave covering this day: paid leave → no deduction; unpaid leave
             // (LWOP) → the full day is deducted (leave is full-day only).
             $leave = $leaves->first(fn ($l) => $dateStr >= Carbon::parse($l->start_date)->toDateString()
                 && $dateStr <= Carbon::parse($l->end_date)->toDateString());
             if ($leave) {
-                if ($leave->leaveType && ! $leave->leaveType->is_paid) {
+                $isUnpaidLeave = $leave->leaveType && ! $leave->leaveType->is_paid;
+                if ($isUnpaidLeave) {
                     $unpaid += 1.0;
                 }
+                // LWOP the day before a regular holiday forfeits the holiday pay; paid leave
+                // does not.
+                $prevWorkdayUnpaid = $isUnpaidLeave;
 
                 continue;
             }
@@ -755,6 +819,10 @@ class AttendanceService
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
                 }
+
+                // Half a day worked is not an absence, so it doesn't forfeit a following
+                // regular holiday.
+                $prevWorkdayUnpaid = false;
 
                 continue; // the half-day itself is handled; skip absence classification
             }
@@ -787,16 +855,22 @@ class AttendanceService
                     $flags = array_merge($flags, $ded->flags);
                 }
 
+                $prevWorkdayUnpaid = false; // they showed up
+
                 continue; // present or late → the day itself is paid
             }
             if ($row && $row->status === 'absent') {
                 $unpaid += 1.0;
+                $prevWorkdayUnpaid = true;
 
                 continue;
             }
             // No usable record: unpaid only once the workday is in the past.
             if ($d->lt($today)) {
                 $unpaid += 1.0;
+                $prevWorkdayUnpaid = true;
+            } else {
+                $prevWorkdayUnpaid = false; // today/future — not an absence yet
             }
         }
 

@@ -27,6 +27,7 @@ class ViolationService
     public function __construct(
         private readonly ScheduleService $schedule,
         private readonly AttendancePolicyService $policy,
+        private readonly HolidayService $holidays,
     ) {}
 
     /**
@@ -138,6 +139,15 @@ class ViolationService
         // untracked day before go-live into an absence for EVERY employee.
         $trackingStart = Attendance::where('source', Attendance::SOURCE_MANUAL)->min('work_date');
 
+        // Non-working holidays in the scanned month (Slice 1). Nobody is expected in, so a
+        // holiday can neither be an absence nor break an absence streak — it is skipped
+        // exactly like a rest day. `special_working` and unclassified (NULL) types are not
+        // in this map, so those still behave as ordinary workdays.
+        $holidays = array_filter(
+            $this->holidays->typedHolidaysBetween($monthStart, $scanEnd),
+            fn ($type) => in_array($type, HolidayService::NON_WORKING_TYPES, true),
+        );
+
         // Approved leaves overlapping the scanned range, grouped by employee.
         $leaves = LeaveRequest::where('status', 'approved')
             ->whereDate('end_date', '>=', $monthStart->toDateString())
@@ -192,6 +202,15 @@ class ViolationService
 
                 $dateStr = $d->toDateString();
                 $row = $rows->get($dateStr);
+
+                // Non-working holiday with no clock-in: not a violation, and it leaves the
+                // streaks untouched (a holiday in the middle of an absence run neither
+                // resets it nor extends it). Someone who DID work falls through, so a late
+                // arrival on a worked holiday is still flagged.
+                if (isset($holidays[$dateStr]) && ! ($row && $row->time_in !== null)) {
+                    continue;
+                }
+
                 $isPast = $d->lt($today);
                 $onLeave = $this->onLeave($leaves->get($emp->id), $dateStr);
                 $clockedIn = $row && $row->time_in !== null;
