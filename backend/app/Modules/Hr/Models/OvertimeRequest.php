@@ -28,12 +28,17 @@ class OvertimeRequest extends Model
         'review_note',
         'reviewed_by',
         'reviewed_at',
+        // Slice 6 — HR can undo an approved request before it is paid.
+        'cancelled_at',
+        'cancelled_by',
+        'cancel_reason',
     ];
 
     protected $casts = [
         'work_date' => 'date',
         'hours' => 'decimal:2',
         'reviewed_at' => 'datetime',
+        'cancelled_at' => 'datetime',
     ];
 
     public function employee(): BelongsTo
@@ -44,5 +49,10 @@ class OvertimeRequest extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 }

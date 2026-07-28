@@ -44,3 +44,12 @@ export async function rejectOvertimeRequest(
   const res = await apiClient.post(`/hr/overtime-requests/${id}/reject`, { reason });
   return res.data.data;
 }
+
+/** HR undoes an approved (or pending) request — Slice 6. Reason is required. */
+export async function cancelOvertimeRequest(
+  id: number,
+  reason: string,
+): Promise<OvertimeRequest> {
+  const res = await apiClient.post(`/hr/overtime-requests/${id}/cancel`, { reason });
+  return res.data.data;
+}

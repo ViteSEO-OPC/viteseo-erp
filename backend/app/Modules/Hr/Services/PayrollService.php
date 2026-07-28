@@ -542,8 +542,25 @@ class PayrollService
             ->whereBetween('work_date', [$start, $end])
             ->get(['work_date', 'hours', 'time_from', 'time_to']);
 
+        if ($requests->isEmpty()) {
+            return [];
+        }
+
+        // What the time clock actually supports per date (Slice 6). An approval is a
+        // permission to work overtime, not proof that it happened: before this, an approved
+        // request paid in full even on a day the employee never clocked in — while that same
+        // day was ALSO docked as an absence.
+        $clocked = $this->attendance->overtimeCapacityFor($employee, $start, $end);
+
         foreach ($requests as $req) {
             $date = $req->work_date->toDateString();
+
+            // No attendance that day (or a missing punch) → nothing to pay.
+            $capacity = $clocked[$date] ?? 0;
+            if ($capacity <= 0) {
+                continue;
+            }
+
             $night = 0;
             // Requests filed before OT-4 carry hours only — no window, so no night portion.
             if ($req->time_from && $req->time_to) {
@@ -559,6 +576,18 @@ class PayrollService
                 'minutes' => ($out[$date]['minutes'] ?? 0) + (int) round((float) $req->hours * 60),
                 'night' => ($out[$date]['night'] ?? 0) + $night,
             ];
+        }
+
+        // Clamp each date to what was actually clocked: asking for 4h and staying 2h past the
+        // shift pays 2h. The night portion is clamped with it so it can never exceed the paid
+        // minutes and inflate the differential.
+        foreach ($out as $date => $entry) {
+            $capacity = $clocked[$date] ?? 0;
+            if ($entry['minutes'] <= $capacity) {
+                continue;
+            }
+            $out[$date]['minutes'] = $capacity;
+            $out[$date]['night'] = min($entry['night'], $capacity);
         }
 
         return $out;

@@ -700,6 +700,73 @@ class AttendanceService
         return $out;
     }
 
+    /**
+     * How many overtime minutes the TIME CLOCK can support on each date (Slice 6) — the ceiling
+     * an approved request is paid against. A date missing from the map supports none.
+     *
+     * Two shapes, because "beyond the shift" means different things:
+     *   - a scheduled WORKDAY → minutes clocked past the schedule's end time;
+     *   - a REST day / non-workday → there is no shift to be beyond, and the first 8 hours are
+     *     the rest-day premium (see PayrollService::REST_DAY_PREMIUM_CAP_MIN), so only the
+     *     excess past 8h can be overtime.
+     *
+     * Both punches are required: a missing clock-out can never become overtime (rule 5).
+     *
+     * @return array<string, int> date 'Y-m-d' => max payable overtime minutes
+     */
+    public function overtimeCapacityFor(Employee $employee, string $start, string $end): array
+    {
+        if ($employee->isManagement()) {
+            return [];
+        }
+
+        $tz = config('app.timezone_local');
+        $rows = Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->whereNotNull('time_in')
+            ->whereNotNull('time_out')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $day = Carbon::parse($row->work_date, $tz);
+            $eff = $this->schedule->effectiveFor($employee, $day);
+
+            $inMin = $this->clockToMinutes($row->time_in);
+            $outMin = $this->clockToMinutes($row->time_out);
+            if ($inMin === null || $outMin === null) {
+                continue;
+            }
+            if ($outMin < $inMin) {
+                $outMin += 24 * 60; // clocked out after midnight
+            }
+
+            if ($eff['is_workday'] ?? false) {
+                $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
+                if ($endMin === null) {
+                    continue;
+                }
+                if ($outMin < $inMin) {
+                    $endMin += 24 * 60;
+                }
+                $capacity = $outMin - $endMin;
+            } else {
+                // Rest day: worked time minus the unpaid meal, less the 8h premium block.
+                $worked = ($outMin - $inMin) - (int) $row->lunch_minutes;
+                $capacity = $worked - self::REST_DAY_PREMIUM_CAP_MIN;
+            }
+
+            if ($capacity > 0) {
+                $out[$day->toDateString()] = $capacity;
+            }
+        }
+
+        return $out;
+    }
+
+    /** A full 8-hour day in minutes — mirrors PayrollService::REST_DAY_PREMIUM_CAP_MIN. */
+    private const REST_DAY_PREMIUM_CAP_MIN = 8 * 60;
+
     public function workedDatesBetween(Employee $employee, string $start, string $end): array
     {
         return Attendance::where('employee_id', $employee->id)

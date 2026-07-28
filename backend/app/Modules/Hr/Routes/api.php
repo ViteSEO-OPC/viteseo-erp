@@ -170,6 +170,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('early-out-requests/{earlyOutRequest}/reject', [EarlyOutRequestController::class, 'reject']);
         Route::post('overtime-requests/{overtimeRequest}/approve', [OvertimeRequestController::class, 'approve']);
         Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
+        Route::post('overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel']);
         Route::post('departments', [DepartmentController::class, 'store']);
         Route::match(['put', 'patch'], 'departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
