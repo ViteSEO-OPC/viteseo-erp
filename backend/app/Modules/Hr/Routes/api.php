@@ -140,6 +140,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/run', [PayrollController::class, 'run']);
         Route::get('payroll/runs/{payrollRun}', [PayrollController::class, 'show']);
         Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun']);
+        Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
+        Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf']);
 

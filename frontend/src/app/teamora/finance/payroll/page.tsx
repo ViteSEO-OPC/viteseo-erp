@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown } from "lucide-react";
+import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -25,6 +25,7 @@ import { downloadHrPayslipPdf, downloadPayrollRunCsv } from "@/modules/hr/api/pa
 import {
   usePayrollRuns,
   usePayrollRun,
+  useSetPayrollRunLock,
   useRunPayroll,
   useMarkPayslipDone,
   usePayrollSettings,
@@ -122,6 +123,10 @@ export default function PayrollPage() {
     : undefined;
   const alreadyRun = !!currentRun;
   const { data: detail } = usePayrollRun(currentRun?.id);
+  // Slice 5 — a re-run skips these, and a run can be locked once they are all disbursed.
+  const disbursedCount =
+    detail?.breakdown?.filter((r) => r.status === "disbursed").length ?? 0;
+  const lockMut = useSetPayrollRunLock();
   const history = (runs ?? []).filter((r) => r.id !== currentRun?.id);
   // A past run selected from the history modal → its per-employee breakdown.
   const { data: viewRun } = usePayrollRun(viewRunId ?? undefined);
@@ -240,10 +245,39 @@ export default function PayrollPage() {
                 </span>
               )}
             </Button>
+            {/* Slice 5 — seal the cycle once every payslip is paid out. */}
+            {detail?.can_lock && (
+              <Button
+                variant="outline"
+                disabled={lockMut.isPending}
+                title="Seal this cycle so it can never be recomputed"
+                onClick={() => lockMut.mutate({ id: detail.id, lock: true })}
+              >
+                <Lock />
+                {lockMut.isPending ? "Locking…" : "Lock this run"}
+              </Button>
+            )}
+            {detail?.is_locked && (
+              <Button
+                variant="outline"
+                disabled={lockMut.isPending}
+                title="Re-open this cycle so it can be recomputed (audit-logged)"
+                onClick={() => lockMut.mutate({ id: detail.id, lock: false })}
+              >
+                <LockOpen />
+                {lockMut.isPending ? "Unlocking…" : "Unlock"}
+              </Button>
+            )}
             <Button
               className="bg-warning text-white hover:bg-warning/90 disabled:opacity-50"
-              disabled={!cycle}
-              title={alreadyRun ? "Recompute this period with the latest data" : undefined}
+              disabled={!cycle || detail?.is_locked}
+              title={
+                detail?.is_locked
+                  ? "This run is locked — unlock it first"
+                  : alreadyRun
+                    ? "Recompute this period with the latest data"
+                    : undefined
+              }
               onClick={() => setConfirmOpen(true)}
             >
               <PlayCircle />
@@ -491,6 +525,15 @@ export default function PayrollPage() {
               latest salaries, attendance and reimbursements. It only computes — no payments are sent.
             </DialogDescription>
           </DialogHeader>
+          {/* Slice 5: be explicit that paid-out payslips are left alone. */}
+          {disbursedCount > 0 && (
+            <p className="rounded-card border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {disbursedCount} already-disbursed payslip{disbursedCount === 1 ? "" : "s"}
+              </span>{" "}
+              will be skipped — money already paid out is never recomputed.
+            </p>
+          )}
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Cancel</Button>

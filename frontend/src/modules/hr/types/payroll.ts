@@ -44,6 +44,12 @@ export interface PayrollRun {
   employee_count: number;
   run_at: string | null;
   run_by: string | null;
+  /** Slice 5 — a locked run can no longer be recomputed. */
+  locked_at: string | null;
+  locked_by: string | null;
+  is_locked: boolean;
+  /** Only present when the breakdown is loaded: every payslip is disbursed. */
+  can_lock?: boolean;
   breakdown?: PayrollBreakdownRow[];
 }
 

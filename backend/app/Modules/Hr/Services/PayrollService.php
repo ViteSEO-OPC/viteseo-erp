@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Payroll engine (v2). Pay is attendance-connected — absences are deducted at the
@@ -613,7 +614,73 @@ class PayrollService
 
     public function runWithBreakdown(PayrollRun $run): PayrollRun
     {
-        return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner']);
+        return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
+    }
+
+    /**
+     * Seal a finished cycle (Slice 5). Only when every payslip in it has actually been paid
+     * out — locking a half-disbursed run would strand the rest, since a locked run can't be
+     * recomputed. Reversible via unlock(), which is audited: the lock is a safety catch
+     * against an accidental re-run, not a legal seal.
+     */
+    public function lock(PayrollRun $run, User $user): PayrollRun
+    {
+        if ($run->isLocked()) {
+            throw ValidationException::withMessages([
+                'locked_at' => ['This payroll run is already locked.'],
+            ]);
+        }
+
+        $total = $run->payslips()->count();
+        if ($total === 0) {
+            throw ValidationException::withMessages([
+                'locked_at' => ['There is nothing to lock — this run has no payslips.'],
+            ]);
+        }
+
+        $pending = $run->payslips()->where('status', '!=', 'disbursed')->count();
+        if ($pending > 0) {
+            throw ValidationException::withMessages([
+                'locked_at' => [
+                    "{$pending} of {$total} payslip(s) are not disbursed yet. Mark them all as disbursed before locking the run.",
+                ],
+            ]);
+        }
+
+        $run->update(['locked_at' => now(), 'locked_by' => $user->id]);
+
+        $this->audit->log(
+            'updated',
+            'Payroll',
+            'Locked the ' . $run->cycle_start?->format('Y-m-d') . ' – ' . $run->cycle_end?->format('Y-m-d')
+                . " payroll run ({$total} payslip(s)) — it can no longer be recomputed",
+            $run,
+        );
+
+        return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
+    }
+
+    /** Re-open a locked cycle. Audited — this is the escape hatch, so it must be visible. */
+    public function unlock(PayrollRun $run, User $user): PayrollRun
+    {
+        if (! $run->isLocked()) {
+            throw ValidationException::withMessages([
+                'locked_at' => ['This payroll run is not locked.'],
+            ]);
+        }
+
+        $lockedAt = $run->locked_at->format('M j, Y');
+        $run->update(['locked_at' => null, 'locked_by' => null]);
+
+        $this->audit->log(
+            'updated',
+            'Payroll',
+            'Unlocked the ' . $run->cycle_start?->format('Y-m-d') . ' – ' . $run->cycle_end?->format('Y-m-d')
+                . " payroll run (locked {$lockedAt}) — it can be recomputed again",
+            $run,
+        );
+
+        return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
     }
 
     /** HR marks a payslip as disbursed (paid out manually) — the terminal state. */
@@ -661,6 +728,16 @@ class PayrollService
             // first-time run — the audit line distinguishes the two.
             $isRerun = $run && $run->run_at !== null;
 
+            // A locked cycle is closed for good (Slice 5) — refuse before anything is touched.
+            if ($run && $run->isLocked()) {
+                throw ValidationException::withMessages([
+                    'cycle_start' => [
+                        'This payroll run is locked (' . $run->locked_at->format('M j, Y')
+                            . ') and can no longer be recomputed. Unlock it first if you really need to change it.',
+                    ],
+                ]);
+            }
+
             if ($run) {
                 $run->update(['status' => 'processing']);
             } else {
@@ -681,10 +758,12 @@ class PayrollService
                 }
             }
 
-            // Preserve each employee's payslip status across a re-run: an already
-            // "disbursed" payslip stays disbursed, recompute only refreshes its amounts.
-            $priorStatus = $run->payslips()->pluck('status', 'employee_id');
+            // Payslips from a previous run of this same period, keyed by employee.
+            $priorSlips = $run->payslips()->get()->keyBy('employee_id');
+            $priorStatus = $priorSlips->map(fn (Payslip $p) => $p->status);
             $paidElsewhere = [];
+            // Employees whose pay was already disbursed and is therefore left untouched.
+            $skippedDisbursed = [];
 
             $totalGross = $totalDed = $totalNet = 0;
             $count = 0;
@@ -692,13 +771,29 @@ class PayrollService
             $reimbPaidCount = 0;
             $reimbPaidTotal = 0.0;
 
-            // Only the employees in this pay group (their pay_frequency, or the default).
-            // Active only: skip anyone separated (voluntary/involuntary) and anyone not yet
-            // hired as of this cycle. (Soft-deleted employees are already excluded.)
-            $employees = Employee::with('user')
+            // Only the employees in this pay group (their pay_frequency, or the default), and
+            // only those employed at some point during the cycle.
+            //
+            // FINAL PAY (Slice 4): a separation is recorded as `separation_type` PLUS a
+            // soft-delete, so a leaver was doubly invisible here — the old `whereNull(
+            // 'separation_type')` filter and Eloquent's own soft-delete scope. Anyone who left
+            // mid-cycle therefore got no payslip at all for the days they had worked. We now
+            // pull them back in with withTrashed() when their last day falls on/after the
+            // cycle start; unpaidDaysDetailFor() prorates the days after they left.
+            $employees = Employee::withTrashed()
+                ->with('user')
                 ->whereRaw('COALESCE(NULLIF(pay_frequency, ""), ?) = ?', [$setting->frequency, $frequency])
-                ->whereNull('separation_type')
                 ->where(fn ($q) => $q->whereNull('hire_date')->orWhere('hire_date', '<=', $cycleEnd))
+                ->where(function ($q) use ($cycleStart) {
+                    // Currently employed: never separated and not soft-deleted for any reason.
+                    $q->where(fn ($active) => $active
+                        ->whereNull('separation_type')
+                        ->whereNull('separation_date')
+                        ->whereNull('deleted_at'))
+                        // …or this is their final cycle. A separation with no recorded date
+                        // stays excluded — we won't guess someone's last working day.
+                        ->orWhere('separation_date', '>=', $cycleStart);
+                })
                 ->get();
 
             // Holidays in this cycle (date => type), fetched once for the whole run.
@@ -708,6 +803,21 @@ class PayrollService
             $policy = $this->attendancePolicy->get();
 
             foreach ($employees as $employee) {
+                // Already paid out (Slice 5): never recompute a disbursed payslip. Its status
+                // used to be preserved while its AMOUNTS were silently rewritten — a salary
+                // edit plus a re-run of an old cycle changed money that had already left the
+                // company. Its existing totals still roll into this run's summary.
+                $existing = $priorSlips->get($employee->id);
+                if ($existing && $existing->status === 'disbursed') {
+                    $skippedDisbursed[] = $employee->id;
+                    $totalGross += (float) $existing->gross;
+                    $totalDed += (float) $existing->total_deductions;
+                    $totalNet += (float) $existing->net_pay;
+                    $count++;
+
+                    continue;
+                }
+
                 // Double-pay guard: if this employee already has a payslip in ANOTHER run
                 // whose period overlaps this cycle (e.g. their pay_frequency changed after
                 // being run in another group), skip them — they're already covered.
@@ -781,9 +891,14 @@ class PayrollService
             // Keep only payslips for employees actually paid in this run — drop those no
             // longer in the pay group AND those skipped as already-paid-elsewhere, so a
             // re-run leaves no orphans or double-pay.
+            //
+            // NEVER a disbursed one (Slice 4): money already paid out is history. Before this,
+            // separating an employee and re-running an old cycle force-deleted the payslip
+            // they had actually been paid from.
             $keep = $employees->pluck('id')->diff($paidElsewhere);
             $run->payslips()
                 ->whereNotIn('employee_id', $keep)
+                ->where('status', 'computed')
                 ->forceDelete();
 
             $run->update([
@@ -810,6 +925,16 @@ class PayrollService
                 $run,
             );
 
+            // Slice 5: say plainly whose pay this re-run left alone.
+            if ($skippedDisbursed !== []) {
+                $this->audit->log(
+                    'updated',
+                    'Payroll',
+                    count($skippedDisbursed) . ' already-disbursed payslip(s) were left unchanged by this recompute',
+                    $run,
+                );
+            }
+
             // P2-8: one summary line for the reimbursements this run auto-paid.
             if ($reimbPaidCount > 0) {
                 $this->audit->log(
@@ -821,7 +946,7 @@ class PayrollService
                 );
             }
 
-            return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner']);
+            return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
         });
     }
 

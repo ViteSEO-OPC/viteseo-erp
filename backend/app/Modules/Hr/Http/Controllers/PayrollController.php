@@ -97,6 +97,23 @@ class PayrollController extends Controller
         )->response();
     }
 
+    // POST /api/v1/hr/payroll/runs/{payrollRun}/lock — seal a fully-disbursed cycle so it
+    // can never be recomputed (Slice 5).
+    public function lockRun(Request $request, PayrollRun $payrollRun): JsonResponse
+    {
+        return PayrollRunResource::make(
+            $this->service->lock($payrollRun, $request->user()),
+        )->response();
+    }
+
+    // POST /api/v1/hr/payroll/runs/{payrollRun}/unlock — re-open a locked cycle. Audited.
+    public function unlockRun(Request $request, PayrollRun $payrollRun): JsonResponse
+    {
+        return PayrollRunResource::make(
+            $this->service->unlock($payrollRun, $request->user()),
+        )->response();
+    }
+
     // POST /api/v1/hr/payslips/{payslip}/mark-done — mark one payslip processed.
     public function markDone(Payslip $payslip): JsonResponse
     {

@@ -7,6 +7,8 @@ import {
   getPayrollRun,
   runPayroll,
   markPayslipDone,
+  lockPayrollRun,
+  unlockPayrollRun,
   getMyNextPayday,
   getMyPayslips,
   getPayslip,
@@ -63,6 +65,19 @@ export function useMarkPayslipDone() {
     onSuccess: () => {
       // Refresh the open breakdown detail AND the runs list, so Run History
       // reflects the new disbursed status/totals without a manual refetch.
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+    },
+  });
+}
+
+/** Lock / unlock a run (Slice 5). Same invalidation as marking a payslip disbursed. */
+export function useSetPayrollRunLock() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, lock }: { id: number; lock: boolean }) =>
+      lock ? lockPayrollRun(id) : unlockPayrollRun(id),
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
       qc.invalidateQueries({ queryKey: RUNS_KEY });
     },

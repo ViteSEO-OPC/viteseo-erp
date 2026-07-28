@@ -802,6 +802,13 @@ class AttendanceService
         // Non-working holidays in the cycle (Slice 1). One query for the whole range.
         $holidays = $this->nonWorkingHolidays($start, $end);
 
+        // The employment window (Slice 4). The DIVISOR deliberately stays the full period's
+        // scheduled workdays — under the `period_workdays` basis, shrinking it would raise the
+        // daily rate and hand a part-period employee a full period's pay. Proration belongs on
+        // the unpaid side, which is what the loop does.
+        $employmentStart = $employee->hire_date?->toDateString();
+        $employmentEnd = $employee->separation_date?->toDateString();
+
         $unpaid = 0.0;
         $lateCount = 0;
         $lateMinutes = 0;
@@ -821,6 +828,24 @@ class AttendanceService
             }
 
             $dateStr = $d->toDateString();
+
+            // --- Outside the employment window (Slice 4) ----------------------------------
+            // Days before the hire date or after the last working day are simply not owed.
+            // This must run BEFORE the past/future test below: a mid-cycle leaver's remaining
+            // days are still in the FUTURE, and the "no record yet, so don't charge it" rule
+            // would otherwise have paid them for days after they left. Pre-hire days already
+            // behaved this way by accident (a past workday with no record); now it is explicit
+            // and also correct for a cycle that has not finished.
+            if ($employmentStart !== null && $dateStr < $employmentStart) {
+                $unpaid += 1.0;
+
+                continue;
+            }
+            if ($employmentEnd !== null && $dateStr > $employmentEnd) {
+                $unpaid += 1.0;
+
+                continue;
+            }
 
             // --- Non-working holiday (Slice 1) -------------------------------------------
             // The monthly salary already covers a regular / special non-working holiday, so

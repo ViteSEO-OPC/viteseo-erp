@@ -27,6 +27,9 @@ class Employee extends Model
         'work_location',
         'employee_role',
         'onboarding_status',
+        'separation_type',
+        // The employee's last working day — bounds their final payslip (Slice 4).
+        'separation_date',
         'hire_date',
         'phone',
         'address',
@@ -77,6 +80,7 @@ class Employee extends Model
 
     protected $casts = [
         'hire_date' => 'date',
+        'separation_date' => 'date',
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
         'is_management' => 'boolean',

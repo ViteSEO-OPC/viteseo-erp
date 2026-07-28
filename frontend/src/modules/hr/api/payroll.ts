@@ -47,6 +47,18 @@ export async function markPayslipDone(id: number): Promise<PayrollRun> {
   return res.data.data;
 }
 
+/** Seal a fully-disbursed run so it can never be recomputed (Slice 5). */
+export async function lockPayrollRun(id: number): Promise<PayrollRun> {
+  const res = await apiClient.post(`/hr/payroll/runs/${id}/lock`);
+  return res.data.data;
+}
+
+/** Re-open a locked run. Audited. */
+export async function unlockPayrollRun(id: number): Promise<PayrollRun> {
+  const res = await apiClient.post(`/hr/payroll/runs/${id}/unlock`);
+  return res.data.data;
+}
+
 export async function getThirteenthMonth(
   year?: number,
 ): Promise<{ rows: ThirteenthMonthRow[]; year: number }> {
