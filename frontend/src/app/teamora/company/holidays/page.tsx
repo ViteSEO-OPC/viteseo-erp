@@ -27,6 +27,12 @@ import { SimpleSelect } from "@/modules/hr/ui/select";
 
 const YEARS = [2024, 2025, 2026, 2027, 2028];
 
+/**
+ * The company's home country. Only this calendar drives pay, so only its unclassified
+ * holidays block a payroll run (mirrors HolidayService::HOME_COUNTRY).
+ */
+const HOME_COUNTRY = "PH";
+
 // Figma type colors: Regular = green, Special = blue, Special Working = amber.
 const TYPE_STYLE: Record<string, string> = {
   regular: "bg-success-subtle text-success",
@@ -68,6 +74,8 @@ export default function HolidaysPage() {
   const activeSet =
     sets?.find((s) => s.country_code === country && s.year === Number(year)) ?? null;
   const { data: holidays } = useHolidays(activeSet?.id ?? null);
+  // Holidays HR hasn't typed yet — these are what block a payroll run (Slice 2).
+  const unclassified = (holidays ?? []).filter((h) => !h.type);
   const deleteHolidayMut = useDeleteHoliday(activeSet?.id ?? 0);
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -198,6 +206,24 @@ export default function HolidaysPage() {
           holidays. Miss Chris can add, edit, or remove entries. Holiday sets are maintained per
           country per year.
         </p>
+
+        {/* Payroll prices a day off the holiday TYPE, so an un-typed date blocks the run. */}
+        {country === HOME_COUNTRY && unclassified.length > 0 && (
+          <div className="mb-4 rounded-card border border-warning bg-warning-subtle p-4">
+            <p className="text-sm font-semibold text-warning">
+              {unclassified.length} holiday{unclassified.length === 1 ? "" : "s"} still need
+              {unclassified.length === 1 ? "s" : ""} a type
+            </p>
+            <p className="mt-1 text-sm text-foreground">
+              Payroll can&apos;t run for a period containing an unclassified holiday — the type
+              decides the premium (Regular 200%, Special 130%). Use{" "}
+              <span className="font-medium">Set type</span> on the rows below.
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {unclassified.map((h) => `${shortDate(h.date)} — ${h.name}`).join(" · ")}
+            </p>
+          </div>
+        )}
 
         {activeSet ? (
           <DataTable columns={columns} rows={holidays ?? []} rowKey={(h) => h.id} pageSize={0} empty="No holidays in this set." />

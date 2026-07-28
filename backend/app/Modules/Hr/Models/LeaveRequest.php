@@ -46,9 +46,17 @@ class LeaveRequest extends Model
         return $this->belongsTo(Employee::class);
     }
 
+    /**
+     * The type this leave was filed under.
+     *
+     * withTrashed() deliberately (Slice 13a item 10): LeaveType soft-deletes, and without this a
+     * retired type resolved to NULL — which made payroll read `$leave->leaveType && ! is_paid` as
+     * false and quietly turn unpaid leave into PAID leave. The type a request was filed under is
+     * historical fact; it must stay readable after the type is retired.
+     */
     public function leaveType(): BelongsTo
     {
-        return $this->belongsTo(LeaveType::class);
+        return $this->belongsTo(LeaveType::class)->withTrashed();
     }
 
     public function reviewer(): BelongsTo

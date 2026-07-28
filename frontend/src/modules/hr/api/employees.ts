@@ -88,3 +88,50 @@ export async function getMyEmployee(): Promise<Employee> {
   const res = await apiClient.get("/hr/me/employee");
   return res.data.data;
 }
+
+// --- Loans & cash advances (Slice 11b) -------------------------------------------
+
+export interface EmployeeLoan {
+  id: number;
+  employee_id: number;
+  type: "loan" | "cash_advance" | "other";
+  reference: string | null;
+  principal: number;
+  per_period_amount: number;
+  start_date: string;
+  status: "active" | "settled" | "cancelled" | "on_hold";
+  notes: string | null;
+  /** Derived from the payment ledger — never a stored column. */
+  paid: number;
+  outstanding: number;
+}
+
+export interface EmployeeLoanInput {
+  type?: EmployeeLoan["type"];
+  reference?: string | null;
+  principal: number;
+  per_period_amount: number;
+  start_date: string;
+  notes?: string | null;
+}
+
+export async function getEmployeeLoans(id: number): Promise<EmployeeLoan[]> {
+  const res = await apiClient.get(`/hr/employees/${id}/loans`);
+  return res.data.data;
+}
+
+export async function createEmployeeLoan(
+  id: number,
+  input: EmployeeLoanInput,
+): Promise<EmployeeLoan> {
+  const res = await apiClient.post(`/hr/employees/${id}/loans`, input);
+  return res.data.data;
+}
+
+export async function cancelEmployeeLoan(
+  loanId: number,
+  reason: string,
+): Promise<EmployeeLoan> {
+  const res = await apiClient.post(`/hr/loans/${loanId}/cancel`, { reason });
+  return res.data.data;
+}

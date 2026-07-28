@@ -27,6 +27,9 @@ class Employee extends Model
         'work_location',
         'employee_role',
         'onboarding_status',
+        'separation_type',
+        // The employee's last working day — bounds their final payslip (Slice 4).
+        'separation_date',
         'hire_date',
         'phone',
         'address',
@@ -77,6 +80,7 @@ class Employee extends Model
 
     protected $casts = [
         'hire_date' => 'date',
+        'separation_date' => 'date',
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
         'is_management' => 'boolean',
@@ -150,7 +154,11 @@ class Employee extends Model
             'hr_benefit_enrollments',
             'employee_id',
             'benefit_program_id',
-        )->withTimestamps();
+        )
+            // The per-employee columns on the pivot. `employee_share` is what payroll deducts
+            // (Slice 11a) — without this it reads as null and nothing is ever taken.
+            ->withPivot(['amount', 'tier', 'employee_share'])
+            ->withTimestamps();
     }
 
     public function salaryHistories(): HasMany

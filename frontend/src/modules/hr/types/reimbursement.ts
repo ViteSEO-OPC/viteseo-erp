@@ -8,7 +8,17 @@ export const REIMBURSEMENT_CATEGORIES = [
   "other",
 ] as const;
 
-export type ReimbursementStatus = "pending" | "approved" | "rejected" | "paid";
+/**
+ * pending → approved → scheduled → paid.
+ * `scheduled` (Slice 12) = folded into a payslip that hasn't been disbursed yet. Computing
+ * payroll no longer marks a claim paid; disbursing the payslip does.
+ */
+export type ReimbursementStatus =
+  | "pending"
+  | "approved"
+  | "scheduled"
+  | "rejected"
+  | "paid";
 
 export interface Reimbursement {
   id: number;

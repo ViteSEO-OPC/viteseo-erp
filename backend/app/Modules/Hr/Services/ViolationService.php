@@ -27,6 +27,7 @@ class ViolationService
     public function __construct(
         private readonly ScheduleService $schedule,
         private readonly AttendancePolicyService $policy,
+        private readonly HolidayService $holidays,
     ) {}
 
     /**
@@ -111,7 +112,13 @@ class ViolationService
         // The colour ladder HR configures (Company → Rules). Constant across this month's
         // scan; a null column falls back to today's literals, so this is a no-op by default.
         $policy = $this->policy->get();
-        $rules = $policy->violation_rules ?: AttendancePolicyService::DEFAULT_VIOLATION_RULES;
+        // Per-CATEGORY merge, so a category added after HR last saved this page (Slice 9's
+        // `long_break`) still has a ladder instead of silently never firing.
+        $rules = $this->policy->violationRules();
+        // Slice 9 — tolerance on top of each employee's own schedule allowance, per bucket.
+        // Either may be 0, meaning no tolerance at all.
+        $lunchGrace = (int) $policy->lunch_grace_minutes;
+        $breakGrace = (int) $policy->break_grace_minutes;
 
         // Step D: `monthly_late_reset` OFF ⇒ the LATE tally CARRIES OVER month to month (it only
         // comes down when HR resolves a violation). ON (default) ⇒ each month starts at zero.
@@ -138,6 +145,15 @@ class ViolationService
         // untracked day before go-live into an absence for EVERY employee.
         $trackingStart = Attendance::where('source', Attendance::SOURCE_MANUAL)->min('work_date');
 
+        // Non-working holidays in the scanned month (Slice 1). Nobody is expected in, so a
+        // holiday can neither be an absence nor break an absence streak — it is skipped
+        // exactly like a rest day. `special_working` and unclassified (NULL) types are not
+        // in this map, so those still behave as ordinary workdays.
+        $holidays = array_filter(
+            $this->holidays->typedHolidaysBetween($monthStart, $scanEnd),
+            fn ($type) => in_array($type, HolidayService::NON_WORKING_TYPES, true),
+        );
+
         // Approved leaves overlapping the scanned range, grouped by employee.
         $leaves = LeaveRequest::where('status', 'approved')
             ->whereDate('end_date', '>=', $monthStart->toDateString())
@@ -157,6 +173,7 @@ class ViolationService
             $absentStreak = 0;
             $monthlyLate = 0;
             $monthlyMissedClockout = 0;
+            $monthlyLongBreak = 0;
 
             // Carry-over seed (step D): with the monthly reset OFF, this month's late tally starts
             // from the count of PRIOR *unresolved* lates (since hire / tracking start), so the
@@ -192,6 +209,15 @@ class ViolationService
 
                 $dateStr = $d->toDateString();
                 $row = $rows->get($dateStr);
+
+                // Non-working holiday with no clock-in: not a violation, and it leaves the
+                // streaks untouched (a holiday in the middle of an absence run neither
+                // resets it nor extends it). Someone who DID work falls through, so a late
+                // arrival on a worked holiday is still flagged.
+                if (isset($holidays[$dateStr]) && ! ($row && $row->time_in !== null)) {
+                    continue;
+                }
+
                 $isPast = $d->lt($today);
                 $onLeave = $this->onLeave($leaves->get($emp->id), $dateStr);
                 $clockedIn = $row && $row->time_in !== null;
@@ -247,6 +273,41 @@ class ViolationService
                         if ($match) {
                             $note = "Clocked in but never clocked out (#{$monthlyMissedClockout} this month)";
                             $computed[] = $this->incident($emp->id, 'missed_time_out', $match['severity'], $dateStr, $note);
+                        }
+                    }
+                }
+
+                // Slice 9 — break/lunch overage. Measured against the EMPLOYEE'S OWN entitlement
+                // (schedule unpaid + paid break) plus the company tolerance, not a flat company
+                // ceiling: a 30-minute-lunch schedule and a 60-minute one can't share one number.
+                // Checked outside the late/absent branches because a long break is orthogonal to
+                // both, and computed here rather than in DeductionService so it works with every
+                // deduction mode off. Flag only — a long break never costs pay.
+                if ($row && $row->time_in) {
+                    // Lunch and break are judged SEPARATELY, each against its own schedule
+                    // allowance and its own tolerance. Pooling them let a short lunch bankroll
+                    // a long break — 20 + 60 totals the same 80 as 60 + 20, so a break running
+                    // 3× its allowance never surfaced.
+                    $over = [];
+                    foreach ([
+                        ['Lunch', (int) $row->lunch_minutes, (int) ($eff['unpaid_break_minutes'] ?? 0), $lunchGrace],
+                        ['Break', (int) $row->break_minutes, (int) ($eff['paid_break_minutes'] ?? 0), $breakGrace],
+                    ] as [$name, $taken, $allowed, $grace]) {
+                        // Strictly greater than, so a grace of 0 means exactly the allowance
+                        // still passes and one minute over is flagged.
+                        if ($taken > $allowed + $grace) {
+                            $over[] = "{$name} ran " . ($taken - $allowed) . " min over the {$allowed} min allowance ({$taken} min taken)";
+                        }
+                    }
+
+                    if ($over !== []) {
+                        $monthlyLongBreak++;
+                        $match = self::ladderMatch($rules, 'long_break', ['occurrence' => $monthlyLongBreak]);
+                        if ($match) {
+                            $computed[] = $this->incident(
+                                $emp->id, 'long_break', $match['severity'], $dateStr,
+                                implode(' · ', $over) . " · #{$monthlyLongBreak} this month",
+                            );
                         }
                     }
                 }

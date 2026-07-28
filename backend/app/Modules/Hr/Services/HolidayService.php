@@ -42,6 +42,21 @@ class HolidayService
 
     public function __construct(private readonly AuditService $audit) {}
 
+    /**
+     * Per-request memo of typedHolidaysBetween(), keyed by range (Slice 15). A payroll run asks
+     * for the same cycle's holidays once per employee, plus once each in AttendanceService and
+     * ViolationService. Every write below clears it.
+     *
+     * @var array<string, array<string, string|null>>
+     */
+    private array $typedMemo = [];
+
+    /** Drop the memo — called from every path that changes holiday data. */
+    private function forgetMemo(): void
+    {
+        $this->typedMemo = [];
+    }
+
     public function listSets(): Collection
     {
         return HolidaySet::withCount('holidays')->orderByDesc('year')->orderBy('country_code')->get();
@@ -84,6 +99,8 @@ class HolidayService
             ]);
         }
 
+        $this->forgetMemo();
+
         $this->audit->log('created', 'Holidays', "Loaded {$set->country_code} {$set->year} holidays", $set);
 
         return $set->load('holidays')->loadCount('holidays');
@@ -114,6 +131,8 @@ class HolidayService
 
         $set->update(['refreshed_at' => now()]);
 
+        $this->forgetMemo();
+
         $this->audit->log('updated', 'Holidays', "Refreshed {$set->country_code} {$set->year} holiday set", $set);
 
         return $set->load('holidays')->loadCount('holidays');
@@ -128,6 +147,8 @@ class HolidayService
         // cascadeOnDelete removes the child holidays with it.
         $set->forceDelete();
 
+        $this->forgetMemo();
+
         $this->audit->log('removed', 'Holidays', "Removed the {$set->country_code} {$set->year} holiday set", $set);
     }
 
@@ -141,6 +162,8 @@ class HolidayService
             'source' => 'manual',
             'needs_review' => false,
         ]);
+
+        $this->forgetMemo();
 
         $this->audit->log('created', 'Holidays', "Added holiday '{$holiday->name}'", $holiday);
 
@@ -157,6 +180,8 @@ class HolidayService
             'needs_review' => false, // HR reviewed it by editing
         ]);
 
+        $this->forgetMemo();
+
         $this->audit->log('updated', 'Holidays', "Updated holiday '{$holiday->name}'", $holiday);
 
         return $holiday;
@@ -165,6 +190,8 @@ class HolidayService
     public function deleteHoliday(Holiday $holiday): void
     {
         $holiday->delete();
+
+        $this->forgetMemo();
 
         $this->audit->log('removed', 'Holidays', "Removed holiday '{$holiday->name}'", $holiday);
     }
@@ -193,11 +220,44 @@ class HolidayService
      */
     public function typedHolidaysBetween(Carbon $start, Carbon $end): array
     {
-        return Holiday::whereBetween('date', [$start->toDateString(), $end->toDateString()])
+        $key = $start->toDateString() . '|' . $end->toDateString();
+        if (isset($this->typedMemo[$key])) {
+            return $this->typedMemo[$key];
+        }
+
+        return $this->typedMemo[$key] = Holiday::whereBetween('date', [$start->toDateString(), $end->toDateString()])
             ->whereHas('set', fn ($q) => $q->where('country_code', self::HOME_COUNTRY))
             ->get(['date', 'type'])
             ->mapWithKeys(fn ($h) => [Carbon::parse($h->date)->toDateString() => $h->type])
             ->all();
+    }
+
+    /**
+     * Home-country holidays in the range that HR has NOT classified yet (type NULL), as
+     * [date 'Y-m-d' => name]. Payroll prices a day off this classification — a regular
+     * holiday pays a different premium from a special day, and an unclassified one pays
+     * nothing at all — so a run covering one of these would quietly under-pay. The pay
+     * run refuses to start while any exist (see RunPayrollRequest).
+     *
+     * @return array<string, string>
+     */
+    public function unclassifiedBetween(Carbon $start, Carbon $end): array
+    {
+        return Holiday::whereNull('type')
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereHas('set', fn ($q) => $q->where('country_code', self::HOME_COUNTRY))
+            ->orderBy('date')
+            ->get(['date', 'name'])
+            ->mapWithKeys(fn ($h) => [Carbon::parse($h->date)->toDateString() => $h->name])
+            ->all();
+    }
+
+    /** How many home-country holidays still need HR's review (for the Holidays page badge). */
+    public function needsReviewCount(): int
+    {
+        return Holiday::where(fn ($q) => $q->whereNull('type')->orWhere('needs_review', true))
+            ->whereHas('set', fn ($q) => $q->where('country_code', self::HOME_COUNTRY))
+            ->count();
     }
 
     // --- helpers ---

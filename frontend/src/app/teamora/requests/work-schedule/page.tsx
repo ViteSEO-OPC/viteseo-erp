@@ -40,6 +40,7 @@ import {
   useOvertimeRequests,
   useApproveOvertimeRequest,
   useRejectOvertimeRequest,
+  useCancelOvertimeRequest,
 } from "@/modules/hr/hooks/use-overtime";
 import type {
   LeaveRequest,
@@ -461,7 +462,11 @@ function OvertimeSection() {
   const { data: requests, isLoading } = useOvertimeRequests();
   const approveMut = useApproveOvertimeRequest();
   const rejectMut = useRejectOvertimeRequest();
-  const [review, setReview] = useState<{ mode: "approve" | "reject"; r: OvertimeRequest } | null>(null);
+  const cancelMut = useCancelOvertimeRequest();
+  const [review, setReview] = useState<{
+    mode: "approve" | "reject" | "cancel";
+    r: OvertimeRequest;
+  } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
 
@@ -472,6 +477,9 @@ function OvertimeSection() {
       if (mode === "approve") {
         await approveMut.mutateAsync(r.id);
         toast.success(`Approved ${r.employee.name}'s overtime`);
+      } else if (mode === "cancel") {
+        await cancelMut.mutateAsync({ id: r.id, reason });
+        toast.success(`Cancelled ${r.employee.name}'s overtime`);
       } else {
         await rejectMut.mutateAsync({ id: r.id, reason });
         toast.error(`Declined ${r.employee.name}'s overtime`);
@@ -484,6 +492,7 @@ function OvertimeSection() {
   const busyId =
     (approveMut.isPending && approveMut.variables) ||
     (rejectMut.isPending && rejectMut.variables?.id) ||
+    (cancelMut.isPending && cancelMut.variables?.id) ||
     null;
 
   const columns: Column<OvertimeRequest>[] = [
@@ -520,6 +529,13 @@ function OvertimeSection() {
               Reject
             </Button>
           </div>
+        ) : r.status === "approved" ? (
+          // Slice 6 — an approved request is no longer frozen: HR can undo overtime
+          // that isn't going to happen, before payroll pays it.
+          <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => setReview({ mode: "cancel", r })}>
+            <X />
+            Cancel
+          </Button>
         ) : (
           <span className="text-muted-foreground">—</span>
         ),
@@ -553,9 +569,19 @@ function OvertimeSection() {
       </div>
 
       <ReviewDialog
-        open={!!review}
+        open={!!review && review.mode !== "cancel"}
         onOpenChange={(o) => !o && setReview(null)}
-        mode={review?.mode ?? "approve"}
+        mode={review?.mode === "reject" ? "reject" : "approve"}
+        subject={review ? `${review.r.employee.name}'s overtime (${formatDate(review.r.work_date)} · ${review.r.hours.toFixed(1)} hrs)` : ""}
+        onConfirm={onConfirm}
+      />
+
+      {/* Cancelling an APPROVED request needs its own reason prompt (Slice 6). The shared
+          ReviewDialog only knows approve/reject and lives in core/, so reuse the HR one. */}
+      <CancelLeaveDialog
+        open={review?.mode === "cancel"}
+        onOpenChange={(o) => !o && setReview(null)}
+        title="Cancel Overtime Request"
         subject={review ? `${review.r.employee.name}'s overtime (${formatDate(review.r.work_date)} · ${review.r.hours.toFixed(1)} hrs)` : ""}
         onConfirm={onConfirm}
       />

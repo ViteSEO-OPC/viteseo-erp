@@ -8,7 +8,6 @@ use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Tests\TestCase;
 
 /**
  * Slice A (2026-07-27): payslipFor() must price a day through the policy's daily-rate basis,
@@ -19,7 +18,7 @@ use Tests\TestCase;
  *     untouched — the basis only re-prices absences/late), and
  *   - the daily rate is one shared number, so absence and holiday premium can't disagree.
  */
-class PayrollDailyRateTest extends TestCase
+class PayrollDailyRateTest extends HrTestCase
 {
     use RefreshDatabase;
 
@@ -27,12 +26,6 @@ class PayrollDailyRateTest extends TestCase
 
     protected function setUp(): void
     {
-        // phpunit DB is in-memory sqlite; skip where that PDO driver isn't installed
-        // (mirrors AttendanceDeductionWiringTest). Runs normally in CI.
-        if (! extension_loaded('pdo_sqlite')) {
-            $this->markTestSkipped('pdo_sqlite not available.');
-        }
-
         parent::setUp();
 
         $dept = Department::create(['name' => 'Ops', 'code' => 'OPS']);

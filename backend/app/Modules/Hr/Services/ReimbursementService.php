@@ -107,8 +107,10 @@ class ReimbursementService
 
     public function markPaid(Reimbursement $claim, User $reviewer): Reimbursement
     {
-        // Only an approved claim can be paid (pending → approved → paid).
-        $this->assertStatus($claim, ['approved'], 'mark as paid');
+        // pending → approved → (scheduled) → paid. `scheduled` means payroll has folded the
+        // claim into a payslip that hasn't been disbursed yet (Slice 12); HR can still settle it
+        // by hand — e.g. paid in cash before the payslip goes out.
+        $this->assertStatus($claim, ['approved', 'scheduled'], 'mark as paid');
 
         $claim = $this->transition($claim, 'paid', $reviewer);
 

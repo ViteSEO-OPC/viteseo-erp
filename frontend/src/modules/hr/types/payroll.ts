@@ -17,6 +17,8 @@ export interface PayrollSettings {
   tax_timing: string;
   anchor_date: string | null;
   pay_delay_days: number;
+  /** Slice 10 -- annual ceiling above which allowances become taxable. null = no ceiling. */
+  deminimis_annual_cap: number | null;
   periods_per_year: number;
   current_period: PayrollPeriod;
   pay_groups: PayGroup[];
@@ -44,7 +46,34 @@ export interface PayrollRun {
   employee_count: number;
   run_at: string | null;
   run_by: string | null;
+  /** Slice 5 — a locked run can no longer be recomputed. */
+  locked_at: string | null;
+  locked_by: string | null;
+  is_locked: boolean;
+  /** Only present when the breakdown is loaded: every payslip is disbursed. */
+  can_lock?: boolean;
+  /** Slice 8 — the rules in force when this run executed. Detail view only. */
+  policy_snapshot?: PolicySnapshot | null;
   breakdown?: PayrollBreakdownRow[];
+}
+
+/** One statutory contribution as it stood when a run executed. */
+export interface PolicySnapshotContribution {
+  type: string;
+  is_active: boolean;
+  config: Record<string, number | string | null> | null;
+}
+
+/**
+ * Everything that priced a payroll run (Slice 8). `version` guards the shape — v1 runs
+ * stored a flat map of deduction fields only.
+ */
+export interface PolicySnapshot {
+  version?: number;
+  captured_at?: string;
+  attendance_policy?: Record<string, unknown>;
+  contributions?: PolicySnapshotContribution[];
+  payroll_setting?: Record<string, unknown>;
 }
 
 // Employee payslip HISTORY row — periods only, NO amounts. `unlocked` = viewable once
@@ -83,6 +112,9 @@ export interface Payslip {
   philhealth: number;
   pagibig: number;
   withholding_tax: number;
+  /** Slice 11a — recurring benefit shares (HMO, union dues). Post-tax. */
+  other_deductions: number;
+  other_deductions_breakdown: { name: string; amount: number }[];
   total_deductions: number;
   net_pay: number;
   status: string;
@@ -95,6 +127,10 @@ export interface Payslip {
   undertime_minutes: number;
   late_deduction: number;
   undertime_deduction: number;
+  /** Whole days charged by the per-N-lates penalty (item 13b.13). */
+  late_penalty_days: number;
+  /** Deductions that gross couldn't cover (item 13a.1). */
+  deduction_carryover: number;
 }
 
 export interface PayslipYtd {

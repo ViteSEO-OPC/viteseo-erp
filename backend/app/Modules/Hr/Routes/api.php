@@ -15,6 +15,7 @@ use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
+use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
 use App\Modules\Hr\Http\Controllers\LeaveConfigController;
 use App\Modules\Hr\Http\Controllers\HalfDayRequestController;
 use App\Modules\Hr\Http\Controllers\EarlyOutRequestController;
@@ -140,6 +141,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/run', [PayrollController::class, 'run']);
         Route::get('payroll/runs/{payrollRun}', [PayrollController::class, 'show']);
         Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun']);
+        Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
+        Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf']);
 
@@ -168,6 +171,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('early-out-requests/{earlyOutRequest}/reject', [EarlyOutRequestController::class, 'reject']);
         Route::post('overtime-requests/{overtimeRequest}/approve', [OvertimeRequestController::class, 'approve']);
         Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
+        Route::post('overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel']);
         Route::post('departments', [DepartmentController::class, 'store']);
         Route::match(['put', 'patch'], 'departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
@@ -178,6 +182,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('employees/{employee}', [EmployeeController::class, 'show']);
         Route::match(['put', 'patch'], 'employees/{employee}', [EmployeeController::class, 'update']);
         Route::get('employees/{employee}/salary-history', [EmployeeController::class, 'salaryHistory']);
+        // Loans & cash advances repaid through payroll (Slice 11b).
+        Route::get('employees/{employee}/loans', [EmployeeLoanController::class, 'index']);
+        Route::post('employees/{employee}/loans', [EmployeeLoanController::class, 'store']);
+        Route::match(['put', 'patch'], 'loans/{loan}', [EmployeeLoanController::class, 'update']);
+        Route::post('loans/{loan}/cancel', [EmployeeLoanController::class, 'cancel']);
         // Schedule a meeting with an employee (e.g. about attendance/violations).
         Route::post('employees/{employee}/meetings', [MeetingController::class, 'store']);
         Route::post('employees/{employee}/activate', [EmployeeController::class, 'activate']);

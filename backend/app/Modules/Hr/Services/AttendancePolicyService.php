@@ -45,8 +45,11 @@ class AttendancePolicyService
         'daily_rate_basis' => 'period_workdays',
         'annual_divisor' => 261,
         'hours_per_day_divisor' => 8,
-        'max_break_minutes_per_day' => 120,
-        'over_max_break_action' => 'flag_only',
+        // Slice 9 — how far over the SCHEDULE's own allowance each may run before it is
+        // flagged. The allowances themselves live on the work schedule; lunch and break are
+        // judged separately so a short lunch can't bankroll a long break. 0 = no tolerance.
+        'lunch_grace_minutes' => 15,
+        'break_grace_minutes' => 15,
         'violation_rules' => self::DEFAULT_VIOLATION_RULES,
         'task_format' => ['require_english' => true, 'uppercase' => true],
     ];
@@ -86,11 +89,25 @@ class AttendancePolicyService
             ['occurrence_min' => 2, 'severity' => 'yellow'],
             ['occurrence_min' => 1, 'severity' => 'green'],
         ],
+        // Slice 9 — days this month where lunch OR break ran past its own schedule allowance
+        // by more than its grace. Flag only: an over-long break NEVER costs pay.
+        'long_break' => [
+            ['occurrence_min' => 4, 'severity' => 'red'],
+            ['occurrence_min' => 3, 'severity' => 'orange'],
+            ['occurrence_min' => 2, 'severity' => 'yellow'],
+            ['occurrence_min' => 1, 'severity' => 'green'],
+        ],
     ];
+
+    /**
+     * Per-request memo (Slice 15). This single row is read by every pricing path, once per
+     * employee per payroll run. update() clears it.
+     */
+    private ?AttendancePolicy $memo = null;
 
     public function get(): AttendancePolicy
     {
-        return AttendancePolicy::firstOrCreate([], self::DEFAULTS);
+        return $this->memo ??= AttendancePolicy::firstOrCreate([], self::DEFAULTS);
     }
 
     /**
@@ -98,11 +115,15 @@ class AttendancePolicyService
      * ViolationService should read the ladder through HERE, never off the column, so a
      * policy row predating the feature can never yield an empty ladder (= no flags at all).
      *
+     * A stored ladder takes priority per CATEGORY, with defaults filling any category it
+     * doesn't mention — so adding a category (Slice 9's `long_break`) works immediately
+     * instead of being silently absent for every org that has ever saved this page.
+     *
      * @return array<string, array<int, array<string, mixed>>>
      */
     public function violationRules(): array
     {
-        return $this->get()->violation_rules ?: self::DEFAULT_VIOLATION_RULES;
+        return array_merge(self::DEFAULT_VIOLATION_RULES, $this->get()->violation_rules ?: []);
     }
 
     /** @param array<string, mixed> $data */
@@ -117,9 +138,32 @@ class AttendancePolicyService
                 $changes[$field] = $data[$field];
             }
         }
-        $policy->update($changes);
+        // Item 13b.12 — record WHAT changed. This was one line reading "Attendance rules
+        // updated" with no before/after, which is the single audit entry guarding every
+        // money-moving rule in the module: it could not answer "who changed the overtime rate?".
+        $before = [];
+        $after = [];
+        foreach ($changes as $field => $value) {
+            $old = $policy->getOriginal($field);
+            if ($old != $value) {
+                $before[$field] = $old;
+                $after[$field] = $value;
+            }
+        }
 
-        $this->audit->log('updated', 'Rules', 'Attendance rules updated', $policy);
+        $policy->update($changes);
+        $this->memo = $policy; // keep the memo in step with what was just written
+
+        $this->audit->log(
+            'updated',
+            'Rules',
+            $before === []
+                ? 'Attendance rules saved (no changes)'
+                : 'Attendance rules updated: ' . implode(', ', array_keys($before)),
+            $policy,
+            $before ?: null,
+            $after ?: null,
+        );
 
         return $policy;
     }
