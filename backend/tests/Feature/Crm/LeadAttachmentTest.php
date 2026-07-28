@@ -176,7 +176,7 @@ class LeadAttachmentTest extends TestCase
         ])->assertForbidden();
     }
 
-    public function test_a_business_developer_cannot_delete_someone_elses_attachment(): void
+    public function test_a_business_developer_may_delete_an_attachment_they_did_not_upload(): void
     {
         $owner = $this->businessDeveloper();
         $admin = $this->admin();
@@ -185,10 +185,34 @@ class LeadAttachmentTest extends TestCase
         $lead = Lead::factory()->create(['assigned_to' => $owner->id]);
         $adminUpload = $this->upload($lead, 'admin-file.pdf');
 
-        // The BD can see the lead, but LeadAttachmentPolicy limits delete to uploader/Admin/SA.
+        // Attachments are shared working documents, not personal statements: anyone who can open
+        // the lead manages them equally, so delete is NOT author-scoped (unlike notes).
         Sanctum::actingAs($owner);
         $this->deleteJson("/api/v1/crm/leads/{$lead->id}/attachments/{$adminUpload->id}")
+            ->assertNoContent();
+
+        $this->assertSoftDeleted('crm_lead_attachments', ['id' => $adminUpload->id]);
+    }
+
+    public function test_a_business_developer_cannot_delete_an_attachment_on_a_lead_they_cannot_see(): void
+    {
+        $owner = $this->businessDeveloper();
+        $other = $this->businessDeveloper();
+
+        Sanctum::actingAs($owner);
+        $lead = Lead::factory()->create(['assigned_to' => $owner->id]);
+        $attachment = $this->upload($lead);
+
+        // The delete route authorizes through LeadAttachmentPolicy ALONE, so the policy's
+        // lead-visibility check is the only thing standing between a BD and another BD's files.
+        Sanctum::actingAs($other);
+        $this->deleteJson("/api/v1/crm/leads/{$lead->id}/attachments/{$attachment->id}")
             ->assertForbidden();
+
+        $this->assertDatabaseHas('crm_lead_attachments', [
+            'id' => $attachment->id,
+            'deleted_at' => null,
+        ]);
     }
 
     public function test_it_rejects_an_oversized_file(): void

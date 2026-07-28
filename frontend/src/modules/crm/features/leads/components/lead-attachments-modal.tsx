@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, Paperclip, X } from "lucide-react";
+import { Download, Loader2, Paperclip, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,7 @@ import {
   useLeadAttachments,
   useUploadAttachment,
   useDeleteAttachment,
+  useDownloadAttachment,
   type LeadAttachment,
 } from "@/modules/crm/features/leads/hooks/use-lead-attachments";
 import { formatAttachmentTimestamp } from "@/modules/crm/features/leads/lib/attachment-format";
@@ -29,21 +30,21 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   leadId: string;
   leadName: string;
-  /** Whether the current user may remove a given file (backend still enforces it). */
-  canDelete: boolean;
 };
 
 /**
  * Upload and manage files for one lead.
  *
- * Reads the SAME per-lead query as the Attachments card, so the list here and the card below the
- * Lead Information card are always the same data — uploading in the modal updates both at once,
- * with no page refresh and no second source of truth.
+ * This modal is the ONLY surface for attachments — the Lead Details page deliberately shows no
+ * Attachments section, so upload, download and delete all live here. Download and delete are
+ * offered to every role that can open the lead: Admin and BD have identical rights over a lead's
+ * files, so there is no permission-driven variation in what the row renders.
  */
-export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName, canDelete }: Props) {
+export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: Props) {
   const { attachments, isLoading } = useLeadAttachments(leadId);
   const upload = useUploadAttachment(leadId);
   const remove = useDeleteAttachment(leadId);
+  const { downloadAttachment, downloadingId } = useDownloadAttachment(leadId);
 
   const files: LeadAttachment[] = attachments ?? [];
   const count = files.length;
@@ -109,7 +110,22 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName, can
                         {file.sizeLabel} · {formatAttachmentTimestamp(file.createdAt)}
                       </p>
                     </div>
-                    {canDelete && (
+                    {/* Download sits beside the existing remove control, in the same trailing slot
+                        and with the same padding — the row layout and spacing are unchanged. */}
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => downloadAttachment(file)}
+                        disabled={downloadingId === file.id}
+                        className="rounded-md p-1 text-muted-foreground transition-colors hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                        aria-label={`Download ${file.name}`}
+                      >
+                        {downloadingId === file.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4" />
+                        )}
+                      </button>
                       <button
                         type="button"
                         onClick={() => remove.mutate(file.id)}
@@ -119,7 +135,7 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName, can
                       >
                         <X className="h-4 w-4" />
                       </button>
-                    )}
+                    </div>
                   </li>
                 ))}
               </ul>
