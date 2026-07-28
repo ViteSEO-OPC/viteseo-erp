@@ -2,7 +2,9 @@
 
 namespace App\Modules\Hr\Http\Requests;
 
+use App\Modules\Hr\Models\Attendance;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class AdjustAttendanceRequest extends FormRequest
 {
@@ -19,8 +21,9 @@ class AdjustAttendanceRequest extends FormRequest
         return [
             'employee_id' => ['required', 'integer', 'exists:hr_employees,id'],
             'work_date' => ['required', 'date'],
-            // Status is derived server-side from the times (see AttendanceService::adjust),
-            // never accepted from the client.
+            // Slice 16 — HR may assert the status. Omitted ⇒ derived from the times as before;
+            // supplied ⇒ it wins, including over the clock and the leave table.
+            'status' => ['sometimes', 'nullable', Rule::in(Attendance::HR_STATUSES)],
             'time_in' => ['nullable', 'date_format:H:i'],
             'time_out' => ['nullable', 'date_format:H:i'],
             'note' => ['nullable', 'string', 'max:255'],

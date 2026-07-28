@@ -72,9 +72,13 @@ export async function resolveViolation(id: number): Promise<Violation> {
 export interface AdjustAttendanceInput {
   employee_id: number;
   work_date: string;
-  // Status is derived server-side from the times — not sent by the client.
   time_in: string | null;
   time_out: string | null;
+  /**
+   * Slice 16 — null/omitted derives the status from the times (the old behaviour). A value
+   * here is an explicit HR override that wins over both the clock and the leave table.
+   */
+  status?: string | null;
   note: string | null;
 }
 
