@@ -99,9 +99,15 @@ class AttendancePolicyService
         ],
     ];
 
+    /**
+     * Per-request memo (Slice 15). This single row is read by every pricing path, once per
+     * employee per payroll run. update() clears it.
+     */
+    private ?AttendancePolicy $memo = null;
+
     public function get(): AttendancePolicy
     {
-        return AttendancePolicy::firstOrCreate([], self::DEFAULTS);
+        return $this->memo ??= AttendancePolicy::firstOrCreate([], self::DEFAULTS);
     }
 
     /**
@@ -146,6 +152,7 @@ class AttendancePolicyService
         }
 
         $policy->update($changes);
+        $this->memo = $policy; // keep the memo in step with what was just written
 
         $this->audit->log(
             'updated',

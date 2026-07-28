@@ -16,9 +16,16 @@ class ContributionService
 {
     public function __construct(private readonly AuditService $audit) {}
 
+    /**
+     * Per-request memo (Slice 15). A payroll run calls settings() twice per employee — once via
+     * benefitsFor(), once via effectiveFor() — for a single, unchanging table. Any write below
+     * clears it, so it can't go stale within a request.
+     */
+    private ?Collection $settingsMemo = null;
+
     public function settings(): Collection
     {
-        return ContributionSetting::orderBy('type')->get();
+        return $this->settingsMemo ??= ContributionSetting::orderBy('type')->get();
     }
 
     /** @param array<string, mixed> $data */
@@ -32,6 +39,7 @@ class ContributionService
             'config' => $data['config'] ?? $setting->config,
             'is_active' => $data['is_active'] ?? $setting->is_active,
         ]);
+        $this->settingsMemo = null; // the rates just changed
 
         $after = ['config' => $setting->config, 'is_active' => (bool) $setting->is_active];
 
@@ -53,7 +61,21 @@ class ContributionService
      */
     public function benefitsFor(Employee $employee): Collection
     {
-        foreach ($this->settings()->where('is_active', true) as $setting) {
+        // Slice 15 — read the employee's existing rows ONCE and only back-fill what is genuinely
+        // missing. This used to fire a firstOrCreate per active contribution per employee (3 × N
+        // SELECTs on a payroll run) purely to discover that the rows were already there.
+        $existing = $employee->benefits()->orderBy('contribution_type')->get();
+        $have = $existing->pluck('contribution_type')->all();
+
+        $missing = $this->settings()
+            ->where('is_active', true)
+            ->reject(fn ($setting) => in_array($setting->type, $have, true));
+
+        if ($missing->isEmpty()) {
+            return $existing;
+        }
+
+        foreach ($missing as $setting) {
             EmployeeBenefit::firstOrCreate(
                 ['employee_id' => $employee->id, 'contribution_type' => $setting->type],
                 ['enrolled' => true],

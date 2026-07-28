@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -926,7 +927,9 @@ class PayrollService
      */
     public function run(string $cycleStart, string $cycleEnd, string $frequency, User $runner): PayrollRun
     {
-        return DB::transaction(function () use ($cycleStart, $cycleEnd, $frequency, $runner) {
+        $startedAt = microtime(true);
+
+        $run = DB::transaction(function () use ($cycleStart, $cycleEnd, $frequency, $runner) {
             $setting = PayrollSetting::current();
             // Frequency + period length drive per-period pay; month position + timing
             // settings decide which cutoff statutory deductions and tax land on.
@@ -1030,6 +1033,17 @@ class PayrollService
             // Slice 13c — the salary each employee was actually on during this period.
             $salaryAsOf = $this->salariesAsOf($employees, $cycleEnd);
 
+            // Slice 15 — who already has a payslip in an OVERLAPPING run, resolved in ONE query
+            // instead of an exists() per employee. Same question, same answer, 1/N the round trips.
+            $paidInAnotherRun = Payslip::whereIn('employee_id', $employees->pluck('id'))
+                ->where('payroll_run_id', '!=', $run->id)
+                ->whereHas('payrollRun', fn ($q) => $q
+                    ->where('cycle_start', '<=', $cycleEnd)
+                    ->where('cycle_end', '>=', $cycleStart))
+                ->pluck('employee_id')
+                ->unique()
+                ->flip();
+
             foreach ($employees as $employee) {
                 // Slice 13c — price this period at the salary that was in force THEN, not the
                 // one on the record today. Set on the in-memory model (never saved) so every
@@ -1058,13 +1072,7 @@ class PayrollService
                 // Double-pay guard: if this employee already has a payslip in ANOTHER run
                 // whose period overlaps this cycle (e.g. their pay_frequency changed after
                 // being run in another group), skip them — they're already covered.
-                $overlaps = Payslip::where('employee_id', $employee->id)
-                    ->where('payroll_run_id', '!=', $run->id)
-                    ->whereHas('payrollRun', fn ($q) => $q
-                        ->where('cycle_start', '<=', $cycleEnd)
-                        ->where('cycle_end', '>=', $cycleStart))
-                    ->exists();
-                if ($overlaps) {
+                if ($paidInAnotherRun->has($employee->id)) {
                     $paidElsewhere[] = $employee->id;
 
                     continue;
@@ -1231,6 +1239,17 @@ class PayrollService
 
             return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
         });
+
+        // Slice 15 — one line so a slow run is visible without guesswork. The whole run is a
+        // single transaction, so its duration is also how long the payroll tables stay locked.
+        Log::info('hr.payroll.run', [
+            'cycle' => "{$cycleStart}..{$cycleEnd}",
+            'frequency' => $frequency,
+            'employees' => $run->employee_count,
+            'ms' => (int) round((microtime(true) - $startedAt) * 1000),
+        ]);
+
+        return $run;
     }
 
     /**

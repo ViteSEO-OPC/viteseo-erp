@@ -701,7 +701,10 @@ function AttendancePolicyEditor() {
         </Hint>
         <SaveButton
           pending={saving === "early_ot"}
-          onClick={() => saveCard("early_ot", { early_arrival_mode: earlyArrival, overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
+          // Slice 14 — early_arrival_mode is deliberately NOT sent: the control is disabled
+          // (no engine reads it) and the API now rejects anything but "none", so echoing a
+          // stored value back would 422 and block HR from saving the overtime settings.
+          onClick={() => saveCard("early_ot", { overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
         />
       </PolicySection>
 

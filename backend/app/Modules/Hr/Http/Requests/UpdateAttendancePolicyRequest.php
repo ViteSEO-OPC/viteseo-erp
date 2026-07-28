@@ -33,9 +33,17 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'late_tiers.*.hours' => ['required_with:late_tiers', 'numeric', 'min:0', 'max:24'],
 
             'undertime_deduction_mode' => ['sometimes', 'in:none,per_hour'],
-            'missing_clockout_mode' => ['sometimes', 'in:no_deduction_flag_for_review,treat_as_undertime_to_now,treat_as_absent'],
+            // Slice 14 — restricted to what the engine actually honours. This accepted
+            // `treat_as_undertime_to_now` and `treat_as_absent`, neither of which is implemented:
+            // DeductionService mentions the field only in a comment. Accepting a value that
+            // silently does nothing is worse than rejecting it — HR would believe a forgotten
+            // punch was being charged. Widen this again when the modes are built.
+            'missing_clockout_mode' => ['sometimes', 'in:no_deduction_flag_for_review'],
 
-            'early_arrival_mode' => ['sometimes', 'in:none,offset_undertime,overtime_eligible'],
+            // Slice 14 — same: `offset_undertime` and `overtime_eligible` have NO reader
+            // anywhere in the codebase. The Rules page already shows this control disabled;
+            // this stops the API from accepting them behind its back.
+            'early_arrival_mode' => ['sometimes', 'in:none'],
             'overtime_mode' => ['sometimes', 'in:none,approved_only,auto_after_threshold'],
             'overtime_threshold_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
 

@@ -46,6 +46,36 @@ class AttendanceService
         );
     }
 
+    /**
+     * Per-request memo of one employee's attendance rows for a date range (Slice 15).
+     *
+     * A payroll run asks the same question four times per employee — unpaidDaysDetailFor,
+     * restDayWorkedMinutesFor, nightMinutesFor and overtimeCapacityFor each ran their own
+     * `where employee_id = ? and work_date between ? and ?`. The filters differ only in whether
+     * they require both punches, which is cheaper to apply in PHP than in a second round trip.
+     *
+     * @var array<string, \Illuminate\Database\Eloquent\Collection<int, Attendance>>
+     */
+    private array $rowsMemo = [];
+
+    /**
+     * Every attendance row for an employee in an inclusive range, memoized.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, Attendance>
+     */
+    private function rowsBetween(Employee $employee, string $start, string $end)
+    {
+        return $this->rowsMemo["{$employee->id}|{$start}|{$end}"] ??= Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->get();
+    }
+
+    /** Drop the memo after a write, so a correction is never read stale. */
+    private function forgetRows(): void
+    {
+        $this->rowsMemo = [];
+    }
+
     private function localNow(): Carbon
     {
         return now(config('app.timezone_local'));
@@ -339,6 +369,8 @@ class AttendanceService
             ],
         );
 
+        $this->forgetRows(); // the row just changed
+
         // A correction can change someone's flags — keep them in sync.
         $this->violations->recompute();
 
@@ -617,11 +649,8 @@ class AttendanceService
         }
 
         $tz = config('app.timezone_local');
-        $rows = Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->whereNotNull('time_in')
-            ->whereNotNull('time_out')
-            ->get();
+        $rows = $this->rowsBetween($employee, $start, $end)
+            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
 
         $out = [];
         foreach ($rows as $row) {
@@ -698,11 +727,8 @@ class AttendanceService
         }
 
         $tz = config('app.timezone_local');
-        $rows = Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->whereNotNull('time_in')
-            ->whereNotNull('time_out')
-            ->get();
+        $rows = $this->rowsBetween($employee, $start, $end)
+            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
 
         $out = [];
         foreach ($rows as $row) {
@@ -755,11 +781,8 @@ class AttendanceService
         }
 
         $tz = config('app.timezone_local');
-        $rows = Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->whereNotNull('time_in')
-            ->whereNotNull('time_out')
-            ->get();
+        $rows = $this->rowsBetween($employee, $start, $end)
+            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
 
         $out = [];
         foreach ($rows as $row) {
@@ -803,11 +826,11 @@ class AttendanceService
 
     public function workedDatesBetween(Employee $employee, string $start, string $end): array
     {
-        return Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->whereIn('status', ['present', 'late'])
-            ->pluck('work_date')
-            ->map(fn ($d) => Carbon::parse($d)->toDateString())
+        // Slice 15 — the fifth reader of the same rows; filter in PHP off the shared memo.
+        return $this->rowsBetween($employee, $start, $end)
+            ->filter(fn (Attendance $r) => in_array($r->status, ['present', 'late'], true))
+            ->map(fn (Attendance $r) => Carbon::parse($r->work_date)->toDateString())
+            ->values()
             ->all();
     }
 
@@ -864,9 +887,7 @@ class AttendanceService
         $today = $this->localNow()->startOfDay();
         $last = Carbon::parse($end, $tz)->startOfDay();
 
-        $rows = Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->get()
+        $rows = $this->rowsBetween($employee, $start, $end)
             ->keyBy(fn ($r) => $r->work_date->toDateString());
 
         $leaves = LeaveRequest::with('leaveType')
