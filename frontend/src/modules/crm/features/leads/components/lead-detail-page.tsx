@@ -125,10 +125,11 @@ export function LeadDetailPage() {
         </div>
       </div>
 
-      {/* `key` remounts the modal per lead, so navigating between leads never carries over the
-          previous lead's dialog state. */}
+      {/* Deliberately NOT keyed by lead id. It holds no local state — `open` lives here and the file
+          list comes from a query already keyed per lead — so a remount would buy nothing, and the
+          key collided with AssignLeadModal's below (both resolve to the same lead id, and sibling
+          keys must be unique). */}
       <LeadAttachmentsModal
-        key={params.id}
         open={attachmentsOpen}
         onOpenChange={setAttachmentsOpen}
         leadId={params.id}
