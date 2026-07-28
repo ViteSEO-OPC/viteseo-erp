@@ -123,7 +123,10 @@ const BD_COLUMN_ORDER: readonly LeadColumnKey[] = [
 
 // Rows shown before the list starts scrolling. Presentation only — it does not cap what is
 // fetched or rendered, so pagination, selection and export still see every row on the page.
-const MAX_VISIBLE_ROWS = 5;
+// BD-only: the Admin/SA table has no internal vertical scroll and grows with its (larger) page.
+// Exported so the page can tell whether this table is scrolling — the pager's summary is shown
+// whenever the list doesn't display every row at once, scrolled or paged.
+export const MAX_VISIBLE_ROWS = 5;
 
 // Subtle scrollbar reused from the existing CRM surfaces (activity timeline, call history,
 // email thread) so this introduces no new scrollbar design.
@@ -225,7 +228,9 @@ export function LeadsTable({
   const [maxHeight, setMaxHeight] = useState<number>();
 
   const rowCount = leads?.length ?? 0;
-  const scrollable = rowCount > MAX_VISIBLE_ROWS;
+  // BD keeps the capped, scrolling list exactly as before. Admin/SA opted out: their page holds up
+  // to 10 rows and is meant to grow naturally, so no height cap is measured or applied for them.
+  const scrollable = !canAssign && rowCount > MAX_VISIBLE_ROWS;
 
   // Cap the list at exactly MAX_VISIBLE_ROWS. The height is measured rather than hard-coded because
   // row height is not uniform — the Contact cell stacks name / email / phone and each is optional,
@@ -362,6 +367,7 @@ export function LeadsTable({
     // untouched for every other CRM table. `[&>div]:overflow-visible` neutralises that inner
     // container: its `overflow-x: auto` computes `overflow-y` to `auto`, which would otherwise make
     // it the scroll container and stop the header sticking to this one.
+    // `scrollable` is BD-only, so Admin/SA always take the plain (naturally growing) branch.
     <div
       ref={scrollRef}
       style={scrollable && maxHeight ? { maxHeight } : undefined}

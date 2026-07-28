@@ -5,7 +5,7 @@ import { LeadsKpiRow } from "@/modules/crm/features/leads/components/leads-kpi-r
 import { LeadsSummaryTabs } from "@/modules/crm/features/leads/components/leads-summary-tabs";
 import { LeadsToolbar } from "@/modules/crm/features/leads/components/leads-toolbar";
 import { LeadsFilterBar } from "@/modules/crm/features/leads/components/leads-filter-bar";
-import { LeadsTable } from "@/modules/crm/features/leads/components/leads-table";
+import { LeadsTable, MAX_VISIBLE_ROWS } from "@/modules/crm/features/leads/components/leads-table";
 import { Pagination } from "@/modules/crm/components/shared/pagination/pagination";
 import { ImportLeadsModal } from "@/modules/crm/features/leads/components/import-leads-modal";
 import { CreateLeadWizard } from "@/modules/crm/features/leads/components/create-lead-wizard";
@@ -112,6 +112,7 @@ export function LeadsPageLayout() {
     data,
     total,
     page,
+    perPage,
     totalPages,
     goToPage,
     clearFilters,
@@ -138,6 +139,11 @@ export function LeadsPageLayout() {
     isError,
     retry,
   } = useLeads();
+
+  // More than one page of results → page controls. BD's table also caps its viewport at
+  // MAX_VISIBLE_ROWS and scrolls beyond that, which is the other case where the summary is useful.
+  const paginated = total > perPage;
+  const scrolled = !canAssign && (data?.length ?? 0) > MAX_VISIBLE_ROWS;
 
   // Single-lead PDF export, shared with Lead Details — one hook, one endpoint, one implementation.
   const { exportLeadPdf, exportingId } = useExportLeadPdf();
@@ -324,13 +330,23 @@ export function LeadsPageLayout() {
             onExportPdf={(lead) => exportLeadPdf(lead.id, lead.business)}
             exportingPdfId={exportingId}
           />
-          <Pagination
-            page={page}
-            totalPages={totalPages}
-            total={total}
-            onPageChange={goToPage}
-            unit="leads"
-          />
+          {/* Page controls appear only once the result set outgrows a single page. The "Showing
+              X–Y of Z" summary appears a step earlier — as soon as the list stops showing every row
+              at once, which for BD also covers a page that fits but scrolls inside its ~5-row
+              viewport. Admin/SA never scroll, so for them the two conditions coincide and the whole
+              pager still appears only above `perPage` — unchanged. Both read the API's filtered
+              `total`, so they re-evaluate on every search/filter change. */}
+          {paginated || scrolled ? (
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              perPage={perPage}
+              onPageChange={goToPage}
+              showControls={paginated}
+              unit="leads"
+            />
+          ) : null}
         </div>
       </div>
 

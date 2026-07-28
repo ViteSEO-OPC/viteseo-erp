@@ -7,6 +7,17 @@ import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
+/**
+ * Rows per page — the same for every role, and the same value `GET /leads` paginates by, so no API
+ * contract changes. It is exported through the hook because it is also the pager's visibility rule:
+ * a pager is only rendered once `total` exceeds one page.
+ *
+ * Role does NOT change the page size; it changes how tall the table is allowed to be. BD keeps a
+ * ~5-row viewport that scrolls internally (see MAX_VISIBLE_ROWS in leads-table), while Admin/Super
+ * Admin render all 10 rows and let the page grow.
+ */
+const PAGE_SIZE = 10;
+
 type LeadApiResponse = {
   data: Lead[];
   meta: {
@@ -85,6 +96,7 @@ export function useLeads() {
   const router = useRouter();
   const pathname = usePathname();
   const [page, setPage] = useState(0);
+  const perPage = PAGE_SIZE;
 
   const search = searchParams.get("search") ?? "";
 
@@ -260,10 +272,10 @@ export function useLeads() {
   };
 
   const query = useQuery<LeadApiResponse>({
-    queryKey: queryKeys.leads.list({ page: page + 1, perPage: 10, search: trimmedSearch, priority, status, websiteStatus, sort, industry: industryKey, emailOutreach, coldCalling, assignedTo }),
+    queryKey: queryKeys.leads.list({ page: page + 1, perPage, search: trimmedSearch, priority, status, websiteStatus, sort, industry: industryKey, emailOutreach, coldCalling, assignedTo }),
     queryFn: () =>
       apiClient
-        .get("/leads", { params: { page: page + 1, per_page: 10, ...listParams } })
+        .get("/leads", { params: { page: page + 1, per_page: perPage, ...listParams } })
         .then((r) => r.data),
     placeholderData: (prev) => prev,
   });
@@ -306,6 +318,7 @@ export function useLeads() {
     data,
     total,
     page,
+    perPage,
     totalPages,
     goToPage,
     clearFilters,
