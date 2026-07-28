@@ -11,6 +11,7 @@ use App\Modules\Hr\Http\Resources\PayslipSummaryResource;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
+use App\Modules\Hr\Services\AuditService;
 use App\Modules\Hr\Services\PayrollService;
 use App\Modules\Hr\Services\PayScheduleService;
 use Illuminate\Http\JsonResponse;
@@ -32,9 +33,36 @@ class PayrollController extends Controller
     }
 
     // PUT /api/v1/hr/payroll/settings — HR changes how often payroll runs.
-    public function updateSettings(UpdatePayrollSettingsRequest $request): JsonResponse
+    public function updateSettings(UpdatePayrollSettingsRequest $request, AuditService $audit): JsonResponse
     {
-        PayrollSetting::current()->update($request->validated());
+        $setting = PayrollSetting::current();
+        $validated = $request->validated();
+
+        // Item 13b.12 — this endpoint wrote NO audit entry at all, despite setting the pay
+        // frequency, the deduction/tax timing and the de-minimis ceiling: every one of them
+        // changes what lands on a payslip.
+        $before = [];
+        $after = [];
+        foreach ($validated as $field => $value) {
+            $old = $setting->getOriginal($field);
+            if ($old != $value) {
+                $before[$field] = $old;
+                $after[$field] = $value;
+            }
+        }
+
+        $setting->update($validated);
+
+        if ($before !== []) {
+            $audit->log(
+                'updated',
+                'Payroll',
+                'Payroll settings updated: ' . implode(', ', array_keys($before)),
+                $setting,
+                $before,
+                $after,
+            );
+        }
 
         return response()->json(['data' => $this->settingsPayload()]);
     }
@@ -50,6 +78,7 @@ class PayrollController extends Controller
             'tax_timing' => $setting->tax_timing,
             'anchor_date' => $setting->anchor_date?->toDateString(),
             'pay_delay_days' => $setting->pay_delay_days,
+            'deminimis_annual_cap' => $setting->deminimis_annual_cap === null ? null : (float) $setting->deminimis_annual_cap,
             'periods_per_year' => PayScheduleService::periodsPerYear($setting->frequency),
             'current_period' => $this->schedule->currentPeriod($setting),
             // Active pay groups (per-employee frequencies) — each runs on its own period.
@@ -94,6 +123,23 @@ class PayrollController extends Controller
     {
         return PayrollRunResource::make(
             $this->service->runWithBreakdown($payrollRun),
+        )->response();
+    }
+
+    // POST /api/v1/hr/payroll/runs/{payrollRun}/lock — seal a fully-disbursed cycle so it
+    // can never be recomputed (Slice 5).
+    public function lockRun(Request $request, PayrollRun $payrollRun): JsonResponse
+    {
+        return PayrollRunResource::make(
+            $this->service->lock($payrollRun, $request->user()),
+        )->response();
+    }
+
+    // POST /api/v1/hr/payroll/runs/{payrollRun}/unlock — re-open a locked cycle. Audited.
+    public function unlockRun(Request $request, PayrollRun $payrollRun): JsonResponse
+    {
+        return PayrollRunResource::make(
+            $this->service->unlock($payrollRun, $request->user()),
         )->response();
     }
 

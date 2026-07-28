@@ -18,7 +18,11 @@ class UpdateEmployeeScheduleRequest extends FormRequest
     {
         return [
             'work_schedule_id' => ['nullable', 'integer', 'exists:hr_work_schedules,id'],
-            'custom_workdays' => ['nullable', 'array'],
+            // Item 11 — at least one workday. An empty array made EVERY day a rest day, so the
+            // period had 0 scheduled workdays, the daily rate divided by zero → ₱0, and the
+            // employee was paid the full period no matter how much they missed. Null (no
+            // override) is still fine; an empty list is not.
+            'custom_workdays' => ['nullable', 'array', 'min:1'],
             'custom_workdays.*' => ['integer', 'between:1,7'],
             'custom_start_time' => ['nullable', 'date_format:H:i'],
             'custom_end_time' => ['nullable', 'date_format:H:i'],

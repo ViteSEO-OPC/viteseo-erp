@@ -37,6 +37,7 @@ export default function ReimbursementPage() {
       pending: list.filter((c) => c.status === "pending").length,
       pendingSum: sum("pending"),
       approved: list.filter((c) => c.status === "approved").length,
+      scheduled: list.filter((c) => c.status === "scheduled").length,
       paidSum: sum("paid"),
       paidCount: list.filter((c) => c.status === "paid").length,
     };
@@ -125,10 +126,15 @@ export default function ReimbursementPage() {
             </div>
           );
         }
-        if (c.status === "approved") {
+        // `scheduled` (Slice 12) = folded into a payslip that hasn't gone out yet. It pays
+        // itself when that payslip is disbursed, but HR can still settle it by hand.
+        if (c.status === "approved" || c.status === "scheduled") {
           return (
             <Button size="sm" variant="outline" disabled={busyId === c.id}
-              onClick={() => act(paidMut.mutateAsync(c.id), "Marked as paid")}>
+              onClick={() => act(paidMut.mutateAsync(c.id), "Marked as paid")}
+              title={c.status === "scheduled"
+                ? "Already included in a payslip — use this only if paid separately"
+                : undefined}>
               Mark paid
             </Button>
           );
@@ -156,7 +162,15 @@ export default function ReimbursementPage() {
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Pending Claims" value={stats.pending}
           subNote={`${formatPeso(stats.pendingSum)} awaiting`} highlight />
-        <StatCard label="Approved Unpaid" value={stats.approved} subNote="Queued for payroll" />
+        <StatCard
+          label="Approved Unpaid"
+          value={stats.approved + stats.scheduled}
+          subNote={
+            stats.scheduled > 0
+              ? `${stats.scheduled} already in a payslip, awaiting disbursement`
+              : "Queued for payroll"
+          }
+        />
         <StatCard label="Paid" value={formatPeso(stats.paidSum)}
           subNote={`${stats.paidCount} claim${stats.paidCount === 1 ? "" : "s"} processed`} />
         <StatCard label="Avg Processing" value="2.1 days" subNote="Last 30 days (mock)" />

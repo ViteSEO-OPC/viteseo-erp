@@ -12,7 +12,6 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\AttendanceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
-use Tests\TestCase;
 
 /**
  * Guards the Slice 2 wiring where DeductionService feeds unpaidDaysFor(). The headline
@@ -20,7 +19,7 @@ use Tests\TestCase;
  * the legacy float and the breakdown is all-zero — enabling per_hour is the ONLY thing
  * that moves a peso.
  */
-class AttendanceDeductionWiringTest extends TestCase
+class AttendanceDeductionWiringTest extends HrTestCase
 {
     use RefreshDatabase;
 
@@ -32,13 +31,6 @@ class AttendanceDeductionWiringTest extends TestCase
 
     protected function setUp(): void
     {
-        // The phpunit DB is in-memory sqlite; skip where that PDO driver isn't installed
-        // (e.g. this dev box) rather than red-fail. Checked BEFORE parent::setUp() so the
-        // RefreshDatabase trait never tries to migrate. Runs normally in CI.
-        if (! extension_loaded('pdo_sqlite')) {
-            $this->markTestSkipped('pdo_sqlite not available.');
-        }
-
         parent::setUp();
 
         $tz = config('app.timezone_local');

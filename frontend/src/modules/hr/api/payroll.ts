@@ -18,6 +18,8 @@ export async function updatePayrollSettings(input: {
   frequency: string;
   deduction_timing?: string;
   tax_timing?: string;
+  /** Slice 10 — null clears the ceiling (allowances fully tax-free). */
+  deminimis_annual_cap?: number | null;
 }): Promise<PayrollSettings> {
   const res = await apiClient.put("/hr/payroll/settings", input);
   return res.data.data;
@@ -44,6 +46,18 @@ export async function runPayroll(input: {
 
 export async function markPayslipDone(id: number): Promise<PayrollRun> {
   const res = await apiClient.post(`/hr/payslips/${id}/mark-done`);
+  return res.data.data;
+}
+
+/** Seal a fully-disbursed run so it can never be recomputed (Slice 5). */
+export async function lockPayrollRun(id: number): Promise<PayrollRun> {
+  const res = await apiClient.post(`/hr/payroll/runs/${id}/lock`);
+  return res.data.data;
+}
+
+/** Re-open a locked run. Audited. */
+export async function unlockPayrollRun(id: number): Promise<PayrollRun> {
+  const res = await apiClient.post(`/hr/payroll/runs/${id}/unlock`);
   return res.data.data;
 }
 

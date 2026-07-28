@@ -16,6 +16,7 @@ final class UnpaidDaysResult
      * @param  int  $undertimeMinutes  raw undertime minutes charged across the period
      * @param  float  $lateDays  late portion expressed in days (× dailyRate ⇒ pesos)
      * @param  float  $undertimeDays  undertime portion in days
+     * @param  float  $latePenaltyDays  whole days charged by the per-N-lates penalty (item 13b.13)
      * @param  list<string>  $flags  non-pay flags raised for HR review
      */
     public function __construct(
@@ -24,6 +25,7 @@ final class UnpaidDaysResult
         public readonly int $undertimeMinutes = 0,
         public readonly float $lateDays = 0.0,
         public readonly float $undertimeDays = 0.0,
+        public readonly float $latePenaltyDays = 0.0,
         public readonly array $flags = [],
     ) {}
 }

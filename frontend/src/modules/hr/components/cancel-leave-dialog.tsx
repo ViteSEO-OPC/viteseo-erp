@@ -21,12 +21,15 @@ export function CancelLeaveDialog({
   open,
   onOpenChange,
   subject,
+  title = "Cancel Leave Request",
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** What's being cancelled, e.g. "Annual Leave · Jul 1 – Jul 3". */
   subject?: string;
+  /** Heading — overridable so overtime (Slice 6) can reuse this same flow. */
+  title?: string;
   onConfirm: (reason: string) => Promise<void>;
 }) {
   const [reason, setReason] = useState("");
@@ -57,7 +60,7 @@ export function CancelLeaveDialog({
             <Ban className="size-7 text-danger" />
           </div>
 
-          <DialogTitle className="mt-4">Cancel Leave Request</DialogTitle>
+          <DialogTitle className="mt-4">{title}</DialogTitle>
           <DialogDescription className="mt-1.5 text-sm">
             {subject
               ? `Please tell us why you're cancelling ${subject}.`

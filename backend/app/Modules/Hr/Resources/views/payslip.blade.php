@@ -79,6 +79,10 @@
         @if (($p['late_minutes'] ?? 0) > 0)
             <tr><td>Late ({{ $p['late_minutes'] }} min)</td><td class="amt neg">− {{ $peso($p['late_deduction']) }}</td></tr>
         @endif
+        @if (($p['late_penalty_days'] ?? 0) > 0)
+            <tr><td>Tardiness penalty ({{ rtrim(rtrim(number_format((float) $p['late_penalty_days'], 2), '0'), '.') }} day)</td>
+                <td class="amt neg">− {{ $peso((float) $p['late_penalty_days'] * (float) ($p['daily_rate'] ?? 0)) }}</td></tr>
+        @endif
         @if (($p['undertime_minutes'] ?? 0) > 0)
             <tr><td>Undertime ({{ $p['undertime_minutes'] }} min)</td><td class="amt neg">− {{ $peso($p['undertime_deduction']) }}</td></tr>
         @endif
@@ -91,6 +95,10 @@
         <tr><td>PhilHealth</td><td class="amt neg">− {{ $peso($p['philhealth']) }}</td></tr>
         <tr><td>Pag-IBIG</td><td class="amt neg">− {{ $peso($p['pagibig']) }}</td></tr>
         <tr><td>Withholding tax</td><td class="amt neg">− {{ $peso($p['withholding_tax']) }}</td></tr>
+        {{-- Slice 11a — benefit shares, itemised by name so the employee can see what they are. --}}
+        @foreach ($p['other_deductions_breakdown'] ?? [] as $line)
+            <tr><td>{{ $line['name'] }}</td><td class="amt neg">− {{ $peso($line['amount']) }}</td></tr>
+        @endforeach
         <tr><td><strong>Total deductions</strong></td>
             <td class="amt neg"><strong>− {{ $peso($p['total_deductions']) }}</strong></td></tr>
     </table>

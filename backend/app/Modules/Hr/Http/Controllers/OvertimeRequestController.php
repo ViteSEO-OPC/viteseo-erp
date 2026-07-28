@@ -75,4 +75,15 @@ class OvertimeRequestController extends Controller
             $this->service->reject($overtimeRequest, $request->user(), $data['reason']),
         )->response();
     }
+
+    // POST /api/v1/hr/overtime-requests/{overtimeRequest}/cancel — HR only (Slice 6).
+    // Undoes a request that was already approved but whose overtime is not happening.
+    public function cancel(Request $request, OvertimeRequest $overtimeRequest): JsonResponse
+    {
+        $data = $request->validate(['reason' => ['required', 'string', 'max:1000']]);
+
+        return OvertimeRequestResource::make(
+            $this->service->cancel($overtimeRequest, $request->user(), $data['reason']),
+        )->response();
+    }
 }

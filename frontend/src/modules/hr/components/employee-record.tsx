@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { notify as toast } from "@/core/lib/notify";
 import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
+import { EmployeeLoans } from "@/modules/hr/components/employee-loans";
 import { Button } from "@/components/ui/button";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import {
@@ -249,6 +250,16 @@ export function EmployeeRecord({
                   Compensation History
                 </p>
                 <CompensationHistory employeeId={employee.id} />
+              </div>
+            )}
+
+            {/* Slice 11b — loans & cash advances repaid through payroll. */}
+            {isHr && (
+              <div className="border-t border-border pt-6">
+                <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
+                  Loans &amp; Cash Advances
+                </p>
+                <EmployeeLoans employeeId={employee.id} />
               </div>
             )}
           </div>

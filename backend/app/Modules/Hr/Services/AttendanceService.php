@@ -23,7 +23,58 @@ class AttendanceService
         private readonly AttendancePolicyService $policy,
         private readonly AuditService $audit,
         private readonly DeductionService $deduction,
+        private readonly HolidayService $holidays,
     ) {}
+
+    /**
+     * Non-working holidays in an inclusive range, as date 'Y-m-d' => type. Fetched ONCE per
+     * caller (never per day) — the day loops below run per employee per date.
+     *
+     * `special_working` is filtered out on purpose: it is an ordinary working day and must keep
+     * behaving like one. Unclassified holidays (type NULL — HR hasn't set them yet) are also
+     * excluded: we never guess whether an unclassified date is a non-working day.
+     *
+     * @return array<string, string>
+     */
+    private function nonWorkingHolidays(string $start, string $end): array
+    {
+        $tz = config('app.timezone_local');
+
+        return array_filter(
+            $this->holidays->typedHolidaysBetween(Carbon::parse($start, $tz), Carbon::parse($end, $tz)),
+            fn ($type) => in_array($type, HolidayService::NON_WORKING_TYPES, true),
+        );
+    }
+
+    /**
+     * Per-request memo of one employee's attendance rows for a date range (Slice 15).
+     *
+     * A payroll run asks the same question four times per employee — unpaidDaysDetailFor,
+     * restDayWorkedMinutesFor, nightMinutesFor and overtimeCapacityFor each ran their own
+     * `where employee_id = ? and work_date between ? and ?`. The filters differ only in whether
+     * they require both punches, which is cheaper to apply in PHP than in a second round trip.
+     *
+     * @var array<string, \Illuminate\Database\Eloquent\Collection<int, Attendance>>
+     */
+    private array $rowsMemo = [];
+
+    /**
+     * Every attendance row for an employee in an inclusive range, memoized.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, Attendance>
+     */
+    private function rowsBetween(Employee $employee, string $start, string $end)
+    {
+        return $this->rowsMemo["{$employee->id}|{$start}|{$end}"] ??= Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->get();
+    }
+
+    /** Drop the memo after a write, so a correction is never read stale. */
+    private function forgetRows(): void
+    {
+        $this->rowsMemo = [];
+    }
 
     private function localNow(): Carbon
     {
@@ -43,6 +94,53 @@ class AttendanceService
             ->first();
     }
 
+    /**
+     * Longest a shift may stay open before we stop treating it as "in progress". Past this
+     * it is a forgotten clock-out, not someone still at work — the violation engine flags it
+     * and payroll credits the scheduled end. Generous enough for a 12h shift plus overtime.
+     */
+    private const MAX_OPEN_SHIFT_HOURS = 18;
+
+    /**
+     * The employee's shift that is currently IN PROGRESS — clocked in, not yet out — even
+     * when it began on an earlier Manila date.
+     *
+     * WHY (Slice 3): a work_date is the Manila date the shift STARTED, so a graveyard shift
+     * clocked in at 22:00 on the 1st is stored on the 1st. Every clock action used to look up
+     * "today's" row, so at 06:00 on the 2nd the employee was told "You have not clocked in
+     * today" and simply could not clock out. Night differential and past-midnight overtime
+     * were therefore unreachable through the UI — only an HR correction could produce such a
+     * row. This resolves the shift instead of the calendar day.
+     */
+    private function openRow(Employee $employee): ?Attendance
+    {
+        $row = Attendance::where('employee_id', $employee->id)
+            ->whereNotNull('time_in')
+            ->whereNull('time_out')
+            // Two Manila days back is plenty to catch an overnight shift, and keeps this off
+            // a full table scan.
+            ->where('work_date', '>=', $this->localNow()->copy()->subDays(2)->toDateString())
+            ->orderByDesc('work_date')
+            ->first();
+
+        if (! $row || ! $row->time_in) {
+            return null;
+        }
+
+        // Stale punch → not an open shift, so the employee can start a fresh day tomorrow
+        // instead of being permanently blocked by one they forgot to close.
+        return $row->time_in->diffInHours(now()) >= self::MAX_OPEN_SHIFT_HOURS ? null : $row;
+    }
+
+    /**
+     * The row the clock acts on: the shift in progress if there is one, else today's row.
+     * The fallback preserves every existing "not clocked in" / "already clocked out" message.
+     */
+    private function activeRow(Employee $employee): ?Attendance
+    {
+        return $this->openRow($employee) ?? $this->todayRow($employee);
+    }
+
     /** Management staff are exempt from attendance — they never clock in/out. */
     private function assertNotManagement(Employee $employee): void
     {
@@ -56,6 +154,18 @@ class AttendanceService
     public function clockIn(Employee $employee): Attendance
     {
         $this->assertNotManagement($employee);
+
+        // An overnight shift from a previous date is still running — starting a second one
+        // would leave the first permanently open and silently unpaid.
+        $open = $this->openRow($employee);
+        if ($open && $open->work_date->toDateString() !== $this->today()) {
+            throw ValidationException::withMessages([
+                'time_in' => [
+                    'You still have an open shift from ' . $open->work_date->format('M j')
+                        . ' — clock out first, or ask HR to correct it.',
+                ],
+            ]);
+        }
 
         $att = Attendance::firstOrNew([
             'employee_id' => $employee->id,
@@ -89,7 +199,7 @@ class AttendanceService
     {
         $this->assertNotManagement($employee);
 
-        $att = $this->todayRow($employee);
+        $att = $this->activeRow($employee);
 
         if (! $att || ! $att->time_in) {
             throw ValidationException::withMessages([
@@ -124,7 +234,7 @@ class AttendanceService
     {
         $this->assertNotManagement($employee);
 
-        $att = $this->todayRow($employee);
+        $att = $this->activeRow($employee);
 
         if (! $att || ! $att->time_in) {
             throw ValidationException::withMessages([
@@ -159,7 +269,11 @@ class AttendanceService
         $att->time_out = now();
 
         $grossMinutes = $att->time_in->diffInMinutes($att->time_out);
-        $netMinutes = $grossMinutes - $att->lunch_minutes - $att->break_minutes;
+        // Item 13b.2 — only the UNPAID meal comes out. A paid break sits inside the paid day
+        // by definition, and subtracting it here made `hours_worked` disagree with every other
+        // "worked minutes" calculation in the module (restDayWorkedMinutesFor, nightMinutesFor,
+        // overtimeCapacityFor all subtract lunch alone).
+        $netMinutes = $grossMinutes - $att->lunch_minutes;
         $att->hours_worked = round(max(0, $netMinutes) / 60, 2);
         $att->save();
 
@@ -168,7 +282,7 @@ class AttendanceService
 
     public function todayFor(Employee $employee): ?Attendance
     {
-        return $this->todayRow($employee);
+        return $this->activeRow($employee);
     }
 
     /**
@@ -222,7 +336,8 @@ class AttendanceService
 
             if ($att->time_in && $att->time_out) {
                 $gross = ($att->time_out->getTimestamp() - $att->time_in->getTimestamp()) / 60;
-                $net = $gross - $att->lunch_minutes - $att->break_minutes;
+                // Item 13b.2 — lunch only; a paid break is inside the paid day.
+                $net = $gross - $att->lunch_minutes;
                 $att->hours_worked = round(max(0, $net) / 60, 2);
             } else {
                 $att->hours_worked = 0;
@@ -253,6 +368,8 @@ class AttendanceService
                 'note' => $att->note,
             ],
         );
+
+        $this->forgetRows(); // the row just changed
 
         // A correction can change someone's flags — keep them in sync.
         $this->violations->recompute();
@@ -288,6 +405,8 @@ class AttendanceService
         $employees = Employee::with('workSchedule')->get();
         $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
         $onLeaveIds = $this->onLeaveIds($date);
+        // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
+        $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
 
         $s = [
             'checked_in' => 0, 'not_checked_in' => 0, 'on_leave' => 0,
@@ -319,10 +438,11 @@ class AttendanceService
                 $s['checked_in']++;
                 $cat = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)['category'];
                 $s[$cat === 'early' ? 'early_arrivals' : ($cat === 'late' ? 'late_arrivals' : 'on_time')]++;
-            } elseif (! $isOnLeave && $eff['is_workday']) {
+            } elseif (! $isOnLeave && $eff['is_workday'] && ! $isHoliday) {
                 // No clock-in on a workday: it's a true absence only once the day has
                 // passed (or HR explicitly marked it absent). During today the employee
                 // can still clock in, so it's "not checked in" — mirrors allForDate().
+                // A non-working holiday is neither: nobody was expected in.
                 if ($isPast || ($row && $row->status === 'absent')) {
                     $s['absent']++;
                 } else {
@@ -353,10 +473,12 @@ class AttendanceService
 
         $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
         $leaveMap = $this->onLeaveMap($date);
+        // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
+        $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
 
         return Employee::with(['user', 'department', 'workSchedule'])
             ->get()
-            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast) {
+            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday) {
                 $att = $rows->get($emp->id);
                 $eff = $this->schedule->effectiveFor($emp, $dateCarbon);
                 $leaveName = $leaveMap->get($emp->id);
@@ -369,6 +491,9 @@ class AttendanceService
                     $status = $att->status; // present | late
                 } elseif ($leaveName) {
                     $status = 'on_leave';
+                } elseif ($isHoliday && ($eff['is_workday'] ?? false)) {
+                    // Non-working holiday on what would have been a workday — not an absence.
+                    $status = 'holiday';
                 } elseif ($emp->isManagement()) {
                     // Management is exempt from attendance — auto-present on a scheduled
                     // workday, rest day otherwise. Never absent/not-checked-in.
@@ -456,7 +581,12 @@ class AttendanceService
         foreach ($rows as $row) {
             $day = Carbon::parse($row->work_date, $tz);
             $date = $day->toDateString();
-            if (isset($holidayMap[$date])) {
+            // Skip ONLY the days holidayPremiumFor() actually pays for — regular and special
+            // non-working. It used to skip every date in the map, which silently unpaid two
+            // cases: a `special_working` day (an ordinary working day, earns no holiday
+            // premium) and an unclassified one (type NULL, also earns nothing) — working
+            // either on a rest day left the employee with no premium from either line.
+            if (in_array($holidayMap[$date] ?? null, HolidayService::NON_WORKING_TYPES, true)) {
                 continue; // the holiday premium covers this day
             }
             if ($this->schedule->effectiveFor($employee, $day)['is_workday'] ?? true) {
@@ -519,11 +649,8 @@ class AttendanceService
         }
 
         $tz = config('app.timezone_local');
-        $rows = Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->whereNotNull('time_in')
-            ->whereNotNull('time_out')
-            ->get();
+        $rows = $this->rowsBetween($employee, $start, $end)
+            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
 
         $out = [];
         foreach ($rows as $row) {
@@ -562,6 +689,35 @@ class AttendanceService
      * Each entry also reports how much of that overrun fell in the NIGHT window, so the night
      * differential can be compounded onto the overtime rate for those minutes (ND-1 tightening).
      *
+     * ─────────────────────────────────────────────────────────────────────────────────────────
+     * DO NOT "FIX" THE LATE-ARRIVAL CASE BY NETTING. Measuring from `end_time` is deliberate.
+     *
+     * Arrive an hour late, leave an hour past the shift, and this pays 60 minutes of overtime
+     * while the late hour is separately docked. That looks like the employee profits from being
+     * late, and it is tempting to subtract one from the other. Two settled rulings say no:
+     *
+     *   • Rule 2e — overtime is measured against `end_time`, NEVER against hours worked:
+     *         overtimeMinutes = max(0, time_out − end_time)     ✅
+     *         overtimeMinutes = hoursWorked − expectedHours     ❌ never
+     *     Someone who works 08:00–18:00 straight through their meal has a 10-hour clock reading
+     *     and ZERO overtime, because they left at their scheduled end. Working through lunch is
+     *     not the same as working late.
+     *
+     *   • Finding F-4 — `netOvertime = minutesPastEnd − lateMinutes − undertimeMinutes` is
+     *     NON-COMPLIANT. Labor Code Art. 88 forbids offsetting undertime with overtime, because
+     *     overtime carries a ≥125% premium while undertime is docked at the plain rate — netting
+     *     shortchanges the worker. The deduction ledger and the OT ledger stay separate.
+     *
+     * Note that `workedMinutes − expectedMinutes` is NOT a third option: with the meal equal to
+     * the scheduled break it reduces algebraically to `minutesPastEnd − lateMinutes`, i.e. exactly
+     * the netting F-4 rejected; and with the RECORDED lunch it manufactures overtime out of a
+     * skipped meal, which is the case 2e exists to prevent.
+     *
+     * The answer to the apparent "profit" is that `approved_only` is the default: unapproved
+     * late-staying simply isn't overtime, so there is no premium to game. Auto mode remains
+     * available for companies that want it, and the Rules page warns about exactly this.
+     * ─────────────────────────────────────────────────────────────────────────────────────────
+     *
      * @return array<string, array{minutes:int, night:int}> date 'Y-m-d' => overtime minutes
      */
     public function autoOvertimeMinutesFor(Employee $employee, string $start, string $end, int $thresholdMinutes = 0): array
@@ -571,11 +727,8 @@ class AttendanceService
         }
 
         $tz = config('app.timezone_local');
-        $rows = Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->whereNotNull('time_in')
-            ->whereNotNull('time_out')
-            ->get();
+        $rows = $this->rowsBetween($employee, $start, $end)
+            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
 
         $out = [];
         foreach ($rows as $row) {
@@ -607,13 +760,77 @@ class AttendanceService
         return $out;
     }
 
+    /**
+     * How many overtime minutes the TIME CLOCK can support on each date (Slice 6) — the ceiling
+     * an approved request is paid against. A date missing from the map supports none.
+     *
+     * Two shapes, because "beyond the shift" means different things:
+     *   - a scheduled WORKDAY → minutes clocked past the schedule's end time;
+     *   - a REST day / non-workday → there is no shift to be beyond, and the first 8 hours are
+     *     the rest-day premium (see PayrollService::REST_DAY_PREMIUM_CAP_MIN), so only the
+     *     excess past 8h can be overtime.
+     *
+     * Both punches are required: a missing clock-out can never become overtime (rule 5).
+     *
+     * @return array<string, int> date 'Y-m-d' => max payable overtime minutes
+     */
+    public function overtimeCapacityFor(Employee $employee, string $start, string $end): array
+    {
+        if ($employee->isManagement()) {
+            return [];
+        }
+
+        $tz = config('app.timezone_local');
+        $rows = $this->rowsBetween($employee, $start, $end)
+            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
+
+        $out = [];
+        foreach ($rows as $row) {
+            $day = Carbon::parse($row->work_date, $tz);
+            $eff = $this->schedule->effectiveFor($employee, $day);
+
+            $inMin = $this->clockToMinutes($row->time_in);
+            $outMin = $this->clockToMinutes($row->time_out);
+            if ($inMin === null || $outMin === null) {
+                continue;
+            }
+            if ($outMin < $inMin) {
+                $outMin += 24 * 60; // clocked out after midnight
+            }
+
+            if ($eff['is_workday'] ?? false) {
+                $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
+                if ($endMin === null) {
+                    continue;
+                }
+                if ($outMin < $inMin) {
+                    $endMin += 24 * 60;
+                }
+                $capacity = $outMin - $endMin;
+            } else {
+                // Rest day: worked time minus the unpaid meal, less the 8h premium block.
+                $worked = ($outMin - $inMin) - (int) $row->lunch_minutes;
+                $capacity = $worked - self::REST_DAY_PREMIUM_CAP_MIN;
+            }
+
+            if ($capacity > 0) {
+                $out[$day->toDateString()] = $capacity;
+            }
+        }
+
+        return $out;
+    }
+
+    /** A full 8-hour day in minutes — mirrors PayrollService::REST_DAY_PREMIUM_CAP_MIN. */
+    private const REST_DAY_PREMIUM_CAP_MIN = 8 * 60;
+
     public function workedDatesBetween(Employee $employee, string $start, string $end): array
     {
-        return Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->whereIn('status', ['present', 'late'])
-            ->pluck('work_date')
-            ->map(fn ($d) => Carbon::parse($d)->toDateString())
+        // Slice 15 — the fifth reader of the same rows; filter in PHP off the shared memo.
+        return $this->rowsBetween($employee, $start, $end)
+            ->filter(fn (Attendance $r) => in_array($r->status, ['present', 'late'], true))
+            ->map(fn (Attendance $r) => Carbon::parse($r->work_date)->toDateString())
+            ->values()
             ->all();
     }
 
@@ -670,9 +887,7 @@ class AttendanceService
         $today = $this->localNow()->startOfDay();
         $last = Carbon::parse($end, $tz)->startOfDay();
 
-        $rows = Attendance::where('employee_id', $employee->id)
-            ->whereBetween('work_date', [$start, $end])
-            ->get()
+        $rows = $this->rowsBetween($employee, $start, $end)
             ->keyBy(fn ($r) => $r->work_date->toDateString());
 
         $leaves = LeaveRequest::with('leaveType')
@@ -706,6 +921,16 @@ class AttendanceService
         $deductionsActive = in_array($policy->late_deduction_mode, ['per_hour', 'tiered'], true)
             || $policy->undertime_deduction_mode === 'per_hour';
 
+        // Non-working holidays in the cycle (Slice 1). One query for the whole range.
+        $holidays = $this->nonWorkingHolidays($start, $end);
+
+        // The employment window (Slice 4). The DIVISOR deliberately stays the full period's
+        // scheduled workdays — under the `period_workdays` basis, shrinking it would raise the
+        // daily rate and hand a part-period employee a full period's pay. Proration belongs on
+        // the unpaid side, which is what the loop does.
+        $employmentStart = $employee->hire_date?->toDateString();
+        $employmentEnd = $employee->separation_date?->toDateString();
+
         $unpaid = 0.0;
         $lateCount = 0;
         $lateMinutes = 0;
@@ -713,6 +938,10 @@ class AttendanceService
         $lateDays = 0.0;
         $undertimeDays = 0.0;
         $flags = [];
+        // DOLE: holiday pay for a REGULAR holiday is forfeited when the employee was absent
+        // without pay on the workday immediately before it. Null = no prior workday seen yet
+        // in this range, in which case we don't know and pay the holiday (employee-favourable).
+        $prevWorkdayUnpaid = null;
 
         for ($d = Carbon::parse($start, $tz)->startOfDay(); $d->lte($last); $d->addDay()) {
             $eff = $this->schedule->effectiveFor($employee, $d);
@@ -722,14 +951,60 @@ class AttendanceService
 
             $dateStr = $d->toDateString();
 
+            // --- Outside the employment window (Slice 4) ----------------------------------
+            // Days before the hire date or after the last working day are simply not owed.
+            // This must run BEFORE the past/future test below: a mid-cycle leaver's remaining
+            // days are still in the FUTURE, and the "no record yet, so don't charge it" rule
+            // would otherwise have paid them for days after they left. Pre-hire days already
+            // behaved this way by accident (a past workday with no record); now it is explicit
+            // and also correct for a cycle that has not finished.
+            if ($employmentStart !== null && $dateStr < $employmentStart) {
+                $unpaid += 1.0;
+
+                continue;
+            }
+            if ($employmentEnd !== null && $dateStr > $employmentEnd) {
+                $unpaid += 1.0;
+
+                continue;
+            }
+
+            // --- Non-working holiday (Slice 1) -------------------------------------------
+            // The monthly salary already covers a regular / special non-working holiday, so
+            // NOT working one is never an absence. Before this, every unworked holiday was
+            // charged a full day's pay (verified: Independence Day cost one day).
+            //
+            // A holiday that WAS worked falls through to the normal paid-day path below, so
+            // late/undertime still price normally and PayrollService::holidayPremiumFor()
+            // pays the premium on top. Only the unworked case short-circuits here.
+            $holidayType = $holidays[$dateStr] ?? null;
+            if ($holidayType !== null) {
+                $holidayRow = $rows->get($dateStr);
+                if (! ($holidayRow && $holidayRow->time_in)) {
+                    // Regular holidays are forfeited after an unpaid absence the workday
+                    // before; special non-working days carry no such condition.
+                    if ($holidayType === 'regular' && $prevWorkdayUnpaid === true) {
+                        $unpaid += 1.0;
+                    }
+
+                    // A holiday is not a workday for this purpose — it can neither break nor
+                    // extend the "absent the day before" chain, so leave the flag as it was.
+                    continue;
+                }
+            }
+
             // Approved leave covering this day: paid leave → no deduction; unpaid leave
             // (LWOP) → the full day is deducted (leave is full-day only).
             $leave = $leaves->first(fn ($l) => $dateStr >= Carbon::parse($l->start_date)->toDateString()
                 && $dateStr <= Carbon::parse($l->end_date)->toDateString());
             if ($leave) {
-                if ($leave->leaveType && ! $leave->leaveType->is_paid) {
+                $isUnpaidLeave = $leave->leaveType && ! $leave->leaveType->is_paid;
+                if ($isUnpaidLeave) {
                     $unpaid += 1.0;
                 }
+                // LWOP the day before a regular holiday forfeits the holiday pay; paid leave
+                // does not.
+                $prevWorkdayUnpaid = $isUnpaidLeave;
 
                 continue;
             }
@@ -740,12 +1015,33 @@ class AttendanceService
             // With one half off, the employee is expected to work the OTHER half — so a
             // per-minute mode still prices late/undertime against that half (F-3).
             if ($dayHalves = ($halfDays[$dateStr] ?? null)) {
-                $halfUnpaid = 0.5 * $dayHalves->count();
+                // Item 5 — clamp at one full day. The API blocks a duplicate date+period while
+                // pending/approved, so AM+PM = 1.0 is the practical maximum, but that check is a
+                // form-request `exists()` with no unique index behind it: two concurrent submits
+                // can both pass. Cheap defence against that and against direct inserts.
+                $halfUnpaid = min(1.0, 0.5 * $dayHalves->count());
                 $unpaid += $halfUnpaid;
+
+                // Item 8 — a late arrival on a half-day used to escape the per-N-lates penalty
+                // entirely, because this branch never touched the tally.
+                if ($row && $row->status === 'late') {
+                    $lateCount++;
+                }
+
+                // Item 8 — and an approved early-out on a half-day cost NOTHING: this branch
+                // never added earlyOutFraction, while `governed_by_early_out` told
+                // DeductionService not to price the undertime either. Charge it here, capped by
+                // whatever of the day is still payable.
+                $eoFrac = 0.0;
+                foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
+                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                }
+                $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
+                $unpaid += $eoFrac;
 
                 if ($deductionsActive && $dayHalves->count() === 1 && $row && $row->time_in) {
                     $ded = $this->deduction->forDay(
-                        $this->deductionCtx($row, $eff, $policy, (string) $dayHalves->first()->period, 1.0 - $halfUnpaid, isset($earlyOuts[$dateStr])),
+                        $this->deductionCtx($row, $eff, $policy, (string) $dayHalves->first()->period, 1.0 - $halfUnpaid - $eoFrac, isset($earlyOuts[$dateStr])),
                         $policy,
                     );
                     $unpaid += $ded->unpaidFraction;
@@ -755,6 +1051,10 @@ class AttendanceService
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
                 }
+
+                // Half a day worked is not an absence, so it doesn't forfeit a following
+                // regular holiday.
+                $prevWorkdayUnpaid = false;
 
                 continue; // the half-day itself is handled; skip absence classification
             }
@@ -787,23 +1087,33 @@ class AttendanceService
                     $flags = array_merge($flags, $ded->flags);
                 }
 
+                $prevWorkdayUnpaid = false; // they showed up
+
                 continue; // present or late → the day itself is paid
             }
             if ($row && $row->status === 'absent') {
                 $unpaid += 1.0;
+                $prevWorkdayUnpaid = true;
 
                 continue;
             }
             // No usable record: unpaid only once the workday is in the past.
             if ($d->lt($today)) {
                 $unpaid += 1.0;
+                $prevWorkdayUnpaid = true;
+            } else {
+                $prevWorkdayUnpaid = false; // today/future — not an absence yet
             }
         }
 
         // Tardiness penalty: every N lates in the range costs one day's pay. Now an
         // INDEPENDENT switch, so it can stack on top of the per-time (`per_hour`) charge.
+        $latePenaltyDays = 0.0;
         if ($policy->late_penalty_enabled && $policy->lates_per_deduction > 0) {
-            $unpaid += intdiv($lateCount, (int) $policy->lates_per_deduction);
+            // Item 13b.13 — reported separately so the payslip can name it, instead of the
+            // days disappearing into `unpaid_days` alongside genuine absences.
+            $latePenaltyDays = (float) intdiv($lateCount, (int) $policy->lates_per_deduction);
+            $unpaid += $latePenaltyDays;
         }
 
         return new UnpaidDaysResult(
@@ -812,6 +1122,7 @@ class AttendanceService
             undertimeMinutes: $undertimeMinutes,
             lateDays: round($lateDays, 6),
             undertimeDays: round($undertimeDays, 6),
+            latePenaltyDays: $latePenaltyDays,
             flags: array_values(array_unique($flags)),
         );
     }

@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\OvertimeRequest;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -221,6 +222,50 @@ class OvertimeRequestService
         $request->load(['employee.user', 'reviewer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log('declined', 'Overtime', "Declined {$employeeName}'s overtime request", $request);
+
+        return $request;
+    }
+
+    /**
+     * Cancel an overtime request (Slice 6). HR only — an approval is a commitment of company
+     * money, so undoing one is an HR act, and it keeps a single clear audit trail. Before
+     * this, `approve()`/`reject()` both guarded on `pending`, which left an approved request
+     * frozen: if the work never happened the overtime was paid anyway.
+     *
+     * Payroll ignores a cancelled request from the next recompute onward. An already-DISBURSED
+     * payslip is deliberately left alone (Slice 5 protects it) — HR settles the difference
+     * manually rather than have pay silently move under a payslip someone has already been given.
+     */
+    public function cancel(OvertimeRequest $request, User $actor, string $reason): OvertimeRequest
+    {
+        if (! $actor->hasAnyRole(['hr_officer', 'super_admin'])) {
+            throw new AuthorizationException('Only HR can cancel an overtime request.');
+        }
+
+        if (! in_array($request->status, ['pending', 'approved'], true)) {
+            throw ValidationException::withMessages([
+                'status' => ["Cannot cancel a request that is {$request->status}."],
+            ]);
+        }
+
+        $wasApproved = $request->status === 'approved';
+
+        $request->update([
+            'status' => 'cancelled',
+            'cancelled_at' => now(),
+            'cancelled_by' => $actor->id,
+            'cancel_reason' => $reason,
+        ]);
+
+        $request->load(['employee.user', 'reviewer', 'canceller']);
+        $name = $request->employee->user?->name ?? $request->employee->name;
+        $this->audit->log(
+            'cancelled',
+            'Overtime',
+            "Cancelled {$name}'s " . ($wasApproved ? 'approved ' : '')
+                . 'overtime request for ' . $request->work_date->format('M j') . " — {$reason}",
+            $request,
+        );
 
         return $request;
     }

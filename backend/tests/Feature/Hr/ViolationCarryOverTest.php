@@ -12,7 +12,6 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\ViolationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
-use Tests\TestCase;
 
 /**
  * Slice D (2026-07-27): the late tally can carry across months (`monthly_late_reset` OFF), and a
@@ -20,7 +19,7 @@ use Tests\TestCase;
  * red@6. Three unresolved lates last month + two this month ⇒ this month's colour depends on the
  * toggle and on what HR has resolved. Flags only — no pay effect.
  */
-class ViolationCarryOverTest extends TestCase
+class ViolationCarryOverTest extends HrTestCase
 {
     use RefreshDatabase;
 
@@ -32,10 +31,6 @@ class ViolationCarryOverTest extends TestCase
 
     protected function setUp(): void
     {
-        if (! extension_loaded('pdo_sqlite')) {
-            $this->markTestSkipped('pdo_sqlite not available.');
-        }
-
         parent::setUp();
 
         $tz = config('app.timezone_local');

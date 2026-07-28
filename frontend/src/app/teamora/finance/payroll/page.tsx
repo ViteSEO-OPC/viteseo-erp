@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown } from "lucide-react";
+import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -25,6 +26,7 @@ import { downloadHrPayslipPdf, downloadPayrollRunCsv } from "@/modules/hr/api/pa
 import {
   usePayrollRuns,
   usePayrollRun,
+  useSetPayrollRunLock,
   useRunPayroll,
   useMarkPayslipDone,
   usePayrollSettings,
@@ -71,7 +73,12 @@ export default function PayrollPage() {
       ? { frequency: activeGroup.frequency, cycle_start: period.start, cycle_end: period.end }
       : null;
 
-  async function saveSettings(patch: { frequency?: string; deduction_timing?: string; tax_timing?: string }) {
+  async function saveSettings(patch: {
+    frequency?: string;
+    deduction_timing?: string;
+    tax_timing?: string;
+    deminimis_annual_cap?: number | null;
+  }) {
     if (!settings) return;
     try {
       await updateSettingsMut.mutateAsync({
@@ -122,6 +129,10 @@ export default function PayrollPage() {
     : undefined;
   const alreadyRun = !!currentRun;
   const { data: detail } = usePayrollRun(currentRun?.id);
+  // Slice 5 — a re-run skips these, and a run can be locked once they are all disbursed.
+  const disbursedCount =
+    detail?.breakdown?.filter((r) => r.status === "disbursed").length ?? 0;
+  const lockMut = useSetPayrollRunLock();
   const history = (runs ?? []).filter((r) => r.id !== currentRun?.id);
   // A past run selected from the history modal → its per-employee breakdown.
   const { data: viewRun } = usePayrollRun(viewRunId ?? undefined);
@@ -240,10 +251,39 @@ export default function PayrollPage() {
                 </span>
               )}
             </Button>
+            {/* Slice 5 — seal the cycle once every payslip is paid out. */}
+            {detail?.can_lock && (
+              <Button
+                variant="outline"
+                disabled={lockMut.isPending}
+                title="Seal this cycle so it can never be recomputed"
+                onClick={() => lockMut.mutate({ id: detail.id, lock: true })}
+              >
+                <Lock />
+                {lockMut.isPending ? "Locking…" : "Lock this run"}
+              </Button>
+            )}
+            {detail?.is_locked && (
+              <Button
+                variant="outline"
+                disabled={lockMut.isPending}
+                title="Re-open this cycle so it can be recomputed (audit-logged)"
+                onClick={() => lockMut.mutate({ id: detail.id, lock: false })}
+              >
+                <LockOpen />
+                {lockMut.isPending ? "Unlocking…" : "Unlock"}
+              </Button>
+            )}
             <Button
               className="bg-warning text-white hover:bg-warning/90 disabled:opacity-50"
-              disabled={!cycle}
-              title={alreadyRun ? "Recompute this period with the latest data" : undefined}
+              disabled={!cycle || detail?.is_locked}
+              title={
+                detail?.is_locked
+                  ? "This run is locked — unlock it first"
+                  : alreadyRun
+                    ? "Recompute this period with the latest data"
+                    : undefined
+              }
               onClick={() => setConfirmOpen(true)}
             >
               <PlayCircle />
@@ -293,6 +333,35 @@ export default function PayrollPage() {
             options={TIMING_OPTIONS.map((t) => ({ value: t.value, label: t.label }))}
           />
           <p className="text-caption text-muted-foreground">When income tax is withheld.</p>
+        </div>
+        {/* Slice 10 — allowances are tax-free only up to this. Blank = no ceiling. */}
+        <div className="space-y-1.5 sm:col-span-3">
+          <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
+            Tax-free allowance ceiling (per year)
+          </p>
+          <input
+            type="number"
+            min={0}
+            step="0.01"
+            inputMode="decimal"
+            defaultValue={settings?.deminimis_annual_cap ?? ""}
+            disabled={!settings || updateSettingsMut.isPending}
+            placeholder="No ceiling — allowances are fully tax-free"
+            className="h-9 w-full max-w-xs rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-64"
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              const next = raw === "" ? null : Number(raw);
+              if (next !== (settings?.deminimis_annual_cap ?? null)) {
+                saveSettings({ deminimis_annual_cap: next });
+              }
+            }}
+          />
+          <p className="text-caption text-muted-foreground">
+            Food, transport and load allowances are de-minimis (tax-free) up to this much a year;
+            anything above it is taxed as compensation. Leave blank for no ceiling — that is the
+            current behaviour. The BIR reference figure is ₱90,000, but the correct number for
+            your mix of benefits is yours to set.
+          </p>
         </div>
       </div>
 
@@ -346,7 +415,11 @@ export default function PayrollPage() {
           )}
         </div>
         {detail?.breakdown ? (
-          <DataTable columns={columns} rows={detail.breakdown} rowKey={(_r, i) => i} />
+          <>
+            <DataTable columns={columns} rows={detail.breakdown} rowKey={(_r, i) => i} />
+            {/* Slice 8 — what these amounts were computed with. */}
+            <RunRulesSnapshot snapshot={detail.policy_snapshot} />
+          </>
         ) : (
           <div className="flex flex-col items-center gap-2 rounded-card border border-dashed border-border bg-card py-16 text-center">
             <PlayCircle className="size-8 text-muted-foreground" />
@@ -491,6 +564,15 @@ export default function PayrollPage() {
               latest salaries, attendance and reimbursements. It only computes — no payments are sent.
             </DialogDescription>
           </DialogHeader>
+          {/* Slice 5: be explicit that paid-out payslips are left alone. */}
+          {disbursedCount > 0 && (
+            <p className="rounded-card border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {disbursedCount} already-disbursed payslip{disbursedCount === 1 ? "" : "s"}
+              </span>{" "}
+              will be skipped — money already paid out is never recomputed.
+            </p>
+          )}
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Cancel</Button>

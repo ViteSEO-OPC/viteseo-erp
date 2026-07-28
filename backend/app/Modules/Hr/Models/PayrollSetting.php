@@ -10,11 +10,14 @@ class PayrollSetting extends Model
 
     protected $fillable = [
         'frequency', 'deduction_timing', 'tax_timing', 'anchor_date', 'pay_delay_days',
+        // Slice 10 — annual ceiling above which allowances become taxable (null = none).
+        'deminimis_annual_cap',
     ];
 
     protected $casts = [
         'anchor_date' => 'date',
         'pay_delay_days' => 'integer',
+        'deminimis_annual_cap' => 'decimal:2',
     ];
 
     /** The singleton company payroll settings row (created with defaults if absent). */

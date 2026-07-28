@@ -247,11 +247,12 @@ function thresholdFrom(tiers: LateTier[] | null | undefined): { over: number; ch
 }
 
 // The four alert levels must strictly ascend. Returns an error message, or null if OK.
-function ladderError(late: number[], absent: number[], missed: number[]): string | null {
+function ladderError(late: number[], absent: number[], missed: number[], longBreak: number[]): string | null {
   const ascends = (a: number[]) => a.every((v, i) => i === 0 || v > a[i - 1]);
   if (!ascends(late)) return "Lateness levels must increase: Low < Caution < Warning < Critical.";
   if (!ascends(absent)) return "Absence levels must increase: Low < Caution < Warning < Critical.";
   if (!ascends(missed)) return "Missed clock-out levels must increase: Low < Caution < Warning < Critical.";
+  if (!ascends(longBreak)) return "Over-long break levels must increase: Low < Caution < Warning < Critical.";
   return null;
 }
 
@@ -275,6 +276,11 @@ function AttendancePolicyEditor() {
   const [missedCaution, setMissedCaution] = useState(String(rungValue(vr, "missed_time_out", "yellow", "occurrence_min", 2)));
   const [missedWarning, setMissedWarning] = useState(String(rungValue(vr, "missed_time_out", "orange", "occurrence_min", 3)));
   const [missedCritical, setMissedCritical] = useState(String(rungValue(vr, "missed_time_out", "red", "occurrence_min", 4)));
+  // Long break -- by count of over-long-break days this month (Slice 9).
+  const [breakLow, setBreakLow] = useState(String(rungValue(vr, "long_break", "green", "occurrence_min", 1)));
+  const [breakCaution, setBreakCaution] = useState(String(rungValue(vr, "long_break", "yellow", "occurrence_min", 2)));
+  const [breakWarning, setBreakWarning] = useState(String(rungValue(vr, "long_break", "orange", "occurrence_min", 3)));
+  const [breakCritical, setBreakCritical] = useState(String(rungValue(vr, "long_break", "red", "occurrence_min", 4)));
   // Whether the late tally resets each calendar month (on) or carries over (off).
   const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
 
@@ -317,8 +323,10 @@ function AttendancePolicyEditor() {
   const [divisor, setDivisor] = useState(String(policy?.annual_divisor ?? 261));
   const [hoursPerDay, setHoursPerDay] = useState(String(policy?.hours_per_day_divisor ?? 8));
 
-  // Break limit (flag only).
-  const [maxBreak, setMaxBreak] = useState(String(policy?.max_break_minutes_per_day ?? 120));
+  // Break overage tolerances (flag only). The allowances live on the work schedule; lunch and
+  // break are judged separately, and 0 means no tolerance.
+  const [lunchGrace, setLunchGrace] = useState(String(policy?.lunch_grace_minutes ?? 15));
+  const [breakGrace, setBreakGrace] = useState(String(policy?.break_grace_minutes ?? 15));
 
   // Which card is currently saving (so only its button shows a spinner).
   const [saving, setSaving] = useState<string | null>(null);
@@ -342,6 +350,7 @@ function AttendancePolicyEditor() {
       [lateLow, lateCaution, lateWarning, lateCritical].map(Number),
       [absentLow, absentCaution, absentWarning, absentCritical].map(Number),
       [missedLow, missedCaution, missedWarning, missedCritical].map(Number),
+      [breakLow, breakCaution, breakWarning, breakCritical].map(Number),
     );
     if (err) {
       toast.error(err);
@@ -370,6 +379,12 @@ function AttendancePolicyEditor() {
         { occurrence_min: Number(missedWarning), severity: "orange" },
         { occurrence_min: Number(missedCaution), severity: "yellow" },
         { occurrence_min: Number(missedLow), severity: "green" },
+      ],
+      long_break: [
+        { occurrence_min: Number(breakCritical), severity: "red" },
+        { occurrence_min: Number(breakWarning), severity: "orange" },
+        { occurrence_min: Number(breakCaution), severity: "yellow" },
+        { occurrence_min: Number(breakLow), severity: "green" },
       ],
     } satisfies ViolationRules,
   });
@@ -500,6 +515,23 @@ function AttendancePolicyEditor() {
           <Hint>
             A forgotten clock-out is auto-credited to the scheduled end time — it never docks pay and
             never counts as overtime; these levels only set its colour in the Attendance flags.
+          </Hint>
+        </div>
+        {/* Slice 9 — over-long breaks became a real flag; these set its colour. */}
+        <div className="space-y-3">
+          <p className="text-[13px] font-semibold text-foreground">
+            Over-long break — days this month
+          </p>
+          <div className="flex flex-wrap items-end gap-4">
+            <NumberField id="pol-break-low" label="Low / Informational at" value={breakLow} onChange={setBreakLow} min={0} max={31} dot="green" />
+            <NumberField id="pol-break-caution" label="Caution at" value={breakCaution} onChange={setBreakCaution} min={Number(breakLow) + 1} max={31} dot="yellow" />
+            <NumberField id="pol-break-warning" label="Warning at" value={breakWarning} onChange={setBreakWarning} min={Number(breakCaution) + 1} max={31} dot="orange" />
+            <NumberField id="pol-break-critical" label="Critical at" value={breakCritical} onChange={setBreakCritical} min={Number(breakWarning) + 1} max={31} dot="red" />
+          </div>
+          <Hint>
+            A day counts when break + lunch runs past that employee&apos;s own schedule allowance by
+            more than the grace set under <strong>Break overage</strong> below. Flag only — a long
+            break never docks pay.
           </Hint>
         </div>
         <CheckBox
@@ -650,6 +682,15 @@ function AttendancePolicyEditor() {
               is the safer setting. A day&apos;s whole overrun is paid once it passes the minimum, and a
               missing clock-out never counts as overtime.
             </p>
+            {/* The late-arrival case surprises people, so say it outright rather than let HR
+                discover it on a payslip. See AttendanceService::autoOvertimeMinutesFor. */}
+            <p className="mt-2 text-xs text-foreground">
+              <strong>Arriving late does not cancel out overtime.</strong> Someone who comes in an hour
+              late and stays an hour past the shift is paid that overtime, and the late hour is deducted
+              separately. The two are never netted off — Philippine law (Art. 88) forbids offsetting
+              undertime with overtime, because overtime is worth more per hour. If that trade looks
+              wrong for your company, use &ldquo;Only when approved&rdquo; instead.
+            </p>
           </div>
         )}
         <Hint>
@@ -660,7 +701,10 @@ function AttendancePolicyEditor() {
         </Hint>
         <SaveButton
           pending={saving === "early_ot"}
-          onClick={() => saveCard("early_ot", { early_arrival_mode: earlyArrival, overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
+          // Slice 14 — early_arrival_mode is deliberately NOT sent: the control is disabled
+          // (no engine reads it) and the API now rejects anything but "none", so echoing a
+          // stored value back would 422 and block HR from saving the overtime settings.
+          onClick={() => saveCard("early_ot", { overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
         />
       </PolicySection>
 
@@ -698,9 +742,11 @@ function AttendancePolicyEditor() {
             regular holiday; night differential <strong>+10%</strong>. The server rejects anything below these.
           </p>
         </div>
+        {/* Item 13b.7 — this used to say only the holiday rate was live. All of them are. */}
         <Hint>
-          Only <strong>holiday premium</strong> reads these today; the overtime, rest-day and night rates take
-          effect as those features ship (Phases 1–3).
+          <strong>All of these move money now.</strong> Holiday premium, overtime, the rest-day
+          premium and the night differential each read their rate here on the next payroll run —
+          changing one changes what people are paid.
         </Hint>
         <SaveButton
           pending={saving === "premium_rates"}
@@ -759,16 +805,33 @@ function AttendancePolicyEditor() {
 
       <Divider />
 
-      {/* Break limit (flag only). */}
+      {/* Break overage (flag only). The LIMIT lives on each work schedule; this is the
+          tolerance on top of it — see ViolationService (Slice 9). */}
       <PolicySection
-        title="Break limits"
-        description="Over-long breaks are flagged for review — they are never deducted from pay."
+        title="Break overage"
+        description="How far past their own break allowance a day may run before it is flagged. Over-long breaks are never deducted from pay."
       >
-        <NumberField id="pol-max-break" label="Max break minutes / day" value={maxBreak} onChange={setMaxBreak} min={0} max={1440} />
-        <Hint>A day beyond this is flagged as a suspected forgotten punch, not fined.</Hint>
+        <div className="flex flex-wrap items-end gap-4">
+          <NumberField id="pol-lunch-grace" label="Lunch grace (minutes)" value={lunchGrace} onChange={setLunchGrace} min={0} max={240} />
+          <NumberField id="pol-break-grace" label="Break grace (minutes)" value={breakGrace} onChange={setBreakGrace} min={0} max={240} />
+        </div>
+        <Hint>
+          The allowances themselves come from each employee&apos;s <strong>work schedule</strong>
+          {" "}(unpaid lunch + paid break) — set them there, per schedule, not here. A shorter-lunch
+          schedule therefore gets a proportionally lower threshold instead of one company-wide
+          number for everyone.
+        </Hint>
+        <Hint>
+          Lunch and breaks are judged <strong>separately</strong>, so a short lunch can&apos;t pay
+          for a long break. Set a grace to <strong>0</strong> for no tolerance at all — exactly the
+          allowance still passes, one minute over is flagged.
+        </Hint>
         <SaveButton
           pending={saving === "break"}
-          onClick={() => saveCard("break", { max_break_minutes_per_day: Number(maxBreak) })}
+          onClick={() => saveCard("break", {
+            lunch_grace_minutes: Number(lunchGrace),
+            break_grace_minutes: Number(breakGrace),
+          })}
         />
       </PolicySection>
 

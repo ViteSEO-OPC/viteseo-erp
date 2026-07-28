@@ -212,6 +212,10 @@ export default function PayslipsPage() {
               <Row label="PhilHealth" value={formatPeso(detail.payslip.philhealth)} negative />
               <Row label="Pag-IBIG" value={formatPeso(detail.payslip.pagibig)} negative />
               <Row label="Withholding tax" value={formatPeso(detail.payslip.withholding_tax)} negative />
+              {/* Slice 11a — benefit shares, named individually rather than one lump. */}
+              {(detail.payslip.other_deductions_breakdown ?? []).map((d) => (
+                <Row key={d.name} label={d.name} value={formatPeso(d.amount)} negative />
+              ))}
             </Section>
 
             <div className="mt-4 flex items-center justify-between border-t-2 border-brand py-5">
@@ -564,6 +568,16 @@ function AttendanceBasis({ payslip }: { payslip: Payslip }) {
         <Row
           label={`Late (${payslip.late_minutes} min)`}
           value={formatPeso(payslip.late_deduction)}
+          negative
+        />
+      )}
+      {/* Item 13b.13 — the per-N-lates penalty used to vanish into "Unpaid days". */}
+      {payslip.late_penalty_days > 0 && (
+        <Row
+          label={`Tardiness penalty (${payslip.late_penalty_days} ${
+            payslip.late_penalty_days === 1 ? "day" : "days"
+          })`}
+          value={formatPeso(payslip.late_penalty_days * payslip.daily_rate)}
           negative
         />
       )}
