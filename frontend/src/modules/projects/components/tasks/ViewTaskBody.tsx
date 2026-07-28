@@ -562,7 +562,9 @@ export function ViewTaskBody({
               placeholder="Task name"
             />
           ) : (
-            <h1 className="text-2xl font-bold text-ink sm:text-3xl">{task.title}</h1>
+            <h1 className="min-w-0 text-2xl font-bold text-ink wrap-break-word sm:text-3xl">
+              {task.title}
+            </h1>
           )}
           {canFullEdit &&
             (editing ? (
@@ -613,7 +615,11 @@ export function ViewTaskBody({
           </Field>
         ) : (
           task.description && (
-            <p className="text-sm leading-relaxed text-ink-soft">{task.description}</p>
+            // `wrap-break-word` so an unbroken run (a pasted URL, say) breaks
+            // instead of spilling across the right-hand column.
+            <p className="text-sm leading-relaxed text-ink-soft wrap-break-word">
+              {task.description}
+            </p>
           )
         )}
 
