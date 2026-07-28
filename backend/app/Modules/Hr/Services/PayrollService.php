@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Http\Resources\PayslipResource;
 use App\Modules\Hr\Models\AttendancePolicy;
+use App\Modules\Hr\Models\ContributionVersion;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LoanPayment;
 use App\Modules\Hr\Models\OvertimeRequest;
@@ -128,8 +129,9 @@ class PayrollService
         $monthlyAllowance = $this->allowances->monthlyFor($employee);
         $perPeriodAllowance = $periodsPerYear > 0 ? round(($monthlyAllowance * 12) / $periodsPerYear, 2) : 0.0;
 
-        // Only the contributions this employee is enrolled in, at the configured rates.
-        $contribConfig = $this->contributions->effectiveFor($employee);
+        // Only the contributions this employee is enrolled in, at the rates in force for THIS
+        // period (Slice B3a) — not whatever they are today.
+        $contribConfig = $this->contributions->effectiveFor($employee, $dist['cycle_end'] ?? null);
 
         // Per-employee statutory OVERRIDES: an amount set on the profile wins over the
         // company-config computation (for contributions the employee is enrolled in).
@@ -318,13 +320,22 @@ class PayrollService
      * in force, it does not restore it. That is why Slice 5's lock exists: the lock is what stops
      * an old cycle being re-priced, not this.
      */
-    private function policySnapshot(PayrollSetting $setting): array
+    private function policySnapshot(PayrollSetting $setting, string $cycleEnd): array
     {
         return [
             'version' => self::SNAPSHOT_VERSION,
             'captured_at' => now()->toIso8601String(),
             'attendance_policy' => $this->attendancePolicy->get()
                 ->only(array_keys(AttendancePolicyService::DEFAULTS)),
+            // Slice B3a — the dated rate versions actually in force for this cycle. The
+            // `contributions` block below is the enrolment config; this is what priced it.
+            'contribution_versions' => $this->contributions->versionsAsOf($cycleEnd)
+                ->map(fn ($v) => $v->only([
+                    'type', 'basis', 'employee_rate', 'employer_rate', 'salary_floor', 'salary_cap',
+                    'employee_amount_cap', 'employer_amount_cap', 'fixed_employer_add_on', 'add_on_min_salary',
+                ]) + ['effective_from' => $v->effective_from?->toDateString()])
+                ->values()
+                ->all(),
             // Statutory rates + who is enrolled drive every deduction line.
             'contributions' => $this->contributions->settings()
                 ->map(fn ($s) => [
@@ -335,13 +346,13 @@ class PayrollService
                 ->values()
                 ->all(),
             // Frequency sets per-period pay; the timings decide which cutoff deductions land on.
-            'payroll_setting' => [
-                'frequency' => $setting->frequency,
-                'deduction_timing' => $setting->deduction_timing,
-                'tax_timing' => $setting->tax_timing,
-                'anchor_date' => $setting->anchor_date?->toDateString(),
-                'pay_delay_days' => $setting->pay_delay_days,
-            ],
+            //
+            // Built from the model's fillable, NOT hand-listed. The five keys here used to be
+            // written out by hand, and Slice 10 added `deminimis_annual_cap` to the settings two
+            // slices later without adding it here — so a payslip could not explain its
+            // taxable-allowance line. Slice 8 existed to stop exactly this drift and had fixed
+            // only its attendance-policy half.
+            'payroll_setting' => $setting->only($setting->getFillable()),
         ];
     }
 
@@ -477,7 +488,20 @@ class PayrollService
             return 0.0; // not enrolled → no employer share either
         }
 
-        return $this->contribution($config[$type], $base, 'employer_rate', 'employer_cap');
+        $amount = $this->contribution($config[$type], $base, 'employer_rate', 'employer_cap');
+
+        // Slice B3a — a flat employer-only add-on above a salary threshold (SSS's Employees'
+        // Compensation fund). Deliberately applied AFTER the amount cap and never mirrored on the
+        // employee side: it is the company's cost, and must not touch net pay or the tax base.
+        $addOn = (float) ($config[$type]['fixed_employer_add_on'] ?? 0);
+        if ($addOn > 0) {
+            $threshold = $config[$type]['add_on_min_salary'] ?? null;
+            if ($threshold === null || $base >= (float) $threshold) {
+                $amount = round($amount + $addOn, 2);
+            }
+        }
+
+        return $amount;
     }
 
     /**
@@ -491,12 +515,25 @@ class PayrollService
      */
     private function contribution(array $config, float $base, string $rateKey = 'rate', string $capKey = 'cap'): float
     {
-        $creditable = $base;
-        if (isset($config['salary_floor'])) {
-            $creditable = max((float) $config['salary_floor'], $creditable);
+        // Slice B3b — a bracket-based contribution (SSS) charges on the band's Monthly Salary
+        // Credit, NOT on the salary itself: ₱20,100 is charged on ₱20,000. Percentage-of-salary
+        // is wrong for almost everyone, in both directions.
+        //
+        // A bracket version with no bands falls through to the percentage path rather than
+        // charging zero — an unfinished table must not silently wipe a statutory deduction.
+        $creditable = null;
+        if (($config['basis'] ?? 'percentage') === 'bracket' && ! empty($config['brackets'])) {
+            $creditable = ContributionVersion::mscFor($config['brackets'], $base);
         }
-        if (isset($config['salary_cap'])) {
-            $creditable = min((float) $config['salary_cap'], $creditable);
+
+        if ($creditable === null) {
+            $creditable = $base;
+            if (isset($config['salary_floor'])) {
+                $creditable = max((float) $config['salary_floor'], $creditable);
+            }
+            if (isset($config['salary_cap'])) {
+                $creditable = min((float) $config['salary_cap'], $creditable);
+            }
         }
 
         $amount = $creditable * (float) ($config[$rateKey] ?? 0);
@@ -1002,6 +1039,8 @@ class PayrollService
                 'tax_timing' => $setting->tax_timing,
                 // Slice 10 — the ceiling above which allowances become taxable (null = none).
                 'deminimis_annual_cap' => $setting->deminimis_annual_cap,
+                // Slice B3a — resolves the statutory rates in force for this period.
+                'cycle_end' => $cycleEnd,
             ];
 
             // Refresh semantics: reuse this group+period's run if one exists, otherwise
@@ -1262,7 +1301,7 @@ class PayrollService
                 'run_by' => $runner->id,
                 // Step 4b / Slice 8 — every rule that priced this run, so an old payslip can
                 // always be explained. A record, not a replay: see policySnapshot().
-                'policy_snapshot' => $this->policySnapshot($setting),
+                'policy_snapshot' => $this->policySnapshot($setting, $cycleEnd),
             ]);
 
             // Audit trail: who ran (or re-ran) which pay cycle, for how many people.

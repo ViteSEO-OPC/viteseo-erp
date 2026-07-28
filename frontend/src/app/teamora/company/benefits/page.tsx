@@ -6,7 +6,7 @@ import { Pencil, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
-import { formatPeso } from "@/core/lib/format";
+import { formatPeso, formatDate } from "@/core/lib/format";
 import { notify as toast } from "@/core/lib/notify";
 import { usePayrollSettings, useUpdatePayrollSettings } from "@/modules/hr/hooks/use-payroll";
 import { useContributionSettings } from "@/modules/hr/hooks/use-benefits";
@@ -14,6 +14,7 @@ import { useBenefitPrograms } from "@/modules/hr/hooks/use-benefit-programs";
 import { useEmployees } from "@/modules/hr/hooks/use-employees";
 import { AssignBenefitsDialog } from "@/modules/hr/components/assign-benefits-dialog";
 import { EditAllowanceDialog } from "@/modules/hr/components/edit-allowance-dialog";
+import { EditContributionDialog } from "@/modules/hr/components/edit-contribution-dialog";
 import { EditHmoDialog } from "@/modules/hr/components/edit-hmo-dialog";
 import {
   CONTRIBUTION_LABELS,
@@ -49,6 +50,7 @@ export default function BenefitsPage() {
 
   const [assignOpen, setAssignOpen] = useState(false);
   const [editAllowance, setEditAllowance] = useState<BenefitProgram | null>(null);
+  const [editContribution, setEditContribution] = useState<string | null>(null);
   const [editHmo, setEditHmo] = useState<BenefitProgram | null>(null);
 
   return (
@@ -79,7 +81,7 @@ export default function BenefitsPage() {
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {(settings ?? []).map((s) => (
-              <GovCard key={s.id} setting={s} />
+              <GovCard key={s.id} setting={s} onEdit={() => setEditContribution(s.type)} />
             ))}
           </div>
         </section>
@@ -128,6 +130,11 @@ export default function BenefitsPage() {
         allowances={allowances}
         hmoPlans={hmoPlans}
       />
+      <EditContributionDialog
+        type={editContribution}
+        onOpenChange={(o) => !o && setEditContribution(null)}
+      />
+
       <EditAllowanceDialog
         program={editAllowance}
         onOpenChange={(o) => !o && setEditAllowance(null)}
@@ -138,10 +145,23 @@ export default function BenefitsPage() {
 }
 
 // A government contribution — read-only, shows the statutory rate (system managed).
-function GovCard({ setting }: { setting: ContributionSetting }) {
-  const rate = Number(setting.config.rate ?? 0);
-  const employer = Number(setting.config.employer_rate ?? 0);
+function GovCard({ setting, onEdit }: { setting: ContributionSetting; onEdit: () => void }) {
+  // Slice B3a/b — the version in force, NOT the legacy `config`. Reading `config` here meant the
+  // card showed 4.5% while payroll charged 5% after a rate change.
+  const current = setting.current;
+  const rate = Number(current?.employee_rate ?? 0);
+  const employer = Number(current?.employer_rate ?? 0);
   const label = CONTRIBUTION_LABELS[setting.type] ?? setting.type;
+
+  // How it's charged, in one line — so the card explains itself without opening the dialog.
+  const basis =
+    current?.basis === "bracket"
+      ? `${current.bracket_count} salary brackets`
+      : current?.employee_amount_cap
+        ? `max ${formatPeso(current.employee_amount_cap)}/mo`
+        : current?.salary_cap
+          ? `up to ${formatPeso(current.salary_cap)} salary`
+          : "uncapped";
 
   return (
     <div className="rounded-card border border-border bg-card p-5">
@@ -154,8 +174,21 @@ function GovCard({ setting }: { setting: ContributionSetting }) {
       </div>
       <p className="mt-4 text-3xl font-bold text-foreground">{formatPct(rate)}</p>
       <p className="mt-1 text-xs text-muted-foreground">
-        Employee share{employer ? ` · Employer ${formatPct(employer)}` : ""} · statutory table
+        Employee{employer ? ` · Employer ${formatPct(employer)}` : ""} · {basis}
       </p>
+      {current && (
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          In force since {formatDate(current.effective_from)}
+          {current.fixed_employer_add_on > 0 &&
+            ` · +${formatPeso(current.fixed_employer_add_on)} employer`}
+        </p>
+      )}
+      {/* Slice B3a — these rates change by legislation; each change is dated so old payslips
+          keep the figures that applied to them. */}
+      <Button size="sm" variant="outline" className="mt-4" onClick={onEdit}>
+        <Pencil />
+        Update rates
+      </Button>
     </div>
   );
 }

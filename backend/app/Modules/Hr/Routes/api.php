@@ -234,6 +234,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Company → Benefits: contribution settings + per-employee checklist.
         Route::get('contribution-settings', [BenefitController::class, 'settingsIndex']);
+        // Slice B3a — dated statutory rate versions.
+        Route::get('contribution-versions', [BenefitController::class, 'versionsIndex']);
+        Route::post('contribution-versions', [BenefitController::class, 'storeVersion']);
         Route::match(['put', 'patch'], 'contribution-settings/{contributionSetting}', [BenefitController::class, 'updateSetting']);
         Route::get('employees/{employee}/benefits', [BenefitController::class, 'employeeBenefitsIndex']);
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);
