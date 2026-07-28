@@ -12,7 +12,7 @@ import { Button, Card } from "@/core/ui";
  */
 export default function AccessDeniedPage() {
   return (
-    <div className="mx-auto flex max-w-[1400px] items-center justify-center px-4 py-16 sm:px-6 lg:px-8">
+    <div className="flex items-center justify-center px-4 py-4 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md p-10 text-center">
         <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-danger/10">
           <Lock className="h-7 w-7 text-danger" />

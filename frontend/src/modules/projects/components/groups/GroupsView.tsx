@@ -126,7 +126,7 @@ export function GroupsView(): React.ReactElement {
   const completed = groupTasks.filter((t) => t.status?.key === "done").length;
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-ink sm:text-[32px]">Groups</h1>

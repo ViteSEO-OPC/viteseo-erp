@@ -17,7 +17,7 @@ export function TeamView() {
   // Show loading state while auth is being checked
   if (!authChecked) {
     return (
-      <div className="mx-auto max-w-[1400px] px-8 py-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <Card className="p-8 text-center">
           <p className="text-ink-soft">Loading…</p>
         </Card>

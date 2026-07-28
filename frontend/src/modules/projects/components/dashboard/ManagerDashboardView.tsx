@@ -83,7 +83,7 @@ export function ManagerDashboardView(): React.ReactElement {
   );
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       <h1 className="text-2xl font-bold text-ink sm:text-3xl lg:text-4xl">
         Overview
       </h1>

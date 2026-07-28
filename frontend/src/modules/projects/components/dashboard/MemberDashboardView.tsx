@@ -57,7 +57,7 @@ export function MemberDashboardView(): React.ReactElement {
   const openTask = useOpenTask();
 
   return (
-    <div className="mx-auto max-w-[1400px] px-8 py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       <h1 className="text-4xl font-bold text-ink">Dashboard</h1>
 
       <div className="mt-6">

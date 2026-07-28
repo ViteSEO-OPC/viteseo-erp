@@ -158,7 +158,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 
   if (forbidden) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <p className="text-ink-soft">Redirecting…</p>
       </div>
     );
@@ -169,7 +169,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   // for a moment before the 403 arrives and redirects them.
   if (projectQuery.isLoading) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <p className="text-ink-soft">Loading project…</p>
       </div>
     );
@@ -177,7 +177,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 
   if (isError) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <Card className="p-8 text-center">
           <p className="font-semibold text-danger">
             Couldn&apos;t load this project.
@@ -191,7 +191,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       {/* Header — "Back to workspace" only for managers; members can't open the
           workspace detail view, so the link would dead-end for them. */}
       {isManager && project && (
