@@ -162,9 +162,17 @@ function StatusSection({
                     </span>
                   </>
                 ) : i.groupName ? (
-                  <span className="text-sm text-ink-soft">
-                    {i.groupName}
-                  </span>
+                  <>
+                    {/* Group tasks read by their group's color. */}
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: i.groupColor ?? "#6366f1" }}
+                      aria-hidden
+                    />
+                    <span className="truncate text-sm text-ink-soft">
+                      {i.groupName}
+                    </span>
+                  </>
                 ) : i.kind === "subtask" ? (
                   <span className="text-sm text-ink-soft">My subtask</span>
                 ) : (
@@ -236,7 +244,7 @@ function StatusSection({
               <p className="text-xs text-ink-faint">↳ subtask in {i.parentTitle}</p>
             )}
             <div className="mt-3 flex flex-wrap items-center gap-3">
-              {i.assignee && (
+              {i.assignee ? (
                 <span className="flex items-center gap-2">
                   <Avatar
                     name={i.assignee.name}
@@ -247,7 +255,19 @@ function StatusSection({
                     {i.assignee.name}
                   </span>
                 </span>
-              )}
+              ) : i.groupName ? (
+                <span className="flex min-w-0 items-center gap-2">
+                  {/* Group tasks read by their group's color. */}
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: i.groupColor ?? "#6366f1" }}
+                    aria-hidden
+                  />
+                  <span className="truncate text-sm text-ink-soft">
+                    {i.groupName}
+                  </span>
+                </span>
+              ) : null}
               <span
                 className={`text-xs ${
                   isOverdue(i.deadline, i.statusKey)
