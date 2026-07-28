@@ -70,6 +70,8 @@ export interface ViolationRules {
   late?: ViolationRule[];
   absence?: ViolationRule[];
   missed_time_out?: ViolationRule[];
+  /** Slice 9 — days where break + lunch ran past the schedule allowance. Flag only. */
+  long_break?: ViolationRule[];
 }
 
 export interface AttendancePolicy {
@@ -112,8 +114,9 @@ export interface AttendancePolicy {
   hours_per_day_divisor: number;
 
   // Breaks are FLAGGED, never deducted.
-  max_break_minutes_per_day: number;
-  over_max_break_action: "flag_only";
+  /** Slice 9 -- tolerance over each schedule's own allowance before flagging. 0 = none. */
+  lunch_grace_minutes: number;
+  break_grace_minutes: number;
 
   // Violation colour ladder (disciplinary flags — never a pay deduction).
   violation_rules: ViolationRules | null;

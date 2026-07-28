@@ -32,6 +32,9 @@ class PayrollRunResource extends JsonResource
             'can_lock' => $this->whenLoaded('payslips', fn () => $this->locked_at === null
                 && $this->payslips->isNotEmpty()
                 && $this->payslips->every(fn ($p) => $p->status === 'disbursed')),
+            // Slice 8 — the rules in force when this run executed. Detail view only: it's a
+            // sizeable blob and the runs LIST would carry one per row for no reason.
+            'policy_snapshot' => $this->whenLoaded('payslips', fn () => $this->policy_snapshot),
             // Per-employee breakdown (only when payslips are eager-loaded).
             'breakdown' => $this->whenLoaded('payslips', fn () => $this->payslips->map(fn ($p) => [
                 'id' => $p->id,

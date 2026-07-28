@@ -140,17 +140,49 @@ class PayrollService
         return $slip;
     }
 
-    /** The deduction-relevant policy fields, captured onto a run for reproducibility (4b). */
-    private function policySnapshot(): array
-    {
-        $p = $this->attendancePolicy->get();
+    /** Snapshot format. v1 was a flat map of 13 attendance-policy fields; v2 is grouped. */
+    private const SNAPSHOT_VERSION = 2;
 
-        return $p->only([
-            'late_deduction_mode', 'lates_per_deduction', 'late_penalty_enabled', 'late_minutes_from', 'late_tiers',
-            'undertime_deduction_mode', 'missing_clockout_mode',
-            'deduction_rounding', 'deduction_block_minutes', 'daily_deduction_cap',
-            'daily_rate_basis', 'annual_divisor', 'hours_per_day_divisor',
-        ]);
+    /**
+     * Every setting that priced this run, captured onto it so a later config change can never
+     * make an old payslip inexplicable (4b, completed in Slice 8).
+     *
+     * WHY IT GREW. v1 hand-listed 13 deduction fields and drifted: it captured none of the seven
+     * premium/overtime rate columns, `overtime_mode`, or `night_diff_pct` — all of which move
+     * money — so "a policy change never silently re-prices these payslips" was simply untrue for
+     * premium pay. The attendance policy is now taken from `array_keys(DEFAULTS)` so a new column
+     * is captured the day it is added and this can't drift again. Contribution config and the pay
+     * schedule are captured for the same reason: both set prices.
+     *
+     * INFORMATIONAL, NOT REPLAY. A re-run always uses the CURRENT rules — this records what was
+     * in force, it does not restore it. That is why Slice 5's lock exists: the lock is what stops
+     * an old cycle being re-priced, not this.
+     */
+    private function policySnapshot(PayrollSetting $setting): array
+    {
+        return [
+            'version' => self::SNAPSHOT_VERSION,
+            'captured_at' => now()->toIso8601String(),
+            'attendance_policy' => $this->attendancePolicy->get()
+                ->only(array_keys(AttendancePolicyService::DEFAULTS)),
+            // Statutory rates + who is enrolled drive every deduction line.
+            'contributions' => $this->contributions->settings()
+                ->map(fn ($s) => [
+                    'type' => $s->type,
+                    'is_active' => (bool) $s->is_active,
+                    'config' => $s->config,
+                ])
+                ->values()
+                ->all(),
+            // Frequency sets per-period pay; the timings decide which cutoff deductions land on.
+            'payroll_setting' => [
+                'frequency' => $setting->frequency,
+                'deduction_timing' => $setting->deduction_timing,
+                'tax_timing' => $setting->tax_timing,
+                'anchor_date' => $setting->anchor_date?->toDateString(),
+                'pay_delay_days' => $setting->pay_delay_days,
+            ],
+        ];
     }
 
     /** How much of a MONTHLY deduction lands on this period, per the timing setting. */
@@ -938,9 +970,9 @@ class PayrollService
                 'employee_count' => $count,
                 'run_at' => now(),
                 'run_by' => $runner->id,
-                // Step 4b — the attendance policy as it stood when this run executed, so a
-                // later policy change never silently re-prices these payslips.
-                'policy_snapshot' => $this->policySnapshot(),
+                // Step 4b / Slice 8 — every rule that priced this run, so an old payslip can
+                // always be explained. A record, not a replay: see policySnapshot().
+                'policy_snapshot' => $this->policySnapshot($setting),
             ]);
 
             // Audit trail: who ran (or re-ran) which pay cycle, for how many people.

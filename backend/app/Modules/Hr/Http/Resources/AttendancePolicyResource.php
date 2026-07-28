@@ -44,8 +44,8 @@ class AttendancePolicyResource extends JsonResource
             'annual_divisor' => (int) $this->annual_divisor,
             'hours_per_day_divisor' => (int) $this->hours_per_day_divisor,
 
-            'max_break_minutes_per_day' => (int) $this->max_break_minutes_per_day,
-            'over_max_break_action' => $this->over_max_break_action,
+            'lunch_grace_minutes' => (int) $this->lunch_grace_minutes,
+            'break_grace_minutes' => (int) $this->break_grace_minutes,
             'violation_rules' => $this->violation_rules,
 
             'task_format' => $this->task_format,

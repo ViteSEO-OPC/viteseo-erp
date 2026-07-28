@@ -60,8 +60,9 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'annual_divisor' => ['sometimes', 'integer', 'min:1', 'max:366'],
             'hours_per_day_divisor' => ['sometimes', 'integer', 'min:1', 'max:24'],
 
-            'max_break_minutes_per_day' => ['sometimes', 'integer', 'min:0', 'max:1440'],
-            'over_max_break_action' => ['sometimes', 'in:flag_only'],
+            // 0 is meaningful: no tolerance at all.
+            'lunch_grace_minutes' => ['sometimes', 'integer', 'min:0', 'max:240'],
+            'break_grace_minutes' => ['sometimes', 'integer', 'min:0', 'max:240'],
 
             // Violation colour ladder (step 3c). Rungs are evaluated top-down, first match
             // wins. Severity names are fixed — Violation::SEVERITY_RANK depends on them.

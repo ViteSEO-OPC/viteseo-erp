@@ -33,8 +33,8 @@ class AttendancePolicy extends Model
         'daily_rate_basis',
         'annual_divisor',
         'hours_per_day_divisor',
-        'max_break_minutes_per_day',
-        'over_max_break_action',
+        'lunch_grace_minutes',
+        'break_grace_minutes',
         'violation_rules',
         'task_format',
     ];
@@ -56,7 +56,8 @@ class AttendancePolicy extends Model
         'daily_deduction_cap' => 'decimal:2',
         'annual_divisor' => 'integer',
         'hours_per_day_divisor' => 'integer',
-        'max_break_minutes_per_day' => 'integer',
+        'lunch_grace_minutes' => 'integer',
+        'break_grace_minutes' => 'integer',
         'violation_rules' => 'array',
         'task_format' => 'array',
     ];

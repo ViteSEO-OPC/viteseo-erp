@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -380,7 +381,11 @@ export default function PayrollPage() {
           )}
         </div>
         {detail?.breakdown ? (
-          <DataTable columns={columns} rows={detail.breakdown} rowKey={(_r, i) => i} />
+          <>
+            <DataTable columns={columns} rows={detail.breakdown} rowKey={(_r, i) => i} />
+            {/* Slice 8 — what these amounts were computed with. */}
+            <RunRulesSnapshot snapshot={detail.policy_snapshot} />
+          </>
         ) : (
           <div className="flex flex-col items-center gap-2 rounded-card border border-dashed border-border bg-card py-16 text-center">
             <PlayCircle className="size-8 text-muted-foreground" />

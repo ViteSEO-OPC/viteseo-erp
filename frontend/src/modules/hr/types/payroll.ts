@@ -50,7 +50,28 @@ export interface PayrollRun {
   is_locked: boolean;
   /** Only present when the breakdown is loaded: every payslip is disbursed. */
   can_lock?: boolean;
+  /** Slice 8 — the rules in force when this run executed. Detail view only. */
+  policy_snapshot?: PolicySnapshot | null;
   breakdown?: PayrollBreakdownRow[];
+}
+
+/** One statutory contribution as it stood when a run executed. */
+export interface PolicySnapshotContribution {
+  type: string;
+  is_active: boolean;
+  config: Record<string, number | string | null> | null;
+}
+
+/**
+ * Everything that priced a payroll run (Slice 8). `version` guards the shape — v1 runs
+ * stored a flat map of deduction fields only.
+ */
+export interface PolicySnapshot {
+  version?: number;
+  captured_at?: string;
+  attendance_policy?: Record<string, unknown>;
+  contributions?: PolicySnapshotContribution[];
+  payroll_setting?: Record<string, unknown>;
 }
 
 // Employee payslip HISTORY row — periods only, NO amounts. `unlocked` = viewable once

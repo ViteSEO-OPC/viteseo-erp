@@ -51,7 +51,10 @@ class DeductionService
             return DeductionResult::zero();
         }
 
-        $flags = $this->breakFlags($ctx, $policy);
+        // Break/lunch overage is never charged, and is no longer detected here: ViolationService
+        // owns it (Slice 9), so it is flagged against the employee's own schedule entitlement and
+        // works whether or not a deduction mode is switched on. Breaks are not a pay input.
+        $flags = [];
 
         // --- the worked window (a half-day shifts start/end to the worked half) ---
         [$workStart, $workEnd] = $this->workedWindow($ctx);
@@ -181,23 +184,4 @@ class DeductionService
         return (int) round($hours * 60);
     }
 
-    /**
-     * Break/lunch overage is FLAGGED for HR, never charged (2026-07-21 revision). A day
-     * whose recorded break exceeds the policy cap is a suspected forgotten punch (F-6).
-     *
-     * @param  array<string,mixed>  $ctx
-     * @return list<string>
-     */
-    private function breakFlags(array $ctx, AttendancePolicy $policy): array
-    {
-        $flags = [];
-        $break = (int) ($ctx['break_minutes'] ?? 0);
-        $lunch = (int) ($ctx['lunch_minutes'] ?? 0);
-
-        if ($break + $lunch > (int) $policy->max_break_minutes_per_day) {
-            $flags[] = 'long_break';
-        }
-
-        return $flags;
-    }
 }

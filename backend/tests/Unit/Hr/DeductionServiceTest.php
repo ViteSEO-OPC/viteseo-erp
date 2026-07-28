@@ -208,15 +208,26 @@ class DeductionServiceTest extends TestCase
         $this->assertEqualsWithDelta(120 / 480, $r90->unpaidFraction, 1e-9);
     }
 
-    public function test_long_break_is_flagged_but_never_charged(): void
+    /**
+     * Breaks are not a pay input — however long they run, this service charges nothing for
+     * them. Detecting an OVERLONG break moved to ViolationService in Slice 9 (it is measured
+     * against the employee's own schedule entitlement, and must work with every deduction mode
+     * off); see ViolationBreakFlagTest. What stays guarded here is that it never costs money.
+     */
+    public function test_a_long_break_never_costs_pay(): void
     {
-        // 40-min break + 90-min lunch = 130 > 120 cap → flagged, but no pay moves.
         $r = $this->svc->forDay(
             $this->ctx(['break_minutes' => 40, 'lunch_minutes' => 90]),
             $this->policy(), // all modes off
         );
-        $this->assertContains('long_break', $r->flags);
         $this->assertSame(0.0, $r->unpaidFraction);
+
+        // …and it stays zero even with both deduction modes on: only late/undertime are charged.
+        $onTime = $this->svc->forDay(
+            $this->ctx(['break_minutes' => 40, 'lunch_minutes' => 90]),
+            $this->policy(['late_deduction_mode' => 'per_hour', 'undertime_deduction_mode' => 'per_hour']),
+        );
+        $this->assertSame(0.0, $onTime->unpaidFraction);
     }
 
     public function test_components_sum_to_the_total_fraction(): void

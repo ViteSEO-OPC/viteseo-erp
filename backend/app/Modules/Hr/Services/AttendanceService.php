@@ -655,6 +655,35 @@ class AttendanceService
      * Each entry also reports how much of that overrun fell in the NIGHT window, so the night
      * differential can be compounded onto the overtime rate for those minutes (ND-1 tightening).
      *
+     * ─────────────────────────────────────────────────────────────────────────────────────────
+     * DO NOT "FIX" THE LATE-ARRIVAL CASE BY NETTING. Measuring from `end_time` is deliberate.
+     *
+     * Arrive an hour late, leave an hour past the shift, and this pays 60 minutes of overtime
+     * while the late hour is separately docked. That looks like the employee profits from being
+     * late, and it is tempting to subtract one from the other. Two settled rulings say no:
+     *
+     *   • Rule 2e — overtime is measured against `end_time`, NEVER against hours worked:
+     *         overtimeMinutes = max(0, time_out − end_time)     ✅
+     *         overtimeMinutes = hoursWorked − expectedHours     ❌ never
+     *     Someone who works 08:00–18:00 straight through their meal has a 10-hour clock reading
+     *     and ZERO overtime, because they left at their scheduled end. Working through lunch is
+     *     not the same as working late.
+     *
+     *   • Finding F-4 — `netOvertime = minutesPastEnd − lateMinutes − undertimeMinutes` is
+     *     NON-COMPLIANT. Labor Code Art. 88 forbids offsetting undertime with overtime, because
+     *     overtime carries a ≥125% premium while undertime is docked at the plain rate — netting
+     *     shortchanges the worker. The deduction ledger and the OT ledger stay separate.
+     *
+     * Note that `workedMinutes − expectedMinutes` is NOT a third option: with the meal equal to
+     * the scheduled break it reduces algebraically to `minutesPastEnd − lateMinutes`, i.e. exactly
+     * the netting F-4 rejected; and with the RECORDED lunch it manufactures overtime out of a
+     * skipped meal, which is the case 2e exists to prevent.
+     *
+     * The answer to the apparent "profit" is that `approved_only` is the default: unapproved
+     * late-staying simply isn't overtime, so there is no premium to game. Auto mode remains
+     * available for companies that want it, and the Rules page warns about exactly this.
+     * ─────────────────────────────────────────────────────────────────────────────────────────
+     *
      * @return array<string, array{minutes:int, night:int}> date 'Y-m-d' => overtime minutes
      */
     public function autoOvertimeMinutesFor(Employee $employee, string $start, string $end, int $thresholdMinutes = 0): array
