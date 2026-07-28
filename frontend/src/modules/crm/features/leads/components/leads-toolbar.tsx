@@ -19,7 +19,11 @@ export function LeadsToolbar({ onImport, onCreate, onExport, exporting }: Props)
     // the parent aligns a lone wrapped item to the start, which left-aligned these buttons at ~1024px
     // (sidebar still expanded, viewport not yet wide enough). No effect when both fit on one row.
     <div className="ml-auto flex items-center gap-2">
-      {can("leads.import") ? (
+      {/* `can()` matches the permission name exactly — the granted names are `crm.`-prefixed
+          (crm.leads.import), so the unprefixed form was never true and hid Import from BOTH
+          Admin/Super Admin and BD. Both roles hold crm.leads.import, so this restores it for both
+          without changing any permission. */}
+      {can("crm.leads.import") ? (
         <Button variant="outline" onClick={onImport}>
           Import
           <Upload className="h-4 w-4" />

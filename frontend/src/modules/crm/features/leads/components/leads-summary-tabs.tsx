@@ -11,8 +11,17 @@ import { useLeadStatusSummary } from "@/modules/crm/features/leads/hooks/use-lea
  * Labels are presentation-only pending BD terminology; the label→status mapping lives in
  * STATUS_TAB_MAP (single source, shared with the counts).
  */
-export function LeadsSummaryTabs() {
-  const { data: items } = useLeadStatusSummary();
+type Props = {
+  /**
+   * Admin/Super Admin only: the list's current filter params. Supplying them switches the counts to
+   * the server-side, filter-aware summary so the tabs describe exactly the dataset in the table.
+   * Omitted on the BD page, which keeps its existing unscoped counts and drill-down links.
+   */
+  scopeParams?: Record<string, string>;
+};
+
+export function LeadsSummaryTabs({ scopeParams }: Props) {
+  const { data: items } = useLeadStatusSummary(scopeParams);
 
   return (
     // Per the approved design: individually-bordered pills rather than one joined segmented

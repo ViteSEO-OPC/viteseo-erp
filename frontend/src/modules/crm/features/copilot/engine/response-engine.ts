@@ -6,6 +6,7 @@ import type {
   EngineResult,
 } from "@/modules/crm/features/copilot/engine/types";
 import { formatNumber } from "@/modules/crm/lib/formatters";
+import { COMPUTATION_BY_ID } from "@/modules/crm/features/copilot/engine/computations";
 
 /**
  * Response engine — turns a data-driven ResponseConfig into rich-text segments (+ optional
@@ -209,6 +210,57 @@ function renderScoreLeads(config: ResponseConfig, ctx: CopilotContext): EngineRe
   return { segments, action: config.action };
 }
 
+/**
+ * Explain Computation — renders one structured entry in a FIXED shape (what it measures → formula →
+ * numerator/denominator → undefined-when → why → caveats → where to see it), so every "how is this
+ * computed?" answer reads the same way instead of varying by author.
+ *
+ * Prose fields go through toSegments, so authored **bold** / *emphasis* and module links keep
+ * working inside them. A `not-defined` entry deliberately renders NO formula — it states what the
+ * CRM does not compute and why, which is the honest answer rather than a plausible guess.
+ */
+function renderComputation(config: ResponseConfig, ctx: CopilotContext): EngineResult {
+  const entry = config.computationId ? COMPUTATION_BY_ID.get(config.computationId) : undefined;
+
+  // Unknown id (a typo in JSON) degrades to the intent's own copy rather than rendering an empty
+  // bubble — same fail-safe posture as the matcher's unknown-condition handling.
+  if (!entry) return renderText(config, ctx);
+
+  const segments: RichTextSegment[] = [{ type: "bold", text: entry.label }];
+  const line = (label: string, value: string) => {
+    segments.push({ type: "text", text: "\n" });
+    segments.push({ type: "emphasis", text: `${label} ` });
+    segments.push(...toSegments(value));
+  };
+
+  if (entry.confidence === "not-defined") {
+    segments.push({ type: "text", text: " — not computed by the CRM.\n\n" });
+    segments.push(...toSegments(entry.whyNot ?? "This value is not defined in the CRM."));
+  } else {
+    segments.push({ type: "text", text: ` — ${entry.measures}.\n` });
+    if (entry.formula) line("Formula", entry.formula);
+    if (entry.numerator) line("Numerator", entry.numerator);
+    if (entry.denominator) line("Denominator", entry.denominator);
+    if (entry.undefinedWhen) line("Undefined when", entry.undefinedWhen);
+    if (entry.reasoning) line("Why", entry.reasoning);
+    for (const caveat of entry.caveats ?? []) line("Note", caveat);
+    // An entry verified in code whose written spec has since fallen behind — say so rather than
+    // presenting it as settled documentation.
+    if (entry.confidence === "implementation-only") {
+      line("Source", "as currently implemented — the written spec predates this rule.");
+    }
+  }
+
+  if (entry.surface) {
+    segments.push({ type: "text", text: "\n\nSee " });
+    if (entry.route) segments.push({ type: "link", label: entry.surface, route: entry.route });
+    else segments.push({ type: "emphasis", text: entry.surface });
+  }
+
+  // Explaining a number never navigates the user away mid-explanation; the link above is opt-in.
+  return { segments, action: { type: "none" } };
+}
+
 const HANDLERS: Record<ResponseType, Handler> = {
   text: renderText,
   template: renderText,
@@ -219,4 +271,5 @@ const HANDLERS: Record<ResponseType, Handler> = {
   summary: renderSummary,
   open_lead: renderOpenLead,
   score_leads: renderScoreLeads,
+  computation: renderComputation,
 };

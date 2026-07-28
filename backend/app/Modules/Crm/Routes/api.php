@@ -63,6 +63,10 @@ Route::prefix('v1/crm')->group(function (): void {
         // ownership-scoped, mirroring the list. Declared before the /leads/{lead} wildcards so the
         // static `priority-summary` segment is not captured as a {lead} route-model-binding id.
         Route::get('/leads/priority-summary', [LeadController::class, 'prioritySummary'])->can('viewAny', Lead::class);
+        // Leads-page status tabs: Total/New/Contacted/Qualified/Declined counts over the SAME filtered,
+        // ownership-scoped dataset as the list, so the tabs can never disagree with the table.
+        // Declared before the /leads/{lead} wildcards, like priority-summary above.
+        Route::get('/leads/status-summary', [LeadController::class, 'statusSummary'])->can('viewAny', Lead::class);
         Route::post('/leads/import', [LeadController::class, 'import'])->can('import', Lead::class);
         // Programmatic enrichment ingest — a discovery provider (Python Scraper) submits normalized
         // discovered businesses as JSON. Same `import` permission; lands fit-data only, assigns no owner.
@@ -73,6 +77,10 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::get('/website-enrichment/queue', [WebsiteEnrichmentController::class, 'queue'])->can('import', Lead::class);
         Route::put('/leads/{lead}/website-enrichment', [WebsiteEnrichmentController::class, 'update'])->can('import', Lead::class);
         Route::get('/leads/{lead}/activities', [LeadController::class, 'activities'])->can('view', 'lead');
+        // One lead as a PDF profile. Authorized by `view` on the lead — the same ownership boundary as
+        // reading it — so a BD can export their own leads and nobody can export a lead they cannot see.
+        // Shared by the Lead Details header action and the BD table row action (one implementation).
+        Route::get('/leads/{lead}/export-pdf', [LeadController::class, 'exportPdf'])->can('view', 'lead');
         // Personal Lead Score breakdown (KPI Engine) — the auditable per-signal "why" behind
         // leads.score. Read-only; ownership-gated identically to viewing the lead.
         Route::get('/leads/{lead}/score', [LeadController::class, 'score'])->can('view', 'lead');

@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Requests;
 
+use App\Modules\Crm\Enums\LeadColdCalling;
+use App\Modules\Crm\Enums\LeadEmailOutreach;
 use App\Modules\Crm\Rules\MustBeBusinessDeveloper;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -25,8 +27,9 @@ class StoreLeadRequest extends FormRequest
             // These five have DB column defaults — omit to use the backend default; validated if provided.
             'website_status' => ['sometimes', Rule::in(['has-website', 'no-website', 'needs-redesign'])],
             'priority' => ['sometimes', Rule::in(['high', 'medium', 'low'])],
-            'email_outreach' => ['sometimes', Rule::in(['sent', 'opened', 'replied', 'none'])],
-            'cold_calling' => ['sometimes', Rule::in(['called', 'scheduled', 'not-called'])],
+            // Validated against the enums that own these two columns — same source as the read filter.
+            'email_outreach' => ['sometimes', Rule::enum(LeadEmailOutreach::class)],
+            'cold_calling' => ['sometimes', Rule::enum(LeadColdCalling::class)],
             'status' => ['sometimes', Rule::in(['interested', 'awaiting-reply', 'declined', 'call-back-req', 'new'])],
             'last_activity' => ['nullable', 'date'],
             'score' => ['nullable', 'integer', 'min:0', 'max:100'],
@@ -45,6 +48,11 @@ class StoreLeadRequest extends FormRequest
             // Website Domain — the existing `website` column, now settable via create (previously
             // written only by discovery ingest). Nullable/optional.
             'website' => ['nullable', 'string', 'max:255'],
+            // Optional FIRST internal note for the lead. Singular on purpose: it creates exactly one
+            // `crm_notes` row through the same service the Lead Details composer uses — it is NOT a
+            // column on `crm_leads` and NOT a collection. Constraint mirrors StoreNoteRequest's `body`
+            // so the same text is accepted whether it is typed in the wizard or on Lead Details.
+            'note' => ['nullable', 'string', 'max:5000'],
             // Digital Presence (social) + Marketplace Presence (e-commerce). All nullable/optional
             // plain strings — an existing lead or an import without these never fails. `tiktok`
             // (social) is distinct from `tiktok_shop` (marketplace).

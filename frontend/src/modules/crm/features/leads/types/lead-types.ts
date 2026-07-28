@@ -70,6 +70,12 @@ export type LeadWritePayload = {
   acquisition_channel?: string | null;
   // Website Domain (leads.website) + Digital/Marketplace presence — all nullable/optional.
   website?: string | null;
+  /**
+   * Create-only: the optional FIRST internal note. Singular — the backend persists it as one
+   * `crm_notes` row via the same service the Lead Details composer uses, so it is not a lead column
+   * and never appears on a Lead read payload. Later notes go through /leads/{id}/notes.
+   */
+  note?: string;
   facebook?: string | null;
   instagram?: string | null;
   tiktok?: string | null;

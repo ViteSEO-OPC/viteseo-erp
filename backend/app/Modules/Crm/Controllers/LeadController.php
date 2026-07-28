@@ -19,7 +19,9 @@ use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Models\Activity;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
+use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Services\LeadImportService;
+use App\Modules\Crm\Services\LeadPdfExporter;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -28,6 +30,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class LeadController extends Controller
 {
@@ -126,6 +129,48 @@ class LeadController extends Controller
     }
 
     /**
+     * Lead Status summary for the Leads-page tabs (Total / New / Contacted / Qualified / Declined).
+     *
+     * Exists so the tabs can be computed from the SAME dataset the table is showing. The counts are
+     * aggregated in SQL over {@see applyLeadListFilters} — the identical filter logic the list uses —
+     * so selecting a BD (`assigned_to`) narrows the table and these counts together and the two can
+     * never disagree. Ownership-scoped by `visibleTo`, exactly like the list.
+     *
+     * Every list filter is honoured EXCEPT `status` itself: the tabs ARE the status switcher, so
+     * applying the active status would leave one tab holding the whole count and the rest at zero.
+     * This mirrors {@see prioritySummary}, which excludes `priority` for the same reason.
+     *
+     * The response shape matches the `statusCounts` block the Leads tabs already consume, so the
+     * frontend's existing tab→status mapping and counting are unchanged.
+     */
+    public function statusSummary(IndexLeadRequest $request): JsonResponse
+    {
+        $query = Lead::query()->active()->visibleTo($request->user());
+        $this->applyLeadListFilters($query, $request, applyPriority: true, applyStatus: false);
+
+        /** @var array<string, int> $counts */
+        $counts = (clone $query)
+            ->groupBy('status')
+            ->selectRaw('status, COUNT(*) as aggregate')
+            ->pluck('aggregate', 'status')
+            ->map(static fn ($count): int => (int) $count)
+            ->all();
+
+        // Every status is present (0 when absent) so a tab never renders a blank instead of a zero.
+        $statusCounts = [];
+        foreach (['new', 'interested', 'awaiting-reply', 'call-back-req', 'declined'] as $status) {
+            $statusCounts[$status] = $counts[$status] ?? 0;
+        }
+
+        return response()->json(['data' => [
+            // Total is the sum of the filtered dataset, NOT a global count — it is what the table's
+            // own "Showing N of M" reports for the same filters.
+            'totalLeads' => array_sum($counts),
+            'statusCounts' => $statusCounts,
+        ]]);
+    }
+
+    /**
      * Website Opportunity buckets — lead counts / average score / share per `website_status`.
      *
      * This is the SINGLE source for the "Lead Priority Overview" cards on BOTH the Dashboard (the
@@ -190,10 +235,21 @@ class LeadController extends Controller
         IndexLeadRequest $request,
         bool $applyPriority,
         bool $applyWebsiteStatus = true,
+        // Excluded by the status summary, so its tabs stay a switcher OVER the filtered dataset
+        // rather than collapsing to the single status already selected — the same reason
+        // prioritySummary excludes `priority`.
+        bool $applyStatus = true,
     ): void {
         $search = trim((string) $request->validated('search'));
         $priority = $request->validated('priority');
         $websiteStatus = $request->validated('website_status');
+        // Communication-lifecycle filters. Applied to every consumer of this method (list, Priority
+        // Summary, Website Status buckets) so the cards keep filtering over the IDENTICAL dataset the
+        // table shows — the same contract `status`, `search` and `industry` already follow.
+        $emailOutreach = $request->validated('email_outreach');
+        $coldCalling = $request->validated('cold_calling');
+        // Ownership filter: the UNASSIGNED sentinel means `assigned_to IS NULL`, otherwise a user id.
+        $assignedTo = (string) $request->validated('assigned_to');
         // Status may be a comma-separated list (e.g. a summary tab mapping to multiple statuses).
         $statuses = array_values(array_filter(array_map('trim', explode(',', (string) $request->validated('status')))));
         // Raw industry filter — comma-separated free-text values (the frontend derives these from
@@ -220,29 +276,49 @@ class LeadController extends Controller
             ->when($applyWebsiteStatus && $websiteStatus, function (Builder $q) use ($websiteStatus): void {
                 $q->where('website_status', $websiteStatus);
             })
-            ->when($statuses !== [], function (Builder $q) use ($statuses): void {
+            ->when($applyStatus && $statuses !== [], function (Builder $q) use ($statuses): void {
                 $q->whereIn('status', $statuses);
+            })
+            ->when($emailOutreach, function (Builder $q) use ($emailOutreach): void {
+                $q->where('email_outreach', $emailOutreach);
+            })
+            ->when($coldCalling, function (Builder $q) use ($coldCalling): void {
+                $q->where('cold_calling', $coldCalling);
+            })
+            ->when($assignedTo === IndexLeadRequest::UNASSIGNED, function (Builder $q): void {
+                $q->whereNull('assigned_to');
+            })
+            ->when($assignedTo !== '' && $assignedTo !== IndexLeadRequest::UNASSIGNED, function (Builder $q) use ($assignedTo): void {
+                $q->where('assigned_to', $assignedTo);
             })
             ->when($industries !== [], function (Builder $q) use ($industries): void {
                 $q->whereIn(DB::raw('LOWER(industry)'), $industries);
             });
     }
 
-    public function store(StoreLeadRequest $request): JsonResponse
+    /**
+     * One lead as a PDF profile.
+     *
+     * The SINGLE export implementation — the Lead Details header action and the BD table's row action
+     * both call this route, so the two can never drift. Authorized by `view` on the lead (the route's
+     * `can('view', 'lead')`), which is the same ownership boundary that governs reading the lead at
+     * all: if a user may open the lead, they may export it.
+     */
+    public function exportPdf(Lead $lead, LeadPdfExporter $exporter): SymfonyResponse
     {
-        $user = $request->user();
+        return $exporter->render($lead)->download($exporter->filename($lead));
+    }
+
+    public function store(StoreLeadRequest $request, LeadCreator $creator): JsonResponse
+    {
         $data = $request->validated();
 
-        // BD-created leads auto-assign to the creator (BDs own their own leads); Admin/SA must
-        // select the owning BD (enforced by StoreLeadRequest).
-        if ($user->hasRole('crm_bd')) {
-            $data['assigned_to'] = $user->id;
-        }
+        // `note` is not a lead column — it is the optional first internal note, created alongside the
+        // lead in one transaction by the service (which also owns the BD auto-assign rule).
+        $initialNote = $data['note'] ?? null;
+        unset($data['note']);
 
-        $lead = Lead::create([
-            ...$data,
-            'created_by' => $user->id,
-        ]);
+        $lead = $creator->create($data, $request->user(), $initialNote);
 
         return response()->json([
             'data' => new LeadResource($lead->load('assignedTo')),

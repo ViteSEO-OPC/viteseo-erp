@@ -2,6 +2,10 @@ import Fuse from "fuse.js";
 import MiniSearch from "minisearch";
 import type { Intent, IntentConfig } from "@/modules/crm/features/copilot/engine/types";
 import knowledgeData from "@/modules/crm/features/copilot/data/knowledge.json";
+import {
+  COMPUTATION_DOCS,
+  computationIdFromDocId,
+} from "@/modules/crm/features/copilot/engine/computations";
 
 /**
  * Normalize free text for matching: lowercase, strip punctuation/symbols (Unicode-aware),
@@ -118,7 +122,14 @@ type KnowledgeDoc = {
   answer: string;
 };
 
-const KNOWLEDGE_BASE = knowledgeData.knowledge as ReadonlyArray<KnowledgeDoc>;
+// The knowledge base plus the Explain Computation corpus, projected into the same document shape.
+// ONE index and ONE retrieval path: a "how is X computed" query never has to guess which corpus to
+// search, and the search configuration below is unchanged. Computation docs are distinguished only
+// by their `computation:` id prefix, which the hit handler uses to render them structurally.
+const KNOWLEDGE_BASE = [
+  ...(knowledgeData.knowledge as ReadonlyArray<KnowledgeDoc>),
+  ...COMPUTATION_DOCS,
+] as ReadonlyArray<KnowledgeDoc>;
 
 // Singleton index — the knowledge base is a static module constant, so it's indexed once.
 let knowledgeIndex: MiniSearch<KnowledgeDoc> | null = null;
@@ -151,10 +162,16 @@ function searchKnowledge(query: string): MatchResult | null {
   const top = getKnowledgeIndex().search(query)[0];
   if (!top || top.score < KNOWLEDGE_MIN_SCORE) return null;
 
+  // A computation hit is rendered STRUCTURALLY (formula / numerator / denominator / reasoning) by
+  // the `computation` handler, so the synthesized intent carries the id rather than prose. Ordinary
+  // knowledge hits keep their previous shape byte-for-byte.
+  const computationId = computationIdFromDocId(String(top.id));
   const synthetic: Intent = {
     id: `knowledge:${top.id}`,
     keywords: [],
-    response: { type: "text", text: String(top.answer) },
+    response: computationId
+      ? { type: "computation", computationId }
+      : { type: "text", text: String(top.answer) },
   };
   return { intent: synthetic, score: round(top.score) };
 }

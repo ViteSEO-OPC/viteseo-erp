@@ -11,18 +11,37 @@ type Props = {
   // row overrides this to text-[33px] per approved sizing; other reuse (e.g. the import
   // preview stats) keeps the default. Only the value's font-size changes — nothing else.
   valueSizeClassName?: string;
+  /**
+   * Pin the value to the bottom of the card instead of a fixed gap under the label.
+   *
+   * With a fixed gap, a label that wraps to two lines (e.g. "SKIPPED (DUPLICATE)") pushes its number
+   * lower than its single-line neighbours, so a row of cards reads as ragged. Bottom-aligning lets
+   * labels wrap freely while every value sits on one baseline — the cards are already equal height
+   * (grid stretch + `h-full`), so "bottom" is the same line for all of them.
+   *
+   * Off by default: the Dashboard KPI row keeps its existing fixed spacing.
+   */
+  bottomAlignValue?: boolean;
 };
 
-export function KpiStatCard({ stat, valueSizeClassName = "text-display" }: Props) {
+export function KpiStatCard({
+  stat,
+  valueSizeClassName = "text-display",
+  bottomAlignValue = false,
+}: Props) {
   const card = (
     <Card className="relative h-full border border-border shadow-card ring-0 transition-shadow duration-200 group-hover:shadow-md [--card-spacing:--spacing(5)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-1 before:content-[''] before:[background:var(--kpi-top-accent)]">
-      <CardContent className="flex flex-col">
+      {/* flex-1 lets the content fill the card so `mt-auto` on the value has room to push against. */}
+      <CardContent className={cn("flex flex-col", bottomAlignValue && "flex-1")}>
         <span className="text-subheading font-semibold uppercase tracking-[0.08em] text-kpi-caption">
           {stat.label}
         </span>
         <span
           className={cn(
-            "mt-6 font-extrabold leading-none",
+            "font-extrabold leading-none",
+            // pt-6 keeps the original minimum gap under the label; mt-auto absorbs whatever space
+            // is left over, so a one-line and a two-line label still align their numbers.
+            bottomAlignValue ? "mt-auto pt-6" : "mt-6",
             valueSizeClassName,
             stat.valueVariant === "accent"
               ? "text-primary-accent"

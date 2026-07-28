@@ -6,6 +6,7 @@ import { useLeadDetail } from "@/modules/crm/features/leads/hooks/use-lead-detai
 import { useLeadActivities } from "@/modules/crm/features/leads/hooks/use-lead-activities";
 import { useDeleteLead, useUpdateLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { LeadDetailHeader } from "@/modules/crm/features/leads/components/lead-detail-header";
+import { useExportLeadPdf } from "@/modules/crm/features/leads/hooks/use-export-lead-pdf";
 import { LeadSummaryCard } from "@/modules/crm/features/leads/components/lead-summary-card";
 import { AssignLeadModal } from "@/modules/crm/features/leads/components/assign-lead-modal";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
@@ -37,6 +38,8 @@ export function LeadDetailPage() {
   const canAssign = hasMinRole("crm_admin");
   // Mirror the backend authorization: DELETE /leads/{id} requires leads.delete (BDMs lack it).
   const canDelete = can("leads.delete");
+  // Shared with the BD table's row action — one hook, one endpoint, one PDF implementation.
+  const { exportLeadPdf, exportingId } = useExportLeadPdf();
 
   const handleDelete = () => {
     deleteLead.mutate(params.id, {
@@ -71,6 +74,8 @@ export function LeadDetailPage() {
           onAssign={() => setAssignOpen(true)}
           onEdit={() => setDrawerOpen(true)}
           onDelete={() => setConfirmOpen(true)}
+          onExportPdf={() => exportLeadPdf(lead.id, lead.business)}
+          exportingPdf={exportingId === lead.id}
         />
 
         {/* Dominant left content region + a narrow right sidebar, matching the reference proportions. */}
