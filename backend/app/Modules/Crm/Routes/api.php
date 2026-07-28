@@ -12,6 +12,7 @@ use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
 use App\Modules\Crm\Controllers\GmailWebhookController;
+use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
 use App\Modules\Crm\Controllers\LeadFollowUpController;
 use App\Modules\Crm\Controllers\LeadOutcomeController;
@@ -227,6 +228,23 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::delete('/leads/{lead}/notes/{note}', [NoteController::class, 'destroy'])
             ->scopeBindings()
             ->can('delete', 'note');
+
+        // Files attached to a lead (Lead Attachments Module). List/download reuse LeadPolicy@view
+        // (the same ownership boundary as opening the lead); upload also needs
+        // lead.attachments.create. Delete authorizes via LeadAttachmentPolicy (uploader/Admin/SA).
+        // scopeBindings ties {attachment} to its {lead}, so an attachment id from another lead 404s
+        // instead of resolving — per-lead isolation is enforced by the binding, not by the caller.
+        Route::get('/leads/{lead}/attachments', [LeadAttachmentController::class, 'index'])
+            ->can('view', 'lead');
+        Route::post('/leads/{lead}/attachments', [LeadAttachmentController::class, 'store'])
+            ->middleware('permission:crm.lead.attachments.create')
+            ->can('view', 'lead');
+        Route::get('/leads/{lead}/attachments/{attachment}/download', [LeadAttachmentController::class, 'download'])
+            ->scopeBindings()
+            ->can('view', 'lead');
+        Route::delete('/leads/{lead}/attachments/{attachment}', [LeadAttachmentController::class, 'destroy'])
+            ->scopeBindings()
+            ->can('delete', 'attachment');
 
         // Planner — the single scheduling platform (Calendar + Board). The list is ownership-scoped
         // (PlannerEvent::scopeVisibleTo: BD sees own/on-owned-leads; Admin/SA all); single-record
