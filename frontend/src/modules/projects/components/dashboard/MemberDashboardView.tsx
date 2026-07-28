@@ -27,10 +27,41 @@ export function MemberDashboardView(): React.ReactElement {
     users,
     countsFor,
     loading,
-    activeTasks,
-    completedTasks,
   } = useDashboardData();
+  // The member's own workload, counted card-for-card with what their "My Tasks"
+  // board draws — otherwise the number and the screen it links to disagree.
+  //
+  // `useDashboardData` counts every task across their projects, which answers
+  // "how big is the project" rather than "how much is on me".
+  const myCounts = useMemo(() => {
+    let active = 0;
+    let completed = 0;
+    const tally = (isDone: boolean): void => {
+      if (isDone) completed += 1;
+      else active += 1;
+    };
 
+    for (const t of tasks) {
+      // Only ever populated with subtasks assigned to the caller.
+      const mySubtasks = t.my_subtasks ?? [];
+      // A group task is this member's when they lead the group that owns it —
+      // the leader owns the parent, while regular members work through their
+      // own subtasks and never see the parent as a card.
+      const leadsGroup = t.leads_my_group ?? false;
+
+      for (const s of mySubtasks) tally(s.status?.key === "done");
+
+      // Holding subtasks replaces the parent for a regular member, but not for
+      // the leader: they own the parent as well as whatever subtask is theirs.
+      const parentCounts =
+        (mySubtasks.length === 0 || leadsGroup) &&
+        (t.assignee_id === user?.id || leadsGroup);
+
+      if (parentCounts) tally(t.status?.key === "done");
+    }
+
+    return { active, completed };
+  }, [tasks, user?.id]);
   // The member's own non-done tasks with a deadline, earliest first. A group
   // task counts as theirs when they lead the group that owns it.
   const upcoming = useMemo(
@@ -90,14 +121,17 @@ export function MemberDashboardView(): React.ReactElement {
               value={loading ? "—" : projects.length}
               href="/sprintly/projects"
             />
+            {/* Scoped to this member — these sit beside "My Projects" and both
+                jump to the My Tasks board, so counting the whole project would
+                never match what the click leads to. */}
             <StatCard
               label="Active Tasks"
-              value={loading ? "—" : activeTasks}
+              value={loading ? "—" : myCounts.active}
               onClick={() => setTab("mine")}
             />
             <StatCard
               label="Completed"
-              value={loading ? "—" : completedTasks}
+              value={loading ? "—" : myCounts.completed}
               onClick={() => setTab("mine")}
             />
           </div>
