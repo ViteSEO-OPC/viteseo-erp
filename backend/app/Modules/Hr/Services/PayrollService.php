@@ -17,6 +17,7 @@ use App\Modules\Hr\Models\Reimbursement;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -163,6 +164,15 @@ class PayrollService
 
         $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium, $otherDeductions);
 
+        // The payslip shows the FULL period basic with the absence charged as its own deduction
+        // line, rather than a basic figure quietly net of it. `absence_deduction` is the charge
+        // ACTUALLY applied, which is not `unpaidDays × dailyRate` whenever basePay clamped at
+        // zero — deriving it at display time would then subtract more than was taken and the
+        // document wouldn't add up to net pay.
+        $slip['period_base'] = round($perPeriodBase, 2);
+        $slip['absence_deduction'] = round($perPeriodBase - $basePay, 2);
+        $slip['allowances_breakdown'] = $this->allowanceBreakdown($employee, $periodsPerYear, $perPeriodAllowance);
+
         // Step 4b — persist how base_salary was derived, so the payslip explains itself.
         // The minute-level portion is all-zero until a deduction mode is enabled.
         $slip['working_days'] = $workingDaysInPeriod;
@@ -179,6 +189,55 @@ class PayrollService
         $slip['late_penalty_days'] = round($unpaidDetail?->latePenaltyDays ?? 0.0, 2);
 
         return $slip;
+    }
+
+    /**
+     * This period's allowances split into the components that make them up, snapshot onto the
+     * payslip so the document can name them instead of showing one opaque "Allowances" figure.
+     *
+     * SNAPSHOT, not a join. Reading the employee's live allowance columns at display time would
+     * silently re-label every historical payslip the moment someone's transport allowance
+     * changes — the same reason `policy_snapshot` exists on the run.
+     *
+     * The residual exists because `allowances` is `round(monthlyTotal × 12 ÷ periods)` — the sum
+     * is rounded, not the parts — so independently rounded components can miss it by a centavo.
+     * It is absorbed into the largest line, which keeps the breakdown summing to the stored
+     * `allowances` exactly without perturbing the figure payroll actually paid.
+     *
+     * @return list<array{name:string, amount:float}>
+     */
+    private function allowanceBreakdown(Employee $employee, int $periodsPerYear, float $perPeriodAllowance): array
+    {
+        if ($periodsPerYear <= 0 || $perPeriodAllowance <= 0) {
+            return [];
+        }
+
+        $lines = [];
+        $monthly = [
+            'Transportation Allowance' => (float) $employee->transportation_allowance,
+            'Food Allowance' => (float) $employee->food_allowance,
+            'Load Allowance' => (float) $employee->load_allowance,
+        ];
+
+        foreach ($monthly as $name => $amount) {
+            $perPeriod = round(($amount * 12) / $periodsPerYear, 2);
+            if ($perPeriod > 0) {
+                $lines[] = ['name' => $name, 'amount' => $perPeriod];
+            }
+        }
+
+        if ($lines === []) {
+            return [];
+        }
+
+        $amounts = array_column($lines, 'amount');
+        $residual = round($perPeriodAllowance - array_sum($amounts), 2);
+        if ($residual !== 0.0) {
+            $largest = (int) array_search(max($amounts), $amounts, true);
+            $lines[$largest]['amount'] = round($lines[$largest]['amount'] + $residual, 2);
+        }
+
+        return $lines;
     }
 
     /**
@@ -1332,25 +1391,41 @@ class PayrollService
     }
 
     /**
-     * Render one payslip to a DomPDF document (itemized earnings/deductions/net + optional
-     * YTD + signature). Money is shown as "PHP" — DomPDF's default font lacks the ₱ glyph.
+     * Render one payslip to a DomPDF document — the same document the UI shows.
      *
-     * @param  array<string, float>|null  $ytd
+     * Fed by PayslipResource so the PDF and the screen can never disagree about what a payslip
+     * contains. The one deliberate difference is the employer share, which the view drops
+     * entirely: a downloaded payslip is a document that gets forwarded, so HR's copy and the
+     * employee's are identical files.
+     *
+     * Amounts are bare numbers with a single "PHP" on the net line — DomPDF's bundled fonts
+     * have no ₱ glyph, so a peso sign would render as a blank box.
      */
-    public function payslipPdf(Payslip $payslip, ?array $ytd = null): \Barryvdh\DomPDF\PDF
+    public function payslipPdf(Payslip $payslip): \Barryvdh\DomPDF\PDF
     {
-        $payslip->loadMissing(['payrollRun.runner', 'employee.user']);
+        return Pdf::loadView('hr::payslip', $this->payslipViewData($payslip));
+    }
 
-        $peso = fn ($n) => 'PHP ' . number_format((float) $n, 2);
-        $fmt = fn ($d) => $d ? Carbon::parse($d)->format('M j, Y') : '—';
+    /**
+     * What `hr::payslip` renders from. Separate from payslipPdf() so a test can render the
+     * document as HTML and read it — the PDF's text is compressed and not searchable.
+     *
+     * @return array<string, mixed>
+     */
+    public function payslipViewData(Payslip $payslip, ?Request $request = null): array
+    {
+        $payslip->loadMissing(['payrollRun.runner', 'employee.user', 'employee.department']);
 
-        return Pdf::loadView('hr::payslip', [
-            'p' => (new PayslipResource($payslip))->toArray(request()),
-            'ytd' => $ytd,
-            'peso' => $peso,
-            'fmt' => $fmt,
-            'generatedAt' => now(config('app.timezone_local'))->format('M j, Y g:i A'),
-        ]);
+        return [
+            // resolve(), not toArray(): the resource's role-gated block is a conditional merge,
+            // and only resolve() runs the filter that either splices it in or drops it.
+            'p' => (new PayslipResource($payslip))->resolve($request ?? request()),
+            'amt' => fn ($n) => number_format((float) $n, 2),
+            'fmt' => fn ($d) => $d ? Carbon::parse($d)->format('F d, Y') : '—',
+            'stamp' => fn ($d) => $d
+                ? Carbon::parse($d)->timezone(config('app.timezone_local'))->format('F d, Y · g:i A')
+                : '—',
+        ];
     }
 
     /**

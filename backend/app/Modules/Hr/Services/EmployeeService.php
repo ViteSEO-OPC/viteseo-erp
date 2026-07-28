@@ -44,6 +44,7 @@ class EmployeeService
         'pay_frequency', 'currency', 'bank_account_type', 'bank_account_name',
         'sss_contribution', 'pagibig_contribution', 'philhealth_contribution',
         'food_allowance', 'transportation_allowance', 'load_allowance',
+        'tin', 'sss_number', 'philhealth_number', 'pagibig_number',
     ];
 
     /** The users.name is composed from the split-name fields, falling back to `name`. */

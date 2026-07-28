@@ -165,15 +165,23 @@ class PayrollController extends Controller
         ]);
     }
 
+    // GET /api/v1/hr/payslips/{payslip} — one payslip in full (HR only). The run breakdown
+    // only carries gross/deductions/net, so HR had no way to read a payslip without
+    // downloading its PDF.
+    public function showHrPayslip(Payslip $payslip): JsonResponse
+    {
+        $payslip->load(['payrollRun.runner', 'employee.user', 'employee.department']);
+
+        return PayslipResource::make($payslip)->response();
+    }
+
     // GET /api/v1/hr/payslips/{payslip}/pdf — one employee's payslip as a PDF (HR only).
     public function payslipPdf(Payslip $payslip): SymfonyResponse
     {
         $payslip->loadMissing(['payrollRun', 'employee.user']);
-        $year = (int) $payslip->payrollRun?->cycle_start?->format('Y');
-        $ytd = $payslip->employee ? $this->service->ytd($payslip->employee, $year) : null;
         $slug = str($payslip->employee?->user?->name ?? 'employee')->slug();
 
-        return $this->service->payslipPdf($payslip, $ytd)
+        return $this->service->payslipPdf($payslip)
             ->download("payslip-{$slug}-{$payslip->payrollRun?->cycle_start?->format('Y-m-d')}.pdf");
     }
 
@@ -226,7 +234,7 @@ class PayrollController extends Controller
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $payslip->load(['payrollRun.runner', 'employee.user']);
+        $payslip->load(['payrollRun.runner', 'employee.user', 'employee.department']);
         $year = (int) $payslip->payrollRun?->cycle_start?->format('Y');
 
         return PayslipResource::make($payslip)
@@ -251,9 +259,8 @@ class PayrollController extends Controller
         }
 
         $payslip->loadMissing('payrollRun');
-        $year = (int) $payslip->payrollRun?->cycle_start?->format('Y');
 
-        return $this->service->payslipPdf($payslip, $this->service->ytd($employee, $year))
+        return $this->service->payslipPdf($payslip)
             ->download("payslip-{$payslip->payrollRun?->cycle_start?->format('Y-m-d')}.pdf");
     }
 }

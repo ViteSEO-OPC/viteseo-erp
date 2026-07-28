@@ -144,6 +144,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
         Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
+        Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf']);
 
         // Recruitment (HR only).

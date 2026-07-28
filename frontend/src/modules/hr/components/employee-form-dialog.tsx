@@ -116,6 +116,10 @@ const schema = z.object({
   food_allowance: z.string(),
   transportation_allowance: z.string(),
   load_allowance: z.string(),
+  tin: z.string(),
+  sss_number: z.string(),
+  philhealth_number: z.string(),
+  pagibig_number: z.string(),
   salary_change_reason: z.string(),
   salary_change_type: z.string(),
   role_change_type: z.string(),
@@ -138,6 +142,7 @@ const EMPTY: FormValues = {
   bank_account_name: "", sss_contribution: "", pagibig_contribution: "",
   philhealth_contribution: "", food_allowance: "", transportation_allowance: "",
   load_allowance: "",
+  tin: "", sss_number: "", philhealth_number: "", pagibig_number: "",
   salary_change_reason: "", salary_change_type: "", role_change_type: "", role_change_reason: "",
 };
 
@@ -229,6 +234,10 @@ export function EmployeeFormDialog({
             food_allowance: employee.food_allowance ?? "",
             transportation_allowance: employee.transportation_allowance ?? "",
             load_allowance: employee.load_allowance ?? "",
+            tin: employee.tin ?? "",
+            sss_number: employee.sss_number ?? "",
+            philhealth_number: employee.philhealth_number ?? "",
+            pagibig_number: employee.pagibig_number ?? "",
             // Audit inputs are always blank per edit.
             salary_change_reason: "", salary_change_type: "", role_change_type: "", role_change_reason: "",
           }
@@ -286,6 +295,10 @@ export function EmployeeFormDialog({
       food_allowance: s(v.food_allowance),
       transportation_allowance: s(v.transportation_allowance),
       load_allowance: s(v.load_allowance),
+      tin: s(v.tin),
+      sss_number: s(v.sss_number),
+      philhealth_number: s(v.philhealth_number),
+      pagibig_number: s(v.pagibig_number),
       salary_change_reason: s(v.salary_change_reason),
       salary_change_type: s(v.salary_change_type),
       role_change_type: s(v.role_change_type),
@@ -666,6 +679,30 @@ export function EmployeeFormDialog({
               <Field label="Load allowance (₱ / mo)">
                 <Input type="number" min="0" step="0.01" {...register("load_allowance")} />
               </Field>
+
+              {/* Membership numbers, not amounts — these print on the payslip header.
+                  Kept apart from the ₱ overrides above so "SSS" can't mean two things. */}
+              <div className="border-t border-border pt-4 sm:col-span-2">
+                <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                  Government IDs
+                </p>
+                <p className="mt-1 text-caption text-muted-foreground">
+                  Printed on the payslip. Blank fields show as “—”.
+                </p>
+              </div>
+              <Field label="TIN">
+                <Input placeholder="123-456-789-000" {...register("tin")} />
+              </Field>
+              <Field label="SSS number">
+                <Input placeholder="34-5678901-2" {...register("sss_number")} />
+              </Field>
+              <Field label="PhilHealth number">
+                <Input placeholder="12-009876543-1" {...register("philhealth_number")} />
+              </Field>
+              <Field label="Pag-IBIG number">
+                <Input placeholder="1211-0098-7654" {...register("pagibig_number")} />
+              </Field>
+
               <label className="flex items-start gap-2.5 rounded-lg border border-input p-3 sm:col-span-2">
                 <input
                   type="checkbox"

@@ -46,6 +46,11 @@ class Employee extends Model
         'sss_contribution',
         'pagibig_contribution',
         'philhealth_contribution',
+        // Membership NUMBERS for the payslip header — not the peso overrides above.
+        'tin',
+        'sss_number',
+        'philhealth_number',
+        'pagibig_number',
         'food_allowance',
         'transportation_allowance',
         'load_allowance',

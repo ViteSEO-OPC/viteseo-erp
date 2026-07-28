@@ -15,6 +15,9 @@ class Payslip extends Model
     protected $fillable = [
         'payroll_run_id', 'employee_id',
         'base_salary', 'reimbursements', 'allowances', 'holiday_premium', 'gross',
+        // Payslip redesign — the full period basic, the absence charge taken off it, and the
+        // per-component allowance split, so the document can show the derivation.
+        'period_base', 'absence_deduction', 'allowances_breakdown',
         // Positive pay lines (OT-1 / ND-1) — must be fillable or run()'s updateOrCreate drops them.
         'overtime_pay', 'overtime_minutes', 'night_diff_pay', 'night_diff_minutes',
         'rest_day_premium', 'rest_day_minutes',
@@ -31,6 +34,9 @@ class Payslip extends Model
 
     protected $casts = [
         'base_salary' => 'decimal:2',
+        'period_base' => 'decimal:2',
+        'absence_deduction' => 'decimal:2',
+        'allowances_breakdown' => 'array',
         'working_days' => 'integer',
         'daily_rate' => 'decimal:2',
         'unpaid_days' => 'decimal:2',
