@@ -20,6 +20,11 @@ import {
   Select,
 } from "@/core/ui";
 import { projectsApi } from "../../api";
+import type { NoteTarget } from "../../notes/types";
+import {
+  NotesTaskPanel,
+  NotesToggleButton,
+} from "../notes/NotesTaskPanel";
 import {
   projectKeys,
   useStatuses,
@@ -52,6 +57,13 @@ export interface WorkspaceViewsProps {
 /** Deadline ordering applied to the board; null keeps the source order. */
 type DeadlineSort = "asc" | "desc" | null;
 
+/**
+ * The board's notes panel shows the user-scoped note — the same document as the
+ * dashboard card, sharing one React Query entry, so an edit on either surface
+ * is immediately reflected on the other.
+ */
+const USER_NOTE: NoteTarget = { scope: "user" };
+
 function WorkspaceViewsInner({
   projects: allProjects,
   members,
@@ -77,6 +89,11 @@ function WorkspaceViewsInner({
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [deadlineSort, setDeadlineSort] = useState<DeadlineSort>(null);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
+  // Closed by default; the choice is remembered per user (§7.1).
+  const [notesOpen, setNotesOpen] = usePersistentState<boolean>(
+    user ? `pmnote:ui:${user.id}:taskpanel` : null,
+    false,
+  );
 
   const allProjectIds = projects.map((p) => p.id);
   const activeProjectIds = projectIds.length ? projectIds : allProjectIds;
@@ -341,6 +358,14 @@ function WorkspaceViewsInner({
             setDeadlineSort={setDeadlineSort}
           />
 
+          {/* Notes sits immediately right of Filter, same height and shape, so
+              the row reads as one control group. */}
+          <NotesToggleButton
+            target={USER_NOTE}
+            open={notesOpen}
+            onToggle={() => setNotesOpen(!notesOpen)}
+          />
+
           {/* Creating a task lives in the page header (dashboard / workspace),
               so it stays reachable from every tab — not just this board. */}
           {isManager && lockedAssigneeId == null && projects.length > 0 && (
@@ -356,8 +381,10 @@ function WorkspaceViewsInner({
         </div>
       </div>
 
-      {/* Body */}
-      <div className="mt-5">
+      {/* Body — the notes panel is a sibling so that on wide screens it pushes
+          the board aside instead of covering it (it overlays below xl). */}
+      <div className="mt-5 flex items-start gap-5">
+        <div className="min-w-0 flex-1">
         {isLoading ? (
           <p className="text-ink-soft">Loading tasks…</p>
         ) : sorted.length === 0 ? (
@@ -407,6 +434,13 @@ function WorkspaceViewsInner({
         ) : (
           <CalendarView items={sorted} onOpen={handleOpen} />
         )}
+        </div>
+
+        <NotesTaskPanel
+          target={USER_NOTE}
+          open={notesOpen}
+          onClose={() => setNotesOpen(false)}
+        />
       </div>
 
       {/* The task-view modal is rendered globally (projects layout) off `?task=`. */}

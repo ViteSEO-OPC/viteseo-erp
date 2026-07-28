@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { Card, StatCard, Tabs } from "@/core/ui";
 import { useOpenTask } from "../tasks/useTaskModal";
+import { NotesCard } from "../notes/NotesCard";
+import type { NoteTarget } from "../../notes/types";
 import {
   DashboardProjectCard,
   DashboardTaskTable,
@@ -11,6 +13,9 @@ import {
   useDashboardData,
 } from "./DashboardShared";
 import Link from "next/dist/client/link";
+
+/** The dashboard card and the task-view panel render this same note. */
+const USER_NOTE: NoteTarget = { scope: "user" };
 
 /** Member dashboard — the projects they're on (Overview) + their "My Tasks" tab. */
 export function MemberDashboardView(): React.ReactElement {
@@ -97,8 +102,12 @@ export function MemberDashboardView(): React.ReactElement {
             />
           </div>
 
+          {/* Content + notes rail (status → notes eye-path). Folds to one
+              column below xl; a sheet launcher on phones. */}
+          <div className="mt-2 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="min-w-0">
           {/* My projects */}
-          <div className="flex items-center justify-between mt-10 text-sm ">
+          <div className="flex items-center justify-between mt-8 text-sm ">
             <h2 className="font-bold uppercase tracking-wide text-ink">
               Projects
             </h2>
@@ -155,6 +164,14 @@ export function MemberDashboardView(): React.ReactElement {
               />
             )}
           </section>
+            </div>
+
+            <NotesCard
+              target={USER_NOTE}
+              uiName="dashboard-card"
+              className="mt-8 xl:sticky xl:top-4"
+            />
+          </div>
         </>
       )}
     </div>
