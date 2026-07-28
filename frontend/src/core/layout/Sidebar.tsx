@@ -19,10 +19,12 @@ import {
   SidebarDashboardIcon,
   SidebarGroupsIcon,
   SidebarProjectsIcon,
-  SidebarSpaceIcon,
   SidebarTeamIcon,
   SidebarWorkspaceIcon,
 } from "@/core/ui";
+
+/** Workspaces carry no stored colour, so the swatch is assigned by position. */
+const SPACE_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
 /** Shared nav-row geometry — icon, label, 12px gap, 12px radius (Figma 801:22341). */
 const ROW = "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors";
@@ -282,31 +284,43 @@ export function Sidebar() {
             Dashboard
           </NavLink>
 
-          <NavGroup
-            label="Workspace"
-            icon={<SidebarWorkspaceIcon className="h-6 w-6" />}
-            open={spacesOpen}
-            onToggle={() => setSpacesOpen((v) => !v)}
-            active={inWorkspaces}
-            collapsed={collapsed}
-            railHref="/sprintly/workspaces"
-          >
-            {spaces.length === 0 ? (
-              <p className="text-xs text-sidebar-ink/40">No workspaces yet</p>
-            ) : (
-              spaces.map((ws) => (
-                <NavChild
-                  key={ws.id}
-                  href={`/sprintly/workspaces/${ws.id}`}
-                  active={pathname === `/sprintly/workspaces/${ws.id}`}
-                  glyph={<SidebarSpaceIcon className="h-[18px] w-[18px]" />}
-                >
-                  {ws.name}
-                </NavChild>
-              ))
-            )}
-            <NavChildAll href="/sprintly/workspaces">View All Workspace</NavChildAll>
-          </NavGroup>
+          {/* Workspaces are a management surface — Admin/PM only. */}
+          {isManager && (
+            <NavGroup
+              label="Workspace"
+              icon={<SidebarWorkspaceIcon className="h-6 w-6" />}
+              open={spacesOpen}
+              onToggle={() => setSpacesOpen((v) => !v)}
+              active={inWorkspaces}
+              collapsed={collapsed}
+              railHref="/sprintly/workspaces"
+            >
+              {spaces.length === 0 ? (
+                <p className="text-xs text-sidebar-ink/40">No workspaces yet</p>
+              ) : (
+                spaces.map((ws, i) => (
+                  <NavChild
+                    key={ws.id}
+                    href={`/sprintly/workspaces/${ws.id}`}
+                    active={pathname === `/sprintly/workspaces/${ws.id}`}
+                    glyph={
+                      <span
+                        className="flex h-[18px] w-[18px] items-center justify-center rounded-md text-[10px] font-bold text-white"
+                        style={{
+                          backgroundColor: SPACE_COLORS[i % SPACE_COLORS.length],
+                        }}
+                      >
+                        {ws.name.charAt(0).toUpperCase()}
+                      </span>
+                    }
+                  >
+                    {ws.name}
+                  </NavChild>
+                ))
+              )}
+              <NavChildAll href="/sprintly/workspaces">View All Workspace</NavChildAll>
+            </NavGroup>
+          )}
 
           <NavGroup
             label="Projects"
