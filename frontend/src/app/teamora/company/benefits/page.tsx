@@ -242,9 +242,11 @@ function DeMinimisCeiling() {
         }}
       />
       <p className="mt-2 text-caption text-muted-foreground">
-        The allowances below are de-minimis (tax-free) up to this much a year; anything above it
-        is taxed as compensation on the payslip. Leave blank for no ceiling. The BIR reference
-        figure is ₱90,000, but the right number for your mix of benefits is yours to set.
+        Allowances marked <strong>tax-free</strong> below stay untaxed up to this much a year;
+        anything above it is taxed as compensation on the payslip. Allowances marked{" "}
+        <strong>taxable</strong> are compensation in full and ignore this ceiling. Leave blank for
+        no ceiling. The BIR reference figure is ₱90,000, but the right number for your mix of
+        benefits is yours to set.
       </p>
     </div>
   );
@@ -259,7 +261,16 @@ function AllowanceCard({ program, onEdit }: { program: BenefitProgram; onEdit: (
           <Dot color={program.color ?? "#3b82f6"} />
           <div>
             <p className="font-bold text-foreground">{program.name}</p>
-            <p className="text-xs text-muted-foreground">Allowance · Monthly</p>
+            <p className="text-xs text-muted-foreground">
+              Allowance · Monthly ·{" "}
+              {/* Slice B4 — this switch now changes withholding, so it has to be visible without
+                  opening each allowance in turn. */}
+              {program.tax_treatment === "taxable" ? (
+                <span className="font-medium text-warning">Taxable</span>
+              ) : (
+                "Tax-free"
+              )}
+            </p>
           </div>
         </div>
         <EditButton onClick={onEdit} />

@@ -155,10 +155,27 @@ class PayrollService
         $taxablePeriodPay = $basePay + $holidayPremium + $overtimePay + $nightDiffPay + $restDayPremium;
         $taxableMonthly = $periodsPerYear > 0 ? round($taxablePeriodPay * $periodsPerYear / 12, 2) : 0.0;
 
-        // Allowances are non-taxable de-minimis pay only up to the company's annual ceiling;
-        // anything above it is compensation. No ceiling set ⇒ nothing taxable, as before.
+        // Slice B4 — the two kinds of allowance are taxed differently, so split before taxing.
+        // Payroll used to treat EVERY allowance as de-minimis regardless of the switch HR sets on
+        // the programme, so marking one "taxable" changed nothing on the payslip and the company
+        // quietly under-withheld. Gross pay is unaffected either way: the split only decides how
+        // much of the same money is compensation.
+        $allowanceSplit = $this->allowances->monthlyByTaxTreatmentFor($employee);
+
+        // A taxable allowance is compensation in full — the de-minimis ceiling has nothing to do
+        // with it. Already a MONTHLY figure, which is what the withholding base is measured in.
+        $taxableMonthly += $allowanceSplit['taxable'];
+
+        // De-minimis allowances are tax-free only up to the company's annual ceiling; the excess
+        // is compensation. The ceiling is measured against the de-minimis portion ALONE — counting
+        // taxable allowances toward it would let a taxable allowance consume the tax-free room
+        // that belongs to the de-minimis ones, and tax that room a second time.
+        // No ceiling set ⇒ nothing extra is taxable, as before.
+        $perPeriodDeMinimis = $periodsPerYear > 0
+            ? round(($allowanceSplit['de_minimis'] * 12) / $periodsPerYear, 2)
+            : 0.0;
         $taxableMonthly += $this->taxableAllowanceMonthly(
-            $perPeriodAllowance,
+            $perPeriodDeMinimis,
             $periodsPerYear,
             $dist['deminimis_annual_cap'] ?? null,
         );

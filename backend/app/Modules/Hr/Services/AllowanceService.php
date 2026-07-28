@@ -39,7 +39,7 @@ class AllowanceService
      * One line per enrolled allowance, with where its amount came from. Drives the reconciliation
      * report and lets a payslip explain itself later.
      *
-     * @return array<int, array{program_id:int, name:string, amount:float, programme_amount:float, is_override:bool}>
+     * @return array<int, array{program_id:int, name:string, amount:float, programme_amount:float, is_override:bool, tax_treatment:string}>
      */
     public function linesFor(Employee $employee): array
     {
@@ -62,10 +62,42 @@ class AllowanceService
                 'amount' => $this->toMonthly($amount, (string) $programme->frequency),
                 'programme_amount' => $this->toMonthly($programmeAmount, (string) $programme->frequency),
                 'is_override' => $override !== null,
+                // Slice B4 — payroll needs this to know which allowances are compensation.
+                // Unknown values fall back to `de_minimis`, matching the column default: guessing
+                // "taxable" for a value we don't understand would over-withhold.
+                'tax_treatment' => $programme->tax_treatment === 'taxable' ? 'taxable' : 'de_minimis',
             ];
         }
 
         return $lines;
+    }
+
+    /**
+     * The employee's monthly allowance split by tax treatment (Slice B4).
+     *
+     * WHY THIS EXISTS. Every allowance programme has a de-minimis / taxable switch that HR can set,
+     * and payroll ignored it — everything was treated as tax-free. Nothing was marked taxable yet,
+     * so nobody was affected, but the moment someone flipped that switch the company would have
+     * been under-withholding with no sign that anything was wrong.
+     *
+     * The two halves are taxed differently, which is the whole point of the split:
+     *   de_minimis → tax-free up to the company's annual ceiling; only the EXCESS is taxable
+     *   taxable    → compensation in full, and the ceiling does not apply to it
+     *
+     * The buckets sum to `monthlyFor()` exactly — every line amount is already rounded to two
+     * decimals, so partitioning them cannot introduce a rounding difference in gross pay.
+     *
+     * @return array{de_minimis: float, taxable: float}
+     */
+    public function monthlyByTaxTreatmentFor(Employee $employee): array
+    {
+        $split = ['de_minimis' => 0.0, 'taxable' => 0.0];
+
+        foreach ($this->linesFor($employee) as $line) {
+            $split[$line['tax_treatment']] += $line['amount'];
+        }
+
+        return ['de_minimis' => round($split['de_minimis'], 2), 'taxable' => round($split['taxable'], 2)];
     }
 
     /**
