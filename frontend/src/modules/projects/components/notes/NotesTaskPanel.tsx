@@ -108,10 +108,12 @@ export function NotesTaskPanel({
     />
   );
 
-  // xl and up: an in-flow column. The board shrinks beside it.
+  // xl and up: an in-flow column. The board shrinks beside it, and the panel
+  // sticks so the note stays reachable while the page scrolls — same behaviour
+  // as the dashboard's notes rail.
   if (isXlUp) {
     return (
-      <aside className="flex w-[380px] shrink-0 flex-col rounded-xl border border-line bg-surface p-4">
+      <aside className="sticky top-4 flex max-h-[calc(100dvh-2rem)] w-[380px] shrink-0 flex-col rounded-xl border border-line bg-surface p-4">
         {header}
         <div className="mt-2 flex min-h-0 flex-1 flex-col">
           <NotesBody

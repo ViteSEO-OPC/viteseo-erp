@@ -295,7 +295,7 @@ export function ManagerDashboardView(): React.ReactElement {
             <NotesCard
               target={USER_NOTE}
               uiName="dashboard-card"
-              className="mt-8 xl:sticky xl:top-4"
+              className="mt-8 xl:sticky xl:top-20"
             />
           </div>
         </>
