@@ -200,6 +200,34 @@ class HolidayService
             ->all();
     }
 
+    /**
+     * Home-country holidays in the range that HR has NOT classified yet (type NULL), as
+     * [date 'Y-m-d' => name]. Payroll prices a day off this classification — a regular
+     * holiday pays a different premium from a special day, and an unclassified one pays
+     * nothing at all — so a run covering one of these would quietly under-pay. The pay
+     * run refuses to start while any exist (see RunPayrollRequest).
+     *
+     * @return array<string, string>
+     */
+    public function unclassifiedBetween(Carbon $start, Carbon $end): array
+    {
+        return Holiday::whereNull('type')
+            ->whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereHas('set', fn ($q) => $q->where('country_code', self::HOME_COUNTRY))
+            ->orderBy('date')
+            ->get(['date', 'name'])
+            ->mapWithKeys(fn ($h) => [Carbon::parse($h->date)->toDateString() => $h->name])
+            ->all();
+    }
+
+    /** How many home-country holidays still need HR's review (for the Holidays page badge). */
+    public function needsReviewCount(): int
+    {
+        return Holiday::where(fn ($q) => $q->whereNull('type')->orWhere('needs_review', true))
+            ->whereHas('set', fn ($q) => $q->where('country_code', self::HOME_COUNTRY))
+            ->count();
+    }
+
     // --- helpers ---
 
     /**

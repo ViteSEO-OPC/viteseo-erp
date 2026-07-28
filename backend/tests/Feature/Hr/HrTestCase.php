@@ -2,8 +2,13 @@
 
 namespace Tests\Feature\Hr;
 
+use App\Models\User;
+use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Testing\TestResponse;
+use Laravel\Sanctum\Sanctum;
 use RuntimeException;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 /**
@@ -74,5 +79,32 @@ abstract class HrTestCase extends TestCase
         ]);
 
         return $app;
+    }
+
+    /**
+     * Authenticate as an HR officer and POST JSON. Seeds the roles table on first use —
+     * the HR routes sit behind `role:hr_officer|super_admin`, so without it every request
+     * would 403 and the assertion under test would never be reached.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    protected function hrPost(string $uri, array $payload): TestResponse
+    {
+        return $this->actingAsHr()->postJson($uri, $payload);
+    }
+
+    /** The HR-officer user these tests act as (created + role-assigned once per test). */
+    protected function actingAsHr(): static
+    {
+        if (Role::query()->where('name', 'hr_officer')->doesntExist()) {
+            $this->seed(RolesAndPermissionsSeeder::class);
+        }
+
+        $user = User::factory()->create();
+        $user->assignRole('hr_officer');
+
+        Sanctum::actingAs($user);
+
+        return $this;
     }
 }

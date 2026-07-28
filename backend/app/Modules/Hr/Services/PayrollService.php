@@ -339,8 +339,12 @@ class PayrollService
      * (regular 200 → +1.0, special 130 → +0.3) this reproduces the old hardcoded behaviour exactly.
      * Pure + static so it is unit-testable without a DB (mirrors ViolationService::ladderMatch).
      */
-    public static function holidayPremiumMultiplier(string $type, AttendancePolicy $policy): float
+    public static function holidayPremiumMultiplier(?string $type, AttendancePolicy $policy): float
     {
+        // NULL = HR hasn't classified this holiday yet. `hr_holidays.type` is nullable by
+        // design, so this argument really can be null — before it was typed `string` and a
+        // single unclassified holiday inside a cycle threw a TypeError that failed the WHOLE
+        // payroll run. Unclassified earns no premium; RunPayrollRequest blocks the run first.
         return match ($type) {
             'regular' => max(0, (int) $policy->premium_regular_holiday_pct - 100) / 100,
             'special_non_working' => max(0, (int) $policy->premium_special_day_pct - 100) / 100,

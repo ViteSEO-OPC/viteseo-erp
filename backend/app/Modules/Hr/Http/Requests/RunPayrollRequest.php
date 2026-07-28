@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Requests;
 
 use App\Modules\Hr\Models\PayrollSetting;
+use App\Modules\Hr\Services\HolidayService;
 use App\Modules\Hr\Services\PayScheduleService;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -55,6 +56,28 @@ class RunPayrollRequest extends FormRequest
             $today = now(config('app.timezone_local'))->startOfDay();
             if (Carbon::parse($start)->startOfDay()->gt($today)) {
                 $validator->errors()->add('cycle_start', 'You cannot run payroll for a period that has not started yet.');
+
+                return;
+            }
+
+            // Every holiday in the cycle must be classified before pay is computed: the type
+            // decides the premium (regular 200% vs special 130% vs none), so running with an
+            // unclassified date silently under-pays anyone who worked it. Blocking here is
+            // also what keeps an un-typed holiday from ever reaching the pay engine.
+            $unclassified = app(HolidayService::class)
+                ->unclassifiedBetween(Carbon::parse($start), Carbon::parse($end));
+
+            if ($unclassified !== []) {
+                $list = collect($unclassified)
+                    ->map(fn ($name, $date) => "{$date} ({$name})")
+                    ->implode(', ');
+
+                $validator->errors()->add('cycle_start', trans_choice(
+                    '{1}A holiday in this period still needs to be classified before payroll can run: :list. Set its type in Company → Holidays.'
+                    . '|[2,*]:count holidays in this period still need to be classified before payroll can run: :list. Set their types in Company → Holidays.',
+                    count($unclassified),
+                    ['count' => count($unclassified), 'list' => $list],
+                ));
             }
         });
     }

@@ -64,6 +64,53 @@ class AttendanceService
             ->first();
     }
 
+    /**
+     * Longest a shift may stay open before we stop treating it as "in progress". Past this
+     * it is a forgotten clock-out, not someone still at work — the violation engine flags it
+     * and payroll credits the scheduled end. Generous enough for a 12h shift plus overtime.
+     */
+    private const MAX_OPEN_SHIFT_HOURS = 18;
+
+    /**
+     * The employee's shift that is currently IN PROGRESS — clocked in, not yet out — even
+     * when it began on an earlier Manila date.
+     *
+     * WHY (Slice 3): a work_date is the Manila date the shift STARTED, so a graveyard shift
+     * clocked in at 22:00 on the 1st is stored on the 1st. Every clock action used to look up
+     * "today's" row, so at 06:00 on the 2nd the employee was told "You have not clocked in
+     * today" and simply could not clock out. Night differential and past-midnight overtime
+     * were therefore unreachable through the UI — only an HR correction could produce such a
+     * row. This resolves the shift instead of the calendar day.
+     */
+    private function openRow(Employee $employee): ?Attendance
+    {
+        $row = Attendance::where('employee_id', $employee->id)
+            ->whereNotNull('time_in')
+            ->whereNull('time_out')
+            // Two Manila days back is plenty to catch an overnight shift, and keeps this off
+            // a full table scan.
+            ->where('work_date', '>=', $this->localNow()->copy()->subDays(2)->toDateString())
+            ->orderByDesc('work_date')
+            ->first();
+
+        if (! $row || ! $row->time_in) {
+            return null;
+        }
+
+        // Stale punch → not an open shift, so the employee can start a fresh day tomorrow
+        // instead of being permanently blocked by one they forgot to close.
+        return $row->time_in->diffInHours(now()) >= self::MAX_OPEN_SHIFT_HOURS ? null : $row;
+    }
+
+    /**
+     * The row the clock acts on: the shift in progress if there is one, else today's row.
+     * The fallback preserves every existing "not clocked in" / "already clocked out" message.
+     */
+    private function activeRow(Employee $employee): ?Attendance
+    {
+        return $this->openRow($employee) ?? $this->todayRow($employee);
+    }
+
     /** Management staff are exempt from attendance — they never clock in/out. */
     private function assertNotManagement(Employee $employee): void
     {
@@ -77,6 +124,18 @@ class AttendanceService
     public function clockIn(Employee $employee): Attendance
     {
         $this->assertNotManagement($employee);
+
+        // An overnight shift from a previous date is still running — starting a second one
+        // would leave the first permanently open and silently unpaid.
+        $open = $this->openRow($employee);
+        if ($open && $open->work_date->toDateString() !== $this->today()) {
+            throw ValidationException::withMessages([
+                'time_in' => [
+                    'You still have an open shift from ' . $open->work_date->format('M j')
+                        . ' — clock out first, or ask HR to correct it.',
+                ],
+            ]);
+        }
 
         $att = Attendance::firstOrNew([
             'employee_id' => $employee->id,
@@ -110,7 +169,7 @@ class AttendanceService
     {
         $this->assertNotManagement($employee);
 
-        $att = $this->todayRow($employee);
+        $att = $this->activeRow($employee);
 
         if (! $att || ! $att->time_in) {
             throw ValidationException::withMessages([
@@ -145,7 +204,7 @@ class AttendanceService
     {
         $this->assertNotManagement($employee);
 
-        $att = $this->todayRow($employee);
+        $att = $this->activeRow($employee);
 
         if (! $att || ! $att->time_in) {
             throw ValidationException::withMessages([
@@ -189,7 +248,7 @@ class AttendanceService
 
     public function todayFor(Employee $employee): ?Attendance
     {
-        return $this->todayRow($employee);
+        return $this->activeRow($employee);
     }
 
     /**
@@ -485,7 +544,12 @@ class AttendanceService
         foreach ($rows as $row) {
             $day = Carbon::parse($row->work_date, $tz);
             $date = $day->toDateString();
-            if (isset($holidayMap[$date])) {
+            // Skip ONLY the days holidayPremiumFor() actually pays for — regular and special
+            // non-working. It used to skip every date in the map, which silently unpaid two
+            // cases: a `special_working` day (an ordinary working day, earns no holiday
+            // premium) and an unclassified one (type NULL, also earns nothing) — working
+            // either on a rest day left the employee with no premium from either line.
+            if (in_array($holidayMap[$date] ?? null, HolidayService::NON_WORKING_TYPES, true)) {
                 continue; // the holiday premium covers this day
             }
             if ($this->schedule->effectiveFor($employee, $day)['is_workday'] ?? true) {
