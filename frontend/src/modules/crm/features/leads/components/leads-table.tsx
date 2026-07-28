@@ -15,7 +15,7 @@ import {
 } from "@/modules/crm/components/ui/table";
 import { PriorityChip } from "@/modules/crm/components/shared/status-badge/priority-chip";
 import { StatusChip } from "@/modules/crm/components/shared/status-badge/status-chip";
-import { Edit, Trash2, UserPlus } from "lucide-react";
+import { Download, Edit, Loader2, Trash2, UserPlus } from "lucide-react";
 import { TableSkeleton } from "@/modules/crm/features/dashboard/components/table-skeleton";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { formatDateLong } from "@/modules/crm/lib/formatters";
@@ -176,6 +176,10 @@ type LeadsTableProps = {
   assignedToFilter: string;
   onAssignedToChange: (value: string) => void;
   bdOptions: ColumnFilterOption[];
+  /** BD table only: download one lead's PDF (replaces Delete in that audience's row actions). */
+  onExportPdf: (lead: Lead) => void;
+  /** Id of the lead currently exporting, so only that row shows a spinner. */
+  exportingPdfId: string | null;
 };
 
 export function LeadsTable({
@@ -205,6 +209,8 @@ export function LeadsTable({
   assignedToFilter,
   onAssignedToChange,
   bdOptions,
+  onExportPdf,
+  exportingPdfId,
 }: LeadsTableProps) {
   const router = useRouter();
 
@@ -523,17 +529,38 @@ export function LeadsTable({
                       >
                         <Edit className="h-3.5 w-3.5" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDelete(lead);
-                        }}
-                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        aria-label={`Delete ${lead.business}`}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {/* Admin/Super Admin keep Delete. The BD table swaps it for Export PDF, which
+                          downloads only this lead via the shared single-lead export endpoint. */}
+                      {canAssign ? (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(lead);
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-label={`Delete ${lead.business}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onExportPdf(lead);
+                          }}
+                          disabled={exportingPdfId === lead.id}
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                          aria-label={`Export ${lead.business} as PDF`}
+                        >
+                          {exportingPdfId === lead.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      )}
                     </div>
                   </TableCell>
                 ),

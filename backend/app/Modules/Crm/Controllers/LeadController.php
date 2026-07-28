@@ -21,6 +21,7 @@ use App\Modules\Crm\Models\Lead;
 use App\Models\User;
 use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Services\LeadImportService;
+use App\Modules\Crm\Services\LeadPdfExporter;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -29,6 +30,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class LeadController extends Controller
 {
@@ -292,6 +294,19 @@ class LeadController extends Controller
             ->when($industries !== [], function (Builder $q) use ($industries): void {
                 $q->whereIn(DB::raw('LOWER(industry)'), $industries);
             });
+    }
+
+    /**
+     * One lead as a PDF profile.
+     *
+     * The SINGLE export implementation — the Lead Details header action and the BD table's row action
+     * both call this route, so the two can never drift. Authorized by `view` on the lead (the route's
+     * `can('view', 'lead')`), which is the same ownership boundary that governs reading the lead at
+     * all: if a user may open the lead, they may export it.
+     */
+    public function exportPdf(Lead $lead, LeadPdfExporter $exporter): SymfonyResponse
+    {
+        return $exporter->render($lead)->download($exporter->filename($lead));
     }
 
     public function store(StoreLeadRequest $request, LeadCreator $creator): JsonResponse

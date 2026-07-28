@@ -131,6 +131,10 @@ class CrmServiceProvider extends ServiceProvider
         // Auto-load the crm_* migrations from inside the module.
         $this->loadMigrationsFrom(__DIR__ . '/../Migrations');
 
+        // Blade views owned by the CRM module, namespaced `crm::` — currently the single-lead PDF
+        // template. Mirrors the HR module's `hr::` registration; no app-level views are touched.
+        $this->loadViewsFrom(__DIR__ . '/../Resources/views', 'crm');
+
         // Register the module policies (models Lead/Note/Email/PlannerEvent + the shared User for
         // CRM team-account management). Observers auto-register via #[ObservedBy] attributes.
         foreach ($this->policies as $model => $policy) {

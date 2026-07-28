@@ -77,6 +77,10 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::get('/website-enrichment/queue', [WebsiteEnrichmentController::class, 'queue'])->can('import', Lead::class);
         Route::put('/leads/{lead}/website-enrichment', [WebsiteEnrichmentController::class, 'update'])->can('import', Lead::class);
         Route::get('/leads/{lead}/activities', [LeadController::class, 'activities'])->can('view', 'lead');
+        // One lead as a PDF profile. Authorized by `view` on the lead — the same ownership boundary as
+        // reading it — so a BD can export their own leads and nobody can export a lead they cannot see.
+        // Shared by the Lead Details header action and the BD table row action (one implementation).
+        Route::get('/leads/{lead}/export-pdf', [LeadController::class, 'exportPdf'])->can('view', 'lead');
         // Personal Lead Score breakdown (KPI Engine) — the auditable per-signal "why" behind
         // leads.score. Read-only; ownership-gated identically to viewing the lead.
         Route::get('/leads/{lead}/score', [LeadController::class, 'score'])->can('view', 'lead');

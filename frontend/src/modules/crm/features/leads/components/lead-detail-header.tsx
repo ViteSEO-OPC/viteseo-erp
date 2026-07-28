@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft, Download, Edit3, Trash2, UserPlus } from "lucide-react";
+import { ArrowLeft, Download, Edit3, Loader2, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/modules/crm/components/ui/button";
 
 type Props = {
@@ -13,9 +13,23 @@ type Props = {
   onAssign?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  /** Download this lead's PDF profile (server-rendered). */
+  onExportPdf?: () => void;
+  exportingPdf?: boolean;
 };
 
-export function LeadDetailHeader({ title, subtitle, canAssign, canDelete, assigned, onAssign, onEdit, onDelete }: Props) {
+export function LeadDetailHeader({
+  title,
+  subtitle,
+  canAssign,
+  canDelete,
+  assigned,
+  onAssign,
+  onEdit,
+  onDelete,
+  onExportPdf,
+  exportingPdf,
+}: Props) {
   return (
     <div>
       <Link
@@ -52,16 +66,19 @@ export function LeadDetailHeader({ title, subtitle, canAssign, canDelete, assign
               Delete Lead
             </Button>
           ) : null}
-          {/* Export PDF — presentation-only (disabled). PDF export is not wired before the demo;
-              this is a visual placeholder and performs no action (mirrors the Won/Lose pattern). */}
+          {/* Server-rendered PDF profile of this lead — same endpoint the BD table row action uses. */}
           <Button
             variant="outline"
             size="sm"
-            disabled
-            title="PDF export not enabled yet"
-            className="cursor-not-allowed opacity-60"
+            onClick={onExportPdf}
+            disabled={exportingPdf}
+            title="Download this lead's profile as a PDF"
           >
-            <Download className="h-4 w-4" />
+            {exportingPdf ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
             Export PDF
           </Button>
           <Button variant="default" size="sm" onClick={onEdit}>

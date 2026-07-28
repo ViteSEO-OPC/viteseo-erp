@@ -15,6 +15,7 @@ import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/co
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import { useLeads, LEAD_UNASSIGNED } from "@/modules/crm/features/leads/hooks/use-leads-data";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
+import { useExportLeadPdf } from "@/modules/crm/features/leads/hooks/use-export-lead-pdf";
 import { ReportsScopeSelector } from "@/modules/crm/features/reports/components/reports-scope-selector";
 import { ALL_SCOPE } from "@/modules/crm/features/performance/lib/performance-scope";
 import type { PerformanceScope } from "@/modules/crm/features/performance/lib/performance-scope";
@@ -107,6 +108,9 @@ export function LeadsPageLayout() {
     isError,
     retry,
   } = useLeads();
+
+  // Single-lead PDF export, shared with Lead Details — one hook, one endpoint, one implementation.
+  const { exportLeadPdf, exportingId } = useExportLeadPdf();
 
   // Assigned BD filter options — live accounts from the shared useBdUsers hook (the same source the
   // Assign modal uses), so no owner name is ever invented. Guarded by `canAssign`: only Admin/SA see
@@ -285,6 +289,8 @@ export function LeadsPageLayout() {
             assignedToFilter={assignedTo}
             onAssignedToChange={setAssignedTo}
             bdOptions={bdOptions}
+            onExportPdf={(lead) => exportLeadPdf(lead.id, lead.business)}
+            exportingPdfId={exportingId}
           />
           <Pagination
             page={page}
