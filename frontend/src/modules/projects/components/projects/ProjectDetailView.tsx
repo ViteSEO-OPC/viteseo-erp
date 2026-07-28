@@ -11,7 +11,7 @@ import {
   PencilIcon,
   PlusIcon,
 } from "@/core/ui";
-import { useIsManager } from "@/core/auth/AuthProvider";
+import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import type { StatusKey } from "../../types";
 import { useProjectChannel } from "../../useProjectChannel";
 import { useForbiddenRedirect } from "../../useForbiddenRedirect";
@@ -29,6 +29,14 @@ import { EditProjectModal } from "./EditProjectModal";
 import { MemberPickerModal } from "../team/MemberPickerModal";
 import { buildGroupsByUser, MemberGroupTags } from "../team/TeamShared";
 import { NotesCard } from "../notes/NotesCard";
+import { ListView } from "../workspaces/views/ListView";
+import {
+  colIdOf,
+  type StatusColumn,
+  type WorkItem,
+} from "../workspaces/views/shared";
+import { TaskModal } from "../tasks/TaskModal";
+import { useOpenTask } from "../tasks/useTaskModal";
 import { ProjectStatusBadge } from "../status/ProjectStatusBadge";
 import { STATUS_COLORS, StatusDonut } from "../status/StatusDonut";
 
@@ -55,6 +63,8 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const statusesQuery = useStatuses(projectId);
   const tasksQuery = useTasks(projectId);
   const isManager = useIsManager();
+  const { user } = useAuth();
+  const openTask = useOpenTask();
 
   const project = projectQuery.data;
   const workspaceId = project?.workspace_id ?? "";
@@ -66,6 +76,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);
+  const [addTaskOpen, setAddTaskOpen] = useState(false);
   const updateProject = useUpdateProject();
   const isDone = project?.status === "done";
 
@@ -132,6 +143,69 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const total = counts.todo + counts.in_progress + counts.done;
   const pct = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 100));
   const donePct = pct(counts.done);
+
+  // What this viewer may see in the task table. A manager gets the project; a
+  // member gets what's actually theirs — tasks assigned to them, plus a group
+  // task when they lead the group that owns it (`leads_my_group` is resolved
+  // server-side from the token, so it can't be spoofed by the client).
+  const visibleTasks = useMemo(() => {
+    const all = tasksQuery.data?.data ?? [];
+    if (isManager) return all;
+    return all.filter(
+      (t) => t.assignee_id === user?.id || (t.leads_my_group ?? false),
+    );
+  }, [tasksQuery.data, isManager, user?.id]);
+
+  // The board's List view speaks WorkItem, not Task — same shape the workspace
+  // board builds, minus the drag/subtask handling that only applies there.
+  const taskItems = useMemo<WorkItem[]>(
+    () =>
+      visibleTasks.map((t) => ({
+        kind: "task",
+        key: `task-${t.id}`,
+        id: t.id,
+        projectId: t.project_id,
+        projectColor: project?.color ?? "#6366f1",
+        title: t.title,
+        priority: t.priority,
+        statusName: t.status?.name ?? null,
+        statusKey: t.status?.key ?? null,
+        statusColor: t.status?.color ?? null,
+        assignee: t.assignee,
+        assigneeId: t.assignee_id,
+        groupName: t.group?.name ?? null,
+        groupColor: t.group?.color ?? null,
+        deadline: t.deadline,
+        hasMySubtask: t.has_my_subtask ?? false,
+        leadsMyGroup: t.leads_my_group ?? false,
+      })),
+    [visibleTasks, project?.color],
+  );
+
+  // This project's custom statuses get their own sections, so an empty one
+  // still shows up rather than silently vanishing.
+  const customStatusColumns = useMemo<StatusColumn[]>(
+    () =>
+      (statusesQuery.data ?? [])
+        .filter((s) => s.key === "custom")
+        .map((s) => ({
+          colId: colIdOf(s.key, s.name),
+          label: s.name,
+          color: s.color ?? "#9ca3af",
+        })),
+    [statusesQuery.data],
+  );
+
+  const projectNameById = useMemo(
+    () => new Map(project ? [[project.id, project.name]] : []),
+    [project],
+  );
+  // ListView wants a non-null colour per project; fall back to the same indigo
+  // the board uses for a project that has none set.
+  const projectColorById = useMemo(
+    () => new Map(project ? [[project.id, project.color ?? "#6366f1"]] : []),
+    [project],
+  );
 
   const members = useMemo(() => project?.members ?? [], [project]);
   const memberIds = useMemo(() => members.map((m) => m.id), [members]);
@@ -336,46 +410,57 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               </div>
             </div>
           </Card>
+            {/* Tasks — full width below the columns, since a table wants the room.
+            A manager sees the whole project; a member sees only what's theirs. */}
+          <Card className="mt-5 gap-3 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-ink">
+                  {isManager ? "Tasks" : "My Tasks"}
+                </h2>
+                <span className="text-xs font-bold text-ink-faint">
+                  {visibleTasks.length}
+                </span>
+              </div>
+              {isManager && (
+                <Button onClick={() => setAddTaskOpen(true)}>
+                  <PlusIcon className="h-4 w-4" />
+                  Add Task
+                </Button>
+              )}
+            </div>
 
-          {/* Groups — auto-attached when all of a group's members are on this
-              project. Read-only here; managed on the Groups page. */}
-          <Card className="gap-3 p-5">
-            <h2 className="text-lg font-bold text-ink">Groups</h2>
-            {(project?.groups ?? []).length === 0 ? (
-              <p className="text-sm text-ink-soft">
-                No groups yet. A group joins automatically once every one of its
-                members is on this project.
+            {tasksQuery.isLoading ? (
+              <p className="text-sm text-ink-soft">Loading tasks…</p>
+            ) : visibleTasks.length === 0 ? (
+              <p className="py-6 text-center text-sm text-ink-soft">
+                {isManager
+                  ? "No tasks in this project yet."
+                  : "Nothing assigned to you in this project yet."}
               </p>
             ) : (
-              // Two-up on wider screens: these rows are short, and a single
-              // column left half the card empty.
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {(project?.groups ?? []).map((g) => (
-                  <div
-                    key={g.id}
-                    className="flex items-center gap-2.5 rounded-lg border border-line px-3 py-2"
-                  >
-                    <span
-                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                      style={{ backgroundColor: g.color }}
-                      aria-hidden
-                    >
-                      {g.name.charAt(0).toUpperCase()}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold text-ink">
-                        {g.name}
-                      </p>
-                      <p className="truncate text-xs text-ink-soft">
-                        {g.members_count ?? g.members?.length ?? 0} members
-                        {g.leader ? ` · ${g.leader.name}` : ""}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              // The board's own List view — same status sections, columns, row
+              // behaviour and lazy loading the user already knows from All Tasks.
+              <ListView
+                items={taskItems}
+                customColumns={customStatusColumns}
+                projectName={projectNameById}
+                projectColor={projectColorById}
+                onOpen={openTask}
+              />
             )}
           </Card>
+
+          {isManager && addTaskOpen && (
+            <TaskModal
+              open
+              onClose={() => setAddTaskOpen(false)}
+              projectId={projectId}
+              statuses={statusesQuery.data ?? []}
+              mode="create"
+            />
+          )}
+
         </div>
 
         {/* RIGHT — people, then the viewer's private notes */}
@@ -435,6 +520,50 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
                 <PlusIcon className="h-4 w-4" />
                 Add Member
               </button>
+            )}
+          </Card>
+
+          {/* Groups sit directly under the people they're made of — auto-attached
+              when all of a group's members are on this project. Read-only here;
+              managed on the Groups page. */}
+          <Card className="gap-3 p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-bold text-ink">Groups</h2>
+              <span className="text-xs font-bold text-ink-faint">
+                {(project?.groups ?? []).length}
+              </span>
+            </div>
+            {(project?.groups ?? []).length === 0 ? (
+              <p className="text-sm text-ink-soft">
+                No groups yet. A group joins automatically once every one of its
+                members is on this project.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                {(project?.groups ?? []).map((g) => (
+                  <div
+                    key={g.id}
+                    className="flex items-center gap-2.5 rounded-lg border border-line px-3 py-2"
+                  >
+                    <span
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                      style={{ backgroundColor: g.color }}
+                      aria-hidden
+                    >
+                      {g.name.charAt(0).toUpperCase()}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-ink">
+                        {g.name}
+                      </p>
+                      <p className="truncate text-xs text-ink-soft">
+                        {g.members_count ?? g.members?.length ?? 0} members
+                        {g.leader ? ` · ${g.leader.name}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </Card>
         </div>
