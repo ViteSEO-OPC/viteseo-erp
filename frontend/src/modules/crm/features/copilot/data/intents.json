@@ -22,10 +22,7 @@
     {
       "id": "revenue-today",
       "keywords": ["revenue today", "todays revenue"],
-      "response": {
-        "type": "text",
-        "text": "There's no live **revenue** metric yet. The revenue figure on My Performance is *sample (Demo)* data, pending the KPI Engine — so I can't report today's revenue."
-      }
+      "response": { "type": "computation", "computationId": "overall-revenue" }
     },
     {
       "id": "pipeline-summary",
@@ -236,18 +233,12 @@
     {
       "id": "revenue",
       "keywords": ["revenue", "overall revenue", "my revenue"],
-      "response": {
-        "type": "text",
-        "text": "**Revenue** isn't tracked with live data yet — the figure on My Performance is *Demo/sample* data, pending the KPI Engine."
-      }
+      "response": { "type": "computation", "computationId": "overall-revenue" }
     },
     {
       "id": "conversion",
       "keywords": ["conversion", "conversion rate", "win rate", "close rate"],
-      "response": {
-        "type": "text",
-        "text": "**Conversion rate** and **win rate** aren't computed yet — they show as *Demo* placeholders on My Performance (and a display-only card on the Dashboard) until the KPI Engine ships."
-      }
+      "response": { "type": "computation", "computationId": "conversion-rate" }
     },
 
     {
@@ -263,10 +254,7 @@
     {
       "id": "score-leads",
       "keywords": ["score my new leads", "score leads", "score my leads", "re-score leads", "rescore leads"],
-      "response": {
-        "type": "template",
-        "template": "Every lead carries a **score** (0–100) that's calculated automatically — higher means a stronger opportunity, and *hot* leads pair a high score with *High* priority. Scoring is applied for you (there's no manual re-score action). You can sort **Leads** by score to see the strongest first."
-      }
+      "response": { "type": "computation", "computationId": "lead-score" }
     },
 
     {

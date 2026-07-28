@@ -1,12 +1,6 @@
 {
   "knowledge": [
     {
-      "id": "lead-score",
-      "question": "What is a lead score and how is it calculated?",
-      "keywords": "lead score scoring points how scored ranking rank quality 0 100 hot",
-      "answer": "Every lead carries a **score** from 0–100 that's calculated automatically when the lead is created or imported — you don't score leads by hand, and there's no manual re-score action. A higher score means a stronger opportunity. Sort the **Leads** table by *Highest score* to see the strongest first."
-    },
-    {
       "id": "priority-levels",
       "question": "What do the priority levels mean?",
       "keywords": "priority high medium low levels meaning hot warm cold filter",
@@ -93,14 +87,8 @@
     {
       "id": "performance",
       "question": "What is on My Performance?",
-      "keywords": "performance my stats kpis assigned leads conversion revenue targets discipline demo",
-      "answer": "**My Performance** shows your live *Assigned Leads* count and *Recent Activity*. The conversion, revenue, converted-leads, targets, and follow-up-discipline cards are *Demo* (sample) placeholders until the KPI Engine ships — the range selector and Export PDF are Demo too."
-    },
-    {
-      "id": "conversion-rate",
-      "question": "What is the conversion rate and where do I see revenue?",
-      "keywords": "conversion rate win rate close converted percentage revenue money metric demo performance",
-      "answer": "**Conversion rate**, **win rate**, and **revenue** aren't computed with live data yet — they appear as *Demo* placeholders on **My Performance** (and a display-only card on the Dashboard) until the KPI Engine ships."
+      "keywords": "performance my stats kpis assigned leads conversion revenue targets discipline",
+      "answer": "**My Performance** is your own scorecard, computed live: *Conversion Rate*, *Converted*, *Revenue*, *Estimated Pipeline*, *Active* and *Assigned* leads, *Completed Follow-ups*, plus *Follow-up Discipline* and *Recent Activity*. Ask me how any of them is computed. Only *Personal Target* is Pending — the CRM has no monthly-goal source, so no progress can be shown. The range selector and Export PDF on this page are still Demo affordances."
     },
     {
       "id": "roles",

@@ -1,0 +1,534 @@
+{
+  "computations": [
+    {
+      "id": "conversion-rate",
+      "label": "Conversion Rate",
+      "measures": "Of the leads you actually worked, the share that converted",
+      "formula": "round(converted ÷ engaged × 100, 1)",
+      "numerator": "Converted — leads with at least one Deal",
+      "denominator": "Engaged — leads where email outreach has started OR a call has been made",
+      "undefinedWhen": "engaged = 0 → null, shown as —, never 0%",
+      "reasoning": "Measured against the leads you actually worked, not everything assigned to you, so a large portfolio isn't penalised for leads nobody has reached yet.",
+      "caveats": [
+        "Raising engagement LOWERS this rate until those new leads convert — the denominator grows first.",
+        "Not comparable to Engagement Coverage (÷ all assigned) or Interest Rate (÷ assigned − declined). Three different denominators are in use across the CRM."
+      ],
+      "surface": "My Performance",
+      "route": "/zerem/my-performance",
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::performanceSummary",
+      "keywords": "conversion rate convert converted percentage close win rate how computed formula calculated why only 23 low denominator engaged"
+    },
+    {
+      "id": "engaged-leads",
+      "label": "Engaged Leads",
+      "question": "What counts as an engaged lead?",
+      "measures": "How many leads we have actually made contact with",
+      "formula": "COUNT(active + visible leads WHERE email_outreach ≠ 'none' OR cold_calling ≠ 'not-called')",
+      "reasoning": "Engagement means we reached out — deliberately NOT that the lead responded. It measures your effort, which is why it is the Conversion Rate denominator.",
+      "caveats": [
+        "A lead that was emailed and ignored still counts as engaged."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::performanceSummary",
+      "keywords": "engaged lead engagement contacted reached out what counts as engaged definition how computed"
+    },
+    {
+      "id": "converted-leads",
+      "label": "Converted Leads",
+      "measures": "How many leads produced real won business",
+      "formula": "COUNT(active + visible leads WHERE EXISTS a Deal)",
+      "reasoning": "Conversion is defined by the EXISTENCE OF A DEAL, never by a status value — no status in the five-value set means 'won'. This is why marking a lead Won does not change its status.",
+      "caveats": [
+        "Also shown as the funnel's Confirmed stage."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::performanceSummary",
+      "keywords": "converted leads conversion won deals confirmed how many how computed definition"
+    },
+    {
+      "id": "assigned-leads",
+      "label": "Total Leads / Assigned Leads",
+      "measures": "The full size of the portfolio you are responsible for",
+      "formula": "COUNT(Lead::active() + visibleTo(you)) — ALL statuses, including declined",
+      "reasoning": "Portfolio size. This is the canonical page denominator for Reports and equals the Lead Status Mix donut total.",
+      "caveats": [
+        "Includes declined leads. Its difference from Active Leads is exactly the declined count.",
+        "Excludes the unqualified Prospect Pool — those are not CRM leads yet."
+      ],
+      "surface": "Reports 'Total Leads' card",
+      "route": "/zerem/reports",
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::kpis, performanceSummary",
+      "keywords": "total leads assigned portfolio how many all leads denominator how computed"
+    },
+    {
+      "id": "active-leads",
+      "label": "Active Leads",
+      "question": "What is an Active Lead?",
+      "measures": "How many of your leads are still workable",
+      "formula": "COUNT(Lead::active() + visibleTo(you) WHERE status IN new, interested, awaiting-reply, call-back-req)",
+      "reasoning": "Live workload, as distinct from total portfolio — it strips out leads you have already disqualified.",
+      "caveats": [
+        "'Active' means TWO different things in this CRM. Lead::active() is a PROVENANCE filter meaning 'a real CRM lead, not an unqualified prospect'. The Active Leads METRIC is a STATUS filter meaning 'not declined'. Most queries apply both.",
+        "The non-declined status set is declared in two places (config/kpi.php and an inline literal), so metric M-03 and this figure read different sources."
+      ],
+      "surface": "Management 'Active Leads' card",
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::performanceSummary, config/kpi.php",
+      "keywords": "active leads what is an active lead workable not declined how computed definition difference"
+    },
+    {
+      "id": "overall-revenue",
+      "label": "Overall Revenue",
+      "measures": "Realized revenue from won business",
+      "formula": "SUM(crm_deals.amount) over deals belonging to leads you can see",
+      "reasoning": "Deals are the sole source of truth for revenue. Revenue is NEVER computed from a lead's amount — that field is only an estimate held while the lead is still a prospect. The two are never summed or substituted.",
+      "caveats": [
+        "NOT time-windowed. This is a running total for the leads you can see — the CRM does not compute a daily, weekly or monthly revenue figure, so there is no 'revenue today'."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::performanceSummary",
+      "keywords": "revenue overall money earned peso total how computed deals amount sales"
+    },
+    {
+      "id": "estimated-pipeline",
+      "label": "Estimated Pipeline Value",
+      "measures": "The expected value of leads still in play",
+      "formula": "SUM(crm_leads.amount) over active + visible leads",
+      "reasoning": "Forward-looking pipeline, kept explicitly separate from realized revenue.",
+      "caveats": [
+        "Leads with no amount contribute nothing — they are not treated as zero-value, they are simply absent."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::performanceSummary",
+      "keywords": "estimated pipeline value potential expected forecast lead amount how computed"
+    },
+    {
+      "id": "lead-score",
+      "label": "Lead Score",
+      "measures": "How strong an opportunity a lead is, from 0 to 100",
+      "formula": "fit = min(Σ fit signals, 40) · engagement = min(Σ engagement signals, 60) · negative = Σ negative signals · score = clamp(fit + engagement − negative, 0, 100)",
+      "reasoning": "Caps are applied PER CATEGORY BEFORE subtraction, so a strong engagement profile cannot compensate for poor business fit beyond the fit ceiling. The calculator is deterministic — identical inputs always give an identical score and breakdown.",
+      "caveats": [
+        "Scoring is automatic and applied for you — there is no manual re-score action in the CRM. Sort the Leads table by highest score to see the strongest first.",
+        "Score is automatic. Priority is manual and is NEVER derived from the score — no code maps one to the other.",
+        "Unqualified prospects are not scored at all and carry 0 until they are qualified.",
+        "Point values come from the active published Business Rules version; the category caps and the 7/30-day windows are file-backed and not admin-editable."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "Services/Scoring/LeadScoreCalculator, config/scoring.php",
+      "keywords": "lead score scoring how calculated formula 0 100 points computed quality ranking what is a lead score how is a lead scored lead scoring explained score meaning"
+    },
+    {
+      "id": "lead-score-signals",
+      "label": "Lead Score signals",
+      "question": "What signals increase or decrease a lead score?",
+      "measures": "Exactly which signals raise or lower a lead score",
+      "formula": "FIT (cap 40): No Website +25 · Needs Redesign +10 · Target Location +10 · Contact Person +5 — ENGAGEMENT (cap 60): Interested +30 · Call Completed +15 · Call Scheduled +8 · Email Opened/Replied +5 · Awaiting Reply +5 · Recent Activity within 7 days +5 — NEGATIVE: Has Website −15 · No Activity for over 30 days −10",
+      "reasoning": "Fit asks 'is this the right kind of business', engagement asks 'how far has the conversation progressed', and negatives penalise poor fit and staleness.",
+      "caveats": [
+        "Contact Person only fires when the contact name is present AND differs from the business name — a real named human is the signal, not merely a filled field.",
+        "The website signals are mutually exclusive, as are Interested/Awaiting Reply and Call Completed/Call Scheduled.",
+        "With no recorded activity at all, NEITHER Recent Activity nor No Activity fires — a brand-new lead is not penalised.",
+        "The Invalid/Bounced Email signal is configured but HARD-DISABLED in the calculator; it contributes 0 and is reserved for future bounce tracking."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "Services/Scoring/LeadScoreCalculator",
+      "keywords": "signals score increase decrease raise lower points what affects website status target location contact person interested recent activity negative penalty"
+    },
+    {
+      "id": "lead-score-recompute",
+      "label": "Why a Lead Score changed",
+      "question": "Why did my lead score change?",
+      "measures": "What causes a score to be recalculated",
+      "formula": "Recomputed when a WATCHED field changes: website_status, status, cold_calling, email_outreach, contact_name, business_name, region, province, city, last_activity",
+      "reasoning": "Only inputs that feed a signal trigger a recompute, so unrelated edits don't churn scores or pollute the activity feed. The scorer writes quietly and only when the value actually changes.",
+      "caveats": [
+        "Editing priority, amount, assignment or notes does NOT change the score.",
+        "Publishing a new Business Rules version auto-triggers a full recompute of every lead.",
+        "Restoring a lead from the archive deliberately does NOT rescore.",
+        "Marking a lead Won or Lost does NOT change the score — neither touches a scored column."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "Services/Scoring/LeadScorer, LeadObserver",
+      "keywords": "why did my score change recompute recalculate changed dropped increased score update trigger when"
+    },
+    {
+      "id": "conversion-funnel",
+      "label": "Conversion Funnel",
+      "measures": "How many leads survived to each stage of qualification",
+      "formula": "Added = all active leads · Contacted = engaged · Interested = engaged AND status IN (interested, awaiting-reply, call-back-req) · Consultation = the above AND cold_calling = 'scheduled' · Confirmed = leads with at least one Deal",
+      "reasoning": "A true SURVIVAL funnel — each stage is a cumulative subset of the one before it, so it narrows monotonically and every bar reads as 'leads that progressed at least this far'.",
+      "caveats": [
+        "Confirmed is NOT nested: a lead can convert through a path outside the modelled signals, so it is the real won total rather than a subset.",
+        "The funnel's Consultation bar counts SCHEDULED SLOTS and is a different question from the Consultations KPI, which counts consultations actually held. The two legitimately differ — the funnel is deliberately unchanged pending a Funnel Review."
+      ],
+      "surface": "Reports → Conversion Funnel",
+      "route": "/zerem/reports",
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::reportsAnalytics",
+      "keywords": "funnel stages conversion added contacted interested consultation confirmed survival drop how computed"
+    },
+    {
+      "id": "funnel-dropoff",
+      "label": "Biggest drop-off",
+      "measures": "Where the funnel loses the most leads",
+      "formula": "For each consecutive stage pair: round((current − previous) ÷ previous × 100); the largest percentage loss wins",
+      "reasoning": "Points at the weakest transition so effort can go where the most leads are being lost.",
+      "caveats": [
+        "A stage with a zero previous value is skipped rather than treated as a 100% drop."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::reportsAnalytics",
+      "keywords": "drop off biggest dropoff funnel loss stage where losing leads how computed"
+    },
+    {
+      "id": "contacted-pct",
+      "label": "Contacted (%)",
+      "measures": "What share of all leads we have made contact with",
+      "formula": "round(funnel Contacted ÷ funnel Added × 100)",
+      "reasoning": "Coverage of the whole book at a glance — how much of the portfolio has been touched at all.",
+      "caveats": [
+        "'Contacted' means THREE different things in this CRM: this management KPI (a percentage of all leads), the funnel's Contacted stage (a count of engaged leads), and the Leads page's Contacted TAB (status IN awaiting-reply, call-back-req). Check which one you are reading."
+      ],
+      "surface": "Reports → Management KPI row",
+      "route": "/zerem/reports",
+      "confidence": "documented",
+      "verifiedAgainst": "management-kpi-row.tsx, DashboardController::reportsAnalytics",
+      "keywords": "contacted percent percentage how many contacted share coverage tab meaning how computed"
+    },
+    {
+      "id": "consultations-held",
+      "label": "Consultations",
+      "question": "What is a Consultation?",
+      "measures": "How many unique leads actually underwent a consultation",
+      "formula": "COUNT(DISTINCT lead_id) over Planner events WHERE event_type = 'consultation' AND status = 'completed' AND outcome IN (successful, not_interested), restricted to active CRM leads",
+      "reasoning": "Evidence, not intent — the lead has to have turned up. A lead with several consultations counts exactly once, so this is a unique-lead KPI and never a session count. 'not_interested' still counts because the consultation genuinely happened; the lead attended and heard the pitch.",
+      "caveats": [
+        "no_show and cancelled do NOT count — no consultation took place.",
+        "A null outcome does NOT count either: it means the consultation is awaiting its result, never that nobody attended. Those appear in the separate Awaiting Outcome queue so the exclusion is visible rather than silent.",
+        "The funnel's Consultation bar is a DIFFERENT question (scheduled slots), so the KPI and the funnel bar legitimately show different numbers.",
+        "The attended set is owned by the ConsultationOutcome enum and must never be re-listed in a query."
+      ],
+      "surface": "Reports → Management KPI row",
+      "route": "/zerem/reports",
+      "confidence": "implementation-only",
+      "verifiedAgainst": "DashboardController::reportsAnalytics, Enums/ConsultationOutcome::attendedValues",
+      "keywords": "consultation consultations what is a consultation held attended how computed counted definition meeting"
+    },
+    {
+      "id": "consultations-awaiting-outcome",
+      "label": "Consultations Awaiting Outcome",
+      "measures": "Which concluded consultations still need a result recorded",
+      "formula": "COUNT(Planner events WHERE event_type = 'consultation' AND status = 'completed' AND outcome IS NULL) — counted as EVENTS, not leads",
+      "reasoning": "An operational work queue, deliberately NOT a KPI. Each row is a consultation whose business result nobody has recorded yet, and it is surfaced so its exclusion from the Consultations KPI is visible instead of silent.",
+      "caveats": [
+        "Counted per event because each event needs its own result — unlike the Consultations KPI, which counts unique leads."
+      ],
+      "confidence": "implementation-only",
+      "verifiedAgainst": "DashboardController::reportsAnalytics",
+      "keywords": "awaiting outcome consultation needs result queue outcome needed pending consultation how computed"
+    },
+    {
+      "id": "outreach-by-channel",
+      "label": "Outreach by Channel",
+      "measures": "How far outreach has progressed on each channel",
+      "formula": "Email: completed = replied · in-progress = sent + opened · not-started = none. Cold calling: completed = called · in-progress = scheduled · not-started = not-called",
+      "reasoning": "Shows the two channels side by side using each one's own progress vocabulary, rather than forcing them into a shared scale.",
+      "surface": "Reports → Outreach by Channel",
+      "route": "/zerem/reports",
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::reportsAnalytics",
+      "keywords": "outreach by channel email cold calling progress completed in progress not started how computed"
+    },
+    {
+      "id": "pending-follow-ups",
+      "label": "Pending Follow-ups",
+      "measures": "Which follow-ups are overdue, due today, or coming up",
+      "formula": "Scoped Planner follow-up events that are dated and not completed, bucketed on the Asia/Manila day boundary as HALF-OPEN windows: overdue = starts_at < todayStart · today = [todayStart, tomorrowStart) · upcoming = ≥ tomorrowStart",
+      "reasoning": "Half-open windows make the three buckets PARTITION the pending set, so they always sum to the total and an event landing exactly on midnight is counted once. The table rows use the identical classifier, so counts and rows can never disagree.",
+      "caveats": [
+        "Day boundaries are Asia/Manila even though timestamps are stored in UTC."
+      ],
+      "surface": "Reports → Pending Follow-ups",
+      "route": "/zerem/reports",
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::reportsAnalytics",
+      "keywords": "pending follow ups overdue today upcoming due buckets how computed timezone manila"
+    },
+    {
+      "id": "completed-follow-ups",
+      "label": "Completed Follow-ups",
+      "measures": "How many follow-ups you completed this month",
+      "formula": "COUNT(Planner follow-up events completed in the CURRENT month, timestamped by completed_at)",
+      "reasoning": "Uses the real completion timestamp rather than a generic updated_at, so editing an old event never makes it look freshly completed.",
+      "caveats": [
+        "Events completed before the completed_at column existed carry null and are excluded — historical totals read low."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::performanceSummary",
+      "keywords": "completed follow ups this month done finished how computed count"
+    },
+    {
+      "id": "follow-up-discipline",
+      "label": "Follow-up Discipline",
+      "measures": "How many scheduled commitments were missed",
+      "formula": "missed = COUNT(Planner events WHERE starts_at < now AND status ≠ 'completed'), grouped by event type into missed follow-ups / meetings / calls",
+      "reasoning": "A commitment whose time has passed without being completed is missed. Grouping by type shows whether the gap is in follow-ups, meetings or calls.",
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::performanceSummary",
+      "keywords": "follow up discipline missed meetings calls overdue how computed"
+    },
+    {
+      "id": "leads-by-niche",
+      "label": "Leads by Niche",
+      "measures": "How the portfolio is distributed across business niches",
+      "formula": "GROUP BY industry over active + visible leads",
+      "reasoning": "A niche IS the lead's industry value — there is no separate niche id, foreign key or mapping table. The Business Niche registry supplies the controlled vocabulary those industry strings are drawn from.",
+      "surface": "Reports → Leads by Niche",
+      "route": "/zerem/reports",
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::reportsAnalytics",
+      "keywords": "niche niches industry leads by niche distribution ranking how computed vocabulary"
+    },
+    {
+      "id": "lead-acquisition",
+      "label": "Monthly Acquisition",
+      "measures": "How many new leads arrived each month",
+      "formula": "For each of 6 rolling calendar months: COUNT(active + visible leads WHERE created_at falls in that month). monthlyAverage = round(total ÷ 6)",
+      "reasoning": "Counts Active CRM Leads only, by creation date, and excludes the unqualified Prospect Pool — consistent with the rest of the dashboard.",
+      "caveats": [
+        "The average divides by the fixed window length of 6, NOT by the number of months containing data, so a new tenant shows an artificially low average.",
+        "A qualified discovered lead buckets by its DISCOVERY date, not the date it was qualified.",
+        "No trend, growth rate or forecast is computed."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::leadAcquisition",
+      "keywords": "monthly acquisition lead acquisition new leads per month average trend chart how computed"
+    },
+    {
+      "id": "priority-summary",
+      "label": "Priority Overview",
+      "measures": "How leads are distributed across High, Medium and Low priority",
+      "formula": "GROUP BY priority; per bucket COUNT, AVG(score), and round(count ÷ total × 100)",
+      "reasoning": "Filter-aware with one deliberate exception — it honours the active list filters but IGNORES the priority filter itself, so drilling into High does not zero the Medium and Low cards.",
+      "caveats": [
+        "Priority is set manually and is never derived from the lead score, so a high-scoring lead may legitimately sit at Low priority."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "LeadController::websiteStatusBuckets, prioritySummary",
+      "keywords": "priority summary overview high medium low distribution average score how computed assigned"
+    },
+    {
+      "id": "website-status-distribution",
+      "label": "Website Status Overview",
+      "measures": "How the pipeline splits by a prospect's web presence",
+      "formula": "GROUP BY website_status; pipelinePct = round(count ÷ total × 100) over all active visible leads",
+      "reasoning": "No Website is the highest-conversion segment, which is why it also carries the largest positive score signal.",
+      "caveats": [
+        "The dashboard endpoint serving this is named 'priority-buckets' for backward compatibility but aggregates website status, not priority."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::priorityBuckets",
+      "keywords": "website status distribution no website needs redesign has website buckets overview how computed"
+    },
+    {
+      "id": "target-location",
+      "label": "Target Location match",
+      "measures": "Whether a lead sits in one of the registered service areas",
+      "formula": "A lead is in target when its region, province or city equals the name of an ACTIVE service-area entry AT THAT ENTRY'S OWN LEVEL",
+      "reasoning": "Levels must correspond: with a city entry for 'Cebu', a lead whose city is Cebu matches, but a lead whose province is Cebu does not.",
+      "caveats": [
+        "An empty or fully inactive registry matches NOTHING — it does not match everything.",
+        "Feeds the +10 Target Location score signal."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "Services/Scoring/TargetAreaMatcher, Lead::scopeInTargetLocation",
+      "keywords": "target location service area region province city match nearby how computed signal"
+    },
+    {
+      "id": "bd-performance",
+      "label": "BD Performance",
+      "measures": "How many active leads each Business Developer is carrying",
+      "formula": "Per active BD user: COUNT of active leads assigned to them",
+      "reasoning": "Returns assigned counts only. Follow-ups, conversions and a performance score are INTENTIONALLY omitted — the table renders placeholders rather than fabricating figures.",
+      "caveats": [
+        "Management-only, and it deliberately bypasses ownership scoping because cross-BD comparison is inherently a management view — the protection is route-level."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::bdPerformance",
+      "keywords": "bd performance business development table assigned per bd management how computed"
+    },
+    {
+      "id": "bd-ranking",
+      "label": "BD Ranking",
+      "measures": "Relative standing of Business Developers across balanced dimensions",
+      "formula": "round(0.40·n(mean Lead Score) + 0.25·n(Engagement Coverage) + 0.20·n(Interest Rate) + 0.15·n(Activity Volume)), where n(x) = 100 × (x − min) ÷ (max − min) across ranked peers",
+      "reasoning": "Balances quality, coverage, interest and raw effort so ranking is not simply lead volume.",
+      "caveats": [
+        "Always returned as interim.",
+        "A BD with 0 assigned leads is unranked; with fewer than 2 ranked peers the whole ranking returns NA; if all peers are equal everyone normalizes to 100.",
+        "Unmeasurable component metrics are substituted with 0 before normalizing, so 'not measurable' and 'measured as zero' become indistinguishable here — unlike everywhere else in the CRM."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "Services/Ranking/BdRankingCalculator, config/ranking.php",
+      "keywords": "bd ranking rank score leaderboard standing weights normalized how computed interim"
+    },
+    {
+      "id": "engagement-coverage",
+      "label": "Engagement Coverage (M-04)",
+      "measures": "What share of your whole portfolio you have contacted at all",
+      "formula": "round(engaged ÷ assigned × 100, 1)",
+      "numerator": "Engaged leads",
+      "denominator": "ALL assigned leads",
+      "undefinedWhen": "assigned = 0 → not evaluable, reason 'No assigned leads'",
+      "reasoning": "Activity discipline — are you working the whole book, or only part of it?",
+      "caveats": [
+        "Its denominator is all assigned leads, unlike Conversion Rate (÷ engaged). Do not compare the two percentages."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "Services/Kpi/KpiCalculator",
+      "keywords": "engagement coverage m04 share portfolio contacted discipline how computed denominator"
+    },
+    {
+      "id": "interest-rate",
+      "label": "Interest Rate (M-05)",
+      "measures": "What share of your still-live portfolio is showing positive intent",
+      "formula": "round((interested + call-back-req) ÷ (assigned − declined) × 100, 1)",
+      "denominator": "Assigned leads MINUS declined",
+      "undefinedWhen": "denominator = 0 → not evaluable",
+      "reasoning": "Declined leads are excluded from the denominator so a BD is not penalised for correctly disqualifying a bad lead.",
+      "confidence": "documented",
+      "verifiedAgainst": "Services/Kpi/KpiCalculator",
+      "keywords": "interest rate m05 interested call back positive intent how computed denominator declined"
+    },
+    {
+      "id": "activity-volume",
+      "label": "Activity Volume (M-06)",
+      "measures": "How much CRM-reportable activity you generated recently",
+      "formula": "COUNT(your visible, CRM-reportable activities WHERE created_at ≥ now − 30 days)",
+      "reasoning": "A raw effort measure, deliberately independent of outcomes.",
+      "confidence": "documented",
+      "verifiedAgainst": "Services/Kpi/KpiCalculator",
+      "keywords": "activity volume m06 activities 30 days effort how computed rolling window"
+    },
+    {
+      "id": "status-mix",
+      "label": "Lead Status Mix (M-02)",
+      "measures": "How the pipeline is distributed across the five statuses",
+      "formula": "GROUP BY status over active + visible leads",
+      "reasoning": "The five statuses are a frozen set: new, interested, awaiting-reply, call-back-req, declined. The donut total is the Reports status denominator.",
+      "caveats": [
+        "The Leads page's status TABS collapse these five backend statuses into five DIFFERENT UI tabs — the 'Qualified' tab means status = interested, which is unrelated to a lead being qualified out of the Prospect Pool."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "DashboardController::kpis, reportsAnalytics",
+      "keywords": "status mix donut leads by status distribution five statuses how computed tabs qualified"
+    },
+    {
+      "id": "lost-deals",
+      "label": "Lost Deals",
+      "question": "How many Lost Deals do I have?",
+      "confidence": "not-defined",
+      "measures": "How much business was lost",
+      "whyNot": "The CRM does not compute a Lost Deals figure. Marking a lead Lost creates NO Deal record — it writes a lead.lost Activity carrying the reason and bulk-completes that lead's open follow-ups. Won and Lost are deliberately asymmetric: only Won creates a Deal, which is why Converted is defined as 'has at least one Deal'. To see lost leads, look for the lead.lost events in Activity Logs.",
+      "route": "/zerem/activity-logs",
+      "verifiedAgainst": "no lostDeals/dealsLost symbol exists in the CRM module or frontend",
+      "keywords": "lost deals lose losses how many lost how computed count declined"
+    },
+    {
+      "id": "quarter-target-goals",
+      "label": "Quarter Target goals",
+      "question": "What is my quarter target progress?",
+      "confidence": "not-defined",
+      "measures": "Progress against a quarterly goal",
+      "whyNot": "There is no goal source in the CRM, so no denominator exists and no percentage can be computed. The Quarter Targets tiles therefore show real live numerators with an explicit Pending marker rather than an invented target. Goal Management is a planned future enhancement.",
+      "keywords": "quarter target goal quota progress percentage pending how computed target"
+    },
+    {
+      "id": "personal-target",
+      "label": "Personal Target",
+      "question": "What is my personal target progress?",
+      "confidence": "not-defined",
+      "measures": "A BD's progress against a monthly conversion target",
+      "whyNot": "A monthly conversion target is not yet a configurable value anywhere in the CRM, so no progress can be computed. The card shows a Pending state with no fabricated percentage.",
+      "keywords": "personal target monthly goal my target progress pending how computed"
+    },
+    {
+      "id": "decline-reason",
+      "label": "Decline Reason Analysis",
+      "question": "Why did leads decline?",
+      "confidence": "not-defined",
+      "measures": "Why leads declined",
+      "whyNot": "Leads do not capture a decline reason — there is no decline_reason field. The card shows only the real declined total and deliberately invents no categories. It becomes live once a reason is captured.",
+      "keywords": "decline reason why declined breakdown categories rejected how computed pending"
+    },
+    {
+      "id": "candidate-lead",
+      "label": "Candidate lead",
+      "question": "What is a candidate lead, a prospect, and a qualified lead?",
+      "confidence": "not-defined",
+      "measures": "A 'candidate lead' record type",
+      "whyNot": "'Candidate lead' is not a modelled concept in this CRM — it appears only as informal wording. The real terms are: a PROSPECT (discovered but not yet qualified: source set, qualified_at null — the Nearby Clients pool), a QUALIFIED lead (qualified_at set — a prospect a BD promoted into the pipeline), and an ACTIVE CRM lead (entered deliberately, or a qualified prospect). Only the last participates in business computation.",
+      "keywords": "candidate lead what is a candidate prospect qualified difference terminology definition"
+    },
+    {
+      "id": "pipeline-stage",
+      "label": "Pipeline stage",
+      "question": "What is a pipeline stage?",
+      "confidence": "not-defined",
+      "measures": "A funnel stage stored on the lead (new → contacted → qualified → converted)",
+      "whyNot": "The CRM has ONE status field holding five values (new, interested, awaiting-reply, declined, call-back-req). A separate pipeline-stage field was recommended in an architecture review but was never implemented, so there is no stored stage to filter or report on. The Reports funnel derives its stages from status, engagement and Deals at query time instead.",
+      "keywords": "pipeline stage stages new contacted qualified converted funnel field status difference"
+    },
+    {
+      "id": "score-to-priority",
+      "label": "Score-to-priority mapping",
+      "question": "How are lead priorities assigned from the score?",
+      "confidence": "not-defined",
+      "measures": "A threshold that turns a lead score into a priority",
+      "whyNot": "No such mapping exists. Priority is set manually; no threshold constant maps score to priority anywhere in the codebase and no engine writes the priority column. A high-scoring lead may legitimately sit at Low priority. Introducing a derivation would need an explicit product decision.",
+      "keywords": "score priority threshold high medium low automatic derive mapping how assigned"
+    },
+    {
+      "id": "assignment-reason",
+      "label": "Why a lead is assigned to you",
+      "question": "Why is this lead assigned to me, or unassigned?",
+      "measures": "How a lead came to have its current owner",
+      "formula": "A Business Developer who creates a lead is FORCE-ASSIGNED to themselves, overriding any submitted owner. CSV import force-assigns every row to the importing BD. Admins and Super Admins reassign through the lead's Assign action.",
+      "reasoning": "Ownership drives visibility: a BD sees only leads assigned to them, while Admins and Super Admins see every lead. Business Developers do not hold the assign permission, so they cannot reassign a lead away from themselves.",
+      "caveats": [
+        "The CRM does not store a REASON for an individual assignment. What it does record is a lead.assigned Activity naming who assigned it and to whom — check the lead's Activity Timeline for that history.",
+        "An unassigned lead simply has no owner set, and no reason is recorded for that either. Admins can list them using the Assigned BD filter's Unassigned option."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "LeadController::store/assign, RolesAndPermissionsSeeder",
+      "keywords": "why is this lead assigned to me unassigned owner ownership assignment rules who assigned no owner"
+    },
+    {
+      "id": "won-lost-rules",
+      "label": "Won and Lost",
+      "question": "When does a lead become Won or Lost, and why doesn't it change the status?",
+      "measures": "What happens when a lead is marked Won or Lost",
+      "formula": "WON: creates a Deal (amount = the amount you supply, otherwise the lead's estimated amount), emits a DealWon event, logs an Activity. A second attempt returns 409 — one active Deal per lead. LOST: writes a lead.lost Activity with the reason and bulk-completes that lead's open follow-ups.",
+      "reasoning": "NEITHER outcome writes the lead status, and neither recomputes the score. That is precisely why Converted is defined as 'has at least one Deal' rather than as a status value — Deal creation touches no lead column, so the lead observer never fires.",
+      "caveats": [
+        "Won and Lost are deliberately asymmetric: only Won creates a Deal.",
+        "The one-active-Deal-per-lead rule is enforced by a 409 guard in the application, not by a database constraint."
+      ],
+      "confidence": "documented",
+      "verifiedAgainst": "Business-Process-Mapping §7",
+      "keywords": "won lost mark as won deal why does won not change status lose reason asymmetric 409 how"
+    },
+    {
+      "id": "copilot-summary-endpoint",
+      "label": "Dashboard AI copilot summary",
+      "question": "What is the dashboard AI copilot summary?",
+      "confidence": "not-defined",
+      "measures": "AI-generated rescoring figures on the dashboard",
+      "whyNot": "The dashboard's copilot-summary endpoint returns hardcoded constants with a fixed timestamp and no computation behind it. The frontend deliberately does not consume it, and its values must never be quoted as measurements. There is no AI scoring engine in the CRM.",
+      "keywords": "copilot summary rescored moved to high ai engine dashboard hardcoded placeholder"
+    }
+  ]
+}
