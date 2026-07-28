@@ -226,6 +226,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('benefit-programs', [BenefitProgramController::class, 'index']);
         Route::post('benefit-programs', [BenefitProgramController::class, 'store']);
         Route::post('benefit-programs/assign', [BenefitProgramController::class, 'assign']);
+        // Slice B1 — the allowance reconciliation working list, and its one action.
+        Route::get('benefit-programs/allowance-reconciliation', [BenefitProgramController::class, 'allowanceReconciliation']);
+        Route::delete('employees/{employee}/allowance-overrides/{program}', [BenefitProgramController::class, 'clearAllowanceOverride']);
         Route::match(['put', 'patch'], 'benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'update']);
         Route::delete('benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'destroy']);
 

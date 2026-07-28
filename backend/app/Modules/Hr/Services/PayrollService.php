@@ -42,6 +42,7 @@ class PayrollService
         private readonly ScheduleService $workSchedule,
         private readonly BenefitDeductionService $benefitDeductions,
         private readonly LoanService $loans,
+        private readonly AllowanceService $allowances,
     ) {}
 
     /**
@@ -116,12 +117,15 @@ class PayrollService
         $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDaysInPeriod);
         $basePay = max(0, round($perPeriodBase - $unpaidDays * $dailyRate, 2));
 
-        // Allowances (food + transport + load) are monthly, non-taxable de-minimis pay.
-        // Spread across the year's periods like base, but NOT absence-prorated (they're
-        // fixed benefits, not attendance-earned).
-        $monthlyAllowance = (float) $employee->food_allowance
-            + (float) $employee->transportation_allowance
-            + (float) $employee->load_allowance;
+        // Allowances are monthly, non-taxable de-minimis pay. Spread across the year's periods
+        // like base, but NOT absence-prorated (they're fixed benefits, not attendance-earned).
+        //
+        // Slice B1 — read from Company → Benefits, not the three `hr_employees` columns. Those
+        // columns and the Benefits page disagreed (₱42,000 vs ₱77,000 a month company-wide) and
+        // Gas Allowance had no column at all, so it could never be paid however HR configured it.
+        // The backfill migration pinned each employee's old column value onto their enrolment, so
+        // this change paid exactly what the columns did on the first run.
+        $monthlyAllowance = $this->allowances->monthlyFor($employee);
         $perPeriodAllowance = $periodsPerYear > 0 ? round(($monthlyAllowance * 12) / $periodsPerYear, 2) : 0.0;
 
         // Only the contributions this employee is enrolled in, at the configured rates.
@@ -212,17 +216,14 @@ class PayrollService
             return [];
         }
 
+        // Slice B1 — the lines come from the employee's enrolled programmes, not the three
+        // hard-coded `hr_employees` columns. That is what lets a fourth allowance (Gas) appear on
+        // a payslip at all, and it means the names shown are the ones HR actually configured.
         $lines = [];
-        $monthly = [
-            'Transportation Allowance' => (float) $employee->transportation_allowance,
-            'Food Allowance' => (float) $employee->food_allowance,
-            'Load Allowance' => (float) $employee->load_allowance,
-        ];
-
-        foreach ($monthly as $name => $amount) {
-            $perPeriod = round(($amount * 12) / $periodsPerYear, 2);
+        foreach ($this->allowances->linesFor($employee) as $line) {
+            $perPeriod = round(($line['amount'] * 12) / $periodsPerYear, 2);
             if ($perPeriod > 0) {
-                $lines[] = ['name' => $name, 'amount' => $perPeriod];
+                $lines[] = ['name' => $line['name'], 'amount' => $perPeriod];
             }
         }
 

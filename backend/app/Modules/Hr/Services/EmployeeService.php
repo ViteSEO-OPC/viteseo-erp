@@ -13,6 +13,7 @@ use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
 use App\Modules\Hr\Models\SalaryHistory;
+use App\Modules\Hr\Services\AllowanceService;
 use App\Modules\Hr\Models\SharedLeaveAllotment;
 use App\Modules\Hr\Models\SharedLeaveBalance;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -206,6 +207,14 @@ class EmployeeService
                     'contribution_type' => $setting->type,
                     'enrolled' => true,
                 ]);
+            }
+
+            // 4b) Slice B1 — enrol them in the open allowance programmes. Payroll now reads
+            //     allowances from Company → Benefits, so an unenrolled hire would earn none at
+            //     all. Programmes restricted to `regular` or `custom` stay HR's call.
+            $allowanceIds = app(AllowanceService::class)->defaultProgrammeIdsForNewHire();
+            if ($allowanceIds !== []) {
+                $employee->benefitPrograms()->syncWithoutDetaching($allowanceIds);
             }
 
             // 5) Open the salary history with the starting salary.

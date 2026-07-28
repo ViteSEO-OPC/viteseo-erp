@@ -69,7 +69,7 @@ class PayslipDocumentTest extends HrTestCase
             'base_salary' => 20000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
             // Allowances so the breakdown has something to split, and government numbers so the
             // identity block isn't all em dashes.
-            'transportation_allowance' => 1000, 'food_allowance' => 500,
+            'transportation_allowance' => 1000, 'food_allowance' => 500, // legacy columns — no longer read (Slice B1)
             'tin' => '123-456-789-000', 'sss_number' => '34-5678901-2',
             'philhealth_number' => '12-009876543-1', 'pagibig_number' => '1211-0098-7654',
         ]);
@@ -224,14 +224,30 @@ class PayslipDocumentTest extends HrTestCase
         $this->assertReconciles($doc);
     }
 
+    /** Enrol the employee in an allowance programme — the Slice B1 source of truth. */
+    private function enrolInAllowance(string $name, float $monthly): void
+    {
+        $program = BenefitProgram::create([
+            'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
+            'amount' => $monthly, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
+            'eligibility' => 'all', 'is_active' => true,
+        ]);
+        $this->employee->benefitPrograms()->attach($program->id);
+    }
+
     public function test_the_allowance_breakdown_sums_to_the_allowances_paid(): void
     {
+        // Slice B1 — allowances come from Company → Benefits now, not the employee's columns.
+        $this->enrolInAllowance('Transportation Allowance', 1000);
+        $this->enrolInAllowance('Food Allowance', 500);
+
         $this->attendance();
         $doc = $this->employeeDocument($this->runPayroll());
 
         $lines = $doc['allowances_breakdown'];
+        // Ordered by programme name (Slice B1) rather than the old hard-coded column order.
         $this->assertSame(
-            ['Transportation Allowance', 'Food Allowance'],
+            ['Food Allowance', 'Transportation Allowance'],
             array_column($lines, 'name'),
         );
         $this->assertEqualsWithDelta($doc['allowances'], array_sum(array_column($lines, 'amount')), 0.01);
@@ -243,6 +259,9 @@ class PayslipDocumentTest extends HrTestCase
      */
     public function test_a_payslip_without_a_recorded_split_shows_a_single_allowance_line(): void
     {
+        $this->enrolInAllowance('Transportation Allowance', 1000);
+        $this->enrolInAllowance('Food Allowance', 500);
+
         $this->attendance();
         $payslip = $this->runPayroll();
         $payslip->update(['allowances_breakdown' => null]);

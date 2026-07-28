@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { formatPeso } from "@/core/lib/format";
+import { notify as toast } from "@/core/lib/notify";
+import { usePayrollSettings, useUpdatePayrollSettings } from "@/modules/hr/hooks/use-payroll";
 import { useContributionSettings } from "@/modules/hr/hooks/use-benefits";
 import { useBenefitPrograms } from "@/modules/hr/hooks/use-benefit-programs";
 import { useEmployees } from "@/modules/hr/hooks/use-employees";
@@ -85,6 +87,10 @@ export default function BenefitsPage() {
         {/* Allowances — HR editable. */}
         <section className="space-y-3">
           <h2 className="text-h3 font-bold text-foreground">Allowances</h2>
+
+          {/* The tax-free ceiling belongs with the allowances it governs, not on the payroll
+              page. It is stored on the payroll settings because that is what payroll reads. */}
+          <DeMinimisCeiling />
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : isError ? (
@@ -149,6 +155,63 @@ function GovCard({ setting }: { setting: ContributionSetting }) {
       <p className="mt-4 text-3xl font-bold text-foreground">{formatPct(rate)}</p>
       <p className="mt-1 text-xs text-muted-foreground">
         Employee share{employer ? ` · Employer ${formatPct(employer)}` : ""} · statutory table
+      </p>
+    </div>
+  );
+}
+
+/**
+ * How much allowance stays tax-free in a year. Above it, the excess is taxed as compensation
+ * (Slice 10). Blank = no ceiling, which is the behaviour if HR never sets one.
+ *
+ * Saved onto the payroll settings — that is the record payroll actually reads — but it is
+ * surfaced here because it is a rule ABOUT allowances, and this is where HR manages them.
+ */
+function DeMinimisCeiling() {
+  const { data: settings } = usePayrollSettings();
+  const updateMut = useUpdatePayrollSettings();
+
+  async function save(next: number | null) {
+    if (!settings) return;
+    try {
+      await updateMut.mutateAsync({
+        frequency: settings.frequency,
+        deduction_timing: settings.deduction_timing,
+        tax_timing: settings.tax_timing,
+        deminimis_annual_cap: next,
+      });
+      toast.success(next === null ? "Ceiling removed" : "Tax-free ceiling updated");
+    } catch {
+      toast.error("Could not update the ceiling.");
+    }
+  }
+
+  return (
+    <div className="rounded-card border border-border bg-card p-4">
+      <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
+        Tax-free ceiling (per year)
+      </p>
+      <input
+        type="number"
+        min={0}
+        step="0.01"
+        inputMode="decimal"
+        defaultValue={settings?.deminimis_annual_cap ?? ""}
+        disabled={!settings || updateMut.isPending}
+        placeholder="No ceiling — allowances are fully tax-free"
+        className="mt-1.5 h-9 w-full max-w-sm rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        onBlur={(e) => {
+          const raw = e.target.value.trim();
+          const next = raw === "" ? null : Number(raw);
+          if (next !== (settings?.deminimis_annual_cap ?? null)) {
+            save(next);
+          }
+        }}
+      />
+      <p className="mt-2 text-caption text-muted-foreground">
+        The allowances below are de-minimis (tax-free) up to this much a year; anything above it
+        is taxed as compensation on the payslip. Leave blank for no ceiling. The BIR reference
+        figure is ₱90,000, but the right number for your mix of benefits is yours to set.
       </p>
     </div>
   );

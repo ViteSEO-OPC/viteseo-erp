@@ -117,7 +117,16 @@ class PremiumPayTaxTest extends HrTestCase
 
     private function withAllowances(float $monthly, ?float $cap): array
     {
-        $this->employee->update(['food_allowance' => $monthly]);
+        // Slice B1 — allowances are read from Company → Benefits, not the employee's columns.
+        $this->employee->benefitPrograms()->detach();
+        if ($monthly > 0) {
+            $program = \App\Modules\Hr\Models\BenefitProgram::create([
+                'name' => 'Meal Allowance ' . uniqid(), 'category' => 'allowance', 'kind' => 'allowance',
+                'amount' => $monthly, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
+                'eligibility' => 'all', 'is_active' => true,
+            ]);
+            $this->employee->benefitPrograms()->attach($program->id);
+        }
         PayrollSetting::current()->update(['deminimis_annual_cap' => $cap]);
 
         return app(PayrollService::class)->payslipFor(

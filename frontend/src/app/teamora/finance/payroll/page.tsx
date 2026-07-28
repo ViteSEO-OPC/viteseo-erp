@@ -83,7 +83,6 @@ export default function PayrollPage() {
     frequency?: string;
     deduction_timing?: string;
     tax_timing?: string;
-    deminimis_annual_cap?: number | null;
   }) {
     if (!settings) return;
     try {
@@ -343,35 +342,6 @@ export default function PayrollPage() {
             options={TIMING_OPTIONS.map((t) => ({ value: t.value, label: t.label }))}
           />
           <p className="text-caption text-muted-foreground">When income tax is withheld.</p>
-        </div>
-        {/* Slice 10 — allowances are tax-free only up to this. Blank = no ceiling. */}
-        <div className="space-y-1.5 sm:col-span-3">
-          <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
-            Tax-free allowance ceiling (per year)
-          </p>
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            inputMode="decimal"
-            defaultValue={settings?.deminimis_annual_cap ?? ""}
-            disabled={!settings || updateSettingsMut.isPending}
-            placeholder="No ceiling — allowances are fully tax-free"
-            className="h-9 w-full max-w-xs rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-64"
-            onBlur={(e) => {
-              const raw = e.target.value.trim();
-              const next = raw === "" ? null : Number(raw);
-              if (next !== (settings?.deminimis_annual_cap ?? null)) {
-                saveSettings({ deminimis_annual_cap: next });
-              }
-            }}
-          />
-          <p className="text-caption text-muted-foreground">
-            Food, transport and load allowances are de-minimis (tax-free) up to this much a year;
-            anything above it is taxed as compensation. Leave blank for no ceiling — that is the
-            current behaviour. The BIR reference figure is ₱90,000, but the correct number for
-            your mix of benefits is yours to set.
-          </p>
         </div>
       </div>
 
