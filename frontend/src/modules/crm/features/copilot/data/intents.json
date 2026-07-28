@@ -15,7 +15,7 @@
       "keywords": ["todays kpis", "today kpis", "kpis", "kpi", "key metrics"],
       "response": {
         "type": "navigate",
-        "text": "Your live KPIs — **Total Leads**, **High Priority**, and **Interested** — are on the **Dashboard**. (Follow-ups Due and Conversion Rate are display-only placeholders until the KPI Engine ships.) Opening it…",
+        "text": "Your live KPIs — **Total Leads**, **High Priority**, **Interested**, and the *Leads by Status* breakdown — are on the **Dashboard**. (*Follow-ups Due* and *Completed Outreach* still show a dash: the data exists but those cards aren't wired yet.) Conversion Rate, Revenue and the rest are computed — ask me how any of them works. Opening the Dashboard…",
         "action": { "type": "navigate", "target": "/zerem/dashboard" }
       }
     },
@@ -118,7 +118,7 @@
       "keywords": ["unassigned leads", "unassigned", "no owner", "leads with no owner"],
       "response": {
         "type": "text",
-        "text": "There isn't an *unassigned* list filter yet. You can set or change a lead's owner from its detail page using **Assign** — open a lead from the **Leads** table to do that."
+        "text": "Admins can list ownerless leads from the **Leads** table using the *Assigned BD* column filter's *Unassigned* option, and change an owner with **Reassign** on the lead. Business Developers don't hold the assign permission, so they only ever see their own leads — never unassigned ones. Ask me why a lead is unassigned for the full rules."
       }
     },
     {
@@ -126,7 +126,7 @@
       "keywords": ["open lead details", "open lead", "lead details", "open top lead", "view lead"],
       "response": {
         "type": "navigate",
-        "text": "Open any lead from the **Leads** table to see its detail page — score, status, edit, **Assign**, discussion **Notes**, the **Activity Timeline**, and *Draft & send email*. Opening **Leads**…",
+        "text": "Open any lead from the **Leads** table to see its detail page — the score ring, status, presence details, **Internal Notes**, **Quick Actions** (status · draft email · schedule follow-up · Won/Lose), the calling panel, and a tabbed **Activity Timeline** / **Call History**. Header actions cover Edit and **Export PDF**. Opening **Leads**…",
         "action": { "type": "navigate", "target": "/zerem/leads" }
       }
     },
@@ -162,7 +162,7 @@
       "keywords": ["show drafts", "my drafts", "drafts", "email drafts"],
       "response": {
         "type": "navigate",
-        "text": "Saved **drafts** aren't available yet — the composer doesn't persist drafts (a future Outreach sprint). You can still write and send an email from **Outreach** — opening it…",
+        "text": "Your saved **drafts** live on the *Drafts* tab in **Outreach**. A draft isn't a separate record — sending it transitions the same email, so you never end up with a duplicate. Opening Outreach…",
         "action": { "type": "navigate", "target": "/zerem/follow-ups" }
       }
     },
@@ -180,13 +180,13 @@
       "keywords": ["show all emails", "all emails", "every email", "email list"],
       "response": {
         "type": "navigate",
-        "text": "There's no combined sent-email history yet — sent emails appear in **Activity Logs** and on each lead's **Activity Timeline**. To write one, open **Outreach**…",
+        "text": "There's no combined sent-email history screen, and the per-lead email conversation panel was removed from Lead Details. Sent and received email surfaces in **Activity Logs** and on each lead's **Activity Timeline** instead. To write one, open **Outreach**…",
         "action": { "type": "navigate", "target": "/zerem/follow-ups" }
       }
     },
     {
       "id": "draft-followup",
-      "keywords": ["draft follow-up", "draft followup", "draft a follow up", "draft a follow-up email"],
+      "keywords": ["draft follow-up", "draft followup", "draft a follow up", "draft a follow-up email", "draft email", "draft an email"],
       "response": { "type": "draft_email" }
     },
     {
@@ -242,6 +242,41 @@
     },
 
     {
+      "id": "nav-planner",
+      "keywords": ["go to planner", "open planner", "planner", "my planner", "show planner"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening the **Planner** — the CRM's single scheduling authority, holding every follow-up, call, meeting, task and consultation. It's a Business Developer workspace, so Admins don't have it.",
+        "action": { "type": "navigate", "target": "/zerem/planner" }
+      }
+    },
+    {
+      "id": "nav-reports",
+      "keywords": ["go to reports", "open reports", "show reports", "reports page"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening **Reports & Performance** — management analytics: the conversion funnel, status mix, outreach by channel, monthly acquisition and pending follow-ups. Admin and Super Admin only; a Business Developer is redirected to the Dashboard and should use *My Performance* instead.",
+        "action": { "type": "navigate", "target": "/zerem/reports" }
+      }
+    },
+    {
+      "id": "nav-settings",
+      "keywords": ["go to settings", "open settings", "show settings", "settings page"],
+      "response": {
+        "type": "navigate",
+        "text": "Opening **Settings** — Team Accounts, the lead Archive, and Business Rules. Management only.",
+        "action": { "type": "navigate", "target": "/zerem/settings" }
+      }
+    },
+    {
+      "id": "nav-nearby-clients",
+      "keywords": ["nearby clients", "prospect pool", "discovered businesses", "discovery"],
+      "response": {
+        "type": "text",
+        "text": "**Nearby Clients** is the discovery surface holding the *Prospect Pool* — businesses found but not yet qualified. A prospect isn't a CRM lead yet: it's unscored and excluded from every dashboard and report until a Business Developer **qualifies** it into the pipeline. Open it from the sidebar (it's a BD workspace, so Admins don't have it)."
+      }
+    },
+    {
       "id": "nav-leads",
       "keywords": ["go to leads", "open leads", "leads page", "show leads"],
       "response": {
@@ -262,7 +297,7 @@
       "keywords": ["help", "what can you do", "what can you do?", "available commands", "commands", "options"],
       "response": {
         "type": "text",
-        "text": "I'm the **Vite Copilot** — a rule-based assistant (no external AI).\nI can:\n*Leads* — surface hot leads, filter by *No Website* / *Needs Redesign* / status, and open the Leads list\n*Outreach* — draft an email and take you to Outreach to send it\n*Navigate* — Dashboard, Leads, Outreach, Activity Logs, or My Performance\n*Explain* — lead scores, statuses, ownership, roles, importing, and more\n\nNot built yet (I'll say so if you ask): a **Companies** module, saved email **drafts**, and live **Performance** metrics.\nTap a suggested prompt or just type your question."
+        "text": "I'm the **Vite AI Copilot** — a rule-based assistant (no external AI), answering from the CRM's own documented rules.\nI can:\n**Explain a computation** — ask *\"how is my conversion rate computed?\"* and I'll give you the formula, its numerator and denominator, and why it's defined that way\n**Explain the business rules** — lead scoring signals, the frozen status model, assignment, calling outcomes, outreach, Won vs Lost, permissions\n**Diagnose a number** — *\"why did my lead score change?\"*, *\"why is this lead unassigned?\"*, *\"why can't I access Reports?\"*\n**Walk you through workflows** — qualifying a prospect, working a lead, follow-ups, closing\n**Navigate** — Dashboard, Leads, Outreach, Planner, Reports, Activity Logs, My Performance\n\nIf the CRM doesn't define something, I'll say so rather than guess. What I can't do yet is quote *your* live figures.\nTap a suggested prompt or just ask."
       }
     }
   ]

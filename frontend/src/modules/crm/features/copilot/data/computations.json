@@ -467,7 +467,7 @@
     {
       "id": "candidate-lead",
       "label": "Candidate lead",
-      "question": "What is a candidate lead, a prospect, and a qualified lead?",
+      "question": "What is a candidate lead?",
       "confidence": "not-defined",
       "measures": "A 'candidate lead' record type",
       "whyNot": "'Candidate lead' is not a modelled concept in this CRM — it appears only as informal wording. The real terms are: a PROSPECT (discovered but not yet qualified: source set, qualified_at null — the Nearby Clients pool), a QUALIFIED lead (qualified_at set — a prospect a BD promoted into the pipeline), and an ACTIVE CRM lead (entered deliberately, or a qualified prospect). Only the last participates in business computation.",
