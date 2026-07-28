@@ -126,13 +126,13 @@ export function NoteToolbar({
       >
         <Highlighter className="h-3.5 w-3.5" />
       </ToolbarButton>
-      <ToolbarButton
+      {/* <ToolbarButton
         label="Link"
         active={editor.isActive("link")}
         onClick={promptForLink}
       >
         <Link2 className="h-3.5 w-3.5" />
-      </ToolbarButton>
+      </ToolbarButton> */}
 
       <Divider />
 

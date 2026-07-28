@@ -269,11 +269,11 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           Back to workspace
         </Link>
       )}
-      <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-5">
         {/* `min-w-0` + `wrap-break-word` so an unbroken run in the name or the
             description breaks instead of spilling across the header. */}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-4">
             <h1 className="min-w-0 text-2xl font-bold text-ink wrap-break-word sm:text-3xl">
               {project?.name ?? "Project"}
             </h1>
@@ -281,13 +281,13 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
             <ProjectStatusBadge project={project} counts={counts} />
           </div>
           {project?.description && (
-            <p className="mt-1.5 max-w-2xl text-sm text-ink-soft wrap-break-word">
+            <p className="mt-2.5 max-w-2xl text-sm leading-relaxed text-ink-soft wrap-break-word">
               {project.description}
             </p>
           )}
           {/* Facts that were previously four bordered boxes in their own card.
               They're reference data, so they read as one quiet line here. */}
-          <dl className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+          <dl className="mt-5 flex flex-wrap items-center gap-x-8 gap-y-3 text-xs">
             <MetaItem label="Workspace" value={workspace?.name ?? "—"} />
             <MetaItem label="Created" value={formatDate(project?.created_at)} />
             <MetaItem label="Updated" value={formatDate(project?.updated_at)} />
@@ -306,7 +306,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           // Full-width and split evenly once the header wraps, so the actions
           // read as a deliberate row instead of two buttons stranded under the
           // title. Content-width again from sm up.
-          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
+          <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
             <Button
               variant="outline"
               onClick={() => setEditOpen(true)}
@@ -329,7 +329,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
       {/* The right column carries member rows (avatar + name + group tags) and
           the notes editor, both of which want room — it widens again at xl
           where the page has the space to give. */}
-      <div className="mt-6 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_460px]">
+      <div className="mt-10 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_460px]">
         {/* LEFT — counts, progress, then the groups working on this project.
             The tiles live inside this column (not spanning the page) so the
             right-hand column starts level with them instead of half a card
@@ -619,10 +619,10 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+      <dt className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">
         {label}
       </dt>
-      <dd className="truncate text-xs font-semibold text-ink">{value}</dd>
+      <dd className="mt-1 truncate text-sm font-semibold text-ink">{value}</dd>
     </div>
   );
 }

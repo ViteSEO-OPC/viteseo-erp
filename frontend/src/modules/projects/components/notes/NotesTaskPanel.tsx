@@ -113,7 +113,7 @@ export function NotesTaskPanel({
   // as the dashboard's notes rail.
   if (isXlUp) {
     return (
-      <aside className="sticky top-4 flex max-h-[calc(100dvh-2rem)] w-[380px] shrink-0 flex-col rounded-xl border border-line bg-surface p-4">
+      <aside className="sticky top-20 flex max-h-[calc(100dvh-2rem)] w-[380px] shrink-0 flex-col rounded-xl border border-line bg-surface p-4">
         {header}
         <div className="mt-2 flex min-h-0 flex-1 flex-col">
           <NotesBody
