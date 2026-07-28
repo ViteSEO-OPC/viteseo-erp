@@ -17,6 +17,8 @@ export interface PayrollSettings {
   tax_timing: string;
   anchor_date: string | null;
   pay_delay_days: number;
+  /** Slice 10 -- annual ceiling above which allowances become taxable. null = no ceiling. */
+  deminimis_annual_cap: number | null;
   periods_per_year: number;
   current_period: PayrollPeriod;
   pay_groups: PayGroup[];
@@ -110,6 +112,9 @@ export interface Payslip {
   philhealth: number;
   pagibig: number;
   withholding_tax: number;
+  /** Slice 11a — recurring benefit shares (HMO, union dues). Post-tax. */
+  other_deductions: number;
+  other_deductions_breakdown: { name: string; amount: number }[];
   total_deductions: number;
   net_pay: number;
   status: string;

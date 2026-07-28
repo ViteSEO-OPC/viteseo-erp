@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Hr\Http\Resources\PayslipResource;
 use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Models\LoanPayment;
 use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
@@ -36,6 +37,8 @@ class PayrollService
         private readonly HolidayService $holidays,
         private readonly AttendancePolicyService $attendancePolicy,
         private readonly ScheduleService $workSchedule,
+        private readonly BenefitDeductionService $benefitDeductions,
+        private readonly LoanService $loans,
     ) {}
 
     /**
@@ -120,9 +123,29 @@ class PayrollService
         // unpaid days, so a normal period is unchanged; it scales down only when pay is
         // reduced, so we don't over-withhold a low-earning period. Contributions stay on
         // the full monthly salary (PH bracket model), so `contribBase` is unchanged.
-        $taxableMonthly = $periodsPerYear > 0 ? round($basePay * $periodsPerYear / 12, 2) : 0.0;
+        //
+        // Slice 10 — PREMIUM PAY IS TAXABLE. Holiday premium, overtime, the night differential
+        // and rest-day premium are all taxable compensation in PH, and all four were excluded
+        // from this base. That was harmless while every one of them was always ₱0; now that they
+        // actually pay, leaving them out understates withholding. Reimbursements stay out (a
+        // reimbursement is not income).
+        $taxablePeriodPay = $basePay + $holidayPremium + $overtimePay + $nightDiffPay + $restDayPremium;
+        $taxableMonthly = $periodsPerYear > 0 ? round($taxablePeriodPay * $periodsPerYear / 12, 2) : 0.0;
 
-        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium);
+        // Allowances are non-taxable de-minimis pay only up to the company's annual ceiling;
+        // anything above it is compensation. No ceiling set ⇒ nothing taxable, as before.
+        $taxableMonthly += $this->taxableAllowanceMonthly(
+            $perPeriodAllowance,
+            $periodsPerYear,
+            $dist['deminimis_annual_cap'] ?? null,
+        );
+
+        // Slice 11a — recurring benefit shares (HMO, union dues) from Company → Benefits.
+        // `count` is how many periods this calendar month has, so a MONTHLY share is split
+        // the same way statutory contributions are.
+        $otherDeductions = $this->benefitDeductions->forPeriod($employee, max(1, (int) ($dist['count'] ?? 1)));
+
+        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium, $otherDeductions);
 
         // Step 4b — persist how base_salary was derived, so the payslip explains itself.
         // The minute-level portion is all-zero until a deduction mode is enabled.
@@ -138,6 +161,27 @@ class PayrollService
         $slip['undertime_deduction'] = round(($unpaidDetail?->undertimeDays ?? 0.0) * $dailyRate, 2);
 
         return $slip;
+    }
+
+    /**
+     * The taxable slice of this period's allowances, as a MONTHLY figure to match the rest of
+     * the withholding base (Slice 10).
+     *
+     * De-minimis benefits are tax-free only up to a ceiling; the excess is compensation. Each
+     * benefit has its own BIR limit, which we deliberately do NOT hardcode — a table of per-item
+     * limits we can't keep current would be worse than no table. HR sets one annual ceiling for
+     * the total instead. A null ceiling means "all of it is tax-free", exactly as before.
+     */
+    private function taxableAllowanceMonthly(float $perPeriodAllowance, int $periodsPerYear, mixed $annualCap): float
+    {
+        if ($annualCap === null || $periodsPerYear <= 0) {
+            return 0.0;
+        }
+
+        $annualAllowance = $perPeriodAllowance * $periodsPerYear;
+        $excess = max(0.0, $annualAllowance - max(0.0, (float) $annualCap));
+
+        return round($excess / 12, 2);
     }
 
     /** Snapshot format. v1 was a flat map of 13 attendance-policy fields; v2 is grouped. */
@@ -208,7 +252,7 @@ class PayrollService
      * @param  array{index:int, count:int, deduction_timing:string, tax_timing:string}  $dist
      * @return array<string, float>
      */
-    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0): array
+    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0, array $otherDeductions = ['total' => 0.0, 'lines' => []]): array
     {
         // SSS/PhilHealth/Pag-IBIG are MONTHLY amounts (on the monthly base); the
         // timing setting decides which cutoff(s) in the month they land on.
@@ -229,17 +273,23 @@ class PayrollService
         $erPg = round($this->monthlyEmployerContribution('pagibig', $contribConfig, $contribBase) * $cf, 2);
 
         // Withholding tax on the taxable monthly compensation actually earned (minus the
-        // employee's mandatory contributions; reimbursements and de-minimis allowances are
-        // non-taxable), distributed by the tax-timing setting.
+        // employee's mandatory contributions), distributed by the tax-timing setting. What the
+        // caller put into `taxableMonthly` (Slice 10): base pay + all four premium lines, plus
+        // any allowance above the de-minimis ceiling. Reimbursements are never in it.
         $annualTaxable = max(0, ($taxableMonthly - ($sssM + $phM + $pgM)) * 12);
         $monthlyTax = $this->annualWithholdingTax($annualTaxable) / 12;
         $tf = $this->timingFactor($dist['tax_timing'] ?? 'every', $dist['index'] ?? 0, $dist['count'] ?? 1);
         $wht = round($monthlyTax * $tf, 2);
 
-        // Holiday premium is added to gross (taxable in reality, but — like the rest of
-        // this simplified engine — it isn't fed back into the withholding base above).
+        // All four premium lines are in gross AND in the withholding base (Slice 10) — the
+        // caller folds them into `taxableMonthly` before calling.
         $gross = round($basePay + $allowances + $reimb + $holidayPremium + $overtimePay + $nightDiffPay + $restDayPremium, 2);
-        $totalDeductions = round($sss + $philhealth + $pagibig + $wht, 2);
+
+        // Slice 11a — the employee's share of the benefits they're enrolled in (HMO, union
+        // dues…). Post-tax: these are not statutory contributions, so they never reduce the
+        // withholding base above.
+        $otherTotal = round((float) ($otherDeductions['total'] ?? 0), 2);
+        $totalDeductions = round($sss + $philhealth + $pagibig + $wht + $otherTotal, 2);
 
         return [
             'base_salary' => round($basePay, 2),
@@ -254,6 +304,10 @@ class PayrollService
             'philhealth' => $philhealth,
             'pagibig' => $pagibig,
             'withholding_tax' => $wht,
+            // Slice 11a — recurring benefit shares, with the breakdown so the payslip can
+            // name them rather than show one opaque figure.
+            'other_deductions' => $otherTotal,
+            'other_deductions_breakdown' => $otherDeductions['lines'] ?? [],
             'employer_sss' => $erSss,
             'employer_philhealth' => $erPh,
             'employer_pagibig' => $erPg,
@@ -775,6 +829,8 @@ class PayrollService
                 'count' => $monthCount,
                 'deduction_timing' => $setting->deduction_timing,
                 'tax_timing' => $setting->tax_timing,
+                // Slice 10 — the ceiling above which allowances become taxable (null = none).
+                'deminimis_annual_cap' => $setting->deminimis_annual_cap,
             ];
 
             // Refresh semantics: reuse this group+period's run if one exists, otherwise
@@ -923,10 +979,32 @@ class PayrollService
 
                 $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
 
-                Payslip::updateOrCreate(
+                $payslip = Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],
                     [...$slip, 'status' => $priorStatus[$employee->id] ?? 'computed'],
                 );
+
+                // Slice 11b — loans/cash advances come LAST, because what they can collect
+                // depends on what the payslip can still afford. They're post-tax and don't
+                // touch gross, so folding them in afterwards is exact rather than a re-compute.
+                // Always called (even at zero) so a cancelled loan's stale ledger row is cleared.
+                $loans = $this->loans->collectForPeriod(
+                    $employee, $run, $cycleEnd, (float) $slip['net_pay'], $payslip,
+                );
+
+                if ($loans['total'] > 0) {
+                    $slip['other_deductions'] = round((float) $slip['other_deductions'] + $loans['total'], 2);
+                    $slip['other_deductions_breakdown'] = [...$slip['other_deductions_breakdown'], ...$loans['lines']];
+                    $slip['total_deductions'] = round((float) $slip['total_deductions'] + $loans['total'], 2);
+                    $slip['net_pay'] = max(0, round((float) $slip['net_pay'] - $loans['total'], 2));
+
+                    $payslip->update([
+                        'other_deductions' => $slip['other_deductions'],
+                        'other_deductions_breakdown' => $slip['other_deductions_breakdown'],
+                        'total_deductions' => $slip['total_deductions'],
+                        'net_pay' => $slip['net_pay'],
+                    ]);
+                }
 
                 // P2-8: auto-flip the folded claims to paid + link them to this run.
                 // Idempotent — on a re-run, claims already paid by this run are untouched.
@@ -961,6 +1039,12 @@ class PayrollService
                 ->whereNotIn('employee_id', $keep)
                 ->where('status', 'computed')
                 ->forceDelete();
+
+            // Slice 11b — same cleanup for the loan ledger: an employee dropped from this run
+            // must not keep a repayment against it, or their balance would stay wrongly reduced.
+            LoanPayment::where('payroll_run_id', $run->id)
+                ->whereHas('loan', fn ($q) => $q->whereNotIn('employee_id', $keep))
+                ->delete();
 
             $run->update([
                 'status' => 'completed',
@@ -1117,12 +1201,12 @@ class PayrollService
     {
         $run->loadMissing(['payslips.employee.user', 'payslips.employee.department']);
 
-        $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'nd' => 0.0, 'rd' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
+        $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'nd' => 0.0, 'rd' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'other' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
 
         $out = fopen('php://temp', 'r+');
         fputcsv($out, [
             'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Night Diff', 'Rest Day', 'Reimbursements', 'Gross',
-            'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Total Deductions', 'Net Pay',
+            'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Other Deductions', 'Total Deductions', 'Net Pay',
             'Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Status',
         ], ',', '"', '');
 
@@ -1138,6 +1222,7 @@ class PayrollService
             $sum['ph'] += (float) $p->philhealth;
             $sum['pg'] += (float) $p->pagibig;
             $sum['wht'] += (float) $p->withholding_tax;
+            $sum['other'] += (float) $p->other_deductions;
             $sum['er_sss'] += (float) $p->employer_sss;
             $sum['er_ph'] += (float) $p->employer_philhealth;
             $sum['er_pg'] += (float) $p->employer_pagibig;
@@ -1146,7 +1231,7 @@ class PayrollService
                 $p->employee->user?->name ?? $p->employee->name,
                 $p->employee->department?->name,
                 $p->base_salary, $p->allowances, $p->holiday_premium, $p->overtime_pay, $p->night_diff_pay, $p->rest_day_premium, $p->reimbursements, $p->gross,
-                $p->sss, $p->philhealth, $p->pagibig, $p->withholding_tax,
+                $p->sss, $p->philhealth, $p->pagibig, $p->withholding_tax, $p->other_deductions,
                 $p->total_deductions, $p->net_pay,
                 $p->employer_sss, $p->employer_philhealth, $p->employer_pagibig, $p->status,
             ], ',', '"', '');
@@ -1155,7 +1240,7 @@ class PayrollService
         fputcsv($out, [
             'TOTAL', '',
             round($sum['base'], 2), round($sum['allow'], 2), round($sum['holiday'], 2), round($sum['ot'], 2), round($sum['nd'], 2), round($sum['rd'], 2), round($sum['reimb'], 2), (float) $run->total_gross,
-            round($sum['sss'], 2), round($sum['ph'], 2), round($sum['pg'], 2), round($sum['wht'], 2),
+            round($sum['sss'], 2), round($sum['ph'], 2), round($sum['pg'], 2), round($sum['wht'], 2), round($sum['other'], 2),
             (float) $run->total_deductions, (float) $run->total_net,
             round($sum['er_sss'], 2), round($sum['er_ph'], 2), round($sum['er_pg'], 2), '',
         ], ',', '"', '');

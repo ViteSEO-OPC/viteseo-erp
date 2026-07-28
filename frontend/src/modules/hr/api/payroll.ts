@@ -18,6 +18,8 @@ export async function updatePayrollSettings(input: {
   frequency: string;
   deduction_timing?: string;
   tax_timing?: string;
+  /** Slice 10 — null clears the ceiling (allowances fully tax-free). */
+  deminimis_annual_cap?: number | null;
 }): Promise<PayrollSettings> {
   const res = await apiClient.put("/hr/payroll/settings", input);
   return res.data.data;

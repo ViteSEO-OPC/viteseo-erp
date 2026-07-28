@@ -35,6 +35,8 @@ class PayslipResource extends JsonResource
             'philhealth' => (float) $this->philhealth,
             'pagibig' => (float) $this->pagibig,
             'withholding_tax' => (float) $this->withholding_tax,
+            'other_deductions' => (float) $this->other_deductions,
+            'other_deductions_breakdown' => $this->other_deductions_breakdown ?? [],
             'total_deductions' => (float) $this->total_deductions,
             'net_pay' => (float) $this->net_pay,
             'status' => $this->status,

@@ -14,6 +14,10 @@ import {
   getMyDocuments,
   uploadEmployeeDocument,
   deleteEmployeeDocument,
+  getEmployeeLoans,
+  createEmployeeLoan,
+  cancelEmployeeLoan,
+  type EmployeeLoanInput,
 } from "@/modules/hr/api/employees";
 import type { EmployeeInput } from "@/modules/hr/types/employee";
 
@@ -115,5 +119,31 @@ export function useActivateEmployee() {
       qc.invalidateQueries({ queryKey: EMPLOYEES_KEY });
       qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id] });
     },
+  });
+}
+
+/** Loans & cash advances for one employee (Slice 11b). HR only. */
+export function useEmployeeLoans(id: number | undefined) {
+  return useQuery({
+    queryKey: [...EMPLOYEES_KEY, id, "loans"] as const,
+    queryFn: () => getEmployeeLoans(id!),
+    enabled: !!id,
+  });
+}
+
+export function useCreateEmployeeLoan(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: EmployeeLoanInput) => createEmployeeLoan(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id, "loans"] }),
+  });
+}
+
+export function useCancelEmployeeLoan(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ loanId, reason }: { loanId: number; reason: string }) =>
+      cancelEmployeeLoan(loanId, reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id, "loans"] }),
   });
 }

@@ -24,6 +24,8 @@ class UpdatePayrollSettingsRequest extends FormRequest
             'tax_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],
             'anchor_date' => ['nullable', 'date'],
             'pay_delay_days' => ['nullable', 'integer', 'min:0', 'max:31'],
+            // Null = no ceiling, i.e. allowances stay entirely non-taxable.
+            'deminimis_annual_cap' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
         ];
     }
 }

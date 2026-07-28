@@ -19,6 +19,8 @@ class Payslip extends Model
         'overtime_pay', 'overtime_minutes', 'night_diff_pay', 'night_diff_minutes',
         'rest_day_premium', 'rest_day_minutes',
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
+        // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
+        'other_deductions', 'other_deductions_breakdown',
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
         'total_deductions', 'net_pay', 'status',
         // Step 4b — how base_salary was derived, so a payslip can explain itself.
@@ -49,6 +51,8 @@ class Payslip extends Model
         'philhealth' => 'decimal:2',
         'pagibig' => 'decimal:2',
         'withholding_tax' => 'decimal:2',
+        'other_deductions' => 'decimal:2',
+        'other_deductions_breakdown' => 'array',
         'employer_sss' => 'decimal:2',
         'employer_philhealth' => 'decimal:2',
         'employer_pagibig' => 'decimal:2',

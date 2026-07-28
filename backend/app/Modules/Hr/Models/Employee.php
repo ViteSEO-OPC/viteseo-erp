@@ -154,7 +154,11 @@ class Employee extends Model
             'hr_benefit_enrollments',
             'employee_id',
             'benefit_program_id',
-        )->withTimestamps();
+        )
+            // The per-employee columns on the pivot. `employee_share` is what payroll deducts
+            // (Slice 11a) — without this it reads as null and nothing is ever taken.
+            ->withPivot(['amount', 'tier', 'employee_share'])
+            ->withTimestamps();
     }
 
     public function salaryHistories(): HasMany

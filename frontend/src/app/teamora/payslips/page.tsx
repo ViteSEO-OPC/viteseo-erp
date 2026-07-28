@@ -212,6 +212,10 @@ export default function PayslipsPage() {
               <Row label="PhilHealth" value={formatPeso(detail.payslip.philhealth)} negative />
               <Row label="Pag-IBIG" value={formatPeso(detail.payslip.pagibig)} negative />
               <Row label="Withholding tax" value={formatPeso(detail.payslip.withholding_tax)} negative />
+              {/* Slice 11a — benefit shares, named individually rather than one lump. */}
+              {(detail.payslip.other_deductions_breakdown ?? []).map((d) => (
+                <Row key={d.name} label={d.name} value={formatPeso(d.amount)} negative />
+              ))}
             </Section>
 
             <div className="mt-4 flex items-center justify-between border-t-2 border-brand py-5">
