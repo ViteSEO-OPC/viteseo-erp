@@ -26,6 +26,9 @@ export interface WorkItem {
   groupName?: string | null;
   deadline: string | null;
   hasMySubtask: boolean;
+  // The item is a group task whose group the requesting user leads — the leader
+  // owns the parent task, so it stays on their "My Tasks" board.
+  leadsMyGroup: boolean;
 }
 
 /** A Kanban/List column: the 3 defaults, one per distinct custom status, + No Status. */

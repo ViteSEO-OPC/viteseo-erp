@@ -110,39 +110,50 @@ function WorkspaceViewsInner({
 
   const items: WorkItem[] = tasks.flatMap<WorkItem>((t) => {
     const mySubs = t.my_subtasks ?? [];
+    const leadsMyGroup = t.leads_my_group ?? false;
+    const cards: WorkItem[] = [];
+
     // On the member "My Tasks" board, if the member has subtask(s) under this
     // task, surface those subtasks as their own cards (with the parent task as
-    // context) instead of the parent task card — and dragging them moves the
-    // subtask, which the member is allowed to do.
+    // context) — and dragging them moves the subtask, which the member is
+    // allowed to do.
     if (lockedAssigneeId != null && mySubs.length > 0) {
-      return mySubs.map<WorkItem>((s) => {
-        const o = ov(
-          `subtask-${s.id}`,
-          s.status?.key ?? null,
-          s.status?.name ?? null,
-          s.status?.color ?? null,
-        );
-        return {
-          kind: "subtask",
-          key: `subtask-${s.id}`,
-          id: t.id,
-          subtaskId: s.id,
-          parentTitle: t.title,
-          projectId: t.project_id,
-          projectColor: projectColor.get(t.project_id) ?? "#6366f1",
-          title: s.name,
-          priority: s.priority,
-          statusName: o.statusName,
-          statusKey: o.statusKey,
-          statusColor: o.statusColor,
-          assignee: null,
-          // It's the member's own subtask → keep it in their filtered board.
-          assigneeId: lockedAssigneeId,
-          groupName: null,
-          deadline: s.deadline,
-          hasMySubtask: true,
-        };
-      });
+      cards.push(
+        ...mySubs.map<WorkItem>((s) => {
+          const o = ov(
+            `subtask-${s.id}`,
+            s.status?.key ?? null,
+            s.status?.name ?? null,
+            s.status?.color ?? null,
+          );
+          return {
+            kind: "subtask",
+            key: `subtask-${s.id}`,
+            id: t.id,
+            subtaskId: s.id,
+            parentTitle: t.title,
+            projectId: t.project_id,
+            projectColor: projectColor.get(t.project_id) ?? "#6366f1",
+            title: s.name,
+            priority: s.priority,
+            statusName: o.statusName,
+            statusKey: o.statusKey,
+            statusColor: o.statusColor,
+            assignee: null,
+            // It's the member's own subtask → keep it in their filtered board.
+            assigneeId: lockedAssigneeId,
+            groupName: null,
+            deadline: s.deadline,
+            hasMySubtask: true,
+            leadsMyGroup: false,
+          };
+        }),
+      );
+
+      // A plain member's stake in the parent is only through those subtasks, so
+      // the parent card is replaced by them. The group's leader owns the parent
+      // task itself, so it stays on their board alongside their own subtasks.
+      if (!leadsMyGroup) return cards;
     }
 
     const o = ov(
@@ -151,25 +162,26 @@ function WorkspaceViewsInner({
       t.status?.name ?? null,
       t.status?.color ?? null,
     );
-    return [
-      {
-        kind: "task",
-        key: `task-${t.id}`,
-        id: t.id,
-        projectId: t.project_id,
-        projectColor: projectColor.get(t.project_id) ?? "#6366f1",
-        title: t.title,
-        priority: t.priority,
-        statusName: o.statusName,
-        statusKey: o.statusKey,
-        statusColor: o.statusColor,
-        assignee: t.assignee,
-        assigneeId: t.assignee_id,
-        groupName: t.group?.name ?? null,
-        deadline: t.deadline,
-        hasMySubtask: t.has_my_subtask ?? false,
-      },
-    ];
+    cards.push({
+      kind: "task",
+      key: `task-${t.id}`,
+      id: t.id,
+      projectId: t.project_id,
+      projectColor: projectColor.get(t.project_id) ?? "#6366f1",
+      title: t.title,
+      priority: t.priority,
+      statusName: o.statusName,
+      statusKey: o.statusKey,
+      statusColor: o.statusColor,
+      assignee: t.assignee,
+      assigneeId: t.assignee_id,
+      groupName: t.group?.name ?? null,
+      deadline: t.deadline,
+      hasMySubtask: t.has_my_subtask ?? false,
+      leadsMyGroup,
+    });
+
+    return cards;
   });
 
   // Custom-status columns known across the in-scope projects, so an empty custom
@@ -196,7 +208,8 @@ function WorkspaceViewsInner({
     if (
       lockedAssigneeId != null &&
       i.assigneeId !== lockedAssigneeId &&
-      !i.hasMySubtask
+      !i.hasMySubtask &&
+      !i.leadsMyGroup
     )
       return false;
     if (memberIds.length) {

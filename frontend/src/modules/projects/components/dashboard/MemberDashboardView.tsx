@@ -26,13 +26,14 @@ export function MemberDashboardView(): React.ReactElement {
     completedTasks,
   } = useDashboardData();
 
-  // The member's own non-done tasks with a deadline, earliest first.
+  // The member's own non-done tasks with a deadline, earliest first. A group
+  // task counts as theirs when they lead the group that owns it.
   const upcoming = useMemo(
     () =>
       tasks
         .filter(
           (t) =>
-            t.assignee_id === user?.id &&
+            (t.assignee_id === user?.id || t.leads_my_group) &&
             t.deadline &&
             t.status?.key !== "done",
         )

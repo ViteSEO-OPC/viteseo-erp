@@ -53,6 +53,13 @@ class TaskSummaryResource extends JsonResource
             // (so it can surface in their "My Tasks" board even without the parent
             // being assigned directly to them).
             'has_my_subtask' => (bool) ($this->my_subtasks_count ?? 0),
+            // True when this is a group task and the requesting user leads that
+            // group — the leader owns the parent task, so it belongs in their
+            // "My Tasks" board without waiting for a subtask of their own.
+            'leads_my_group' => $this->relationLoaded('group')
+                && $this->group !== null
+                && $request->user() !== null
+                && (int) $this->group->leader_id === (int) $request->user()->id,
             // The requesting user's own subtasks under this task (loaded only for
             // the board list) — the member board renders these as their own cards.
             'my_subtasks' => $this->whenLoaded('subtasks', fn () => $this->subtasks->map(fn ($s): array => [
