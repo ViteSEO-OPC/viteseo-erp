@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Card, PriorityBadge, StatCard, Tabs } from "@/core/ui";
+import { Button, Card, PlusIcon, PriorityBadge, StatCard, Tabs } from "@/core/ui";
 import { isOverdue, OverdueBadge } from "../../overdue";
 import { useOpenTask } from "../tasks/useTaskModal";
+import { WorkspaceCreateTaskModal } from "../workspaces/WorkspaceViews";
 import {
   DashboardProjectCard,
   DashboardTaskTable,
@@ -24,6 +25,7 @@ const ACTIVITY_TEMPLATES: Array<{ who: string; verb: string; when: string }> = [
 /** PM/Admin dashboard — org-wide Overview + a personal "My Tasks" tab. */
 export function ManagerDashboardView(): React.ReactElement {
   const [tab, setTab] = useState<"overview" | "mine">("overview");
+  const [createOpen, setCreateOpen] = useState(false);
   const {
     projects,
     tasks,
@@ -88,8 +90,11 @@ export function ManagerDashboardView(): React.ReactElement {
         Overview
       </h1>
 
-      <div className="mt-6">
+      {/* Tab bar with "Add Task" pinned to its right, so a PM/Admin can create a
+          task from either tab rather than only from the board toolbar. */}
+      <div className="mt-6 flex flex-wrap items-end justify-between gap-3">
         <Tabs
+          className="min-w-0 flex-1"
           tabs={[
             { key: "overview", label: "Overview" },
             { key: "mine", label: "All Tasks" },
@@ -97,6 +102,12 @@ export function ManagerDashboardView(): React.ReactElement {
           active={tab}
           onChange={(k) => setTab(k as "overview" | "mine")}
         />
+        {projects.length > 0 && (
+          <Button className="mb-2" onClick={() => setCreateOpen(true)}>
+            <PlusIcon className="h-4 w-4" />
+            Add Task
+          </Button>
+        )}
       </div>
 
       {tab === "mine" ? (
@@ -269,6 +280,13 @@ export function ManagerDashboardView(): React.ReactElement {
             )}
           </section>
         </>
+      )}
+
+      {createOpen && (
+        <WorkspaceCreateTaskModal
+          projects={projects}
+          onClose={() => setCreateOpen(false)}
+        />
       )}
     </div>
   );

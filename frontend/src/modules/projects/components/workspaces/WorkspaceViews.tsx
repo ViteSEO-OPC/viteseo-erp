@@ -76,7 +76,6 @@ function WorkspaceViewsInner({
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [deadlineSort, setDeadlineSort] = useState<DeadlineSort>(null);
-  const [createOpen, setCreateOpen] = useState(false);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
 
   const allProjectIds = projects.map((p) => p.id);
@@ -342,24 +341,17 @@ function WorkspaceViewsInner({
             setDeadlineSort={setDeadlineSort}
           />
 
+          {/* Creating a task lives in the page header (dashboard / workspace),
+              so it stays reachable from every tab — not just this board. */}
           {isManager && lockedAssigneeId == null && projects.length > 0 && (
-            <div className="flex flex-1 items-center gap-2 sm:flex-none">
-              <Button
-                variant="brand-outline"
-                onClick={() => setStatusModalOpen(true)}
-                className="flex-1 sm:flex-none"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add status
-              </Button>
-              <Button
-                onClick={() => setCreateOpen(true)}
-                className="flex-1 sm:flex-none"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add Task
-              </Button>
-            </div>
+            <Button
+              variant="brand-outline"
+              onClick={() => setStatusModalOpen(true)}
+              className="flex-1 sm:flex-none"
+            >
+              <PlusIcon className="h-4 w-4" />
+              Add status
+            </Button>
           )}
         </div>
       </div>
@@ -418,17 +410,6 @@ function WorkspaceViewsInner({
       </div>
 
       {/* The task-view modal is rendered globally (projects layout) off `?task=`. */}
-
-      {createOpen && (
-        <WorkspaceCreateTaskModal
-          projects={
-            projectIds.length
-              ? projects.filter((p) => projectIds.includes(p.id))
-              : projects
-          }
-          onClose={() => setCreateOpen(false)}
-        />
-      )}
 
       <StatusManagerModal
         open={statusModalOpen}
@@ -655,7 +636,12 @@ function FilterPopover({
   );
 }
 
-function WorkspaceCreateTaskModal({
+/**
+ * "Add Task" from a multi-project surface: pick the project first (when more
+ * than one is in scope), then fill in the task itself. Rendered by the page
+ * headers that own the button — the dashboard and the workspace detail view.
+ */
+export function WorkspaceCreateTaskModal({
   projects,
   onClose,
 }: {

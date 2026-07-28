@@ -30,6 +30,7 @@ import {
 import { EditProjectModal } from "./EditProjectModal";
 import { MemberPickerModal } from "../team/MemberPickerModal";
 import { buildGroupsByUser, MemberGroupTags } from "../team/TeamShared";
+import { ProjectStatusBadge } from "../status/ProjectStatusBadge";
 import { STATUS_COLORS, StatusDonut } from "../status/StatusDonut";
 
 export interface ProjectDetailViewProps {
@@ -133,16 +134,6 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const pct = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 100));
   const donePct = pct(counts.done);
 
-  const projectStatus = isDone
-    ? "Done"
-    : total === 0
-      ? "Not Started"
-      : counts.done === total
-        ? "Completed"
-        : counts.in_progress > 0 || counts.done > 0
-          ? "In Progress"
-          : "Not Started";
-
   const members = useMemo(() => project?.members ?? [], [project]);
   const memberIds = useMemo(() => members.map((m) => m.id), [members]);
   const users = usersQuery.data ?? [];
@@ -206,15 +197,19 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
         </Link>
       )}
       <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
-        <div>
+        {/* `min-w-0` + `wrap-break-word` so an unbroken run in the name or the
+            description breaks instead of spilling across the header. */}
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-ink sm:text-[32px]">
+            <h1 className="min-w-0 text-2xl font-bold text-ink wrap-break-word sm:text-[32px]">
               {project?.name ?? "Project"}
             </h1>
             {isDone && <Badge tone="success">Done</Badge>}
           </div>
           {project?.description && (
-            <p className="mt-1 max-w-2xl text-ink-soft">{project.description}</p>
+            <p className="mt-1 max-w-2xl text-ink-soft wrap-break-word">
+              {project.description}
+            </p>
           )}
         </div>
         {isManager && project && (
@@ -248,12 +243,11 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               <div>
                 <p className="text-sm font-bold text-ink">Project Status</p>
                 <div className="mt-2">
-                  <Badge
-                    tone="info"
+                  <ProjectStatusBadge
+                    project={project}
+                    counts={counts}
                     className="rounded-md px-2.5 py-1 normal-case"
-                  >
-                    {projectStatus}
-                  </Badge>
+                  />
                 </div>
               </div>
             </div>
