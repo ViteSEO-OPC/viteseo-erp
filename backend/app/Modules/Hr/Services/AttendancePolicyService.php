@@ -31,6 +31,14 @@ class AttendancePolicyService
         'early_arrival_mode' => 'none',
         'overtime_mode' => 'approved_only',
         'overtime_threshold_minutes' => 0,
+        // Premium & overtime rates (Phase 0) — seeded to the DOLE legal minimums (no-op).
+        'premium_rest_day_pct' => 130,
+        'premium_special_day_pct' => 130,
+        'premium_regular_holiday_pct' => 200,
+        'overtime_ordinary_pct' => 125,
+        'overtime_rest_special_pct' => 169,
+        'overtime_regular_holiday_pct' => 260,
+        'night_diff_pct' => 10,
         'deduction_rounding' => 'exact',
         'deduction_block_minutes' => 60,
         'daily_deduction_cap' => 1.0,
@@ -71,7 +79,11 @@ class AttendancePolicyService
             ['streak_min' => 2, 'severity' => 'yellow', 'type' => 'ua'],
             ['streak_min' => 1, 'severity' => 'green', 'type' => 'ua'],
         ],
+        // Missed clock-outs this month — a count ladder, like `late` (HR-configurable, step B).
         'missed_time_out' => [
+            ['occurrence_min' => 4, 'severity' => 'red'],
+            ['occurrence_min' => 3, 'severity' => 'orange'],
+            ['occurrence_min' => 2, 'severity' => 'yellow'],
             ['occurrence_min' => 1, 'severity' => 'green'],
         ],
     ];

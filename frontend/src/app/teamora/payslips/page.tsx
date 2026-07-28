@@ -182,6 +182,24 @@ export default function PayslipsPage() {
               {detail.payslip.holiday_premium > 0 && (
                 <Row label="Holiday premium" value={formatPeso(detail.payslip.holiday_premium)} />
               )}
+              {detail.payslip.overtime_pay > 0 && (
+                <Row
+                  label={`Overtime (${(detail.payslip.overtime_minutes / 60).toFixed(1)} hrs)`}
+                  value={formatPeso(detail.payslip.overtime_pay)}
+                />
+              )}
+              {detail.payslip.night_diff_pay > 0 && (
+                <Row
+                  label={`Night differential (${(detail.payslip.night_diff_minutes / 60).toFixed(1)} hrs)`}
+                  value={formatPeso(detail.payslip.night_diff_pay)}
+                />
+              )}
+              {detail.payslip.rest_day_premium > 0 && (
+                <Row
+                  label={`Rest day worked (${(detail.payslip.rest_day_minutes / 60).toFixed(1)} hrs)`}
+                  value={formatPeso(detail.payslip.rest_day_premium)}
+                />
+              )}
               {detail.payslip.reimbursements > 0 && (
                 <Row label="Reimbursement" value={formatPeso(detail.payslip.reimbursements)} />
               )}

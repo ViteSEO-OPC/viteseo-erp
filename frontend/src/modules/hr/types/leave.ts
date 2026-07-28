@@ -46,6 +46,41 @@ export interface EarlyOutRequest {
   created_at: string;
 }
 
+// Overtime requests — hours worked BEYOND the schedule, filed as a time window. Opposite sign
+// to early-out: an approved one ADDS pay at the rate for that day's classification. `hours` is
+// derived from the window server-side, never typed.
+export interface OvertimeRequest {
+  id: number;
+  work_date: string;
+  time_from: string | null; // HH:MM (24h)
+  time_to: string | null;
+  hours: number;
+  reason: string;
+  status: string;
+  review_note: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  employee: { id: number; name: string | null };
+  created_at: string;
+}
+
+/** Company overtime setting, as it affects FILING a request. */
+export interface OvertimeSettings {
+  mode: "none" | "approved_only" | "auto_after_threshold";
+  requests_enabled: boolean;
+  note: string;
+}
+
+/** How a date's overtime is priced: regular day / rest day / special day / regular holiday. */
+export interface OvertimeClassification {
+  code: "regular_day" | "rest_day" | "special_day" | "regular_holiday";
+  label: string;
+  rate_pct: number;
+  is_workday: boolean;
+  /** That day's shift end (HH:MM) — overtime can only start after it. Null on a rest day. */
+  schedule_end: string | null;
+}
+
 export interface LeaveBalance {
   id: number;
   year: number;

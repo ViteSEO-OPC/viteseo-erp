@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Hr\Http\Resources\PayslipResource;
 use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Models\Payslip;
@@ -33,6 +34,7 @@ class PayrollService
         private readonly AuditService $audit,
         private readonly HolidayService $holidays,
         private readonly AttendancePolicyService $attendancePolicy,
+        private readonly ScheduleService $workSchedule,
     ) {}
 
     /**
@@ -78,6 +80,12 @@ class PayrollService
         float $holidayPremium = 0.0,
         ?UnpaidDaysResult $unpaidDetail = null,
         ?AttendancePolicy $policy = null,
+        float $overtimePay = 0.0,
+        int $overtimeMinutes = 0,
+        float $nightDiffPay = 0.0,
+        int $nightDiffMinutes = 0,
+        float $restDayPremium = 0.0,
+        int $restDayMinutes = 0,
     ): array {
         $policy ??= $this->attendancePolicy->get();
         $monthlyBase = (float) $employee->base_salary;
@@ -113,7 +121,7 @@ class PayrollService
         // the full monthly salary (PH bracket model), so `contribBase` is unchanged.
         $taxableMonthly = $periodsPerYear > 0 ? round($basePay * $periodsPerYear / 12, 2) : 0.0;
 
-        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium);
+        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium);
 
         // Step 4b — persist how base_salary was derived, so the payslip explains itself.
         // The minute-level portion is all-zero until a deduction mode is enabled.
@@ -122,6 +130,9 @@ class PayrollService
         $slip['unpaid_days'] = round($unpaidDays, 2);
         $slip['late_minutes'] = $unpaidDetail?->lateMinutes ?? 0;
         $slip['undertime_minutes'] = $unpaidDetail?->undertimeMinutes ?? 0;
+        $slip['overtime_minutes'] = $overtimeMinutes;
+        $slip['night_diff_minutes'] = $nightDiffMinutes;
+        $slip['rest_day_minutes'] = $restDayMinutes;
         $slip['late_deduction'] = round(($unpaidDetail?->lateDays ?? 0.0) * $dailyRate, 2);
         $slip['undertime_deduction'] = round(($unpaidDetail?->undertimeDays ?? 0.0) * $dailyRate, 2);
 
@@ -164,7 +175,7 @@ class PayrollService
      * @param  array{index:int, count:int, deduction_timing:string, tax_timing:string}  $dist
      * @return array<string, float>
      */
-    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0): array
+    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0): array
     {
         // SSS/PhilHealth/Pag-IBIG are MONTHLY amounts (on the monthly base); the
         // timing setting decides which cutoff(s) in the month they land on.
@@ -194,7 +205,7 @@ class PayrollService
 
         // Holiday premium is added to gross (taxable in reality, but — like the rest of
         // this simplified engine — it isn't fed back into the withholding base above).
-        $gross = round($basePay + $allowances + $reimb + $holidayPremium, 2);
+        $gross = round($basePay + $allowances + $reimb + $holidayPremium + $overtimePay + $nightDiffPay + $restDayPremium, 2);
         $totalDeductions = round($sss + $philhealth + $pagibig + $wht, 2);
 
         return [
@@ -202,6 +213,9 @@ class PayrollService
             'reimbursements' => round($reimb, 2),
             'allowances' => round($allowances, 2),
             'holiday_premium' => round($holidayPremium, 2),
+            'overtime_pay' => round($overtimePay, 2),
+            'night_diff_pay' => round($nightDiffPay, 2),
+            'rest_day_premium' => round($restDayPremium, 2),
             'gross' => $gross,
             'sss' => $sss,
             'philhealth' => $philhealth,
@@ -312,14 +326,261 @@ class PayrollService
             if (! isset($worked[$date])) {
                 continue;
             }
-            $premium += $dailyRate * match ($type) {
-                'regular' => 1.0,
-                'special_non_working' => 0.3,
-                default => 0.0, // special_working — a normal working day
-            };
+            $premium += $dailyRate * self::holidayPremiumMultiplier($type, $policy);
         }
 
         return round($premium, 2);
+    }
+
+    /**
+     * The add-on multiple of the daily rate for WORKING a holiday of this type (P0-2). Reads the
+     * HR-editable rate columns instead of hardcoded literals: a "total %" column (e.g. 200) becomes
+     * an add-on of (pct − 100) ÷ 100 on top of the day's normal pay. At the DOLE-minimum defaults
+     * (regular 200 → +1.0, special 130 → +0.3) this reproduces the old hardcoded behaviour exactly.
+     * Pure + static so it is unit-testable without a DB (mirrors ViolationService::ladderMatch).
+     */
+    public static function holidayPremiumMultiplier(string $type, AttendancePolicy $policy): float
+    {
+        return match ($type) {
+            'regular' => max(0, (int) $policy->premium_regular_holiday_pct - 100) / 100,
+            'special_non_working' => max(0, (int) $policy->premium_special_day_pct - 100) / 100,
+            default => 0.0, // special_working — a normal working day, no premium
+        };
+    }
+
+    /**
+     * Overtime pay for the cycle (OT-3): each APPROVED overtime request's hours × the hourly rate ×
+     * the OT rate for that day's type (from the editable rate table). Stacks with holiday premium
+     * WITHOUT double-counting — the premium pays the regular-day hours worked on a holiday, OT pays
+     * the *extra* approved hours. Management → 0. Paid only in `approved_only` mode (auto detection is
+     * OT-5; `none` = off). No-op until an OT request is approved, so wiring it changes no pesos today.
+     *
+     * @param  array<string, string>  $holidayMap  date 'Y-m-d' => type
+     * @return array{pay: float, minutes: int}
+     */
+    private function overtimePayFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null, ?array $byDate = null): array
+    {
+        if ($employee->isManagement()) {
+            return ['pay' => 0.0, 'minutes' => 0];
+        }
+
+        $policy ??= $this->attendancePolicy->get();
+
+        // WHICH minutes count is the mode's job (OT-5); pricing them is shared below.
+        //   approved_only        → the hours on each APPROVED request (the safe, authorised default)
+        //   auto_after_threshold → clock minutes past the scheduled end (opt-in, warned in the UI)
+        //   none                 → overtime is switched off entirely
+        $byDate ??= $this->overtimeMinutesByDate($employee, $start, $end, $policy);
+        if ($byDate === []) {
+            return ['pay' => 0.0, 'minutes' => 0];
+        }
+
+        $tz = config('app.timezone_local');
+        $hourly = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays)
+            / max(1, (int) $policy->hours_per_day_divisor);
+
+        $pay = 0.0;
+        $minutes = 0;
+        foreach ($byDate as $date => $entry) {
+            $mins = (int) $entry['minutes'];
+            $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
+            $ratePct = self::overtimeMultiplierPct($holidayMap[$date] ?? null, $isWorkday, $policy);
+            $pay += ($mins / 60) * $hourly * ($ratePct / 100);
+            $minutes += $mins;
+        }
+
+        return ['pay' => round($pay, 2), 'minutes' => $minutes];
+    }
+
+    /**
+     * Night-shift differential (ND-1): +`night_diff_pct`% of the hourly rate for every minute worked
+     * between 22:00 and 06:00 — for ALL night work, not just overtime, per PH practice. Management → 0.
+     *
+     * STACKING: this is only the PREMIUM portion (the +10%), so it adds on top of the overtime line for
+     * hours that are both. For night minutes that are ALSO overtime the premium is compounded onto the
+     * overtime rate — hourly × OT% × night% — matching the PH rule that night pay is a percentage of the
+     * applicable (overtime) hourly rate, not of the base. Ordinary night hours get hourly × night%.
+     *
+     * Remaining nuance: night hours on a holiday/rest day are premiumed at the base rate here; the day's
+     * own premium is paid separately by holidayPremiumFor(). Compounding those is a Phase-3 refinement.
+     *
+     * @param  array<string, array{minutes:int, night:int}>|null  $otByDate  shared with overtimePayFor
+     * @return array{pay: float, minutes: int}
+     */
+    private function nightDiffPayFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null, ?array $otByDate = null): array
+    {
+        if ($employee->isManagement()) {
+            return ['pay' => 0.0, 'minutes' => 0];
+        }
+
+        $policy ??= $this->attendancePolicy->get();
+        $nightByDate = $this->attendance->nightMinutesFor($employee, $start, $end);
+        if ($nightByDate === []) {
+            return ['pay' => 0.0, 'minutes' => 0];
+        }
+
+        $otByDate ??= $this->overtimeMinutesByDate($employee, $start, $end, $policy);
+        $tz = config('app.timezone_local');
+        $hourly = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays)
+            / max(1, (int) $policy->hours_per_day_divisor);
+        $nightRate = (int) $policy->night_diff_pct / 100;
+
+        $pay = 0.0;
+        $minutes = 0;
+        foreach ($nightByDate as $date => $nightMins) {
+            // Night minutes that are also overtime earn the premium ON the overtime rate.
+            $otNight = min($nightMins, (int) ($otByDate[$date]['night'] ?? 0));
+            $plainNight = $nightMins - $otNight;
+
+            $pay += ($plainNight / 60) * $hourly * $nightRate;
+            if ($otNight > 0) {
+                $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
+                $otRate = self::overtimeMultiplierPct($holidayMap[$date] ?? null, $isWorkday, $policy) / 100;
+                $pay += ($otNight / 60) * $hourly * $otRate * $nightRate;
+            }
+            $minutes += $nightMins;
+        }
+
+        return ['pay' => round($pay, 2), 'minutes' => $minutes];
+    }
+
+    /** A full 8-hour day in minutes — the line between rest-day premium and rest-day overtime. */
+    private const REST_DAY_PREMIUM_CAP_MIN = 8 * 60;
+
+    /**
+     * Rest-day premium (RD-1): pay for WORKING a scheduled rest day — the first 8 hours at
+     * `premium_rest_day_pct`. Hours past the 8th are rest-day OVERTIME instead (see the cap in
+     * overtimeMinutesByDate), so one rest day is never paid through both lines.
+     *
+     * FULL RATE vs PREMIUM-ONLY: under the default `period_workdays` basis (and the 261/313 divisors)
+     * the salary is spread over SCHEDULED WORKDAYS only — a rest day isn't in it at all, so working one
+     * earns the whole 130%. Only when the divisor counts every day (365) is the day already inside the
+     * salary, and then just the +30% portion is owed on top.
+     *
+     * @param  array<string, int>  $restByDate  date => minutes worked on a rest day
+     * @return array{pay: float, minutes: int}
+     */
+    private function restDayPremiumFor(Employee $employee, int $periodsPerYear, int $workingDays, array $restByDate, ?AttendancePolicy $policy = null): array
+    {
+        if ($restByDate === []) {
+            return ['pay' => 0.0, 'minutes' => 0];
+        }
+
+        $policy ??= $this->attendancePolicy->get();
+        $hourly = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays)
+            / max(1, (int) $policy->hours_per_day_divisor);
+
+        $pct = (int) $policy->premium_rest_day_pct;
+        $salaryCoversRestDays = $policy->daily_rate_basis === 'fixed_divisor'
+            && (int) $policy->annual_divisor >= 365;
+        $rate = ($salaryCoversRestDays ? max(0, $pct - 100) : $pct) / 100;
+
+        $pay = 0.0;
+        $minutes = 0;
+        foreach ($restByDate as $worked) {
+            $premiumMinutes = min(self::REST_DAY_PREMIUM_CAP_MIN, $worked);
+            $pay += ($premiumMinutes / 60) * $hourly * $rate;
+            $minutes += $premiumMinutes;
+        }
+
+        return ['pay' => round($pay, 2), 'minutes' => $minutes];
+    }
+
+    /**
+     * Which minutes count as overtime, per date — the mode's source of truth, shared by the overtime
+     * pay line and the night differential (which compounds onto the OT rate for night OT minutes).
+     *
+     * @param  array<string, int>  $restByDate  worked rest days, whose first 8h are paid as a premium
+     * @return array<string, array{minutes:int, night:int}>
+     */
+    private function overtimeMinutesByDate(Employee $employee, string $start, string $end, AttendancePolicy $policy, array $restByDate = []): array
+    {
+        $map = match ($policy->overtime_mode) {
+            'approved_only' => $this->approvedOvertimeMinutes($employee, $start, $end),
+            'auto_after_threshold' => $this->attendance->autoOvertimeMinutesFor(
+                $employee, $start, $end, (int) $policy->overtime_threshold_minutes,
+            ),
+            default => [],
+        };
+
+        // On a worked rest day the first 8 hours are the rest-day PREMIUM, so only the excess can be
+        // overtime. (A rest day with no attendance row isn't in $restByDate — no premium is paid for
+        // it, so an approved request there still pays in full.)
+        foreach ($restByDate as $date => $worked) {
+            if (! isset($map[$date])) {
+                continue;
+            }
+            $cap = max(0, $worked - self::REST_DAY_PREMIUM_CAP_MIN);
+            if ($map[$date]['minutes'] > $cap) {
+                $map[$date]['minutes'] = $cap;
+                $map[$date]['night'] = min($map[$date]['night'], $cap);
+            }
+            if ($map[$date]['minutes'] <= 0) {
+                unset($map[$date]);
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * Approved-request overtime as date => minutes (the `approved_only` source), with the portion
+     * falling in the night window derived from the request's own time span.
+     *
+     * @return array<string, array{minutes:int, night:int}>
+     */
+    private function approvedOvertimeMinutes(Employee $employee, string $start, string $end): array
+    {
+        $out = [];
+        $requests = OvertimeRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get(['work_date', 'hours', 'time_from', 'time_to']);
+
+        foreach ($requests as $req) {
+            $date = $req->work_date->toDateString();
+            $night = 0;
+            // Requests filed before OT-4 carry hours only — no window, so no night portion.
+            if ($req->time_from && $req->time_to) {
+                $from = self::hmToMinutes((string) $req->time_from);
+                $to = self::hmToMinutes((string) $req->time_to);
+                if ($to <= $from) {
+                    $to += 24 * 60; // crosses midnight
+                }
+                $night = AttendanceService::nightOverlapMinutes($from, $to);
+            }
+
+            $out[$date] = [
+                'minutes' => ($out[$date]['minutes'] ?? 0) + (int) round((float) $req->hours * 60),
+                'night' => ($out[$date]['night'] ?? 0) + $night,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** 'HH:MM(:SS)' → minute-of-day. */
+    private static function hmToMinutes(string $hm): int
+    {
+        [$h, $m] = array_map('intval', explode(':', substr($hm, 0, 5)));
+
+        return $h * 60 + $m;
+    }
+
+    /**
+     * The OT rate (whole percent) for a day, from the editable rate table (P0-1): regular holiday and
+     * special-day from the holiday map; a non-workday that isn't a holiday is a REST day; otherwise an
+     * ordinary day. Pure + static so it is unit-testable without a DB.
+     */
+    public static function overtimeMultiplierPct(?string $holidayType, bool $isWorkday, AttendancePolicy $policy): int
+    {
+        return match ($holidayType) {
+            'regular' => (int) $policy->overtime_regular_holiday_pct,
+            'special_non_working' => (int) $policy->overtime_rest_special_pct,
+            default => $isWorkday
+                ? (int) $policy->overtime_ordinary_pct
+                : (int) $policy->overtime_rest_special_pct, // rest day (non-workday, non-holiday)
+        };
     }
 
     /**
@@ -477,8 +738,15 @@ class PayrollService
 
                 // Premium for working on a (non-working) holiday in this cycle.
                 $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
+                // Rest days worked feed BOTH the rest-day premium and the overtime cap below.
+                $restByDate = $this->attendance->restDayWorkedMinutesFor($employee, $cycleStart, $cycleEnd, $holidayMap);
+                $restDay = $this->restDayPremiumFor($employee, $periodsPerYear, $workingDays, $restByDate, $policy);
+                // One overtime source, shared by the OT line and the night differential.
+                $otByDate = $this->overtimeMinutesByDate($employee, $cycleStart, $cycleEnd, $policy, $restByDate);
+                $overtime = $this->overtimePayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
+                $nightDiff = $this->nightDiffPayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy);
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
 
                 Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],
@@ -659,11 +927,11 @@ class PayrollService
     {
         $run->loadMissing(['payslips.employee.user', 'payslips.employee.department']);
 
-        $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
+        $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'nd' => 0.0, 'rd' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
 
         $out = fopen('php://temp', 'r+');
         fputcsv($out, [
-            'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Reimbursements', 'Gross',
+            'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Night Diff', 'Rest Day', 'Reimbursements', 'Gross',
             'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Total Deductions', 'Net Pay',
             'Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Status',
         ], ',', '"', '');
@@ -672,6 +940,9 @@ class PayrollService
             $sum['base'] += (float) $p->base_salary;
             $sum['allow'] += (float) $p->allowances;
             $sum['holiday'] += (float) $p->holiday_premium;
+            $sum['ot'] += (float) $p->overtime_pay;
+            $sum['nd'] += (float) $p->night_diff_pay;
+            $sum['rd'] += (float) $p->rest_day_premium;
             $sum['reimb'] += (float) $p->reimbursements;
             $sum['sss'] += (float) $p->sss;
             $sum['ph'] += (float) $p->philhealth;
@@ -684,7 +955,7 @@ class PayrollService
             fputcsv($out, [
                 $p->employee->user?->name ?? $p->employee->name,
                 $p->employee->department?->name,
-                $p->base_salary, $p->allowances, $p->holiday_premium, $p->reimbursements, $p->gross,
+                $p->base_salary, $p->allowances, $p->holiday_premium, $p->overtime_pay, $p->night_diff_pay, $p->rest_day_premium, $p->reimbursements, $p->gross,
                 $p->sss, $p->philhealth, $p->pagibig, $p->withholding_tax,
                 $p->total_deductions, $p->net_pay,
                 $p->employer_sss, $p->employer_philhealth, $p->employer_pagibig, $p->status,
@@ -693,7 +964,7 @@ class PayrollService
 
         fputcsv($out, [
             'TOTAL', '',
-            round($sum['base'], 2), round($sum['allow'], 2), round($sum['holiday'], 2), round($sum['reimb'], 2), (float) $run->total_gross,
+            round($sum['base'], 2), round($sum['allow'], 2), round($sum['holiday'], 2), round($sum['ot'], 2), round($sum['nd'], 2), round($sum['rd'], 2), round($sum['reimb'], 2), (float) $run->total_gross,
             round($sum['sss'], 2), round($sum['ph'], 2), round($sum['pg'], 2), round($sum['wht'], 2),
             (float) $run->total_deductions, (float) $run->total_net,
             round($sum['er_sss'], 2), round($sum['er_ph'], 2), round($sum['er_pg'], 2), '',

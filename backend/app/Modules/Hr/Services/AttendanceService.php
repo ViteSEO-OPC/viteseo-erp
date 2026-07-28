@@ -426,6 +426,187 @@ class AttendanceService
      *
      * @return array<int, string>
      */
+    /**
+     * Minutes actually WORKED on a scheduled rest day (RD-1), per date — the basis for the rest-day
+     * premium. A rest day is any date the employee's effective schedule says is not a workday; the
+     * salary doesn't cover it, so working it is extra work.
+     *
+     * Dates that are also HOLIDAYS are excluded: holidayPremiumFor() already pays those, and stacking
+     * both premiums on one day is the double-premium case left to a later refinement.
+     *
+     * Worked minutes = the clock window minus the unpaid meal. Needs both punches; management earns none.
+     *
+     * @param  array<string, string>  $holidayMap  date => holiday type (to exclude)
+     * @return array<string, int> date 'Y-m-d' => worked minutes
+     */
+    public function restDayWorkedMinutesFor(Employee $employee, string $start, string $end, array $holidayMap = []): array
+    {
+        if ($employee->isManagement()) {
+            return [];
+        }
+
+        $tz = config('app.timezone_local');
+        $rows = Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->whereNotNull('time_in')
+            ->whereNotNull('time_out')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $day = Carbon::parse($row->work_date, $tz);
+            $date = $day->toDateString();
+            if (isset($holidayMap[$date])) {
+                continue; // the holiday premium covers this day
+            }
+            if ($this->schedule->effectiveFor($employee, $day)['is_workday'] ?? true) {
+                continue; // an ordinary scheduled workday
+            }
+
+            $inMin = $this->clockToMinutes($row->time_in);
+            $outMin = $this->clockToMinutes($row->time_out);
+            if ($inMin === null || $outMin === null) {
+                continue;
+            }
+            if ($outMin < $inMin) {
+                $outMin += 24 * 60;
+            }
+
+            $worked = ($outMin - $inMin) - (int) $row->lunch_minutes;
+            if ($worked > 0) {
+                $out[$date] = $worked;
+            }
+        }
+
+        return $out;
+    }
+
+    /** The night-differential window (Manila): 22:00 → 06:00. */
+    public const NIGHT_START_MIN = 22 * 60;
+
+    public const NIGHT_END_MIN = 6 * 60;
+
+    /**
+     * Minutes of a worked window that fall inside the night window (ND-1). Both arguments are
+     * minute-of-day on the work date; `out` may exceed 1440 when the shift crosses midnight. In that
+     * coordinate space the night bands are [00:00–06:00] of the work date and [22:00 → next 06:00].
+     * Pure/static so the overlap arithmetic is unit-testable without a DB.
+     */
+    public static function nightOverlapMinutes(int $in, int $out): int
+    {
+        $overlap = static fn (int $a0, int $a1, int $b0, int $b1): int => max(0, min($a1, $b1) - max($a0, $b0));
+
+        return $overlap($in, $out, 0, self::NIGHT_END_MIN)
+            + $overlap($in, $out, self::NIGHT_START_MIN, 24 * 60 + self::NIGHT_END_MIN);
+    }
+
+    /**
+     * Night-shift minutes per date (ND-1) — for EVERY worked day, not just overtime, since the PH
+     * night differential applies to all night work. Needs both punches; management earns none.
+     *
+     * UNPAID BREAK: the differential is for hours WORKED, so the unpaid meal has to come out — but the
+     * clock doesn't record when it was taken. We therefore subtract only the part that MUST have fallen
+     * at night: whatever the daytime portion of the shift couldn't absorb. A graveyard 22:00–06:00 with
+     * a 60-min lunch loses exactly 60 (no daytime to absorb it); an evening 14:00–23:30 loses none (its
+     * 8 daytime hours could hold the whole break). Conservative by construction — it never under-pays.
+     *
+     * @return array<string, int> date 'Y-m-d' => night minutes
+     */
+    public function nightMinutesFor(Employee $employee, string $start, string $end): array
+    {
+        if ($employee->isManagement()) {
+            return [];
+        }
+
+        $tz = config('app.timezone_local');
+        $rows = Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->whereNotNull('time_in')
+            ->whereNotNull('time_out')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $inMin = $this->clockToMinutes($row->time_in);
+            $outMin = $this->clockToMinutes($row->time_out);
+            if ($inMin === null || $outMin === null) {
+                continue;
+            }
+            if ($outMin < $inMin) {
+                $outMin += 24 * 60; // clocked out after midnight
+            }
+
+            $minutes = self::nightOverlapMinutes($inMin, $outMin);
+            if ($minutes > 0) {
+                // Carve out only the unpaid meal that the daytime part of the shift can't account for.
+                $daytime = ($outMin - $inMin) - $minutes;
+                $minutes = max(0, $minutes - max(0, (int) $row->lunch_minutes - $daytime));
+            }
+            if ($minutes > 0) {
+                $out[Carbon::parse($row->work_date, $tz)->toDateString()] = $minutes;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Auto-detected overtime (OT-5): minutes clocked out PAST the scheduled end, per date. Counted
+     * only on scheduled workdays that have BOTH punches — a missing clock-out is credited to the
+     * scheduled end (slice B) and can never become overtime. A day whose overrun is under
+     * `thresholdMinutes` is ignored, so trivial overruns don't create pay. Management earns none.
+     *
+     * Rest-day work is deliberately NOT auto-detected: there is no shift to be "beyond", and pricing
+     * a whole worked rest day belongs to the rest-day premium (Phase 3). File it as an OT request.
+     *
+     * Each entry also reports how much of that overrun fell in the NIGHT window, so the night
+     * differential can be compounded onto the overtime rate for those minutes (ND-1 tightening).
+     *
+     * @return array<string, array{minutes:int, night:int}> date 'Y-m-d' => overtime minutes
+     */
+    public function autoOvertimeMinutesFor(Employee $employee, string $start, string $end, int $thresholdMinutes = 0): array
+    {
+        if ($employee->isManagement()) {
+            return [];
+        }
+
+        $tz = config('app.timezone_local');
+        $rows = Attendance::where('employee_id', $employee->id)
+            ->whereBetween('work_date', [$start, $end])
+            ->whereNotNull('time_in')
+            ->whereNotNull('time_out')
+            ->get();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $day = Carbon::parse($row->work_date, $tz);
+            $eff = $this->schedule->effectiveFor($employee, $day);
+            if (! ($eff['is_workday'] ?? false)) {
+                continue; // rest day — see the note above
+            }
+
+            $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
+            $inMin = $this->clockToMinutes($row->time_in);
+            $outMin = $this->clockToMinutes($row->time_out);
+            if ($endMin === null || $inMin === null || $outMin === null) {
+                continue;
+            }
+            if ($outMin < $inMin) {
+                $outMin += 24 * 60; // clocked out after midnight
+            }
+
+            $minutes = $outMin - $endMin;
+            if ($minutes > 0 && $minutes >= max(0, $thresholdMinutes)) {
+                $out[$day->toDateString()] = [
+                    'minutes' => $minutes,
+                    'night' => self::nightOverlapMinutes($endMin, $outMin),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
     public function workedDatesBetween(Employee $employee, string $start, string $end): array
     {
         return Attendance::where('employee_id', $employee->id)

@@ -24,7 +24,7 @@ import { ViewModeProvider } from "@/modules/hr/components/view-mode-context";
 // else under /teamora is HR-management and needs an HRIS-management role.
 const EMPLOYEE_PATHS = new Set([
   "/teamora",
-  "/teamora/time-off",
+  "/teamora/work-schedule",
   "/teamora/payslips",
   "/teamora/claims",
   "/teamora/concerns",
