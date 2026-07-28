@@ -22,6 +22,22 @@ import { toManilaTimeInput, formatDate } from "@/core/lib/format";
 import { useAdjustAttendance, useViolations, useResolveViolation } from "@/modules/hr/hooks/use-attendance";
 import { useAttendancePolicy } from "@/modules/hr/hooks/use-rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
+
+/**
+ * What HR can assert for a day (Slice 16). Blank derives it from the times, as before.
+ * Every value here has a defined pay meaning in AttendanceService::unpaidDaysDetailFor() —
+ * don't add one without giving it a rule there, or it becomes a control that does nothing.
+ */
+const STATUS_OPTIONS = [
+  { value: "", label: "Auto (from Time In)" },
+  { value: "present", label: "Present — paid" },
+  { value: "late", label: "Late — paid, flagged" },
+  { value: "absent", label: "Absent — 1 unpaid day" },
+  { value: "on_leave", label: "On leave — follows the leave request" },
+  { value: "half_day", label: "Half day — 0.5 unpaid" },
+  { value: "rest_day", label: "Rest day — not a workday" },
+  { value: "holiday", label: "Holiday — paid" },
+];
 import { TimePicker } from "@/modules/hr/ui/time-picker";
 import { SEVERITY_LABEL } from "@/modules/hr/types/attendance";
 import type { HrAttendanceRow, Severity, Violation } from "@/modules/hr/types/attendance";
@@ -162,6 +178,8 @@ function Details({
   const [timeIn, setTimeIn] = useState(toManilaTimeInput(row.time_in));
   const [timeOut, setTimeOut] = useState(toManilaTimeInput(row.time_out));
   const [note, setNote] = useState(row.note ?? "");
+  // "" = derive from the times (the default). Any other value is an explicit HR override.
+  const [status, setStatus] = useState<string>(row.status_override ? row.status : "");
 
   // Status is not editable — it's derived from the times HR enters, matching the
   // server. No time-in disables (and clears) the time-out.
@@ -197,6 +215,8 @@ function Details({
         work_date: row.work_date,
         time_in: timeIn || null,
         time_out: timeIn && timeOut ? timeOut : null,
+        // Only send a status when HR actually picked one — otherwise the server derives it.
+        status: status || null,
         note: note || null,
       });
       toast.success("Attendance updated");
@@ -323,13 +343,15 @@ function Details({
           <div className="rounded-lg border border-border p-4">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <Info label="Date" value={formatDate(row.work_date)} />
+              {/* Slice 16 — HR can set the status outright. "Auto" keeps the old behaviour
+                  (derived from Time In); anything else wins, even over the clock. */}
               <div className="space-y-1.5">
-                <Label>Status (auto)</Label>
-                <div className="flex h-8 items-center">
-                  <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold", pill.cls)}>
-                    {pill.label}
-                  </span>
-                </div>
+                <Label>Status</Label>
+                <SimpleSelect
+                  value={status}
+                  onValueChange={setStatus}
+                  options={STATUS_OPTIONS}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>Time In</Label>
@@ -341,7 +363,9 @@ function Details({
               </div>
             </div>
             <p className="mt-2 text-caption text-muted-foreground">
-              Status updates automatically from Time In. Clear Time In to mark the day absent.
+              {status
+                ? "You've set this status manually — it overrides the times, and payroll and violation flags follow it."
+                : "Status follows Time In automatically. Clear Time In to mark the day absent, or pick a status to override it."}
             </p>
             <p className="mt-3 text-caption text-muted-foreground">
               Hours worked: <span className="font-semibold text-foreground">{Number(row.hours_worked.toFixed(1))}</span>

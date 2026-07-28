@@ -96,6 +96,17 @@ abstract class HrTestCase extends TestCase
     /** The HR-officer user these tests act as (created + role-assigned once per test). */
     protected function actingAsHr(): static
     {
+        Sanctum::actingAs($this->hrUser());
+
+        return $this;
+    }
+
+    /**
+     * An HR-officer user, without authenticating as them. For the cases that need to hand a
+     * viewer to something directly (a role-gated Resource, say) rather than call an endpoint.
+     */
+    protected function hrUser(): User
+    {
         if (Role::query()->where('name', 'hr_officer')->doesntExist()) {
             $this->seed(RolesAndPermissionsSeeder::class);
         }
@@ -103,8 +114,6 @@ abstract class HrTestCase extends TestCase
         $user = User::factory()->create();
         $user->assignRole('hr_officer');
 
-        Sanctum::actingAs($user);
-
-        return $this;
+        return $user;
     }
 }

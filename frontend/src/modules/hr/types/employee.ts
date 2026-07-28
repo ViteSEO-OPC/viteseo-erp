@@ -42,6 +42,11 @@ export interface Employee {
   food_allowance: string | null;
   transportation_allowance: string | null;
   load_allowance: string | null;
+  // Government membership NUMBERS for the payslip header — not the peso overrides above.
+  tin: string | null;
+  sss_number: string | null;
+  philhealth_number: string | null;
+  pagibig_number: string | null;
   department: DepartmentRef | null;
   manager: ManagerRef | null;
   created_at: string;
@@ -124,6 +129,10 @@ export interface EmployeeInput {
   food_allowance?: string;
   transportation_allowance?: string;
   load_allowance?: string;
+  tin?: string;
+  sss_number?: string;
+  philhealth_number?: string;
+  pagibig_number?: string;
   // Audit inputs (only meaningful on update when the value actually changes).
   salary_change_reason?: string;
   salary_change_type?: string;

@@ -21,7 +21,9 @@ class StoreBenefitProgramRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'category' => ['sometimes', 'string', 'max:50'],
             'kind' => ['sometimes', 'in:allowance,company'],
-            'amount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            // Slice B5.4 — required for an allowance (it would otherwise pay ₱0 silently);
+            // nullable for a company plan, which prices by tier instead.
+            'amount' => ['required_if:kind,allowance', 'nullable', 'numeric', 'min:0'],
             'description' => ['sometimes', 'nullable', 'string', 'max:1000'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'frequency' => ['sometimes', 'string', 'max:20'],
@@ -44,5 +46,18 @@ class StoreBenefitProgramRequest extends FormRequest
             'employee_ids' => ['array'],
             'employee_ids.*' => ['integer', 'exists:hr_employees,id'],
         ];
+    }
+
+    public function withValidator(\Illuminate\Contracts\Validation\Validator $validator): void
+    {
+        $validator->after(function ($v) {
+            // Slice B5.4 — an allowance with no amount renders as ₱0 and pays ₱0, with nothing to
+            // say it was never finished. `amount` stays nullable for company plans (HMO), which
+            // price by tier rather than by a single figure.
+            $kind = $this->input('kind', 'allowance');
+            if ($kind === 'allowance' && $this->has('amount') && $this->input('amount') === null) {
+                $v->errors()->add('amount', 'An allowance needs an amount — it would pay nothing.');
+            }
+        });
     }
 }

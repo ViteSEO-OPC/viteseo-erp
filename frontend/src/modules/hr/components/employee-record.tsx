@@ -233,6 +233,18 @@ export function EmployeeRecord({
 
             <div className="border-t border-border pt-6">
               <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
+                Government IDs
+              </p>
+              <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
+                <Detail label="TIN" value={employee.tin} />
+                <Detail label="SSS number" value={employee.sss_number} />
+                <Detail label="PhilHealth number" value={employee.philhealth_number} />
+                <Detail label="Pag-IBIG number" value={employee.pagibig_number} />
+              </div>
+            </div>
+
+            <div className="border-t border-border pt-6">
+              <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
                 Leave Credits
               </p>
               {/* HR edits this person's credits (source of truth, moved off the

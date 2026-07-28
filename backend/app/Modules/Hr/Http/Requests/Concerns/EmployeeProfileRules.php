@@ -52,6 +52,13 @@ trait EmployeeProfileRules
             'food_allowance' => ['nullable', 'numeric', 'min:0'],
             'transportation_allowance' => ['nullable', 'numeric', 'min:0'],
             'load_allowance' => ['nullable', 'numeric', 'min:0'],
+            // Government membership numbers for the payslip header. Free-form strings on
+            // purpose: agencies format these inconsistently and a strict mask would reject
+            // legitimate older numbers.
+            'tin' => ['nullable', 'string', 'max:32'],
+            'sss_number' => ['nullable', 'string', 'max:32'],
+            'philhealth_number' => ['nullable', 'string', 'max:32'],
+            'pagibig_number' => ['nullable', 'string', 'max:32'],
         ];
     }
 }

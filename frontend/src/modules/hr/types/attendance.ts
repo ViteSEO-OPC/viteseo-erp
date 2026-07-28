@@ -89,6 +89,8 @@ export interface HrAttendanceRow {
   last_out: string | null;
   hours_worked: number;
   status: string;
+  /** Slice 16 — a human asserted this status; it beats the clock and the leave table. */
+  status_override: boolean;
   leave_type: string | null;
   timing: AttendanceTiming | null;
   flag: ViolationFlag | null;

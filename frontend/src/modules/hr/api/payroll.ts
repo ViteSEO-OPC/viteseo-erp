@@ -117,3 +117,12 @@ export async function getPayslip(
   const res = await apiClient.get(`/hr/me/payslips/${id}`);
   return { payslip: res.data.data, ytd: res.data.ytd };
 }
+
+/**
+ * HR: one payslip in full. Unlike the employee endpoint this includes the employer's
+ * counterpart contributions, which the resource withholds from a non-HR caller.
+ */
+export async function getHrPayslip(id: number): Promise<Payslip> {
+  const res = await apiClient.get(`/hr/payslips/${id}`);
+  return res.data.data;
+}

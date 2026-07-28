@@ -8,6 +8,24 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Attendance extends Model
 {
+    /**
+     * The statuses HR may set on a day (Slice 16). Each one has a defined pay meaning in
+     * AttendanceService::unpaidDaysDetailFor() — adding a value here without teaching that loop
+     * about it would give HR a control that silently does nothing:
+     *
+     *   present    paid, no deduction
+     *   late       paid; counts toward the late tally and per-minute charge
+     *   absent     one unpaid day
+     *   on_leave   follows the covering leave request; paid when there is none
+     *   half_day   half an unpaid day
+     *   rest_day   not a working day — never unpaid
+     *   holiday    paid, no deduction
+     */
+    public const HR_STATUSES = ['present', 'late', 'absent', 'on_leave', 'half_day', 'rest_day', 'holiday'];
+
+    /** Statuses that mean the day is fully paid and raises no violation. */
+    public const PAID_STATUSES = ['present', 'late', 'on_leave', 'rest_day', 'holiday'];
+
     use SoftDeletes;
 
     protected $table = 'hr_attendance';
@@ -29,6 +47,9 @@ class Attendance extends Model
         'break_minutes',
         'hours_worked',
         'status',
+        // Slice 16 — a human asserted this status; derivation must not overwrite it.
+        'status_override',
+        'leave_credit_refunded_at',
         'note',
         'source',
         'tasks',
@@ -36,6 +57,8 @@ class Attendance extends Model
 
     protected $casts = [
         'work_date' => 'date',
+        'status_override' => 'boolean',
+        'leave_credit_refunded_at' => 'datetime',
         'time_in' => 'datetime',
         'time_out' => 'datetime',
         'lunch_started_at' => 'datetime',

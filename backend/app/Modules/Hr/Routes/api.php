@@ -144,6 +144,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
         Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
+        Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf']);
 
         // Recruitment (HR only).
@@ -225,11 +226,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('benefit-programs', [BenefitProgramController::class, 'index']);
         Route::post('benefit-programs', [BenefitProgramController::class, 'store']);
         Route::post('benefit-programs/assign', [BenefitProgramController::class, 'assign']);
+        // Slice B1 — the allowance reconciliation working list, and its one action.
+        Route::get('benefit-programs/allowance-reconciliation', [BenefitProgramController::class, 'allowanceReconciliation']);
+        Route::delete('employees/{employee}/allowance-overrides/{program}', [BenefitProgramController::class, 'clearAllowanceOverride']);
         Route::match(['put', 'patch'], 'benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'update']);
         Route::delete('benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'destroy']);
 
         // Company → Benefits: contribution settings + per-employee checklist.
         Route::get('contribution-settings', [BenefitController::class, 'settingsIndex']);
+        // Slice B3a — dated statutory rate versions.
+        Route::get('contribution-versions', [BenefitController::class, 'versionsIndex']);
+        Route::post('contribution-versions', [BenefitController::class, 'storeVersion']);
         Route::match(['put', 'patch'], 'contribution-settings/{contributionSetting}', [BenefitController::class, 'updateSetting']);
         Route::get('employees/{employee}/benefits', [BenefitController::class, 'employeeBenefitsIndex']);
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);

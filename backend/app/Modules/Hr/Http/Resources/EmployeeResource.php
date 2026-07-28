@@ -47,6 +47,11 @@ class EmployeeResource extends JsonResource
             'food_allowance' => $this->food_allowance,
             'transportation_allowance' => $this->transportation_allowance,
             'load_allowance' => $this->load_allowance,
+            // Membership numbers (payslip header) — distinct from the *_contribution overrides.
+            'tin' => $this->tin,
+            'sss_number' => $this->sss_number,
+            'philhealth_number' => $this->philhealth_number,
+            'pagibig_number' => $this->pagibig_number,
             // Expanded personal record.
             'first_name' => $this->first_name,
             'middle_name' => $this->middle_name,

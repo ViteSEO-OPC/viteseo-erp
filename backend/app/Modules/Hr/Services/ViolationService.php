@@ -218,6 +218,19 @@ class ViolationService
                     continue;
                 }
 
+                // Slice 16 — attendance is the source of truth for flags, and an HR override is
+                // the strongest form of it. A day HR marked on-leave / rest-day / holiday raises
+                // nothing and clears the streaks; `absent` and `late` fall through so they still
+                // flag. Without this, correcting a record left its old flag standing.
+                if ($row && $row->status_override && in_array($row->status, Attendance::PAID_STATUSES, true)) {
+                    if ($row->status !== 'late') {
+                        $lateStreak = 0;
+                        $absentStreak = 0;
+
+                        continue;
+                    }
+                }
+
                 $isPast = $d->lt($today);
                 $onLeave = $this->onLeave($leaves->get($emp->id), $dateStr);
                 $clockedIn = $row && $row->time_in !== null;
