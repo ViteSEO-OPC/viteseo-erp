@@ -221,7 +221,7 @@ export function useBulkDeleteLeads() {
   });
 }
 
-/** Outcome of a bulk niche assignment: which ids took the new niche and which failed. */
+/** Outcome of a bulk assignment (niche or owning BD): which ids took the new value and which failed. */
 export type BulkAssignResult = {
   succeeded: string[];
   failed: { id: string; reason: unknown }[];
@@ -273,6 +273,77 @@ export function useAssignLeadsToNiche() {
         );
       }
       if (failed.length > 0) {
+        toast.error(
+          getApiErrorMessage(
+            failed[0]?.reason,
+            `Failed to assign ${failed.length} lead${failed.length === 1 ? "" : "s"}`,
+          ),
+        );
+      }
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, "Failed to assign leads"));
+    },
+  });
+}
+
+/**
+ * Assign one or more leads to a single BD — one logical action fanned out over the SAME
+ * authoritative `PATCH /leads/{id}/assign` route {@link useAssignLead} already uses (once per lead).
+ * No new backend endpoint or assignment logic is introduced: every lead goes through the identical
+ * `leads.assign` policy check (Admin/SA), the MustBeBusinessDeveloper validation, and the dedicated
+ * `lead.assigned` Activity.
+ *
+ * Per-request try/catch lets one failure NOT abort the rest, and the caller keeps the failed ids
+ * selected — a partial failure leaves the selection accurate rather than corrupted. Reassignment
+ * moves the per-BD "assigned" counts and every ownership-scoped aggregate, so this refreshes exactly
+ * the caches the single assign does, plus each reassigned lead's own detail. One combined success /
+ * error toast replaces the per-lead toasts.
+ */
+export function useBulkAssignLeads() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      assignedTo,
+    }: {
+      ids: string[];
+      assignedTo: string;
+      /** Chosen BD's display name — used only for the success toast. */
+      bdName: string;
+    }): Promise<BulkAssignResult> => {
+      const outcomes = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            await apiClient.patch(`/leads/${id}/assign`, { assigned_to: Number(assignedTo) });
+            return { id, ok: true as const };
+          } catch (reason) {
+            return { id, ok: false as const, reason };
+          }
+        }),
+      );
+      const succeeded = outcomes.filter((o) => o.ok).map((o) => o.id);
+      const failed = outcomes
+        .filter((o) => !o.ok)
+        .map((o) => ({ id: o.id, reason: "reason" in o ? o.reason : undefined }));
+      return { succeeded, failed };
+    },
+    onSuccess: ({ succeeded, failed }, { bdName }) => {
+      if (succeeded.length > 0) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
+        // Each reassigned lead's detail (and, by prefix, its activity timeline) now shows a new owner.
+        succeeded.forEach((id) => {
+          queryClient.invalidateQueries({ queryKey: queryKeys.leads.detail(id) });
+        });
+        queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
+        toast.success(
+          `${succeeded.length} lead${succeeded.length === 1 ? "" : "s"} successfully assigned to ${bdName}`,
+        );
+      }
+      if (failed.length > 0) {
+        // Surfaces the backend's own message (incl. the 422 validation summary) for the first failure.
         toast.error(
           getApiErrorMessage(
             failed[0]?.reason,

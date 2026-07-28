@@ -153,6 +153,10 @@ type LeadsTableProps = {
   onBulkDelete: () => void;
   /** True while a bulk delete is in flight — locks the checkboxes + bar. */
   bulkDeleting: boolean;
+  /** Open the Assign BD confirmation for the selected leads. Rendered only when `canAssign`. */
+  onBulkAssign: () => void;
+  /** True while a bulk assign is in flight — locks the checkboxes + bar, same as a bulk delete. */
+  bulkAssigning: boolean;
   /**
    * Column filters. Values and setters come from the single useLeads instance, so they map onto the
    * URL params the API already accepts (`?priority=`, `?status=`) and stay in lockstep with the
@@ -198,6 +202,8 @@ export function LeadsTable({
   onClearSelection,
   onBulkDelete,
   bulkDeleting,
+  onBulkAssign,
+  bulkAssigning,
   priorityFilter,
   onPriorityChange,
   statusFilter,
@@ -265,6 +271,9 @@ export function LeadsTable({
   const selectedCount = leads.reduce((n, lead) => (selectedIds.has(lead.id) ? n + 1 : n), 0);
   const allSelected = leads.length > 0 && selectedCount === leads.length;
   const someSelected = selectedCount > 0 && !allSelected;
+  // Either bulk action locks the whole bar + the row checkboxes, so the selection can't be edited
+  // out from under a request that is already running against it.
+  const bulkBusy = bulkDeleting || bulkAssigning;
 
   const columnOrder = canAssign ? ADMIN_COLUMN_ORDER : BD_COLUMN_ORDER;
   // +1 for the leading selection checkbox column, which sits outside the order list.
@@ -374,7 +383,7 @@ export function LeadsTable({
                   checked={allSelected}
                   indeterminate={someSelected}
                   onCheckedChange={onToggleSelectAll}
-                  disabled={bulkDeleting}
+                  disabled={bulkBusy}
                 />
               </TableHead>
               <TableHead colSpan={totalCols - 1} className="h-10 px-3">
@@ -387,20 +396,30 @@ export function LeadsTable({
                     variant="destructive"
                     size="sm"
                     onClick={onBulkDelete}
-                    disabled={bulkDeleting}
+                    disabled={bulkBusy}
                   >
                     Delete Selected
                   </Button>
-                  {/* Assign BD is intentionally disabled for now (bulk assign not yet wired). */}
-                  <Button type="button" variant="outline" size="sm" disabled>
-                    Assign BD
-                  </Button>
+                  {/* Bulk ownership assignment is Admin/SA only — same `canAssign` gate as the
+                      per-row Assign action and the Assigned BD column, so a BD never sees it (and
+                      the PATCH /leads/{id}/assign route would reject them anyway). */}
+                  {canAssign ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={onBulkAssign}
+                      disabled={bulkBusy}
+                    >
+                      {bulkAssigning ? "Assigning…" : "Assign BD"}
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={onClearSelection}
-                    disabled={bulkDeleting}
+                    disabled={bulkBusy}
                   >
                     Clear Selection
                   </Button>
@@ -583,7 +602,7 @@ export function LeadsTable({
                         aria-label={`Select ${lead.business}`}
                         checked={selectedIds.has(lead.id)}
                         onCheckedChange={() => onToggleSelect(lead.id)}
-                        disabled={bulkDeleting}
+                        disabled={bulkBusy}
                       />
                     </span>
                   </TableCell>

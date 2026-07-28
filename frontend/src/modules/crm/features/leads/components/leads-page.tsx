@@ -21,7 +21,12 @@ import { ALL_SCOPE } from "@/modules/crm/features/performance/lib/performance-sc
 import type { PerformanceScope } from "@/modules/crm/features/performance/lib/performance-scope";
 import { useNicheDistribution } from "@/modules/crm/features/leads/hooks/use-niche-distribution";
 import { useExportLeads } from "@/modules/crm/features/leads/hooks/use-export-leads";
-import { useDeleteLead, useBulkDeleteLeads } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
+import { BulkAssignBdModal } from "@/modules/crm/features/leads/components/bulk-assign-bd-modal";
+import {
+  useDeleteLead,
+  useBulkDeleteLeads,
+  useBulkAssignLeads,
+} from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { useHeaderSearch } from "@/modules/crm/providers/header-search-provider";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
@@ -35,8 +40,13 @@ export function LeadsPageLayout() {
   // page — the reset effect below clears it whenever the page or filters change.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  // Bulk Assign BD is a two-step flow: confirm the intent, THEN pick the BD. Two flags rather than
+  // one so Cancel on the confirmation never opens the picker.
+  const [bulkAssignConfirmOpen, setBulkAssignConfirmOpen] = useState(false);
+  const [bulkAssignPickerOpen, setBulkAssignPickerOpen] = useState(false);
   const deleteLead = useDeleteLead();
   const bulkDelete = useBulkDeleteLeads();
+  const bulkAssign = useBulkAssignLeads();
   // Assign/Reassign ownership is Admin/SA only (leads.assign is not held by BD).
   const { hasMinRole } = usePermissions();
   const canAssign = hasMinRole("crm_admin");
@@ -74,6 +84,26 @@ export function LeadsPageLayout() {
         setBulkOpen(false);
       },
     });
+  };
+
+  const handleBulkAssign = (bdId: string, bdName: string) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    bulkAssign.mutate(
+      { ids, assignedTo: bdId, bdName },
+      {
+        // Mirrors the bulk delete: drop only the ids that actually took the new owner, so any that
+        // failed stay selected for a retry instead of silently disappearing from the selection.
+        onSuccess: ({ succeeded }) => {
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            succeeded.forEach((id) => next.delete(id));
+            return next;
+          });
+          setBulkAssignPickerOpen(false);
+        },
+      },
+    );
   };
   // Single source of truth for the list: one useLeads instance drives the
   // table (results) and the pager, and receives the search term from the
@@ -278,6 +308,8 @@ export function LeadsPageLayout() {
             onClearSelection={clearSelection}
             onBulkDelete={() => setBulkOpen(true)}
             bulkDeleting={bulkDelete.isPending}
+            onBulkAssign={() => setBulkAssignConfirmOpen(true)}
+            bulkAssigning={bulkAssign.isPending}
             priorityFilter={priority}
             onPriorityChange={setPriority}
             statusFilter={status}
@@ -328,6 +360,34 @@ export function LeadsPageLayout() {
             if (!o) setAssignLead(null);
           }}
           lead={assignLead}
+        />
+      ) : null}
+
+      {/* Step 1 of Bulk Assign BD: confirm the intent before any picker or request. Cancel simply
+          closes — nothing is opened and no lead is touched. */}
+      <ConfirmDialog
+        open={bulkAssignConfirmOpen}
+        onOpenChange={setBulkAssignConfirmOpen}
+        title="Assign Selected Leads"
+        description="Are you sure you want to assign the selected leads to a Business Development representative?"
+        confirmLabel="Assign"
+        onConfirm={() => {
+          setBulkAssignConfirmOpen(false);
+          setBulkAssignPickerOpen(true);
+        }}
+      />
+
+      {/* Step 2: pick the one BD who takes ownership. Mounted only while open so the picker starts
+          empty on every run (no stale selection, and no key needed to force that). */}
+      {bulkAssignPickerOpen ? (
+        <BulkAssignBdModal
+          open
+          onOpenChange={(o) => {
+            if (!o) setBulkAssignPickerOpen(false);
+          }}
+          count={selectedIds.size}
+          onConfirm={handleBulkAssign}
+          pending={bulkAssign.isPending}
         />
       ) : null}
 
