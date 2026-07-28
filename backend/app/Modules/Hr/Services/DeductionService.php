@@ -58,6 +58,24 @@ class DeductionService
 
         // --- the worked window (a half-day shifts start/end to the worked half) ---
         [$workStart, $workEnd] = $this->workedWindow($ctx);
+        $timeOut = $ctx['time_out_min'] ?? null;
+
+        // Item 15 — an OVERNIGHT shift (end before start, e.g. 22:00–06:00) needs the end and
+        // any post-midnight punches rolled past 24h before these raw minute-of-day values can be
+        // compared. Without it a 00:30 arrival computed max(0, 30 − 1320) = 0 late, and a 23:00
+        // departure looked like no undertime at all — a graveyard worker could never be charged.
+        //
+        // Which side of midnight a punch belongs to is decided by the midpoint of the off-shift
+        // gap: for 22:00–06:00 that is 14:00, so 00:30 is the next day while 21:00 is an early
+        // arrival on the same one.
+        if ($workStart !== null && $workEnd !== null && $workEnd < $workStart) {
+            $boundary = intdiv($workEnd + $workStart, 2);
+            $roll = static fn (?int $t): ?int => $t !== null && $t <= $boundary ? $t + 1440 : $t;
+
+            $timeIn = $roll($timeIn);
+            $timeOut = $roll($timeOut);
+            $workEnd += 1440;
+        }
 
         // --- late ---
         $lateMode = $policy->late_deduction_mode;
@@ -71,7 +89,6 @@ class DeductionService
 
         // --- undertime (clock-derived; approved early-out days are handled elsewhere) ---
         $undertimeMinutes = 0;
-        $timeOut = $ctx['time_out_min'] ?? null;
         if (
             $policy->undertime_deduction_mode === 'per_hour'
             && empty($ctx['governed_by_early_out'])
@@ -89,8 +106,14 @@ class DeductionService
             ? $this->tierMinutes($lateMinutes, $policy)
             : $lateMinutes;
 
-        $lateFraction = $this->toFraction($chargedLate, $policy);
-        $undertimeFraction = $this->toFraction($undertimeMinutes, $policy);
+        // Item 9 — the audit spec rounds the shortfall ONCE. Rounding each component separately
+        // over-charged under the round_* modes: 30 min late + 30 min undertime became two 60-min
+        // blocks instead of one. Round the total, then split it back proportionally so the two
+        // display figures still sum to what is actually charged.
+        $rawShortfall = $chargedLate + $undertimeMinutes;
+        $totalFraction = $this->toFraction($rawShortfall, $policy);
+        $lateFraction = $rawShortfall > 0 ? $totalFraction * ($chargedLate / $rawShortfall) : 0.0;
+        $undertimeFraction = $totalFraction - $lateFraction;
 
         $capRemaining = (float) ($ctx['cap_remaining'] ?? (float) $policy->daily_deduction_cap);
         $capRemaining = max(0.0, min($capRemaining, (float) $policy->daily_deduction_cap));

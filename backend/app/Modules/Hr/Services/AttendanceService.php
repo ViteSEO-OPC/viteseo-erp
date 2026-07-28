@@ -239,7 +239,11 @@ class AttendanceService
         $att->time_out = now();
 
         $grossMinutes = $att->time_in->diffInMinutes($att->time_out);
-        $netMinutes = $grossMinutes - $att->lunch_minutes - $att->break_minutes;
+        // Item 13b.2 — only the UNPAID meal comes out. A paid break sits inside the paid day
+        // by definition, and subtracting it here made `hours_worked` disagree with every other
+        // "worked minutes" calculation in the module (restDayWorkedMinutesFor, nightMinutesFor,
+        // overtimeCapacityFor all subtract lunch alone).
+        $netMinutes = $grossMinutes - $att->lunch_minutes;
         $att->hours_worked = round(max(0, $netMinutes) / 60, 2);
         $att->save();
 
@@ -302,7 +306,8 @@ class AttendanceService
 
             if ($att->time_in && $att->time_out) {
                 $gross = ($att->time_out->getTimestamp() - $att->time_in->getTimestamp()) / 60;
-                $net = $gross - $att->lunch_minutes - $att->break_minutes;
+                // Item 13b.2 — lunch only; a paid break is inside the paid day.
+                $net = $gross - $att->lunch_minutes;
                 $att->hours_worked = round(max(0, $net) / 60, 2);
             } else {
                 $att->hours_worked = 0;
@@ -989,12 +994,33 @@ class AttendanceService
             // With one half off, the employee is expected to work the OTHER half — so a
             // per-minute mode still prices late/undertime against that half (F-3).
             if ($dayHalves = ($halfDays[$dateStr] ?? null)) {
-                $halfUnpaid = 0.5 * $dayHalves->count();
+                // Item 5 — clamp at one full day. The API blocks a duplicate date+period while
+                // pending/approved, so AM+PM = 1.0 is the practical maximum, but that check is a
+                // form-request `exists()` with no unique index behind it: two concurrent submits
+                // can both pass. Cheap defence against that and against direct inserts.
+                $halfUnpaid = min(1.0, 0.5 * $dayHalves->count());
                 $unpaid += $halfUnpaid;
+
+                // Item 8 — a late arrival on a half-day used to escape the per-N-lates penalty
+                // entirely, because this branch never touched the tally.
+                if ($row && $row->status === 'late') {
+                    $lateCount++;
+                }
+
+                // Item 8 — and an approved early-out on a half-day cost NOTHING: this branch
+                // never added earlyOutFraction, while `governed_by_early_out` told
+                // DeductionService not to price the undertime either. Charge it here, capped by
+                // whatever of the day is still payable.
+                $eoFrac = 0.0;
+                foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
+                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                }
+                $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
+                $unpaid += $eoFrac;
 
                 if ($deductionsActive && $dayHalves->count() === 1 && $row && $row->time_in) {
                     $ded = $this->deduction->forDay(
-                        $this->deductionCtx($row, $eff, $policy, (string) $dayHalves->first()->period, 1.0 - $halfUnpaid, isset($earlyOuts[$dateStr])),
+                        $this->deductionCtx($row, $eff, $policy, (string) $dayHalves->first()->period, 1.0 - $halfUnpaid - $eoFrac, isset($earlyOuts[$dateStr])),
                         $policy,
                     );
                     $unpaid += $ded->unpaidFraction;
@@ -1061,8 +1087,12 @@ class AttendanceService
 
         // Tardiness penalty: every N lates in the range costs one day's pay. Now an
         // INDEPENDENT switch, so it can stack on top of the per-time (`per_hour`) charge.
+        $latePenaltyDays = 0.0;
         if ($policy->late_penalty_enabled && $policy->lates_per_deduction > 0) {
-            $unpaid += intdiv($lateCount, (int) $policy->lates_per_deduction);
+            // Item 13b.13 — reported separately so the payslip can name it, instead of the
+            // days disappearing into `unpaid_days` alongside genuine absences.
+            $latePenaltyDays = (float) intdiv($lateCount, (int) $policy->lates_per_deduction);
+            $unpaid += $latePenaltyDays;
         }
 
         return new UnpaidDaysResult(
@@ -1071,6 +1101,7 @@ class AttendanceService
             undertimeMinutes: $undertimeMinutes,
             lateDays: round($lateDays, 6),
             undertimeDays: round($undertimeDays, 6),
+            latePenaltyDays: $latePenaltyDays,
             flags: array_values(array_unique($flags)),
         );
     }

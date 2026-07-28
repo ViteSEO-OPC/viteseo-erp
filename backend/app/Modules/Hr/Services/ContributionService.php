@@ -24,12 +24,25 @@ class ContributionService
     /** @param array<string, mixed> $data */
     public function updateSetting(ContributionSetting $setting, array $data): ContributionSetting
     {
+        // Item 13b.12 — these rates set every statutory deduction on every payslip, so the
+        // audit line has to carry the old and new values, not just "settings updated".
+        $before = ['config' => $setting->config, 'is_active' => (bool) $setting->is_active];
+
         $setting->update([
             'config' => $data['config'] ?? $setting->config,
             'is_active' => $data['is_active'] ?? $setting->is_active,
         ]);
 
-        $this->audit->log('updated', 'Benefits', "{$setting->type} contribution settings updated", $setting);
+        $after = ['config' => $setting->config, 'is_active' => (bool) $setting->is_active];
+
+        $this->audit->log(
+            'updated',
+            'Benefits',
+            "{$setting->type} contribution settings updated",
+            $setting,
+            $before,
+            $after,
+        );
 
         return $setting;
     }

@@ -22,10 +22,11 @@ class Payslip extends Model
         // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
         'other_deductions', 'other_deductions_breakdown',
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
-        'total_deductions', 'net_pay', 'status',
+        'total_deductions', 'deduction_carryover', 'net_pay', 'status',
         // Step 4b — how base_salary was derived, so a payslip can explain itself.
         'working_days', 'daily_rate', 'unpaid_days',
         'late_minutes', 'undertime_minutes', 'late_deduction', 'undertime_deduction',
+        'late_penalty_days',
     ];
 
     protected $casts = [
@@ -37,6 +38,7 @@ class Payslip extends Model
         'undertime_minutes' => 'integer',
         'late_deduction' => 'decimal:2',
         'undertime_deduction' => 'decimal:2',
+        'late_penalty_days' => 'decimal:2',
         'reimbursements' => 'decimal:2',
         'allowances' => 'decimal:2',
         'holiday_premium' => 'decimal:2',
@@ -57,6 +59,7 @@ class Payslip extends Model
         'employer_philhealth' => 'decimal:2',
         'employer_pagibig' => 'decimal:2',
         'total_deductions' => 'decimal:2',
+        'deduction_carryover' => 'decimal:2',
         'net_pay' => 'decimal:2',
     ];
 

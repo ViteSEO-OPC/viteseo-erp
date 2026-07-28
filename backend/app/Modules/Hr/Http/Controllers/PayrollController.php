@@ -11,6 +11,7 @@ use App\Modules\Hr\Http\Resources\PayslipSummaryResource;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
+use App\Modules\Hr\Services\AuditService;
 use App\Modules\Hr\Services\PayrollService;
 use App\Modules\Hr\Services\PayScheduleService;
 use Illuminate\Http\JsonResponse;
@@ -32,9 +33,36 @@ class PayrollController extends Controller
     }
 
     // PUT /api/v1/hr/payroll/settings — HR changes how often payroll runs.
-    public function updateSettings(UpdatePayrollSettingsRequest $request): JsonResponse
+    public function updateSettings(UpdatePayrollSettingsRequest $request, AuditService $audit): JsonResponse
     {
-        PayrollSetting::current()->update($request->validated());
+        $setting = PayrollSetting::current();
+        $validated = $request->validated();
+
+        // Item 13b.12 — this endpoint wrote NO audit entry at all, despite setting the pay
+        // frequency, the deduction/tax timing and the de-minimis ceiling: every one of them
+        // changes what lands on a payslip.
+        $before = [];
+        $after = [];
+        foreach ($validated as $field => $value) {
+            $old = $setting->getOriginal($field);
+            if ($old != $value) {
+                $before[$field] = $old;
+                $after[$field] = $value;
+            }
+        }
+
+        $setting->update($validated);
+
+        if ($before !== []) {
+            $audit->log(
+                'updated',
+                'Payroll',
+                'Payroll settings updated: ' . implode(', ', array_keys($before)),
+                $setting,
+                $before,
+                $after,
+            );
+        }
 
         return response()->json(['data' => $this->settingsPayload()]);
     }

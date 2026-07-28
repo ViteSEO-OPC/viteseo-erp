@@ -79,6 +79,10 @@
         @if (($p['late_minutes'] ?? 0) > 0)
             <tr><td>Late ({{ $p['late_minutes'] }} min)</td><td class="amt neg">− {{ $peso($p['late_deduction']) }}</td></tr>
         @endif
+        @if (($p['late_penalty_days'] ?? 0) > 0)
+            <tr><td>Tardiness penalty ({{ rtrim(rtrim(number_format((float) $p['late_penalty_days'], 2), '0'), '.') }} day)</td>
+                <td class="amt neg">− {{ $peso((float) $p['late_penalty_days'] * (float) ($p['daily_rate'] ?? 0)) }}</td></tr>
+        @endif
         @if (($p['undertime_minutes'] ?? 0) > 0)
             <tr><td>Undertime ({{ $p['undertime_minutes'] }} min)</td><td class="amt neg">− {{ $peso($p['undertime_deduction']) }}</td></tr>
         @endif

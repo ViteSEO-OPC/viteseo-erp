@@ -739,9 +739,11 @@ function AttendancePolicyEditor() {
             regular holiday; night differential <strong>+10%</strong>. The server rejects anything below these.
           </p>
         </div>
+        {/* Item 13b.7 — this used to say only the holiday rate was live. All of them are. */}
         <Hint>
-          Only <strong>holiday premium</strong> reads these today; the overtime, rest-day and night rates take
-          effect as those features ship (Phases 1–3).
+          <strong>All of these move money now.</strong> Holiday premium, overtime, the rest-day
+          premium and the night differential each read their rate here on the next payroll run —
+          changing one changes what people are paid.
         </Hint>
         <SaveButton
           pending={saving === "premium_rates"}

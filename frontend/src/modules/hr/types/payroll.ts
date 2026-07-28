@@ -127,6 +127,10 @@ export interface Payslip {
   undertime_minutes: number;
   late_deduction: number;
   undertime_deduction: number;
+  /** Whole days charged by the per-N-lates penalty (item 13b.13). */
+  late_penalty_days: number;
+  /** Deductions that gross couldn't cover (item 13a.1). */
+  deduction_carryover: number;
 }
 
 export interface PayslipYtd {

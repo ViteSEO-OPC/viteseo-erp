@@ -571,6 +571,16 @@ function AttendanceBasis({ payslip }: { payslip: Payslip }) {
           negative
         />
       )}
+      {/* Item 13b.13 — the per-N-lates penalty used to vanish into "Unpaid days". */}
+      {payslip.late_penalty_days > 0 && (
+        <Row
+          label={`Tardiness penalty (${payslip.late_penalty_days} ${
+            payslip.late_penalty_days === 1 ? "day" : "days"
+          })`}
+          value={formatPeso(payslip.late_penalty_days * payslip.daily_rate)}
+          negative
+        />
+      )}
       {payslip.undertime_minutes > 0 && (
         <Row
           label={`Undertime (${payslip.undertime_minutes} min)`}

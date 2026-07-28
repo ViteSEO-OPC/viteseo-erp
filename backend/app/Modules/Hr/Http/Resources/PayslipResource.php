@@ -38,6 +38,12 @@ class PayslipResource extends JsonResource
             'other_deductions' => (float) $this->other_deductions,
             'other_deductions_breakdown' => $this->other_deductions_breakdown ?? [],
             'total_deductions' => (float) $this->total_deductions,
+            'deduction_carryover' => (float) $this->deduction_carryover,
+            // Item 13b.6 — the company's counterpart contributions. Not deducted from the
+            // employee; needed for remittance, and they were in the CSV but not the API.
+            'employer_sss' => (float) $this->employer_sss,
+            'employer_philhealth' => (float) $this->employer_philhealth,
+            'employer_pagibig' => (float) $this->employer_pagibig,
             'net_pay' => (float) $this->net_pay,
             'status' => $this->status,
             // The HR officer who ran this payroll — for the payslip signature line.
@@ -51,6 +57,7 @@ class PayslipResource extends JsonResource
             'undertime_minutes' => (int) $this->undertime_minutes,
             'late_deduction' => (float) $this->late_deduction,
             'undertime_deduction' => (float) $this->undertime_deduction,
+            'late_penalty_days' => (float) $this->late_penalty_days,
         ];
     }
 }

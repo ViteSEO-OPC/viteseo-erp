@@ -132,9 +132,31 @@ class AttendancePolicyService
                 $changes[$field] = $data[$field];
             }
         }
+        // Item 13b.12 — record WHAT changed. This was one line reading "Attendance rules
+        // updated" with no before/after, which is the single audit entry guarding every
+        // money-moving rule in the module: it could not answer "who changed the overtime rate?".
+        $before = [];
+        $after = [];
+        foreach ($changes as $field => $value) {
+            $old = $policy->getOriginal($field);
+            if ($old != $value) {
+                $before[$field] = $old;
+                $after[$field] = $value;
+            }
+        }
+
         $policy->update($changes);
 
-        $this->audit->log('updated', 'Rules', 'Attendance rules updated', $policy);
+        $this->audit->log(
+            'updated',
+            'Rules',
+            $before === []
+                ? 'Attendance rules saved (no changes)'
+                : 'Attendance rules updated: ' . implode(', ', array_keys($before)),
+            $policy,
+            $before ?: null,
+            $after ?: null,
+        );
 
         return $policy;
     }
