@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
@@ -8,18 +7,12 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { EmployeeRecord } from "@/modules/hr/components/employee-record";
-import {
-  EmployeeFormDialog,
-  type EmployeeEditSection,
-} from "@/modules/hr/components/employee-form-dialog";
 import { useEmployee } from "@/modules/hr/hooks/use-employees";
 
 export default function EmployeeRecordPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
   const { data: employee, isLoading, isError } = useEmployee(id);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editSection, setEditSection] = useState<EmployeeEditSection>("personal");
 
   return (
     <div className="p-4 sm:p-8">
@@ -40,29 +33,12 @@ export default function EmployeeRecordPage() {
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading record…</p>
         ) : isError || !employee ? (
-          <p className="text-sm text-destructive">
-            Could not load this employee.
-          </p>
+          <p className="text-sm text-destructive">Could not load this employee.</p>
         ) : (
-          <EmployeeRecord
-            employee={employee}
-            onEdit={(tab) => {
-              // Only personal/job/compensation are editable (guarded in EmployeeRecord).
-              setEditSection(tab as EmployeeEditSection);
-              setEditOpen(true);
-            }}
-          />
+          // Each section on the record edits in place — no dialog.
+          <EmployeeRecord employee={employee} isHr />
         )}
       </div>
-
-      {employee && (
-        <EmployeeFormDialog
-          open={editOpen}
-          onOpenChange={setEditOpen}
-          employee={employee}
-          section={editSection}
-        />
-      )}
     </div>
   );
 }

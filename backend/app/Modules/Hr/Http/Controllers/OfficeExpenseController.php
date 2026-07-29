@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreOfficeExpenseRequest;
 use App\Modules\Hr\Http\Resources\OfficeExpenseResource;
 use App\Modules\Hr\Models\OfficeExpense;
@@ -51,6 +52,14 @@ class OfficeExpenseController extends Controller
 
         return OfficeExpenseResource::make(
             $this->service->reject($officeExpense, $request->user(), $data['reason'] ?? null),
+        )->response();
+    }
+
+    // POST /hr/office-expenses/{officeExpense}/reopen — undo the review.
+    public function reopen(ReopenRequest $request, OfficeExpense $officeExpense): JsonResponse
+    {
+        return OfficeExpenseResource::make(
+            $this->service->reopen($officeExpense, $request->validated('reason')),
         )->response();
     }
 

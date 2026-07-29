@@ -7,6 +7,7 @@ import {
   getPayrollRun,
   runPayroll,
   markPayslipDone,
+  reopenPayslip,
   lockPayrollRun,
   unlockPayrollRun,
   getMyNextPayday,
@@ -71,6 +72,20 @@ export function useMarkPayslipDone() {
       qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
       qc.invalidateQueries({ queryKey: RUNS_KEY });
       qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+    },
+  });
+}
+
+/** Undo a disbursement. Also refreshes claims — any it paid are owed again. */
+export function useReopenPayslip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenPayslip(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
     },
   });
 }

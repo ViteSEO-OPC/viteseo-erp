@@ -9,16 +9,33 @@ export interface ManagerRef {
   name: string | null;
 }
 
+/**
+ * Who a record belongs to, as embedded in the HR queue payloads: enough to render a
+ * row's identity — the name plus the face. `photo_url` is null when they never uploaded
+ * one, and absent when the endpoint didn't load the employee; both mean initials.
+ */
+export interface EmployeeRef {
+  id: number;
+  name: string | null;
+  photo_url?: string | null;
+}
+
+/** One named sibling on the personal record. */
+export interface Sibling {
+  name: string;
+  gender: string | null;
+}
+
 export interface Employee {
   id: number;
   employee_no: string;
   name: string; // composed identity from the split-name fields (users.name)
   email: string;
   is_hr_officer: boolean; // account has HR-officer (admin) access
+  photo_url: string | null; // profile picture; null falls back to initials
 
   job_title: string;
   employment_status: string;
-  employment_type: string | null;
   work_location: string | null;
   employee_role: string | null;
   onboarding_status: "pending" | "complete" | null;
@@ -63,7 +80,9 @@ export interface Employee {
   current_address: string | null;
   mothers_maiden_name: string | null;
   fathers_name: string | null;
-  siblings_name: string | null;
+  siblings: Sibling[];
+  /** Total siblings — may exceed the names listed above. */
+  number_of_siblings: number | null;
   high_school: string | null;
   college_course: string | null;
   university: string | null;
@@ -104,7 +123,8 @@ export interface EmployeeInput {
   place_of_birth?: string;
   mothers_maiden_name?: string;
   fathers_name?: string;
-  siblings_name?: string;
+  siblings?: Sibling[];
+  number_of_siblings?: number | null;
   high_school?: string;
   college_course?: string;
   university?: string;
@@ -116,7 +136,6 @@ export interface EmployeeInput {
   height?: string;
   weight?: string;
   health_condition?: string;
-  employment_type?: string;
   work_location?: string;
   employee_role?: string;
   pay_frequency?: string;
@@ -140,17 +159,17 @@ export interface EmployeeInput {
   role_change_reason?: string;
 }
 
+/**
+ * An edit to an existing record. The API applies only the keys it is sent, so each
+ * section of the employee record saves its own fields without disturbing the rest.
+ * An explicit `null` clears a field — omitting the key leaves it as it was.
+ */
+export type EmployeeUpdateInput = {
+  [K in keyof EmployeeInput]?: EmployeeInput[K] | null;
+};
+
 export const GENDERS = ["Male", "Female", "Other", "Prefer not to say"] as const;
 export const CIVIL_STATUSES = ["Single", "Married", "Widowed", "Separated", "Divorced"] as const;
-export const JOB_TYPES = [
-  "Full-time Regular",
-  "Full-time Probationary",
-  "Part-time",
-  "Contract",
-  "Project-based",
-  "Internship/OJT",
-] as const;
-
 export const PAY_FREQUENCIES = [
   { value: "monthly", label: "Monthly" },
   { value: "semi_monthly", label: "Semi-monthly" },
@@ -207,17 +226,34 @@ export interface SalaryHistoryEntry {
   changed_by: string | null;
 }
 
+// Mirrors the backend EmployeeService::STATUSES. This is the single employment
+// classification on the record — leave allotments and benefits eligibility are
+// keyed on it, and the Job tab shows it.
 export const EMPLOYMENT_STATUSES = [
   "regular",
   "probationary",
   "contract",
   "part_time",
+  "project_based",
+  "ojt",
 ] as const;
 
-/** Prettify an employment_status for display, e.g. part_time -> "Part Time". */
+const STATUS_LABELS: Record<string, string> = {
+  regular: "Regular",
+  probationary: "Probationary",
+  contract: "Contract",
+  part_time: "Part-time",
+  project_based: "Project-based",
+  ojt: "Internship/OJT",
+};
+
+/** Display label for an employment_status, e.g. part_time -> "Part-time". */
 export function statusLabel(status: string): string {
-  return status
-    .split("_")
-    .map((w) => w[0]?.toUpperCase() + w.slice(1))
-    .join(" ");
+  return (
+    STATUS_LABELS[status] ??
+    status
+      .split("_")
+      .map((w) => w[0]?.toUpperCase() + w.slice(1))
+      .join(" ")
+  );
 }

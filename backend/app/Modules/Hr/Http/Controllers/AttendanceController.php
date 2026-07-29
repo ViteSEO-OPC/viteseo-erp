@@ -21,7 +21,13 @@ class AttendanceController extends Controller
         $employee = $request->user()->employee;
 
         if (! $employee) {
-            return response()->json(['data' => ['today' => null, 'week' => []]]);
+            return response()->json([
+                'data' => [
+                    'today' => null,
+                    'week' => [],
+                    'clock_in' => ['strict' => false, 'opens_at' => null],
+                ],
+            ]);
         }
 
         $today = $this->service->todayFor($employee);
@@ -30,6 +36,9 @@ class AttendanceController extends Controller
             'data' => [
                 'today' => $today ? AttendanceResource::make($today) : null,
                 'week' => AttendanceResource::collection($this->service->currentWeek($employee)),
+                // Lets the panel disable "Time in" and say when it opens, instead of the
+                // employee discovering the strict rule through a rejected press.
+                'clock_in' => $this->service->clockInWindowFor($employee),
             ],
         ]);
     }

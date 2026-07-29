@@ -18,16 +18,38 @@ use App\Modules\Hr\Models\SharedLeaveAllotment;
 use App\Modules\Hr\Models\SharedLeaveBalance;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class EmployeeService
 {
     public function __construct(private readonly AuditService $audit) {}
 
-    /** Allowed employment statuses (also enforced in the Form Requests). */
-    public const STATUSES = ['regular', 'probationary', 'contract', 'part_time'];
+    /**
+     * Allowed employment statuses (also enforced in the Form Requests). Leave
+     * allotments are keyed on these — adding one here means every leave type needs
+     * an allotment row for it (see AddProjectBasedAndOjtLeaveAllotments migration).
+     */
+    public const STATUSES = ['regular', 'probationary', 'contract', 'part_time', 'project_based', 'ojt'];
+
+    /**
+     * Accepted values for the record's picklist fields. These mirror the option lists
+     * the UI offers (frontend/src/modules/hr/types/employee.ts) — keep both in step.
+     */
+    public const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
+
+    public const CIVIL_STATUSES = ['Single', 'Married', 'Widowed', 'Separated', 'Divorced'];
+
+    public const BANK_ACCOUNT_TYPES = ['Savings', 'Checking', 'Payroll'];
+
+    public const PAY_FREQUENCIES = ['monthly', 'semi_monthly', 'weekly', 'bi_weekly'];
+
+    /** The most siblings a record may name; the count field allows more than are named. */
+    public const MAX_SIBLINGS = 20;
 
     /**
      * Editable profile columns on hr_employees (everything except the identity
@@ -38,7 +60,7 @@ class EmployeeService
         'first_name', 'middle_name', 'last_name', 'name_extension',
         'gender', 'civil_status', 'nationality', 'date_of_birth', 'place_of_birth',
         'phone', 'address', 'current_address',
-        'mothers_maiden_name', 'fathers_name', 'siblings_name',
+        'mothers_maiden_name', 'fathers_name', 'siblings', 'number_of_siblings',
         'high_school', 'college_course', 'university',
         'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
         'bank_name', 'bank_account', 'height', 'weight', 'health_condition',
@@ -60,9 +82,17 @@ class EmployeeService
     }
 
     /**
-     * Pull the profile columns out of a request payload. NOTE: callers always send
-     * the full record (the edit modal keeps every field registered), so a missing
-     * key legitimately means "clear it".
+     * Job columns written explicitly rather than as part of the profile blob.
+     */
+    private const CORE_COLUMNS = [
+        'department_id', 'manager_id', 'job_title',
+        'employment_status', 'onboarding_status', 'hire_date', 'base_salary',
+    ];
+
+    /**
+     * Pull the profile columns out of a request payload. Only keys the caller
+     * actually sent come back, so a section-scoped save (each inline editor on the
+     * record posts just its own fields) leaves every other column untouched.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
@@ -71,13 +101,63 @@ class EmployeeService
     {
         $out = [];
         foreach (self::PROFILE_COLUMNS as $col) {
-            $out[$col] = $data[$col] ?? null;
+            if (array_key_exists($col, $data)) {
+                $out[$col] = $data[$col];
+            }
         }
-        // is_management is a non-nullable boolean — a missing/omitted value means "not
-        // management", so normalise null → false.
-        $out['is_management'] = ! empty($data['is_management']);
+        // Non-nullable boolean: when the caller sends the field at all, a null or
+        // absent-but-falsy value means "not management".
+        if (array_key_exists('is_management', $data)) {
+            $out['is_management'] = ! empty($data['is_management']);
+        }
 
         return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function coreData(array $data): array
+    {
+        $out = [];
+        foreach (self::CORE_COLUMNS as $col) {
+            if (array_key_exists($col, $data)) {
+                $out[$col] = $data[$col];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Identity lives on the users row. Only touch it when the payload carries it —
+     * a compensation-only save must not blank out the person's name or email.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function updateIdentity(Employee $employee, array $data): void
+    {
+        $changes = [];
+
+        if (array_key_exists('email', $data)) {
+            $changes['email'] = $data['email'];
+        }
+
+        $nameParts = array_flip(['first_name', 'middle_name', 'last_name', 'name_extension']);
+        $sent = array_intersect_key($data, $nameParts);
+
+        if ($sent !== []) {
+            // Merge over the stored parts so a partial payload still composes a full name.
+            $changes['name'] = $this->displayName([
+                ...array_intersect_key($employee->only(array_keys($nameParts)), $nameParts),
+                ...$sent,
+            ]);
+        }
+
+        if ($changes !== []) {
+            $employee->user->update($changes);
+        }
     }
 
     /**
@@ -245,7 +325,8 @@ class EmployeeService
     }
 
     /**
-     * Update the employee record (and the linked user's name/email).
+     * Update the employee record (and the linked user's name/email). The payload may
+     * be partial — only the fields it carries are written.
      *
      * @param  array<string, mixed>  $data
      */
@@ -253,24 +334,16 @@ class EmployeeService
     {
         return DB::transaction(function () use ($employee, $data) {
             $oldSalary = (float) $employee->base_salary;
-            $newSalary = (float) ($data['base_salary'] ?? $employee->base_salary);
             $oldTitle = $employee->job_title;
 
-            $employee->user->update([
-                'name' => $this->displayName($data),
-                'email' => $data['email'],
-            ]);
+            $this->updateIdentity($employee, $data);
 
             $employee->update([
-                'department_id' => $data['department_id'],
-                'manager_id' => $data['manager_id'] ?? null,
-                'job_title' => $data['job_title'],
-                'employment_status' => $data['employment_status'] ?? $employee->employment_status,
-                'onboarding_status' => $data['onboarding_status'] ?? $employee->onboarding_status,
-                'hire_date' => $data['hire_date'],
-                'base_salary' => $newSalary,
+                ...$this->coreData($data),
                 ...$this->profileData($data),
             ]);
+
+            $newSalary = (float) $employee->base_salary;
 
             // A salary change appends to the history (never rewrites it).
             if ($newSalary !== $oldSalary) {
@@ -285,8 +358,8 @@ class EmployeeService
             }
 
             // A job-title change moves the employment-history timeline forward.
-            if (($data['job_title'] ?? $oldTitle) !== $oldTitle) {
-                $this->recordRoleChange($employee, $data['job_title'], $data);
+            if ($employee->job_title !== $oldTitle) {
+                $this->recordRoleChange($employee, $employee->job_title, $data);
             }
 
             $employee->load('user');
@@ -294,6 +367,44 @@ class EmployeeService
 
             return $employee->load(['user', 'department', 'manager.user']);
         });
+    }
+
+    /**
+     * Replace the employee's profile picture. The previous file is discarded — photos
+     * are overwritten in place, so there is no history worth keeping.
+     */
+    public function setPhoto(Employee $employee, UploadedFile $photo): Employee
+    {
+        $previous = $employee->photo_path;
+
+        $employee->update([
+            'photo_path' => $photo->store("hr/employee-photos/{$employee->id}", 'public'),
+        ]);
+
+        if ($previous) {
+            Storage::disk('public')->delete($previous);
+        }
+
+        $employee->load('user');
+        $this->audit->log('updated', 'People', "Updated {$employee->user?->name}'s profile photo", $employee);
+
+        return $employee->load(['user.roles', 'department', 'manager.user', 'employmentHistories']);
+    }
+
+    /** Drop the profile picture, falling the avatar back to initials. */
+    public function removePhoto(Employee $employee): Employee
+    {
+        $previous = $employee->photo_path;
+
+        if ($previous) {
+            $employee->update(['photo_path' => null]);
+            Storage::disk('public')->delete($previous);
+
+            $employee->load('user');
+            $this->audit->log('removed', 'People', "Removed {$employee->user?->name}'s profile photo", $employee);
+        }
+
+        return $employee->load(['user.roles', 'department', 'manager.user', 'employmentHistories']);
     }
 
     /** The employee's base-salary history, newest effective date first. */
@@ -309,6 +420,28 @@ class EmployeeService
 
         $employee->load('user');
         $this->audit->log('updated', 'People', "Marked {$employee->user?->name}'s onboarding complete", $employee);
+
+        return $employee->load(['user', 'department', 'manager.user']);
+    }
+
+    /** Undo the above — puts the "Onboarding" tag back. */
+    public function reopenOnboarding(Employee $employee, ?string $reason = null): Employee
+    {
+        if ($employee->onboarding_status !== 'complete') {
+            throw ValidationException::withMessages([
+                'onboarding_status' => ['This employee is still onboarding — there is nothing to undo.'],
+            ]);
+        }
+
+        $employee->update(['onboarding_status' => 'pending']);
+
+        $employee->load('user');
+        $this->audit->log(
+            'reopened',
+            'People',
+            "Reopened {$employee->user?->name}'s onboarding" . ($reason ? " — {$reason}" : ''),
+            $employee,
+        );
 
         return $employee->load(['user', 'department', 'manager.user']);
     }

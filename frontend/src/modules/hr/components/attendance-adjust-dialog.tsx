@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Clock, CalendarPlus } from "lucide-react";
+import { Clock, CalendarPlus, RotateCcw } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,13 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toManilaTimeInput, formatDate } from "@/core/lib/format";
-import { useAdjustAttendance, useViolations, useResolveViolation } from "@/modules/hr/hooks/use-attendance";
+import { format12Hour, manilaYear } from "@/modules/hr/lib/manila-date";
+import {
+  useAdjustAttendance,
+  useViolations,
+  useResolveViolation,
+  useReopenViolation,
+} from "@/modules/hr/hooks/use-attendance";
 import { useAttendancePolicy } from "@/modules/hr/hooks/use-rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
@@ -38,7 +44,11 @@ const STATUS_OPTIONS = [
   { value: "rest_day", label: "Rest day — not a workday" },
   { value: "holiday", label: "Holiday — paid" },
 ];
+
+/** Mirror of Attendance::HR_STATUSES — the values this dialog is allowed to send. */
+const HR_STATUSES = new Set(STATUS_OPTIONS.map((o) => o.value).filter(Boolean));
 import { TimePicker } from "@/modules/hr/ui/time-picker";
+import { SoftBadge, hrStatusBadge } from "@/modules/hr/lib/attendance-display";
 import { SEVERITY_LABEL } from "@/modules/hr/types/attendance";
 import type { HrAttendanceRow, Severity, Violation } from "@/modules/hr/types/attendance";
 import type { ViolationRules } from "@/modules/hr/types/rules";
@@ -84,12 +94,6 @@ function legendDescriptions(rules: ViolationRules | null | undefined): Record<Se
   };
 }
 
-const STATUS_PILL: Record<string, { cls: string; label: string }> = {
-  present: { cls: "bg-success-subtle text-success", label: "Checked in" },
-  late: { cls: "bg-danger-subtle text-danger", label: "Late" },
-  absent: { cls: "bg-danger-subtle text-danger", label: "Absent" },
-};
-
 // Month options for the period filter, value = 2-digit month.
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: String(i + 1).padStart(2, "0"),
@@ -98,13 +102,6 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
 
 function titleCase(s: string): string {
   return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-// Current calendar year in Manila.
-function manilaYear(): number {
-  return Number(
-    new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric" }).format(new Date()),
-  );
 }
 
 // Mirror of the backend rule: status follows the time-in — none = absent; otherwise
@@ -119,13 +116,25 @@ function deriveStatus(timeIn: string, schedule: HrAttendanceRow["schedule"]): "p
   return th * 60 + tm > cutoff ? "late" : "present";
 }
 
-// "09:00" → "9:00 AM".
-function to12h(hhmm: string | null | undefined): string {
-  if (!hhmm) return "—";
+/**
+ * Which status the dropdown opens on. "Auto" only ever yields present/late/absent, so a
+ * day the roster settled some other way — on leave, a rest day, a holiday, or management
+ * reported present without a punch — arrives pre-selected: leaving it on Auto would turn
+ * an untouched Save into an absence. Statuses HR can't assert (`not_checked_in`, a day
+ * still in progress) stay on Auto, since sending them back is not an option.
+ */
+function initialStatus(row: HrAttendanceRow): string {
+  if (!HR_STATUSES.has(row.status)) return "";
+
+  const autoWouldBe = deriveStatus(toManilaTimeInput(row.time_in), row.schedule);
+
+  return row.status_override || row.status !== autoWouldBe ? row.status : "";
+}
+
+/** "09:30" → 570 minutes past midnight. */
+function minutesOf(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
-  const period = h >= 12 ? "PM" : "AM";
-  const h12 = ((h + 11) % 12) + 1;
-  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+  return h * 60 + m;
 }
 
 const WEEKDAY_ABBR = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; // ISO 1..7
@@ -174,17 +183,31 @@ function Details({
 }) {
   const adjustMut = useAdjustAttendance();
   const resolve = useResolveViolation();
+  const reopen = useReopenViolation();
 
   const [timeIn, setTimeIn] = useState(toManilaTimeInput(row.time_in));
   const [timeOut, setTimeOut] = useState(toManilaTimeInput(row.time_out));
   const [note, setNote] = useState(row.note ?? "");
   // "" = derive from the times (the default). Any other value is an explicit HR override.
-  const [status, setStatus] = useState<string>(row.status_override ? row.status : "");
+  const [status, setStatus] = useState<string>(initialStatus(row));
 
-  // Status is not editable — it's derived from the times HR enters, matching the
-  // server. No time-in disables (and clears) the time-out.
+  // With no override, the status follows the times HR enters, matching the server.
+  // No time-in disables the time-out.
   const derivedStatus = deriveStatus(timeIn, row.schedule);
   const noTimeIn = !timeIn;
+  // What this day will actually be once saved: HR's pick wins, else the times decide.
+  const effectiveStatus = status || derivedStatus;
+
+  // Both punches are on the same date, so an out earlier than the in is not a
+  // shift — it's a typo. The server rejects it; catch it before the round-trip.
+  const timesReversed = !!timeIn && !!timeOut && minutesOf(timeOut) <= minutesOf(timeIn);
+
+  // Hours as they will be recomputed on save: (out − in) − unpaid lunch. Shown live,
+  // because the saved figure is stale the moment HR edits a time.
+  const pendingHours =
+    !timeIn || !timeOut || timesReversed
+      ? 0
+      : Math.max(0, minutesOf(timeOut) - minutesOf(timeIn) - row.lunch_minutes) / 60;
 
   // Violation history: fetch ALL months, filter client-side by an optional period.
   const { data: violations } = useViolations(row.employee_id);
@@ -230,7 +253,16 @@ function Details({
   const level = { sev: currentSev, label: SEVERITY_LABEL[currentSev] };
   // Legend descriptions reflect the thresholds HR configured (Company → Rules).
   const legendDesc = useMemo(() => legendDescriptions(policy?.violation_rules), [policy]);
-  const pill = STATUS_PILL[derivedStatus] ?? { cls: "bg-muted text-muted-foreground", label: titleCase(derivedStatus) };
+  const pill = hrStatusBadge(effectiveStatus);
+
+  // Three different things "a status is selected" can mean, and HR needs to be able to
+  // tell them apart: nothing picked, something the roster already settled, or a hand
+  // override. Only the untouched pre-selection is safe to describe as "already".
+  const statusHint = !status
+    ? "Status follows Time In automatically. Clear Time In to mark the day absent, or pick a status to override it."
+    : status === row.status && !row.status_override
+      ? `This day is already ${hrStatusBadge(row.status).label.toLowerCase()}, so it's pre-selected — saving keeps it that way. Switch to Auto only if the times should decide instead.`
+      : "You've set this status manually — it overrides the times, and payroll and violation flags follow it.";
 
   // Violation-history table columns (unresolved float to the top via `needsAction`).
   const violationColumns: Column<Violation>[] = [
@@ -247,7 +279,22 @@ function Details({
       align: "right",
       cell: (v) =>
         v.resolved ? (
-          <span className="text-caption text-muted-foreground">Resolved</span>
+          // Resolving is one click, so undoing it is too — the flag is derived from
+          // attendance and recomputed on every adjustment, nothing else hangs off it.
+          <span className="inline-flex items-center justify-end gap-1.5">
+            <span className="text-caption text-muted-foreground">Resolved</span>
+            <Button
+              size="xs"
+              variant="ghost"
+              className="text-muted-foreground"
+              disabled={reopen.isPending}
+              onClick={() => reopen.mutate(v.id)}
+              title="Flag this violation again"
+            >
+              <RotateCcw />
+              Undo
+            </Button>
+          </span>
         ) : (
           <Button
             size="xs"
@@ -302,14 +349,7 @@ function Details({
           <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
             <Info label="Name" value={<span className="font-semibold text-foreground">{row.name ?? "—"}</span>} />
             <Info label="Department" value={row.department ?? "—"} />
-            <Info
-              label="Status"
-              value={
-                <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold", pill.cls)}>
-                  {pill.label}
-                </span>
-              }
-            />
+            <Info label="Status" value={<SoftBadge tone={pill.tone}>{pill.label}</SoftBadge>} />
             <Info
               label="Current Alert Level"
               value={
@@ -327,7 +367,7 @@ function Details({
               {row.schedule?.start_time && (
                 <span className="text-muted-foreground">
                   {" · "}
-                  {to12h(row.schedule.start_time)}–{to12h(row.schedule.end_time)}
+                  {format12Hour(row.schedule.start_time)}–{format12Hour(row.schedule.end_time)}
                   {" · "}
                   {formatWorkdays(row.schedule.workdays)}
                   {" · "}
@@ -359,16 +399,28 @@ function Details({
               </div>
               <div className="space-y-1.5">
                 <Label>Time Out</Label>
-                <TimePicker value={timeOut} onChange={setTimeOut} disabled={noTimeIn} />
+                <TimePicker
+                  value={timeOut}
+                  onChange={setTimeOut}
+                  disabled={noTimeIn}
+                  aria-invalid={timesReversed}
+                />
               </div>
             </div>
-            <p className="mt-2 text-caption text-muted-foreground">
-              {status
-                ? "You've set this status manually — it overrides the times, and payroll and violation flags follow it."
-                : "Status follows Time In automatically. Clear Time In to mark the day absent, or pick a status to override it."}
-            </p>
+            {timesReversed && (
+              <p className="mt-2 text-caption font-medium text-danger">
+                Time Out has to be later than Time In.
+              </p>
+            )}
+            <p className="mt-2 text-caption text-muted-foreground">{statusHint}</p>
             <p className="mt-3 text-caption text-muted-foreground">
-              Hours worked: <span className="font-semibold text-foreground">{Number(row.hours_worked.toFixed(1))}</span>
+              Hours worked: <span className="font-semibold text-foreground">{Number(pendingHours.toFixed(1))}</span>
+              {row.lunch_minutes > 0 && (
+                <span> · after {row.lunch_minutes}m unpaid lunch</span>
+              )}
+              {row.break_minutes > 0 && (
+                <span> · {row.break_minutes}m paid break</span>
+              )}
             </p>
             <div className="mt-3 space-y-1.5">
               <Label>Note (optional)</Label>
@@ -424,7 +476,7 @@ function Details({
             rows={filteredViolations}
             rowKey={(v) => v.id}
             needsAction={(v) => !v.resolved}
-            pageSize={5}
+            pageSize={10}
             searchPlaceholder="Search violations…"
             toolbar={periodToolbar}
             empty={
@@ -449,7 +501,7 @@ function Details({
           <DialogClose asChild>
             <Button variant="outline">Cancel</Button>
           </DialogClose>
-          <Button disabled={adjustMut.isPending} onClick={onSave}>
+          <Button disabled={adjustMut.isPending || timesReversed} onClick={onSave}>
             {adjustMut.isPending ? "Saving…" : "Save changes"}
           </Button>
         </div>

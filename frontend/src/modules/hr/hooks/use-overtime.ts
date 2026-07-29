@@ -10,6 +10,7 @@ import {
   approveOvertimeRequest,
   rejectOvertimeRequest,
   cancelOvertimeRequest,
+  reopenOvertimeRequest,
 } from "@/modules/hr/api/overtime";
 
 const KEY = ["hr", "overtime-requests"] as const;
@@ -68,5 +69,18 @@ export function useRejectOvertimeRequest() {
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
       rejectOvertimeRequest(id, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+export function useReopenOvertimeRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) =>
+      reopenOvertimeRequest(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      // Approved overtime shows on the attendance day it was worked.
+      qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+    },
   });
 }

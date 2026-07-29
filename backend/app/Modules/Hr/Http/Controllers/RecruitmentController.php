@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\MoveCandidateRequest;
+use App\Modules\Hr\Http\Requests\SendCandidateEmailRequest;
 use App\Modules\Hr\Http\Requests\StoreCandidateRequest;
 use App\Modules\Hr\Http\Requests\StoreRequisitionRequest;
 use App\Modules\Hr\Http\Resources\CandidateResource;
@@ -90,12 +91,15 @@ class RecruitmentController extends Controller
     }
 
     // POST /api/v1/hr/candidates/{candidate}/email — send a stage-specific email
-    // (online/final interview invite, offer, or rejection).
-    public function sendEmail(Request $request, Candidate $candidate): JsonResponse
+    // (online/final interview invite, assessment, offer, or rejection).
+    public function sendEmail(SendCandidateEmailRequest $request, Candidate $candidate): JsonResponse
     {
-        $data = $request->validate(['type' => ['required', 'string']]);
+        $data = $request->validated();
+        $compose = array_intersect_key($data, array_flip(['link', 'instructions', 'deadline']));
 
-        return CandidateResource::make($this->service->sendEmail($candidate, $data['type']))->response();
+        return CandidateResource::make(
+            $this->service->sendEmail($candidate, $data['type'], $compose),
+        )->response();
     }
 
     // POST /api/v1/hr/candidates/{candidate}/reject — move to rejected with a reason,

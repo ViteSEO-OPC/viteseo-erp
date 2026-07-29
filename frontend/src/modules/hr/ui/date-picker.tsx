@@ -23,6 +23,18 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/modules/hr/ui/popover
 
 const FMT = "yyyy-MM-dd"; // the value contract — matches <input type="date">
 const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const MONTHS = Array.from({ length: 12 }, (_, i) => format(new Date(2000, i, 1), "MMMM"));
+
+/**
+ * How far the year dropdown reaches when the caller gives no `min`/`max`. Wide
+ * enough backwards for a date of birth, and a little forward for future-dated
+ * things like a hire date.
+ */
+const YEARS_BACK = 100;
+const YEARS_FORWARD = 10;
+
+const CAPTION_SELECT =
+  "h-7 rounded-md border border-input bg-card px-1.5 text-sm font-semibold text-foreground outline-none focus-visible:border-ring";
 
 /** Parse a "yyyy-MM-dd" string to a LOCAL Date (no timezone shift). */
 function parseValue(value: string | null | undefined): Date | null {
@@ -44,6 +56,8 @@ export function DatePicker({
   disabled,
   min,
   max,
+  fromYear,
+  toYear,
   id,
   className,
   "aria-label": ariaLabel,
@@ -57,6 +71,10 @@ export function DatePicker({
   min?: string;
   /** Latest selectable date, "yyyy-MM-dd". */
   max?: string;
+  /** First year in the year dropdown. Defaults to `min`'s year, else 100 years back. */
+  fromYear?: number;
+  /** Last year in the year dropdown. Defaults to `max`'s year, else 10 years ahead. */
+  toYear?: number;
   id?: string;
   className?: string;
   "aria-label"?: string;
@@ -94,6 +112,29 @@ export function DatePicker({
 
   const today = startOfToday();
 
+  // Year dropdown range, so picking a birthday isn't 26 chevron clicks.
+  const viewStart = startOfMonth(viewMonth);
+  const viewYear = viewMonth.getFullYear();
+  // The shown year always has an option, even if an existing value sits outside
+  // the range — otherwise the dropdown would render blank.
+  const firstYear = Math.min(
+    fromYear ?? minDate?.getFullYear() ?? today.getFullYear() - YEARS_BACK,
+    viewYear,
+  );
+  const lastYear = Math.max(
+    toYear ?? maxDate?.getFullYear() ?? today.getFullYear() + YEARS_FORWARD,
+    viewYear,
+  );
+  // Newest first — most picks are near the present, in both directions.
+  const years = Array.from({ length: lastYear - firstYear + 1 }, (_, i) => lastYear - i);
+
+  const atMinMonth = !!minDate && !isAfter(viewStart, startOfMonth(minDate));
+  const atMaxMonth = !!maxDate && !isBefore(viewStart, startOfMonth(maxDate));
+
+  function goToMonth(month: number, year: number) {
+    setViewMonth(startOfMonth(new Date(year, month, 1)));
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -113,22 +154,45 @@ export function DatePicker({
         <CalendarIcon className="size-4 shrink-0 opacity-50" />
       </PopoverTrigger>
       <PopoverContent className="p-3">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between gap-1">
           <button
             type="button"
+            disabled={atMinMonth}
             onClick={() => setViewMonth((m) => addMonths(m, -1))}
-            className="inline-flex size-7 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Previous month"
           >
             <ChevronLeft className="size-4" />
           </button>
-          <span className="text-sm font-semibold text-foreground">
-            {format(viewMonth, "MMMM yyyy")}
-          </span>
+
+          <div className="flex items-center gap-1">
+            <select
+              value={viewMonth.getMonth()}
+              onChange={(e) => goToMonth(Number(e.target.value), viewMonth.getFullYear())}
+              className={CAPTION_SELECT}
+              aria-label="Month"
+            >
+              {MONTHS.map((label, i) => (
+                <option key={label} value={i}>{label}</option>
+              ))}
+            </select>
+            <select
+              value={viewMonth.getFullYear()}
+              onChange={(e) => goToMonth(viewMonth.getMonth(), Number(e.target.value))}
+              className={CAPTION_SELECT}
+              aria-label="Year"
+            >
+              {years.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+
           <button
             type="button"
+            disabled={atMaxMonth}
             onClick={() => setViewMonth((m) => addMonths(m, 1))}
-            className="inline-flex size-7 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted"
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Next month"
           >
             <ChevronRight className="size-4" />

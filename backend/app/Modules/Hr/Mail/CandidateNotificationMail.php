@@ -32,6 +32,7 @@ class CandidateNotificationMail extends Mailable
         $subject = match ($this->type) {
             'online_interview' => "Online Interview Invitation — {$role}",
             'final_interview' => "Final Interview Invitation — {$role}",
+            'assessment' => "Assessment — {$role}",
             'offer' => "Job Offer — {$role}",
             'rejection' => "Update on your application — {$role}",
             default => "Update — {$role}",
@@ -52,6 +53,7 @@ class CandidateNotificationMail extends Mailable
             'final_interview' => "<p>Great news — you've advanced to the <strong>final interview</strong> "
                 . "for the <strong>{$role}</strong> role. This round is with the hiring team; "
                 . "we'll share the details and timing separately.</p>",
+            'assessment' => $this->assessmentBody($role),
             'offer' => "<p>Congratulations! We're delighted to extend an <strong>offer</strong> for the "
                 . "<strong>{$role}</strong> role. Our HR team will reach out with your offer letter, "
                 . "compensation details, and onboarding next steps.</p>",
@@ -69,5 +71,32 @@ class CandidateNotificationMail extends Mailable
                 <p>Best regards,<br>The Hiring Team</p>
                 HTML,
         );
+    }
+
+    /**
+     * The assessment email is the only one HR writes rather than picks: the link and
+     * instructions live on the candidate, put there by the compose dialog just before
+     * this renders. Either one may be absent — the service guarantees at least one.
+     */
+    private function assessmentBody(string $role): string
+    {
+        $body = "<p>Thank you for your interest in the <strong>{$role}</strong> role. "
+            . 'The next step is a short <strong>assessment</strong>.</p>';
+
+        if ($this->candidate->assessment_instructions) {
+            $body .= '<p>' . nl2br(e($this->candidate->assessment_instructions)) . '</p>';
+        }
+
+        if ($this->candidate->assessment_link) {
+            $link = e($this->candidate->assessment_link);
+            $body .= "<p><a href=\"{$link}\">{$link}</a></p>";
+        }
+
+        if ($this->candidate->assessment_deadline) {
+            $due = e($this->candidate->assessment_deadline->format('F j, Y'));
+            $body .= "<p>Please complete it by <strong>{$due}</strong>.</p>";
+        }
+
+        return $body;
     }
 }

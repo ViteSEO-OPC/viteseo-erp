@@ -5,11 +5,14 @@ import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/core/auth-context";
 import { Sidebar } from "@/core/components/sidebar";
 import { TopBar } from "@/core/components/top-bar";
 import { NotificationProvider } from "@/core/notifications-context";
 import { TeamoraMobileTopBar } from "@/modules/hr/components/teamora-mobile-top-bar";
 import { useViewMode } from "@/modules/hr/components/view-mode-context";
+import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
+import { useMyEmployee } from "@/modules/hr/hooks/use-my-employee";
 
 /**
  * TeamOra's responsive frame — an HR-local replacement for `core/AppShell`.
@@ -29,6 +32,22 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
   const { variant, canSwitch, toggle } = useViewMode();
+
+  // The sidebar's user card shows the viewer's own profile picture. Core's Sidebar
+  // takes the rendered avatar rather than a URL — where a face comes from is ours to
+  // know. Only passed when there is a photo, so accounts without one keep the plain
+  // initials chip. The upload already invalidates this query, so a new picture lands
+  // here without a reload.
+  const { user, employee } = useAuth();
+  const { data: me } = useMyEmployee({ enabled: !!employee });
+  const avatar = me?.photo_url ? (
+    <EmployeeAvatar
+      name={me.name ?? user?.name ?? "?"}
+      photoUrl={me.photo_url}
+      colorSeed={me.id}
+      className="size-9"
+    />
+  ) : undefined;
 
   // Navigating from a drawer link should close the drawer behind you. Handled
   // by delegation rather than an effect on `pathname`: the nav links live
@@ -71,6 +90,7 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
             variant={variant}
             canSwitchView={canSwitch}
             onSwitchView={switchView}
+            avatar={avatar}
           />
         </div>
 
@@ -99,6 +119,7 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
             variant={variant}
             canSwitchView={canSwitch}
             onSwitchView={switchView}
+            avatar={avatar}
           />
           <button
             type="button"

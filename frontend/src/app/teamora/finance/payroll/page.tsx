@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { PayslipDocument } from "@/modules/hr/components/payslip-document";
 import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -30,6 +31,7 @@ import {
   useSetPayrollRunLock,
   useRunPayroll,
   useMarkPayslipDone,
+  useReopenPayslip,
   usePayrollSettings,
   useUpdatePayrollSettings,
   useThirteenthMonth,
@@ -55,6 +57,7 @@ export default function PayrollPage() {
   const { data: runs } = usePayrollRuns();
   const runMut = useRunPayroll();
   const markDoneMut = useMarkPayslipDone();
+  const reopenPayslipMut = useReopenPayslip();
   const { data: thirteenth } = useThirteenthMonth();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -159,7 +162,9 @@ export default function PayrollPage() {
     }
   }
 
-  const columns: Column<PayrollBreakdownRow>[] = [
+  // Built per run, not once: the same table renders the current run and a past one from
+  // the history modal, and whether a disbursement can be undone depends on that run's lock.
+  const makeColumns = (locked: boolean): Column<PayrollBreakdownRow>[] => [
     { header: "Employee", cell: (r) => <span className="font-semibold text-foreground">{r.employee}</span> },
     { header: "Department", cell: (r) => r.department ?? "—" },
     { header: "Gross", cell: (r) => peso(r.gross) },
@@ -185,9 +190,24 @@ export default function PayrollPage() {
             <span className="sr-only">Download payslip PDF</span>
           </Button>
           {r.status === "disbursed" ? (
-            <span className="inline-flex items-center gap-1 text-caption font-medium text-success">
-              <Check className="size-3.5" /> Disbursed
-            </span>
+            <>
+              <span className="inline-flex items-center gap-1 text-caption font-medium text-success">
+                <Check className="size-3.5" /> Disbursed
+              </span>
+              {locked ? null : (
+                <ReopenAction
+                  size="xs"
+                  label="Undo"
+                  title="Reverse this disbursement?"
+                  confirmLabel="Reverse payslip"
+                  successMessage="Disbursement reversed"
+                  subject={`${r.employee}'s ${peso(r.net)} payslip`}
+                  description={`${r.employee}'s ${peso(r.net)} payslip goes back to computed — it counts as unpaid again.`}
+                  consequence="Any reimbursements it settled go back to scheduled, and the run can be recomputed."
+                  onReopen={(reason) => reopenPayslipMut.mutateAsync({ id: r.id, reason })}
+                />
+              )}
+            </>
           ) : (
             <Button size="xs" variant="outline" disabled={markDoneMut.isPending} onClick={() => onMarkDone(r)}>
               Mark as disbursed
@@ -397,7 +417,7 @@ export default function PayrollPage() {
         {detail?.breakdown ? (
           <>
             <DataTable
-              columns={columns}
+              columns={makeColumns(!!detail.is_locked)}
               rows={detail.breakdown}
               rowKey={(_r, i) => i}
               onRowClick={(r) => setPayslipId(r.id)}
@@ -477,7 +497,7 @@ export default function PayrollPage() {
               </div>
               <div className="max-h-[55vh] overflow-auto">
                 <DataTable
-                  columns={columns}
+                  columns={makeColumns(!!viewRun.is_locked)}
                   rows={viewRun.breakdown}
                   rowKey={(_r, i) => i}
                   onRowClick={(r) => setPayslipId(r.id)}

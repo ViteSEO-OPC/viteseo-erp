@@ -54,6 +54,17 @@ class ViolationService
     }
 
     /**
+     * Undo a resolve, putting the flag back in play. The row itself is never
+     * recomputed away, so this simply re-arms it for the escalation ladder.
+     */
+    public function unresolve(Violation $violation): Violation
+    {
+        $violation->update(['resolved' => false]);
+
+        return $violation;
+    }
+
+    /**
      * Worst unresolved flag + count per employee, for the roster. `work_date` is the
      * date of the violation DRIVING the severity (worst severity, most recent on a
      * tie) — the roster flag can point to a past month, so the detail modal uses this

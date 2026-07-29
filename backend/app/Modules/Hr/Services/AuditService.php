@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Auth;
  *
  * `action` is a normalized verb key (approved | declined | assigned | updated |
  * created | submitted | enrolled | removed | login | exported | resolved |
- * scheduled); `module` is the display group (Leave, Benefits, Rules, …);
+ * scheduled | reopened); `module` is the display group (Leave, Benefits, Rules, …);
  * `description` is the human "what happened" line.
  */
 class AuditService
@@ -20,6 +20,8 @@ class AuditService
     public const ACTIONS = [
         'approved', 'declined', 'assigned', 'updated', 'created', 'submitted',
         'enrolled', 'removed', 'login', 'exported', 'resolved', 'scheduled',
+        // HR undoing a decision — the original entry stays, this one records the reversal.
+        'reopened',
     ];
 
     /**

@@ -87,6 +87,35 @@ class PayrollInquiryService
         return $inquiry->load(['employee.user', 'resolver', 'payslip.payrollRun']);
     }
 
+    /**
+     * Undo the last mark: done → in progress, in progress → pending. Resolving is
+     * reversible because nothing outside the inquiry depends on it — the resolution
+     * note and its attachments are dropped so HR writes a fresh answer.
+     */
+    public function reopen(PayrollInquiry $inquiry, ?string $reason = null): PayrollInquiry
+    {
+        $this->assertStatus($inquiry, ['in_progress', 'done'], 'reopen');
+
+        $wasDone = $inquiry->status === 'done';
+
+        $inquiry->update($wasDone ? [
+            'status' => 'in_progress',
+            'resolution_note' => null,
+            'resolution_attachments' => null,
+            'resolved_by' => null,
+            'resolved_at' => null,
+        ] : ['status' => 'pending']);
+
+        $this->audit->log(
+            'reopened',
+            'Payroll',
+            'Reopened a payroll inquiry' . ($reason ? " — {$reason}" : ''),
+            $inquiry,
+        );
+
+        return $inquiry->load(['employee.user', 'resolver', 'payslip.payrollRun']);
+    }
+
     /** @param array<int, string> $allowed */
     private function assertStatus(PayrollInquiry $inquiry, array $allowed, string $action): void
     {

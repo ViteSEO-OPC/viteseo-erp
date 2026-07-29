@@ -40,6 +40,35 @@ export function deriveAttendanceStatus(row: HrAttendanceRow): { label: string; t
 }
 
 /**
+ * Badge for one of the statuses HR can assert on a day (Attendance::HR_STATUSES).
+ * Unlike {@link deriveAttendanceStatus} this reads a status value directly, so it
+ * can show a status HR has picked but not yet saved.
+ */
+export function hrStatusBadge(status: string): { label: string; tone: Tone } {
+  switch (status) {
+    case "present":
+      return { label: "Present", tone: "success" };
+    case "late":
+      return { label: "Late", tone: "danger" };
+    case "absent":
+      return { label: "Absent", tone: "danger" };
+    case "on_leave":
+      return { label: "On leave", tone: "warning" };
+    case "half_day":
+      return { label: "Half day", tone: "warning" };
+    case "rest_day":
+      return { label: "Rest day", tone: "muted" };
+    case "holiday":
+      return { label: "Holiday", tone: "info" };
+    default:
+      return {
+        label: status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        tone: "muted",
+      };
+  }
+}
+
+/**
  * Punctuality relative to the employee's schedule: Early / On time / Late 1h 15m.
  * Returns null when there's no clock-in to judge (shown as "—").
  */

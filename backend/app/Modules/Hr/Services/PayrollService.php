@@ -1030,6 +1030,60 @@ class PayrollService
     }
 
     /**
+     * Undo the above — the payslip goes back to `computed` and the claims it settled go
+     * back to `scheduled`, i.e. owed on this run again. Use when a disbursement was
+     * recorded in error.
+     *
+     * A locked run is refused: locking requires every payslip disbursed, so un-disbursing
+     * one would leave the run sealed in a state it could never have been locked in. Unlock
+     * it first. Reversing also re-opens the payslip to recompute, which is the point —
+     * whatever was wrong upstream can now be fixed and the run re-run.
+     */
+    public function reopenPayslip(Payslip $payslip, ?string $reason = null): Payslip
+    {
+        if ($payslip->status !== 'disbursed') {
+            throw ValidationException::withMessages([
+                'status' => ['This payslip has not been disbursed — there is nothing to undo.'],
+            ]);
+        }
+
+        $run = $payslip->payrollRun;
+        if ($run?->isLocked()) {
+            throw ValidationException::withMessages([
+                'status' => ['The payroll run is locked. Unlock it before reversing a payslip.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($payslip, $reason) {
+            $payslip->update(['status' => 'computed']);
+
+            // Put back only what this payslip paid; a claim HR settled by hand outside
+            // payroll has no run link and must stay paid.
+            $claims = Reimbursement::where('employee_id', $payslip->employee_id)
+                ->where('payroll_run_id', $payslip->payroll_run_id)
+                ->where('status', 'paid')
+                ->get();
+
+            foreach ($claims as $claim) {
+                $claim->update(['status' => 'scheduled']);
+            }
+
+            $payslip->load(['employee.user', 'employee.department']);
+            $name = $payslip->employee->user?->name ?? $payslip->employee->name;
+            $this->audit->log(
+                'reopened',
+                'Payroll',
+                "Reversed {$name}'s disbursed payslip — ₱" . number_format((float) $payslip->net_pay, 2)
+                    . ($claims->isNotEmpty() ? ', ' . $claims->count() . ' reimbursement(s) back to scheduled' : '')
+                    . ($reason ? " — {$reason}" : ''),
+                $payslip,
+            );
+
+            return $payslip;
+        });
+    }
+
+    /**
      * Execute payroll for a cycle: one payslip per active employee, unpaid days from
      * hr_attendance/leave deducted, approved reimbursements folded into gross. Payslips
      * start "computed" and become "disbursed" when HR marks them paid out. Atomic.

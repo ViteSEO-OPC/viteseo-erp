@@ -21,6 +21,7 @@ class LeaveService
         private readonly HolidayService $holidays,
         private readonly AuditService $audit,
         private readonly ViolationService $violations,
+        private readonly PayrollFreezeService $freeze,
     ) {}
 
     /**
@@ -358,37 +359,8 @@ class LeaveService
         }
 
         DB::transaction(function () use ($request, $actor, $reason, $wasApproved) {
-            // Give the credits back if they were deducted at approval. Reverse the
-            // EXACT bucket stamped at approval (deducted_from), so a mode flip
-            // between approve and cancel can't restore the wrong table. Legacy
-            // rows (approved before stamping) fall back to the paid-type + current
-            // mode guess.
             if ($wasApproved) {
-                $bucket = $request->deducted_from;
-                if ($bucket === null) {
-                    $type = LeaveType::find($request->leave_type_id);
-                    $paid = (! $type || $type->is_paid);
-                    $bucket = ! $paid
-                        ? 'none'
-                        : ($this->isSharedMode() ? 'pool' : 'per_type');
-                }
-
-                if ($bucket === 'pool') {
-                    $pool = SharedLeaveBalance::where('employee_id', $request->employee_id)
-                        ->where('year', $request->start_date->year)
-                        ->first();
-                    if ($pool) {
-                        $pool->update(['used_days' => max(0, (float) $pool->used_days - (float) $request->days)]);
-                    }
-                } elseif ($bucket === 'per_type') {
-                    $balance = LeaveBalance::where('employee_id', $request->employee_id)
-                        ->where('leave_type_id', $request->leave_type_id)
-                        ->where('year', $request->start_date->year)
-                        ->first();
-                    if ($balance) {
-                        $balance->update(['used_days' => max(0, (float) $balance->used_days - (float) $request->days)]);
-                    }
-                }
+                $this->restoreBalance($request);
             }
 
             $request->update([
@@ -413,6 +385,104 @@ class LeaveService
         }
 
         return $request->load(['employee.user', 'leaveType', 'reviewer', 'canceller']);
+    }
+
+    /**
+     * Give back the credits an approval consumed. Reverses the EXACT bucket stamped at
+     * approval (`deducted_from`), so a mode flip between approve and reversal can't
+     * restore the wrong table. Legacy rows (approved before stamping) fall back to the
+     * paid-type + current-mode guess.
+     */
+    private function restoreBalance(LeaveRequest $request): void
+    {
+        $bucket = $request->deducted_from;
+        if ($bucket === null) {
+            $type = LeaveType::find($request->leave_type_id);
+            $paid = (! $type || $type->is_paid);
+            $bucket = ! $paid
+                ? 'none'
+                : ($this->isSharedMode() ? 'pool' : 'per_type');
+        }
+
+        if ($bucket === 'pool') {
+            $pool = SharedLeaveBalance::where('employee_id', $request->employee_id)
+                ->where('year', $request->start_date->year)
+                ->first();
+            if ($pool) {
+                $pool->update(['used_days' => max(0, (float) $pool->used_days - (float) $request->days)]);
+            }
+        } elseif ($bucket === 'per_type') {
+            $balance = LeaveBalance::where('employee_id', $request->employee_id)
+                ->where('leave_type_id', $request->leave_type_id)
+                ->where('year', $request->start_date->year)
+                ->first();
+            if ($balance) {
+                $balance->update(['used_days' => max(0, (float) $balance->used_days - (float) $request->days)]);
+            }
+        }
+    }
+
+    /**
+     * Undo the decision — back to pending, so HR can rule on it again. Unlike cancel()
+     * (final, and only before the leave starts), a reopened request is still live, which
+     * is what makes it the right tool for a mistaken approval on a date already past.
+     *
+     * Re-approving re-deducts, so the credits an approval consumed are given back here,
+     * and violations recompute because the covered days stop counting as excused leave.
+     * Refused once payroll has settled any day the leave covers.
+     */
+    public function reopen(LeaveRequest $request, ?string $reason = null): LeaveRequest
+    {
+        if ($request->status === 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['This request is still pending — there is nothing to undo.'],
+            ]);
+        }
+
+        $wasApproved = $request->status === 'approved';
+
+        if ($wasApproved) {
+            $this->freeze->assertOpen(
+                $request->employee_id,
+                $request->start_date->toDateString(),
+                $request->end_date->toDateString(),
+                'reopen this leave request',
+            );
+        }
+
+        DB::transaction(function () use ($request, $reason, $wasApproved) {
+            if ($wasApproved) {
+                $this->restoreBalance($request);
+            }
+
+            $request->update([
+                'status' => 'pending',
+                'reviewed_by' => null,
+                'reviewed_at' => null,
+                'review_note' => null,
+                'deducted_from' => null,
+                'cancelled_by' => null,
+                'cancelled_at' => null,
+                'cancel_reason' => null,
+            ]);
+
+            $request->load(['employee.user', 'leaveType']);
+            $employeeName = $request->employee->user?->name ?? $request->employee->name;
+            $this->audit->log(
+                'reopened',
+                'Leave',
+                "Reopened {$employeeName}'s {$request->leaveType?->name} request"
+                    . ($reason ? " — {$reason}" : ''),
+                $request,
+            );
+        });
+
+        // The days stop being excused leave, so an absence/AWOL flag may come back.
+        if ($wasApproved) {
+            $this->violations->recompute();
+        }
+
+        return $request->load(['employee.user', 'leaveType', 'reviewer']);
     }
 
     /** Reject: mark rejected + reviewer + reason. Balance is untouched. */

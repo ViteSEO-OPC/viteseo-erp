@@ -20,6 +20,7 @@ class EarlyOutRequestService
     public function __construct(
         private readonly AuditService $audit,
         private readonly ScheduleService $schedule,
+        private readonly PayrollFreezeService $freeze,
     ) {}
 
     /** HR sees all; an employee sees only their own. */
@@ -98,6 +99,46 @@ class EarlyOutRequestService
             'declined',
             'Leave',
             "Declined {$employeeName}'s early-out request",
+            $request,
+        );
+
+        return $request;
+    }
+
+    /**
+     * Undo the decision — back to pending. An approved early-out docks the undertime
+     * fraction, so this is refused once payroll has settled that date.
+     */
+    public function reopen(EarlyOutRequest $request, ?string $reason = null): EarlyOutRequest
+    {
+        if ($request->status === 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['This request is still pending — there is nothing to undo.'],
+            ]);
+        }
+
+        if ($request->status === 'approved') {
+            $this->freeze->assertOpen(
+                $request->employee_id,
+                $request->work_date->toDateString(),
+                null,
+                'reopen this early-out request',
+            );
+        }
+
+        $request->update([
+            'status' => 'pending',
+            'review_note' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+        ]);
+
+        $request->load(['employee.user', 'reviewer']);
+        $employeeName = $request->employee->user?->name ?? $request->employee->name;
+        $this->audit->log(
+            'reopened',
+            'Leave',
+            "Reopened {$employeeName}'s early-out request" . ($reason ? " — {$reason}" : ''),
             $request,
         );
 

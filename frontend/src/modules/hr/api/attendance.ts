@@ -69,6 +69,12 @@ export async function resolveViolation(id: number): Promise<Violation> {
   return res.data.data;
 }
 
+/** Undo a resolve, putting the flag back in play for the escalation ladder. */
+export async function reopenViolation(id: number): Promise<Violation> {
+  const res = await apiClient.post(`/hr/violations/${id}/reopen`);
+  return res.data.data;
+}
+
 export interface AdjustAttendanceInput {
   employee_id: number;
   work_date: string;

@@ -34,8 +34,8 @@ class StoreEmployeeRequest extends FormRequest
             'job_title' => ['required', 'string', 'max:255'],
             'employment_status' => ['required', Rule::in(EmployeeService::STATUSES)],
             'hire_date' => ['required', 'date'],
-            'base_salary' => ['required', 'numeric', 'min:0'],
-            ...self::profileRules(),
+            'base_salary' => ['required', 'numeric', 'min:0', 'max:99999999.99'],
+            ...$this->profileRules(),
         ];
     }
 }

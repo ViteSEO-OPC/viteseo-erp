@@ -11,10 +11,12 @@ import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import {
   useEmployeeLoans,
   useCreateEmployeeLoan,
   useCancelEmployeeLoan,
+  useReopenEmployeeLoan,
 } from "@/modules/hr/hooks/use-employees";
 import type { EmployeeLoan } from "@/modules/hr/api/employees";
 import { SimpleSelect } from "@/modules/hr/ui/select";
@@ -42,6 +44,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
   const { data: loans, isLoading } = useEmployeeLoans(employeeId);
   const createMut = useCreateEmployeeLoan(employeeId);
   const cancelMut = useCancelEmployeeLoan(employeeId);
+  const reopenMut = useReopenEmployeeLoan(employeeId);
 
   const [adding, setAdding] = useState(false);
   const [cancelling, setCancelling] = useState<EmployeeLoan | null>(null);
@@ -219,6 +222,19 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                         <Ban className="size-3.5" />
                         <span className="sr-only">Cancel loan</span>
                       </Button>
+                    )}
+                    {l.status === "cancelled" && (
+                      <ReopenAction
+                        size="xs"
+                        label="Undo cancel"
+                        title="Resume collecting this loan?"
+                        confirmLabel="Reactivate"
+                        successMessage="Loan reactivated"
+                        subject={`This ${TYPE_LABEL[l.type] ?? l.type}`}
+                        description={`This ${(TYPE_LABEL[l.type] ?? l.type).toLowerCase()} becomes active again.`}
+                        consequence={`Payroll deducts ${formatPeso(l.per_period_amount)} per period until the ${formatPeso(l.outstanding)} balance is settled.`}
+                        onReopen={(reason) => reopenMut.mutateAsync({ loanId: l.id, reason })}
+                      />
                     )}
                   </td>
                 </tr>

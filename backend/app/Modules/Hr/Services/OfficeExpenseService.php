@@ -34,7 +34,7 @@ class OfficeExpenseService
             'recorded_by' => Auth::id(),
         ]);
 
-        $this->audit->log('office_expense.created', $expense);
+        $this->audit->log('created', 'Office Expenses', $this->describe($expense, 'Recorded'), $expense);
 
         return $expense->load('recorder');
     }
@@ -51,6 +51,8 @@ class OfficeExpenseService
             'receipt_path' => $receipt ? $receipt->store('office-expenses', 'public') : $expense->receipt_path,
         ]);
 
+        $this->audit->log('updated', 'Office Expenses', $this->describe($expense, 'Updated'), $expense);
+
         return $expense->load(['recorder', 'reviewer']);
     }
 
@@ -62,6 +64,35 @@ class OfficeExpenseService
     public function reject(OfficeExpense $expense, User $reviewer, ?string $reason = null): OfficeExpense
     {
         return $this->transition($expense, 'rejected', $reviewer, $reason);
+    }
+
+    /**
+     * Undo the review — back to recorded, awaiting a decision again. Office expenses
+     * are company spend, never employee pay, so nothing downstream needs unwinding.
+     */
+    public function reopen(OfficeExpense $expense, ?string $reason = null): OfficeExpense
+    {
+        if ($expense->status === 'recorded') {
+            throw ValidationException::withMessages([
+                'status' => ['This expense has not been reviewed yet — there is nothing to undo.'],
+            ]);
+        }
+
+        $expense->update([
+            'status' => 'recorded',
+            'review_note' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+        ]);
+
+        $this->audit->log(
+            'reopened',
+            'Office Expenses',
+            $this->describe($expense, 'Reopened') . ($reason ? " — {$reason}" : ''),
+            $expense,
+        );
+
+        return $expense->load(['recorder', 'reviewer']);
     }
 
     public function delete(OfficeExpense $expense): void
@@ -84,8 +115,19 @@ class OfficeExpenseService
             'reviewed_at' => now(),
         ]);
 
-        $this->audit->log("office_expense.{$status}", $expense);
+        $this->audit->log(
+            $status === 'approved' ? 'approved' : 'declined',
+            'Office Expenses',
+            $this->describe($expense, $status === 'approved' ? 'Approved' : 'Declined'),
+            $expense,
+        );
 
         return $expense->load(['recorder', 'reviewer']);
+    }
+
+    /** Audit-trail line for an expense, e.g. "Recorded a supplies expense — ₱1,200.00". */
+    private function describe(OfficeExpense $expense, string $verb): string
+    {
+        return "{$verb} a {$expense->category} expense — ₱" . number_format((float) $expense->amount, 2);
     }
 }

@@ -145,6 +145,43 @@ class DocumentRequestService
         return $request->load(['employee.user', 'reviewer']);
     }
 
+    /**
+     * Undo the decision — back to pending. Fulfilling is what unlocks the employee's
+     * download (see myDocumentsWithAccess), so reopening re-locks it; the file HR
+     * attached is deleted rather than left orphaned behind a locked request.
+     */
+    public function reopen(DocumentRequest $request, ?string $reason = null): DocumentRequest
+    {
+        if (in_array($request->status, ['pending', 'in_progress'], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['This request has not been decided yet — there is nothing to undo.'],
+            ]);
+        }
+
+        $attached = $request->fulfilled_path;
+
+        $request->update([
+            'status' => 'pending',
+            'fulfilled_path' => null,
+            'review_note' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+        ]);
+
+        if ($attached) {
+            Storage::disk('public')->delete($attached);
+        }
+
+        $this->audit->log(
+            'reopened',
+            'Documents',
+            "Reopened {$request->type} record request" . ($reason ? " — {$reason}" : ''),
+            $request,
+        );
+
+        return $request->load(['employee.user', 'reviewer']);
+    }
+
     private function assertOpen(DocumentRequest $request, string $action): void
     {
         if (! in_array($request->status, ['pending', 'in_progress'], true)) {

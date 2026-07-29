@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { Star, Check, UserPlus, Mail } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
@@ -8,6 +8,8 @@ import { notify as toast } from "@/core/lib/notify";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/core/components/avatar";
+import { formatDate } from "@/core/lib/format";
+import { AssessmentEmailDialog } from "@/modules/hr/components/assessment-email-dialog";
 import {
   useHireCandidate,
   useSendCandidateEmail,
@@ -84,6 +86,7 @@ export function CandidateCard({
   const hireMut = useHireCandidate();
   const emailMut = useSendCandidateEmail();
   const stageEmail = candidate.stage ? STAGE_EMAIL[candidate.stage] : undefined;
+  const [composeOpen, setComposeOpen] = useState(false);
 
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
@@ -109,8 +112,12 @@ export function CandidateCard({
   }
 
   // "Send X email" button, or a "sent" marker once it's been sent for this stage.
+  // The assessment email is composed first, so its button opens a dialog instead.
   function emailAction(type: string, label: string) {
-    if (candidate.emails_sent.includes(type)) {
+    const composed = type === "assessment";
+    const sent = candidate.emails_sent.includes(type);
+
+    if (sent && !composed) {
       const cap = label.charAt(0).toUpperCase() + label.slice(1);
       return (
         <p className="mt-2 flex items-center gap-1 text-caption font-medium text-info">
@@ -118,6 +125,30 @@ export function CandidateCard({
         </p>
       );
     }
+
+    if (sent) {
+      return (
+        <div className="mt-2 space-y-1">
+          <p className="flex items-center gap-1 text-caption font-medium text-info">
+            <Mail className="size-3.5" />
+            Assessment sent
+            {candidate.assessment_deadline
+              ? ` · due ${formatDate(candidate.assessment_deadline)}`
+              : ""}
+          </p>
+          <Button
+            size="xs"
+            variant="ghost"
+            className="h-6 w-full text-caption"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setComposeOpen(true)}
+          >
+            Re-send or edit
+          </Button>
+        </div>
+      );
+    }
+
     return (
       <Button
         size="xs"
@@ -126,10 +157,14 @@ export function CandidateCard({
         disabled={emailMut.isPending || !candidate.email}
         title={candidate.email ? undefined : "No email on file"}
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={() => onSendEmail(type, label)}
+        onClick={() => (composed ? setComposeOpen(true) : onSendEmail(type, label))}
       >
         <Mail />
-        {emailMut.isPending ? "Sending…" : `Send ${label}`}
+        {composed
+          ? "Send assessment"
+          : emailMut.isPending
+            ? "Sending…"
+            : `Send ${label}`}
       </Button>
     );
   }
@@ -167,25 +202,33 @@ export function CandidateCard({
     ) : null;
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
-      onPointerDownCapture={(e) => { downPos.current = { x: e.clientX, y: e.clientY }; }}
-      onClick={(e) => {
-        // Ignore clicks on the inner action buttons, and any real drag.
-        if ((e.target as HTMLElement).closest("button, a")) return;
-        const d = downPos.current;
-        if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) onSelect?.(candidate);
-      }}
-      className={cn(
-        "cursor-pointer touch-none",
-        !locked && "cursor-grab active:cursor-grabbing",
-        isDragging && "opacity-40",
+    <>
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...listeners}
+        {...attributes}
+        onPointerDownCapture={(e) => { downPos.current = { x: e.clientX, y: e.clientY }; }}
+        onClick={(e) => {
+          // Ignore clicks on the inner action buttons, and any real drag.
+          if ((e.target as HTMLElement).closest("button, a")) return;
+          const d = downPos.current;
+          if (d && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) onSelect?.(candidate);
+        }}
+        className={cn(
+          "cursor-pointer touch-none",
+          !locked && "cursor-grab active:cursor-grabbing",
+          isDragging && "opacity-40",
+        )}
+      >
+        <CandidateCardView candidate={candidate} footer={footer} />
+      </div>
+
+      {/* Kept outside the draggable element: a portal still bubbles its events through
+          the React tree, so clicks inside the dialog would reach the drag listeners. */}
+      {composeOpen && (
+        <AssessmentEmailDialog candidate={candidate} open onOpenChange={setComposeOpen} />
       )}
-    >
-      <CandidateCardView candidate={candidate} footer={footer} />
-    </div>
+    </>
   );
 }

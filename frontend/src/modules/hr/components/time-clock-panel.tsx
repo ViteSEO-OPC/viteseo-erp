@@ -16,6 +16,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { formatTimeManila, formatHm } from "@/core/lib/format";
+import { format12Hour, manilaHm } from "@/modules/hr/lib/manila-date";
 import {
   useMyAttendance,
   useMyViolations,
@@ -118,6 +119,12 @@ export function TimeClockPanel() {
   const meta = STATUS_META[state];
   const busy = clockInMut.isPending || clockOutMut.isPending || breakMut.isPending;
   const active = state === "clocked_in" || state === "on_lunch" || state === "on_break";
+
+  // Strict clock-in (Company → Rules). The server decides whether anything holds this
+  // employee back and until when; we only compare that against the ticking clock, so the
+  // button unlocks on the minute the shift opens without waiting for a refetch.
+  const opensAt = data?.clock_in?.opens_at ?? null;
+  const tooEarly = opensAt !== null && manilaHm(now) < opensAt;
 
   // The employee's own flag for the current Manila month. Only unresolved,
   // above-green flags surface — a clean record shows no banner — and the worst
@@ -258,7 +265,10 @@ export function TimeClockPanel() {
         </p>
 
         <p className="mt-3 text-sm text-white/70">
-          {state === "not_clocked_in" && "You haven't clocked in yet today."}
+          {state === "not_clocked_in" &&
+            (tooEarly
+              ? `Your shift starts at ${format12Hour(opensAt)} — you can time in from then.`
+              : "You haven't clocked in yet today.")}
           {state === "clocked_in" && `Clocked in at ${formatTimeManila(today?.time_in)}.`}
           {state === "on_lunch" && "You're on your lunch break."}
           {state === "on_break" && "You're on a short break."}
@@ -270,8 +280,9 @@ export function TimeClockPanel() {
             easy mis-tap when the two do very different things. */}
         <div className="mt-5 grid gap-3 sm:flex sm:flex-wrap sm:gap-2">
           <button
-            disabled={busy || state !== "not_clocked_in"}
+            disabled={busy || state !== "not_clocked_in" || tooEarly}
             onClick={() => setConfirm("time_in")}
+            title={tooEarly ? `Opens at ${format12Hour(opensAt)}` : undefined}
             className="rounded-lg bg-brand px-4 py-3 sm:py-2 text-sm font-semibold text-brand-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             Time in

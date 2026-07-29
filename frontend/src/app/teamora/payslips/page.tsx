@@ -9,6 +9,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  Paperclip,
 } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
@@ -37,9 +38,12 @@ import {
 import { PayrollInquiryDialog } from "@/modules/hr/components/payroll-inquiry-dialog";
 import { PayslipDocument } from "@/modules/hr/components/payslip-document";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
-import { SimpleSelect } from "@/modules/hr/ui/select";
+import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
 import type { PayslipSummary } from "@/modules/hr/types/payroll";
 import type { PayslipRequest } from "@/modules/hr/types/request";
+
+// Fixed rows per page — deliberately not user-selectable (see DataTable).
+const PAGE_SIZE = 10;
 
 function cycleLabel(start: string, end: string) {
   return `${formatDate(start)} – ${formatDate(end)}`;
@@ -87,15 +91,17 @@ export default function PayslipsPage() {
 
   const { data: inquiries } = useMyPayrollInquiries();
   const [inqPage, setInqPage] = useState(1);
-  const [inqSize, setInqSize] = useState(5);
+  // By id, then read back from the live list, so the modal picks up HR's reply
+  // if it lands while the employee has it open.
+  const [inqDetailId, setInqDetailId] = useState<number | null>(null);
 
   const inquiryList = inquiries ?? [];
-  const inqPageSizes = [5, 10, 20, 50];
-  const inqTotalPages = Math.max(1, Math.ceil(inquiryList.length / inqSize));
+  const inqDetail = inquiryList.find((q) => q.id === inqDetailId) ?? null;
+  const inqTotalPages = Math.max(1, Math.ceil(inquiryList.length / PAGE_SIZE));
   const inqSafePage = Math.min(inqPage, inqTotalPages);
   const pagedInquiries = useMemo(
-    () => inquiryList.slice((inqSafePage - 1) * inqSize, inqSafePage * inqSize),
-    [inquiryList, inqSafePage, inqSize],
+    () => inquiryList.slice((inqSafePage - 1) * PAGE_SIZE, inqSafePage * PAGE_SIZE),
+    [inquiryList, inqSafePage],
   );
 
   return (
@@ -183,7 +189,19 @@ export default function PayslipsPage() {
           <h2 className="mb-3 text-h3 font-bold text-foreground">My Inquiries</h2>
           <div className="divide-y divide-border">
             {pagedInquiries.map((q) => (
-              <div key={q.id} className="py-3">
+              <div
+                key={q.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setInqDetailId(q.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setInqDetailId(q.id);
+                  }
+                }}
+                className="cursor-pointer py-3 transition-colors hover:bg-muted/40"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-foreground">
@@ -204,19 +222,11 @@ export default function PayslipsPage() {
               </div>
             ))}
           </div>
-          {inquiryList.length > inqSize && (
+          {inquiryList.length > PAGE_SIZE && (
             <div className="-mx-6 -mb-6 flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-              <div className="flex items-center gap-2 text-caption text-muted-foreground">
-                <span>Rows per page</span>
-                <SimpleSelect
-                  className="h-7 w-16"
-                  value={String(inqSize)}
-                  onValueChange={(v) => { setInqSize(Number(v)); setInqPage(1); }}
-                  options={inqPageSizes.map((n) => ({ value: String(n), label: String(n) }))}
-                />
-                <span className="hidden sm:inline">
-                  · Showing {(inqSafePage - 1) * inqSize + 1}–{Math.min(inqSafePage * inqSize, inquiryList.length)} of {inquiryList.length}
-                </span>
+              <div className="text-caption text-muted-foreground">
+                Showing {(inqSafePage - 1) * PAGE_SIZE + 1}–
+                {Math.min(inqSafePage * PAGE_SIZE, inquiryList.length)} of {inquiryList.length}
               </div>
 
               <div className="flex items-center gap-1">
@@ -262,6 +272,70 @@ export default function PayslipsPage() {
         title="Hard-copy request declined"
         reason={declinedCopy?.review_note ?? null}
       />
+
+      {inqDetail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setInqDetailId(null)}
+          title={inqDetail.subject || inqDetail.topic || "Payroll inquiry"}
+          status={inqDetail.status}
+          submitted={inqDetail.created_at}
+          fields={[
+            { label: "Pay period", value: inqDetail.payslip_cycle ?? "Not specific" },
+            { label: "Topic", value: inqDetail.topic },
+            {
+              label: "Priority",
+              value:
+                inqDetail.priority === "high" ? (
+                  <span className="font-semibold text-danger">High</span>
+                ) : (
+                  <span className="capitalize">{inqDetail.priority}</span>
+                ),
+            },
+          ]}
+          note={{ label: "What you asked", text: inqDetail.message }}
+          decision={{
+            label: "HR's reply",
+            by: inqDetail.resolved_by,
+            at: inqDetail.resolved_at,
+            note: inqDetail.resolution_note,
+          }}
+        >
+          {inqDetail.attachment_url && (
+            <a
+              href={inqDetail.attachment_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+            >
+              <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+              The file you attached
+            </a>
+          )}
+          {inqDetail.resolution_attachments.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                Attached by HR ({inqDetail.resolution_attachments.length})
+              </p>
+              <ul className="space-y-1">
+                {inqDetail.resolution_attachments.map((a, i) => (
+                  <li key={i}>
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{a.name}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </RequestDetailDialog>
+      )}
     </div>
   );
 }

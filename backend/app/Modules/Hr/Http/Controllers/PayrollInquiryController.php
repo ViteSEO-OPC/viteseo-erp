@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StorePayrollInquiryRequest;
 use App\Modules\Hr\Http\Resources\PayrollInquiryResource;
 use App\Modules\Hr\Models\PayrollInquiry;
@@ -57,6 +58,15 @@ class PayrollInquiryController extends Controller
                 $data['note'],
                 $request->file('attachments', []),
             ),
+        )->response();
+    }
+
+    // POST /hr/payroll-inquiries/{payrollInquiry}/reopen — HR only: step the status back
+    // (done → in progress, in progress → pending). A resolution note is discarded.
+    public function reopen(ReopenRequest $request, PayrollInquiry $payrollInquiry): JsonResponse
+    {
+        return PayrollInquiryResource::make(
+            $this->service->reopen($payrollInquiry, $request->validated('reason')),
         )->response();
     }
 }
