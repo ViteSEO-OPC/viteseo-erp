@@ -157,7 +157,9 @@ export function AttendanceAdjustDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg">
+      {/* Wider from lg up so the violation-history table's Details column has room;
+          phone/tablet keep the narrow dialog. */}
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg lg:max-w-4xl">
         {/* Keyed so state re-initialises from a fresh row (Radix unmounts on close). */}
         {row && (
           <Details
