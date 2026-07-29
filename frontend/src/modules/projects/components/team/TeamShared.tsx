@@ -15,6 +15,7 @@ import {
   ChevronRightIcon,
   FilterIcon,
 } from "@/core/ui";
+import { CountBubble } from "../shared/Pills";
 import { GroupWorkloadBadge, UserWorkloadBadge } from "../tasks/shared";
 
 export const PAGE_SIZE = 8;
@@ -30,17 +31,18 @@ export function roleLabel(role?: UserRole): string {
  * Role pill. Admin renders as a soft red badge; PM/Member render as an
  * outlined teal badge (per the Figma "Team" design). The Badge component
  * upper-cases the label for us.
+ *
+ * Only the colours are overridden — size, radius and type come from `Badge`,
+ * so this sits at the same height as every other pill in the row (workload,
+ * effort, member count). Base `Badge` already carries a transparent border, so
+ * the outline here doesn't change the box.
  */
 export function RoleBadge({ role }: { role?: UserRole }) {
   if (role === "Admin") {
-    return (
-      <Badge tone="danger" className="rounded-full px-2.5 py-1">
-        Admin
-      </Badge>
-    );
+    return <Badge tone="danger">Admin</Badge>;
   }
   return (
-    <Badge className="rounded-full border border-brand bg-white px-2.5 py-1 text-[#0f8f8b]">
+    <Badge className="border-brand bg-white text-[#0f8f8b]">
       {roleLabel(role)}
     </Badge>
   );
@@ -156,9 +158,7 @@ export function TeamFilterPopover({
         <FilterIcon className="h-4 w-4" />
         Filters
         {activeCount > 0 && (
-          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0f766e] px-1 text-xs font-bold text-white">
-            {activeCount}
-          </span>
+          <CountBubble>{activeCount}</CountBubble>
         )}
         <ChevronDownIcon className="ml-auto h-4 w-4 sm:ml-0" />
       </button>
@@ -519,7 +519,7 @@ export function GroupCard({ group }: { group: Group }) {
         </h3>
         <div className="flex shrink-0 items-center gap-2">
           <GroupWorkloadBadge groupId={group.id} />
-          <Badge className="rounded-full bg-ink px-2.5 py-1 text-white">
+          <Badge className="bg-ink text-white">
             {group.members_count ?? group.members?.length ?? 0} members
           </Badge>
         </div>

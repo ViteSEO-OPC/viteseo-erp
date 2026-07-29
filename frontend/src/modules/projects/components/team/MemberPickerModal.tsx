@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { User } from '@/core/types';
 import { Avatar, Button, ConfirmDialog, Input, Modal, SearchIcon } from '@/core/ui';
+import { GroupPill } from '../shared/Pills';
 import { MemberGroupTags, type GroupTag } from './TeamShared';
 
 /**
@@ -168,17 +169,7 @@ export function MemberPickerModal({
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-soft">Groups</p>
             <div className="flex flex-wrap gap-2">
               {completeGroups.map((g) => (
-                <span
-                  key={g.id}
-                  title={`Every member of ${g.name} is on this project`}
-                  className="inline-flex items-center gap-2 rounded-full border border-brand bg-brand/15 px-4 py-1.5 text-sm font-semibold text-ink"
-                >
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: g.color }}
-                  />
-                  {g.name}
-                </span>
+                <GroupPill key={g.id} name={g.name} color={g.color} />
               ))}
             </div>
           </div>

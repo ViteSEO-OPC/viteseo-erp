@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@/core/types";
 import { AvatarStack, Card, PriorityBadge } from "@/core/ui";
+import { ProjectPill } from "../shared/Pills";
 import { isOverdue, OverdueBadge } from "../../overdue";
 import { useProjects, useUsers, useWorkspaceTasks } from "../../hooks";
 import type { Project, Task } from "../../types";
@@ -254,16 +255,11 @@ export function DashboardTaskTable({
               onClick={() => onOpen(t.id)}
               className="grid w-full grid-cols-[180px_1fr_100px_140px_100px] items-center gap-4 px-5 py-3.5 text-left transition-colors hover:bg-black/[0.02]"
             >
-              <span className="flex items-center">
-                <span
-                  className="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-bold"
-                  style={{
-                    backgroundColor: `${projectColor.get(t.project_id) ?? "#6366f1"}15`,
-                    color: projectColor.get(t.project_id) ?? "#6366f1",
-                  }}
-                >
-                  {projectName.get(t.project_id) ?? "—"}
-                </span>
+              <span className="flex min-w-0 items-center">
+                <ProjectPill
+                  name={projectName.get(t.project_id) ?? "—"}
+                  color={projectColor.get(t.project_id)}
+                />
               </span>
               <span className="min-w-0 truncate font-medium text-ink">
                 {t.title}
@@ -325,16 +321,13 @@ export function DashboardTaskTable({
             className="w-full rounded-xl border border-line bg-surface p-4 text-left transition-colors hover:bg-black/[0.02]"
           >
             <div className="flex items-start justify-between gap-3">
-              <span
-                className="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-bold"
-                style={{
-                  backgroundColor: `${projectColor.get(t.project_id) ?? "#6366f1"}15`,
-                  color: projectColor.get(t.project_id) ?? "#6366f1",
-                }}
-              >
-                {projectName.get(t.project_id) ?? "—"}
+              <ProjectPill
+                name={projectName.get(t.project_id) ?? "—"}
+                color={projectColor.get(t.project_id)}
+              />
+              <span className="shrink-0">
+                <PriorityBadge priority={t.priority} />
               </span>
-              <PriorityBadge priority={t.priority} />
             </div>
             <p className="mt-2 font-medium text-ink">{t.title}</p>
             <div className="mt-3 flex flex-wrap items-center gap-3">

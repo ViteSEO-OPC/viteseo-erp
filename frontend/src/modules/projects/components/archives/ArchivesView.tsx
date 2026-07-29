@@ -59,11 +59,7 @@ function fmtDate(iso: string | null | undefined): string {
 /** Status pill shared by the task / subtask tables. */
 function StatusPill({ name }: { name?: string | null }) {
   if (!name) return <span className="text-ink-soft">—</span>;
-  return (
-    <span className="inline-flex items-center rounded-full bg-black/5 px-2.5 py-0.5 text-xs font-semibold text-ink-soft">
-      {name}
-    </span>
-  );
+  return <Badge>{name}</Badge>;
 }
 
 /** Query state passed from the page down into whichever tab is mounted. */

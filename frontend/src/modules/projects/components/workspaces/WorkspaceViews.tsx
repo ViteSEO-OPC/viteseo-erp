@@ -19,6 +19,7 @@ import {
   SegmentedItem,
   Select,
 } from "@/core/ui";
+import { CountBubble } from "../shared/Pills";
 import { projectsApi } from "../../api";
 import type { NoteTarget } from "../../notes/types";
 import {
@@ -539,9 +540,7 @@ function FilterPopover({
         <FilterIcon className="h-4 w-4" />
         Filters
         {activeCount > 0 && (
-          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0f766e] px-1 text-xs font-bold text-white">
-            {activeCount}
-          </span>
+          <CountBubble>{activeCount}</CountBubble>
         )}
         <ChevronDownIcon className="h-4 w-4" />
       </button>
