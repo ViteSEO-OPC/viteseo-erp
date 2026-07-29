@@ -83,8 +83,7 @@ export default function ClaimsPage() {
                 columns={columns}
                 rows={all}
                 rowKey={(c) => c.id}
-                pageSize={6}
-                pageSizeOptions={[6, 12, 24, 48]}
+                pageSize={10}
                 onRowClick={(c) => {
                   if (c.status === "rejected") setDeclined(c);
                 }}

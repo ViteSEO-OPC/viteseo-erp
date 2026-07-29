@@ -177,8 +177,8 @@ export function EmployeeRecord({
               <Detail label="Department" value={employee.department?.name} />
               <Detail label="Manager" value={employee.manager?.name ?? "—"} />
               <Detail
-                label="Type"
-                value={employee.employment_type ?? statusLabel(employee.employment_status)}
+                label="Employment status"
+                value={statusLabel(employee.employment_status)}
               />
               <Detail label="Location" value={employee.work_location} />
               <Detail label="Start date" value={formatDate(employee.hire_date)} />

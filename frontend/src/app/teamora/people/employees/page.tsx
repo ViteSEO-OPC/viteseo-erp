@@ -17,6 +17,10 @@ import {
 } from "@/modules/hr/types/employee";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
+// Fixed page size (12 fills the 1/2/3-column card grid evenly). Deliberately not
+// user-selectable — see the note in DataTable.
+const PAGE_SIZE = 12;
+
 export default function EmployeesPage() {
   const { data: employees, isLoading, isError } = useEmployees();
   const { data: departments } = useDepartments();
@@ -26,7 +30,6 @@ export default function EmployeesPage() {
   const [status, setStatus] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(12);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -42,8 +45,8 @@ export default function EmployeesPage() {
     });
   }, [employees, search, dept, status]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const pagesToShow: (number | "ellipsis")[] = (() => {
     const result: (number | "ellipsis")[] = [];
     for (let i = 1; i <= totalPages; i++) {
@@ -123,14 +126,9 @@ export default function EmployeesPage() {
             {/* Pagination */}
             {totalPages > 1 && (
               <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-caption text-muted-foreground">
-                  <span>Cards per page</span>
-                  <SimpleSelect
-                    className="h-7 w-16"
-                    value={String(pageSize)}
-                    onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}
-                    options={[6, 12, 24, 48].map((n) => ({ value: String(n), label: String(n) }))}
-                  />
+                <div className="text-caption text-muted-foreground">
+                  Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of{" "}
+                  {filtered.length}
                 </div>
                 <div className="flex items-center gap-1">
                   <button

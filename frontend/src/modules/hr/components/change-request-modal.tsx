@@ -19,7 +19,14 @@ import {
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
 import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { manilaToday } from "@/modules/hr/lib/manila-date";
 import { CHANGE_FIELDS } from "@/modules/hr/types/request";
+import {
+  GENDERS,
+  CIVIL_STATUSES,
+  BANK_ACCOUNT_TYPES,
+} from "@/modules/hr/types/employee";
 import {
   useCreateChangeRequest,
   useMyChangeRequests,
@@ -28,6 +35,15 @@ import {
 type Row = { field: string; value: string };
 
 const newRow = (): Row => ({ field: CHANGE_FIELDS[0].value, value: "" });
+
+// Fields that deserve a real control rather than free text, so the value HR
+// receives is already in the shape the employee record expects.
+const DATE_FIELDS = new Set<string>(["date_of_birth"]);
+const OPTION_FIELDS: Record<string, readonly string[]> = {
+  gender: GENDERS,
+  civil_status: CIVIL_STATUSES,
+  bank_account_type: BANK_ACCOUNT_TYPES,
+};
 
 /**
  * Employee self-service: request changes to several personal/bank fields at once.
@@ -100,7 +116,9 @@ export function ChangeRequestModal({
                 <div className="flex items-center gap-2">
                   <SimpleSelect
                     value={r.field}
-                    onValueChange={(v) => update(i, { field: v })}
+                    // Clear the value too: a date or option value means nothing
+                    // once the field it belonged to has changed.
+                    onValueChange={(v) => update(i, { field: v, value: "" })}
                     options={CHANGE_FIELDS.map((f) => ({ value: f.value, label: f.label }))}
                   />
                   <button
@@ -115,12 +133,29 @@ export function ChangeRequestModal({
                 <p className="mt-2 text-caption text-muted-foreground">
                   Current: <span className="text-foreground">{currentValue(r.field)}</span>
                 </p>
-                <Input
-                  className="mt-2"
-                  placeholder="New value"
-                  value={r.value}
-                  onChange={(e) => update(i, { value: e.target.value })}
-                />
+                <div className="mt-2">
+                  {DATE_FIELDS.has(r.field) ? (
+                    <DatePicker
+                      value={r.value}
+                      onChange={(v) => update(i, { value: v })}
+                      max={manilaToday()}
+                      placeholder="Pick the new date"
+                    />
+                  ) : OPTION_FIELDS[r.field] ? (
+                    <SimpleSelect
+                      value={r.value}
+                      onValueChange={(v) => update(i, { value: v })}
+                      placeholder="Select the new value"
+                      options={OPTION_FIELDS[r.field].map((o) => ({ value: o, label: o }))}
+                    />
+                  ) : (
+                    <Input
+                      placeholder="New value"
+                      value={r.value}
+                      onChange={(e) => update(i, { value: e.target.value })}
+                    />
+                  )}
+                </div>
               </div>
             ))}
           </div>

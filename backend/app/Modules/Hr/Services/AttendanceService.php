@@ -151,6 +151,46 @@ class AttendanceService
         }
     }
 
+    /**
+     * When today's shift opens for clocking in, or null when nothing holds the employee
+     * back. Null for three distinct reasons, all of which must stay permissive:
+     * strict mode is off; today isn't one of their workdays (there is no shift to be
+     * early for); or the schedule has no start time at all — FALLBACK_START is a guess,
+     * and a guess must never lock someone out of their own time clock.
+     *
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
+     */
+    private function clockInOpensAt(array $eff, Carbon $local): ?Carbon
+    {
+        if (! $this->policy->get()->block_early_clock_in) {
+            return null;
+        }
+
+        if (! ($eff['is_workday'] ?? false) || ($eff['start_time'] ?? null) === null) {
+            return null;
+        }
+
+        return $this->scheduleStart($local, $eff);
+    }
+
+    /**
+     * What the employee's time clock needs to know about today beyond their own row.
+     * Computed here rather than in the panel so the strict rule has exactly one reader —
+     * a client that re-derived it could offer a button the server would refuse.
+     *
+     * @return array{strict: bool, opens_at: ?string}  opens_at is Manila "HH:MM"
+     */
+    public function clockInWindowFor(Employee $employee): array
+    {
+        $local = $this->localNow();
+        $eff = $this->schedule->effectiveFor($employee, $local);
+
+        return [
+            'strict' => (bool) $this->policy->get()->block_early_clock_in,
+            'opens_at' => $this->clockInOpensAt($eff, $local)?->format('H:i'),
+        ];
+    }
+
     public function clockIn(Employee $employee): Attendance
     {
         $this->assertNotManagement($employee);
@@ -182,6 +222,18 @@ class AttendanceService
         // Lateness is measured against the employee's EFFECTIVE schedule (start +
         // grace), resolved from override → assigned → default — not a fixed cutoff.
         $eff = $this->schedule->effectiveFor($employee, $local);
+
+        // Strict clock-in (Company → Rules): the shift can't be started before it begins.
+        $opensAt = $this->clockInOpensAt($eff, $local);
+        if ($opensAt && $local->lt($opensAt)) {
+            throw ValidationException::withMessages([
+                'time_in' => [
+                    'Your shift starts at ' . $opensAt->format('g:i A')
+                        . ' — you can clock in from then. Ask HR if you need to start earlier.',
+                ],
+            ]);
+        }
+
         $cutoff = $this->scheduleStart($local, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
 
         $att->time_in = now(); // stored UTC
@@ -626,6 +678,10 @@ class AttendanceService
                     'time_out' => $att?->time_out,
                     'first_in' => $att?->time_in,
                     'last_out' => $att?->time_out,
+                    // Lunch is unpaid, so it's part of how hours_worked was reached —
+                    // HR's correction dialog needs it to show the same figure.
+                    'lunch_minutes' => (int) ($att?->lunch_minutes ?? 0),
+                    'break_minutes' => (int) ($att?->break_minutes ?? 0),
                     'hours_worked' => $att ? (float) $att->hours_worked : 0,
                     'status' => $status,
                     // Slice 16 — lets the UI show HR that this status was set by hand.

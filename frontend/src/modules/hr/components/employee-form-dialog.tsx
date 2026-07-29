@@ -41,7 +41,6 @@ import {
   EMPLOYMENT_STATUSES,
   GENDERS,
   CIVIL_STATUSES,
-  JOB_TYPES,
   PAY_FREQUENCIES,
   BANK_ACCOUNT_TYPES,
   SALARY_CHANGE_TYPES,
@@ -52,6 +51,7 @@ import {
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { TimePicker } from "@/modules/hr/ui/time-picker";
+import { manilaToday } from "@/modules/hr/lib/manila-date";
 
 const ROLE_CHANGE_TYPES = [
   { value: "promotion", label: "Promotion" },
@@ -95,7 +95,6 @@ const schema = z.object({
   manager_id: z.string(),
   job_title: z.string().min(1, "Job title is required"),
   employment_status: z.string().min(1),
-  employment_type: z.string(),
   work_location: z.string(),
   employee_role: z.string(),
   hire_date: z.string().min(1, "Hire date is required"),
@@ -135,7 +134,7 @@ const EMPTY: FormValues = {
   fathers_name: "", siblings_name: "", high_school: "", college_course: "",
   university: "", emergency_contact_name: "", emergency_contact_relationship: "",
   emergency_contact_phone: "", department_id: "", manager_id: "", job_title: "",
-  employment_status: "regular", employment_type: "", work_location: "", employee_role: "",
+  employment_status: "regular", work_location: "", employee_role: "",
   hire_date: "", base_salary: "", is_management: false, bank_name: "",
   bank_account: "", height: "", weight: "", health_condition: "",
   pay_frequency: "semi_monthly", currency: "PHP", bank_account_type: "",
@@ -213,7 +212,6 @@ export function EmployeeFormDialog({
             manager_id: employee.manager ? String(employee.manager.id) : "",
             job_title: employee.job_title,
             employment_status: employee.employment_status,
-            employment_type: employee.employment_type ?? "",
             work_location: employee.work_location ?? "",
             employee_role: employee.employee_role ?? "",
             hire_date: employee.hire_date,
@@ -257,7 +255,6 @@ export function EmployeeFormDialog({
       manager_id: v.manager_id ? Number(v.manager_id) : null,
       job_title: v.job_title,
       employment_status: v.employment_status,
-      employment_type: s(v.employment_type),
       work_location: s(v.work_location),
       employee_role: s(v.employee_role),
       hire_date: v.hire_date,
@@ -413,7 +410,11 @@ export function EmployeeFormDialog({
                   control={control}
                   name="date_of_birth"
                   render={({ field }) => (
-                    <DatePicker value={field.value} onChange={field.onChange} />
+                    <DatePicker
+                      value={field.value}
+                      onChange={field.onChange}
+                      max={manilaToday()}
+                    />
                   )}
                 />
               </Field>
@@ -510,20 +511,6 @@ export function EmployeeFormDialog({
                         value={field.value}
                         onValueChange={field.onChange}
                         options={EMPLOYMENT_STATUSES.map((st) => ({ value: st, label: statusLabel(st) }))}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label="Type">
-                  <Controller
-                    control={control}
-                    name="employment_type"
-                    render={({ field }) => (
-                      <SimpleSelect
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        placeholder="Select…"
-                        options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
                       />
                     )}
                   />

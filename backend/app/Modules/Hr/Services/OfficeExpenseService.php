@@ -34,7 +34,7 @@ class OfficeExpenseService
             'recorded_by' => Auth::id(),
         ]);
 
-        $this->audit->log('office_expense.created', $expense);
+        $this->audit->log('created', 'Office Expenses', $this->describe($expense, 'Recorded'), $expense);
 
         return $expense->load('recorder');
     }
@@ -50,6 +50,8 @@ class OfficeExpenseService
             'vendor' => $data['vendor'] ?? null,
             'receipt_path' => $receipt ? $receipt->store('office-expenses', 'public') : $expense->receipt_path,
         ]);
+
+        $this->audit->log('updated', 'Office Expenses', $this->describe($expense, 'Updated'), $expense);
 
         return $expense->load(['recorder', 'reviewer']);
     }
@@ -84,8 +86,19 @@ class OfficeExpenseService
             'reviewed_at' => now(),
         ]);
 
-        $this->audit->log("office_expense.{$status}", $expense);
+        $this->audit->log(
+            $status === 'approved' ? 'approved' : 'declined',
+            'Office Expenses',
+            $this->describe($expense, $status === 'approved' ? 'Approved' : 'Declined'),
+            $expense,
+        );
 
         return $expense->load(['recorder', 'reviewer']);
+    }
+
+    /** Audit-trail line for an expense, e.g. "Recorded a supplies expense — ₱1,200.00". */
+    private function describe(OfficeExpense $expense, string $verb): string
+    {
+        return "{$verb} a {$expense->category} expense — ₱" . number_format((float) $expense->amount, 2);
     }
 }

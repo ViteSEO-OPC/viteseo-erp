@@ -26,8 +26,12 @@ class EmployeeService
 {
     public function __construct(private readonly AuditService $audit) {}
 
-    /** Allowed employment statuses (also enforced in the Form Requests). */
-    public const STATUSES = ['regular', 'probationary', 'contract', 'part_time'];
+    /**
+     * Allowed employment statuses (also enforced in the Form Requests). Leave
+     * allotments are keyed on these — adding one here means every leave type needs
+     * an allotment row for it (see AddProjectBasedAndOjtLeaveAllotments migration).
+     */
+    public const STATUSES = ['regular', 'probationary', 'contract', 'part_time', 'project_based', 'ojt'];
 
     /**
      * Editable profile columns on hr_employees (everything except the identity

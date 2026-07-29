@@ -111,7 +111,7 @@ export function AuditReport() {
         ) : isError || !report ? (
           <p className="text-sm text-destructive">Could not load this report.</p>
         ) : (
-          <DataTable columns={columns} rows={entries} rowKey={(_e, i) => i} pageSize={15} empty="No activity in this period." />
+          <DataTable columns={columns} rows={entries} rowKey={(_e, i) => i} pageSize={10} empty="No activity in this period." />
         )}
       </div>
     </div>

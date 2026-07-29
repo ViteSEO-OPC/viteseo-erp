@@ -37,9 +37,11 @@ import {
 import { PayrollInquiryDialog } from "@/modules/hr/components/payroll-inquiry-dialog";
 import { PayslipDocument } from "@/modules/hr/components/payslip-document";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
-import { SimpleSelect } from "@/modules/hr/ui/select";
 import type { PayslipSummary } from "@/modules/hr/types/payroll";
 import type { PayslipRequest } from "@/modules/hr/types/request";
+
+// Fixed rows per page — deliberately not user-selectable (see DataTable).
+const PAGE_SIZE = 10;
 
 function cycleLabel(start: string, end: string) {
   return `${formatDate(start)} – ${formatDate(end)}`;
@@ -87,15 +89,13 @@ export default function PayslipsPage() {
 
   const { data: inquiries } = useMyPayrollInquiries();
   const [inqPage, setInqPage] = useState(1);
-  const [inqSize, setInqSize] = useState(5);
 
   const inquiryList = inquiries ?? [];
-  const inqPageSizes = [5, 10, 20, 50];
-  const inqTotalPages = Math.max(1, Math.ceil(inquiryList.length / inqSize));
+  const inqTotalPages = Math.max(1, Math.ceil(inquiryList.length / PAGE_SIZE));
   const inqSafePage = Math.min(inqPage, inqTotalPages);
   const pagedInquiries = useMemo(
-    () => inquiryList.slice((inqSafePage - 1) * inqSize, inqSafePage * inqSize),
-    [inquiryList, inqSafePage, inqSize],
+    () => inquiryList.slice((inqSafePage - 1) * PAGE_SIZE, inqSafePage * PAGE_SIZE),
+    [inquiryList, inqSafePage],
   );
 
   return (
@@ -204,19 +204,11 @@ export default function PayslipsPage() {
               </div>
             ))}
           </div>
-          {inquiryList.length > inqSize && (
+          {inquiryList.length > PAGE_SIZE && (
             <div className="-mx-6 -mb-6 flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-              <div className="flex items-center gap-2 text-caption text-muted-foreground">
-                <span>Rows per page</span>
-                <SimpleSelect
-                  className="h-7 w-16"
-                  value={String(inqSize)}
-                  onValueChange={(v) => { setInqSize(Number(v)); setInqPage(1); }}
-                  options={inqPageSizes.map((n) => ({ value: String(n), label: String(n) }))}
-                />
-                <span className="hidden sm:inline">
-                  · Showing {(inqSafePage - 1) * inqSize + 1}–{Math.min(inqSafePage * inqSize, inquiryList.length)} of {inquiryList.length}
-                </span>
+              <div className="text-caption text-muted-foreground">
+                Showing {(inqSafePage - 1) * PAGE_SIZE + 1}–
+                {Math.min(inqSafePage * PAGE_SIZE, inquiryList.length)} of {inquiryList.length}
               </div>
 
               <div className="flex items-center gap-1">

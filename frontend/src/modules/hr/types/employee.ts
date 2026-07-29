@@ -18,7 +18,6 @@ export interface Employee {
 
   job_title: string;
   employment_status: string;
-  employment_type: string | null;
   work_location: string | null;
   employee_role: string | null;
   onboarding_status: "pending" | "complete" | null;
@@ -116,7 +115,6 @@ export interface EmployeeInput {
   height?: string;
   weight?: string;
   health_condition?: string;
-  employment_type?: string;
   work_location?: string;
   employee_role?: string;
   pay_frequency?: string;
@@ -142,15 +140,6 @@ export interface EmployeeInput {
 
 export const GENDERS = ["Male", "Female", "Other", "Prefer not to say"] as const;
 export const CIVIL_STATUSES = ["Single", "Married", "Widowed", "Separated", "Divorced"] as const;
-export const JOB_TYPES = [
-  "Full-time Regular",
-  "Full-time Probationary",
-  "Part-time",
-  "Contract",
-  "Project-based",
-  "Internship/OJT",
-] as const;
-
 export const PAY_FREQUENCIES = [
   { value: "monthly", label: "Monthly" },
   { value: "semi_monthly", label: "Semi-monthly" },
@@ -207,17 +196,34 @@ export interface SalaryHistoryEntry {
   changed_by: string | null;
 }
 
+// Mirrors the backend EmployeeService::STATUSES. This is the single employment
+// classification on the record — leave allotments and benefits eligibility are
+// keyed on it, and the Job tab shows it.
 export const EMPLOYMENT_STATUSES = [
   "regular",
   "probationary",
   "contract",
   "part_time",
+  "project_based",
+  "ojt",
 ] as const;
 
-/** Prettify an employment_status for display, e.g. part_time -> "Part Time". */
+const STATUS_LABELS: Record<string, string> = {
+  regular: "Regular",
+  probationary: "Probationary",
+  contract: "Contract",
+  part_time: "Part-time",
+  project_based: "Project-based",
+  ojt: "Internship/OJT",
+};
+
+/** Display label for an employment_status, e.g. part_time -> "Part-time". */
 export function statusLabel(status: string): string {
-  return status
-    .split("_")
-    .map((w) => w[0]?.toUpperCase() + w.slice(1))
-    .join(" ");
+  return (
+    STATUS_LABELS[status] ??
+    status
+      .split("_")
+      .map((w) => w[0]?.toUpperCase() + w.slice(1))
+      .join(" ")
+  );
 }

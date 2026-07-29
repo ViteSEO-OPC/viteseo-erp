@@ -27,9 +27,11 @@ import {
 import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
 import { useEarlyOutRequests } from "@/modules/hr/hooks/use-early-out";
 import { useOvertimeRequests } from "@/modules/hr/hooks/use-overtime";
-import { SimpleSelect } from "@/modules/hr/ui/select";
 
 type RequestTab = "leave" | "half" | "early" | "overtime";
+
+// Fixed rows per page — deliberately not user-selectable (see DataTable).
+const PAGE_SIZE = 10;
 
 const REQUEST_TITLES: Record<RequestTab, string> = {
   leave: "Request Leave",
@@ -111,7 +113,6 @@ export default function TimeOffPage() {
   const [declined, setDeclined] = useState<HistItem | null>(null);
   const [cancelTarget, setCancelTarget] = useState<HistItem | null>(null);
   const [page, setPage] = useState(1);
-  const [size, setSize] = useState(6);
 
   const mode = summary?.mode ?? "not_shared";
   const balances = useMemo(() => summary?.balances ?? [], [summary]);
@@ -195,12 +196,11 @@ export default function TimeOffPage() {
     })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
-  const pageSizes = [6, 12, 24, 48];
-  const totalPages = Math.max(1, Math.ceil(history.length / size));
+  const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageHistory = useMemo(
-    () => history.slice((safePage - 1) * size, safePage * size),
-    [history, safePage, size],
+    () => history.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [history, safePage],
   );
 
   async function handleCancel(reason: string) {
@@ -346,17 +346,9 @@ export default function TimeOffPage() {
             </div>
             {history.length > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-                <div className="flex items-center gap-2 text-caption text-muted-foreground">
-                  <span>Rows per page</span>
-                  <SimpleSelect
-                    className="h-7 w-16"
-                    value={String(size)}
-                    onValueChange={(v) => { setSize(Number(v)); setPage(1); }}
-                    options={pageSizes.map((n) => ({ value: String(n), label: String(n) }))}
-                  />
-                  <span className="hidden sm:inline">
-                    · Showing {(safePage - 1) * size + 1}–{Math.min(safePage * size, history.length)} of {history.length}
-                  </span>
+                <div className="text-caption text-muted-foreground">
+                  Showing {(safePage - 1) * PAGE_SIZE + 1}–
+                  {Math.min(safePage * PAGE_SIZE, history.length)} of {history.length}
                 </div>
 
                 <div className="flex items-center gap-1">
