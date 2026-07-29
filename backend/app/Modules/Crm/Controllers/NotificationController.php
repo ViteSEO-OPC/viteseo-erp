@@ -44,10 +44,18 @@ class NotificationController extends Controller
         return response()->json(['ok' => true]);
     }
 
-    /** Mark every unread notification for the current user read. */
+    /**
+     * Mark every unread notification for the current user read.
+     *
+     * One UPDATE against the scoped relation. The previous form read the
+     * `unreadNotifications` PROPERTY, which hydrates every unread row into memory
+     * to call markAsRead() on each — invisible at twenty notifications, a full
+     * table-of-models load at five thousand. The relation still bounds it to the
+     * caller, so the ownership guarantee is unchanged.
+     */
     public function markAllAsRead(Request $request): JsonResponse
     {
-        $request->user()->unreadNotifications->markAsRead();
+        $request->user()->unreadNotifications()->update(['read_at' => now()]);
 
         return response()->json(['ok' => true]);
     }
