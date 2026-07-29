@@ -2,7 +2,6 @@
 
 namespace App\Modules\Hr\Services;
 
-use App\Modules\Hr\Models\BenefitProgram;
 use App\Modules\Hr\Models\Employee;
 
 /**
@@ -21,6 +20,8 @@ use App\Modules\Hr\Models\Employee;
  */
 class AllowanceService
 {
+    public function __construct(private readonly BenefitProgramService $programs) {}
+
     /**
      * The employee's total monthly allowance. Payroll spreads this across the pay periods, so it
      * must be a MONTHLY figure regardless of how a programme is described.
@@ -38,11 +39,10 @@ class AllowanceService
      */
     public function linesFor(Employee $employee): array
     {
-        $programmes = $employee->benefitPrograms()
-            ->where('kind', 'allowance')
-            ->where('is_active', true)
-            ->orderBy('name')
-            ->get();
+        // The programmes whose RULE covers this employee today — not a stored enrolment list.
+        // A status change is therefore followed automatically, which is the drift B5 item 3 and
+        // B10 both described.
+        $programmes = $this->programs->allowancesFor($employee);
 
         $lines = [];
 
@@ -106,23 +106,4 @@ class AllowanceService
         }, 2);
     }
 
-    /**
-     * The allowance programmes a new hire should start on: active, and open to everyone.
-     *
-     * `EmployeeService::create()` seeds the statutory contribution checklist but never enrolled
-     * anyone in a benefit programme — harmless while payroll read the employee's own columns, but
-     * under Slice B1 it would have meant every new hire silently earning no allowances at all.
-     * `eligibility = 'regular'` and `'custom'` are deliberately excluded: those are HR's call.
-     *
-     * @return array<int, int>
-     */
-    public function defaultProgrammeIdsForNewHire(): array
-    {
-        return BenefitProgram::where('kind', 'allowance')
-            ->where('is_active', true)
-            ->where('eligibility', 'all')
-            ->pluck('id')
-            ->map(fn ($id) => (int) $id)
-            ->all();
-    }
 }

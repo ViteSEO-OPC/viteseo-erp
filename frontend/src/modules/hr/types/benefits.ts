@@ -52,13 +52,6 @@ export interface BenefitTier {
   employee_share: number;
 }
 
-/** Payload to assign allowances / an HMO plan to a set of employees. */
-export interface AssignBenefitsInput {
-  employee_ids: number[];
-  allowance_ids?: number[];
-  hmo?: { program_id: number; tiers: Record<number, string> };
-}
-
 export const ALLOWANCE_FREQUENCIES = [
   { value: "monthly", label: "Monthly" },
   { value: "semi_monthly", label: "Semi-monthly" },
@@ -70,11 +63,18 @@ export const TAX_TREATMENTS = [
   { value: "taxable", label: "Taxable" },
 ] as const;
 
-export const ELIGIBILITY_OPTIONS = [
+/**
+ * How an allowance decides who it covers. The first three are RULES, evaluated when payroll runs,
+ * so a promotion or a new hire is followed automatically; `custom` is a stored list of names.
+ */
+export const ELIGIBILITY_MODES = [
   { value: "all", label: "All employees" },
-  { value: "regular", label: "Regular only" },
-  { value: "custom", label: "Custom" },
+  { value: "status", label: "By employment status" },
+  { value: "management", label: "Management only" },
+  { value: "custom", label: "Specific employees" },
 ] as const;
+
+export type EligibilityMode = (typeof ELIGIBILITY_MODES)[number]["value"];
 
 export const HMO_CADENCES = [
   { value: "per_cutoff", label: "Per cutoff" },
@@ -102,7 +102,11 @@ export interface BenefitProgram {
   // Allowance config.
   frequency: string; // monthly | semi_monthly | annual
   tax_treatment: string; // de_minimis | taxable
-  eligibility: string; // all | regular | custom
+  eligibility: string; // all | status | management | custom
+  /** Only meaningful when `eligibility` is "status". */
+  eligibility_statuses: string[];
+  /** How many employees the rule covers right now — computed, not stored. */
+  covered_count: number;
   // HMO / company-plan config.
   deduction_cadence: string | null; // per_cutoff | monthly
   tiers: BenefitTier[];

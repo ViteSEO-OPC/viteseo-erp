@@ -237,7 +237,6 @@ Route::middleware('auth:sanctum')->group(function () {
         // Company → Benefits: flexible benefit-programs catalogue (HR-authored).
         Route::get('benefit-programs', [BenefitProgramController::class, 'index']);
         Route::post('benefit-programs', [BenefitProgramController::class, 'store']);
-        Route::post('benefit-programs/assign', [BenefitProgramController::class, 'assign']);
         Route::match(['put', 'patch'], 'benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'update']);
         Route::delete('benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'destroy']);
 

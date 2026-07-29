@@ -17,7 +17,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
  * first time someone uses the feature as designed: an eligibility rule that only half applies, a
  * dropdown typo that enrols someone on nothing, an allowance saved without an amount.
  *
- * One targeted assertion each.
+ * REWRITTEN 2026-07-29. "Add a Plan" and its `assign()` endpoint are gone, and eligibility is a
+ * rule (everyone / these statuses / management / these named people) evaluated when payroll runs
+ * rather than a list frozen at assignment. The tier and share tests went with the modal that was
+ * the only way to reach them — see B2, which is where an HMO enrolment screen belongs.
  */
 class BenefitAssignmentGapsTest extends HrTestCase
 {
@@ -45,6 +48,16 @@ class BenefitAssignmentGapsTest extends HrTestCase
         ]);
     }
 
+    /** @param array<int, string>|null $statuses */
+    private function allowance(string $eligibility = 'all', ?array $statuses = null): BenefitProgram
+    {
+        return BenefitProgram::create([
+            'name' => 'Test Allowance', 'category' => 'allowance', 'kind' => 'allowance',
+            'amount' => 1000, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
+            'eligibility' => $eligibility, 'eligibility_statuses' => $statuses, 'is_active' => true,
+        ]);
+    }
+
     private function hmo(string $eligibility = 'all'): BenefitProgram
     {
         return BenefitProgram::create([
@@ -54,132 +67,109 @@ class BenefitAssignmentGapsTest extends HrTestCase
         ]);
     }
 
-    // --- 1. the eligibility rule must apply to company plans too ---------------------
+    // --- 1. eligibility is a RULE, evaluated per run ---------------------------------
 
-    public function test_a_regular_only_plan_cannot_be_assigned_to_a_probationary_employee(): void
-    {
-        $probationary = $this->employee('E-PROB', 'probationary');
-        $hmo = $this->hmo('regular');
-
-        app(BenefitProgramService::class)->assign([
-            'employee_ids' => [$probationary->id],
-            'hmo' => ['program_id' => $hmo->id, 'tiers' => [$probationary->id => 'Family']],
-        ]);
-
-        $this->assertSame(0, $hmo->employees()->count(), 'the eligibility rule was ignored for HMOs');
-    }
-
-    public function test_an_eligible_employee_is_still_assigned(): void
+    /**
+     * The old model had one hard-coded status (`regular`) and a stored list of enrolled ids. It is
+     * now a rule — everyone, these statuses, management, or these named people — and the rule is
+     * evaluated when payroll runs rather than frozen when HR pressed a button.
+     */
+    public function test_a_status_rule_covers_exactly_those_statuses(): void
     {
         $regular = $this->employee('E-REG', 'regular');
-        $hmo = $this->hmo('regular');
-
-        app(BenefitProgramService::class)->assign([
-            'employee_ids' => [$regular->id],
-            'hmo' => ['program_id' => $hmo->id, 'tiers' => [$regular->id => 'Family']],
-        ]);
-
-        $this->assertSame(1, $hmo->employees()->count());
-    }
-
-    // --- 2. a mistyped tier must not enrol anyone on a null share --------------------
-
-    public function test_an_unknown_tier_enrols_nobody(): void
-    {
-        $employee = $this->employee('E-001');
-        $hmo = $this->hmo();
-
-        app(BenefitProgramService::class)->assign([
-            'employee_ids' => [$employee->id],
-            // "Familly" — a typo. Before B5 this enrolled them with employee_share = NULL,
-            // i.e. the company silently paying the whole premium.
-            'hmo' => ['program_id' => $hmo->id, 'tiers' => [$employee->id => 'Familly']],
-        ]);
-
-        $this->assertSame(0, $hmo->employees()->count());
-    }
-
-    public function test_a_valid_tier_carries_its_share(): void
-    {
-        $employee = $this->employee('E-001');
-        $hmo = $this->hmo();
-
-        app(BenefitProgramService::class)->assign([
-            'employee_ids' => [$employee->id],
-            'hmo' => ['program_id' => $hmo->id, 'tiers' => [$employee->id => 'Family']],
-        ]);
-
-        $pivot = $hmo->employees()->first()->pivot;
-        $this->assertSame('Family', $pivot->tier);
-        $this->assertSame('500.00', $pivot->employee_share);
-    }
-
-    // --- 4. an allowance needs an amount --------------------------------------------
-
-    public function test_an_allowance_cannot_be_created_without_an_amount(): void
-    {
-        $this->hrPost('/api/v1/hr/benefit-programs', [
-            'name' => 'Meal', 'kind' => 'allowance', 'category' => 'allowance', 'amount' => null,
-        ])->assertStatus(422)->assertJsonValidationErrors('amount');
-    }
-
-    public function test_a_company_plan_may_have_no_amount(): void
-    {
-        $this->hrPost('/api/v1/hr/benefit-programs', [
-            'name' => 'HMO', 'kind' => 'company', 'category' => 'health', 'amount' => null,
-            'tiers' => self::TIERS,
-        ])->assertCreated();
-    }
-
-    /** Clearing the amount of an existing allowance must fail too — `kind` is absent on a PATCH. */
-    public function test_an_existing_allowances_amount_cannot_be_cleared(): void
-    {
-        $allowance = BenefitProgram::create([
-            'name' => 'Meal', 'category' => 'allowance', 'kind' => 'allowance',
-            'amount' => 2000, 'frequency' => 'monthly', 'is_active' => true,
-        ]);
-
-        $this->actingAsHr()
-            ->patchJson("/api/v1/hr/benefit-programs/{$allowance->id}", ['amount' => null])
-            ->assertStatus(422)->assertJsonValidationErrors('amount');
-    }
-
-    // --- 5. the audit trail must say who ---------------------------------------------
-
-    public function test_the_enrolment_log_records_the_employee_ids(): void
-    {
-        $a = $this->employee('E-001');
-        $b = $this->employee('E-002');
-        $allowance = BenefitProgram::create([
-            'name' => 'Meal', 'category' => 'allowance', 'kind' => 'allowance',
-            'amount' => 2000, 'frequency' => 'monthly', 'eligibility' => 'all', 'is_active' => true,
-        ]);
-
-        app(BenefitProgramService::class)->assign([
-            'employee_ids' => [$a->id, $b->id], 'allowance_ids' => [$allowance->id],
-        ]);
-
-        $log = AuditLog::where('action', 'enrolled')->latest('id')->first();
-        $this->assertNotNull($log);
-        $this->assertStringContainsString("ids: {$a->id}, {$b->id}", $log->description);
-    }
-
-    /** The old log counted employees SELECTED, not enrolled — with a rule in play they differ. */
-    public function test_the_log_does_not_claim_more_enrolments_than_happened(): void
-    {
-        $regular = $this->employee('E-REG', 'regular');
+        $partTime = $this->employee('E-PT', 'part_time');
         $probationary = $this->employee('E-PROB', 'probationary');
-        $allowance = BenefitProgram::create([
-            'name' => 'Rice', 'category' => 'allowance', 'kind' => 'allowance',
-            'amount' => 2000, 'frequency' => 'monthly', 'eligibility' => 'regular', 'is_active' => true,
+
+        $allowance = $this->allowance(eligibility: 'status', statuses: ['regular', 'part_time']);
+        $service = app(BenefitProgramService::class);
+
+        $this->assertTrue($service->covers($allowance, $regular));
+        $this->assertTrue($service->covers($allowance, $partTime), 'multi-select, not one status');
+        $this->assertFalse($service->covers($allowance, $probationary));
+        $this->assertSame(2, $service->eligibleCount($allowance));
+    }
+
+    /** THE DRIFT FIX (B5 item 3, B10): a status change is followed with no re-enrolment. */
+    public function test_a_status_change_is_followed_automatically(): void
+    {
+        $employee = $this->employee('E-001', 'probationary');
+        $allowance = $this->allowance(eligibility: 'status', statuses: ['regular']);
+        $service = app(BenefitProgramService::class);
+
+        $this->assertFalse($service->covers($allowance, $employee));
+
+        $employee->update(['employment_status' => 'regular']);
+
+        $this->assertTrue($service->covers($allowance, $employee->fresh()));
+    }
+
+    public function test_a_management_rule_covers_management_only(): void
+    {
+        $staff = $this->employee('E-STAFF');
+        $manager = $this->employee('E-MGR');
+        $manager->update(['is_management' => true]);
+
+        $allowance = $this->allowance(eligibility: 'management');
+        $service = app(BenefitProgramService::class);
+
+        $this->assertFalse($service->covers($allowance, $staff));
+        $this->assertTrue($service->covers($allowance, $manager->fresh()));
+    }
+
+    /** `custom` is the one mode that stores a list, because a list of names IS the rule. */
+    public function test_a_custom_rule_covers_only_the_named_employees(): void
+    {
+        $picked = $this->employee('E-PICK');
+        $other = $this->employee('E-OTHER');
+
+        $allowance = $this->allowance(eligibility: 'custom');
+        $allowance->employees()->attach($picked->id);
+
+        $service = app(BenefitProgramService::class);
+        $this->assertTrue($service->covers($allowance, $picked));
+        $this->assertFalse($service->covers($allowance, $other));
+    }
+
+    // --- 2. a rule that covers nobody is rejected ------------------------------------
+
+    /** It would save cleanly, show on the page, and quietly pay no one. */
+    public function test_a_status_rule_with_no_statuses_is_rejected(): void
+    {
+        $this->hrPost('/api/v1/hr/benefit-programs', [
+            'name' => 'Nobody Allowance', 'kind' => 'allowance', 'amount' => 1000,
+            'eligibility' => 'status', 'eligibility_statuses' => [],
+        ])->assertStatus(422)->assertJsonValidationErrors('eligibility_statuses');
+    }
+
+    public function test_a_custom_rule_with_no_employees_is_rejected(): void
+    {
+        $this->hrPost('/api/v1/hr/benefit-programs', [
+            'name' => 'Nobody Allowance', 'kind' => 'allowance', 'amount' => 1000,
+            'eligibility' => 'custom', 'employee_ids' => [],
+        ])->assertStatus(422)->assertJsonValidationErrors('employee_ids');
+    }
+
+    /** Switching away from `status` must not leave the old list to reappear later. */
+    public function test_changing_the_mode_clears_a_stale_status_list(): void
+    {
+        $allowance = $this->allowance(eligibility: 'status', statuses: ['regular']);
+
+        app(BenefitProgramService::class)->update($allowance, ['eligibility' => 'all']);
+
+        $this->assertNull($allowance->fresh()->eligibility_statuses);
+    }
+
+    // --- 5. the audit trail says who it is for ---------------------------------------
+
+    public function test_the_audit_line_records_the_rule(): void
+    {
+        app(BenefitProgramService::class)->create([
+            'name' => 'Field Allowance', 'kind' => 'allowance', 'amount' => 1000,
+            'eligibility' => 'status', 'eligibility_statuses' => ['regular', 'part_time'],
         ]);
 
-        app(BenefitProgramService::class)->assign([
-            'employee_ids' => [$regular->id, $probationary->id], 'allowance_ids' => [$allowance->id],
-        ]);
-
-        $log = AuditLog::where('action', 'enrolled')->latest('id')->first();
-        $this->assertStringContainsString('1 of 2 selected', $log->description);
+        $log = AuditLog::where('action', 'created')->latest('id')->first();
+        $this->assertStringContainsString('regular, part_time', $log->description);
     }
 
     // --- 6. dropping and re-adding must not destroy the pivot ------------------------

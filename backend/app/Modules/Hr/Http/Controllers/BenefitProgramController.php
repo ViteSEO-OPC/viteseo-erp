@@ -3,7 +3,6 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Modules\Hr\Http\Requests\AssignBenefitsRequest;
 use App\Modules\Hr\Http\Requests\StoreBenefitProgramRequest;
 use App\Modules\Hr\Http\Requests\UpdateBenefitProgramRequest;
 use App\Modules\Hr\Http\Resources\BenefitProgramResource;
@@ -52,14 +51,6 @@ class BenefitProgramController extends Controller
         $this->service->delete($benefitProgram);
 
         return response()->noContent();
-    }
-
-    // POST /api/v1/hr/benefit-programs/assign — assign allowances/HMO to employees.
-    public function assign(AssignBenefitsRequest $request): JsonResponse
-    {
-        $this->service->assign($request->validated());
-
-        return BenefitProgramResource::collection($this->service->list())->response();
     }
 
     // GET /api/v1/hr/me/benefit-programs — the caller's own enrolled programs.
