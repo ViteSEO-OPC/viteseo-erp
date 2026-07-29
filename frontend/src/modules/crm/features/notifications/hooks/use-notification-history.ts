@@ -1,6 +1,6 @@
 "use client";
 
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys, type NotificationHistoryFilters } from "@/modules/crm/lib/query-keys";
 import type { NotificationDto } from "@/modules/crm/features/notifications/types/notification-types";
@@ -46,6 +46,12 @@ export function useNotificationHistory(filters: NotificationHistoryFilters) {
     // The first page asks for no cursor at all; the server anchors it at the head.
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.meta.next_cursor ?? undefined,
+    // Every filter combination is its own key, so without this each debounced
+    // keystroke would blank the list to skeletons and back — the reader loses their
+    // place on every letter. Holding the previous results puts the page in a
+    // "refining" state instead of a "loading" one; `isPlaceholderData` is what the
+    // page dims on. Same reasoning, and same primitive, as use-archived-leads.
+    placeholderData: keepPreviousData,
   });
 
   const notifications: NotificationDto[] =
@@ -56,6 +62,8 @@ export function useNotificationHistory(filters: NotificationHistoryFilters) {
     isLoading: query.isLoading,
     isError: query.isError,
     isFetching: query.isFetching,
+    /** Showing the previous filter's rows while the new ones load. */
+    isRefining: query.isPlaceholderData,
     hasNextPage: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
     fetchNextPage: query.fetchNextPage,

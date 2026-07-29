@@ -60,6 +60,7 @@ export function NotificationHistoryPage() {
     notifications,
     isLoading,
     isError,
+    isRefining,
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
@@ -88,27 +89,49 @@ export function NotificationHistoryPage() {
     <div className="flex flex-col gap-4">
       {/* Filter bar */}
       <div className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 shadow-card sm:flex-row sm:items-center">
-        <div className="flex shrink-0 gap-1 rounded-lg bg-muted p-1" role="group" aria-label="Read state">
-          {(["all", "unread"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setReadState(value)}
-              aria-pressed={readState === value}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                readState === value
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {value === "all" ? "All" : "Unread"}
-              {value === "unread" && unreadCount > 0 && (
-                <span className="ml-1.5 text-xs text-muted-foreground">{unreadCount}</span>
-              )}
-            </button>
-          ))}
+        {/* Same segmented control as the Outreach workspace (OutreachTabs) — this is
+            the platform's idiom for switching one list between two views, so it should
+            not look like a second invention of the same thing. */}
+        <div
+          className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-border bg-card p-1"
+          role="group"
+          aria-label="Read state"
+        >
+          {(["all", "unread"] as const).map((value) => {
+            const isActive = readState === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setReadState(value)}
+                aria-pressed={isActive}
+                className={cn(
+                  "flex items-center gap-2 rounded-lg border border-transparent px-3 py-1.5 text-sm font-medium transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                  isActive
+                    ? "border-border bg-card text-teal-900 shadow-sm dark:text-teal-300"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span>{value === "all" ? "All" : "Unread"}</span>
+                {/* Only the unread tally is knowable — a cursor-paginated feed has no
+                    total to show against "All", and a made-up one would be worse than
+                    none. */}
+                {value === "unread" && unreadCount > 0 && (
+                  <span
+                    className={cn(
+                      "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold",
+                      isActive
+                        ? "bg-[var(--chip-teal-bg)] text-teal-800"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {/* Base UI hands back `null` when a selection is cleared; the sentinel keeps
@@ -166,7 +189,16 @@ export function NotificationHistoryPage() {
 
       {!isLoading && !isError && notifications.length > 0 && (
         <>
-          <div className="overflow-hidden rounded-lg border border-border bg-card shadow-card">
+          {/* Dimmed rather than replaced while a new filter loads: the rows shown are
+              real, just about to be superseded, and blanking them costs the reader
+              their place. aria-busy tells assistive tech the same thing. */}
+          <div
+            aria-busy={isRefining}
+            className={cn(
+              "overflow-hidden rounded-lg border border-border bg-card shadow-card transition-opacity",
+              isRefining && "opacity-60",
+            )}
+          >
             <ul className="divide-y divide-border-subtle">
               {notifications.map((notification) => (
                 <li key={notification.id} className="flex items-start gap-1 p-1">
