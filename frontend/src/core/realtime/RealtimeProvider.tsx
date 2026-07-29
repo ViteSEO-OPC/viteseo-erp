@@ -12,10 +12,16 @@ import { notificationKeys } from "@/modules/projects/useNotifications";
 import { getEcho, teardownEcho } from "./echo";
 
 /**
- * Owns the global WebSocket lifecycle: connect Echo while authenticated,
- * subscribe the private `user.{id}` channel for live notifications, and tear the
- * socket down on logout. Mounted in the root layout inside AuthProvider (so it
- * can read the user) and inside QueryProvider (so it can patch the cache).
+ * Owns the WebSocket lifecycle: connect Echo while authenticated, subscribe the
+ * private `user.{id}` channel for live notifications, and tear the socket down
+ * on logout.
+ *
+ * Mounted by the CRM section layout (src/app/zerem/layout.tsx), NOT the root
+ * layout — realtime is CRM-scoped for now, so no socket is opened for HRIS,
+ * Sprintly or any other app. It still relies on the root layout for both of its
+ * contexts: AuthProvider (to read the user) and QueryProvider (to patch the
+ * cache). Sprintly's own `useProjectChannel` calls getEcho() directly and is
+ * unaffected by where this is mounted.
  *
  * Reads the platform auth context directly rather than the Projects module's
  * auth shim: this is platform infrastructure and must not depend on a module.
@@ -75,6 +81,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       pusher?.connection?.unbind?.("connected", onConnected);
     };
   }, [authChecked, isAuthenticated, userId, qc]);
+
+  // Because this is mounted per-app rather than at the root, unmounting means the
+  // user has navigated out of the CRM. The effect above only leaves the channel;
+  // this closes the transport too, so an idle socket never follows them into
+  // HRIS or Sprintly. Re-entering the CRM lazily rebuilds it via getEcho().
+  useEffect(() => teardownEcho, []);
 
   return <>{children}</>;
 }

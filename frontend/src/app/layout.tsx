@@ -3,7 +3,6 @@ import { Exo_2 } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "@/core/query-provider";
 import { AuthProvider } from "@/core/auth-context";
-import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
 import { Toaster } from "@/core/components/toaster";
 
 // Exo 2 — the Style Guide's single typeface (Bold headings, Medium nav, Regular body).
@@ -30,13 +29,11 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <QueryProvider>
-          {/* RealtimeProvider sits inside both: it reads the signed-in user from
-              AuthProvider and patches the cache owned by QueryProvider. It stays
-              inert until NEXT_PUBLIC_REVERB_APP_KEY is set, so environments
-              without Reverb are unaffected. */}
-          <AuthProvider>
-            <RealtimeProvider>{children}</RealtimeProvider>
-          </AuthProvider>
+          {/* Realtime is deliberately NOT mounted here. The WebSocket layer is
+              CRM-scoped and starts in src/app/zerem/layout.tsx, so HRIS,
+              Sprintly and the rest of the platform open no socket and keep their
+              existing behaviour. */}
+          <AuthProvider>{children}</AuthProvider>
         </QueryProvider>
         <Toaster />
       </body>

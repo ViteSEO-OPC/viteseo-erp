@@ -1,5 +1,4 @@
 import axios from "axios";
-import { getSocketId } from "@/core/realtime/echo";
 
 const ENV_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -30,16 +29,16 @@ export const apiClient = axios.create({
 });
 
 // Automatically attach the Sanctum token (saved at login) to every request.
+//
+// No X-Socket-Id here on purpose. That header only matters to a caller whose
+// writes are broadcast with ->toOthers(), which today is CRM alone, and it is
+// set by the CRM client (modules/crm/lib/axios.ts). Keeping it out of the shared
+// client leaves HR and the platform sending byte-identical requests to before
+// Reverb existed, and keeps laravel-echo/pusher-js out of their bundles.
 apiClient.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("token");
     if (token) config.headers.Authorization = `Bearer ${token}`;
-    // Identify the originating socket so the server can exclude it from a
-    // broadcast made with ->toOthers(). Without this header the actor receives
-    // their own event back and can clobber their optimistic update. Absent
-    // (undefined) whenever realtime is off — the header is simply not sent.
-    const socketId = getSocketId();
-    if (socketId) config.headers["X-Socket-Id"] = socketId;
   }
   return config;
 });

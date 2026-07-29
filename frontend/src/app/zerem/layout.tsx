@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/modules/crm/providers/auth-provider";
+import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
 import { PermissionsProvider } from "@/modules/crm/providers/permissions-provider";
 import { ThemeProvider } from "@/modules/crm/providers/theme-provider";
 import { canAccessPath } from "@/modules/crm/lib/rbac";
@@ -18,6 +19,12 @@ import "@/modules/crm/styles/zerem-theme.css";
  * (single shared login), so it does NOT re-mount auth/query — it only adds the
  * CRM module's own theme + permissions context and its self-contained AppShell
  * (sidebar/topbar/header-search). Auth redirects use the SHARED /login.
+ *
+ * This is also where the realtime layer starts. RealtimeProvider is mounted HERE
+ * rather than in the root layout so the WebSocket is CRM-scoped: HRIS, Sprintly
+ * and the rest of the platform open no socket and subscribe no channel. It reads
+ * the platform auth context and the query cache, both provided by the root
+ * layout above, and stays inert without NEXT_PUBLIC_REVERB_APP_KEY.
  */
 export default function CrmLayout({ children }: { children: React.ReactNode }) {
   const { user, isAuthenticated, isLoading } = useAuth();
@@ -54,11 +61,13 @@ export default function CrmLayout({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider>
       <PermissionsProvider>
-        {/* `font-primary` (Exo) is scoped here so CRM keeps its typeface without
-            changing the platform's global body font. */}
-        <div className="font-primary">
-          <AppShell>{children}</AppShell>
-        </div>
+        <RealtimeProvider>
+          {/* `font-primary` (Exo) is scoped here so CRM keeps its typeface without
+              changing the platform's global body font. */}
+          <div className="font-primary">
+            <AppShell>{children}</AppShell>
+          </div>
+        </RealtimeProvider>
       </PermissionsProvider>
     </ThemeProvider>
   );
