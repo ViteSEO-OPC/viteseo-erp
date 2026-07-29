@@ -51,6 +51,9 @@ class StoreContributionVersionRequest extends FormRequest
             'brackets' => ['sometimes', 'array', 'max:200'],
             'brackets.*.min_salary' => ['required', 'numeric', 'min:0', 'max:99999999'],
             'brackets.*.msc' => ['required', 'numeric', 'min:0', 'max:99999999'],
+            // Slice B8 — the employer-only EC printed for this band. Null falls back to the
+            // version's `fixed_employer_add_on` rule.
+            'brackets.*.employer_add_on' => ['nullable', 'numeric', 'min:0', 'max:99999'],
         ];
     }
 

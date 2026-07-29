@@ -9,9 +9,6 @@ use App\Modules\Hr\Http\Requests\UpdateBenefitProgramRequest;
 use App\Modules\Hr\Http\Resources\BenefitProgramResource;
 use App\Modules\Hr\Http\Resources\MyBenefitResource;
 use App\Modules\Hr\Models\BenefitProgram;
-use App\Modules\Hr\Models\Employee;
-use App\Modules\Hr\Services\AllowanceService;
-use App\Modules\Hr\Services\AuditService;
 use App\Modules\Hr\Services\BenefitProgramService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,35 +20,6 @@ use Illuminate\Http\Response;
  */
 class BenefitProgramController extends Controller
 {
-    // GET /api/v1/hr/benefit-programs/allowance-reconciliation — Slice B1.
-    // Employees whose pinned allowance differs from their programme: the working list for
-    // switching Benefits to the source of truth.
-    public function allowanceReconciliation(AllowanceService $allowances): JsonResponse
-    {
-        return response()->json(['data' => $allowances->reconciliation()]);
-    }
-
-    // DELETE /api/v1/hr/employees/{employee}/allowance-overrides/{program}
-    // Hand this employee back to the programme amount.
-    public function clearAllowanceOverride(
-        Employee $employee,
-        BenefitProgram $program,
-        AllowanceService $allowances,
-        AuditService $audit,
-    ): JsonResponse {
-        $allowances->clearOverride($employee, $program->id);
-
-        $employee->loadMissing('user');
-        $audit->log(
-            'updated', 'Benefits',
-            "Cleared the {$program->name} override for "
-                . ($employee->user?->name ?? $employee->name) . ' — now paid the programme amount',
-            $program,
-        );
-
-        return response()->json(['data' => $allowances->linesFor($employee->fresh())]);
-    }
-
     public function __construct(private readonly BenefitProgramService $service) {}
 
     // GET /api/v1/hr/benefit-programs — hr_officer only.

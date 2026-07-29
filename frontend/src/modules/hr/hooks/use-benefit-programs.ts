@@ -80,3 +80,4 @@ export function useAssignBenefits() {
 export function useMyBenefits() {
   return useQuery({ queryKey: MY_KEY, queryFn: getMyBenefits });
 }
+

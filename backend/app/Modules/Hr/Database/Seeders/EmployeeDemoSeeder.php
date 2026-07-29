@@ -120,7 +120,12 @@ class EmployeeDemoSeeder extends Seeder
                 },
                 'currency' => 'PHP',
                 'bank_account_type' => 'Savings', 'bank_account_name' => $e->user->name,
-                'sss_contribution' => 1350, 'pagibig_contribution' => 200, 'philhealth_contribution' => 450,
+                // Slice B7 — the three statutory columns are deliberately NOT seeded. They are
+                // per-employee OVERRIDES that switch off the government rates for that person,
+                // and seeding them gave every demo employee the identical ₱1,350 / ₱450 / ₱200
+                // regardless of a salary range from ₱30k to ₱160k — suppressing ₱15,375/month of
+                // deductions and producing employee/employer pairs that exist on no SSS table.
+                // A demo dataset must show the engine working, not a company-wide exception.
                 'food_allowance' => 2000, 'transportation_allowance' => 1500, 'load_allowance' => 500,
             ]);
             // Note: EmployeeService::create already opened each person's employment
@@ -158,7 +163,7 @@ class EmployeeDemoSeeder extends Seeder
             'bank_account_type' => 'Savings',
             'bank_account' => '1234-5678-9012-34',
             'bank_account_name' => 'Maya R. Villanueva',
-            'sss_contribution' => 1350, 'pagibig_contribution' => 200, 'philhealth_contribution' => 450,
+            // No statutory overrides here either — see the note above.
             'food_allowance' => 3000, 'transportation_allowance' => 2500, 'load_allowance' => 500,
             'base_salary' => 160000,
         ]);

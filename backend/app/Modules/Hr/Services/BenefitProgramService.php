@@ -60,9 +60,15 @@ class BenefitProgramService
     }
 
     /**
-     * Assign benefits to a set of employees (the "Add a Plan" modal). Allowances
-     * attach to every ELIGIBLE selected employee with the allowance's amount; an HMO
-     * plan attaches with a per-employee tier + the tier's employee share.
+     * Assign benefits to a set of employees (the "Add a Plan" modal). Allowances attach to every
+     * ELIGIBLE selected employee and FOLLOW the programme amount; an HMO plan attaches with a
+     * per-employee tier + the tier's employee share.
+     *
+     * Slice B6 — this used to copy the programme's amount onto the pivot, which made every
+     * newly-assigned employee deaf to the next edit of that allowance. That is the same freeze the
+     * B1 backfill applied to all 56 existing enrolments, regenerated on every assignment. There is
+     * no per-employee allowance amount any more: an enrolment means "paid what the programme says",
+     * which is what new hires already got (`AllowanceService::defaultProgrammeIdsForNewHire()`).
      *
      * @param  array<string, mixed>  $data
      */
@@ -83,14 +89,14 @@ class BenefitProgramService
                 continue;
             }
             $eligible = array_values(array_intersect($employeeIds, $this->eligibleEmployeeIds($allowance)));
-            $pivot = [];
-            foreach ($eligible as $eid) {
-                $pivot[$eid] = ['amount' => $allowance->amount];
-            }
-            if ($pivot) {
-                $allowance->employees()->syncWithoutDetaching($pivot);
+            if ($eligible) {
+                // No pivot attributes: the enrolment follows the programme amount (B6). Anyone
+                // already enrolled keeps whatever they have — `syncWithoutDetaching` with plain
+                // ids leaves an existing row alone, so re-assigning cannot silently re-freeze
+                // someone HR has just handed back to the programme.
+                $allowance->employees()->syncWithoutDetaching($eligible);
                 $names[] = $allowance->name;
-                $enrolled = array_merge($enrolled, array_keys($pivot));
+                $enrolled = array_merge($enrolled, $eligible);
             }
         }
 

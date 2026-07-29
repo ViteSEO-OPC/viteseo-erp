@@ -54,24 +54,37 @@ class ContributionVersion extends Model
     }
 
     /**
-     * The Monthly Salary Credit a salary is charged on: the highest band whose `min_salary` it
-     * reaches. Returns null when this version isn't bracket-based or has no bands, so the caller
-     * falls back to percentage-of-salary rather than silently charging zero.
+     * The band a salary falls in: the highest whose `min_salary` it reaches. Returns null when
+     * this version isn't bracket-based or has no bands, so the caller falls back to
+     * percentage-of-salary rather than silently charging zero.
      *
-     * @param  array<int, array{min_salary: float, msc: float}>  $brackets  lowest first
+     * @param  array<int, array{min_salary: float, msc: float, employer_add_on?: ?float}>  $brackets  lowest first
+     * @return array{min_salary: float, msc: float, employer_add_on?: ?float}|null
      */
-    public static function mscFor(array $brackets, float $salary): ?float
+    public static function bandFor(array $brackets, float $salary): ?array
     {
-        $msc = null;
-        foreach ($brackets as $band) {
-            if ($salary >= (float) $band['min_salary']) {
-                $msc = (float) $band['msc'];
+        $band = null;
+        foreach ($brackets as $candidate) {
+            if ($salary >= (float) $candidate['min_salary']) {
+                $band = $candidate;
                 continue;
             }
             break; // sorted ascending — everything after this is out of reach
         }
 
-        return $msc;
+        return $band;
+    }
+
+    /**
+     * The Monthly Salary Credit a salary is charged on.
+     *
+     * @param  array<int, array{min_salary: float, msc: float}>  $brackets  lowest first
+     */
+    public static function mscFor(array $brackets, float $salary): ?float
+    {
+        $band = self::bandFor($brackets, $salary);
+
+        return $band === null ? null : (float) $band['msc'];
     }
 
     /**
@@ -97,6 +110,8 @@ class ContributionVersion extends Model
                 ? $this->brackets->map(fn ($b) => [
                     'min_salary' => (float) $b->min_salary,
                     'msc' => (float) $b->msc,
+                    // Slice B8 — the EC printed for this band; null falls back to the rule above.
+                    'employer_add_on' => $b->employer_add_on !== null ? (float) $b->employer_add_on : null,
                 ])->values()->all()
                 : null,
         ], fn ($v) => $v !== null);

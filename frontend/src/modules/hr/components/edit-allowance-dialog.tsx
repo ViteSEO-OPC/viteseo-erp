@@ -50,6 +50,9 @@ function AllowanceForm({ program, onDone }: { program: BenefitProgram; onDone: (
   const [tax, setTax] = useState(program.tax_treatment);
   const [elig, setElig] = useState(program.eligibility);
 
+  // Every enrolled employee is affected, because there is one amount per allowance and it is this
+  // one (B6). That was untrue between B1 and B6, when a per-employee pin on the enrolment meant an
+  // edit here reached nobody; the pin is gone.
   const enrolled = program.employee_ids.length;
 
   async function save() {
@@ -115,8 +118,14 @@ function AllowanceForm({ program, onDone }: { program: BenefitProgram; onDone: (
         <Segmented label="Eligibility" options={ELIGIBILITY_OPTIONS} value={elig} onChange={setElig} />
 
         <div className="rounded-lg border border-warning/40 bg-warning-subtle px-3 py-2.5 text-xs text-foreground">
-          {enrolled} enrolled employee{enrolled === 1 ? "" : "s"} will be affected. Changes apply
-          from the next payroll cutoff.
+          {enrolled === 0 ? (
+            <>Nobody is enrolled in this allowance yet, so nothing will change.</>
+          ) : (
+            <>
+              All {enrolled} enrolled employee{enrolled === 1 ? "" : "s"} will be paid this amount
+              from the next payroll cutoff.
+            </>
+          )}
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-danger/40 bg-danger-subtle px-3 py-2.5">

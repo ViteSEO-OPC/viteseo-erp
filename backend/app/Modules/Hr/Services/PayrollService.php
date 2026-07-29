@@ -5,7 +5,6 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Http\Resources\PayslipResource;
 use App\Modules\Hr\Models\AttendancePolicy;
-use App\Modules\Hr\Models\ContributionVersion;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LoanPayment;
 use App\Modules\Hr\Models\OvertimeRequest;
@@ -462,6 +461,16 @@ class PayrollService
             'employer_sss' => $erSss,
             'employer_philhealth' => $erPh,
             'employer_pagibig' => $erPg,
+            // Slice B7 — which of the three came from a per-employee amount on the profile rather
+            // than the government rates. An override replaces the EMPLOYEE side only, so the pair
+            // above and below can belong to different salary brackets; without this the payslip
+            // and the remittance file present that mismatch as if it were a proper contribution.
+            // Recorded only for types the employee is enrolled in — an override on something they
+            // are not enrolled in deducts nothing and is not in force.
+            'contribution_overrides' => array_values(array_filter(
+                ['sss', 'philhealth', 'pagibig'],
+                fn ($t) => isset($contribConfig[$t]) && ($overrides[$t] ?? null) !== null,
+            )) ?: null,
             'total_deductions' => $totalDeductions,
             // What couldn't be taken because gross wasn't enough to cover it (item 1).
             'deduction_carryover' => $deductionCarryover,
@@ -505,60 +514,21 @@ class PayrollService
             return 0.0; // not enrolled → no employer share either
         }
 
-        $amount = $this->contribution($config[$type], $base, 'employer_rate', 'employer_cap');
-
-        // Slice B3a — a flat employer-only add-on above a salary threshold (SSS's Employees'
-        // Compensation fund). Deliberately applied AFTER the amount cap and never mirrored on the
-        // employee side: it is the company's cost, and must not touch net pay or the tax base.
-        $addOn = (float) ($config[$type]['fixed_employer_add_on'] ?? 0);
-        if ($addOn > 0) {
-            $threshold = $config[$type]['add_on_min_salary'] ?? null;
-            if ($threshold === null || $base >= (float) $threshold) {
-                $amount = round($amount + $addOn, 2);
-            }
-        }
-
-        return $amount;
+        return ContributionCalculator::employer($config[$type], $base);
     }
 
     /**
-     * One contribution from its config. Supports rate + salary floor/cap and an
-     * amount cap (Pag-IBIG). The shape is editable in Company → Benefits, so swapping
-     * in the official SSS bracket table later is a config change, not a code change.
-     * `$rateKey`/`$capKey` pick the employee (`rate`/`cap`) or employer
-     * (`employer_rate`/`employer_cap`) side — the salary floor/cap are shared.
+     * One contribution from its config — the employee side.
+     *
+     * Slice B7 — the arithmetic moved to `ContributionCalculator` so the employee form can show
+     * what the rates WOULD charge next to a per-employee override without a second implementation
+     * of it. This wrapper stays because payroll reads better for it.
      *
      * @param  array<string, mixed>  $config
      */
-    private function contribution(array $config, float $base, string $rateKey = 'rate', string $capKey = 'cap'): float
+    private function contribution(array $config, float $base): float
     {
-        // Slice B3b — a bracket-based contribution (SSS) charges on the band's Monthly Salary
-        // Credit, NOT on the salary itself: ₱20,100 is charged on ₱20,000. Percentage-of-salary
-        // is wrong for almost everyone, in both directions.
-        //
-        // A bracket version with no bands falls through to the percentage path rather than
-        // charging zero — an unfinished table must not silently wipe a statutory deduction.
-        $creditable = null;
-        if (($config['basis'] ?? 'percentage') === 'bracket' && ! empty($config['brackets'])) {
-            $creditable = ContributionVersion::mscFor($config['brackets'], $base);
-        }
-
-        if ($creditable === null) {
-            $creditable = $base;
-            if (isset($config['salary_floor'])) {
-                $creditable = max((float) $config['salary_floor'], $creditable);
-            }
-            if (isset($config['salary_cap'])) {
-                $creditable = min((float) $config['salary_cap'], $creditable);
-            }
-        }
-
-        $amount = $creditable * (float) ($config[$rateKey] ?? 0);
-        if (isset($config[$capKey])) {
-            $amount = min((float) $config[$capKey], $amount);
-        }
-
-        return round(max(0, $amount), 2);
+        return ContributionCalculator::employee($config, $base);
     }
 
     /**
@@ -1553,7 +1523,10 @@ class PayrollService
         fputcsv($out, [
             'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Night Diff', 'Rest Day', 'Reimbursements', 'Gross',
             'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Other Deductions', 'Total Deductions', 'Net Pay',
-            'Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Status',
+            // Slice B7 — this file doubles as the remittance summary, and a per-employee override
+            // moves the employee half only. Without this column the mismatched pair reads as a
+            // proper contribution and gets filed as one.
+            'Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Overridden', 'Status',
         ], ',', '"', '');
 
         foreach ($run->payslips as $p) {
@@ -1579,7 +1552,17 @@ class PayrollService
                 $p->base_salary, $p->allowances, $p->holiday_premium, $p->overtime_pay, $p->night_diff_pay, $p->rest_day_premium, $p->reimbursements, $p->gross,
                 $p->sss, $p->philhealth, $p->pagibig, $p->withholding_tax, $p->other_deductions,
                 $p->total_deductions, $p->net_pay,
-                $p->employer_sss, $p->employer_philhealth, $p->employer_pagibig, $p->status,
+                $p->employer_sss, $p->employer_philhealth, $p->employer_pagibig,
+                implode(' ', array_map(
+                    fn ($t) => match ($t) {
+                        'sss' => 'SSS',
+                        'philhealth' => 'PhilHealth',
+                        'pagibig' => 'Pag-IBIG',
+                        default => $t,
+                    },
+                    $p->contribution_overrides ?? [],
+                )),
+                $p->status,
             ], ',', '"', '');
         }
 

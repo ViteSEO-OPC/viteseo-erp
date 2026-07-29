@@ -51,6 +51,6 @@ class BenefitProgram extends Model
             'hr_benefit_enrollments',
             'benefit_program_id',
             'employee_id',
-        )->withPivot(['amount', 'tier', 'employee_share'])->withTimestamps();
+        )->withPivot(['tier', 'employee_share'])->withTimestamps();
     }
 }

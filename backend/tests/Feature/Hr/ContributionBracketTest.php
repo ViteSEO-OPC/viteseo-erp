@@ -143,8 +143,9 @@ class ContributionBracketTest extends HrTestCase
         )['sss'];
 
         $this->assertSame(1000.0, $slip('2026-03-15'), 'the bracket table');
-        // 2025 predates it — the seeded percentage version (4.5%, ₱30k cap) still applies.
-        $this->assertSame(904.5, $slip('2025-06-30'), '4.5% of ₱20,100');
+        // 2024 predates BOTH this table and the published 2025 schedule the seeder carries (B8),
+        // so the opening percentage version (4.5%, ₱30k cap) still applies.
+        $this->assertSame(904.5, $slip('2024-06-30'), '4.5% of ₱20,100');
     }
 
     // --- the endpoint ----------------------------------------------------------------
@@ -174,8 +175,10 @@ class ContributionBracketTest extends HrTestCase
             ...$payload, 'brackets' => [['min_salary' => 0, 'msc' => 10000]],
         ])->assertCreated();
 
-        // The BRACKET version, not the seeded 2000-01-01 percentage one.
-        $version = ContributionVersion::where('basis', 'bracket')->firstOrFail();
+        // This test's own version, by date: the seeder also ships a bracket version now (B8), so
+        // "the only bracket one" is no longer a way to find it.
+        $version = ContributionVersion::where('type', 'sss')
+            ->whereDate('effective_from', '2026-01-01')->firstOrFail();
         $this->assertSame(1, $version->brackets()->count());
         $this->assertSame(500.0, $this->sssFor(20100), 'the single ₱10,000 band');
     }

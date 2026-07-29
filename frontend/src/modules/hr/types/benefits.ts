@@ -146,3 +146,4 @@ export const BENEFIT_CATEGORIES: { value: string; label: string }[] = [
   { value: "enrollment", label: "Enrollment window" },
   { value: "general", label: "Other" },
 ];
+

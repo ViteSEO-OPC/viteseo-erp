@@ -20,9 +20,11 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
  * the company, payroll paid ₱42,000 from three hard-coded `hr_employees` columns. Editing the page
  * changed nobody's payslip, and Gas Allowance had no column at all so it could never be paid.
  *
- * The behaviour that matters most here is the PRECEDENCE: a null pivot amount means "follow the
- * programme", a non-null one is a deliberate per-employee override. Get that backwards and either
- * editing a programme reaches nobody, or every carefully-set individual amount is wiped.
+ * The behaviour that matters most here is that there is ONE amount per allowance: the programme's.
+ * Editing it reaches everyone enrolled. B1 shipped with a per-employee override on the enrolment
+ * and a backfill that pinned all 56 of them, which meant an edit reached nobody at all; the
+ * override was dropped outright on 2026-07-29 (B6) — the company does not want per-employee
+ * amounts, so the enrolment carries no figure to disagree with.
  */
 class AllowanceSourceOfTruthTest extends HrTestCase
 {
@@ -92,37 +94,6 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         $this->assertSame(2500.0, $this->monthly());
     }
 
-    /** A pinned amount is a deliberate override and does NOT follow the programme. */
-    public function test_a_per_employee_override_wins(): void
-    {
-        $p = $this->programme('Meal Allowance', 2000);
-        $this->employee->benefitPrograms()->attach($p->id, ['amount' => 3000]);
-
-        $this->assertSame(3000.0, $this->monthly());
-
-        $p->update(['amount' => 2500]);
-        $this->assertSame(3000.0, $this->monthly(), 'the override is not swept along');
-    }
-
-    public function test_clearing_an_override_hands_them_back_to_the_programme(): void
-    {
-        $p = $this->programme('Meal Allowance', 2000);
-        $this->employee->benefitPrograms()->attach($p->id, ['amount' => 3000]);
-
-        app(AllowanceService::class)->clearOverride($this->employee, $p->id);
-
-        $this->assertSame(2000.0, $this->monthly());
-    }
-
-    /** A ₱0 override is a real decision ("enrolled but not paid"), not "unset". */
-    public function test_a_zero_override_is_respected(): void
-    {
-        $p = $this->programme('Gas Allowance', 1500);
-        $this->employee->benefitPrograms()->attach($p->id, ['amount' => 0]);
-
-        $this->assertSame(0.0, $this->monthly());
-    }
-
     public function test_an_inactive_programme_pays_nothing(): void
     {
         $p = $this->programme('Meal Allowance', 2000);
@@ -141,6 +112,22 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         $this->assertSame(5500.0, $this->monthly(), 'Gas pays now — it never could before');
     }
 
+    /**
+     * The enrolment carries NO amount at all (B6, 2026-07-29). Guarding the shape rather than the
+     * behaviour: a re-added pivot column would quietly restore the bug where editing an allowance
+     * reached nobody, and every other test here would still pass.
+     */
+    public function test_an_enrolment_carries_no_per_employee_amount(): void
+    {
+        $p = $this->programme('Meal Allowance', 2000);
+        $this->employee->benefitPrograms()->attach($p->id);
+
+        $columns = \Illuminate\Support\Facades\Schema::getColumnListing('hr_benefit_enrollments');
+
+        $this->assertNotContains('amount', $columns);
+        $this->assertSame(2000.0, $this->monthly());
+    }
+
     // --- payroll ---------------------------------------------------------------------
 
     public function test_the_allowance_reaches_the_payslip(): void
@@ -155,39 +142,6 @@ class AllowanceSourceOfTruthTest extends HrTestCase
 
         // ₱3,500/month × 12 ÷ 24 periods = ₱1,750 this period.
         $this->assertSame(1750.0, (float) $slip->allowances);
-    }
-
-    // --- reconciliation --------------------------------------------------------------
-
-    public function test_reconciliation_lists_only_real_differences(): void
-    {
-        $matching = $this->programme('Meal Allowance', 2000);
-        $drifting = $this->programme('Transport Allowance', 1500);
-        $this->employee->benefitPrograms()->attach($matching->id, ['amount' => 2000]); // same
-        $this->employee->benefitPrograms()->attach($drifting->id, ['amount' => 0]);    // differs
-
-        $rows = app(AllowanceService::class)->reconciliation();
-
-        $this->assertCount(1, $rows);
-        $this->assertSame(-1500.0, $rows[0]['delta']);
-        $this->assertCount(1, $rows[0]['lines'], 'the matching line is not noise');
-    }
-
-    public function test_the_endpoints_are_reachable(): void
-    {
-        $p = $this->programme('Meal Allowance', 2000);
-        $this->employee->benefitPrograms()->attach($p->id, ['amount' => 3000]);
-
-        $this->actingAsHr()
-            ->getJson('/api/v1/hr/benefit-programs/allowance-reconciliation')
-            ->assertOk()
-            ->assertJsonPath('data.0.delta', 1000);
-
-        $this->actingAsHr()
-            ->deleteJson("/api/v1/hr/employees/{$this->employee->id}/allowance-overrides/{$p->id}")
-            ->assertOk();
-
-        $this->assertSame(2000.0, $this->monthly());
     }
 
     // --- new hires -------------------------------------------------------------------

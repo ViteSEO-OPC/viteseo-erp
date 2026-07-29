@@ -257,3 +257,20 @@ export function statusLabel(status: string): string {
       .join(" ")
   );
 }
+
+/**
+ * One statutory contribution for an employee: what the government rates would charge, and the
+ * per-employee override (if any) that is replacing it (Slice B7).
+ *
+ * `calculated_employer` is here because it does NOT move with the override — the mismatch between
+ * the two halves is the whole reason this is shown.
+ */
+export interface StatutoryPreviewRow {
+  type: "sss" | "philhealth" | "pagibig";
+  /** False ⇒ nothing is deducted at all and an override on it is inert. */
+  enrolled: boolean;
+  override: number | null;
+  calculated_employee: number;
+  calculated_employer: number;
+  basis: string | null;
+}

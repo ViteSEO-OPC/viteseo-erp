@@ -170,6 +170,12 @@ export interface Payslip {
   employer_sss?: number;
   employer_philhealth?: number;
   employer_pagibig?: number;
+  /**
+   * Slice B7 — which statutory deductions came from a per-employee amount on the profile rather
+   * than the government rates. HR-only, and empty on payslips run before the column existed.
+   * An override moves the employee half only, so these lines do not pair with the employer ones.
+   */
+  contribution_overrides?: ("sss" | "philhealth" | "pagibig")[];
   status: string;
   processed_by: string | null;
   // Attendance basis — how base_salary was derived (0 on older payslips).
