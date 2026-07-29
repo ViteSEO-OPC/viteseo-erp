@@ -1,16 +1,19 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import type { User, UserRole } from "@/core/types";
 import type { Group } from "../../types";
 import {
   Avatar,
   AvatarStack,
   Badge,
+  Button,
   Card,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  FilterIcon,
 } from "@/core/ui";
 import { GroupWorkloadBadge, UserWorkloadBadge } from "../tasks/shared";
 
@@ -103,39 +106,177 @@ export function MemberGroupTags({
   );
 }
 
-/** Compact "Label: [value ▾]" filter dropdown used in the Team toolbar. */
-export function FilterSelect({
-  label,
-  value,
-  onChange,
-  children,
+/** Shared row styling for the filter popover's option buttons. */
+const FILTER_ROW =
+  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-ink transition-colors hover:bg-black/5";
+
+/**
+ * Team filters (job role + group) in one popover, matching the task board's
+ * Filters control: a single trigger with an active-constraint badge, sections
+ * inside, and Clear all. Keeping both filters behind one button is what lets
+ * the toolbar stay on a single row down to phone widths.
+ *
+ * "all" is the unset value for both filters — it never counts toward the badge.
+ */
+export function TeamFilterPopover({
+  roleFilter,
+  onRoleChange,
+  groupFilter,
+  onGroupChange,
+  groups,
 }: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  children: ReactNode;
+  roleFilter: "all" | UserRole;
+  onRoleChange: (role: "all" | UserRole) => void;
+  groupFilter: string;
+  onGroupChange: (groupName: string) => void;
+  groups: Group[];
 }) {
+  const [open, setOpen] = useState(false);
+
+  const activeCount =
+    (roleFilter === "all" ? 0 : 1) + (groupFilter === "all" ? 0 : 1);
+
+  const clearAll = () => {
+    onRoleChange("all");
+    onGroupChange("all");
+  };
+
   return (
-    <div className="flex items-center gap-2 rounded-[10px] border border-line bg-white px-3 py-2">
-      <span className="whitespace-nowrap text-xs text-ink-soft">{label}</span>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="appearance-none rounded-md bg-brand-soft/60 py-1 pl-2.5 pr-7 text-xs font-semibold text-ink focus:outline-none"
-        >
-          {children}
-        </select>
-        <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-ink-soft" />
-      </div>
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={`flex h-10 w-full items-center gap-2 rounded-lg border bg-surface px-3 text-sm font-bold transition-colors sm:w-auto ${
+          activeCount > 0
+            ? "border-brand text-ink"
+            : "border-line text-ink-soft hover:text-ink"
+        }`}
+      >
+        <FilterIcon className="h-4 w-4" />
+        Filters
+        {activeCount > 0 && (
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0f766e] px-1 text-xs font-bold text-white">
+            {activeCount}
+          </span>
+        )}
+        <ChevronDownIcon className="ml-auto h-4 w-4 sm:ml-0" />
+      </button>
+
+      {open && (
+        <>
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          {/* Opens rightward on mobile (the trigger is full-width there) and
+              right-aligned from sm up, where it sits at the end of the row. */}
+          <div className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-lg sm:left-auto sm:right-0">
+            <div className="flex items-center justify-between px-1 pb-2">
+              <span className="text-xs font-bold uppercase tracking-wide text-ink-faint">
+                Filters
+              </span>
+              {activeCount > 0 && (
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="text-xs font-bold text-brand hover:underline"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+
+            <div className="px-1">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+                Job role
+              </p>
+              <div className="space-y-0.5">
+                <FilterOptionRow
+                  label="All roles"
+                  selected={roleFilter === "all"}
+                  onClick={() => onRoleChange("all")}
+                />
+                {ROLE_OPTIONS.map((r) => (
+                  <FilterOptionRow
+                    key={r}
+                    label={roleLabel(r)}
+                    selected={roleFilter === r}
+                    onClick={() => onRoleChange(r)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-2 border-t border-line px-1 pt-2">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+                Group
+              </p>
+              <div className="max-h-40 space-y-0.5 overflow-y-auto">
+                <FilterOptionRow
+                  label="All groups"
+                  selected={groupFilter === "all"}
+                  onClick={() => onGroupChange("all")}
+                />
+                {groups.length === 0 ? (
+                  <p className="px-2 py-1 text-xs text-ink-faint">No groups</p>
+                ) : (
+                  groups.map((g) => (
+                    <FilterOptionRow
+                      key={g.id}
+                      label={g.name}
+                      color={g.color}
+                      selected={groupFilter === g.name}
+                      onClick={() => onGroupChange(g.name)}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
+function FilterOptionRow({
+  label,
+  color,
+  selected,
+  onClick,
+}: {
+  label: string;
+  color?: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} className={FILTER_ROW}>
+      {color && (
+        <span
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+      )}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {selected && <span className="text-xs font-bold text-brand">✓</span>}
+    </button>
+  );
+}
+
+/** Column template — one source of truth for the header and every row. */
+const MEMBER_COLS = "md:grid-cols-[2fr_1fr_1.2fr_1fr]";
+
 /**
- * Members table (header + rows). Columns: Member · Role · Group · Job Role.
- * Group is derived from group membership; Job Role has no backing field yet so
- * it degrades to an em dash.
+ * Members list. Columns: Member · Role · Group · Workload (group is derived
+ * from group membership).
+ *
+ * Below `md` each member is a stacked card — identity on top, then role,
+ * groups and workload wrapping beneath — so the list never needs a sideways
+ * scroll on a phone. From `md` up the same markup becomes the four-column
+ * table via `md:contents` on the secondary-fields wrapper.
  */
 export function MembersTable({
   rows,
@@ -147,23 +288,19 @@ export function MembersTable({
   isLoading: boolean;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-[560px]">
+    <div>
       <div className="border-b border-line pb-4">
         <h2 className="text-lg font-bold text-ink">Members</h2>
-        <div className="mt-3 grid grid-cols-[2fr_1fr_1fr_1fr] gap-4">
-          <span className="text-xs font-bold uppercase tracking-wide text-ink-soft">
-            Member
-          </span>
-          <span className="text-xs font-bold uppercase tracking-wide text-ink-soft">
-            Role
-          </span>
-          <span className="text-xs font-bold uppercase tracking-wide text-ink-soft">
-            Group
-          </span>
-          <span className="text-xs font-bold uppercase tracking-wide text-ink-soft">
-            Workload
-          </span>
+        {/* Column headers are meaningless once the rows stack. */}
+        <div className={`mt-3 hidden gap-4 md:grid ${MEMBER_COLS}`}>
+          {["Member", "Role", "Group", "Workload"].map((h) => (
+            <span
+              key={h}
+              className="text-xs font-bold uppercase tracking-wide text-ink-soft"
+            >
+              {h}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -178,7 +315,7 @@ export function MembersTable({
           {rows.map((u, idx) => (
             <div
               key={u.id}
-              className={`grid grid-cols-[2fr_1fr_1fr_1fr] items-center gap-4 py-4 ${
+              className={`flex flex-col gap-3 px-2 py-4 md:grid md:items-center md:gap-4 md:px-0 ${MEMBER_COLS} ${
                 idx % 2 === 1 ? "bg-[#FAFAF0]" : ""
               }`}
             >
@@ -191,20 +328,23 @@ export function MembersTable({
                   <p className="truncate text-xs text-ink-soft">{u.email}</p>
                 </div>
               </div>
-              <div>
-                <RoleBadge role={u.role} />
+              {/* One wrapped row on mobile; `md:contents` dissolves this box so
+                  its three children land in the grid as their own columns. */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-[52px] md:contents md:pl-0">
+                <div>
+                  <RoleBadge role={u.role} />
+                </div>
+                <MemberGroupTags
+                  tags={groupsByUser.get(u.id) ?? []}
+                  emptyDash
+                  max={3}
+                />
+                <UserWorkloadBadge userId={u.id} />
               </div>
-              <MemberGroupTags
-                tags={groupsByUser.get(u.id) ?? []}
-                emptyDash
-                max={3}
-              />
-              <UserWorkloadBadge userId={u.id} />
             </div>
           ))}
         </div>
       )}
-      </div>
     </div>
   );
 }
@@ -241,7 +381,7 @@ export function Pagination({
   summary: string;
 }) {
   return (
-    <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
+    <div className="mt-4 flex flex-col items-center gap-3 border-t border-line pt-4 sm:flex-row sm:justify-between">
       <p className="text-[13px] text-ink-soft">{summary}</p>
       <div className="flex items-center gap-2">
         <button
@@ -289,6 +429,83 @@ export function Pagination({
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Groups side panel, sized to match the members table it sits beside.
+ *
+ * From `lg` the inner column is absolutely positioned inside the grid cell, so
+ * the groups contribute nothing to the row's height — the members table alone
+ * decides how tall the row is, and the list fills exactly that and scrolls the
+ * overflow. Below `lg` the panel is full-width with nothing beside it, so it
+ * flows normally under a plain height cap. "View all groups" is the escape
+ * hatch to the full Groups page either way.
+ *
+ * Pass `onCreate` to get the manager-only Create Group affordances.
+ */
+export function GroupsPanel({
+  groups,
+  isLoading,
+  onCreate,
+}: {
+  groups: Group[];
+  isLoading: boolean;
+  onCreate?: () => void;
+}) {
+  return (
+    <section className="min-w-0 lg:relative">
+      <div className="flex flex-col lg:absolute lg:inset-0">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-bold text-ink">Groups</h2>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/sprintly/groups"
+              className="rounded-lg px-2 py-1.5 text-sm font-bold text-brand transition-colors hover:bg-brand/10"
+            >
+              View all groups
+            </Link>
+            {onCreate && (
+              <button
+                type="button"
+                onClick={onCreate}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-3 py-1.5 text-sm font-bold text-[#0f766e] transition-colors hover:bg-brand/10"
+              >
+                <span className="text-base">+</span>
+                Create Group
+              </button>
+            )}
+          </div>
+        </div>
+
+        {isLoading ? (
+          <p className="mt-4 text-ink-soft">Loading groups...</p>
+        ) : groups.length === 0 ? (
+          <Card className="mt-4 rounded-xl p-6 text-center">
+            <p className="text-sm font-bold text-ink">No groups yet</p>
+            <p className="mt-1 text-xs text-ink-soft">
+              {onCreate
+                ? "Create a group to organize members."
+                : "Groups will appear here once they're created."}
+            </p>
+            {onCreate && (
+              <Button variant="outline" size="sm" className="mt-4" onClick={onCreate}>
+                + Create Group
+              </Button>
+            )}
+          </Card>
+        ) : (
+          // `min-h-0` lets the flex child shrink below its content so the
+          // overflow actually scrolls; `pr-1` keeps the cards' border clear of
+          // the scrollbar. Below lg the panel is full-width, so cards sit 2-up.
+          <div className="mt-4 grid max-h-[640px] grid-cols-1 gap-4 overflow-y-auto pr-1 sm:grid-cols-2 lg:max-h-none lg:min-h-0 lg:flex-1 lg:grid-cols-1">
+            {groups.map((g) => (
+              <GroupCard key={g.id} group={g} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
