@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Enums;
 
 use App\Modules\Crm\Notifications\Presenters\InboundReplyPresenter;
+use App\Modules\Crm\Notifications\Presenters\LeadAssignedPresenter;
 use App\Modules\Crm\Notifications\Presenters\NotificationPresenter;
 use App\Modules\Crm\Notifications\Presenters\PlannerReminderPresenter;
 
@@ -24,18 +25,23 @@ use App\Modules\Crm\Notifications\Presenters\PlannerReminderPresenter;
  * alongside the producer that emits it — see the roadmap below.
  *
  * Planned (each lands with its producer + presenter, not before):
- *   lead.assigned · lead.status_changed · lead.converted · lead.imported
- *   lead.note_added · followup.assigned · followup.completed
- *   email.received · meeting.scheduled
+ *   lead_status_changed · lead_converted · lead_imported · lead_note_added
+ *   followup_assigned · followup_completed · email_received · meeting_scheduled
  *
- * The two cases below keep the exact string values written since RC2 — renaming
- * either would orphan every notification already stored, because the value is
- * persisted inside each row's `data` payload.
+ * Values are snake_case. An earlier version of this list wrote them dotted
+ * (`lead.assigned`), which never matched the two shipped cases; `lead_assigned`
+ * settled it in favour of the persisted convention, and the rest are spelled
+ * that way here so the next producer does not have to re-decide.
+ *
+ * The cases below keep the exact string values written since RC2 — renaming any
+ * would orphan every notification already stored, because the value is persisted
+ * inside each row's `data` payload.
  */
 enum NotificationType: string
 {
     case INBOUND_REPLY = 'inbound_reply';
     case PLANNER_REMINDER = 'planner_reminder';
+    case LEAD_ASSIGNED = 'lead_assigned';
 
     /**
      * The presenter that turns this type's payload into title / message / deep-link.
@@ -47,6 +53,7 @@ enum NotificationType: string
         return match ($this) {
             self::INBOUND_REPLY => new InboundReplyPresenter,
             self::PLANNER_REMINDER => new PlannerReminderPresenter,
+            self::LEAD_ASSIGNED => new LeadAssignedPresenter,
         };
     }
 }

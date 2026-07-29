@@ -21,6 +21,7 @@ use App\Modules\Crm\Resources\EmailResource;
 use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Models\Activity;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Notifications\LeadAssignedNotification;
 use App\Models\User;
 use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Services\LeadImportService;
@@ -536,10 +537,27 @@ class LeadController extends Controller
             ],
         ]);
 
+        // The durable record of the handover, for the new owner's Notification Center.
+        // notify() is the only entry point: persisting fires NotificationSent, and
+        // BroadcastCrmNotification pushes it to their bell — the same one path every
+        // CRM notification takes. Nothing here broadcasts.
+        //
+        // ORDER MATTERS, and it is the reason this is not a listener on LeadAssigned.
+        // Illuminate\Events\Dispatcher broadcasts BEFORE it runs listeners, and
+        // SafeBroadcast deliberately swallows a Reverb failure — so a listener hung off
+        // that event would silently not run during an outage, and the assignment would
+        // reach nobody. Persisting first makes the record independent of the transport,
+        // which is the whole reason it is persisted.
+        $lead->assignedTo->notify(new LeadAssignedNotification($lead, $request->user()));
+
         // Realtime push — only after the write and its activity have succeeded, so a subscriber is
         // never told about an assignment that didn't land. toOthers() excludes the assigning client
         // (identified by its X-Socket-Id header) so the actor keeps its own optimistic update.
         // SafeBroadcast keeps a Reverb outage from turning this 200 into a 500.
+        //
+        // Still separate from the notification above, and still worth having: this is the
+        // transient toast for a BD who is looking right now, and it also updates the lead's
+        // own stream for Admins watching it. The notification is the record; this is the nudge.
         SafeBroadcast::toOthers(new LeadAssigned($lead, $request->user()));
 
         return response()->json([

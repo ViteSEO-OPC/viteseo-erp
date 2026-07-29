@@ -13,6 +13,7 @@
 export const NOTIFICATION_TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "inbound_reply", label: "Inbound replies" },
   { value: "planner_reminder", label: "Reminders" },
+  { value: "lead_assigned", label: "Lead assignments" },
 ];
 
 export type NotificationDto = {
