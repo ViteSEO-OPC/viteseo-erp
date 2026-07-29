@@ -1,3 +1,10 @@
+/** The Notification History filter set — part of its cache key, so each combination pages independently. */
+export type NotificationHistoryFilters = {
+  filter: "all" | "unread";
+  type: string | null;
+  search: string;
+};
+
 export const queryKeys = {
   dashboard: {
     all: ["dashboard"] as const,
@@ -141,6 +148,14 @@ export const queryKeys = {
     all: ["notifications"] as const,
     list: () => [...queryKeys.notifications.all, "list"] as const,
     unreadCount: () => [...queryKeys.notifications.all, "unread-count"] as const,
+    // History page. Kept UNDER the `all` prefix on purpose: the existing mark-read /
+    // mark-all invalidations already target that prefix, so History reconciles with
+    // them without either side learning about the other. `historyAll` is the prefix
+    // to invalidate when the filter set is unknown — every filter combination is a
+    // separate cursor walk and therefore a separate cache entry.
+    historyAll: () => [...queryKeys.notifications.all, "history"] as const,
+    history: (filters: NotificationHistoryFilters) =>
+      [...queryKeys.notifications.historyAll(), filters] as const,
   },
   businessRules: {
     // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved

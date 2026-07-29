@@ -133,6 +133,11 @@ export const PAGE_ACCESS: PageAccess[] = [
   // (/zerem/reports), which shows the same widgets with an All-Reports / per-BD scope selector.
   { href: "/zerem/my-performance", allowedRoles: ["crm_bd"] },
   { href: "/zerem/activity-logs", minRole: "crm_bd" },
+  // Notification History — a personal surface, like the bell it is reached from: every
+  // CRM role has notifications, and the feed is scoped to the caller server-side, so
+  // `minRole` (inherit-upward) rather than an allow-list. It is reachable only from the
+  // dropdown's "View all", NOT the sidebar — the bell stays the single entry point.
+  { href: "/zerem/notifications", minRole: "crm_bd" },
   // BD self-service profile ("Settings" in the BD sidebar) — role-exclusive, like Planner: visible
   // ONLY to Business Development Managers. Admin/Super Admin have the separate admin Settings module
   // at /settings. Self-service edits own name + phone via PATCH /me (no admin user management).

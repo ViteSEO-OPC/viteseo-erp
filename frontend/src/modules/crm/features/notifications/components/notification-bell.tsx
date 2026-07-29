@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell } from "lucide-react";
+import { ArrowRight, Bell } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import {
   DropdownMenu,
@@ -101,6 +101,27 @@ export function NotificationBell({ className }: { className?: string }) {
               />
             ))
           )}
+        </div>
+
+        {/* The only change to this dropdown in Slice 4: a way out to the full history.
+            The list above still shows just the most recent page — browsing, searching
+            and filtering live on the History page rather than growing this panel. */}
+        <div className="border-t border-border-subtle p-1">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              router.push("/zerem/notifications");
+            }}
+            className={cn(
+              "flex w-full items-center justify-center gap-1 rounded-lg px-3 py-2 text-xs font-medium",
+              "text-teal-700 transition-colors hover:bg-muted dark:text-teal-400",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+            )}
+          >
+            View all notifications
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

@@ -67,6 +67,44 @@ export function useMarkRead() {
   });
 }
 
+/**
+ * Mark one notification UNREAD again — the undo for a misclick, and the History page's
+ * only way back once a row has been read. Mirrors useMarkRead in the other direction:
+ * same scoped endpoint, same cancel-then-optimistic shape, same reconcile on settle.
+ *
+ * Deliberately not a "dismiss": the row is never removed and nothing is deleted. Read
+ * state is the only thing a user can change about a notification (PO decision
+ * 2026-07-29) — archive, if it is ever wanted, would be a new field, not this.
+ */
+export function useMarkUnread() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.patch(`/notifications/${id}/unread`),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: queryKeys.notifications.all });
+      const prevList = qc.getQueryData<NotificationDto[]>(queryKeys.notifications.list());
+      const prevCount = qc.getQueryData<number>(queryKeys.notifications.unreadCount());
+      // Only a row that is currently READ changes the count — re-marking an already
+      // unread row is a no-op the badge must not double-count.
+      const wasRead = prevList?.find((n) => n.id === id)?.read === true;
+      qc.setQueryData<NotificationDto[]>(queryKeys.notifications.list(), (old) =>
+        old?.map((n) => (n.id === id ? { ...n, read: false, read_at: null } : n)),
+      );
+      if (wasRead && typeof prevCount === "number") {
+        qc.setQueryData<number>(queryKeys.notifications.unreadCount(), prevCount + 1);
+      }
+      return { prevList, prevCount };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prevList) qc.setQueryData(queryKeys.notifications.list(), ctx.prevList);
+      if (ctx?.prevCount !== undefined) {
+        qc.setQueryData(queryKeys.notifications.unreadCount(), ctx.prevCount);
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: queryKeys.notifications.all }),
+  });
+}
+
 /** Mark every unread notification read — optimistic, then reconciled. */
 export function useMarkAllRead() {
   const qc = useQueryClient();

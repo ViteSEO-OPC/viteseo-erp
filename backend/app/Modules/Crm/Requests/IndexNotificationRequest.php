@@ -44,6 +44,15 @@ class IndexNotificationRequest extends FormRequest
             // Page size. Capped so a caller cannot ask for the entire history in one
             // response — the feed is unbounded over a user's lifetime.
             'per_page' => ['nullable', 'integer', 'min:1', 'max:50'],
+
+            // Pagination strategy, opt-in. Absent means `page` — the offset envelope
+            // the bell and dropdown already consume, unchanged. History asks for
+            // `cursor` because it pages a feed that grows at the HEAD: with offsets,
+            // a notification arriving while the reader is on page 2 pushes every row
+            // down one, so the next page repeats a row the reader already saw. A
+            // cursor is anchored to a row rather than a count, so head insertions
+            // cannot shift it.
+            'paginate' => ['nullable', Rule::in(['page', 'cursor'])],
         ];
     }
 }

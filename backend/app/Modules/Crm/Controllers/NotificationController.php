@@ -22,9 +22,12 @@ class NotificationController extends Controller
      *
      * Filters are additive and all optional: with no parameters this returns exactly
      * what it returned before they existed, page size and envelope included, so the
-     * bell and dropdown are unaffected. Pagination stays offset-based on purpose —
-     * switching to a cursor changes the response envelope, and that belongs in the
-     * slice that builds the History page which needs it, not ahead of any consumer.
+     * bell and dropdown are unaffected.
+     *
+     * Pagination has two modes and the default is still offset. Cursor is opt-in via
+     * `paginate=cursor` rather than a swap, because the two envelopes differ
+     * (`meta.current_page`/`last_page` vs `meta.next_cursor`) and the dropdown reads
+     * the offset one. History opts in; every existing caller keeps its contract.
      */
     public function index(IndexNotificationRequest $request): AnonymousResourceCollection
     {
@@ -56,9 +59,29 @@ class NotificationController extends Controller
             $query->where('data', 'like', "%{$term}%");
         }
 
+        $perPage = $filters['per_page'] ?? 15;
+
+        // Cursor mode is opt-in and additive; absent, this is byte-for-byte the
+        // offset feed the bell has always consumed.
+        if (($filters['paginate'] ?? 'page') === 'cursor') {
+            // `id` is the tiebreaker, and it is not optional. The relation orders by
+            // `created_at` alone, which is NOT unique here — a single scheduler run
+            // delivers several reminders within the same second, and that is normal
+            // traffic rather than a corner case. A cursor over a non-unique key
+            // cannot tell those rows apart, so paging across the tie silently skips
+            // or repeats them. Ordering by (created_at, id) makes every row's
+            // position total, which is the precondition cursor pagination needs.
+            $notifications = $query
+                ->orderBy('id', 'desc')
+                ->cursorPaginate($perPage)
+                ->withQueryString();
+
+            return NotificationResource::collection($notifications);
+        }
+
         // withQueryString keeps the active filters on the generated page links, so
         // paging through a filtered feed cannot silently drop the filter.
-        $notifications = $query->paginate($filters['per_page'] ?? 15)->withQueryString();
+        $notifications = $query->paginate($perPage)->withQueryString();
 
         return NotificationResource::collection($notifications);
     }

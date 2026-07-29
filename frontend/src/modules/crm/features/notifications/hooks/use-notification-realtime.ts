@@ -92,6 +92,14 @@ export function useNotificationRealtime(): void {
           return [payload, ...prev];
         });
       }
+
+      // History is refetched rather than patched. It is a cursor walk split across
+      // pages and keyed by its filter set, so there is no single cached array to
+      // prepend to — and the new row may not even belong in the current view, which
+      // only the server's filters can decide. Invalidating defers that judgement to
+      // the server. Costs nothing while History is closed: an inactive query is not
+      // refetched, and the page is not mounted for most of a session.
+      qc.invalidateQueries({ queryKey: queryKeys.notifications.historyAll() });
     };
 
     channel.listen(NOTIFICATION_CREATED, onCreated);
