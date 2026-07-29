@@ -227,6 +227,8 @@
 
   --color-sidebar-surface: #141414;
   --color-sidebar-muted: #9ca3af;
+  /* Warm off-white the sidebar sets its labels in (Figma 801:22337). */
+  --color-sidebar-ink: #fbfbef;
   --color-canvas: #ffffff;
   --color-surface: #ffffff;
 

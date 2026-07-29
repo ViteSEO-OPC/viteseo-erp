@@ -95,7 +95,7 @@ export function WorkspacesView() {
   };
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-ink sm:text-4xl">Work Spaces</h1>

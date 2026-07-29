@@ -3,7 +3,8 @@
 import { Suspense, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useIsManager } from "@/core/auth/AuthProvider";
+import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
+import { usePersistentState } from "@/core/use-persistent-state";
 import { celebrateTask } from "@/core/lib/confetti";
 import type { User } from "@/core/types";
 import {
@@ -19,6 +20,11 @@ import {
   Select,
 } from "@/core/ui";
 import { projectsApi } from "../../api";
+import type { NoteTarget } from "../../notes/types";
+import {
+  NotesTaskPanel,
+  NotesToggleButton,
+} from "../notes/NotesTaskPanel";
 import {
   projectKeys,
   useStatuses,
@@ -51,6 +57,13 @@ export interface WorkspaceViewsProps {
 /** Deadline ordering applied to the board; null keeps the source order. */
 type DeadlineSort = "asc" | "desc" | null;
 
+/**
+ * The board's notes panel shows the user-scoped note — the same document as the
+ * dashboard card, sharing one React Query entry, so an edit on either surface
+ * is immediately reflected on the other.
+ */
+const USER_NOTE: NoteTarget = { scope: "user" };
+
 function WorkspaceViewsInner({
   projects: allProjects,
   members,
@@ -62,12 +75,25 @@ function WorkspaceViewsInner({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [view, setView] = useState<ViewKey>("list");
+  const { user } = useAuth();
+  // Remember each user's last-picked board view (List / Kanban / Calendar).
+  const [storedView, setView] = usePersistentState<ViewKey>(
+    user ? `pm:board-view:${user.id}` : null,
+    "list",
+  );
+  // Guard against a stale/unknown persisted key so a bad value can't blank the board.
+  const view: ViewKey = VIEWS.some((v) => v.key === storedView)
+    ? storedView
+    : "list";
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [memberIds, setMemberIds] = useState<number[]>([]);
   const [deadlineSort, setDeadlineSort] = useState<DeadlineSort>(null);
-  const [createOpen, setCreateOpen] = useState(false);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
+  // Closed by default; the choice is remembered per user (§7.1).
+  const [notesOpen, setNotesOpen] = usePersistentState<boolean>(
+    user ? `pmnote:ui:${user.id}:taskpanel` : null,
+    false,
+  );
 
   const allProjectIds = projects.map((p) => p.id);
   const activeProjectIds = projectIds.length ? projectIds : allProjectIds;
@@ -100,39 +126,51 @@ function WorkspaceViewsInner({
 
   const items: WorkItem[] = tasks.flatMap<WorkItem>((t) => {
     const mySubs = t.my_subtasks ?? [];
+    const leadsMyGroup = t.leads_my_group ?? false;
+    const cards: WorkItem[] = [];
+
     // On the member "My Tasks" board, if the member has subtask(s) under this
     // task, surface those subtasks as their own cards (with the parent task as
-    // context) instead of the parent task card — and dragging them moves the
-    // subtask, which the member is allowed to do.
+    // context) — and dragging them moves the subtask, which the member is
+    // allowed to do.
     if (lockedAssigneeId != null && mySubs.length > 0) {
-      return mySubs.map<WorkItem>((s) => {
-        const o = ov(
-          `subtask-${s.id}`,
-          s.status?.key ?? null,
-          s.status?.name ?? null,
-          s.status?.color ?? null,
-        );
-        return {
-          kind: "subtask",
-          key: `subtask-${s.id}`,
-          id: t.id,
-          subtaskId: s.id,
-          parentTitle: t.title,
-          projectId: t.project_id,
-          projectColor: projectColor.get(t.project_id) ?? "#6366f1",
-          title: s.name,
-          priority: s.priority,
-          statusName: o.statusName,
-          statusKey: o.statusKey,
-          statusColor: o.statusColor,
-          assignee: null,
-          // It's the member's own subtask → keep it in their filtered board.
-          assigneeId: lockedAssigneeId,
-          groupName: null,
-          deadline: s.deadline,
-          hasMySubtask: true,
-        };
-      });
+      cards.push(
+        ...mySubs.map<WorkItem>((s) => {
+          const o = ov(
+            `subtask-${s.id}`,
+            s.status?.key ?? null,
+            s.status?.name ?? null,
+            s.status?.color ?? null,
+          );
+          return {
+            kind: "subtask",
+            key: `subtask-${s.id}`,
+            id: t.id,
+            subtaskId: s.id,
+            parentTitle: t.title,
+            projectId: t.project_id,
+            projectColor: projectColor.get(t.project_id) ?? "#6366f1",
+            title: s.name,
+            priority: s.priority,
+            statusName: o.statusName,
+            statusKey: o.statusKey,
+            statusColor: o.statusColor,
+            assignee: null,
+            // It's the member's own subtask → keep it in their filtered board.
+            assigneeId: lockedAssigneeId,
+            groupName: null,
+            groupColor: null,
+            deadline: s.deadline,
+            hasMySubtask: true,
+            leadsMyGroup: false,
+          };
+        }),
+      );
+
+      // A plain member's stake in the parent is only through those subtasks, so
+      // the parent card is replaced by them. The group's leader owns the parent
+      // task itself, so it stays on their board alongside their own subtasks.
+      if (!leadsMyGroup) return cards;
     }
 
     const o = ov(
@@ -141,25 +179,27 @@ function WorkspaceViewsInner({
       t.status?.name ?? null,
       t.status?.color ?? null,
     );
-    return [
-      {
-        kind: "task",
-        key: `task-${t.id}`,
-        id: t.id,
-        projectId: t.project_id,
-        projectColor: projectColor.get(t.project_id) ?? "#6366f1",
-        title: t.title,
-        priority: t.priority,
-        statusName: o.statusName,
-        statusKey: o.statusKey,
-        statusColor: o.statusColor,
-        assignee: t.assignee,
-        assigneeId: t.assignee_id,
-        groupName: t.group?.name ?? null,
-        deadline: t.deadline,
-        hasMySubtask: t.has_my_subtask ?? false,
-      },
-    ];
+    cards.push({
+      kind: "task",
+      key: `task-${t.id}`,
+      id: t.id,
+      projectId: t.project_id,
+      projectColor: projectColor.get(t.project_id) ?? "#6366f1",
+      title: t.title,
+      priority: t.priority,
+      statusName: o.statusName,
+      statusKey: o.statusKey,
+      statusColor: o.statusColor,
+      assignee: t.assignee,
+      assigneeId: t.assignee_id,
+      groupName: t.group?.name ?? null,
+      groupColor: t.group?.color ?? null,
+      deadline: t.deadline,
+      hasMySubtask: t.has_my_subtask ?? false,
+      leadsMyGroup,
+    });
+
+    return cards;
   });
 
   // Custom-status columns known across the in-scope projects, so an empty custom
@@ -186,7 +226,8 @@ function WorkspaceViewsInner({
     if (
       lockedAssigneeId != null &&
       i.assigneeId !== lockedAssigneeId &&
-      !i.hasMySubtask
+      !i.hasMySubtask &&
+      !i.leadsMyGroup
     )
       return false;
     if (memberIds.length) {
@@ -317,30 +358,33 @@ function WorkspaceViewsInner({
             setDeadlineSort={setDeadlineSort}
           />
 
+          {/* Notes sits immediately right of Filter, same height and shape, so
+              the row reads as one control group. */}
+          <NotesToggleButton
+            target={USER_NOTE}
+            open={notesOpen}
+            onToggle={() => setNotesOpen(!notesOpen)}
+          />
+
+          {/* Creating a task lives in the page header (dashboard / workspace),
+              so it stays reachable from every tab — not just this board. */}
           {isManager && lockedAssigneeId == null && projects.length > 0 && (
-            <div className="flex flex-1 items-center gap-2 sm:flex-none">
-              <Button
-                variant="brand-outline"
-                onClick={() => setStatusModalOpen(true)}
-                className="flex-1 sm:flex-none"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add status
-              </Button>
-              <Button
-                onClick={() => setCreateOpen(true)}
-                className="flex-1 sm:flex-none"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add Task
-              </Button>
-            </div>
+            <Button
+              variant="brand-outline"
+              onClick={() => setStatusModalOpen(true)}
+              className="flex-1 sm:flex-none"
+            >
+              <PlusIcon className="h-4 w-4" />
+              Add status
+            </Button>
           )}
         </div>
       </div>
 
-      {/* Body */}
-      <div className="mt-5">
+      {/* Body — the notes panel is a sibling so that on wide screens it pushes
+          the board aside instead of covering it (it overlays below xl). */}
+      <div className="mt-5 flex items-start gap-5">
+        <div className="min-w-0 flex-1">
         {isLoading ? (
           <p className="text-ink-soft">Loading tasks…</p>
         ) : sorted.length === 0 ? (
@@ -390,20 +434,16 @@ function WorkspaceViewsInner({
         ) : (
           <CalendarView items={sorted} onOpen={handleOpen} />
         )}
+        </div>
+
+        <NotesTaskPanel
+          target={USER_NOTE}
+          open={notesOpen}
+          onClose={() => setNotesOpen(false)}
+        />
       </div>
 
       {/* The task-view modal is rendered globally (projects layout) off `?task=`. */}
-
-      {createOpen && (
-        <WorkspaceCreateTaskModal
-          projects={
-            projectIds.length
-              ? projects.filter((p) => projectIds.includes(p.id))
-              : projects
-          }
-          onClose={() => setCreateOpen(false)}
-        />
-      )}
 
       <StatusManagerModal
         open={statusModalOpen}
@@ -630,7 +670,12 @@ function FilterPopover({
   );
 }
 
-function WorkspaceCreateTaskModal({
+/**
+ * "Add Task" from a multi-project surface: pick the project first (when more
+ * than one is in scope), then fill in the task itself. Rendered by the page
+ * headers that own the button — the dashboard and the workspace detail view.
+ */
+export function WorkspaceCreateTaskModal({
   projects,
   onClose,
 }: {

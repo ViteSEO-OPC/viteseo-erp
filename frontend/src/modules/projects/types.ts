@@ -78,7 +78,7 @@ export interface Task {
   description: string | null;
   assignment_type: AssignmentType;
   group_id: string | null;
-  group?: { id: string; name: string } | null;
+  group?: { id: string; name: string; color?: string | null } | null;
   assignee_id: number | null;
   assignee?: User | null;
   /** Who set the current assignment (null when unassigned). */
@@ -100,6 +100,9 @@ export interface Task {
   // Board-list flag: the requesting user has a subtask assigned under this task,
   // so it belongs in their "My Tasks" view even if the task itself isn't theirs.
   has_my_subtask?: boolean;
+  // Board-list flag: this is a group task and the requesting user leads that
+  // group, so the parent task is theirs to own on their "My Tasks" view.
+  leads_my_group?: boolean;
   // Board-list only: the requesting user's own subtasks under this task. The
   // member "My Tasks" board renders these as their own cards.
   my_subtasks?: {

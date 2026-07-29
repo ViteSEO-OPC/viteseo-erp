@@ -1,6 +1,7 @@
 "use client";
 
 import { RequireAuth } from "@/core/auth-context";
+import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
 import { Sidebar } from "@/core/layout/Sidebar";
 import { Topbar } from "@/core/layout/Topbar";
 import { SidebarProvider } from "@/core/layout/SidebarContext";
@@ -19,16 +20,18 @@ export default function ProjectsLayout({
 }) {
   return (
     <RequireAuth>
-      <SidebarProvider>
-        <div className="flex h-screen overflow-hidden bg-canvas">
-          <Sidebar />
-          <main className="min-w-0 flex-1 overflow-y-auto">
-            <Topbar />
-            {children}
-          </main>
-        </div>
-      </SidebarProvider>
-      <GlobalTaskModal />
+      <RealtimeProvider>
+        <SidebarProvider>
+          <div className="flex h-screen overflow-hidden bg-canvas">
+            <Sidebar />
+            <main className="min-w-0 flex-1 overflow-y-auto">
+              <Topbar />
+              {children}
+            </main>
+          </div>
+        </SidebarProvider>
+        <GlobalTaskModal />
+      </RealtimeProvider>
     </RequireAuth>
   );
 }

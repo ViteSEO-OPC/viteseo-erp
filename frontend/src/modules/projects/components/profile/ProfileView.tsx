@@ -60,7 +60,7 @@ export function ProfileView() {
   const roleTone: BadgeTone = user?.role ? ROLE_TONES[user.role] : 'neutral';
 
   return (
-    <div className="mx-auto max-w-[1400px] px-8 py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       <h1 className="text-4xl font-bold text-ink">Profile</h1>
 
       {/* Identity card */}
