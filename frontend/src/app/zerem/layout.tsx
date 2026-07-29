@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
+import { LeadRealtimeListener } from "@/modules/crm/features/leads/components/lead-realtime-listener";
 import { PermissionsProvider } from "@/modules/crm/providers/permissions-provider";
 import { ThemeProvider } from "@/modules/crm/providers/theme-provider";
 import { canAccessPath } from "@/modules/crm/lib/rbac";
@@ -62,6 +63,8 @@ export default function CrmLayout({ children }: { children: React.ReactNode }) {
     <ThemeProvider>
       <PermissionsProvider>
         <RealtimeProvider>
+          {/* "A lead was assigned to me" toasts, live on every CRM screen. */}
+          <LeadRealtimeListener />
           {/* `font-primary` (Exo) is scoped here so CRM keeps its typeface without
               changing the platform's global body font. */}
           <div className="font-primary">

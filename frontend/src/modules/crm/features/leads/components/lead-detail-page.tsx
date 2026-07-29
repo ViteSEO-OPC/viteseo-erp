@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useLeadDetail } from "@/modules/crm/features/leads/hooks/use-lead-detail";
+import { useLeadChannel } from "@/modules/crm/features/leads/hooks/use-lead-realtime";
 import { useLeadActivities } from "@/modules/crm/features/leads/hooks/use-lead-activities";
 import { useDeleteLead, useUpdateLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import { LeadDetailHeader } from "@/modules/crm/features/leads/components/lead-detail-header";
@@ -33,6 +34,10 @@ export function LeadDetailPage() {
   const [lostOpen, setLostOpen] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const { lead, editableLead, quickActions, isLoading, isError } = useLeadDetail(params.id);
+  // Live ownership for the lead on screen: patches the owner in place if someone
+  // else reassigns it, and unsubscribes a BD who loses it. Subscribed here (not in
+  // the list) because this is the one view showing a single lead's stream.
+  useLeadChannel(params.id);
   const activities = useLeadActivities(params.id);
   const deleteLead = useDeleteLead();
   const updateLead = useUpdateLead();

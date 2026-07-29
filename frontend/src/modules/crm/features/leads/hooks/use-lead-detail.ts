@@ -6,7 +6,9 @@ import { queryKeys } from "@/modules/crm/lib/query-keys";
 import type { LeadDetail, QuickAction } from "@/modules/crm/features/leads/types/lead-detail-types";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
-type LeadApiDetail = {
+// Exported so the realtime consumer can patch this exact cached shape in place
+// (use-lead-realtime.ts) rather than restating it.
+export type LeadApiDetail = {
   id: string;
   business: string;
   contact: string;
