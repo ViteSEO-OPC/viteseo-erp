@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\AdjustAttendanceRequest;
+use App\Modules\Hr\Http\Requests\ClockInRequest;
 use App\Modules\Hr\Http\Resources\AttendanceResource;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\AttendanceService;
@@ -43,9 +44,17 @@ class AttendanceController extends Controller
         ]);
     }
 
-    public function clockIn(Request $request): JsonResponse
+    public function clockIn(ClockInRequest $request): JsonResponse
     {
-        return $this->clockAction($request, fn ($emp) => $this->service->clockIn($emp));
+        return $this->clockAction($request, fn ($emp) => $this->service->clockIn(
+            $emp,
+            $request->filled('lat') ? (float) $request->validated('lat') : null,
+            $request->filled('lng') ? (float) $request->validated('lng') : null,
+            $request->filled('accuracy') ? (float) $request->validated('accuracy') : null,
+            // From the SERVER's view of the connection, never the body — a client-supplied
+            // address would make the whole network check self-certified.
+            $request->ip(),
+        ));
     }
 
     public function clockOut(Request $request): JsonResponse

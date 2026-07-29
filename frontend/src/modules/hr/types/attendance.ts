@@ -24,6 +24,12 @@ export interface Attendance {
   on_lunch: boolean;
   on_break: boolean;
   tasks: DayTask[];
+  /**
+   * How the clock-in proved where the employee was. `null` means no check ran at all —
+   * the geofence was off, the row predates the feature, or the policy was enabled but
+   * unconfigured and deliberately failed open. Never read a null as "unverified".
+   */
+  location_verified_by: "ip_gps" | "ip_only" | "remote_approved" | null;
 }
 
 /**

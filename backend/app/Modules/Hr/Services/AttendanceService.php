@@ -24,6 +24,7 @@ class AttendanceService
         private readonly AuditService $audit,
         private readonly DeductionService $deduction,
         private readonly HolidayService $holidays,
+        private readonly GeofenceService $geofence,
     ) {}
 
     /**
@@ -191,8 +192,18 @@ class AttendanceService
         ];
     }
 
-    public function clockIn(Employee $employee): Attendance
-    {
+    /**
+     * @param  ?float  $lat  browser-captured position; absent is normal and allowed
+     * @param  ?float  $accuracy  the reading's radius of confidence, in metres
+     * @param  ?string  $ip  the address the SERVER saw, passed in by the controller
+     */
+    public function clockIn(
+        Employee $employee,
+        ?float $lat = null,
+        ?float $lng = null,
+        ?float $accuracy = null,
+        ?string $ip = null,
+    ): Attendance {
         $this->assertNotManagement($employee);
 
         // An overnight shift from a previous date is still running — starting a second one
@@ -234,10 +245,17 @@ class AttendanceService
             ]);
         }
 
+        // Geofence (Company → Rules). Returns null — and changes nothing below — whenever the
+        // feature is off or unconfigured, so an untouched install behaves exactly as before.
+        // Deliberately the LAST gate: no point telling someone they aren't at the office when
+        // the real problem is that they already clocked in an hour ago.
+        $verifiedBy = $this->geofence->verifyOfficeClockIn($lat, $lng, $accuracy, $ip);
+
         $cutoff = $this->scheduleStart($local, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
 
         $att->time_in = now(); // stored UTC
         $att->status = $local->gt($cutoff) ? 'late' : 'present';
+        $att->location_verified_by = $verifiedBy;
         $att->save();
 
         return $att;

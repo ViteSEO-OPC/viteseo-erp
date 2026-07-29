@@ -19,6 +19,11 @@ class AttendancePolicy extends Model
         'missing_clockout_mode',
         'early_arrival_mode',
         'block_early_clock_in',
+        'geofence_enabled',
+        'office_lat',
+        'office_lng',
+        'office_radius_m',
+        'office_ips',
         'overtime_mode',
         'overtime_threshold_minutes',
         'premium_rest_day_pct',
@@ -46,6 +51,14 @@ class AttendancePolicy extends Model
         'late_penalty_enabled' => 'boolean',
         'late_tiers' => 'array',
         'block_early_clock_in' => 'boolean',
+        'geofence_enabled' => 'boolean',
+        // float, not decimal:7 — these are fed straight into haversine trigonometry and
+        // serialised as JSON numbers; `decimal:` would hand both a string. A double holds
+        // 7 dp of latitude with room to spare. Null stays null.
+        'office_lat' => 'float',
+        'office_lng' => 'float',
+        'office_radius_m' => 'integer',
+        'office_ips' => 'array',
         'overtime_threshold_minutes' => 'integer',
         'premium_rest_day_pct' => 'integer',
         'premium_special_day_pct' => 'integer',
