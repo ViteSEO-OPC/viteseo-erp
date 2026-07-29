@@ -32,9 +32,14 @@ export function priorityPill(priority: Priority): string {
   return 'bg-success-soft text-success';
 }
 
-/** Read-only field box in the details panel — white, hairline, rounded (Figma 801:24655). */
+/**
+ * Read-only field box in the details panel — white, hairline, rounded (Figma
+ * 801:24655). Steps down a point below `sm`: the details grid stays two columns
+ * on a phone, and at 14px a full date ("Jul 28, 2026") wrapped onto a second
+ * line inside the box.
+ */
 export const readonlyField =
-  'flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface px-3 text-sm text-ink';
+  'flex h-10 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 text-[13px] text-ink sm:gap-2.5 sm:px-3 sm:text-sm';
 
 export function formatDate(value?: string | null): string {
   if (!value) return '—';

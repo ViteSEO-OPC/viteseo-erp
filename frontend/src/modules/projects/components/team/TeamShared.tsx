@@ -311,12 +311,15 @@ export function MembersTable({
           No members match your filters.
         </p>
       ) : (
-        <div className="divide-y divide-line">
+        // Separate cards below md; one divided table from md up.
+        <div className="mt-3 space-y-3 md:mt-0 md:space-y-0 md:divide-y md:divide-line">
           {rows.map((u, idx) => (
             <div
               key={u.id}
-              className={`flex flex-col gap-3 px-2 py-4 md:grid md:items-center md:gap-4 md:px-0 ${MEMBER_COLS} ${
-                idx % 2 === 1 ? "bg-[#FAFAF0]" : ""
+              className={`flex flex-col gap-3 rounded-xl border border-line p-4 md:grid md:items-center md:gap-4 md:rounded-none md:border-0 md:p-0 md:py-4 ${MEMBER_COLS} ${
+                // Zebra striping only reads as striping in a table — on stacked
+                // cards it looks like rows were highlighted at random.
+                idx % 2 === 1 ? "md:bg-[#FAFAF0]" : ""
               }`}
             >
               <div className="flex min-w-0 items-center gap-3">
@@ -328,23 +331,51 @@ export function MembersTable({
                   <p className="truncate text-xs text-ink-soft">{u.email}</p>
                 </div>
               </div>
-              {/* One wrapped row on mobile; `md:contents` dissolves this box so
-                  its three children land in the grid as their own columns. */}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pl-[52px] md:contents md:pl-0">
-                <div>
+              {/* Below md each field is a labelled row, so it reads without the
+                  column headers and every card comes out the same shape. From
+                  md up `md:contents` dissolves this box and the three fields
+                  become the grid's own columns. */}
+              <div className="flex flex-col gap-2 border-t border-line pt-3 md:contents">
+                <MemberField label="Role">
                   <RoleBadge role={u.role} />
-                </div>
-                <MemberGroupTags
-                  tags={groupsByUser.get(u.id) ?? []}
-                  emptyDash
-                  max={3}
-                />
-                <UserWorkloadBadge userId={u.id} />
+                </MemberField>
+                <MemberField label="Group">
+                  <MemberGroupTags
+                    tags={groupsByUser.get(u.id) ?? []}
+                    emptyDash
+                    max={3}
+                  />
+                </MemberField>
+                <MemberField label="Workload">
+                  <UserWorkloadBadge userId={u.id} />
+                </MemberField>
               </div>
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * One member field. Below md it's a `label · value` row with the label in a
+ * fixed gutter so the values line up down the card; from md up the label is
+ * dropped (the column header says it) and this wrapper becomes a grid cell.
+ */
+function MemberField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-3 md:block">
+      <span className="w-20 shrink-0 pt-0.5 text-xs font-bold uppercase tracking-wide text-ink-faint md:hidden">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1 md:flex-none">{children}</div>
     </div>
   );
 }
@@ -509,22 +540,33 @@ export function GroupsPanel({
   );
 }
 
-/** Read-only group card: name, member-count pill, lead, avatar stack. */
+/**
+ * Read-only group card: name, workload + member-count pills, lead, avatar stack.
+ *
+ * The name gets a line of its own rather than sharing one with two `shrink-0`
+ * pills — in a ~380px card (the side panel's width, and roughly a phone's) that
+ * arrangement squeezed the name down to "Frontend …" while the pills kept their
+ * full size. The pills wrap underneath instead.
+ */
 export function GroupCard({ group }: { group: Group }) {
+  const memberCount = group.members_count ?? group.members?.length ?? 0;
+
   return (
     <Card className="rounded-xl p-5">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="min-w-0 truncate text-lg font-bold text-ink">
-          {group.name}
-        </h3>
-        <div className="flex shrink-0 items-center gap-2">
-          <GroupWorkloadBadge groupId={group.id} />
-          <Badge className="bg-ink text-white">
-            {group.members_count ?? group.members?.length ?? 0} members
-          </Badge>
-        </div>
+      <h3
+        className="truncate text-lg font-bold text-ink"
+        title={group.name}
+      >
+        {group.name}
+      </h3>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <GroupWorkloadBadge groupId={group.id} />
+        <Badge className="bg-ink text-white">
+          {memberCount} {memberCount === 1 ? "member" : "members"}
+        </Badge>
       </div>
-      <div className="mt-3 flex items-center gap-2">
+
+      <div className="mt-3 flex min-w-0 items-center gap-2">
         {group.leader && (
           <Avatar
             name={group.leader.name}
@@ -532,10 +574,11 @@ export function GroupCard({ group }: { group: Group }) {
             size={20}
           />
         )}
-        <p className="text-[13px] text-ink-soft">
+        <p className="min-w-0 truncate text-[13px] text-ink-soft">
           Lead: {group.leader?.name ?? "—"}
         </p>
       </div>
+
       {group.members && group.members.length > 0 && (
         <div className="mt-4">
           <AvatarStack

@@ -561,7 +561,9 @@ export function ViewTaskBody({
               placeholder="Task name"
             />
           ) : (
-            <h1 className="min-w-0 text-2xl font-bold text-ink wrap-break-word sm:text-3xl">
+            // 24px was set for the 900px modal; on a ~344px phone card it
+            // dominates the panel, so the ladder starts a step lower.
+            <h1 className="min-w-0 text-xl font-bold text-ink wrap-break-word sm:text-2xl md:text-3xl">
               {task.title}
             </h1>
           )}
