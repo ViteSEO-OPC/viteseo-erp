@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getEcho } from "@/core/realtime/echo";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
@@ -11,6 +11,9 @@ import type { NotificationDto } from "@/modules/crm/features/notifications/types
 type BroadcastNotification = NotificationDto & { module?: string };
 
 const NOTIFICATION_CREATED = ".NotificationCreated";
+
+/** One spoken announcement. `seq` only exists to force a re-announce on repeated text. */
+export type Announcement = { seq: number; text: string };
 
 /**
  * Live notifications for the CRM bell.
@@ -25,10 +28,18 @@ const NOTIFICATION_CREATED = ".NotificationCreated";
  * echo.leave() here would take platform notifications down with it — and filters on
  * `module` so another module's payload is never mistaken for a CRM notification.
  */
-export function useNotificationRealtime(): void {
+export function useNotificationRealtime(): Announcement | null {
   const { user } = useAuth();
   const qc = useQueryClient();
   const userId = user?.id;
+
+  // What a screen reader is told when a notification arrives. Sighted users get the
+  // badge; without this, a non-sighted user gets nothing at all from a feature whose
+  // entire point is telling you something happened. `seq` exists because two
+  // notifications can carry identical text, and a live region whose content does not
+  // change is not re-announced — remounting on the sequence forces it through.
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null);
+  const seq = useRef(0);
 
   // Distinguishes the first connect from a re-connect: on the first, the REST
   // fetches already reflect current state and a refetch would be pure noise.
@@ -100,6 +111,19 @@ export function useNotificationRealtime(): void {
       // the server. Costs nothing while History is closed: an inactive query is not
       // refetched, and the page is not mounted for most of a session.
       qc.invalidateQueries({ queryKey: queryKeys.notifications.historyAll() });
+
+      // Announced last, so the cache is already consistent if the listener's render
+      // reads it. Falls back to a bare noun rather than announcing an empty string.
+      //
+      // "Notification:" and not "New notification:" — every title already opens with
+      // its own verb ("New lead assigned…", "New reply from…", "Reminder:…"), so the
+      // longer prefix made screen readers say "New" twice and stack two colons. The
+      // prefix is only here to say where the interruption came from.
+      seq.current += 1;
+      setAnnouncement({
+        seq: seq.current,
+        text: payload.title ? `Notification: ${payload.title}` : "New notification",
+      });
     };
 
     channel.listen(NOTIFICATION_CREATED, onCreated);
@@ -131,4 +155,6 @@ export function useNotificationRealtime(): void {
       pusher?.connection?.unbind?.("connected", onConnected);
     };
   }, [userId, qc]);
+
+  return announcement;
 }
