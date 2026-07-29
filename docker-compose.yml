@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Viteseo platform — local development stack
+#
+#   docker compose up -d              start mysql + api + reverb
+#   docker compose exec api php artisan migrate:fresh --seed
+#   docker compose logs -f reverb
+#
+# The host's PHP is 8.3 but composer.lock requires 8.4, so artisan/composer must
+# always run through `docker compose exec api …`, never on the host.
+#
+# The frontend is NOT containerised — run `npm run dev` in ./frontend (port 3000).
+#
+# NETWORKING. `api` and `reverb` deliberately use host networking so the DB_HOST
+# in backend/.env stays `127.0.0.1:3308` — identical whether a command runs on
+# the host or in a container, and identical to how the browser reaches Reverb.
+# The trade-off is that they cannot use compose's DNS to reach `mysql:3306`;
+# they go through the published 3308 port instead. Keep .env and the published
+# port in sync if you change either.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: viteseo-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: viteseo_platform
+      MYSQL_USER: viteseo
+      MYSQL_PASSWORD: viteseo
+    ports:
+      # 3308, not 3306 — this machine also runs the legacy CRM's MySQL.
+      - "3308:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # Gates the `api` and `reverb` starts below. Without it both race the DB
+      # and die on boot: Reverb reads the `cache` table for its restart signal
+      # before serving, so a cold `up` used to crash it with a connection error.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  api:
+    build:
+      context: ./docker/php
+    image: viteseo-php:8.4
+    container_name: viteseo-api
+    restart: unless-stopped
+    # Run as the invoking developer so files artisan writes into the bind mount
+    # (logs, caches, generated migrations) are owned by them and not by root.
+    # Override in a root-level .env if your uid/gid is not 1000.
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    environment:
+      # That uid has no /etc/passwd entry inside the container, so HOME would be
+      # unset and composer would fail trying to write its cache to /.
+      HOME: /tmp
+    volumes:
+      - ./backend:/app
+    network_mode: host
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["php", "artisan", "serve", "--host", "0.0.0.0", "--port", "8001"]
+
+  reverb:
+    # Same image as `api` — only the command differs. Reverb needs the pcntl and
+    # sockets extensions that ./docker/php/Dockerfile compiles in.
+    build:
+      context: ./docker/php
+    image: viteseo-php:8.4
+    container_name: viteseo-reverb
+    restart: unless-stopped
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    environment:
+      HOME: /tmp
+    volumes:
+      - ./backend:/app
+    network_mode: host
+    depends_on:
+      mysql:
+        condition: service_healthy
+    # Binds 127.0.0.1:8085 per REVERB_SERVER_HOST/PORT in backend/.env. Loopback
+    # only: reaching the app over a LAN IP will connect to the API but fail every
+    # WebSocket upgrade. Browse via localhost.
+    command: ["php", "artisan", "reverb:start"]
+
+volumes:
+  mysql-data:
