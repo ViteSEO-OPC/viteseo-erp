@@ -18,9 +18,14 @@ use Illuminate\Support\Facades\Schema;
  *   feed / cursor: … WHERE notifiable_* = ? ORDER BY created_at DESC
  *
  * The existing 2-column morphs index becomes a prefix of both of these. It is left
- * in place deliberately: it is created by Laravel's `morphs()` and other consumers
- * of this shared table (HR has its own notification controller) may rely on it.
- * Dropping it would not be additive.
+ * in place deliberately: it is created by Laravel's `morphs()`, so anything using
+ * the Notifiable relation expects it, and dropping it would not be additive.
+ *
+ * (An earlier version of this note said HR relies on this table. It does not —
+ * verified 2026-07-29: HR derives its notifications live from its own domain models
+ * and writes no rows here. The CRM is this table's only consumer today; it is
+ * unprefixed because it is Laravel's standard table, not because it is shared in
+ * practice.)
  *
  * Index names are given explicitly — the generated names for three-column indexes
  * on this table would be long and inconsistent with the existing one.

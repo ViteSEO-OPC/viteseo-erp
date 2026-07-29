@@ -57,6 +57,7 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
         Route::patch('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
         Route::patch('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+        Route::patch('/notifications/{id}/unread', [NotificationController::class, 'markAsUnread']);
 
         Route::get('/leads', [LeadController::class, 'index'])->can('viewAny', Lead::class);
         // Leads-page Priority Summary cards: High/Medium/Low counts aggregated from leads.priority
