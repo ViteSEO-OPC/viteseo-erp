@@ -22,9 +22,11 @@ class DocumentRequestResource extends JsonResource
             'fulfilled_url' => $this->fulfilled_path ? Storage::disk('public')->url($this->fulfilled_path) : null,
             'review_note' => $this->review_note,
             'reviewed_at' => $this->reviewed_at,
+            'reviewed_by' => $this->whenLoaded('reviewer', fn () => $this->reviewer?->name),
             'employee' => [
                 'id' => $this->employee_id,
                 'name' => $this->whenLoaded('employee', fn () => $this->employee->user?->name),
+                'photo_url' => $this->whenLoaded('employee', fn () => $this->employee->photo_url),
             ],
             'created_at' => $this->created_at,
         ];

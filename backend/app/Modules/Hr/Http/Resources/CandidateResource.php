@@ -32,6 +32,12 @@ class CandidateResource extends JsonResource
             'feedback' => $this->feedback,
             'notes' => $this->notes,
             'emails_sent' => $this->emails_sent ?? [],
+            // What HR actually sent in the assessment email, kept so it can be read
+            // back on the candidate and repeated on a re-send.
+            'assessment_link' => $this->assessment_link,
+            'assessment_instructions' => $this->assessment_instructions,
+            'assessment_deadline' => $this->assessment_deadline?->toDateString(),
+            'assessment_sent_at' => $this->assessment_sent_at?->toIso8601String(),
             'rejection_reason' => $this->rejection_reason,
             'hired_employee_id' => $this->hired_employee_id,
             'resume_path' => $this->resume_path,

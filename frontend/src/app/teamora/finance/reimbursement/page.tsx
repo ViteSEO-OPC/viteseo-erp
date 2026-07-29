@@ -7,10 +7,11 @@ import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
-import { Avatar } from "@/core/components/avatar";
+import { EmployeeCell } from "@/modules/hr/components/employee-cell";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
+import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import {
@@ -47,6 +48,10 @@ export default function ReimbursementPage() {
   }, [claims]);
 
   const [review, setReview] = useState<{ mode: "approve" | "reject"; c: Reimbursement } | null>(null);
+  // Kept as an id and read back from the live list so deciding inside the modal
+  // moves the status shown there too.
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (claims ?? []).find((c) => c.id === detailId) ?? null;
 
   const busyId =
     (approveMut.isPending && approveMut.variables) ||
@@ -73,15 +78,63 @@ export default function ReimbursementPage() {
     }
   }
 
+  /** The same decisions on the row and in the detail modal. */
+  function claimActions(c: Reimbursement) {
+    if (c.status === "pending") {
+      return (
+        <>
+          <Button size="sm" variant="success" disabled={busyId === c.id}
+            onClick={() => setReview({ mode: "approve", c })}>
+            <Check /> Approve
+          </Button>
+          <Button size="sm" variant="destructive" disabled={busyId === c.id}
+            onClick={() => setReview({ mode: "reject", c })}>
+            <X /> Reject
+          </Button>
+        </>
+      );
+    }
+
+    const undo = (
+      <ReopenAction
+        subject={`${c.employee.name}'s ${categoryLabel(c.category)} claim`}
+        label={c.status === "paid" ? "Undo payment" : "Reopen"}
+        title={c.status === "paid" ? "Reverse this payment?" : undefined}
+        confirmLabel={c.status === "paid" ? "Reverse payment" : undefined}
+        successMessage={c.status === "paid" ? "Payment reversed" : "Claim reopened"}
+        description={
+          c.status === "paid"
+            ? `This ${formatPeso(c.amount)} claim goes back to approved and unpaid — it is owed again.`
+            : undefined
+        }
+        onReopen={(reason) => reopenMut.mutateAsync({ id: c.id, reason })}
+      />
+    );
+
+    // `scheduled` (Slice 12) = folded into a payslip that hasn't gone out yet. It pays
+    // itself when that payslip is disbursed, but HR can still settle it by hand. No undo
+    // here: payroll is already carrying it — reverse the payslip instead.
+    if (c.status === "approved" || c.status === "scheduled") {
+      return (
+        <>
+          <Button size="sm" variant="outline" disabled={busyId === c.id}
+            onClick={() => act(paidMut.mutateAsync(c.id), "Marked as paid")}
+            title={c.status === "scheduled"
+              ? "Already included in a payslip — use this only if paid separately"
+              : undefined}>
+            Mark paid
+          </Button>
+          {c.status === "approved" ? undo : null}
+        </>
+      );
+    }
+    return undo;
+  }
+
   const columns: Column<Reimbursement>[] = [
     {
       header: "Employee",
-      cell: (c) => (
-        <div className="flex items-center gap-2.5">
-          <Avatar name={c.employee.name ?? "?"} colorSeed={c.employee.id} size="sm" />
-          <span className="font-semibold text-foreground">{c.employee.name}</span>
-        </div>
-      ),
+      cell: (c) => <EmployeeCell employee={c.employee} />,
     },
     { header: "Category", cell: (c) => categoryLabel(c.category) },
     {
@@ -95,6 +148,7 @@ export default function ReimbursementPage() {
               href={url}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="text-brand hover:opacity-80"
               title={
                 c.receipt_urls.length > 1
@@ -114,57 +168,11 @@ export default function ReimbursementPage() {
     {
       header: "Action",
       align: "right",
-      cell: (c) => {
-        if (c.status === "pending") {
-          return (
-            <div className="flex justify-end gap-1.5">
-              <Button size="sm" variant="success" disabled={busyId === c.id}
-                onClick={() => setReview({ mode: "approve", c })}>
-                <Check /> Approve
-              </Button>
-              <Button size="sm" variant="destructive" disabled={busyId === c.id}
-                onClick={() => setReview({ mode: "reject", c })}>
-                <X /> Reject
-              </Button>
-            </div>
-          );
-        }
-
-        const undo = (
-          <ReopenAction
-            subject={`${c.employee.name}'s ${categoryLabel(c.category)} claim`}
-            label={c.status === "paid" ? "Undo payment" : "Reopen"}
-            title={c.status === "paid" ? "Reverse this payment?" : undefined}
-            confirmLabel={c.status === "paid" ? "Reverse payment" : undefined}
-            successMessage={c.status === "paid" ? "Payment reversed" : "Claim reopened"}
-            description={
-              c.status === "paid"
-                ? `This ${formatPeso(c.amount)} claim goes back to approved and unpaid — it is owed again.`
-                : undefined
-            }
-            onReopen={(reason) => reopenMut.mutateAsync({ id: c.id, reason })}
-          />
-        );
-
-        // `scheduled` (Slice 12) = folded into a payslip that hasn't gone out yet. It pays
-        // itself when that payslip is disbursed, but HR can still settle it by hand. No undo
-        // here: payroll is already carrying it — reverse the payslip instead.
-        if (c.status === "approved" || c.status === "scheduled") {
-          return (
-            <div className="flex justify-end gap-1.5">
-              <Button size="sm" variant="outline" disabled={busyId === c.id}
-                onClick={() => act(paidMut.mutateAsync(c.id), "Marked as paid")}
-                title={c.status === "scheduled"
-                  ? "Already included in a payslip — use this only if paid separately"
-                  : undefined}>
-                Mark paid
-              </Button>
-              {c.status === "approved" ? undo : null}
-            </div>
-          );
-        }
-        return <div className="flex justify-end">{undo}</div>;
-      },
+      cell: (c) => (
+        <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+          {claimActions(c)}
+        </div>
+      ),
     },
   ];
 
@@ -207,6 +215,7 @@ export default function ReimbursementPage() {
           <p className="text-sm text-destructive">Could not load claims.</p>
         ) : (
           <DataTable columns={columns} rows={claims ?? []} rowKey={(c) => c.id}
+            onRowClick={(c) => setDetailId(c.id)}
             needsAction={(c) => c.status === "pending" || c.status === "approved"}
             empty="No claims filed yet." />
         )}
@@ -219,6 +228,68 @@ export default function ReimbursementPage() {
         subject={review ? `${review.c.employee.name}'s ${categoryLabel(review.c.category)} claim (${formatPeso(review.c.amount)})` : ""}
         onConfirm={onConfirm}
       />
+
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title={`${categoryLabel(detail.category)} claim`}
+          status={detail.status}
+          employee={detail.employee}
+          submitted={detail.created_at}
+          fields={[
+            {
+              label: "Amount",
+              value: (
+                <span className="text-base font-bold">{formatPeso(detail.amount)}</span>
+              ),
+            },
+            { label: "Category", value: categoryLabel(detail.category) },
+            { label: "Spent on", value: formatDate(detail.expense_date) },
+            {
+              label: "Payment",
+              value:
+                detail.status === "paid"
+                  ? "Settled"
+                  : detail.status === "scheduled"
+                    ? "In a payslip, awaiting disbursement"
+                    : detail.status === "approved"
+                      ? "Owed — queued for the next payroll run"
+                      : undefined,
+            },
+          ]}
+          note={{ label: "What it was for", text: detail.description }}
+          decision={{
+            by: detail.reviewed_by,
+            at: detail.reviewed_at,
+            note: detail.review_note,
+          }}
+          actions={claimActions(detail)}
+        >
+          {detail.receipt_urls.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                Receipts ({detail.receipt_urls.length})
+              </p>
+              <ul className="space-y-1">
+                {detail.receipt_urls.map((url, i) => (
+                  <li key={url}>
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                      Receipt {i + 1}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </RequestDetailDialog>
+      )}
     </div>
   );
 }

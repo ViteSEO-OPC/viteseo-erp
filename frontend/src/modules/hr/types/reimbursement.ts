@@ -1,3 +1,5 @@
+import type { EmployeeRef } from "@/modules/hr/types/employee";
+
 export const REIMBURSEMENT_CATEGORIES = [
   "travel",
   "meals",
@@ -22,7 +24,7 @@ export type ReimbursementStatus =
 
 export interface Reimbursement {
   id: number;
-  employee: { id: number; name: string | null };
+  employee: EmployeeRef;
   category: string;
   amount: string; // raw decimal; format for display
   expense_date: string;

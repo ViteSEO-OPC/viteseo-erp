@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { Paperclip } from "lucide-react";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatusBadge } from "@/core/components/status-badge";
-import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
+import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { ClaimForm } from "@/modules/hr/components/claim-form";
@@ -27,9 +28,12 @@ function statusNote(status: string): string | null {
 
 export default function ClaimsPage() {
   const { data: claims, isLoading, isError } = useReimbursements();
-  const [declined, setDeclined] = useState<Reimbursement | null>(null);
+  // By id, then read back from the live list, so the modal follows an HR decision
+  // that lands while it is open.
+  const [detailId, setDetailId] = useState<number | null>(null);
 
   const all = claims ?? [];
+  const detail = all.find((c) => c.id === detailId) ?? null;
 
   const columns: Column<Reimbursement>[] = [
     { header: "Category", cell: (c) => categoryLabel(c.category) },
@@ -84,10 +88,7 @@ export default function ClaimsPage() {
                 rows={all}
                 rowKey={(c) => c.id}
                 pageSize={10}
-                onRowClick={(c) => {
-                  if (c.status === "rejected") setDeclined(c);
-                }}
-                rowClassName={(c) => (c.status === "rejected" ? "cursor-pointer" : undefined)}
+                onRowClick={(c) => setDetailId(c.id)}
                 empty="No claims yet. File your first one."
               />
             </>
@@ -95,13 +96,64 @@ export default function ClaimsPage() {
         </div>
       </div>
 
-      <RejectionReasonDialog
-        open={!!declined}
-        onOpenChange={(o) => !o && setDeclined(null)}
-        title="Claim declined"
-        subject={declined ? declined.description : undefined}
-        reason={declined?.review_note ?? null}
-      />
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title={`${categoryLabel(detail.category)} claim`}
+          status={detail.status}
+          submitted={detail.created_at}
+          fields={[
+            {
+              label: "Amount",
+              value: <span className="text-base font-bold">{formatPeso(detail.amount)}</span>,
+            },
+            { label: "Category", value: categoryLabel(detail.category) },
+            { label: "Spent on", value: formatDate(detail.expense_date) },
+            {
+              label: "Payment",
+              value:
+                detail.status === "paid"
+                  ? "Paid in your payslip"
+                  : detail.status === "scheduled"
+                    ? "In your next payslip"
+                    : detail.status === "approved"
+                      ? "Queued for payroll"
+                      : undefined,
+            },
+          ]}
+          note={{ label: "What it was for", text: detail.description }}
+          decision={{
+            label: detail.status === "rejected" ? "Why it was declined" : "HR's decision",
+            by: detail.reviewed_by,
+            at: detail.reviewed_at,
+            note: detail.review_note,
+          }}
+        >
+          {detail.receipt_urls.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                Your receipts ({detail.receipt_urls.length})
+              </p>
+              <ul className="space-y-1">
+                {detail.receipt_urls.map((url, i) => (
+                  <li key={url}>
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                      Receipt {i + 1}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </RequestDetailDialog>
+      )}
     </div>
   );
 }

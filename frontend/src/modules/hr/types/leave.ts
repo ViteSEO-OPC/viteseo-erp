@@ -1,3 +1,4 @@
+import type { EmployeeRef } from "@/modules/hr/types/employee";
 import type { AllotmentMode } from "@/modules/hr/types/leave-config";
 
 export type { AllotmentMode };
@@ -27,7 +28,7 @@ export interface HalfDayRequest {
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
-  employee: { id: number; name: string | null };
+  employee: EmployeeRef;
   created_at: string;
 }
 
@@ -42,7 +43,7 @@ export interface EarlyOutRequest {
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
-  employee: { id: number; name: string | null };
+  employee: EmployeeRef;
   created_at: string;
 }
 
@@ -60,7 +61,7 @@ export interface OvertimeRequest {
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
-  employee: { id: number; name: string | null };
+  employee: EmployeeRef;
   created_at: string;
 }
 
@@ -108,7 +109,7 @@ export interface MyLeaveSummary {
 
 export interface LeaveRequest {
   id: number;
-  employee: { id: number; name: string | null };
+  employee: EmployeeRef;
   leave_type: { id: number; name: string; code: string; color: string | null };
   start_date: string;
   end_date: string;

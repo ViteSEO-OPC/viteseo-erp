@@ -13,6 +13,7 @@ import {
   hireCandidate,
   sendCandidateEmail,
   rejectCandidate,
+  type AssessmentCompose,
   type RequisitionInput,
 } from "@/modules/hr/api/recruitment";
 import type { Candidate } from "@/modules/hr/types/recruitment";
@@ -91,7 +92,12 @@ export function useMoveCandidate() {
 export function useSendCandidateEmail() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, type }: { id: number; type: string }) => sendCandidateEmail(id, type),
+    mutationFn: ({
+      id,
+      type,
+      ...compose
+    }: { id: number; type: string } & AssessmentCompose) =>
+      sendCandidateEmail(id, type, compose),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hr", "candidates"] }),
   });
 }

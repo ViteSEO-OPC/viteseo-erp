@@ -4,7 +4,6 @@ namespace App\Modules\Hr\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class EmployeeResource extends JsonResource
 {
@@ -17,7 +16,7 @@ class EmployeeResource extends JsonResource
             'id' => $this->id,
             'employee_no' => $this->employee_no,
             // Browser-facing URL for the profile picture; null falls back to initials.
-            'photo_url' => $this->photo_path ? Storage::disk('public')->url($this->photo_path) : null,
+            'photo_url' => $this->photo_url,
             // Identity comes from the linked user (relations are eager-loaded).
             'name' => $this->user?->name,
             'email' => $this->user?->email,

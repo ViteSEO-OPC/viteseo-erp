@@ -9,6 +9,17 @@ export interface ManagerRef {
   name: string | null;
 }
 
+/**
+ * Who a record belongs to, as embedded in the HR queue payloads: enough to render a
+ * row's identity — the name plus the face. `photo_url` is null when they never uploaded
+ * one, and absent when the endpoint didn't load the employee; both mean initials.
+ */
+export interface EmployeeRef {
+  id: number;
+  name: string | null;
+  photo_url?: string | null;
+}
+
 /** One named sibling on the personal record. */
 export interface Sibling {
   name: string;

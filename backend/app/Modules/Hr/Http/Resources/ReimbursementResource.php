@@ -24,6 +24,7 @@ class ReimbursementResource extends JsonResource
             'employee' => [
                 'id' => $this->employee->id,
                 'name' => $this->employee->user?->name,
+                'photo_url' => $this->employee->photo_url,
             ],
             'category' => $this->category,
             'amount' => $this->amount,

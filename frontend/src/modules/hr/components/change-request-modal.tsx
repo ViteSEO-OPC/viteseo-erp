@@ -17,6 +17,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/core/components/status-badge";
+import { DASH, RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
 import { formatDate } from "@/core/lib/format";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
@@ -61,6 +62,9 @@ export function ChangeRequestModal({
   const createMut = useCreateChangeRequest();
   const { data: history } = useMyChangeRequests();
   const [rows, setRows] = useState<Row[]>([newRow()]);
+  // A past request opened from the history list, stacked over this dialog.
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (history ?? []).find((c) => c.id === detailId) ?? null;
 
   useEffect(() => {
     if (open) setRows([newRow()]);
@@ -173,7 +177,19 @@ export function ChangeRequestModal({
               </p>
               <div className="space-y-2">
                 {(history ?? []).slice(0, 5).map((c) => (
-                  <div key={c.id} className="flex items-center justify-between gap-2 text-sm">
+                  <div
+                    key={c.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetailId(c.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setDetailId(c.id);
+                      }
+                    }}
+                    className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-1 py-1 text-sm transition-colors hover:bg-muted/50"
+                  >
                     <div className="min-w-0">
                       <p className="font-medium text-foreground">{c.field_label}</p>
                       <p className="truncate text-caption text-muted-foreground">
@@ -196,6 +212,30 @@ export function ChangeRequestModal({
             {createMut.isPending ? "Submitting…" : `Submit ${valid.length || ""} change${valid.length === 1 ? "" : "s"}`.trim()}
           </Button>
         </DialogFooter>
+
+        {detail && (
+          <RequestDetailDialog
+            open
+            onOpenChange={(o) => !o && setDetailId(null)}
+            title={`${detail.field_label} change`}
+            status={detail.status}
+            submitted={detail.created_at}
+            fields={[
+              { label: "Field", value: detail.field_label },
+              { label: "Was", value: detail.old_value || DASH },
+              {
+                label: "Asked to be",
+                value: <span className="font-medium">{detail.new_value || DASH}</span>,
+              },
+            ]}
+            decision={{
+              label: detail.status === "rejected" ? "Why it was declined" : "HR's decision",
+              by: detail.reviewed_by,
+              at: detail.reviewed_at,
+              note: detail.review_note,
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

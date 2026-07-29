@@ -3,11 +3,13 @@
 namespace App\Modules\Hr\Models;
 
 use App\Models\User;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
 
 class Employee extends Model
 {
@@ -104,6 +106,21 @@ class Employee extends Model
     public function isManagement(): bool
     {
         return (bool) $this->is_management;
+    }
+
+    /**
+     * Browser-facing URL for the profile picture, or null to fall back to initials.
+     *
+     * Lives here rather than in a Resource because the face belongs everywhere a person
+     * is listed — a dozen resources embed an identity block, and each building the URL
+     * itself is a dozen chances to build it differently. Deliberately not in `$appends`:
+     * every payload that carries it names it.
+     */
+    protected function photoUrl(): Attribute
+    {
+        return Attribute::get(
+            fn () => $this->photo_path ? Storage::disk('public')->url($this->photo_path) : null,
+        );
     }
 
     public function user(): BelongsTo

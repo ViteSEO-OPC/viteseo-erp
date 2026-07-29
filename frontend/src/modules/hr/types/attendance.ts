@@ -92,6 +92,8 @@ export interface EmployeeSchedule {
 export interface HrAttendanceRow {
   employee_id: number;
   name: string | null;
+  /** Profile picture; null falls back to initials. */
+  photo_url: string | null;
   department: string | null;
   /** 'YYYY-MM-DD' — bounds how far back violation history can be browsed. */
   hire_date: string | null;

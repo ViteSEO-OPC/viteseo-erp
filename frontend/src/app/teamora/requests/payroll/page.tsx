@@ -16,7 +16,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/modules/hr/components/page-header";
-import { Avatar } from "@/core/components/avatar";
+import { EmployeeCell } from "@/modules/hr/components/employee-cell";
 import { DataTable, type Column } from "@/core/components/data-table";
 import {
   StatusFilter,
@@ -26,6 +26,7 @@ import {
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
+import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
 import { formatDate, formatDateTime } from "@/core/lib/format";
 import {
   usePayslipRequests,
@@ -72,12 +73,41 @@ function turnaround(from: string, to: string | null): string {
   return `${rem} min`;
 }
 
-function EmployeeCell({ employee }: { employee: { id: number; name: string | null } }) {
-  const name = employee.name ?? "?";
+/** Keeps a press on a decision button from also counting as a press on the row. */
+function RowActions({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-3">
-      <Avatar name={name} colorSeed={employee.id} size="sm" />
-      <span className="font-semibold text-foreground">{name}</span>
+    <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+      {children}
+    </div>
+  );
+}
+
+/** Employee-supplied or HR-supplied files, linked out. */
+function AttachmentList({
+  label,
+  files,
+}: {
+  label: string;
+  files: { url: string; name: string }[];
+}) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-label font-semibold uppercase tracking-wide text-brand">{label}</p>
+      <ul className="space-y-1">
+        {files.map((f, i) => (
+          <li key={i}>
+            <a
+              href={f.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+            >
+              <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{f.name}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -113,6 +143,10 @@ function PayslipQueue() {
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: PayslipRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(rows ?? [], status);
+  // Kept as an id and read back from the live list so deciding inside the modal
+  // moves the status shown there too.
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (rows ?? []).find((r) => r.id === detailId) ?? null;
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -129,6 +163,28 @@ function PayslipQueue() {
     }
   }
 
+  /** The same decisions on the row and in the detail modal. */
+  function payslipActions(r: PayslipRequest) {
+    if (r.status === "pending") {
+      return (
+        <>
+          <Button size="sm" variant="success" onClick={() => setReview({ mode: "approve", row: r })}>
+            Approve
+          </Button>
+          <Button size="sm" variant="outline" className={REJECT_BTN} onClick={() => setReview({ mode: "reject", row: r })}>
+            Reject
+          </Button>
+        </>
+      );
+    }
+    return (
+      <ReopenAction
+        subject={`${r.employee.name}'s hard-copy request`}
+        onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+      />
+    );
+  }
+
   const columns: Column<PayslipRequest>[] = [
     { header: "Employee", cell: (r) => <EmployeeCell employee={r.employee} /> },
     { header: "Payslip Period", cell: (r) => r.payslip_cycle ?? "—" },
@@ -138,24 +194,7 @@ function PayslipQueue() {
     {
       header: "Action",
       align: "right",
-      cell: (r) =>
-        r.status === "pending" ? (
-          <div className="flex justify-end gap-2">
-            <Button size="sm" variant="success" onClick={() => setReview({ mode: "approve", row: r })}>
-              Approve
-            </Button>
-            <Button size="sm" variant="outline" className={REJECT_BTN} onClick={() => setReview({ mode: "reject", row: r })}>
-              Reject
-            </Button>
-          </div>
-        ) : (
-          <div className="flex justify-end">
-            <ReopenAction
-              subject={`${r.employee.name}'s hard-copy request`}
-              onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
-            />
-          </div>
-        ),
+      cell: (r) => <RowActions>{payslipActions(r)}</RowActions>,
     },
   ];
 
@@ -170,6 +209,7 @@ function PayslipQueue() {
           columns={columns}
           rows={visible}
           rowKey={(r) => r.id}
+          onRowClick={(r) => setDetailId(r.id)}
           needsAction={(r) => r.status === "pending"}
           getSearchText={(r) =>
             `${r.employee.name ?? ""} ${r.payslip_cycle ?? ""} ${r.reason} ${r.status}`
@@ -186,6 +226,28 @@ function PayslipQueue() {
         subject={review ? `${review.row.employee.name}'s signed hard-copy request` : ""}
         onConfirm={onConfirm}
       />
+
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title="Signed hard copy"
+          status={detail.status}
+          statusLabel={PAYSLIP_STATUS_LABEL[detail.status]}
+          employee={detail.employee}
+          submitted={detail.created_at}
+          fields={[
+            { label: "Payslip period", value: detail.payslip_cycle ?? "Not specific" },
+          ]}
+          note={{ label: "Why they need it", text: detail.reason }}
+          decision={{
+            by: detail.reviewed_by,
+            at: detail.reviewed_at,
+            note: detail.review_note,
+          }}
+          actions={payslipActions(detail)}
+        />
+      )}
     </>
   );
 }
@@ -197,9 +259,12 @@ function InquiryQueue() {
   const progressMut = useProgressPayrollInquiry();
   const reopenMut = useReopenPayrollInquiry();
   const [resolving, setResolving] = useState<PayrollInquiry | null>(null);
-  const [viewing, setViewing] = useState<PayrollInquiry | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(rows ?? [], status);
+  // Kept as an id and read back from the live list: resolving from inside the modal
+  // has to move it from "in progress" to "done" without closing it.
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (rows ?? []).find((r) => r.id === detailId) ?? null;
 
   const hasHighPriority = (rows ?? []).some(
     (r) => r.priority === "high" && r.status !== "done",
@@ -211,6 +276,50 @@ function InquiryQueue() {
     } catch {
       toast.error("Could not update the inquiry.");
     }
+  }
+
+  /**
+   * The queue is a one-action-at-a-time ladder — Pending → Start, In progress → Mark Done —
+   * with the undo for each. Shared by the row and the detail modal.
+   */
+  function inquiryActions(r: PayrollInquiry) {
+    if (r.status === "done") {
+      return (
+        <ReopenAction
+          subject={`${r.employee.name}'s inquiry`}
+          consequence="The resolution note and any proof attached to it are cleared."
+          onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+        />
+      );
+    }
+    if (r.status === "in_progress") {
+      return (
+        <>
+          <Button size="sm" variant="success" onClick={() => setResolving(r)}>
+            Mark Done
+          </Button>
+          <ReopenAction
+            label="Undo start"
+            title="Send this back to pending?"
+            confirmLabel="Send back"
+            successMessage="Back to pending"
+            subject={`${r.employee.name}'s inquiry`}
+            description={`${r.employee.name}'s inquiry goes back to pending, as if it hadn't been picked up.`}
+            onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+          />
+        </>
+      );
+    }
+    return (
+      <Button
+        size="sm"
+        className="bg-info text-white hover:bg-info/90"
+        disabled={progressMut.isPending}
+        onClick={() => onStart(r)}
+      >
+        Start
+      </Button>
+    );
   }
 
   const columns: Column<PayrollInquiry>[] = [
@@ -237,53 +346,7 @@ function InquiryQueue() {
     {
       header: "Action",
       align: "right",
-      cell: (r) => {
-        if (r.status === "done") {
-          return (
-            <div className="flex items-center justify-end gap-2">
-              <Button size="sm" variant="link" className="h-auto p-0" onClick={() => setViewing(r)}>
-                View Note
-              </Button>
-              <ReopenAction
-                subject={`${r.employee.name}'s inquiry`}
-                consequence="The resolution note and any proof attached to it are cleared."
-                onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
-              />
-            </div>
-          );
-        }
-        // One action at a time: Pending → Start, then In progress → Mark Done.
-        if (r.status === "in_progress") {
-          return (
-            <div className="flex justify-end gap-1.5">
-              <Button size="sm" variant="success" onClick={() => setResolving(r)}>
-                Mark Done
-              </Button>
-              <ReopenAction
-                label="Undo start"
-                title="Send this back to pending?"
-                confirmLabel="Send back"
-                successMessage="Back to pending"
-                subject={`${r.employee.name}'s inquiry`}
-                description={`${r.employee.name}'s inquiry goes back to pending, as if it hadn't been picked up.`}
-                onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
-              />
-            </div>
-          );
-        }
-        return (
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              className="bg-info text-white hover:bg-info/90"
-              disabled={progressMut.isPending}
-              onClick={() => onStart(r)}
-            >
-              Start
-            </Button>
-          </div>
-        );
-      },
+      cell: (r) => <RowActions>{inquiryActions(r)}</RowActions>,
     },
   ];
 
@@ -311,6 +374,7 @@ function InquiryQueue() {
           columns={columns}
           rows={visible}
           rowKey={(r) => r.id}
+          onRowClick={(r) => setDetailId(r.id)}
           needsAction={(r) => r.status !== "done"}
           getSearchText={(r) =>
             `${r.employee.name ?? ""} ${r.subject ?? r.topic ?? r.message ?? ""} ${r.status}`
@@ -326,7 +390,52 @@ function InquiryQueue() {
         inquiry={resolving}
         onOpenChange={(o) => !o && setResolving(null)}
       />
-      <NoteDialog inquiry={viewing} onOpenChange={(o) => !o && setViewing(null)} />
+
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title={detail.subject || detail.topic || "Payroll inquiry"}
+          status={detail.status}
+          employee={detail.employee}
+          submitted={detail.created_at}
+          fields={[
+            { label: "Pay period", value: detail.payslip_cycle ?? "Not specific" },
+            { label: "Topic", value: detail.topic },
+            {
+              label: "Priority",
+              value:
+                detail.priority === "high" ? (
+                  <span className="font-semibold text-danger">High</span>
+                ) : (
+                  <span className="capitalize">{detail.priority}</span>
+                ),
+            },
+            { label: "Turnaround", value: turnaround(detail.created_at, detail.resolved_at) },
+          ]}
+          note={{ label: "Inquiry", text: detail.message }}
+          decision={{
+            label: "Resolution",
+            by: detail.resolved_by,
+            at: detail.resolved_at,
+            note: detail.resolution_note,
+          }}
+          actions={inquiryActions(detail)}
+        >
+          {detail.attachment_url && (
+            <AttachmentList
+              label="Attached by employee"
+              files={[{ url: detail.attachment_url, name: "Attachment" }]}
+            />
+          )}
+          {detail.resolution_attachments.length > 0 && (
+            <AttachmentList
+              label={`Proof attached (${detail.resolution_attachments.length})`}
+              files={detail.resolution_attachments}
+            />
+          )}
+        </RequestDetailDialog>
+      )}
     </section>
   );
 }
@@ -434,51 +543,3 @@ function ResolveDialog({
   );
 }
 
-function NoteDialog({
-  inquiry,
-  onOpenChange,
-}: {
-  inquiry: PayrollInquiry | null;
-  onOpenChange: (open: boolean) => void;
-}) {
-  return (
-    <Dialog open={!!inquiry} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Resolution note</DialogTitle>
-          <DialogDescription>{inquiry?.employee.name}&apos;s payroll inquiry</DialogDescription>
-        </DialogHeader>
-        <p className="rounded-lg bg-muted px-3 py-2.5 text-sm text-foreground">
-          {inquiry?.resolution_note?.trim() || "No note was added."}
-        </p>
-        {inquiry && inquiry.resolution_attachments.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="text-xs font-semibold text-muted-foreground">
-              Proof attached ({inquiry.resolution_attachments.length})
-            </p>
-            <ul className="space-y-1">
-              {inquiry.resolution_attachments.map((a, i) => (
-                <li key={i}>
-                  <a
-                    href={a.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
-                  >
-                    <Paperclip className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{a.name}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="outline">Close</Button>
-          </DialogClose>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}

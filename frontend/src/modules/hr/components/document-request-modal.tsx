@@ -17,6 +17,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/core/components/status-badge";
+import { DASH, RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
 import { formatDate } from "@/core/lib/format";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DOCUMENT_TYPES, documentTypeLabel } from "@/modules/hr/types/request";
@@ -24,6 +25,14 @@ import {
   useCreateDocumentRequest,
   useMyDocumentRequests,
 } from "@/modules/hr/hooks/use-requests";
+
+/** Employee-facing wording for the request lifecycle (mirrors the HR queue). */
+const DOC_STATUS_LABEL: Record<string, string> = {
+  pending: "Pending",
+  in_progress: "Processing",
+  fulfilled: "Completed",
+  rejected: "Rejected",
+};
 
 /** Employee self-service: request an official document from HR + see the history. */
 export function DocumentRequestModal({
@@ -38,6 +47,9 @@ export function DocumentRequestModal({
   const [type, setType] = useState<string>(DOCUMENT_TYPES[0].value);
   const [otherDetail, setOtherDetail] = useState("");
   const [reason, setReason] = useState("");
+  // A past request opened from the history list, stacked over this dialog.
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (history ?? []).find((d) => d.id === detailId) ?? null;
 
   const isOther = type === "other";
 
@@ -135,7 +147,19 @@ export function DocumentRequestModal({
             ) : (
               <div className="max-h-[40vh] space-y-2 overflow-y-auto">
                 {(history ?? []).map((d) => (
-                  <div key={d.id} className="flex items-center justify-between gap-2 text-sm">
+                  <div
+                    key={d.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetailId(d.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setDetailId(d.id);
+                      }
+                    }}
+                    className="flex cursor-pointer items-center justify-between gap-2 rounded-md px-1 py-1 text-sm transition-colors hover:bg-muted/50"
+                  >
                     <div className="min-w-0">
                       <p className="font-medium text-foreground">
                         {d.type === "other" && d.other_detail
@@ -144,7 +168,7 @@ export function DocumentRequestModal({
                       </p>
                       <p className="text-caption text-muted-foreground">{formatDate(d.created_at)}</p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       {d.fulfilled_url && (
                         <Button size="xs" variant="outline" asChild>
                           <a href={d.fulfilled_url} target="_blank" rel="noreferrer">
@@ -166,6 +190,44 @@ export function DocumentRequestModal({
             <Button variant="outline">Close</Button>
           </DialogClose>
         </DialogFooter>
+
+        {detail && (
+          <RequestDetailDialog
+            open
+            onOpenChange={(o) => !o && setDetailId(null)}
+            title={documentTypeLabel(detail.type)}
+            status={detail.status}
+            statusLabel={DOC_STATUS_LABEL[detail.status]}
+            submitted={detail.created_at}
+            fields={[
+              { label: "Document", value: documentTypeLabel(detail.type) },
+              {
+                label: "Which one",
+                value: detail.type === "other" ? detail.other_detail || DASH : undefined,
+              },
+              {
+                label: "Your file",
+                value: detail.fulfilled_url ? (
+                  <a
+                    href={detail.fulfilled_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-brand hover:underline"
+                  >
+                    Download document
+                  </a>
+                ) : undefined,
+              },
+            ]}
+            note={{ label: "Your reason", text: detail.reason }}
+            decision={{
+              label: detail.status === "rejected" ? "Why it was declined" : "HR's decision",
+              by: detail.reviewed_by,
+              at: detail.reviewed_at,
+              note: detail.review_note,
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

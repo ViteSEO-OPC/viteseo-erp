@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { Search } from "lucide-react";
 
-import { Avatar } from "@/core/components/avatar";
+import { EmployeeCell } from "@/modules/hr/components/employee-cell";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatTimeManila } from "@/core/lib/format";
 import { useAttendanceSummary, useHrAttendance } from "@/modules/hr/hooks/use-attendance";
@@ -22,10 +22,9 @@ const columns: Column<HrAttendanceRow>[] = [
   {
     header: "Employee",
     cell: (r) => (
-      <div className="flex items-center gap-2.5">
-        <Avatar name={r.name ?? ""} colorSeed={r.employee_id} size="sm" />
-        <span className="font-semibold text-foreground">{r.name ?? "—"}</span>
-      </div>
+      <EmployeeCell
+        employee={{ id: r.employee_id, name: r.name, photo_url: r.photo_url }}
+      />
     ),
   },
   { header: "Dept", cell: (r) => r.department ?? "—", className: "text-muted-foreground" },

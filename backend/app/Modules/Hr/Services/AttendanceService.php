@@ -663,6 +663,7 @@ class AttendanceService
                 return [
                     'employee_id' => $emp->id,
                     'name' => $emp->user?->name,
+                    'photo_url' => $emp->photo_url,
                     'department' => $emp->department?->name,
                     'hire_date' => $emp->hire_date?->format('Y-m-d'),
                     'schedule' => [

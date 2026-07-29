@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Avatar } from "@/core/components/avatar";
+import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
 import {
   Dialog,
   DialogContent,
@@ -217,7 +217,12 @@ function AssignForm({
                 >
                   {checked && <span className="text-[10px] leading-none">✓</span>}
                 </span>
-                <Avatar name={e.name} colorSeed={e.id} size="sm" />
+                <EmployeeAvatar
+                  name={e.name}
+                  photoUrl={e.photo_url}
+                  colorSeed={e.id}
+                  size="sm"
+                />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-foreground">{e.name}</p>
                   <p className="truncate text-caption text-muted-foreground">

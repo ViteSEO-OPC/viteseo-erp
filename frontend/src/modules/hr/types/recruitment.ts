@@ -31,10 +31,15 @@ export function employmentTypeLabel(v: string | null): string {
 /** Stages that expose the "send interview email" action (mirrors the backend). */
 export const INTERVIEW_STAGES = ["online_interview", "final_interview"];
 
-/** The email a candidate at a given stage can be sent — type + button label. */
+/**
+ * The email a candidate at a given stage can be sent — type + button label. All but
+ * `assessment` are fixed templates sent in one click; the assessment email is composed
+ * by HR first (see AssessmentEmailDialog).
+ */
 export const STAGE_EMAIL: Record<string, { type: string; label: string }> = {
   online_interview: { type: "online_interview", label: "online interview invite" },
   final_interview: { type: "final_interview", label: "final interview invite" },
+  assessment: { type: "assessment", label: "assessment email" },
   hired: { type: "offer", label: "offer email" },
   rejected: { type: "rejection", label: "rejection notice" },
 };
@@ -92,6 +97,12 @@ export interface Candidate {
   notes: string | null;
   /** Email types already sent to this candidate (e.g. ["online_interview"]). */
   emails_sent: string[];
+  /** What HR sent in the assessment email — the record of it, for reading back or re-sending. */
+  assessment_link: string | null;
+  assessment_instructions: string | null;
+  /** "yyyy-MM-dd", or null when HR gave no deadline. */
+  assessment_deadline: string | null;
+  assessment_sent_at: string | null;
   rejection_reason: string | null;
   hired_employee_id: number | null;
   resume_path: string | null;

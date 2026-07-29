@@ -18,11 +18,13 @@ class PayslipRequestResource extends JsonResource
             'status' => $this->status,
             'review_note' => $this->review_note,
             'reviewed_at' => $this->reviewed_at,
+            'reviewed_by' => $this->whenLoaded('reviewer', fn () => $this->reviewer?->name),
             'payslip_id' => $this->payslip_id,
             'payslip_cycle' => $this->payslipCycle(),
             'employee' => [
                 'id' => $this->employee_id,
                 'name' => $this->whenLoaded('employee', fn () => $this->employee->user?->name),
+                'photo_url' => $this->whenLoaded('employee', fn () => $this->employee->photo_url),
             ],
             'created_at' => $this->created_at,
         ];

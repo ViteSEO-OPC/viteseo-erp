@@ -7,9 +7,12 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
 import { notify as toast } from "@/core/lib/notify";
-import { formatDate } from "@/core/lib/format";
+import { formatDate, formatDateTime } from "@/core/lib/format";
+import {
+  RequestDetailDialog,
+  type DetailField,
+} from "@/modules/hr/components/request-detail-dialog";
 import { LeaveBalanceCard } from "@/modules/hr/components/leave-balance-card";
 import { LeaveTypesListCard } from "@/modules/hr/components/leave-types-list-card";
 import { LeaveRequestForm } from "@/modules/hr/components/leave-request-form";
@@ -40,6 +43,11 @@ const REQUEST_TITLES: Record<RequestTab, string> = {
   overtime: "Request overtime",
 };
 
+/**
+ * One row of the combined history, carrying everything its detail modal needs. The four
+ * request kinds have different shapes, so each maps its own `fields` and `decision`
+ * rather than the modal switching on `kind`.
+ */
 interface HistItem {
   key: string;
   id: number;
@@ -48,7 +56,14 @@ interface HistItem {
   date: string;
   status: string;
   at: string;
-  reason: string | null;
+  /** The employee's own words when filing. */
+  reason: string;
+  /** HR's verdict — `note` is the decline reason on a rejected request. */
+  decision: { at: string | null; by?: string | null; note: string | null };
+  /** The label/value rows shown in the detail modal. */
+  fields: DetailField[];
+  /** Only leave can be cancelled, so only leave fills this in. */
+  cancelled: { at: string; by: string | null; reason: string | null } | null;
   /** Employees can cancel only their own still-pending leave. */
   cancellable: boolean;
 }
@@ -110,7 +125,7 @@ export default function TimeOffPage() {
   const { data: overtimes } = useOvertimeRequests();
   const cancelMut = useCancelLeaveRequest();
   const [tab, setTab] = useState<RequestTab>("leave");
-  const [declined, setDeclined] = useState<HistItem | null>(null);
+  const [detail, setDetail] = useState<HistItem | null>(null);
   const [cancelTarget, setCancelTarget] = useState<HistItem | null>(null);
   const [page, setPage] = useState(1);
 
@@ -147,20 +162,46 @@ export default function TimeOffPage() {
 
   // Combined leave + half-day history, newest first.
   const history: HistItem[] = [
-    ...(requests ?? []).map((l) => ({
-      key: `l${l.id}`,
-      id: l.id,
-      kind: "leave" as const,
-      title: l.leave_type.name,
-      date:
+    ...(requests ?? []).map((l) => {
+      const dates =
         l.start_date === l.end_date
           ? formatDate(l.start_date)
-          : `${formatDate(l.start_date)} – ${formatDate(l.end_date)}`,
-      status: l.status,
-      at: l.created_at,
-      reason: l.review_note,
-      cancellable: l.status === "pending",
-    })),
+          : `${formatDate(l.start_date)} – ${formatDate(l.end_date)}`;
+      return {
+        key: `l${l.id}`,
+        id: l.id,
+        kind: "leave" as const,
+        title: l.leave_type.name,
+        date: dates,
+        status: l.status,
+        at: l.created_at,
+        reason: l.reason,
+        decision: { at: l.reviewed_at, by: l.reviewed_by, note: l.review_note },
+        fields: [
+          { label: "Leave type", value: l.leave_type.name },
+          { label: "Dates", value: dates },
+          {
+            label: "Days",
+            value: l.is_half_day
+              ? `${l.days} (half day · ${l.half_day_period ?? "—"})`
+              : l.days,
+          },
+          {
+            label: "Your credits",
+            value:
+              l.status === "approved"
+                ? `${l.days} day(s) deducted`
+                : l.status === "cancelled"
+                  ? "Returned to your balance"
+                  : undefined,
+          },
+        ],
+        cancelled: l.cancelled_at
+          ? { at: l.cancelled_at, by: l.cancelled_by, reason: l.cancel_reason }
+          : null,
+        cancellable: l.status === "pending",
+      };
+    }),
     ...(halfDays ?? []).map((h) => ({
       key: `h${h.id}`,
       id: h.id,
@@ -169,7 +210,14 @@ export default function TimeOffPage() {
       date: `${formatDate(h.work_date)} · Unpaid`,
       status: h.status,
       at: h.created_at,
-      reason: h.review_note,
+      reason: h.reason,
+      decision: { at: h.reviewed_at, by: h.reviewed_by, note: h.review_note },
+      fields: [
+        { label: "Date", value: formatDate(h.work_date) },
+        { label: "Half", value: h.period },
+        { label: "Pay", value: <span className="text-danger">Unpaid · 0.5 day</span> },
+      ],
+      cancelled: null,
       cancellable: false,
     })),
     ...(earlyOuts ?? []).map((e) => ({
@@ -180,7 +228,14 @@ export default function TimeOffPage() {
       date: `${formatDate(e.work_date)} · Unpaid`,
       status: e.status,
       at: e.created_at,
-      reason: e.review_note,
+      reason: e.reason,
+      decision: { at: e.reviewed_at, by: e.reviewed_by, note: e.review_note },
+      fields: [
+        { label: "Date", value: formatDate(e.work_date) },
+        { label: "Leaving at", value: e.early_out_time },
+        { label: "Pay", value: <span className="text-danger">Unpaid · undertime</span> },
+      ],
+      cancelled: null,
       cancellable: false,
     })),
     ...(overtimes ?? []).map((o) => ({
@@ -191,7 +246,18 @@ export default function TimeOffPage() {
       date: `${formatDate(o.work_date)} · Paid`,
       status: o.status,
       at: o.created_at,
-      reason: o.review_note,
+      reason: o.reason,
+      decision: { at: o.reviewed_at, by: o.reviewed_by, note: o.review_note },
+      fields: [
+        { label: "Date", value: formatDate(o.work_date) },
+        {
+          label: "Window",
+          value: o.time_from && o.time_to ? `${o.time_from} – ${o.time_to}` : undefined,
+        },
+        { label: "Hours", value: `${o.hours.toFixed(1)} hrs` },
+        { label: "Pay", value: <span className="text-success">Paid · overtime</span> },
+      ],
+      cancelled: null,
       cancellable: false,
     })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
@@ -306,42 +372,54 @@ export default function TimeOffPage() {
               {history.length === 0 ? (
                 <p className="py-6 text-sm text-muted-foreground">No requests yet.</p>
               ) : (
-                pageHistory.map((r) =>
-                  r.status === "rejected" ? (
-                    <button
-                      key={r.key}
-                      type="button"
-                      onClick={() => setDeclined(r)}
-                      className="flex w-full items-center justify-between py-3 text-left transition-colors hover:bg-muted/40"
-                    >
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{r.title}</p>
-                        <p className="text-caption text-danger">{r.date} · Tap to see why</p>
-                      </div>
-                      <StatusBadge status={r.status} />
-                    </button>
-                  ) : (
-                    <div key={r.key} className="flex items-center justify-between gap-3 py-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground">{r.title}</p>
-                        <p className="text-caption text-muted-foreground">{r.date}</p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <StatusBadge status={r.status} />
-                        {r.cancellable && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-danger hover:bg-danger/10 hover:text-danger"
-                            onClick={() => setCancelTarget(r)}
-                          >
-                            Cancel
-                          </Button>
+                // Every row opens the full detail, so a decline reason is one tap away
+                // and so is everything else the employee filed.
+                pageHistory.map((r) => (
+                  // A div, not a button: the Cancel action lives inside the row and
+                  // nesting one button in another is invalid markup.
+                  <div
+                    key={r.key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetail(r)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setDetail(r);
+                      }
+                    }}
+                    className="flex w-full cursor-pointer items-center justify-between gap-3 py-3 text-left transition-colors hover:bg-muted/40"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">{r.title}</p>
+                      <p
+                        className={cn(
+                          "text-caption",
+                          r.status === "rejected" ? "text-danger" : "text-muted-foreground",
                         )}
-                      </div>
+                      >
+                        {r.date}
+                        {r.status === "rejected" ? " · Tap to see why" : ""}
+                      </p>
                     </div>
-                  ),
-                )
+                    <div className="flex shrink-0 items-center gap-2">
+                      <StatusBadge status={r.status} />
+                      {r.cancellable && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-danger hover:bg-danger/10 hover:text-danger"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCancelTarget(r);
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))
               )}
             </div>
             {history.length > 0 && (
@@ -380,19 +458,54 @@ export default function TimeOffPage() {
         </div>
       </div>
 
-      <RejectionReasonDialog
-        open={!!declined}
-        onOpenChange={(o) => !o && setDeclined(null)}
-        title={
-          declined?.kind === "half"
-            ? "Half-day declined"
-            : declined?.kind === "early"
-              ? "Early-out declined"
-              : "Leave declined"
-        }
-        subject={declined ? `${declined.title} · ${declined.date}` : undefined}
-        reason={declined?.reason ?? null}
-      />
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetail(null)}
+          title={detail.title}
+          status={detail.status}
+          submitted={detail.at}
+          fields={detail.fields}
+          note={{ label: "Your reason", text: detail.reason }}
+          decision={{
+            label: detail.status === "rejected" ? "Why it was declined" : "HR's decision",
+            by: detail.decision.by,
+            at: detail.decision.at,
+            note: detail.decision.note,
+          }}
+          actions={
+            detail.cancellable ? (
+              <Button
+                variant="outline"
+                className="border-danger text-danger hover:bg-danger/10 hover:text-danger"
+                onClick={() => {
+                  setDetail(null);
+                  setCancelTarget(detail);
+                }}
+              >
+                Cancel this request
+              </Button>
+            ) : undefined
+          }
+        >
+          {detail.cancelled && (
+            <div className="space-y-1.5">
+              <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                Cancelled
+              </p>
+              <p className="text-caption text-muted-foreground">
+                {detail.cancelled.by ? `${detail.cancelled.by} · ` : ""}
+                {formatDateTime(detail.cancelled.at)}
+              </p>
+              {detail.cancelled.reason && (
+                <p className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3.5 py-3 text-sm text-foreground">
+                  {detail.cancelled.reason}
+                </p>
+              )}
+            </div>
+          )}
+        </RequestDetailDialog>
+      )}
 
       <CancelLeaveDialog
         open={!!cancelTarget}

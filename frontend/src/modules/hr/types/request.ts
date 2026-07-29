@@ -1,5 +1,7 @@
 // Phase-2 Slice 19 — document + profile-change requests.
 
+import type { EmployeeRef } from "@/modules/hr/types/employee";
+
 export const DOCUMENT_TYPES = [
   { value: "payroll", label: "Payroll record" },
   { value: "leave", label: "Leave record" },
@@ -51,7 +53,9 @@ export interface DocumentRequest {
   fulfilled_url: string | null;
   review_note: string | null;
   reviewed_at: string | null;
-  employee: { id: number; name: string | null };
+  /** Only present when the API loaded the reviewer relation. */
+  reviewed_by?: string | null;
+  employee: EmployeeRef;
   created_at: string;
 }
 
@@ -64,7 +68,8 @@ export interface ChangeRequest {
   status: string;
   review_note: string | null;
   reviewed_at: string | null;
-  employee: { id: number; name: string | null };
+  reviewed_by?: string | null;
+  employee: EmployeeRef;
   created_at: string;
 }
 
@@ -78,9 +83,10 @@ export interface PayslipRequest {
   status: string;
   review_note: string | null;
   reviewed_at: string | null;
+  reviewed_by?: string | null;
   payslip_id: number | null;
   payslip_cycle: string | null;
-  employee: { id: number; name: string | null };
+  employee: EmployeeRef;
   created_at: string;
 }
 
@@ -95,8 +101,9 @@ export interface PayrollInquiry {
   resolution_note: string | null;
   resolution_attachments: { url: string; name: string }[];
   resolved_at: string | null;
+  resolved_by?: string | null;
   payslip_id: number | null;
   payslip_cycle: string | null;
-  employee: { id: number; name: string | null };
+  employee: EmployeeRef;
   created_at: string;
 }
