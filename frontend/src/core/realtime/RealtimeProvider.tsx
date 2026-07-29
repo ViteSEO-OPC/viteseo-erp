@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "@/core/auth/AuthProvider";
+import { useAuth } from "@/core/auth-context";
 import {
   fromResource,
   type AppNotification,
@@ -14,13 +14,21 @@ import { getEcho, teardownEcho } from "./echo";
 /**
  * Owns the global WebSocket lifecycle: connect Echo while authenticated,
  * subscribe the private `user.{id}` channel for live notifications, and tear the
- * socket down on logout. Mounted inside AuthProvider so it can read the user.
+ * socket down on logout. Mounted in the root layout inside AuthProvider (so it
+ * can read the user) and inside QueryProvider (so it can patch the cache).
+ *
+ * Reads the platform auth context directly rather than the Projects module's
+ * auth shim: this is platform infrastructure and must not depend on a module.
+ * `authChecked` / `isAuthenticated` are derived here from `loading` / `user`,
+ * which is exactly what that shim was doing.
  */
 export function RealtimeProvider({ children }: { children: ReactNode }) {
-  const { user, isAuthenticated, authChecked } = useAuth();
+  const { user, loading } = useAuth();
   const qc = useQueryClient();
   const connectedOnce = useRef(false);
 
+  const authChecked = !loading;
+  const isAuthenticated = !!user;
   const userId = user?.id;
 
   useEffect(() => {

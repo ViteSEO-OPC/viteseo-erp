@@ -14,7 +14,11 @@ return [
     |
     */
 
-    'paths' => ['api/*'],
+    // `broadcasting/auth` is registered by withBroadcasting() at the ROOT, not under
+    // /api, so it is not covered by `api/*`. Laravel Echo POSTs it from the browser to
+    // authorize every private channel — without CORS headers the preflight passes but
+    // the POST is blocked (net::ERR_FAILED) and no channel is ever subscribed.
+    'paths' => ['api/*', 'broadcasting/auth'],
 
     'allowed_methods' => ['*'],
 
