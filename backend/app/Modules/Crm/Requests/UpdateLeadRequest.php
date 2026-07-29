@@ -52,7 +52,13 @@ class UpdateLeadRequest extends FormRequest
             'lazada' => ['nullable', 'string', 'max:255'],
             'tiktok_shop' => ['nullable', 'string', 'max:255'],
             'other_marketplace' => ['nullable', 'string', 'max:255'],
-            'assigned_to' => ['nullable', 'integer', 'exists:users,id'],
+            // NOTE: `assigned_to` is deliberately NOT accepted here. Ownership changes go through
+            // PATCH /leads/{lead}/assign — the single source of truth — which is the only path that
+            // enforces `crm.leads.assign` (Admin/SA), validates the new owner is a BD
+            // (MustBeBusinessDeveloper), records the dedicated `lead.assigned` activity, and
+            // broadcasts LeadAssigned. Accepting it here let a BD reassign their own lead and let
+            // any caller hand a lead to a non-BD, both silently and without a realtime event.
+            // Same convention as IngestDiscoveredLeadsRequest: omit the field so it can never be set.
         ];
     }
 }

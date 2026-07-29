@@ -12,6 +12,11 @@ use App\Modules\Crm\Requests\IngestDiscoveredLeadsRequest;
 use App\Modules\Crm\Requests\RestoreAllRequest;
 use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Requests\UpdateLeadRequest;
+use App\Modules\Crm\Events\LeadAssigned;
+// Shared fire-and-forget broadcast helper. It currently lives in the Projects module; it is
+// module-agnostic and should move to a platform-level namespace together with the shared
+// `user.{userId}` channel — see the realtime hygiene note.
+use App\Modules\Projects\Support\SafeBroadcast;
 use App\Modules\Crm\Resources\ActivityResource;
 use App\Modules\Crm\Resources\ArchivedLeadResource;
 use App\Modules\Crm\Resources\EmailResource;
@@ -532,6 +537,12 @@ class LeadController extends Controller
                 'to_name' => $lead->assignedTo->name,
             ],
         ]);
+
+        // Realtime push — only after the write and its activity have succeeded, so a subscriber is
+        // never told about an assignment that didn't land. toOthers() excludes the assigning client
+        // (identified by its X-Socket-Id header) so the actor keeps its own optimistic update.
+        // SafeBroadcast keeps a Reverb outage from turning this 200 into a 500.
+        SafeBroadcast::toOthers(new LeadAssigned($lead, $request->user()));
 
         return response()->json([
             'data' => new LeadResource($lead),
