@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@/core/types";
-import { AvatarStack, Badge, Card, PriorityBadge } from "@/core/ui";
+import { AvatarStack, Card, PriorityBadge } from "@/core/ui";
 import { isOverdue, OverdueBadge } from "../../overdue";
 import { useProjects, useUsers, useWorkspaceTasks } from "../../hooks";
 import type { Project, Task } from "../../types";
+import { ProjectStatusBadge } from "../status/ProjectStatusBadge";
 import { STATUS_COLORS, StatusDonut, type StatusCounts } from "../status/StatusDonut";
 import { StatusPill } from "../workspaces/views/ListView";
 import { BATCH_SIZE, fmtShort } from "../workspaces/views/shared";
@@ -78,18 +79,13 @@ export function DashboardProjectCard({
   const total = counts.todo + counts.in_progress + counts.done;
   const pct = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 100));
   const donePct = pct(counts.done);
-  // A project card reads "Done" when the project itself is marked done, or when
-  // every one of its tasks is complete.
-  const done = project.status === "done" || (total > 0 && counts.done === total);
   const people = project.members ?? [];
 
   return (
     <Link href={`/sprintly/projects/${project.id}`} className="block">
       <Card className="h-full p-5 transition-shadow hover:shadow-md">
         <div className="flex items-start justify-between">
-          <Badge tone={done ? "success" : "accent"}>
-            {done ? "Completed" : "In Progress"}
-          </Badge>
+          <ProjectStatusBadge project={project} counts={counts} />
           <span className="text-xs text-ink-faint">
             {formatDate(project.created_at)}
           </span>

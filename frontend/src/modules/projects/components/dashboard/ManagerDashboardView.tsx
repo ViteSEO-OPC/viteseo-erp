@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Card, PriorityBadge, StatCard, Tabs } from "@/core/ui";
+import { Button, Card, PlusIcon, PriorityBadge, StatCard, Tabs } from "@/core/ui";
 import { isOverdue, OverdueBadge } from "../../overdue";
 import { useOpenTask } from "../tasks/useTaskModal";
+import { NotesCard } from "../notes/NotesCard";
+import type { NoteTarget } from "../../notes/types";
+import { WorkspaceCreateTaskModal } from "../workspaces/WorkspaceViews";
 import {
   DashboardProjectCard,
   DashboardTaskTable,
@@ -15,6 +18,9 @@ import Link from "next/dist/client/link";
 
 // Representative activity feed — no activity API yet, so it's templated over
 // real recent tasks and each entry opens that task in the global modal.
+/** The dashboard card and the task-view panel render this same note. */
+const USER_NOTE: NoteTarget = { scope: "user" };
+
 const ACTIVITY_TEMPLATES: Array<{ who: string; verb: string; when: string }> = [
   { who: "Sarah L.", verb: "commented on", when: "12m ago" },
   { who: "System", verb: "moved", when: "1h ago" },
@@ -24,6 +30,7 @@ const ACTIVITY_TEMPLATES: Array<{ who: string; verb: string; when: string }> = [
 /** PM/Admin dashboard — org-wide Overview + a personal "My Tasks" tab. */
 export function ManagerDashboardView(): React.ReactElement {
   const [tab, setTab] = useState<"overview" | "mine">("overview");
+  const [createOpen, setCreateOpen] = useState(false);
   const {
     projects,
     tasks,
@@ -83,13 +90,16 @@ export function ManagerDashboardView(): React.ReactElement {
   );
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       <h1 className="text-2xl font-bold text-ink sm:text-3xl lg:text-4xl">
         Overview
       </h1>
 
-      <div className="mt-6">
+      {/* Tab bar with "Add Task" pinned to its right, so a PM/Admin can create a
+          task from either tab rather than only from the board toolbar. */}
+      <div className="mt-6 flex flex-wrap items-end justify-between gap-3">
         <Tabs
+          className="min-w-0 flex-1"
           tabs={[
             { key: "overview", label: "Overview" },
             { key: "mine", label: "All Tasks" },
@@ -97,6 +107,12 @@ export function ManagerDashboardView(): React.ReactElement {
           active={tab}
           onChange={(k) => setTab(k as "overview" | "mine")}
         />
+        {projects.length > 0 && (
+          <Button className="mb-2" onClick={() => setCreateOpen(true)}>
+            <PlusIcon className="h-4 w-4" />
+            Add Task
+          </Button>
+        )}
       </div>
 
       {tab === "mine" ? (
@@ -127,8 +143,13 @@ export function ManagerDashboardView(): React.ReactElement {
             />
           </div>
 
+          {/* Everything below the stats splits into main content + a notes
+              rail, so the eye-path is status → notes. The rail folds under the
+              content below xl (and becomes a sheet launcher on phones). */}
+          <div className="mt-2 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="min-w-0">
           {/* All projects */}
-          <div className="flex items-center justify-between mt-10 text-sm ">
+          <div className="flex items-center justify-between mt-8 text-sm ">
             <h2 className="font-bold uppercase tracking-wide text-ink">
               Projects
             </h2>
@@ -268,7 +289,23 @@ export function ManagerDashboardView(): React.ReactElement {
               />
             )}
           </section>
+            </div>
+
+            {/* Notes rail — sticky so it stays reachable while the feed scrolls. */}
+            <NotesCard
+              target={USER_NOTE}
+              uiName="dashboard-card"
+              className="mt-8 xl:sticky xl:top-20"
+            />
+          </div>
         </>
+      )}
+
+      {createOpen && (
+        <WorkspaceCreateTaskModal
+          projects={projects}
+          onClose={() => setCreateOpen(false)}
+        />
       )}
     </div>
   );

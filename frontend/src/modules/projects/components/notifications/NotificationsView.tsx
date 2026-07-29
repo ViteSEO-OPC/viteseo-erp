@@ -26,7 +26,7 @@ export function NotificationsView() {
   };
 
   return (
-    <div className="mx-auto max-w-[900px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-ink sm:text-[32px]">Notifications</h1>

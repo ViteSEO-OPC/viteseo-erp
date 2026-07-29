@@ -90,3 +90,4 @@ export {
 // Misc
 export { PagePlaceholder } from './page-placeholder';
 export * from './icons';
+export * from './sidebar-icons';

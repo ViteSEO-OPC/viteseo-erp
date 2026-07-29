@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Paginated } from "@/core/types";
 import { getEcho } from "@/core/realtime/echo";
@@ -35,6 +35,7 @@ interface SubtaskUpdatedEvent {
  */
 export function useProjectChannel(projectId?: string): void {
   const qc = useQueryClient();
+  const connectedOnce = useRef(false);
 
   useEffect(() => {
     if (!projectId) return;
@@ -132,7 +133,42 @@ export function useProjectChannel(projectId?: string): void {
       qc.invalidateQueries({ queryKey: tasksKey });
     });
 
+    // Reconnect backfill: a dropped WebSocket silently loses every event fired
+    // during the gap (unlike notifications in RealtimeProvider, this channel's
+    // events aren't otherwise re-synced). After the connection re-establishes,
+    // refetch this project's board + statuses and any open task's detail —
+    // comments/subtasks/links all live under the ["projects","tasks"] prefix,
+    // which is disjoint from the ["projects","projects"] board keys. Skip the
+    // first connect (the initial REST fetches already cover current state).
+    const pusher = (
+      echo.connector as unknown as {
+        pusher?: {
+          connection?: {
+            state?: string;
+            bind?: (e: string, cb: () => void) => void;
+            unbind?: (e: string, cb: () => void) => void;
+          };
+        };
+      }
+    ).pusher;
+    // If the socket is ALREADY connected when this channel mounts (the usual
+    // case — RealtimeProvider opens the connection first), the initial data is
+    // loaded by the query hooks and the next "connected" event is a genuine
+    // reconnect that must backfill. Only when we mount before the first connect
+    // do we skip that first event (its REST fetches cover current state).
+    connectedOnce.current = pusher?.connection?.state === "connected";
+    const onConnected = () => {
+      if (connectedOnce.current) {
+        qc.invalidateQueries({ queryKey: tasksKey });
+        qc.invalidateQueries({ queryKey: statusesKey });
+        qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+      }
+      connectedOnce.current = true;
+    };
+    pusher?.connection?.bind?.("connected", onConnected);
+
     return () => {
+      pusher?.connection?.unbind?.("connected", onConnected);
       echo.leave(`project.${projectId}`);
     };
   }, [projectId, qc]);

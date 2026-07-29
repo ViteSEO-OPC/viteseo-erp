@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { Card, StatCard, Tabs } from "@/core/ui";
 import { useOpenTask } from "../tasks/useTaskModal";
+import { NotesCard } from "../notes/NotesCard";
+import type { NoteTarget } from "../../notes/types";
 import {
   DashboardProjectCard,
   DashboardTaskTable,
@@ -11,6 +13,9 @@ import {
   useDashboardData,
 } from "./DashboardShared";
 import Link from "next/dist/client/link";
+
+/** The dashboard card and the task-view panel render this same note. */
+const USER_NOTE: NoteTarget = { scope: "user" };
 
 /** Member dashboard — the projects they're on (Overview) + their "My Tasks" tab. */
 export function MemberDashboardView(): React.ReactElement {
@@ -22,17 +27,49 @@ export function MemberDashboardView(): React.ReactElement {
     users,
     countsFor,
     loading,
-    activeTasks,
-    completedTasks,
   } = useDashboardData();
+  // The member's own workload, counted card-for-card with what their "My Tasks"
+  // board draws — otherwise the number and the screen it links to disagree.
+  //
+  // `useDashboardData` counts every task across their projects, which answers
+  // "how big is the project" rather than "how much is on me".
+  const myCounts = useMemo(() => {
+    let active = 0;
+    let completed = 0;
+    const tally = (isDone: boolean): void => {
+      if (isDone) completed += 1;
+      else active += 1;
+    };
 
-  // The member's own non-done tasks with a deadline, earliest first.
+    for (const t of tasks) {
+      // Only ever populated with subtasks assigned to the caller.
+      const mySubtasks = t.my_subtasks ?? [];
+      // A group task is this member's when they lead the group that owns it —
+      // the leader owns the parent, while regular members work through their
+      // own subtasks and never see the parent as a card.
+      const leadsGroup = t.leads_my_group ?? false;
+
+      for (const s of mySubtasks) tally(s.status?.key === "done");
+
+      // Holding subtasks replaces the parent for a regular member, but not for
+      // the leader: they own the parent as well as whatever subtask is theirs.
+      const parentCounts =
+        (mySubtasks.length === 0 || leadsGroup) &&
+        (t.assignee_id === user?.id || leadsGroup);
+
+      if (parentCounts) tally(t.status?.key === "done");
+    }
+
+    return { active, completed };
+  }, [tasks, user?.id]);
+  // The member's own non-done tasks with a deadline, earliest first. A group
+  // task counts as theirs when they lead the group that owns it.
   const upcoming = useMemo(
     () =>
       tasks
         .filter(
           (t) =>
-            t.assignee_id === user?.id &&
+            (t.assignee_id === user?.id || t.leads_my_group) &&
             t.deadline &&
             t.status?.key !== "done",
         )
@@ -57,7 +94,7 @@ export function MemberDashboardView(): React.ReactElement {
   const openTask = useOpenTask();
 
   return (
-    <div className="mx-auto max-w-[1400px] px-8 py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       <h1 className="text-4xl font-bold text-ink">Dashboard</h1>
 
       <div className="mt-6">
@@ -84,20 +121,27 @@ export function MemberDashboardView(): React.ReactElement {
               value={loading ? "—" : projects.length}
               href="/sprintly/projects"
             />
+            {/* Scoped to this member — these sit beside "My Projects" and both
+                jump to the My Tasks board, so counting the whole project would
+                never match what the click leads to. */}
             <StatCard
               label="Active Tasks"
-              value={loading ? "—" : activeTasks}
+              value={loading ? "—" : myCounts.active}
               onClick={() => setTab("mine")}
             />
             <StatCard
               label="Completed"
-              value={loading ? "—" : completedTasks}
+              value={loading ? "—" : myCounts.completed}
               onClick={() => setTab("mine")}
             />
           </div>
 
+          {/* Content + notes rail (status → notes eye-path). Folds to one
+              column below xl; a sheet launcher on phones. */}
+          <div className="mt-2 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="min-w-0">
           {/* My projects */}
-          <div className="flex items-center justify-between mt-10 text-sm ">
+          <div className="flex items-center justify-between mt-8 text-sm ">
             <h2 className="font-bold uppercase tracking-wide text-ink">
               Projects
             </h2>
@@ -154,6 +198,14 @@ export function MemberDashboardView(): React.ReactElement {
               />
             )}
           </section>
+            </div>
+
+            <NotesCard
+              target={USER_NOTE}
+              uiName="dashboard-card"
+              className="mt-8 xl:sticky xl:top-4"
+            />
+          </div>
         </>
       )}
     </div>

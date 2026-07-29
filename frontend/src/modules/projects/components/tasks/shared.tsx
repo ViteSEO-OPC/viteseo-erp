@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Avatar, Badge, Field, Input, Select, UsersIcon, XIcon } from '@/core/ui';
+import { Avatar, Badge, ChevronDownIcon, Field, Input, Select, UsersIcon, XIcon } from '@/core/ui';
 import type { User } from '@/core/types';
 import { useGroupWorkload, useUserWorkload } from '../../hooks';
 import type { ActivityLog, Group, Priority, ProjectStatus, StatusKey, WorkloadLevel } from '../../types';
@@ -13,6 +13,27 @@ export const sectionLabel = 'text-xs font-bold uppercase tracking-wide text-ink-
 // --- Figma task-modal redesign tokens ---
 export const TEAL = 'bg-[#0f766e] text-white hover:bg-[#0d655e]';
 export const TEAL_OUTLINE = 'border border-[#0f766e] bg-white text-[#0f766e] hover:bg-[#0f766e]/5';
+
+/**
+ * The details panel renders its status / priority selects as tinted pills
+ * rather than bordered inputs (Figma 801:24639). Compose with `statusPill` or
+ * `priorityPill` for the tint.
+ */
+export const PILL_SELECT =
+  'h-auto rounded-lg border-0 py-2 pl-2.5 pr-7 text-[11px] font-bold uppercase shadow-none';
+
+export const statusPill = 'bg-ink-soft/10 text-ink-soft';
+
+/** Priority → pill tint, matching the PriorityBadge tones. */
+export function priorityPill(priority: Priority): string {
+  if (priority === 'High') return 'bg-danger-soft text-danger';
+  if (priority === 'Medium') return 'bg-warning-soft text-warning';
+  return 'bg-success-soft text-success';
+}
+
+/** Read-only field box in the details panel — white, hairline, rounded (Figma 801:24655). */
+export const readonlyField =
+  'flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface px-3 text-sm text-ink';
 
 export function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -114,7 +135,11 @@ export function ModalShell({
   );
 }
 
-/** Cyan→orange effort-score slider (0–10). */
+/**
+ * Amber effort-score slider (0–10) — a soft amber pill holding a ticked track
+ * whose filled portion runs to the current value (Figma 801:24680). The native
+ * range input sits on top, transparent, so it stays keyboard-accessible.
+ */
 export function EffortSlider({
   value,
   onChange,
@@ -125,27 +150,42 @@ export function EffortSlider({
   disabled?: boolean;
 }) {
   const pct = Math.max(0, Math.min(100, (value / 10) * 100));
-  const track = `linear-gradient(to right, #4fdbd7 0%, #f59e0b ${pct}%, #f6e7c9 ${pct}%, #f6e7c9 100%)`;
   return (
     <div>
       <style>{`
-        .effort-range { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 9999px; }
-        .effort-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 9999px; background: #ffffff; border: 3px solid #f59e0b; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
-        .effort-range::-moz-range-thumb { width: 18px; height: 18px; border-radius: 9999px; background: #ffffff; border: 3px solid #f59e0b; cursor: pointer; }
+        .effort-range { -webkit-appearance: none; appearance: none; background: transparent; }
+        .effort-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 9999px; background: #ffffff; border: 3px solid #f0a608; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+        .effort-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 9999px; background: #ffffff; border: 3px solid #f0a608; cursor: pointer; }
         .effort-range:disabled::-webkit-slider-thumb { cursor: default; }
       `}</style>
-      <input
-        type="range"
-        min={0}
-        max={10}
-        step={1}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange?.(Number(e.target.value))}
-        style={{ background: track }}
-        className="effort-range w-full outline-none"
-      />
-      <div className="mt-1 flex justify-between text-[11px] font-semibold text-ink-faint">
+      <div className="relative h-[22px] rounded-full bg-warning/10">
+        {/* Track, fill and the 0–10 ticks all inset by half a thumb so the
+            thumb's travel lines up with the tick it is sitting on. */}
+        <div className="pointer-events-none absolute inset-x-2 top-1/2 h-1 -translate-y-1/2 rounded-full bg-warning/20" />
+        <div
+          className="pointer-events-none absolute left-2 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-warning"
+          style={{ width: `calc((100% - 1rem) * ${pct / 100})` }}
+        />
+        <div className="pointer-events-none absolute inset-x-2 top-1/2 flex -translate-y-1/2 justify-between">
+          {Array.from({ length: 11 }, (_, i) => (
+            <span
+              key={i}
+              className={`h-1.5 w-px ${i <= value ? 'bg-warning' : 'bg-warning/35'}`}
+            />
+          ))}
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={10}
+          step={1}
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange?.(Number(e.target.value))}
+          className="effort-range absolute inset-0 h-full w-full outline-none"
+        />
+      </div>
+      <div className="mt-1 flex justify-between text-[11px] font-semibold text-warning">
         <span>0</span>
         <span>{value}</span>
         <span>10</span>
@@ -364,16 +404,18 @@ export function CollapsiblePanel({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="overflow-hidden rounded-xl border border-[#e4e4d8]">
+    <div className="rounded-xl bg-[#FAFAF7] p-3">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between bg-[#eeeee2] px-4 py-2.5 text-sm font-bold text-ink-soft"
+        className="flex w-full items-center justify-between rounded-md bg-ink-soft/10 px-2 py-1.5 text-xs font-bold text-ink-soft transition-colors hover:bg-ink-soft/15"
       >
         {title}
-        <span className={`transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+        <ChevronDownIcon
+          className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
       </button>
-      {open && <div className="space-y-5 bg-[#fbfbef] p-4">{children}</div>}
+      {open && <div className="space-y-6 px-1 pt-4">{children}</div>}
     </div>
   );
 }

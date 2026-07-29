@@ -6,7 +6,6 @@ import type { User } from "@/core/types";
 import {
   Avatar,
   AvatarStack,
-  Badge,
   Button,
   Card,
   ChevronRightIcon,
@@ -28,7 +27,8 @@ import {
 import type { Project, StatusKey } from "../../types";
 import { CreateProjectModal } from "../projects/CreateProjectModal";
 import { EditWorkspaceModal } from "./EditWorkspaceModal";
-import { WorkspaceViews } from "./WorkspaceViews";
+import { WorkspaceCreateTaskModal, WorkspaceViews } from "./WorkspaceViews";
+import { ProjectStatusBadge } from "../status/ProjectStatusBadge";
 import { STATUS_COLORS, StatusDonut, type StatusCounts } from "../status/StatusDonut";
 
 export interface WorkspaceDetailViewProps {
@@ -77,15 +77,12 @@ function ProjectCard({
   const total = counts.todo + counts.in_progress + counts.done;
   const pct = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 100));
   const donePct = pct(counts.done);
-  const done = total > 0 && counts.done === total;
 
   return (
     <Link href={`/sprintly/projects/${project.id}`} className="block">
       <Card className="h-full p-5 transition-shadow hover:shadow-md">
         <div className="flex items-start justify-between">
-          <Badge tone={done ? "success" : "accent"}>
-            {done ? "Completed" : "In Progress"}
-          </Badge>
+          <ProjectStatusBadge project={project} counts={counts} />
           <span className="text-xs text-ink-faint">
             {formatDate(project.created_at)}
           </span>
@@ -170,6 +167,7 @@ export function WorkspaceDetailView({
 }: WorkspaceDetailViewProps): React.ReactElement {
   const [tab, setTab] = useState<"summary" | "tasks">("summary");
   const [createOpen, setCreateOpen] = useState(false);
+  const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [search, setSearch] = useState("");
   const isManager = useIsManager();
@@ -219,7 +217,7 @@ export function WorkspaceDetailView({
   const forbidden = useForbiddenRedirect(workspaceQuery.error);
   if (forbidden) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <p className="text-ink-soft">Redirecting…</p>
       </div>
     );
@@ -227,7 +225,7 @@ export function WorkspaceDetailView({
 
   if (workspaceQuery.isLoading) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <p className="text-ink-soft">Loading workspace…</p>
       </div>
     );
@@ -235,7 +233,7 @@ export function WorkspaceDetailView({
 
   if (workspaceQuery.isError || !workspace) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <Card className="p-8 text-center">
           <p className="font-semibold text-danger">
             Couldn&apos;t load this workspace.
@@ -255,7 +253,7 @@ export function WorkspaceDetailView({
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
@@ -283,6 +281,17 @@ export function WorkspaceDetailView({
               <PencilIcon className="h-4 w-4" />
               Edit
             </Button>
+            {/* The board no longer carries its own "Add Task" — it lives here so
+                it's reachable from the Summary tab too. */}
+            {projects.length > 0 && (
+              <Button
+                variant="brand-outline"
+                onClick={() => setCreateTaskOpen(true)}
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add Task
+              </Button>
+            )}
             {(tab === "summary" || tab === "tasks") && (
               <Button onClick={() => setCreateOpen(true)}>
                 <PlusIcon className="h-4 w-4" />
@@ -407,6 +416,13 @@ export function WorkspaceDetailView({
         onClose={() => setCreateOpen(false)}
         workspaceId={workspaceId}
       />
+
+      {createTaskOpen && (
+        <WorkspaceCreateTaskModal
+          projects={projects}
+          onClose={() => setCreateTaskOpen(false)}
+        />
+      )}
 
       {editOpen && (
         <EditWorkspaceModal

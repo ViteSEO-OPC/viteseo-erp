@@ -27,9 +27,13 @@ export interface ModalProps {
 export function Modal({ open, onClose, title, children, footer, width = 520 }: ModalProps) {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      {/* `[&>*]:min-w-0` — the dialog is a grid, so a row's automatic minimum is
+          its content's min-content width. Unbreakable content (a long URL in a
+          field, a `field-sizing-content` textarea) would otherwise widen the
+          column past `maxWidth` and push the rest of the form out of view. */}
       <DialogContent
         style={{ width: '100%', maxWidth: width }}
-        className="max-h-[90vh] gap-0 overflow-y-auto rounded-2xl bg-surface p-0 sm:max-w-[calc(100%-2rem)]"
+        className="max-h-[90vh] gap-0 overflow-y-auto rounded-2xl bg-surface p-0 [&>*]:min-w-0 sm:max-w-[calc(100%-2rem)]"
       >
         <DialogHeader className="space-y-0 border-b border-line px-6 py-4 text-left">
           <DialogTitle className="text-lg font-bold text-ink">{title}</DialogTitle>

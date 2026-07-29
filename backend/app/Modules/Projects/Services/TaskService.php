@@ -262,6 +262,15 @@ class TaskService
                     'old_value' => (string) $oldStatusId,
                     'new_value' => (string) $data['status_id'],
                 ]);
+
+                // Notify the project's managers that a task moved — this is how a
+                // PM hears about a member advancing their own task's status.
+                $newStatus = ProjectStatus::find((int) $data['status_id']);
+                $this->notifications->notifyTaskStatusChanged(
+                    $task,
+                    $user,
+                    $newStatus?->name ?? 'a new status',
+                );
             }
 
             return $task;

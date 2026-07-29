@@ -63,17 +63,19 @@ export function ConfirmDialog({
       title={title}
       footer={
         <>
-          <Button variant="outline" type="button" onClick={onClose} disabled={isPending}>
-            {cancelLabel}
-          </Button>
-          <Button
-            variant={destructive ? 'destructive' : 'default'}
-            type="button"
-            onClick={onConfirm}
-            disabled={disabled}
-          >
-            {isPending ? (destructive ? 'Deleting…' : 'Saving…') : confirmLabel}
-          </Button>
+          <div className='flex justify-between w-full'>
+            <Button variant="outline" type="button" onClick={onClose} disabled={isPending}>
+              {cancelLabel}
+            </Button>
+            <Button
+              variant={destructive ? 'destructive' : 'default'}
+              type="button"
+              onClick={onConfirm}
+              disabled={disabled}
+            >
+              {isPending ? (destructive ? 'Deleting…' : 'Saving…') : confirmLabel}
+            </Button>
+          </div>
         </>
       }
     >

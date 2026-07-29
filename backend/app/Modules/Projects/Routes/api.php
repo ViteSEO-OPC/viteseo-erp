@@ -7,6 +7,7 @@ use App\Modules\Projects\Controllers\ArchiveController;
 use App\Modules\Projects\Controllers\CommentController;
 use App\Modules\Projects\Controllers\GroupController;
 use App\Modules\Projects\Controllers\LinkController;
+use App\Modules\Projects\Controllers\NoteController;
 use App\Modules\Projects\Controllers\NotificationController;
 use App\Modules\Projects\Controllers\ProjectController;
 use App\Modules\Projects\Controllers\ProjectStatusController;
@@ -76,6 +77,16 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
 
     // Activity logs (read-only, task-scoped)
     Route::get('tasks/{task}/activity-logs', [ActivityLogController::class, 'index']);
+
+    // Private rich-text notes. Always "mine" — the note is resolved from the
+    // token, never from a client-supplied id. Saves are autosaves (debounced
+    // client-side), so the write routes carry a generous throttle.
+    Route::get('notes/me', [NoteController::class, 'showMine']);
+    Route::get('projects/{project}/notes/me', [NoteController::class, 'showMineForProject']);
+    Route::middleware('throttle:60,1')->group(function (): void {
+        Route::put('notes/me', [NoteController::class, 'updateMine']);
+        Route::put('projects/{project}/notes/me', [NoteController::class, 'updateMineForProject']);
+    });
 
     // Notifications (scoped to the authenticated user). `read-all` before `{notification}`.
     Route::get('notifications', [NotificationController::class, 'index']);
