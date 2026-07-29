@@ -2,6 +2,7 @@
 
 use App\Modules\Hr\Http\Controllers\AttendanceController;
 use App\Modules\Hr\Http\Controllers\AttendancePolicyController;
+use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
 use App\Modules\Hr\Http\Controllers\BenefitController;
 use App\Modules\Hr\Http\Controllers\BenefitProgramController;
 use App\Modules\Hr\Http\Controllers\ChangeRequestController;
@@ -81,6 +82,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('attendance/clock-in', [AttendanceController::class, 'clockIn']);
     Route::post('attendance/clock-out', [AttendanceController::class, 'clockOut']);
     Route::post('attendance/break', [AttendanceController::class, 'break']);
+    // Off-site time-in: submit a selfie for HR to approve, and read back its status.
+    Route::post('attendance/remote-checkin', [RemoteCheckinController::class, 'store']);
+    Route::get('me/remote-checkin', [RemoteCheckinController::class, 'me']);
 
     // Reimbursement — caller files + views own; HR sees all + decides.
     Route::get('reimbursements', [ReimbursementController::class, 'index']);
@@ -122,6 +126,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('reports/{key}/export', [ReportController::class, 'export']);
         Route::get('attendance', [AttendanceController::class, 'index']);
         Route::get('attendance/summary', [AttendanceController::class, 'summary']);
+        // Field time-ins queue. Declared BEFORE attendance/adjust is irrelevant, but these
+        // must stay above any `attendance/{param}` route if one is ever added.
+        Route::get('attendance/remote-checkins', [RemoteCheckinController::class, 'index']);
+        Route::post('attendance/remote-checkins/{remoteCheckin}/approve', [RemoteCheckinController::class, 'approve']);
+        Route::post('attendance/remote-checkins/{remoteCheckin}/reject', [RemoteCheckinController::class, 'reject']);
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).

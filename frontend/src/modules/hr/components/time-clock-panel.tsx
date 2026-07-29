@@ -24,12 +24,18 @@ import {
   useClockOut,
   useToggleBreak,
 } from "@/modules/hr/hooks/use-attendance";
+import {
+  useMyRemoteCheckin,
+  useSubmitRemoteCheckin,
+} from "@/modules/hr/hooks/use-remote-checkins";
 import { TimeOutDialog } from "@/modules/hr/components/time-out-dialog";
+import { ClockInLocationDialog } from "@/modules/hr/components/clock-in-location-dialog";
 import { SEVERITY_LABEL, SEVERITY_RANK } from "@/modules/hr/types/attendance";
 import type {
   Attendance,
   ClockState,
   DayTask,
+  LocationFix,
   Severity,
   Violation,
 } from "@/modules/hr/types/attendance";
@@ -126,6 +132,20 @@ export function TimeClockPanel() {
   const opensAt = data?.clock_in?.opens_at ?? null;
   const tooEarly = opensAt !== null && manilaHm(now) < opensAt;
 
+  // Geofenced clock-in (Company → Rules). The server reports whether it is ACTUALLY
+  // enforcing — an enabled-but-unconfigured policy fails open and reports false — so the
+  // panel never asks a question whose answer would be ignored.
+  const geofenced = data?.clock_in?.geofence ?? false;
+
+  // The employee's own latest off-site submission. Only fetched when the feature is on —
+  // there is nothing to show otherwise, and this is polled by the panel.
+  const { data: myCheckin } = useMyRemoteCheckin(geofenced);
+  const submitCheckinMut = useSubmitRemoteCheckin();
+  // Awaiting review, and they haven't been clocked in by some other route since.
+  const awaitingReview = myCheckin?.status === "pending" && state === "not_clocked_in";
+  // A rejection they haven't acted on yet: still not clocked in, so it needs saying.
+  const wasRejected = myCheckin?.status === "rejected" && state === "not_clocked_in";
+
   // The employee's own flag for the current Manila month. Only unresolved,
   // above-green flags surface — a clean record shows no banner — and the worst
   // one wins so a red AWOL is never hidden behind a newer yellow lateness.
@@ -163,6 +183,7 @@ export function TimeClockPanel() {
   // Which confirmation modal is open ("time_out" has its own tasks dialog).
   const [confirm, setConfirm] = useState<"time_in" | "lunch" | "break" | null>(null);
   const [timeOutOpen, setTimeOutOpen] = useState(false);
+  const [locationOpen, setLocationOpen] = useState(false);
   const lunchActive = state === "on_lunch";
   const breakActive = state === "on_break";
 
@@ -188,7 +209,9 @@ export function TimeClockPanel() {
           desc: "Start your work day now — your time in is recorded at the current time.",
           label: "Time in",
           className: "bg-brand text-brand-foreground hover:bg-brand/90",
-          action: () => run(() => clockInMut.mutateAsync(), "Clocked in"),
+          // Explicitly no location: this is the plain confirm, only reachable when the
+          // geofence isn't enforcing, so there is nothing to send and nothing to check.
+          action: () => run(() => clockInMut.mutateAsync(null), "Clocked in"),
         }
       : confirm === "lunch"
         ? {
@@ -218,6 +241,24 @@ export function TimeClockPanel() {
     if (!confirmMeta) return;
     const ok = await confirmMeta.action();
     if (ok) setConfirm(null);
+  }
+
+  // Geofenced office clock-in. `fix` is null whenever the browser couldn't produce one —
+  // permission denied, no hardware, timed out — and that is sent as a clock-in with no
+  // coordinates, which the office network can still verify on its own.
+  async function onOfficeClockIn(fix: LocationFix | null) {
+    const ok = await run(() => clockInMut.mutateAsync(fix), "Clocked in");
+    if (ok) setLocationOpen(false);
+  }
+
+  // Off-site: the selfie goes to HR and the employee is stamped NOW. They are not on the
+  // clock until it's approved, which the banner below spells out.
+  async function onOutsideClockIn(photo: File, fix: LocationFix | null) {
+    const ok = await run(
+      () => submitCheckinMut.mutateAsync({ photo, fix }),
+      "Sent to HR for approval",
+    );
+    if (ok) setLocationOpen(false);
   }
 
   async function onTimeOut(tasks: DayTask[]) {
@@ -266,9 +307,13 @@ export function TimeClockPanel() {
 
         <p className="mt-3 text-sm text-white/70">
           {state === "not_clocked_in" &&
-            (tooEarly
-              ? `Your shift starts at ${format12Hour(opensAt)} — you can time in from then.`
-              : "You haven't clocked in yet today.")}
+            (awaitingReview
+              ? `Sent to HR at ${formatTimeManila(myCheckin?.submitted_at)} — you'll be timed in at that moment once they approve it.`
+              : wasRejected
+                ? `HR couldn't accept your photo: ${myCheckin?.rejection_note ?? "no reason given"} — send another to time in.`
+                : tooEarly
+                  ? `Your shift starts at ${format12Hour(opensAt)} — you can time in from then.`
+                  : "You haven't clocked in yet today.")}
           {state === "clocked_in" && `Clocked in at ${formatTimeManila(today?.time_in)}.`}
           {state === "on_lunch" && "You're on your lunch break."}
           {state === "on_break" && "You're on a short break."}
@@ -280,12 +325,14 @@ export function TimeClockPanel() {
             easy mis-tap when the two do very different things. */}
         <div className="mt-5 grid gap-3 sm:flex sm:flex-wrap sm:gap-2">
           <button
-            disabled={busy || state !== "not_clocked_in" || tooEarly}
-            onClick={() => setConfirm("time_in")}
+            // Awaiting review disables it too: a second submission would be refused by the
+            // server anyway, and the button offering it reads as "that didn't work".
+            disabled={busy || state !== "not_clocked_in" || tooEarly || awaitingReview}
+            onClick={() => (geofenced ? setLocationOpen(true) : setConfirm("time_in"))}
             title={tooEarly ? `Opens at ${format12Hour(opensAt)}` : undefined}
             className="rounded-lg bg-brand px-4 py-3 sm:py-2 text-sm font-semibold text-brand-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
           >
-            Time in
+            {awaitingReview ? "Waiting for HR" : "Time in"}
           </button>
           <button
             disabled={busy || !(state === "clocked_in" || state === "on_lunch")}
@@ -365,6 +412,16 @@ export function TimeClockPanel() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Geofenced clock-in — replaces the plain confirm above when the server is
+          enforcing a location check. Opening it starts the GPS fix immediately. */}
+      <ClockInLocationDialog
+        open={locationOpen}
+        onOpenChange={setLocationOpen}
+        onOffice={onOfficeClockIn}
+        onOutside={onOutsideClockIn}
+        pending={clockInMut.isPending || submitCheckinMut.isPending}
+      />
 
       {/* Time-out modal with the day's tasks */}
       <TimeOutDialog

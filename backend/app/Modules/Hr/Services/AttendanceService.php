@@ -179,7 +179,7 @@ class AttendanceService
      * Computed here rather than in the panel so the strict rule has exactly one reader —
      * a client that re-derived it could offer a button the server would refuse.
      *
-     * @return array{strict: bool, opens_at: ?string}  opens_at is Manila "HH:MM"
+     * @return array{strict: bool, opens_at: ?string, geofence: bool}  opens_at is Manila "HH:MM"
      */
     public function clockInWindowFor(Employee $employee): array
     {
@@ -189,6 +189,11 @@ class AttendanceService
         return [
             'strict' => (bool) $this->policy->get()->block_early_clock_in,
             'opens_at' => $this->clockInOpensAt($eff, $local)?->format('H:i'),
+            // Whether the panel should ask WHERE the employee is before clocking in. This
+            // is "actually enforcing", not the raw toggle: a policy that is switched on but
+            // unconfigured fails open server-side, so making the employee answer a question
+            // whose answer will be ignored would be theatre.
+            'geofence' => $this->geofence->enforcing(),
         ];
     }
 
@@ -251,12 +256,80 @@ class AttendanceService
         // the real problem is that they already clocked in an hour ago.
         $verifiedBy = $this->geofence->verifyOfficeClockIn($lat, $lng, $accuracy, $ip);
 
-        $cutoff = $this->scheduleStart($local, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
-
         $att->time_in = now(); // stored UTC
-        $att->status = $local->gt($cutoff) ? 'late' : 'present';
+        $att->status = $this->arrivalStatus($eff, $local);
         $att->location_verified_by = $verifiedBy;
         $att->save();
+
+        return $att;
+    }
+
+    /**
+     * `present` or `late` for an arrival at $local, judged against the employee's own
+     * effective schedule start plus its grace. Shared by the live clock and by HR's
+     * approval of a field time-in, so an approved selfie is marked late on exactly the
+     * same rule as a punch at the same minute would have been.
+     *
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
+     */
+    private function arrivalStatus(array $eff, Carbon $local): string
+    {
+        $cutoff = $this->scheduleStart($local, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
+
+        return $local->gt($cutoff) ? 'late' : 'present';
+    }
+
+    /**
+     * Write a clock-in that a human has already verified, stamped at the moment it was
+     * SUBMITTED rather than the moment it was approved.
+     *
+     * This is the approval half of the off-site selfie path. It deliberately skips the
+     * geofence (HR's eyes on the photo *are* the verification) and the strict-clock-in
+     * window (HR is overriding, which is the point of a manual review), but it keeps the
+     * duplicate guard: two time-ins for one day is a data error whoever creates it.
+     *
+     * @param  Carbon  $at  when the employee submitted — becomes `time_in` verbatim
+     * @param  string  $verifiedBy  an Attendance::LOCATION_* value
+     */
+    public function recordVerifiedClockIn(Employee $employee, Carbon $at, string $verifiedBy): Attendance
+    {
+        $this->assertNotManagement($employee);
+
+        // The Manila day the shift STARTED — the same work_date rule the live clock uses,
+        // so an 11pm field time-in lands on the day it began, not the day HR approved it.
+        $local = $at->copy()->setTimezone(config('app.timezone_local'));
+
+        $att = Attendance::firstOrNew([
+            'employee_id' => $employee->id,
+            'work_date' => $local->toDateString(),
+        ]);
+
+        if ($att->time_in) {
+            throw ValidationException::withMessages([
+                'time_in' => [
+                    'This employee already has a time in for ' . $local->format('M j')
+                        . ' — correct that day instead.',
+                ],
+            ]);
+        }
+
+        $eff = $this->schedule->effectiveFor($employee, $local);
+
+        $att->time_in = $at;
+        $att->status = $this->arrivalStatus($eff, $local);
+        $att->location_verified_by = $verifiedBy;
+        $att->save();
+
+        // A new row invalidates any range this request already read.
+        $this->forgetRows();
+
+        // Recompute the month this row LANDED in, the way adjust() does — and unlike the
+        // live clock, which never needs to. clockIn() can only ever write today, so the
+        // default current-month recompute on the next roster read covers it. An approval
+        // can write a past day: HR clearing Friday's queue on Monday, or a submission from
+        // the tail of last month. Without this, a late field time-in approved after the
+        // month turned would raise no flag until someone happened to open that month.
+        $this->violations->recompute($local->format('Y-m'));
 
         return $att;
     }
@@ -396,6 +469,11 @@ class AttendanceService
             $att->time_out = null;
             $att->hours_worked = 0;
             $att->status = 'absent';
+            // The location claim belonged to the punch that has just been removed. Left
+            // behind it would read as "absent, but we verified where they were" — a
+            // contradiction in the one column an audit is supposed to be able to trust.
+            // A CORRECTED time keeps it: HR moving 9:04 to 9:00 doesn't unverify anything.
+            $att->location_verified_by = null;
         } else {
             // Parse the "HH:MM" as Manila wall-clock, then convert to UTC before
             // storing — Eloquent formats the Carbon's own wall-clock into the column

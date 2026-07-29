@@ -7,6 +7,7 @@ import type {
   AttendanceSummary,
   Violation,
   DailyOverride,
+  LocationFix,
 } from "@/modules/hr/types/attendance";
 
 export async function getMyAttendance(): Promise<MyAttendance> {
@@ -14,8 +15,13 @@ export async function getMyAttendance(): Promise<MyAttendance> {
   return res.data.data;
 }
 
-export async function clockIn(): Promise<Attendance> {
-  const res = await apiClient.post("/hr/attendance/clock-in");
+/**
+ * `fix` is optional on purpose: no location is a legitimate, common case — the geofence is
+ * off, the browser denied permission, or the machine can't resolve a position at all. The
+ * server decides what an absent reading means; we just don't send one.
+ */
+export async function clockIn(fix?: LocationFix | null): Promise<Attendance> {
+  const res = await apiClient.post("/hr/attendance/clock-in", fix ?? {});
   return res.data.data;
 }
 

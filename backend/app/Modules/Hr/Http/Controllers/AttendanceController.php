@@ -26,7 +26,7 @@ class AttendanceController extends Controller
                 'data' => [
                     'today' => null,
                     'week' => [],
-                    'clock_in' => ['strict' => false, 'opens_at' => null],
+                    'clock_in' => ['strict' => false, 'opens_at' => null, 'geofence' => false],
                 ],
             ]);
         }

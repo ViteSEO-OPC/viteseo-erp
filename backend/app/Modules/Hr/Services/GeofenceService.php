@@ -49,6 +49,47 @@ class GeofenceService
     public function __construct(private readonly AttendancePolicyService $policy) {}
 
     /**
+     * Is the geofence actually going to check anything?
+     *
+     * True only when the toggle is on AND the policy is complete enough to enforce. A
+     * half-configured policy answers FALSE, which is the same answer employees get when the
+     * feature is off — the fail-open path (§2.5) has to be invisible in the UI too, or the
+     * time clock would demand a location it is about to ignore.
+     */
+    public function enforcing(): bool
+    {
+        return $this->config() !== null;
+    }
+
+    /**
+     * The enforceable office config, or null when there is nothing to enforce.
+     *
+     * @return ?array{ips: array<int, string>, lat: float, lng: float, radius: int}
+     */
+    private function config(): ?array
+    {
+        $policy = $this->policy->get();
+
+        if (! $policy->geofence_enabled) {
+            return null;
+        }
+
+        // Blank rows are HR mid-edit, not addresses — an all-blank list is an empty list.
+        $ips = array_values(array_filter(array_map('trim', $policy->office_ips ?? [])));
+
+        if ($ips === [] || $policy->office_lat === null || $policy->office_lng === null) {
+            return null;
+        }
+
+        return [
+            'ips' => $ips,
+            'lat' => (float) $policy->office_lat,
+            'lng' => (float) $policy->office_lng,
+            'radius' => (int) $policy->office_radius_m,
+        ];
+    }
+
+    /**
      * Verify an office clock-in, returning the method that proved it — or null when no
      * check applied and the punch should simply go through.
      *
@@ -60,31 +101,29 @@ class GeofenceService
      */
     public function verifyOfficeClockIn(?float $lat, ?float $lng, ?float $accuracy, ?string $ip): ?string
     {
-        $policy = $this->policy->get();
+        $config = $this->config();
 
-        // Off — the kill switch. Today's clock-in, untouched.
-        if (! $policy->geofence_enabled) {
-            return null;
-        }
+        // Either off — the kill switch — or on but with nothing to check against.
+        //
+        // FAIL OPEN (plan §2.5): a half-finished setting must never lock the whole company
+        // out of its own time clock. Loud in the log for the misconfigured case, silent for
+        // the deliberate off case, and invisible to the employee in both.
+        if ($config === null) {
+            $policy = $this->policy->get();
 
-        $officeIps = array_values(array_filter(array_map('trim', $policy->office_ips ?? [])));
-        $hasPin = $policy->office_lat !== null && $policy->office_lng !== null;
-
-        // FAIL OPEN (plan §2.5). On, but with nothing to check against — a half-finished
-        // setting must never lock the whole company out of its own time clock. Loud in the
-        // log, invisible to the employee, and the Rules page says the same thing to HR.
-        if ($officeIps === [] || ! $hasPin) {
-            Log::warning('Geofenced clock-in is enabled but not configured — allowing this clock-in unchecked.', [
-                'has_office_ips' => $officeIps !== [],
-                'has_office_pin' => $hasPin,
-            ]);
+            if ($policy->geofence_enabled) {
+                Log::warning('Geofenced clock-in is enabled but not configured — allowing this clock-in unchecked.', [
+                    'has_office_ips' => array_filter(array_map('trim', $policy->office_ips ?? [])) !== [],
+                    'has_office_pin' => $policy->office_lat !== null && $policy->office_lng !== null,
+                ]);
+            }
 
             return null;
         }
 
         // 1 — The network. Mandatory, and checked first: being off it is the one failure we
         // can state with certainty, whatever the GPS claims.
-        if ($ip === null || ! in_array($ip, $officeIps, true)) {
+        if ($ip === null || ! in_array($ip, $config['ips'], true)) {
             throw ValidationException::withMessages([
                 'location' => [
                     "You don't appear to be on the office network. If you're working off-site, use the Outside option instead.",
@@ -100,9 +139,9 @@ class GeofenceService
 
         // 3 — Both signals. The reading's own margin of error is forgiven, so someone
         // genuinely inside isn't rejected by a fix that happens to be drifting outward.
-        $distance = $this->distanceMeters($lat, $lng, (float) $policy->office_lat, (float) $policy->office_lng);
+        $distance = $this->distanceMeters($lat, $lng, $config['lat'], $config['lng']);
 
-        if ($distance - $accuracy > $policy->office_radius_m) {
+        if ($distance - $accuracy > $config['radius']) {
             throw ValidationException::withMessages([
                 'location' => [
                     'You appear to be about ' . $this->roundedDistance($distance)
