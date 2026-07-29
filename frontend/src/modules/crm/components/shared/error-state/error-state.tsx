@@ -6,12 +6,20 @@ type ErrorStateProps = {
   message?: string;
   onRetry?: () => void;
   className?: string;
+  /**
+   * `error` (default) for a failure the user should worry about; `info` for an
+   * expected outcome that simply ends the view — a lead reassigned out from
+   * under the viewer, say. Same panel, neutral ink, so a normal state change
+   * does not read as something broken.
+   */
+  tone?: "error" | "info";
 };
 
 export function ErrorState({
   message = "Failed to load",
   onRetry,
   className,
+  tone = "error",
 }: ErrorStateProps) {
   return (
     <div
@@ -20,7 +28,9 @@ export function ErrorState({
         className,
       )}
     >
-      <p className="text-sm text-red-500">{message}</p>
+      <p className={cn("text-sm", tone === "info" ? "text-muted-foreground" : "text-red-500")}>
+        {message}
+      </p>
       {onRetry && (
         <button
           type="button"

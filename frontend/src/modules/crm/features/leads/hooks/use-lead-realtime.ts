@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { getEcho } from "@/core/realtime/echo";
 import { notify as toast } from "@/core/lib/notify";
@@ -114,17 +114,31 @@ export function useAssignedLeadToasts(): void {
  * already subscribed keeps receiving until their client resubscribes. When the
  * lead moves to someone else and the viewer is a BD, they have just lost access,
  * so we unsubscribe immediately rather than hold a channel we can no longer read.
- * The invalidation above refetches the detail, the API answers 403, and the page
- * falls through to its existing error state. Admin/Super Admin see every lead, so
- * they stay subscribed.
+ * Admin/Super Admin see every lead, so they stay subscribed.
+ *
+ * Returns `lostAccess` for exactly that case. The invalidation also refetches the
+ * detail and the API correctly answers 403, but a raw failed request tells the
+ * user only that something broke; this flag lets the page say what actually
+ * happened instead. Reported from here because this is the only place that knows
+ * the difference between "reassigned away from you" and a genuine load failure.
  */
-export function useLeadChannel(leadId: string | undefined): void {
+export function useLeadChannel(leadId: string | undefined): { lostAccess: boolean } {
   const qc = useQueryClient();
   const { user } = useAuth();
   const { hasMinRole } = usePermissions();
 
   const viewerId = user?.id;
   const seesEveryLead = hasMinRole("crm_admin");
+
+  const [lostAccess, setLostAccess] = useState(false);
+  // Clear the flag when the view moves to a different lead — "adjust state during
+  // render", the same pattern useLeads() uses to reset its page on filter change,
+  // and the reason this is not a setState inside an effect.
+  const [trackedLeadId, setTrackedLeadId] = useState(leadId);
+  if (trackedLeadId !== leadId) {
+    setTrackedLeadId(leadId);
+    setLostAccess(false);
+  }
 
   useEffect(() => {
     if (!leadId) return;
@@ -158,6 +172,7 @@ export function useLeadChannel(leadId: string | undefined): void {
 
       if (!seesEveryLead && viewerId != null && newOwnerId !== String(viewerId)) {
         leftOnOwnershipChange = true;
+        setLostAccess(true);
         echo.leave(channelName);
       }
     };
@@ -171,4 +186,6 @@ export function useLeadChannel(leadId: string | undefined): void {
       if (!leftOnOwnershipChange) echo.leave(channelName);
     };
   }, [leadId, qc, seesEveryLead, viewerId]);
+
+  return { lostAccess };
 }

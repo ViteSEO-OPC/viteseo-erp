@@ -37,7 +37,7 @@ export function LeadDetailPage() {
   // Live ownership for the lead on screen: patches the owner in place if someone
   // else reassigns it, and unsubscribes a BD who loses it. Subscribed here (not in
   // the list) because this is the one view showing a single lead's stream.
-  useLeadChannel(params.id);
+  const { lostAccess } = useLeadChannel(params.id);
   const activities = useLeadActivities(params.id);
   const deleteLead = useDeleteLead();
   const updateLead = useUpdateLead();
@@ -58,6 +58,19 @@ export function LeadDetailPage() {
       },
     });
   };
+
+  // Checked before the loading and error branches on purpose. Losing the lead
+  // triggers a refetch that necessarily 403s, so without this the viewer would see
+  // a spinner and then a red "Failed to load lead details" — technically true and
+  // completely unhelpful, since nothing failed. Say what happened instead.
+  if (lostAccess) {
+    return (
+      <ErrorState
+        tone="info"
+        message="This lead has been reassigned. You no longer have permission to view it."
+      />
+    );
+  }
 
   if (isLoading) {
     return (
