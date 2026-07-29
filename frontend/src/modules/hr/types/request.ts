@@ -26,7 +26,7 @@ export const CHANGE_FIELDS = [
   { value: "current_address", label: "Current address" },
   { value: "mothers_maiden_name", label: "Mother's maiden name" },
   { value: "fathers_name", label: "Father's name" },
-  { value: "siblings_name", label: "Siblings name" },
+  // Siblings are a structured list, not a single value, so HR edits them on the record.
   { value: "high_school", label: "High school" },
   { value: "college_course", label: "College course" },
   { value: "university", label: "University/College" },

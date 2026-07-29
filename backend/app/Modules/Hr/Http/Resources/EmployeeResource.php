@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 class EmployeeResource extends JsonResource
 {
@@ -15,6 +16,8 @@ class EmployeeResource extends JsonResource
         return [
             'id' => $this->id,
             'employee_no' => $this->employee_no,
+            // Browser-facing URL for the profile picture; null falls back to initials.
+            'photo_url' => $this->photo_path ? Storage::disk('public')->url($this->photo_path) : null,
             // Identity comes from the linked user (relations are eager-loaded).
             'name' => $this->user?->name,
             'email' => $this->user?->email,
@@ -65,7 +68,12 @@ class EmployeeResource extends JsonResource
             'current_address' => $this->current_address,
             'mothers_maiden_name' => $this->mothers_maiden_name,
             'fathers_name' => $this->fathers_name,
-            'siblings_name' => $this->siblings_name,
+            // One entry per named sibling; the count may exceed the names listed.
+            'siblings' => array_values(array_map(fn ($sibling) => [
+                'name' => $sibling['name'] ?? '',
+                'gender' => $sibling['gender'] ?? null,
+            ], $this->siblings ?? [])),
+            'number_of_siblings' => $this->number_of_siblings,
             'high_school' => $this->high_school,
             'college_course' => $this->college_course,
             'university' => $this->university,

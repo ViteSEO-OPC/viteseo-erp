@@ -183,6 +183,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('employees/{employee}', [EmployeeController::class, 'show']);
         Route::match(['put', 'patch'], 'employees/{employee}', [EmployeeController::class, 'update']);
         Route::get('employees/{employee}/salary-history', [EmployeeController::class, 'salaryHistory']);
+        // Profile picture: set/replace or clear (falls back to initials).
+        Route::post('employees/{employee}/photo', [EmployeeController::class, 'updatePhoto']);
+        Route::delete('employees/{employee}/photo', [EmployeeController::class, 'destroyPhoto']);
         // Loans & cash advances repaid through payroll (Slice 11b).
         Route::get('employees/{employee}/loans', [EmployeeLoanController::class, 'index']);
         Route::post('employees/{employee}/loans', [EmployeeLoanController::class, 'store']);

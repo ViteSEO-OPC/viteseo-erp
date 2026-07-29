@@ -2,6 +2,7 @@ import { apiClient } from "@/core/api-client";
 import type {
   Employee,
   EmployeeInput,
+  EmployeeUpdateInput,
   EmployeeDocument,
   MyDocument,
   SalaryHistoryEntry,
@@ -24,11 +25,26 @@ export async function createEmployee(input: EmployeeInput): Promise<Employee> {
   return res.data.data;
 }
 
+/** Partial by design: only the fields sent are written (see EmployeeUpdateInput). */
 export async function updateEmployee(
   id: number,
-  input: EmployeeInput,
+  input: EmployeeUpdateInput,
 ): Promise<Employee> {
-  const res = await apiClient.put(`/hr/employees/${id}`, input);
+  const res = await apiClient.patch(`/hr/employees/${id}`, input);
+  return res.data.data;
+}
+
+export async function uploadEmployeePhoto(id: number, photo: File): Promise<Employee> {
+  const form = new FormData();
+  form.append("photo", photo);
+  const res = await apiClient.post(`/hr/employees/${id}/photo`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data.data;
+}
+
+export async function deleteEmployeePhoto(id: number): Promise<Employee> {
+  const res = await apiClient.delete(`/hr/employees/${id}/photo`);
   return res.data.data;
 }
 

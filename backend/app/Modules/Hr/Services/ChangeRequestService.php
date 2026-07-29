@@ -14,7 +14,8 @@ class ChangeRequestService
     /**
      * Employee fields an employee may request a change to, with labels. All personal +
      * bank columns on hr_employees. (Email/login identity lives on the users row and is
-     * NOT self-service — it goes through HR directly.)
+     * NOT self-service — it goes through HR directly. Siblings are excluded too: they
+     * are a structured list, which a single-string request cannot express.)
      */
     public const FIELDS = [
         'first_name' => 'First name',
@@ -31,7 +32,6 @@ class ChangeRequestService
         'current_address' => 'Current address',
         'mothers_maiden_name' => "Mother's maiden name",
         'fathers_name' => "Father's name",
-        'siblings_name' => 'Siblings name',
         'high_school' => 'High school',
         'college_course' => 'College course',
         'university' => 'University/College',
@@ -105,6 +105,14 @@ class ChangeRequestService
     public function approve(ChangeRequest $request, User $reviewer): ChangeRequest
     {
         $this->assertPending($request, 'approve');
+
+        // The requestable list can shrink (a field may become structured data). Refuse
+        // an in-flight request for such a field rather than writing a column blindly.
+        if (! array_key_exists($request->field, self::FIELDS)) {
+            throw ValidationException::withMessages([
+                'field' => ['This field is no longer editable through self-service — change it on the employee record instead.'],
+            ]);
+        }
 
         return DB::transaction(function () use ($request, $reviewer) {
             $employee = $request->employee;

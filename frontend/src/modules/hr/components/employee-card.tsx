@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
+import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
 import type { Employee } from "@/modules/hr/types/employee";
 
 export function EmployeeCard({ employee }: { employee: Employee }) {
@@ -10,7 +10,11 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
       href={`/teamora/people/employees/${employee.id}`}
       className="flex items-center gap-3 rounded-card border border-border bg-card p-4 transition-colors hover:border-brand/60"
     >
-      <Avatar name={employee.name} colorSeed={employee.id} />
+      <EmployeeAvatar
+        name={employee.name}
+        photoUrl={employee.photo_url}
+        colorSeed={employee.id}
+      />
       <div className="min-w-0 flex-1">
         <p className="truncate font-semibold text-foreground">{employee.name}</p>
         <p className="truncate text-caption text-muted-foreground">

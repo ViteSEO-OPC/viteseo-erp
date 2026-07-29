@@ -1,18 +1,30 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { User, Briefcase, CreditCard, FileText, Download, Plus, Pencil, Lock, Trash2 } from "lucide-react";
+import {
+  User,
+  Briefcase,
+  CreditCard,
+  FileText,
+  Download,
+  Plus,
+  Pencil,
+  Lock,
+  Trash2,
+  Camera,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { notify as toast } from "@/core/lib/notify";
-import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
 import { EmployeeLoans } from "@/modules/hr/components/employee-loans";
+import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
+import { EmployeePersonalSection } from "@/modules/hr/components/employee-personal-section";
+import { EmployeeJobSection } from "@/modules/hr/components/employee-job-section";
+import { EmployeeCompensationSection } from "@/modules/hr/components/employee-compensation-section";
 import { Button } from "@/components/ui/button";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import {
-  statusLabel,
-  payFrequencyLabel,
   salaryChangeLabel,
   type Employee,
   type EmploymentHistoryEntry,
@@ -26,6 +38,8 @@ import {
   useMyDocuments,
   useUploadEmployeeDocument,
   useDeleteEmployeeDocument,
+  useUploadEmployeePhoto,
+  useDeleteEmployeePhoto,
 } from "@/modules/hr/hooks/use-employees";
 import { useCreateDocumentRequest } from "@/modules/hr/hooks/use-requests";
 import { useMyLeaveSummary } from "@/modules/hr/hooks/use-leave";
@@ -43,25 +57,21 @@ const TABS: { key: TabKey; label: string; icon: typeof User }[] = [
   { key: "documents", label: "Documents", icon: FileText },
 ];
 
-// Only these tabs have an editable form; Work Details and Documents don't.
-const EDITABLE_TABS = new Set<TabKey>(["personal", "job", "compensation"]);
-
 export function EmployeeRecord({
   employee,
-  onEdit,
+  isHr = false,
   onRequestChange,
   onRequestDocument,
 }: {
   employee: Employee;
-  /** Omit for read-only (employee's own profile). Receives the active tab. */
-  onEdit?: (tab: TabKey) => void;
+  /** HR view: sections are editable in place and the photo can be changed. */
+  isHr?: boolean;
   /** Self-service: open the "request profile change" modal (Personal tab). */
   onRequestChange?: () => void;
   /** Self-service: open the "request a document" modal (Documents tab). */
   onRequestDocument?: () => void;
 }) {
   const [tab, setTab] = useState<TabKey>("personal");
-  const isHr = !!onEdit;
   const visibleTabs = TABS;
 
   return (
@@ -69,7 +79,7 @@ export function EmployeeRecord({
       {/* Left: identity + tab rail */}
       <div className="rounded-card border border-border bg-card p-6">
         <div className="flex flex-col items-center text-center">
-          <Avatar name={employee.name} colorSeed={employee.id} size="lg" />
+          <ProfilePhoto employee={employee} canEdit={isHr} />
           <p className="mt-3 text-h3 font-bold text-foreground">{employee.name}</p>
           <p className="text-caption text-muted-foreground">
             {employee.job_title}
@@ -104,88 +114,25 @@ export function EmployeeRecord({
         </nav>
       </div>
 
-      {/* Right: tab content */}
+      {/* Right: tab content. Each editable tab owns its own form + Save/Cancel. */}
       <div className="rounded-card border border-border bg-card p-6">
-        {/* Documents renders its own header (with the Upload button). */}
-        {tab !== "documents" && (
-          <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-h3 font-bold text-foreground">
-              {TABS.find((t) => t.key === tab)?.label} Information
-            </h2>
-            {onEdit && EDITABLE_TABS.has(tab) && (
-              <Button variant="link" size="sm" onClick={() => onEdit(tab)}>
-                Edit
-              </Button>
-            )}
-            {onRequestChange && tab === "personal" && (
-              <Button size="sm" variant="outline" onClick={onRequestChange}>
-                <Pencil />
-                Request Change
-              </Button>
-            )}
-          </div>
-        )}
-
         {tab === "personal" && (
-          <div className="space-y-8">
-            <Section title="Personal Information">
-              <Detail label="Last name" value={employee.last_name} />
-              <Detail label="First name" value={employee.first_name} />
-              <Detail label="Middle name" value={employee.middle_name} />
-              <Detail label="Name extension" value={employee.name_extension} />
-              <Detail label="Contact number" value={employee.phone} />
-              <Detail label="Email address" value={employee.email} />
-              <Detail label="Gender" value={employee.gender} />
-              <Detail label="Civil status" value={employee.civil_status} />
-              <Detail label="Nationality" value={employee.nationality} />
-              <Detail
-                label="Date of birth"
-                value={employee.date_of_birth ? formatDate(employee.date_of_birth) : null}
-              />
-              <Detail label="Place of birth" value={employee.place_of_birth} />
-              <Detail label="Home address" value={employee.address} />
-              <Detail label="Current address" value={employee.current_address} />
-              <Detail label="Mother's maiden name" value={employee.mothers_maiden_name} />
-              <Detail label="Father's name" value={employee.fathers_name} />
-              <Detail label="Siblings name" value={employee.siblings_name} />
-            </Section>
-
-            <Section title="Educational Background" divider>
-              <Detail label="High school" value={employee.high_school} />
-              <Detail label="College course" value={employee.college_course} />
-              <Detail label="University/College" value={employee.university} />
-            </Section>
-
-            <Section title="Emergency Contact" divider>
-              <Detail label="Full name" value={employee.emergency_contact_name} />
-              <Detail label="Relationship" value={employee.emergency_contact_relationship} />
-              <Detail label="Contact number" value={employee.emergency_contact_phone} />
-            </Section>
-
-            <Section title="Health" divider>
-              <Detail label="Height" value={employee.height} />
-              <Detail label="Weight" value={employee.weight} />
-              <Detail label="Health concern/condition" value={employee.health_condition} />
-            </Section>
-          </div>
+          <EmployeePersonalSection
+            employee={employee}
+            canEdit={isHr}
+            headerExtra={
+              onRequestChange && (
+                <Button size="sm" variant="outline" onClick={onRequestChange}>
+                  <Pencil />
+                  Request Change
+                </Button>
+              )
+            }
+          />
         )}
 
         {tab === "job" && (
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-              <Detail label="Title" value={employee.job_title} />
-              <Detail label="Department" value={employee.department?.name} />
-              <Detail label="Manager" value={employee.manager?.name ?? "—"} />
-              <Detail
-                label="Employment status"
-                value={statusLabel(employee.employment_status)}
-              />
-              <Detail label="Location" value={employee.work_location} />
-              <Detail label="Start date" value={formatDate(employee.hire_date)} />
-              <Detail label="Employee ID number" value={employee.employee_no} />
-              <Detail label="Employee role" value={employee.employee_role} />
-            </div>
-
+          <EmployeeJobSection employee={employee} canEdit={isHr}>
             {/* Work schedule: HR assigns/overrides here (moved off the Rules page). */}
             {isHr && (
               <div className="border-t border-border pt-6">
@@ -208,41 +155,11 @@ export function EmployeeRecord({
             )}
 
             {isHr && <HrAccessSection employee={employee} />}
-          </div>
+          </EmployeeJobSection>
         )}
 
         {tab === "compensation" && (
-          <div className="space-y-8">
-            <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-              <Detail
-                label="Base salary"
-                value={`${formatPeso(employee.base_salary)} / mo`}
-              />
-              <Detail label="Pay frequency" value={payFrequencyLabel(employee.pay_frequency)} />
-              <Detail label="Currency" value={employee.currency} />
-              <Detail label="Bank type" value={employee.bank_account_type} />
-              <Detail label="Bank account number" value={employee.bank_account} />
-              <Detail label="Bank account name" value={employee.bank_account_name} />
-              <Detail label="SSS" value={money(employee.sss_contribution)} />
-              <Detail label="Pag-IBIG" value={money(employee.pagibig_contribution)} />
-              <Detail label="PhilHealth" value={money(employee.philhealth_contribution)} />
-              <Detail label="Food allowance" value={money(employee.food_allowance)} />
-              <Detail label="Transportation allowance" value={money(employee.transportation_allowance)} />
-              <Detail label="Load allowance" value={money(employee.load_allowance)} />
-            </div>
-
-            <div className="border-t border-border pt-6">
-              <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
-                Government IDs
-              </p>
-              <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
-                <Detail label="TIN" value={employee.tin} />
-                <Detail label="SSS number" value={employee.sss_number} />
-                <Detail label="PhilHealth number" value={employee.philhealth_number} />
-                <Detail label="Pag-IBIG number" value={employee.pagibig_number} />
-              </div>
-            </div>
-
+          <EmployeeCompensationSection employee={employee} canEdit={isHr}>
             <div className="border-t border-border pt-6">
               <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
                 Leave Credits
@@ -274,7 +191,7 @@ export function EmployeeRecord({
                 <EmployeeLoans employeeId={employee.id} />
               </div>
             )}
-          </div>
+          </EmployeeCompensationSection>
         )}
 
         {tab === "documents" &&
@@ -283,6 +200,86 @@ export function EmployeeRecord({
           ) : (
             <MyDocuments onRequestDocument={onRequestDocument} />
           ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The record's avatar. For HR it doubles as the upload control: click the photo (or the
+ * button) to pick a new one, with a Remove action once a photo exists.
+ */
+function ProfilePhoto({ employee, canEdit }: { employee: Employee; canEdit: boolean }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const upload = useUploadEmployeePhoto(employee.id);
+  const remove = useDeleteEmployeePhoto(employee.id);
+  const busy = upload.isPending || remove.isPending;
+
+  async function onFile(file?: File) {
+    if (!file) return;
+    try {
+      await upload.mutateAsync(file);
+      toast.success("Photo updated");
+    } catch (err) {
+      // The server explains an oversized or non-image file better than we can.
+      const message =
+        (err as { response?: { data?: { errors?: { photo?: string[] }; message?: string } } })
+          ?.response?.data?.errors?.photo?.[0] ?? "Could not upload the photo.";
+      toast.error(message);
+    }
+    if (fileRef.current) fileRef.current.value = ""; // allow re-picking the same file
+  }
+
+  async function onRemove() {
+    try {
+      await remove.mutateAsync();
+      toast.success("Photo removed");
+    } catch {
+      toast.error("Could not remove the photo.");
+    }
+  }
+
+  const avatar = (
+    <EmployeeAvatar
+      name={employee.name}
+      photoUrl={employee.photo_url}
+      colorSeed={employee.id}
+      size="lg"
+    />
+  );
+
+  if (!canEdit) return avatar;
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="sr-only"
+        onChange={(e) => onFile(e.target.files?.[0])}
+      />
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => fileRef.current?.click()}
+        title="Change profile photo"
+        className="group relative rounded-full disabled:opacity-60"
+      >
+        {avatar}
+        <span className="absolute inset-0 flex items-center justify-center rounded-full bg-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">
+          <Camera className="size-6 text-white" />
+        </span>
+      </button>
+      <div className="flex items-center gap-1">
+        <Button variant="link" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {upload.isPending ? "Uploading…" : employee.photo_url ? "Change photo" : "Add photo"}
+        </Button>
+        {employee.photo_url && (
+          <Button variant="link" size="sm" disabled={busy} onClick={onRemove}>
+            {remove.isPending ? "Removing…" : "Remove"}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -501,11 +498,6 @@ function ActivateOnboarding({ employeeId }: { employeeId: number }) {
   );
 }
 
-// Format a raw decimal string as peso, or a dash when empty.
-function money(v: string | null): string | null {
-  return v ? formatPeso(v) : null;
-}
-
 /**
  * HR-only "System Access" block (Job tab): grant or revoke HR-officer access.
  * HR officers keep their employee role too — this only toggles the extra keychain.
@@ -712,38 +704,6 @@ function EmploymentHistoryList({ entries }: { entries: EmploymentHistoryEntry[] 
           </span>
         </div>
       ))}
-    </div>
-  );
-}
-
-// A titled subsection (teal header) with a 3-column detail grid, matching the
-// expanded personal record. `divider` adds a top rule to separate stacked sections.
-function Section({
-  title,
-  divider,
-  children,
-}: {
-  title: string;
-  divider?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={cn(divider && "border-t border-border pt-6")}>
-      <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">{title}</p>
-      <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function Detail({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div>
-      <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-1 text-sm text-foreground">{value || "—"}</p>
     </div>
   );
 }

@@ -9,12 +9,19 @@ export interface ManagerRef {
   name: string | null;
 }
 
+/** One named sibling on the personal record. */
+export interface Sibling {
+  name: string;
+  gender: string | null;
+}
+
 export interface Employee {
   id: number;
   employee_no: string;
   name: string; // composed identity from the split-name fields (users.name)
   email: string;
   is_hr_officer: boolean; // account has HR-officer (admin) access
+  photo_url: string | null; // profile picture; null falls back to initials
 
   job_title: string;
   employment_status: string;
@@ -62,7 +69,9 @@ export interface Employee {
   current_address: string | null;
   mothers_maiden_name: string | null;
   fathers_name: string | null;
-  siblings_name: string | null;
+  siblings: Sibling[];
+  /** Total siblings — may exceed the names listed above. */
+  number_of_siblings: number | null;
   high_school: string | null;
   college_course: string | null;
   university: string | null;
@@ -103,7 +112,8 @@ export interface EmployeeInput {
   place_of_birth?: string;
   mothers_maiden_name?: string;
   fathers_name?: string;
-  siblings_name?: string;
+  siblings?: Sibling[];
+  number_of_siblings?: number | null;
   high_school?: string;
   college_course?: string;
   university?: string;
@@ -137,6 +147,15 @@ export interface EmployeeInput {
   role_change_type?: string;
   role_change_reason?: string;
 }
+
+/**
+ * An edit to an existing record. The API applies only the keys it is sent, so each
+ * section of the employee record saves its own fields without disturbing the rest.
+ * An explicit `null` clears a field — omitting the key leaves it as it was.
+ */
+export type EmployeeUpdateInput = {
+  [K in keyof EmployeeInput]?: EmployeeInput[K] | null;
+};
 
 export const GENDERS = ["Male", "Female", "Other", "Prefer not to say"] as const;
 export const CIVIL_STATUSES = ["Single", "Married", "Widowed", "Separated", "Divorced"] as const;
