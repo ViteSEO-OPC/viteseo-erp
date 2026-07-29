@@ -10,6 +10,7 @@ import { StatCard } from "@/core/components/stat-card";
 import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import {
@@ -17,6 +18,7 @@ import {
   useApproveReimbursement,
   useRejectReimbursement,
   useMarkReimbursementPaid,
+  useReopenReimbursement,
 } from "@/modules/hr/hooks/use-reimbursements";
 import {
   categoryLabel,
@@ -28,6 +30,7 @@ export default function ReimbursementPage() {
   const approveMut = useApproveReimbursement();
   const rejectMut = useRejectReimbursement();
   const paidMut = useMarkReimbursementPaid();
+  const reopenMut = useReopenReimbursement();
 
   const stats = useMemo(() => {
     const list = claims ?? [];
@@ -126,20 +129,41 @@ export default function ReimbursementPage() {
             </div>
           );
         }
+
+        const undo = (
+          <ReopenAction
+            subject={`${c.employee.name}'s ${categoryLabel(c.category)} claim`}
+            label={c.status === "paid" ? "Undo payment" : "Reopen"}
+            title={c.status === "paid" ? "Reverse this payment?" : undefined}
+            confirmLabel={c.status === "paid" ? "Reverse payment" : undefined}
+            successMessage={c.status === "paid" ? "Payment reversed" : "Claim reopened"}
+            description={
+              c.status === "paid"
+                ? `This ${formatPeso(c.amount)} claim goes back to approved and unpaid — it is owed again.`
+                : undefined
+            }
+            onReopen={(reason) => reopenMut.mutateAsync({ id: c.id, reason })}
+          />
+        );
+
         // `scheduled` (Slice 12) = folded into a payslip that hasn't gone out yet. It pays
-        // itself when that payslip is disbursed, but HR can still settle it by hand.
+        // itself when that payslip is disbursed, but HR can still settle it by hand. No undo
+        // here: payroll is already carrying it — reverse the payslip instead.
         if (c.status === "approved" || c.status === "scheduled") {
           return (
-            <Button size="sm" variant="outline" disabled={busyId === c.id}
-              onClick={() => act(paidMut.mutateAsync(c.id), "Marked as paid")}
-              title={c.status === "scheduled"
-                ? "Already included in a payslip — use this only if paid separately"
-                : undefined}>
-              Mark paid
-            </Button>
+            <div className="flex justify-end gap-1.5">
+              <Button size="sm" variant="outline" disabled={busyId === c.id}
+                onClick={() => act(paidMut.mutateAsync(c.id), "Marked as paid")}
+                title={c.status === "scheduled"
+                  ? "Already included in a payslip — use this only if paid separately"
+                  : undefined}>
+                Mark paid
+              </Button>
+              {c.status === "approved" ? undo : null}
+            </div>
           );
         }
-        return <span className="text-muted-foreground">—</span>;
+        return <div className="flex justify-end">{undo}</div>;
       },
     },
   ];

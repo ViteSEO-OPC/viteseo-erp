@@ -58,6 +58,12 @@ export async function activateEmployee(id: number): Promise<Employee> {
   return res.data.data;
 }
 
+/** Undo the above — puts the "Onboarding" tag back on the record. */
+export async function reopenOnboarding(id: number, reason?: string): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/reopen-onboarding`, { reason });
+  return res.data.data;
+}
+
 /** Grant or revoke HR-officer access for this employee's user account. */
 export async function setHrRole(
   id: number,
@@ -149,5 +155,14 @@ export async function cancelEmployeeLoan(
   reason: string,
 ): Promise<EmployeeLoan> {
   const res = await apiClient.post(`/hr/loans/${loanId}/cancel`, { reason });
+  return res.data.data;
+}
+
+/** Undo a cancellation — payroll resumes collecting from the next run. */
+export async function reopenEmployeeLoan(
+  loanId: number,
+  reason?: string,
+): Promise<EmployeeLoan> {
+  const res = await apiClient.post(`/hr/loans/${loanId}/reopen`, { reason });
   return res.data.data;
 }

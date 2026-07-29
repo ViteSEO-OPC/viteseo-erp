@@ -27,3 +27,8 @@ export async function rejectHalfDayRequest(
   const res = await apiClient.post(`/hr/half-day-requests/${id}/reject`, { reason });
   return res.data.data;
 }
+
+export async function reopenHalfDayRequest(id: number, reason?: string): Promise<HalfDayRequest> {
+  const res = await apiClient.post(`/hr/half-day-requests/${id}/reopen`, { reason });
+  return res.data.data;
+}

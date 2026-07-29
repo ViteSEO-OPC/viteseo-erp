@@ -10,6 +10,7 @@ import {
   cancelLeaveRequest,
   approveLeaveRequest,
   rejectLeaveRequest,
+  reopenLeaveRequest,
 } from "@/modules/hr/api/leave";
 import type { StoreLeaveInput } from "@/modules/hr/types/leave";
 
@@ -80,6 +81,22 @@ export function useRejectLeaveRequest() {
       qc.invalidateQueries({ queryKey: REQUESTS_KEY });
       qc.invalidateQueries({ queryKey: BALANCES_KEY });
       qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
+  });
+}
+
+// Reopening an approved leave returns its credits and re-opens the covered days, so
+// attendance and violations move with it.
+export function useReopenLeaveRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenLeaveRequest(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: REQUESTS_KEY });
+      qc.invalidateQueries({ queryKey: BALANCES_KEY });
+      qc.invalidateQueries({ queryKey: NOTIF_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+      qc.invalidateQueries({ queryKey: ["hr", "violations"] });
     },
   });
 }

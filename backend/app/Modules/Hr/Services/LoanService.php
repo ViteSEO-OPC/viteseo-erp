@@ -98,6 +98,31 @@ class LoanService
     }
 
     /**
+     * Undo a cancellation — the loan goes back to active and payroll resumes collecting it
+     * from the next run. Instalments already collected are untouched, so the balance simply
+     * picks up where it left off. A loan payroll marked `settled` is left alone: its balance
+     * is zero, so re-activating it would collect nothing.
+     */
+    public function reopen(EmployeeLoan $loan, ?string $reason = null): EmployeeLoan
+    {
+        if ($loan->status !== 'cancelled') {
+            throw ValidationException::withMessages([
+                'status' => ["Only a cancelled loan can be reopened; this one is {$loan->status}."],
+            ]);
+        }
+
+        $loan->update(['status' => 'active']);
+        $this->audit->log(
+            'reopened',
+            'Loans',
+            "Reopened loan #{$loan->id} — collection resumes" . ($reason ? " — {$reason}" : ''),
+            $loan,
+        );
+
+        return $loan->fresh('payments');
+    }
+
+    /**
      * Collect this period's instalments for one employee and record them against the run.
      *
      * `availableNet` is what the payslip can still afford after every other deduction. Each

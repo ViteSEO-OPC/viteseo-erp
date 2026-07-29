@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Clock, CalendarPlus } from "lucide-react";
+import { Clock, CalendarPlus, RotateCcw } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,12 @@ import {
 import { cn } from "@/lib/utils";
 import { toManilaTimeInput, formatDate } from "@/core/lib/format";
 import { format12Hour, manilaYear } from "@/modules/hr/lib/manila-date";
-import { useAdjustAttendance, useViolations, useResolveViolation } from "@/modules/hr/hooks/use-attendance";
+import {
+  useAdjustAttendance,
+  useViolations,
+  useResolveViolation,
+  useReopenViolation,
+} from "@/modules/hr/hooks/use-attendance";
 import { useAttendancePolicy } from "@/modules/hr/hooks/use-rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
@@ -178,6 +183,7 @@ function Details({
 }) {
   const adjustMut = useAdjustAttendance();
   const resolve = useResolveViolation();
+  const reopen = useReopenViolation();
 
   const [timeIn, setTimeIn] = useState(toManilaTimeInput(row.time_in));
   const [timeOut, setTimeOut] = useState(toManilaTimeInput(row.time_out));
@@ -273,7 +279,22 @@ function Details({
       align: "right",
       cell: (v) =>
         v.resolved ? (
-          <span className="text-caption text-muted-foreground">Resolved</span>
+          // Resolving is one click, so undoing it is too — the flag is derived from
+          // attendance and recomputed on every adjustment, nothing else hangs off it.
+          <span className="inline-flex items-center justify-end gap-1.5">
+            <span className="text-caption text-muted-foreground">Resolved</span>
+            <Button
+              size="xs"
+              variant="ghost"
+              className="text-muted-foreground"
+              disabled={reopen.isPending}
+              onClick={() => reopen.mutate(v.id)}
+              title="Flag this violation again"
+            >
+              <RotateCcw />
+              Undo
+            </Button>
+          </span>
         ) : (
           <Button
             size="xs"

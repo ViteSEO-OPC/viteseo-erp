@@ -13,14 +13,17 @@ import {
 } from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { formatDate } from "@/core/lib/format";
 import {
   useDocumentRequests,
   useFulfillDocumentRequest,
   useRejectDocumentRequest,
+  useReopenDocumentRequest,
   useChangeRequests,
   useApproveChangeRequest,
   useRejectChangeRequest,
+  useReopenChangeRequest,
 } from "@/modules/hr/hooks/use-requests";
 import {
   documentTypeLabel,
@@ -85,6 +88,7 @@ function DocumentQueue() {
   const { data: rows, isLoading, isError } = useDocumentRequests();
   const fulfillMut = useFulfillDocumentRequest();
   const rejectMut = useRejectDocumentRequest();
+  const reopenMut = useReopenDocumentRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: DocumentRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(rows ?? [], status);
@@ -116,19 +120,37 @@ function DocumentQueue() {
       header: "Action",
       align: "right",
       cell: (r) => {
+        const undo = (
+          <ReopenAction
+            subject={`the ${documentTypeLabel(r.type)} request from ${r.employee.name}`}
+            successMessage="Request reopened"
+            consequence={
+              r.status === "fulfilled"
+                ? r.fulfilled_url
+                  ? "The attached file is deleted and the employee loses access to it."
+                  : "The employee loses access to the fulfilled request."
+                : undefined
+            }
+            onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+          />
+        );
+
         if (r.status === "fulfilled") {
           return (
-            <Button
-              size="sm"
-              variant="success"
-              onClick={() =>
-                r.fulfilled_url
-                  ? window.open(r.fulfilled_url, "_blank", "noopener")
-                  : toast.error("No file attached to this request.")
-              }
-            >
-              View
-            </Button>
+            <div className="flex justify-end gap-2">
+              <Button
+                size="sm"
+                variant="success"
+                onClick={() =>
+                  r.fulfilled_url
+                    ? window.open(r.fulfilled_url, "_blank", "noopener")
+                    : toast.error("No file attached to this request.")
+                }
+              >
+                View
+              </Button>
+              {undo}
+            </div>
           );
         }
         if (r.status === "pending") {
@@ -142,6 +164,9 @@ function DocumentQueue() {
               </Button>
             </div>
           );
+        }
+        if (r.status === "rejected") {
+          return <div className="flex justify-end">{undo}</div>;
         }
         return <span className="text-muted-foreground">—</span>;
       },
@@ -185,6 +210,7 @@ function ChangeQueue() {
   const { data: rows, isLoading, isError } = useChangeRequests();
   const approveMut = useApproveChangeRequest();
   const rejectMut = useRejectChangeRequest();
+  const reopenMut = useReopenChangeRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: ChangeRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(rows ?? [], status);
@@ -224,7 +250,22 @@ function ChangeQueue() {
             </Button>
           </div>
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <div className="flex justify-end">
+            <ReopenAction
+              subject={`${r.employee.name}'s ${r.field_label} change`}
+              consequence={
+                r.status === "approved"
+                  ? `Their ${r.field_label} goes back to ${r.old_value || "empty"} — unless HR has edited it since.`
+                  : undefined
+              }
+              successMessage={({ restored }) =>
+                restored ? "Reopened and the old value restored" : "Change request reopened"
+              }
+              // Annotated so the result type is inferred here: an un-annotated callback
+              // makes both props context-sensitive and the generic collapses to unknown.
+              onReopen={(reason: string) => reopenMut.mutateAsync({ id: r.id, reason })}
+            />
+          </div>
         ),
     },
   ];

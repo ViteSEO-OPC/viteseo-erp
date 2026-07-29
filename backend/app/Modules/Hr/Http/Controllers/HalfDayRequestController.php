@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreHalfDayRequestRequest;
 use App\Modules\Hr\Http\Resources\HalfDayRequestResource;
 use App\Modules\Hr\Models\HalfDayRequest;
@@ -51,6 +52,14 @@ class HalfDayRequestController extends Controller
 
         return HalfDayRequestResource::make(
             $this->service->reject($halfDayRequest, $request->user(), $data['reason']),
+        )->response();
+    }
+
+    // POST /api/v1/hr/half-day-requests/{halfDayRequest}/reopen — HR only: undo the decision.
+    public function reopen(ReopenRequest $request, HalfDayRequest $halfDayRequest): JsonResponse
+    {
+        return HalfDayRequestResource::make(
+            $this->service->reopen($halfDayRequest, $request->validated('reason')),
         )->response();
     }
 }

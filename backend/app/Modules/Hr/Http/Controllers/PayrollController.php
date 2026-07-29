@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\RunPayrollRequest;
 use App\Modules\Hr\Http\Requests\UpdatePayrollSettingsRequest;
 use App\Modules\Hr\Http\Resources\PayrollRunResource;
@@ -147,6 +148,17 @@ class PayrollController extends Controller
     public function markDone(Payslip $payslip): JsonResponse
     {
         $this->service->markDone($payslip);
+
+        return PayrollRunResource::make(
+            $this->service->runWithBreakdown($payslip->payrollRun),
+        )->response();
+    }
+
+    // POST /api/v1/hr/payslips/{payslip}/reopen — undo the above: the payslip goes back to
+    // computed and any claims it paid go back to scheduled. Refused on a locked run.
+    public function reopenPayslip(ReopenRequest $request, Payslip $payslip): JsonResponse
+    {
+        $this->service->reopenPayslip($payslip, $request->validated('reason'));
 
         return PayrollRunResource::make(
             $this->service->runWithBreakdown($payslip->payrollRun),

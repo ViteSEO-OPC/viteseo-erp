@@ -50,6 +50,12 @@ export async function rejectOfficeExpense(id: number, reason: string): Promise<O
   return res.data.data;
 }
 
+// Undo the review — back to recorded, awaiting a decision again.
+export async function reopenOfficeExpense(id: number, reason?: string): Promise<OfficeExpense> {
+  const res = await apiClient.post(`/hr/office-expenses/${id}/reopen`, { reason });
+  return res.data.data;
+}
+
 export async function deleteOfficeExpense(id: number): Promise<void> {
   await apiClient.delete(`/hr/office-expenses/${id}`);
 }

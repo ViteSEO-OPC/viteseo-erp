@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StorePayslipRequestRequest;
 use App\Modules\Hr\Http\Resources\PayslipRequestResource;
 use App\Modules\Hr\Models\PayslipRequest;
@@ -46,6 +47,14 @@ class PayslipRequestController extends Controller
 
         return PayslipRequestResource::make(
             $this->service->reject($payslipRequest, $request->user(), $data['reason'] ?? null),
+        )->response();
+    }
+
+    // POST /hr/payslip-requests/{payslipRequest}/reopen — HR only: undo the decision.
+    public function reopen(ReopenRequest $request, PayslipRequest $payslipRequest): JsonResponse
+    {
+        return PayslipRequestResource::make(
+            $this->service->reopen($payslipRequest, $request->validated('reason')),
         )->response();
     }
 }

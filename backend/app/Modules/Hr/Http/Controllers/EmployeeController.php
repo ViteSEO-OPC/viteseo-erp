@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\SetHrRoleRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeeDocumentRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeePhotoRequest;
@@ -124,6 +125,14 @@ class EmployeeController extends Controller
     public function activate(Employee $employee): JsonResponse
     {
         return EmployeeResource::make($this->service->activate($employee))->response();
+    }
+
+    // POST /api/v1/hr/employees/{employee}/reopen-onboarding — undo the above.
+    public function reopenOnboarding(ReopenRequest $request, Employee $employee): JsonResponse
+    {
+        return EmployeeResource::make(
+            $this->service->reopenOnboarding($employee, $request->validated('reason')),
+        )->response();
     }
 
     // POST /api/v1/hr/employees/{employee}/hr-role — grant/revoke HR-officer access.

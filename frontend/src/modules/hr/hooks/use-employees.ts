@@ -9,6 +9,7 @@ import {
   updateEmployee,
   getSalaryHistory,
   activateEmployee,
+  reopenOnboarding,
   setHrRole,
   getEmployeeDocuments,
   getMyDocuments,
@@ -19,6 +20,7 @@ import {
   getEmployeeLoans,
   createEmployeeLoan,
   cancelEmployeeLoan,
+  reopenEmployeeLoan,
   type EmployeeLoanInput,
 } from "@/modules/hr/api/employees";
 import type { EmployeeInput, EmployeeUpdateInput } from "@/modules/hr/types/employee";
@@ -151,6 +153,17 @@ export function useActivateEmployee() {
   });
 }
 
+export function useReopenOnboarding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenOnboarding(id, reason),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: EMPLOYEES_KEY });
+      qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id] });
+    },
+  });
+}
+
 /** Loans & cash advances for one employee (Slice 11b). HR only. */
 export function useEmployeeLoans(id: number | undefined) {
   return useQuery({
@@ -173,6 +186,15 @@ export function useCancelEmployeeLoan(id: number) {
   return useMutation({
     mutationFn: ({ loanId, reason }: { loanId: number; reason: string }) =>
       cancelEmployeeLoan(loanId, reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id, "loans"] }),
+  });
+}
+
+export function useReopenEmployeeLoan(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ loanId, reason }: { loanId: number; reason?: string }) =>
+      reopenEmployeeLoan(loanId, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id, "loans"] }),
   });
 }

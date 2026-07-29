@@ -33,6 +33,7 @@ import {
 import {
   useSalaryHistory,
   useActivateEmployee,
+  useReopenOnboarding,
   useSetHrRole,
   useEmployeeDocuments,
   useMyDocuments,
@@ -47,6 +48,7 @@ import { EmployeeScheduleEditor } from "@/modules/hr/components/employee-schedul
 import { EmployeeLeaveCreditsEditor } from "@/modules/hr/components/employee-leave-credits-editor";
 import type { LeaveBalance } from "@/modules/hr/types/leave";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 
 export type TabKey = "personal" | "job" | "compensation" | "documents";
 
@@ -150,9 +152,7 @@ export function EmployeeRecord({
               <EmploymentHistoryList entries={employee.employment_history} />
             </div>
 
-            {isHr && employee.onboarding_status === "pending" && (
-              <ActivateOnboarding employeeId={employee.id} />
-            )}
+            {isHr && <OnboardingPanel employee={employee} />}
 
             {isHr && <HrAccessSection employee={employee} />}
           </EmployeeJobSection>
@@ -472,8 +472,35 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
   );
 }
 
-function ActivateOnboarding({ employeeId }: { employeeId: number }) {
+/**
+ * The onboarding mark and its undo. Shown in both states so completing it by mistake
+ * isn't a one-way door — nothing else keys off the flag, so this is a safe flip.
+ */
+function OnboardingPanel({ employee }: { employee: Employee }) {
   const activate = useActivateEmployee();
+  const reopen = useReopenOnboarding();
+
+  if (employee.onboarding_status !== "pending") {
+    return (
+      <div className="flex flex-col gap-3 rounded-card border border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Onboarding complete</p>
+          <p className="text-xs text-muted-foreground">
+            Reopen it if this hire still has onboarding steps left.
+          </p>
+        </div>
+        <ReopenAction
+          label="Reopen onboarding"
+          successMessage="Back to onboarding"
+          subject={`${employee.name}'s onboarding`}
+          description={`${employee.name} goes back to onboarding.`}
+          consequence="Their record shows the Onboarding tag again until you mark it complete."
+          onReopen={(reason) => reopen.mutateAsync({ id: employee.id, reason })}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-card border border-warning/40 bg-warning-subtle p-4">
       <div>
@@ -485,7 +512,7 @@ function ActivateOnboarding({ employeeId }: { employeeId: number }) {
         disabled={activate.isPending}
         onClick={async () => {
           try {
-            await activate.mutateAsync(employeeId);
+            await activate.mutateAsync(employee.id);
             toast.success("Onboarding complete");
           } catch {
             toast.error("Could not update onboarding.");

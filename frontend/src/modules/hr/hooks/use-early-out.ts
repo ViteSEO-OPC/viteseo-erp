@@ -7,6 +7,7 @@ import {
   createEarlyOutRequest,
   approveEarlyOutRequest,
   rejectEarlyOutRequest,
+  reopenEarlyOutRequest,
 } from "@/modules/hr/api/early-out";
 
 const KEY = ["hr", "early-out-requests"] as const;
@@ -37,5 +38,18 @@ export function useRejectEarlyOutRequest() {
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
       rejectEarlyOutRequest(id, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+// An approved early-out docks the undertime fraction, so undoing it moves attendance too.
+export function useReopenEarlyOutRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) =>
+      reopenEarlyOutRequest(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+    },
   });
 }

@@ -53,3 +53,9 @@ export async function rejectLeaveRequest(
   const res = await apiClient.post(`/hr/leave-requests/${id}/reject`, { reason });
   return res.data.data;
 }
+
+// Undo the decision: back to pending, and any credits the approval consumed are returned.
+export async function reopenLeaveRequest(id: number, reason?: string): Promise<LeaveRequest> {
+  const res = await apiClient.post(`/hr/leave-requests/${id}/reopen`, { reason });
+  return res.data.data;
+}

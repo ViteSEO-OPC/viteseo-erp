@@ -44,6 +44,15 @@ export async function rejectDocumentRequest(
   return res.data.data;
 }
 
+// Undo the decision: back to pending, employee access re-locked, attachment dropped.
+export async function reopenDocumentRequest(
+  id: number,
+  reason?: string,
+): Promise<DocumentRequest> {
+  const res = await apiClient.post(`/hr/document-requests/${id}/reopen`, { reason });
+  return res.data.data;
+}
+
 // --- Change requests ---
 
 export async function getChangeRequests(): Promise<ChangeRequest[]> {
@@ -77,6 +86,19 @@ export async function rejectChangeRequest(
   return res.data.data;
 }
 
+/**
+ * Undo the decision. `restored` says whether the employee's previous value went back
+ * too — it doesn't when HR has since edited that field directly on the record, and the
+ * caller tells the user so rather than implying a revert that didn't happen.
+ */
+export async function reopenChangeRequest(
+  id: number,
+  reason?: string,
+): Promise<{ request: ChangeRequest; restored: boolean }> {
+  const res = await apiClient.post(`/hr/change-requests/${id}/reopen`, { reason });
+  return { request: res.data.data, restored: res.data.meta?.restored ?? false };
+}
+
 // --- Payslip requests ---
 
 export async function getPayslipRequests(): Promise<PayslipRequest[]> {
@@ -104,6 +126,11 @@ export async function approvePayslipRequest(id: number): Promise<PayslipRequest>
 
 export async function rejectPayslipRequest(id: number, reason: string): Promise<PayslipRequest> {
   const res = await apiClient.post(`/hr/payslip-requests/${id}/reject`, { reason });
+  return res.data.data;
+}
+
+export async function reopenPayslipRequest(id: number, reason?: string): Promise<PayslipRequest> {
+  const res = await apiClient.post(`/hr/payslip-requests/${id}/reopen`, { reason });
   return res.data.data;
 }
 
@@ -152,5 +179,11 @@ export async function resolvePayrollInquiry(
   fd.append("note", note);
   for (const file of files) fd.append("attachments[]", file);
   const res = await apiClient.post(`/hr/payroll-inquiries/${id}/resolve`, fd);
+  return res.data.data;
+}
+
+// Steps the status back one: done → in progress, in progress → pending.
+export async function reopenPayrollInquiry(id: number, reason?: string): Promise<PayrollInquiry> {
+  const res = await apiClient.post(`/hr/payroll-inquiries/${id}/reopen`, { reason });
   return res.data.data;
 }

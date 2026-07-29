@@ -7,6 +7,7 @@ import {
   getMyConcerns,
   createConcern,
   setConcernStatus,
+  reopenConcern,
   scheduleMeeting,
   scheduleEmployeeMeeting,
   getMyMeetings,
@@ -38,6 +39,17 @@ export function useSetConcernStatus() {
   return useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) => setConcernStatus(id, status),
     onSuccess: () => qc.invalidateQueries({ queryKey: CONCERNS_KEY }),
+  });
+}
+
+export function useReopenConcern() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenConcern(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: CONCERNS_KEY });
+      qc.invalidateQueries({ queryKey: MY_CONCERNS_KEY });
+    },
   });
 }
 

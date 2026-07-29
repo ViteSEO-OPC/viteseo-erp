@@ -8,6 +8,7 @@ import {
   approveReimbursement,
   rejectReimbursement,
   markReimbursementPaid,
+  reopenReimbursement,
 } from "@/modules/hr/api/reimbursements";
 
 const KEY = ["hr", "reimbursements"] as const;
@@ -56,6 +57,20 @@ export function useRejectReimbursement() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
       qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
+  });
+}
+
+// Un-paying a claim can put it back on an open payroll run, so refresh payroll too.
+export function useReopenReimbursement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) =>
+      reopenReimbursement(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      qc.invalidateQueries({ queryKey: NOTIF_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll"] });
     },
   });
 }

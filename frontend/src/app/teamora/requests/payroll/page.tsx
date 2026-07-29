@@ -25,14 +25,17 @@ import {
 } from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { formatDate, formatDateTime } from "@/core/lib/format";
 import {
   usePayslipRequests,
   useApprovePayslipRequest,
   useRejectPayslipRequest,
+  useReopenPayslipRequest,
   usePayrollInquiries,
   useProgressPayrollInquiry,
   useResolvePayrollInquiry,
+  useReopenPayrollInquiry,
 } from "@/modules/hr/hooks/use-requests";
 import type { PayslipRequest, PayrollInquiry } from "@/modules/hr/types/request";
 
@@ -106,6 +109,7 @@ function PayslipQueue() {
   const { data: rows, isLoading, isError } = usePayslipRequests();
   const approveMut = useApprovePayslipRequest();
   const rejectMut = useRejectPayslipRequest();
+  const reopenMut = useReopenPayslipRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: PayslipRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(rows ?? [], status);
@@ -145,7 +149,12 @@ function PayslipQueue() {
             </Button>
           </div>
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <div className="flex justify-end">
+            <ReopenAction
+              subject={`${r.employee.name}'s hard-copy request`}
+              onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+            />
+          </div>
         ),
     },
   ];
@@ -186,6 +195,7 @@ function PayslipQueue() {
 function InquiryQueue() {
   const { data: rows, isLoading, isError } = usePayrollInquiries();
   const progressMut = useProgressPayrollInquiry();
+  const reopenMut = useReopenPayrollInquiry();
   const [resolving, setResolving] = useState<PayrollInquiry | null>(null);
   const [viewing, setViewing] = useState<PayrollInquiry | null>(null);
   const [status, setStatus] = useState("all");
@@ -230,18 +240,34 @@ function InquiryQueue() {
       cell: (r) => {
         if (r.status === "done") {
           return (
-            <Button size="sm" variant="link" className="h-auto p-0" onClick={() => setViewing(r)}>
-              View Note
-            </Button>
+            <div className="flex items-center justify-end gap-2">
+              <Button size="sm" variant="link" className="h-auto p-0" onClick={() => setViewing(r)}>
+                View Note
+              </Button>
+              <ReopenAction
+                subject={`${r.employee.name}'s inquiry`}
+                consequence="The resolution note and any proof attached to it are cleared."
+                onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+              />
+            </div>
           );
         }
         // One action at a time: Pending → Start, then In progress → Mark Done.
         if (r.status === "in_progress") {
           return (
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-1.5">
               <Button size="sm" variant="success" onClick={() => setResolving(r)}>
                 Mark Done
               </Button>
+              <ReopenAction
+                label="Undo start"
+                title="Send this back to pending?"
+                confirmLabel="Send back"
+                successMessage="Back to pending"
+                subject={`${r.employee.name}'s inquiry`}
+                description={`${r.employee.name}'s inquiry goes back to pending, as if it hadn't been picked up.`}
+                onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+              />
             </div>
           );
         }

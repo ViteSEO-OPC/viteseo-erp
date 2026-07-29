@@ -66,6 +66,35 @@ class OfficeExpenseService
         return $this->transition($expense, 'rejected', $reviewer, $reason);
     }
 
+    /**
+     * Undo the review — back to recorded, awaiting a decision again. Office expenses
+     * are company spend, never employee pay, so nothing downstream needs unwinding.
+     */
+    public function reopen(OfficeExpense $expense, ?string $reason = null): OfficeExpense
+    {
+        if ($expense->status === 'recorded') {
+            throw ValidationException::withMessages([
+                'status' => ['This expense has not been reviewed yet — there is nothing to undo.'],
+            ]);
+        }
+
+        $expense->update([
+            'status' => 'recorded',
+            'review_note' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+        ]);
+
+        $this->audit->log(
+            'reopened',
+            'Office Expenses',
+            $this->describe($expense, 'Reopened') . ($reason ? " — {$reason}" : ''),
+            $expense,
+        );
+
+        return $expense->load(['recorder', 'reviewer']);
+    }
+
     public function delete(OfficeExpense $expense): void
     {
         $expense->delete();

@@ -10,6 +10,7 @@ import { Avatar } from "@/core/components/avatar";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
 import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import {
   DataTable,
   type Column,
@@ -25,22 +26,26 @@ import {
   useApproveLeaveRequest,
   useRejectLeaveRequest,
   useCancelLeaveRequest,
+  useReopenLeaveRequest,
 } from "@/modules/hr/hooks/use-leave";
 import {
   useHalfDayRequests,
   useApproveHalfDayRequest,
   useRejectHalfDayRequest,
+  useReopenHalfDayRequest,
 } from "@/modules/hr/hooks/use-half-day";
 import {
   useEarlyOutRequests,
   useApproveEarlyOutRequest,
   useRejectEarlyOutRequest,
+  useReopenEarlyOutRequest,
 } from "@/modules/hr/hooks/use-early-out";
 import {
   useOvertimeRequests,
   useApproveOvertimeRequest,
   useRejectOvertimeRequest,
   useCancelOvertimeRequest,
+  useReopenOvertimeRequest,
 } from "@/modules/hr/hooks/use-overtime";
 import type {
   LeaveRequest,
@@ -62,6 +67,7 @@ export default function TimeLeavePage() {
   const approveMut = useApproveLeaveRequest();
   const rejectMut = useRejectLeaveRequest();
   const cancelMut = useCancelLeaveRequest();
+  const reopenMut = useReopenLeaveRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: LeaveRequest } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<LeaveRequest | null>(null);
   const [status, setStatus] = useState("all");
@@ -154,21 +160,30 @@ export default function TimeLeavePage() {
               Reject
             </Button>
           </div>
-        ) : canCancel(r) ? (
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-danger text-danger hover:bg-danger/10 hover:text-danger"
-              disabled={cancelMut.isPending && cancelMut.variables?.id === r.id}
-              onClick={() => setCancelTarget(r)}
-            >
-              <Ban />
-              Cancel
-            </Button>
-          </div>
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <div className="flex justify-end gap-1.5">
+            {canCancel(r) ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-danger text-danger hover:bg-danger/10 hover:text-danger"
+                disabled={cancelMut.isPending && cancelMut.variables?.id === r.id}
+                onClick={() => setCancelTarget(r)}
+              >
+                <Ban />
+                Cancel
+              </Button>
+            ) : null}
+            <ReopenAction
+              subject={`${r.employee.name}'s ${r.leave_type.name}`}
+              consequence={
+                r.status === "approved"
+                  ? `The ${r.days} day(s) deducted from their balance will be credited back.`
+                  : undefined
+              }
+              onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+            />
+          </div>
         ),
     },
   ];
@@ -251,6 +266,7 @@ function HalfDaySection() {
   const { data: requests, isLoading } = useHalfDayRequests();
   const approveMut = useApproveHalfDayRequest();
   const rejectMut = useRejectHalfDayRequest();
+  const reopenMut = useReopenHalfDayRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: HalfDayRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
@@ -307,7 +323,17 @@ function HalfDaySection() {
             </Button>
           </div>
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <div className="flex justify-end">
+            <ReopenAction
+              subject={`${r.employee.name}'s half-day`}
+              consequence={
+                r.status === "approved"
+                  ? "The 0.5-day deduction comes off this pay period."
+                  : undefined
+              }
+              onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+            />
+          </div>
         ),
     },
   ];
@@ -356,6 +382,7 @@ function EarlyOutSection() {
   const { data: requests, isLoading } = useEarlyOutRequests();
   const approveMut = useApproveEarlyOutRequest();
   const rejectMut = useRejectEarlyOutRequest();
+  const reopenMut = useReopenEarlyOutRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: EarlyOutRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
@@ -412,7 +439,17 @@ function EarlyOutSection() {
             </Button>
           </div>
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <div className="flex justify-end">
+            <ReopenAction
+              subject={`${r.employee.name}'s early-out`}
+              consequence={
+                r.status === "approved"
+                  ? "The undertime deduction comes off this pay period."
+                  : undefined
+              }
+              onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+            />
+          </div>
         ),
     },
   ];
@@ -463,6 +500,7 @@ function OvertimeSection() {
   const approveMut = useApproveOvertimeRequest();
   const rejectMut = useRejectOvertimeRequest();
   const cancelMut = useCancelOvertimeRequest();
+  const reopenMut = useReopenOvertimeRequest();
   const [review, setReview] = useState<{
     mode: "approve" | "reject" | "cancel";
     r: OvertimeRequest;
@@ -529,15 +567,26 @@ function OvertimeSection() {
               Reject
             </Button>
           </div>
-        ) : r.status === "approved" ? (
-          // Slice 6 — an approved request is no longer frozen: HR can undo overtime
-          // that isn't going to happen, before payroll pays it.
-          <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => setReview({ mode: "cancel", r })}>
-            <X />
-            Cancel
-          </Button>
         ) : (
-          <span className="text-muted-foreground">—</span>
+          <div className="flex justify-end gap-1.5">
+            {r.status === "approved" ? (
+              // Slice 6 — an approved request is no longer frozen: HR can undo overtime
+              // that isn't going to happen, before payroll pays it.
+              <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => setReview({ mode: "cancel", r })}>
+                <X />
+                Cancel
+              </Button>
+            ) : null}
+            <ReopenAction
+              subject={`${r.employee.name}'s overtime`}
+              consequence={
+                r.status === "approved"
+                  ? `The ${r.hours.toFixed(1)} overtime hours stop counting toward pay.`
+                  : undefined
+              }
+              onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+            />
+          </div>
         ),
     },
   ];

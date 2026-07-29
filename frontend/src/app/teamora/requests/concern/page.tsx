@@ -23,8 +23,14 @@ import {
   type StatusFilterOption,
 } from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { formatDate, formatDateTime } from "@/core/lib/format";
-import { useConcerns, useSetConcernStatus, useScheduleMeeting } from "@/modules/hr/hooks/use-concerns";
+import {
+  useConcerns,
+  useSetConcernStatus,
+  useScheduleMeeting,
+  useReopenConcern,
+} from "@/modules/hr/hooks/use-concerns";
 import { concernCategoryLabel, type Concern } from "@/modules/hr/types/concern";
 import { DateTimePicker } from "@/modules/hr/ui/date-time-picker";
 
@@ -37,9 +43,12 @@ const CONCERN_STATUS_OPTIONS: StatusFilterOption[] = [
 
 export default function ConcernsPage() {
   const { data: rows, isLoading, isError } = useConcerns();
-  const [selected, setSelected] = useState<Concern | null>(null);
+  // Track the id, not the row: the open modal then follows the list as HR marks the
+  // concern under review, resolves it or undoes that, instead of freezing on click.
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(rows ?? [], status);
+  const selected = (rows ?? []).find((c) => c.id === selectedId) ?? null;
 
   const columns: Column<Concern>[] = [
     {
@@ -85,7 +94,7 @@ export default function ConcernsPage() {
             columns={columns}
             rows={visible}
             rowKey={(c) => c.id}
-            onRowClick={(c) => setSelected(c)}
+            onRowClick={(c) => setSelectedId(c.id)}
             needsAction={(c) => c.status !== "resolved"}
             // HR sees the submitter (even anonymous), so name is searchable here — this
             // data is HR-only. The 'anonymous' keyword still matches anonymous concerns.
@@ -99,7 +108,7 @@ export default function ConcernsPage() {
         )}
       </div>
 
-      <ConcernDetail concern={selected} onOpenChange={(o) => !o && setSelected(null)} />
+      <ConcernDetail concern={selected} onOpenChange={(o) => !o && setSelectedId(null)} />
     </div>
   );
 }
@@ -144,6 +153,7 @@ function ConcernDetail({
 }) {
   const statusMut = useSetConcernStatus();
   const scheduleMut = useScheduleMeeting();
+  const reopenMut = useReopenConcern();
 
   // Inline schedule form, revealed by the "Schedule meeting" toggle.
   const [scheduling, setScheduling] = useState(false);
@@ -292,6 +302,20 @@ function ConcernDetail({
                 >
                   Mark resolved
                 </Button>
+              )}
+              {concern.status !== "pending" && (
+                <ReopenAction
+                  className="h-10 text-[13px]"
+                  label={concern.status === "resolved" ? "Undo resolve" : "Back to pending"}
+                  successMessage="Concern reopened"
+                  subject={`Concern ${concern.reference_no}`}
+                  description={
+                    concern.status === "resolved"
+                      ? `Concern ${concern.reference_no} goes back to under review and the resolved date is cleared.`
+                      : `Concern ${concern.reference_no} goes back to pending.`
+                  }
+                  onReopen={(reason) => reopenMut.mutateAsync({ id: concern.id, reason })}
+                />
               )}
             </div>
 

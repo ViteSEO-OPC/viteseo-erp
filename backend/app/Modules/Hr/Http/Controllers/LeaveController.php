@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\CancelLeaveRequest;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreLeaveRequest;
 use App\Modules\Hr\Http\Resources\LeaveBalanceResource;
 use App\Modules\Hr\Http\Resources\LeaveRequestResource;
@@ -101,6 +102,14 @@ class LeaveController extends Controller
         $data = $request->validate(['reason' => ['required', 'string', 'max:1000']]);
 
         $updated = $this->service->reject($leaveRequest, $request->user(), $data['reason']);
+
+        return LeaveRequestResource::make($updated)->response();
+    }
+
+    // POST /api/v1/hr/leave-requests/{leaveRequest}/reopen — HR only: undo the decision.
+    public function reopen(ReopenRequest $request, LeaveRequest $leaveRequest): JsonResponse
+    {
+        $updated = $this->service->reopen($leaveRequest, $request->validated('reason'));
 
         return LeaveRequestResource::make($updated)->response();
     }

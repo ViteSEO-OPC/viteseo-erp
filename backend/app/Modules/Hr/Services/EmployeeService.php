@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class EmployeeService
 {
@@ -419,6 +420,28 @@ class EmployeeService
 
         $employee->load('user');
         $this->audit->log('updated', 'People', "Marked {$employee->user?->name}'s onboarding complete", $employee);
+
+        return $employee->load(['user', 'department', 'manager.user']);
+    }
+
+    /** Undo the above — puts the "Onboarding" tag back. */
+    public function reopenOnboarding(Employee $employee, ?string $reason = null): Employee
+    {
+        if ($employee->onboarding_status !== 'complete') {
+            throw ValidationException::withMessages([
+                'onboarding_status' => ['This employee is still onboarding — there is nothing to undo.'],
+            ]);
+        }
+
+        $employee->update(['onboarding_status' => 'pending']);
+
+        $employee->load('user');
+        $this->audit->log(
+            'reopened',
+            'People',
+            "Reopened {$employee->user?->name}'s onboarding" . ($reason ? " — {$reason}" : ''),
+            $employee,
+        );
 
         return $employee->load(['user', 'department', 'manager.user']);
     }

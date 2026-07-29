@@ -166,6 +166,67 @@ class ChangeRequestService
         return $request->load(['employee.user', 'reviewer']);
     }
 
+    /**
+     * Undo the decision — back to pending. Approving wrote `new_value` onto the employee,
+     * so undoing puts `old_value` back — but ONLY if the field still holds exactly what
+     * this request set. HR can edit the same field directly on the record, and silently
+     * reverting a newer, deliberate edit to a stale value would be worse than leaving it:
+     * in that case the request reopens and the record is left as HR last set it.
+     *
+     * The return flag says which happened, so the UI can be honest about it.
+     *
+     * @return array{request: ChangeRequest, restored: bool}
+     */
+    public function reopen(ChangeRequest $request, ?string $reason = null): array
+    {
+        if ($request->status === 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['This request is still pending — there is nothing to undo.'],
+            ]);
+        }
+
+        $wasApproved = $request->status === 'approved';
+        $field = $request->field;
+        $employee = $request->employee;
+
+        // Only touch the record when the approval is still the last word on that field.
+        $restorable = $wasApproved
+            && array_key_exists($field, self::FIELDS)
+            && (string) $employee->{$field} === (string) $request->new_value;
+
+        $result = DB::transaction(function () use ($request, $employee, $field, $restorable, $reason) {
+            $before = [$field => $employee->{$field}];
+
+            if ($restorable) {
+                $employee->update([$field => $request->old_value]);
+            }
+
+            $request->update([
+                'status' => 'pending',
+                'review_note' => null,
+                'reviewed_by' => null,
+                'reviewed_at' => null,
+            ]);
+
+            $label = self::FIELDS[$field] ?? $field;
+            $employeeName = $employee->user?->name ?? $employee->name;
+            $this->audit->log(
+                'reopened',
+                'Profile',
+                "Reopened {$label} change for {$employeeName}"
+                    . ($restorable ? ' and restored the previous value' : '')
+                    . ($reason ? " — {$reason}" : ''),
+                $employee,
+                $restorable ? $before : null,
+                $restorable ? [$field => $request->old_value] : null,
+            );
+
+            return $request->load(['employee.user', 'reviewer']);
+        });
+
+        return ['request' => $result, 'restored' => $restorable];
+    }
+
     private function assertPending(ChangeRequest $request, string $action): void
     {
         if ($request->status !== 'pending') {

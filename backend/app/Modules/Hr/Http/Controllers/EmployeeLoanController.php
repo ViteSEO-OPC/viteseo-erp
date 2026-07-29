@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeeLoanRequest;
 use App\Modules\Hr\Http\Resources\EmployeeLoanResource;
 use App\Modules\Hr\Models\Employee;
@@ -46,6 +47,14 @@ class EmployeeLoanController extends Controller
 
         return EmployeeLoanResource::make(
             $this->service->cancel($loan, $request->user(), $data['reason']),
+        )->response();
+    }
+
+    // POST /api/v1/hr/loans/{loan}/reopen — undo a cancellation; collection resumes.
+    public function reopen(ReopenRequest $request, EmployeeLoan $loan): JsonResponse
+    {
+        return EmployeeLoanResource::make(
+            $this->service->reopen($loan, $request->validated('reason')),
         )->response();
     }
 }

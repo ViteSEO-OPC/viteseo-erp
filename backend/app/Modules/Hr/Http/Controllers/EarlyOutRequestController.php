@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreEarlyOutRequestRequest;
 use App\Modules\Hr\Http\Resources\EarlyOutRequestResource;
 use App\Modules\Hr\Models\EarlyOutRequest;
@@ -51,6 +52,14 @@ class EarlyOutRequestController extends Controller
 
         return EarlyOutRequestResource::make(
             $this->service->reject($earlyOutRequest, $request->user(), $data['reason']),
+        )->response();
+    }
+
+    // POST /api/v1/hr/early-out-requests/{earlyOutRequest}/reopen — HR only: undo the decision.
+    public function reopen(ReopenRequest $request, EarlyOutRequest $earlyOutRequest): JsonResponse
+    {
+        return EarlyOutRequestResource::make(
+            $this->service->reopen($earlyOutRequest, $request->validated('reason')),
         )->response();
     }
 }

@@ -27,3 +27,8 @@ export async function rejectEarlyOutRequest(
   const res = await apiClient.post(`/hr/early-out-requests/${id}/reject`, { reason });
   return res.data.data;
 }
+
+export async function reopenEarlyOutRequest(id: number, reason?: string): Promise<EarlyOutRequest> {
+  const res = await apiClient.post(`/hr/early-out-requests/${id}/reopen`, { reason });
+  return res.data.data;
+}

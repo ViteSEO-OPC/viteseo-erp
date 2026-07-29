@@ -49,6 +49,15 @@ export async function markPayslipDone(id: number): Promise<PayrollRun> {
   return res.data.data;
 }
 
+/**
+ * Undo a disbursement: the payslip goes back to computed and any claims it settled
+ * are owed on this run again. Refused while the run is locked.
+ */
+export async function reopenPayslip(id: number, reason?: string): Promise<PayrollRun> {
+  const res = await apiClient.post(`/hr/payslips/${id}/reopen`, { reason });
+  return res.data.data;
+}
+
 /** Seal a fully-disbursed run so it can never be recomputed (Slice 5). */
 export async function lockPayrollRun(id: number): Promise<PayrollRun> {
   const res = await apiClient.post(`/hr/payroll/runs/${id}/lock`);

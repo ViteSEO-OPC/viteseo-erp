@@ -75,4 +75,10 @@ class ViolationController extends Controller
     {
         return ViolationResource::make($this->service->resolve($violation))->response();
     }
+
+    // POST /hr/violations/{violation}/reopen — undo a resolve, re-arming the flag.
+    public function reopen(Violation $violation): JsonResponse
+    {
+        return ViolationResource::make($this->service->unresolve($violation))->response();
+    }
 }
