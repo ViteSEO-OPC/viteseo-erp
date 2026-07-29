@@ -25,7 +25,7 @@ class AttendancePolicyResource extends JsonResource
             'missing_clockout_mode' => $this->missing_clockout_mode,
 
             'early_arrival_mode' => $this->early_arrival_mode,
-            'block_early_clock_in' => (bool) $this->block_early_clock_in,
+            'early_clock_in_mode' => $this->early_clock_in_mode,
 
             // Geofenced clock-in. lat/lng stay nullable — "no pin set yet" is a real state
             // the Rules form has to distinguish from 0,0 (a valid point in the Atlantic).

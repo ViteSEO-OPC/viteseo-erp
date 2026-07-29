@@ -42,6 +42,13 @@ export type MissingClockoutMode =
   | "treat_as_undertime_to_now"
   | "treat_as_absent";
 export type EarlyArrivalMode = "none" | "offset_undertime" | "overtime_eligible";
+/**
+ * What happens when someone punches in before their shift starts.
+ *  allow — recorded at the time they actually pressed it
+ *  defer — accepted, but recorded at the shift's start time (pressed 7:30 ⇒ counts 8:00)
+ *  block — refused until the shift has started
+ */
+export type EarlyClockInMode = "allow" | "defer" | "block";
 export type OvertimeMode = "none" | "approved_only" | "auto_after_threshold";
 export type DeductionRounding = "exact" | "round_up" | "round_nearest" | "round_down";
 export type DailyRateBasis = "period_workdays" | "fixed_divisor";
@@ -89,7 +96,7 @@ export interface AttendancePolicy {
   missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct
 
   early_arrival_mode: EarlyArrivalMode; // what early minutes are WORTH (inert for now)
-  block_early_clock_in: boolean; // whether an early punch is REFUSED outright
+  early_clock_in_mode: EarlyClockInMode; // what happens to an early punch
 
   // Geofenced clock-in. Off = today's clock-in, untouched; it doubles as the kill switch.
   // On but half-configured (no pin, or no IPs) deliberately behaves as OFF — the server

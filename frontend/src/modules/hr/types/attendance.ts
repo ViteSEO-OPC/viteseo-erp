@@ -37,13 +37,18 @@ export interface Attendance {
  * The panel only reads it — it never re-derives the rule.
  */
 export interface ClockInWindow {
-  /** HR requires everyone to wait for their scheduled start. */
-  strict: boolean;
+  /** How early punches are handled — see EarlyClockInMode in types/rules. */
+  mode: "allow" | "defer" | "block";
   /**
    * Manila "HH:MM" this employee's shift opens, or null when nothing holds them back
    * (strict off, a non-workday, or no scheduled start time).
    */
   opens_at: string | null;
+  /**
+   * `defer` mode only: the Manila "HH:MM" a punch made RIGHT NOW would be recorded at.
+   * Null once the shift has started, because from then on it's stamped normally.
+   */
+  defers_to: string | null;
   /**
    * Ask where the employee is before clocking in. This is "the server is actually
    * enforcing a geofence", NOT the raw Company → Rules toggle: a policy switched on but

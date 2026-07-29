@@ -124,7 +124,7 @@ export function TimeClockPanel() {
   const state: ClockState = today?.state ?? "not_clocked_in";
   const meta = STATUS_META[state];
   const busy = clockInMut.isPending || clockOutMut.isPending || breakMut.isPending;
-  const active = state === "clocked_in" || state === "on_lunch" || state === "on_break";
+  const activeState = state === "clocked_in" || state === "on_lunch" || state === "on_break";
 
   // Strict clock-in (Company → Rules). The server decides whether anything holds this
   // employee back and until when; we only compare that against the ticking clock, so the
@@ -136,6 +136,18 @@ export function TimeClockPanel() {
   // enforcing — an enabled-but-unconfigured policy fails open and reports false — so the
   // panel never asks a question whose answer would be ignored.
   const geofenced = data?.clock_in?.geofence ?? false;
+
+  // `defer` mode: they pressed Time in before their shift, so the punch is stamped at the
+  // shift start and is still in the future. Derived against the ticking clock rather than
+  // read from the server, so it flips to a real clocked-in state on the minute — the same
+  // trick `tooEarly` uses to unlock the button without waiting for a refetch.
+  const queuedUntil =
+    today?.time_in && new Date(today.time_in).getTime() > now ? today.time_in : null;
+  // What a punch made RIGHT NOW would be recorded at, when defer mode is on and it's early.
+  const defersTo = data?.clock_in?.defers_to ?? null;
+  // A queued punch is NOT time on the clock — the running timer would be counting minutes
+  // the employee is not being paid for.
+  const active = activeState && queuedUntil === null;
 
   // The employee's own latest off-site submission. Only fetched when the feature is on —
   // there is nothing to show otherwise, and this is polled by the panel.
@@ -292,8 +304,12 @@ export function TimeClockPanel() {
             reaches the column's right edge. */}
         <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 lg:pr-5">
           <div className="flex items-center gap-2">
-            <span className={cn("size-2.5 rounded-full", meta.dot)} />
-            <span className="text-sm font-semibold">{meta.label}</span>
+            <span
+              className={cn("size-2.5 rounded-full", queuedUntil ? "bg-warning" : meta.dot)}
+            />
+            <span className="text-sm font-semibold">
+              {queuedUntil ? "Queued" : meta.label}
+            </span>
           </div>
           {alertFlag && <AttendanceAlertBanner violation={alertFlag} />}
         </div>
@@ -313,8 +329,13 @@ export function TimeClockPanel() {
                 ? `HR couldn't accept your photo: ${myCheckin?.rejection_note ?? "no reason given"} — send another to time in.`
                 : tooEarly
                   ? `Your shift starts at ${format12Hour(opensAt)} — you can time in from then.`
-                  : "You haven't clocked in yet today.")}
-          {state === "clocked_in" && `Clocked in at ${formatTimeManila(today?.time_in)}.`}
+                  : defersTo
+                    ? `You haven't clocked in yet today. Timing in now counts from ${format12Hour(defersTo)}, when your shift starts.`
+                    : "You haven't clocked in yet today.")}
+          {state === "clocked_in" &&
+            (queuedUntil
+              ? `You're queued — your time in counts from ${formatTimeManila(queuedUntil)}, when your shift starts.`
+              : `Clocked in at ${formatTimeManila(today?.time_in)}.`)}
           {state === "on_lunch" && "You're on your lunch break."}
           {state === "on_break" && "You're on a short break."}
           {state === "clocked_out" && "You've clocked out for today."}
@@ -335,21 +356,21 @@ export function TimeClockPanel() {
             {awaitingReview ? "Waiting for HR" : "Time in"}
           </button>
           <button
-            disabled={busy || !(state === "clocked_in" || state === "on_lunch")}
+            disabled={busy || !!queuedUntil || !(state === "clocked_in" || state === "on_lunch")}
             onClick={() => setConfirm("lunch")}
             className="rounded-lg border border-white/25 px-4 py-3 sm:py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             {lunchActive ? "End lunch" : "Start lunch"}
           </button>
           <button
-            disabled={busy || !(state === "clocked_in" || state === "on_break")}
+            disabled={busy || !!queuedUntil || !(state === "clocked_in" || state === "on_break")}
             onClick={() => setConfirm("break")}
             className="rounded-lg border border-white/25 px-4 py-3 sm:py-2 text-sm font-semibold text-white transition-colors hover:bg-white/10 disabled:opacity-40"
           >
             {breakActive ? "End break" : "Start break"}
           </button>
           <button
-            disabled={busy || state !== "clocked_in"}
+            disabled={busy || !!queuedUntil || state !== "clocked_in"}
             onClick={() => setTimeOutOpen(true)}
             className="rounded-lg bg-danger px-4 py-3 sm:py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40"
           >

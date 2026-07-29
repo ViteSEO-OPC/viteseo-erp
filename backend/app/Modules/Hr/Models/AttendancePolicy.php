@@ -18,7 +18,7 @@ class AttendancePolicy extends Model
         'undertime_deduction_mode',
         'missing_clockout_mode',
         'early_arrival_mode',
-        'block_early_clock_in',
+        'early_clock_in_mode',
         'geofence_enabled',
         'office_lat',
         'office_lng',
@@ -50,7 +50,6 @@ class AttendancePolicy extends Model
         'lates_per_deduction' => 'integer',
         'late_penalty_enabled' => 'boolean',
         'late_tiers' => 'array',
-        'block_early_clock_in' => 'boolean',
         'geofence_enabled' => 'boolean',
         // float, not decimal:7 — these are fed straight into haversine trigonometry and
         // serialised as JSON numbers; `decimal:` would hand both a string. A double holds

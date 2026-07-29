@@ -44,10 +44,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // anywhere in the codebase. The Rules page already shows this control disabled;
             // this stops the API from accepting them behind its back.
             'early_arrival_mode' => ['sometimes', 'in:none'],
-            // Whether an early punch is REFUSED, which is a separate question from what
-            // early minutes are worth (early_arrival_mode above). AttendanceService::clockIn
-            // reads this one.
-            'block_early_clock_in' => ['sometimes', 'boolean'],
+            // What happens to an early punch, which is a separate question from what early
+            // minutes are WORTH (early_arrival_mode above). AttendanceService::clockIn reads
+            // this one. `defer` accepts the punch but stamps it at the shift start.
+            'early_clock_in_mode' => ['sometimes', 'in:allow,defer,block'],
 
             // Geofenced clock-in. Deliberately NOT cross-validated against
             // `geofence_enabled` — a half-configured policy must be SAVEABLE (HR pins the

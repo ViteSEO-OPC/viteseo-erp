@@ -142,6 +142,29 @@ class AttendanceService
         return $this->openRow($employee) ?? $this->todayRow($employee);
     }
 
+    /**
+     * Refuse anything that assumes the shift is under way while a DEFERRED punch is still
+     * in the future (`early_clock_in_mode = defer`: pressed at 07:30, counts from 08:00).
+     *
+     * Without this, clocking out at 07:45 would produce a row whose time_out precedes its
+     * time_in — negative worked minutes, floored to zero, and a day that silently reads as
+     * having worked nothing. Better to say plainly that the shift hasn't started.
+     *
+     * @param  string  $field  the error key the calling action already uses
+     */
+    private function assertShiftStarted(Attendance $att, string $field): void
+    {
+        if ($att->time_in === null || ! $att->time_in->isFuture()) {
+            return;
+        }
+
+        $startsAt = $att->time_in->timezone(config('app.timezone_local'))->format('g:i A');
+
+        throw ValidationException::withMessages([
+            $field => ["Your time in is queued for {$startsAt} — your shift hasn't started yet."],
+        ]);
+    }
+
     /** Management staff are exempt from attendance — they never clock in/out. */
     private function assertNotManagement(Employee $employee): void
     {
@@ -153,20 +176,16 @@ class AttendanceService
     }
 
     /**
-     * When today's shift opens for clocking in, or null when nothing holds the employee
-     * back. Null for three distinct reasons, all of which must stay permissive:
-     * strict mode is off; today isn't one of their workdays (there is no shift to be
-     * early for); or the schedule has no start time at all — FALLBACK_START is a guess,
-     * and a guess must never lock someone out of their own time clock.
+     * The employee's own shift start for $local, or null when there is no meaningful one
+     * to measure "early" against. Null for two reasons, both of which must stay permissive:
+     * today isn't one of their workdays (there is no shift to be early for), or the
+     * schedule has no start time at all — FALLBACK_START is a guess, and a guess must never
+     * lock someone out of their own time clock, nor silently move their punch.
      *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
      */
-    private function clockInOpensAt(array $eff, Carbon $local): ?Carbon
+    private function shiftStartFor(array $eff, Carbon $local): ?Carbon
     {
-        if (! $this->policy->get()->block_early_clock_in) {
-            return null;
-        }
-
         if (! ($eff['is_workday'] ?? false) || ($eff['start_time'] ?? null) === null) {
             return null;
         }
@@ -175,26 +194,64 @@ class AttendanceService
     }
 
     /**
-     * What the employee's time clock needs to know about today beyond their own row.
-     * Computed here rather than in the panel so the strict rule has exactly one reader —
-     * a client that re-derived it could offer a button the server would refuse.
+     * When today's shift opens for clocking in, or null when nothing holds the employee
+     * back. Only `block` mode ever holds anyone back: `defer` deliberately ACCEPTS the
+     * early punch (and re-stamps it), so the button must stay live.
      *
-     * @return array{strict: bool, opens_at: ?string, geofence: bool}  opens_at is Manila "HH:MM"
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
+     */
+    private function clockInOpensAt(array $eff, Carbon $local): ?Carbon
+    {
+        if ($this->policy->get()->early_clock_in_mode !== 'block') {
+            return null;
+        }
+
+        return $this->shiftStartFor($eff, $local);
+    }
+
+    /**
+     * What the employee's time clock needs to know about today beyond their own row.
+     * Computed here rather than in the panel so these rules have exactly one reader —
+     * a client that re-derived them could offer a button the server would refuse.
+     *
+     * @return array{mode: string, opens_at: ?string, defers_to: ?string, geofence: bool}
+     *                                   both times are Manila "HH:MM"
      */
     public function clockInWindowFor(Employee $employee): array
     {
         $local = $this->localNow();
         $eff = $this->schedule->effectiveFor($employee, $local);
+        $mode = $this->policy->get()->early_clock_in_mode;
+
+        // Only meaningful right now, and only in defer mode: the time this punch WOULD be
+        // recorded at if they pressed the button this second. Null once the shift has
+        // started, because from then on the punch is stamped normally.
+        $deferTo = $mode === 'defer' ? $this->deferredStartFor($eff, $local) : null;
 
         return [
-            'strict' => (bool) $this->policy->get()->block_early_clock_in,
+            'mode' => $mode,
             'opens_at' => $this->clockInOpensAt($eff, $local)?->format('H:i'),
+            'defers_to' => $deferTo?->format('H:i'),
             // Whether the panel should ask WHERE the employee is before clocking in. This
             // is "actually enforcing", not the raw toggle: a policy that is switched on but
             // unconfigured fails open server-side, so making the employee answer a question
             // whose answer will be ignored would be theatre.
             'geofence' => $this->geofence->enforcing(),
         ];
+    }
+
+    /**
+     * In `defer` mode, the shift start an arrival at $local should be re-stamped to — or
+     * null when it shouldn't be re-stamped at all (they're on time, or there is no shift
+     * to defer to).
+     *
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
+     */
+    private function deferredStartFor(array $eff, Carbon $local): ?Carbon
+    {
+        $start = $this->shiftStartFor($eff, $local);
+
+        return $start !== null && $local->lt($start) ? $start : null;
     }
 
     /**
@@ -256,8 +313,25 @@ class AttendanceService
         // the real problem is that they already clocked in an hour ago.
         $verifiedBy = $this->geofence->verifyOfficeClockIn($lat, $lng, $accuracy, $ip);
 
-        $att->time_in = now(); // stored UTC
-        $att->status = $this->arrivalStatus($eff, $local);
+        // `defer` mode: the punch is accepted now but counts from the shift's start. The
+        // employee gets to press the button when they walk in and stop thinking about it;
+        // the company doesn't pay for the early minutes and nobody is turned away at the
+        // door. Null once the shift has started — from then on this is an ordinary punch.
+        //
+        // Deliberately re-stamped at write time rather than queued for a background job to
+        // apply later: the shift start is already known, so the two produce an identical
+        // record, and one of them can't fail to run.
+        $deferredTo = $this->policy->get()->early_clock_in_mode === 'defer'
+            ? $this->deferredStartFor($eff, $local)
+            : null;
+
+        // Both branches store UTC. $deferredTo is a Manila-tz Carbon, so it must be
+        // converted rather than handed over as-is — Eloquent writes the Carbon's own
+        // wall-clock into the column without converting, which would land 8 hours out.
+        $att->time_in = $deferredTo?->copy()->utc() ?? now();
+        // Judged at the time it will COUNT as, so a deferred punch is never late: the
+        // arrival being re-stamped to the shift start is exactly what "on time" means.
+        $att->status = $this->arrivalStatus($eff, $deferredTo ?? $local);
         $att->location_verified_by = $verifiedBy;
         $att->save();
 
@@ -355,6 +429,9 @@ class AttendanceService
             ]);
         }
 
+        // A queued (deferred) punch isn't a shift in progress yet.
+        $this->assertShiftStarted($att, 'type');
+
         $startedField = "{$type}_started_at";
         $minutesField = "{$type}_minutes";
 
@@ -389,6 +466,9 @@ class AttendanceService
                 'time_out' => ['You have already clocked out today.'],
             ]);
         }
+
+        // Clocking out before a deferred time in would invert the row.
+        $this->assertShiftStarted($att, 'time_out');
 
         // Keep only non-empty task rows; store null when there are none.
         $cleanTasks = array_values(array_filter(

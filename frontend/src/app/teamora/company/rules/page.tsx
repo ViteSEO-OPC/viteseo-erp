@@ -21,6 +21,7 @@ import {
   formatWorkdays,
   type DailyRateBasis,
   type EarlyArrivalMode,
+  type EarlyClockInMode,
   type LateDeductionMode,
   type LateTier,
   type OvertimeMode,
@@ -296,7 +297,9 @@ function AttendancePolicyEditor() {
 
   // Early arrival & overtime.
   const [earlyArrival, setEarlyArrival] = useState<EarlyArrivalMode>(policy?.early_arrival_mode ?? "none");
-  const [blockEarlyClockIn, setBlockEarlyClockIn] = useState(policy?.block_early_clock_in ?? false);
+  const [earlyClockIn, setEarlyClockIn] = useState<EarlyClockInMode>(
+    policy?.early_clock_in_mode ?? "allow",
+  );
 
   // Geofenced clock-in. lat/lng are kept as STRINGS so an empty box stays empty ("no pin
   // set") instead of collapsing to 0 — 0,0 is a real coordinate in the Atlantic.
@@ -713,24 +716,42 @@ function AttendancePolicyEditor() {
         title="Early arrival &amp; overtime"
         description="Clocking in early, and how extra time past the schedule is treated."
       >
-        <SubHeading>Clocking in early</SubHeading>
-        <CheckBox
-          checked={blockEarlyClockIn}
-          onChange={setBlockEarlyClockIn}
-          label="Only let staff time in once their shift has started"
-        />
+        <SubHeading>When someone times in before their shift starts</SubHeading>
+        <div className="flex flex-wrap items-end gap-4">
+          <FieldSelect
+            id="pol-early-clock-in"
+            label="Early time in"
+            value={earlyClockIn}
+            onChange={(v) => setEarlyClockIn(v as EarlyClockInMode)}
+            options={[
+              { value: "allow", label: "Record it at the time they arrived" },
+              { value: "defer", label: "Accept it, but count it from their shift start" },
+              { value: "block", label: "Don't let them time in yet" },
+            ]}
+          />
+        </div>
         <Hint>
-          {blockEarlyClockIn ? (
+          {earlyClockIn === "block" ? (
             <>
               The <strong>Time in</strong> button stays disabled until each person&apos;s own
-              scheduled start, and the server refuses an early punch either way. Staff with no
-              schedule assigned are held to the default one. On a day that isn&apos;t one of their
-              workdays they can still clock in whenever — there&apos;s no shift that day to be early
-              for. Lateness is unaffected: this only sets the earliest they may start.
+              scheduled start, and the server refuses an early punch either way.
+            </>
+          ) : earlyClockIn === "defer" ? (
+            <>
+              They can press <strong>Time in</strong> the moment they arrive and forget about
+              it — but someone who arrives at 7:30 for an 8:00 shift is recorded as timing in
+              at <strong>8:00</strong>. Nobody waits at the door, nobody is paid for arriving
+              early, and a deferred time in is never late. Until their shift starts their
+              time in shows as <strong>queued</strong>, and breaks and time out stay locked.
             </>
           ) : (
-            "Anyone can time in as early as they like, and the punch is recorded at the actual time. Turn this on to hold everyone to their scheduled start."
+            "Anyone can time in as early as they like, and the punch is recorded at the actual time they pressed it."
           )}
+        </Hint>
+        <Hint>
+          Staff with no schedule assigned are held to the default one. On a day that
+          isn&apos;t one of their workdays this never applies — there&apos;s no shift to be
+          early for, so the punch is recorded as-is. Lateness is unaffected either way.
         </Hint>
         <SubDivider />
 
@@ -796,7 +817,7 @@ function AttendancePolicyEditor() {
           // stored value back would 422 and block HR from saving the overtime settings.
           onClick={() =>
             saveCard("early_ot", {
-              block_early_clock_in: blockEarlyClockIn,
+              early_clock_in_mode: earlyClockIn,
               overtime_mode: overtimeMode,
               overtime_threshold_minutes: Number(overtimeThreshold),
             })
