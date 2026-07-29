@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useMutation,
   useQueries,
   useQuery,
@@ -7,6 +8,7 @@ import {
 import type { Paginated } from "@/core/types";
 import { celebrateTask } from "@/core/lib/confetti";
 import { projectsApi } from "./api";
+import { SEARCH_MIN_LENGTH } from "./types";
 import type { CreateTaskPayload, ProjectStatus, Subtask, Task } from "./types";
 
 export const projectKeys = {
@@ -32,6 +34,8 @@ export const projectKeys = {
   comments: (taskId: string) =>
     ["projects", "tasks", taskId, "comments"] as const,
   links: (taskId: string) => ["projects", "tasks", taskId, "links"] as const,
+  search: (q: string, limit: number) =>
+    ["projects", "search", q, limit] as const,
 };
 
 // Users
@@ -66,6 +70,31 @@ export function useGroupWorkload(groupId: string | null | undefined) {
     queryFn: () => projectsApi.getGroupWorkload(groupId as string),
     enabled: !!groupId,
     staleTime: 0,
+  });
+}
+
+/**
+ * Global search across projects and tasks for the topbar menu.
+ *
+ * Pass an ALREADY-DEBOUNCED term — the query key is the term, so every distinct
+ * value is one request. Terms shorter than SEARCH_MIN_LENGTH are never sent
+ * (the API 422s on those), and the previous term's results stay on screen while
+ * the next one loads so the menu doesn't flash empty between keystrokes.
+ */
+export function useProjectSearch(term: string, limit = 5) {
+  const q = term.trim();
+  const enabled = q.length >= SEARCH_MIN_LENGTH;
+
+  return useQuery({
+    queryKey: projectKeys.search(q, limit),
+    queryFn: ({ signal }) => projectsApi.search(q, limit, signal),
+    enabled,
+    placeholderData: keepPreviousData,
+    // Results for a given term rarely change within a single search session,
+    // so re-typing one (or backspacing into it) is served from cache.
+    staleTime: 30_000,
+    // Nothing here is worth a retry storm on a keystroke-driven endpoint.
+    retry: false,
   });
 }
 
