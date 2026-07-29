@@ -8,11 +8,15 @@ use Illuminate\Support\Facades\Broadcast;
 
 /*
 |--------------------------------------------------------------------------
-| Broadcast Channels
+| Projects Broadcast Channels
 |--------------------------------------------------------------------------
 |
 | Private channels for real-time collaboration. Authorization mirrors the
 | REST layer exactly so channel access can never drift from API access.
+|
+| `user.{userId}` used to be declared here. It is an identity channel shared by
+| every module, so it now lives in the platform's routes/channels.php — Projects
+| still receives its notifications on it, unchanged.
 |
 */
 
@@ -22,9 +26,4 @@ Broadcast::channel('project.{projectUuid}', function (User $user, string $projec
     $project = Project::query()->where('uuid', $projectUuid)->first();
 
     return $project !== null && $user->can('view', $project);
-});
-
-// user.{userId} — a user's private notification stream. Only the user themselves.
-Broadcast::channel('user.{userId}', function (User $user, string $userId): bool {
-    return (int) $user->id === (int) $userId;
 });

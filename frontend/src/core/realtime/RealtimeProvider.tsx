@@ -12,6 +12,14 @@ import { notificationKeys } from "@/modules/projects/useNotifications";
 import { getEcho, teardownEcho } from "./echo";
 
 /**
+ * What actually arrives on `user.{id}`: a module's own notification resource plus
+ * the platform event's `module` tag. Kept separate from NotificationDto because
+ * that type describes the REST shape, which needs no discriminator — the REST
+ * endpoints are already per-module.
+ */
+type BroadcastNotification = NotificationDto & { module?: string };
+
+/**
  * Owns the WebSocket lifecycle: connect Echo while authenticated, subscribe the
  * private `user.{id}` channel for live notifications, and tear the socket down
  * on logout.
@@ -49,8 +57,17 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     if (!echo) return;
 
     // Live notifications on the user's private channel.
+    //
+    // `user.{id}` is a SHARED stream: a user has one notification channel however
+    // many modules they work in, and every module broadcasts the same platform
+    // NotificationCreated event on it. The `module` tag says whose payload this is,
+    // so this handler keeps only Projects' and ignores the rest — without it, a
+    // notification from another module would be mapped by fromResource() and
+    // written straight into the Projects cache.
     const userChannel = echo.private(`user.${userId}`);
-    userChannel.listen(".NotificationCreated", (dto: NotificationDto) => {
+    userChannel.listen(".NotificationCreated", (dto: BroadcastNotification) => {
+      if (dto.module !== "projects") return;
+
       const item = fromResource(dto);
       qc.setQueryData<AppNotification[]>(notificationKeys.all, (prev) => {
         if (!prev) return [item];

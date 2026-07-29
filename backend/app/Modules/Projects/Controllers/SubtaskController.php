@@ -14,7 +14,7 @@ use App\Modules\Projects\Requests\StoreSubtaskRequest;
 use App\Modules\Projects\Requests\UpdateSubtaskRequest;
 use App\Modules\Projects\Resources\SubtaskResource;
 use App\Modules\Projects\Services\SubtaskService;
-use App\Modules\Projects\Support\SafeBroadcast;
+use App\Support\SafeBroadcast;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;

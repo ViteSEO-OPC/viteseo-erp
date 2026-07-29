@@ -13,10 +13,8 @@ use App\Modules\Crm\Requests\RestoreAllRequest;
 use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Requests\UpdateLeadRequest;
 use App\Modules\Crm\Events\LeadAssigned;
-// Shared fire-and-forget broadcast helper. It currently lives in the Projects module; it is
-// module-agnostic and should move to a platform-level namespace together with the shared
-// `user.{userId}` channel — see the realtime hygiene note.
-use App\Modules\Projects\Support\SafeBroadcast;
+// Platform-level fire-and-forget broadcast helper (App\Support), shared by every module.
+use App\Support\SafeBroadcast;
 use App\Modules\Crm\Resources\ActivityResource;
 use App\Modules\Crm\Resources\ArchivedLeadResource;
 use App\Modules\Crm\Resources\EmailResource;

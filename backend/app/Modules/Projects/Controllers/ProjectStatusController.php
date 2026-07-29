@@ -14,7 +14,7 @@ use App\Modules\Projects\Requests\StoreProjectStatusRequest;
 use App\Modules\Projects\Requests\UpdateProjectStatusRequest;
 use App\Modules\Projects\Resources\ProjectStatusResource;
 use App\Modules\Projects\Services\ProjectStatusService;
-use App\Modules\Projects\Support\SafeBroadcast;
+use App\Support\SafeBroadcast;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;
 

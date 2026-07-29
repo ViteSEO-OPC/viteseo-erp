@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace App\Modules\Projects\Support;
+namespace App\Support;
 
 use Illuminate\Support\Facades\Log;
 
 /**
- * Fire-and-forget event broadcasting.
+ * Fire-and-forget event broadcasting. PLATFORM-LEVEL — every module may use it.
  *
  * Our events broadcast synchronously (ShouldBroadcastNow) so delivery never
  * depends on a running queue worker. The trade-off is that a transient Reverb
@@ -15,6 +15,10 @@ use Illuminate\Support\Facades\Log;
  * the triggering request. These helpers guarantee real-time degrades silently:
  * the DB change still succeeds and the API responds normally; only the live
  * push is skipped (and logged).
+ *
+ * This lived in App\Modules\Projects\Support until the CRM started broadcasting
+ * too and a module found itself depending on another module for infrastructure.
+ * It has never contained anything module-specific.
  */
 final class SafeBroadcast
 {
