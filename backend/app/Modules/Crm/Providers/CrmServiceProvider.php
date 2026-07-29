@@ -27,6 +27,7 @@ use App\Modules\Crm\Listeners\EmitOutboundEmailSentWebhook;
 use App\Modules\Crm\Listeners\EmitProposalSentWebhook;
 use App\Modules\Crm\Listeners\EmitReminderDueWebhook;
 use App\Modules\Crm\Listeners\EscalateUnansweredFollowUp;
+use App\Modules\Crm\Listeners\BroadcastCrmNotification;
 use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
@@ -52,6 +53,7 @@ use App\Modules\Crm\Services\Mail\Providers\SmtpEmailProvider;
 use App\Modules\Crm\Services\Ranking\RankingConfig;
 use App\Modules\Crm\Services\Scoring\ScoringConfig;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -180,6 +182,13 @@ class CrmServiceProvider extends ServiceProvider
         // `outreach.internal_notifications.mail`; slack/teams/sms later). Internal staff alerts only —
         // customer communication continues to flow through the shared outreach mailbox.
         Event::listen(InboundReplyReceived::class, InboundReplyDeliveryDispatcher::class);
+
+        // Notification Center realtime. Hooks Laravel's own notification lifecycle
+        // rather than each producer, so EVERY CRM in-app notification — the two that
+        // exist and every one added later — is pushed to its recipient without the
+        // producer knowing anything about broadcasting. There is deliberately no
+        // second path that creates a notification.
+        Event::listen(NotificationSent::class, BroadcastCrmNotification::class);
 
         // Console commands + inbound-sync maintenance schedule. Registering the schedule is inert
         // until a scheduler/queue worker runs at deploy (and Gmail creds are configured).
