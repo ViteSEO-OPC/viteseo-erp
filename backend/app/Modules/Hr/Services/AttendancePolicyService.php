@@ -29,8 +29,16 @@ class AttendancePolicyService
         'undertime_deduction_mode' => 'none',
         'missing_clockout_mode' => 'no_deduction_flag_for_review',
         'early_arrival_mode' => 'none',
-        // Off = today's behaviour: an early punch is accepted and recorded as-is.
-        'block_early_clock_in' => false,
+        // How an early punch is handled: allow (recorded as-is — today's behaviour),
+        // defer (accepted, but stamped at the shift's start time), block (refused).
+        'early_clock_in_mode' => 'allow',
+        // Geofenced clock-in — off is today's behaviour. Also the kill switch: turning it
+        // off puts everyone back on the normal clock instantly, with no deploy.
+        'geofence_enabled' => false,
+        'office_lat' => null,
+        'office_lng' => null,
+        'office_radius_m' => 200,
+        'office_ips' => null,
         'overtime_mode' => 'approved_only',
         'overtime_threshold_minutes' => 0,
         // Premium & overtime rates (Phase 0) — seeded to the DOLE legal minimums (no-op).

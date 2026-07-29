@@ -25,7 +25,22 @@ class AttendancePolicyResource extends JsonResource
             'missing_clockout_mode' => $this->missing_clockout_mode,
 
             'early_arrival_mode' => $this->early_arrival_mode,
-            'block_early_clock_in' => (bool) $this->block_early_clock_in,
+            'early_clock_in_mode' => $this->early_clock_in_mode,
+
+            // Geofenced clock-in. lat/lng stay nullable — "no pin set yet" is a real state
+            // the Rules form has to distinguish from 0,0 (a valid point in the Atlantic).
+            'geofence_enabled' => (bool) $this->geofence_enabled,
+            'office_lat' => $this->office_lat,
+            'office_lng' => $this->office_lng,
+            'office_radius_m' => (int) $this->office_radius_m,
+            'office_ips' => $this->office_ips ?? [],
+            // Read-only, never persisted: the IP the SERVER sees this caller as. It is both
+            // the easy way for HR to fill the list in (open Rules from the office, click Add)
+            // and the diagnostic for the trusted-proxy gotcha — if every office machine shows
+            // the same 127.0.0.1 or proxy address here, `trustProxies` isn't configured yet
+            // and the IP half of the check would pass for the whole internet.
+            'your_ip' => $request->ip(),
+
             'overtime_mode' => $this->overtime_mode,
             'overtime_threshold_minutes' => (int) $this->overtime_threshold_minutes,
 

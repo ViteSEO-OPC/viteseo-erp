@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
+import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
 import type { Payslip, PayslipLine } from "@/modules/hr/types/payroll";
 
 /**
@@ -90,6 +91,9 @@ export function PayslipDocument({
   const employerTotal =
     (p.employer_sss ?? 0) + (p.employer_philhealth ?? 0) + (p.employer_pagibig ?? 0);
   const showEmployer = variant === "hr" && employerTotal > 0;
+  // Slice B7 — snapshotted on the payslip at run time, not read from the profile now: the
+  // override may since have been cleared, and this payslip still charged what it charged.
+  const overridden = p.contribution_overrides ?? [];
 
   return (
     <div
@@ -228,6 +232,23 @@ export function PayslipDocument({
             <Row label="Pag-IBIG — employer" value={amount(p.employer_pagibig ?? 0)} />
             <Row label="Total Employer Share" value={amount(employerTotal)} total />
           </Table>
+        )}
+
+        {/* Slice B7 — an override replaces the EMPLOYEE half only, so the pair above belongs to
+            no single salary bracket and cannot be filed as it stands. HR-only: the employee
+            cannot act on it, and it must not appear on the copy they receive. */}
+        {variant === "hr" && overridden.length > 0 && (
+          <div className="rounded-lg border border-warning bg-warning-subtle px-4 py-3">
+            <p className="text-sm font-semibold">
+              {overridden.map((t) => CONTRIBUTION_LABELS[t] ?? t).join(", ")} came from a
+              per-employee amount, not the government rates
+            </p>
+            <p className="mt-0.5 text-caption text-muted-foreground">
+              Only the employee&rsquo;s half was replaced — the employer share above is still
+              calculated, so the two do not correspond to one salary bracket. Check the override on
+              this employee&rsquo;s profile before filing this remittance.
+            </p>
+          </div>
         )}
       </div>
 

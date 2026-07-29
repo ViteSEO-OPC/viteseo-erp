@@ -9,6 +9,8 @@ import {
   updateEmployeeBenefits,
   getContributionVersions,
   saveContributionVersion,
+  importContributionSchedule,
+  deleteContributionVersion,
   type ContributionVersionInput,
 } from "@/modules/hr/api/benefits";
 
@@ -59,6 +61,28 @@ export function useContributionVersions(type?: string) {
     queryKey: [...VERSIONS_KEY, type ?? "all"] as const,
     queryFn: () => getContributionVersions(type),
     enabled: !!type,
+  });
+}
+
+/**
+ * Read an uploaded schedule (Slice B8). A mutation rather than a query because it takes a file and
+ * is a deliberate action — and because caching "what that spreadsheet said" would be meaningless.
+ */
+export function useImportContributionSchedule() {
+  return useMutation({
+    mutationFn: ({ file, columns }: { file: File; columns?: Record<string, string> }) =>
+      importContributionSchedule(file, columns),
+  });
+}
+
+export function useDeleteContributionVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => deleteContributionVersion(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: VERSIONS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "contribution-settings"] });
+    },
   });
 }
 

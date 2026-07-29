@@ -15,6 +15,19 @@ class BenefitProgram extends Model
 {
     use SoftDeletes;
 
+    /**
+     * How a programme decides who it covers.
+     *
+     *   all         — everyone
+     *   status      — the employment statuses in `eligibility_statuses` (multi-select)
+     *   management  — management staff only
+     *   custom      — the named employees on the enrolment pivot
+     *
+     * The first three are RULES, evaluated when payroll runs, so a status change is followed
+     * automatically. Only `custom` is a stored list, because a list of names is the rule.
+     */
+    public const ELIGIBILITY_MODES = ['all', 'status', 'management', 'custom'];
+
     protected $table = 'hr_benefit_programs';
 
     protected $fillable = [
@@ -28,6 +41,7 @@ class BenefitProgram extends Model
         'frequency',
         'tax_treatment',
         'eligibility',
+        'eligibility_statuses',
         'deduction_cadence',
         'tiers',
         'details',
@@ -40,6 +54,7 @@ class BenefitProgram extends Model
         'details' => 'array',
         'progress' => 'array',
         'tiers' => 'array',
+        'eligibility_statuses' => 'array',
         'amount' => 'decimal:2',
         'is_active' => 'boolean',
     ];
@@ -51,6 +66,6 @@ class BenefitProgram extends Model
             'hr_benefit_enrollments',
             'benefit_program_id',
             'employee_id',
-        )->withPivot(['amount', 'tier', 'employee_share'])->withTimestamps();
+        )->withPivot(['tier', 'employee_share'])->withTimestamps();
     }
 }

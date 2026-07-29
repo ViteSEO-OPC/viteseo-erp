@@ -29,8 +29,17 @@ import {
   usePayrollInquiries,
 } from "@/modules/hr/hooks/use-requests";
 import { useConcerns } from "@/modules/hr/hooks/use-concerns";
+import { useRemoteCheckins } from "@/modules/hr/hooks/use-remote-checkins";
 
-type Kind = "leave" | "claim" | "change" | "payslip" | "document" | "inquiry" | "concern";
+type Kind =
+  | "leave"
+  | "claim"
+  | "change"
+  | "payslip"
+  | "document"
+  | "inquiry"
+  | "concern"
+  | "timein";
 
 interface Item {
   key: string;
@@ -50,6 +59,7 @@ const KIND_TAG: Record<Kind, string> = {
   document: "Document",
   inquiry: "Payroll",
   concern: "Concern",
+  timein: "Time-in",
 };
 
 // Chip colours mapped to the semantic status tokens (no raw hexes).
@@ -61,10 +71,15 @@ const KIND_TONE: Record<Kind, string> = {
   document: "bg-info-subtle text-info",
   inquiry: "bg-severity-orange-subtle text-severity-orange",
   concern: "bg-danger-subtle text-danger",
+  timein: "bg-info-subtle text-info",
 };
 
 // Only these kinds expose a clean one-click approve / reject. Everything else is
 // navigate-only (fulfilment, meetings, inquiry resolution happen on their page).
+//
+// `timein` is deliberately NOT reviewable: the entire point of a field time-in is that a
+// human looks at the photo before approving it, and a one-click Approve here — with no
+// photo in sight — would quietly defeat the feature. The row links to the queue instead.
 const REVIEWABLE = new Set<Kind>(["leave", "claim", "change", "payslip"]);
 
 export function PendingApprovals() {
@@ -75,6 +90,8 @@ export function PendingApprovals() {
   const { data: documents } = useDocumentRequests();
   const { data: inquiries } = usePayrollInquiries();
   const { data: concerns } = useConcerns();
+  // Already filtered to pending by the endpoint's default.
+  const { data: checkins } = useRemoteCheckins();
 
   const apL = useApproveLeaveRequest();
   const rjL = useRejectLeaveRequest();
@@ -148,6 +165,14 @@ export function PendingApprovals() {
         createdAt: q.created_at,
         href: "/teamora/requests/payroll",
       })),
+    ...(checkins ?? []).map((rc) => ({
+      key: `timein-${rc.id}`,
+      kind: "timein" as const,
+      id: rc.id,
+      name: rc.employee.name ?? "—",
+      createdAt: rc.submitted_at,
+      href: "/teamora/attendance",
+    })),
     ...(concerns ?? [])
       .filter((c) => c.status === "pending")
       .map((c) => ({

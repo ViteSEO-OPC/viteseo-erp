@@ -12,6 +12,7 @@ use App\Modules\Hr\Models\Meeting;
 use App\Modules\Hr\Models\PayrollInquiry;
 use App\Modules\Hr\Models\PayslipRequest;
 use App\Modules\Hr\Models\Reimbursement;
+use App\Modules\Hr\Models\RemoteCheckin;
 use Illuminate\Support\Collection;
 
 /**
@@ -68,6 +69,20 @@ class NotificationService
                 'subtitle' => ucfirst($r->category) . ' · ₱' . number_format((float) $r->amount, 0),
                 'href' => '/teamora/finance/reimbursement',
                 'at' => $r->created_at,
+            ]);
+        }
+
+        // Off-site time-ins. These are the most time-critical thing in the list: the
+        // employee is already working and isn't on the clock until HR decides.
+        $pendingCheckins = RemoteCheckin::with('employee.user')
+            ->where('status', RemoteCheckin::STATUS_PENDING)->latest()->get();
+        foreach ($pendingCheckins as $rc) {
+            $items->push([
+                'id' => "checkin-{$rc->id}",
+                'title' => "Field time-in · {$rc->employee->user?->name}",
+                'subtitle' => 'Photo needs review',
+                'href' => '/teamora/attendance',
+                'at' => $rc->created_at,
             ]);
         }
 
@@ -141,6 +156,7 @@ class NotificationService
             'items' => $paged->all(),
             'has_more' => ($offset + $limit) < $total,
             'nav' => [
+                '/teamora/attendance' => $pendingCheckins->count(),
                 '/teamora/requests/leave' => $pendingLeave->count() + $pendingHalfDay->count(),
                 '/teamora/finance/reimbursement' => $pendingReimb->count(),
                 '/teamora/requests/document' => $pendingDocs->count() + $pendingChanges->count(),
@@ -187,6 +203,20 @@ class NotificationService
                 'subtitle' => ucfirst($r->category) . ' · ₱' . number_format((float) $r->amount, 0),
                 'href' => '/teamora/claims',
                 'at' => $r->reviewed_at,
+            ]));
+
+        // A rejected field time-in is the one decision here the employee must ACT on —
+        // they aren't clocked in and have to re-submit — so the note carries HR's reason.
+        RemoteCheckin::where('employee_id', $employee->id)
+            ->whereNotNull('reviewed_at')->latest('reviewed_at')->take(5)->get()
+            ->each(fn ($rc) => $items->push([
+                'id' => "checkin-{$rc->id}",
+                'title' => "Field time-in {$rc->status}",
+                'subtitle' => $rc->status === RemoteCheckin::STATUS_REJECTED
+                    ? ($rc->rejection_note ?? 'Submit a new photo to time in.')
+                    : 'Your time in was recorded.',
+                'href' => '/teamora/attendance',
+                'at' => $rc->reviewed_at,
             ]));
 
         DocumentRequest::where('employee_id', $employee->id)

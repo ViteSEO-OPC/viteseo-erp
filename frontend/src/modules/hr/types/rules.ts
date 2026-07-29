@@ -42,6 +42,13 @@ export type MissingClockoutMode =
   | "treat_as_undertime_to_now"
   | "treat_as_absent";
 export type EarlyArrivalMode = "none" | "offset_undertime" | "overtime_eligible";
+/**
+ * What happens when someone punches in before their shift starts.
+ *  allow — recorded at the time they actually pressed it
+ *  defer — accepted, but recorded at the shift's start time (pressed 7:30 ⇒ counts 8:00)
+ *  block — refused until the shift has started
+ */
+export type EarlyClockInMode = "allow" | "defer" | "block";
 export type OvertimeMode = "none" | "approved_only" | "auto_after_threshold";
 export type DeductionRounding = "exact" | "round_up" | "round_nearest" | "round_down";
 export type DailyRateBasis = "period_workdays" | "fixed_divisor";
@@ -89,7 +96,18 @@ export interface AttendancePolicy {
   missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct
 
   early_arrival_mode: EarlyArrivalMode; // what early minutes are WORTH (inert for now)
-  block_early_clock_in: boolean; // whether an early punch is REFUSED outright
+  early_clock_in_mode: EarlyClockInMode; // what happens to an early punch
+
+  // Geofenced clock-in. Off = today's clock-in, untouched; it doubles as the kill switch.
+  // On but half-configured (no pin, or no IPs) deliberately behaves as OFF — the server
+  // fails open rather than locking the company out of its own time clock.
+  geofence_enabled: boolean;
+  office_lat: number | null; // null = no pin set (distinct from 0,0, a real point)
+  office_lng: number | null;
+  office_radius_m: number; // metres; server floor 20 (GPS itself is only ~10–20 m accurate)
+  office_ips: string[]; // exact matches only — CIDR ranges are an MVP non-goal
+  /** Read-only: the IP the SERVER sees this browser as. Never sent back on save. */
+  your_ip?: string | null;
   overtime_mode: OvertimeMode; // takes effect when OT requests ship
   overtime_threshold_minutes: number;
 

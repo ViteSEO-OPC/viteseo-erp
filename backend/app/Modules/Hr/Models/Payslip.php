@@ -25,6 +25,8 @@ class Payslip extends Model
         // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
         'other_deductions', 'other_deductions_breakdown',
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
+        // Slice B7 — which statutory deductions came from a per-employee override, not the rates.
+        'contribution_overrides',
         'total_deductions', 'deduction_carryover', 'net_pay', 'status',
         // Step 4b — how base_salary was derived, so a payslip can explain itself.
         'working_days', 'daily_rate', 'unpaid_days',
@@ -64,6 +66,7 @@ class Payslip extends Model
         'employer_sss' => 'decimal:2',
         'employer_philhealth' => 'decimal:2',
         'employer_pagibig' => 'decimal:2',
+        'contribution_overrides' => 'array',
         'total_deductions' => 'decimal:2',
         'deduction_carryover' => 'decimal:2',
         'net_pay' => 'decimal:2',

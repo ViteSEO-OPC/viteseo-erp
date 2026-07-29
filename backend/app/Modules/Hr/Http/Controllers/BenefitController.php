@@ -7,11 +7,15 @@ use App\Modules\Hr\Http\Requests\StoreContributionVersionRequest;
 use App\Modules\Hr\Http\Resources\ContributionSettingResource;
 use App\Modules\Hr\Http\Resources\EmployeeBenefitResource;
 use App\Modules\Hr\Models\ContributionSetting;
+use App\Modules\Hr\Models\ContributionVersion;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Services\ContributionScheduleImporter;
 use App\Modules\Hr\Services\ContributionService;
+use App\Modules\Hr\Services\SpreadsheetReader;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Validation\ValidationException;
 
 // Company → Benefits. All routes are hr_officer-only (see Routes/api.php).
 class BenefitController extends Controller
@@ -59,6 +63,7 @@ class BenefitController extends Controller
                 'brackets' => $v->brackets->map(fn ($b) => [
                     'min_salary' => (float) $b->min_salary,
                     'msc' => (float) $b->msc,
+                    'employer_add_on' => $b->employer_add_on !== null ? (float) $b->employer_add_on : null,
                 ])->values(),
             ]),
         ]);
@@ -76,6 +81,77 @@ class BenefitController extends Controller
     public function employeeBenefitsIndex(Employee $employee): JsonResponse
     {
         return EmployeeBenefitResource::collection($this->service->benefitsFor($employee))->response();
+    }
+
+    /**
+     * POST /hr/contribution-versions/import-schedule — Slice B8.
+     *
+     * Reads the agency's own published spreadsheet and returns the bands it found, the columns it
+     * used, and anything it is unsure about. It saves NOTHING: HR confirms the reading, then the
+     * ordinary create-a-version endpoint writes it. A schedule imported with a column misread is
+     * worse than no schedule, so the confirmation step is not optional.
+     *
+     * `columns` lets HR re-point a column the detection got wrong (`{"msc": "D"}`), which is what
+     * makes a differently-laid-out circular importable without a code change.
+     */
+    public function importSchedule(
+        Request $request,
+        SpreadsheetReader $reader,
+        ContributionScheduleImporter $importer,
+    ): JsonResponse {
+        $data = $request->validate([
+            // 2 MB is generous for a contribution schedule and keeps a stray upload cheap.
+            'file' => ['required', 'file', 'max:2048', 'mimes:xlsx,csv,txt'],
+            'columns' => ['sometimes', 'array'],
+            'columns.*' => ['nullable', 'string', 'max:3', 'regex:/^[A-Za-z]{1,3}$/'],
+        ]);
+
+        $file = $data['file'];
+        // Empty values are KEPT: "" means HR said this column is not in the file, which must
+        // override the detection rather than fall back to it.
+        $columns = array_map(
+            fn ($c) => strtoupper((string) $c),
+            $request->input('columns', []),
+        );
+
+        try {
+            $rows = $reader->read($file->getRealPath(), $file->getClientOriginalName());
+        } catch (\RuntimeException $e) {
+            throw ValidationException::withMessages(['file' => [$e->getMessage()]]);
+        }
+
+        return response()->json(['data' => $importer->parse($rows, $columns)]);
+    }
+
+    // DELETE /hr/contribution-versions/{contributionVersion} — Slice B8.
+    // So a version saved with the wrong date can be removed rather than worked around.
+    public function destroyVersion(ContributionVersion $contributionVersion): JsonResponse
+    {
+        // Never leave a type with no version: payroll would resolve nothing and charge ₱0 on every
+        // payslip, which looks like a working run.
+        $remaining = ContributionVersion::where('type', $contributionVersion->type)
+            ->whereKeyNot($contributionVersion->id)
+            ->count();
+
+        if ($remaining === 0) {
+            throw ValidationException::withMessages([
+                'version' => ['This is the only ' . strtoupper($contributionVersion->type)
+                    . ' schedule. Removing it would deduct nothing on every payslip — add a replacement first.'],
+            ]);
+        }
+
+        $this->service->deleteVersion($contributionVersion);
+
+        return response()->json(['data' => ['deleted' => true]]);
+    }
+
+    // GET /hr/employees/{employee}/statutory-preview — Slice B7.
+    // What the government rates would charge this employee, beside any per-employee override.
+    // Its own endpoint rather than a field on EmployeeResource: this resolves rate versions per
+    // employee, and hanging it off the list resource would be three extra lookups per row.
+    public function statutoryPreview(Employee $employee): JsonResponse
+    {
+        return response()->json(['data' => $this->service->overridePreviewFor($employee)]);
     }
 
     // PUT/PATCH /hr/employees/{employee}/benefits

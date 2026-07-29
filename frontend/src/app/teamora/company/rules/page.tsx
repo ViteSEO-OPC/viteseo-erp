@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Plus, Pencil, Trash2, Check } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, MapPin } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
@@ -21,6 +21,7 @@ import {
   formatWorkdays,
   type DailyRateBasis,
   type EarlyArrivalMode,
+  type EarlyClockInMode,
   type LateDeductionMode,
   type LateTier,
   type OvertimeMode,
@@ -296,7 +297,18 @@ function AttendancePolicyEditor() {
 
   // Early arrival & overtime.
   const [earlyArrival, setEarlyArrival] = useState<EarlyArrivalMode>(policy?.early_arrival_mode ?? "none");
-  const [blockEarlyClockIn, setBlockEarlyClockIn] = useState(policy?.block_early_clock_in ?? false);
+  const [earlyClockIn, setEarlyClockIn] = useState<EarlyClockInMode>(
+    policy?.early_clock_in_mode ?? "allow",
+  );
+
+  // Geofenced clock-in. lat/lng are kept as STRINGS so an empty box stays empty ("no pin
+  // set") instead of collapsing to 0 — 0,0 is a real coordinate in the Atlantic.
+  const [geofenceOn, setGeofenceOn] = useState(policy?.geofence_enabled ?? false);
+  const [officeLat, setOfficeLat] = useState(policy?.office_lat?.toString() ?? "");
+  const [officeLng, setOfficeLng] = useState(policy?.office_lng?.toString() ?? "");
+  const [officeRadius, setOfficeRadius] = useState(String(policy?.office_radius_m ?? 200));
+  const [officeIps, setOfficeIps] = useState<string[]>(policy?.office_ips ?? []);
+  const [locating, setLocating] = useState(false);
   const [overtimeMode, setOvertimeMode] = useState<OvertimeMode>(policy?.overtime_mode ?? "approved_only");
   const [overtimeThreshold, setOvertimeThreshold] = useState(String(policy?.overtime_threshold_minutes ?? 0));
 
@@ -469,6 +481,64 @@ function AttendancePolicyEditor() {
       <Hint>Leaving early is always billed to the exact minute. A single day can never cost more than one day&apos;s pay.</Hint>
     </div>
   );
+
+  // --- Geofenced clock-in ---
+
+  // Drop this browser's fix into the pin boxes. HR sets this up sitting in the office, so
+  // "where I am now" IS the office — far more reliable than typing coordinates by hand.
+  function pinCurrentLocation() {
+    if (!navigator.geolocation) {
+      toast.error("This browser can't read a location.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setOfficeLat(pos.coords.latitude.toFixed(7));
+        setOfficeLng(pos.coords.longitude.toFixed(7));
+        setLocating(false);
+        toast.success(`Pinned — accurate to about ${Math.round(pos.coords.accuracy)} m.`);
+      },
+      () => {
+        setLocating(false);
+        // The usual cause is an insecure origin: geolocation only works on https or
+        // localhost, so this is also what HR will see on an http:// deployment.
+        toast.error("Couldn't read this device's location. Allow location access, and check the site is on https.");
+      },
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 },
+    );
+  }
+
+  // Blank rows are the user still typing, not a value — they never reach the API.
+  const cleanIps = () => officeIps.map((ip) => ip.trim()).filter(Boolean);
+
+  const geofenceFields = () => ({
+    geofence_enabled: geofenceOn,
+    office_lat: officeLat.trim() === "" ? null : Number(officeLat),
+    office_lng: officeLng.trim() === "" ? null : Number(officeLng),
+    office_radius_m: Number(officeRadius),
+    office_ips: cleanIps(),
+  });
+
+  function guardGeofence(): boolean {
+    const bad = cleanIps().find((ip) => !isIpish(ip));
+    if (bad) {
+      toast.error(`"${bad}" isn't a valid IP address.`);
+      return false;
+    }
+    // A lone coordinate is meaningless — the server rejects it, so catch it here with a
+    // sentence HR can act on. An empty pair is fine: that's "no pin set yet".
+    if ((officeLat.trim() === "") !== (officeLng.trim() === "")) {
+      toast.error("Enter both a latitude and a longitude, or leave both blank.");
+      return false;
+    }
+    return true;
+  }
+
+  // On, but with nothing to check against. The server fails OPEN on this (§2.5) — better a
+  // normal clock-in than a company locked out — but HR must be told it isn't enforcing.
+  const geofenceIncomplete =
+    geofenceOn && (cleanIps().length === 0 || officeLat.trim() === "" || officeLng.trim() === "");
 
   return (
     <div className="w-full overflow-hidden rounded-card border border-border bg-card">
@@ -646,24 +716,42 @@ function AttendancePolicyEditor() {
         title="Early arrival &amp; overtime"
         description="Clocking in early, and how extra time past the schedule is treated."
       >
-        <SubHeading>Clocking in early</SubHeading>
-        <CheckBox
-          checked={blockEarlyClockIn}
-          onChange={setBlockEarlyClockIn}
-          label="Only let staff time in once their shift has started"
-        />
+        <SubHeading>When someone times in before their shift starts</SubHeading>
+        <div className="flex flex-wrap items-end gap-4">
+          <FieldSelect
+            id="pol-early-clock-in"
+            label="Early time in"
+            value={earlyClockIn}
+            onChange={(v) => setEarlyClockIn(v as EarlyClockInMode)}
+            options={[
+              { value: "allow", label: "Record it at the time they arrived" },
+              { value: "defer", label: "Accept it, but count it from their shift start" },
+              { value: "block", label: "Don't let them time in yet" },
+            ]}
+          />
+        </div>
         <Hint>
-          {blockEarlyClockIn ? (
+          {earlyClockIn === "block" ? (
             <>
               The <strong>Time in</strong> button stays disabled until each person&apos;s own
-              scheduled start, and the server refuses an early punch either way. Staff with no
-              schedule assigned are held to the default one. On a day that isn&apos;t one of their
-              workdays they can still clock in whenever — there&apos;s no shift that day to be early
-              for. Lateness is unaffected: this only sets the earliest they may start.
+              scheduled start, and the server refuses an early punch either way.
+            </>
+          ) : earlyClockIn === "defer" ? (
+            <>
+              They can press <strong>Time in</strong> the moment they arrive and forget about
+              it — but someone who arrives at 7:30 for an 8:00 shift is recorded as timing in
+              at <strong>8:00</strong>. Nobody waits at the door, nobody is paid for arriving
+              early, and a deferred time in is never late. Until their shift starts their
+              time in shows as <strong>queued</strong>, and breaks and time out stay locked.
             </>
           ) : (
-            "Anyone can time in as early as they like, and the punch is recorded at the actual time. Turn this on to hold everyone to their scheduled start."
+            "Anyone can time in as early as they like, and the punch is recorded at the actual time they pressed it."
           )}
+        </Hint>
+        <Hint>
+          Staff with no schedule assigned are held to the default one. On a day that
+          isn&apos;t one of their workdays this never applies — there&apos;s no shift to be
+          early for, so the punch is recorded as-is. Lateness is unaffected either way.
         </Hint>
         <SubDivider />
 
@@ -729,11 +817,125 @@ function AttendancePolicyEditor() {
           // stored value back would 422 and block HR from saving the overtime settings.
           onClick={() =>
             saveCard("early_ot", {
-              block_early_clock_in: blockEarlyClockIn,
+              early_clock_in_mode: earlyClockIn,
               overtime_mode: overtimeMode,
               overtime_threshold_minutes: Number(overtimeThreshold),
             })
           }
+        />
+      </PolicySection>
+
+      <Divider />
+
+      {/* Geofenced clock-in. The switch is the kill switch: off = today's clock-in, with
+          nothing else in the app changing. On but half-configured fails OPEN by design. */}
+      <PolicySection
+        title="Geofenced clock-in"
+        description="Check where someone is when they time in. Off, the time clock works exactly as it does today."
+      >
+        <CheckBox
+          checked={geofenceOn}
+          onChange={setGeofenceOn}
+          label="Check where staff are when they time in"
+        />
+
+        {!geofenceOn && (
+          <Hint>
+            Off — anyone can time in from anywhere, and nothing else in the app changes. Turn
+            this on to make office time-ins prove they&apos;re at the office, and send everyone
+            else through a selfie you approve.
+          </Hint>
+        )}
+
+        {geofenceOn && (
+          <div className="ml-7 space-y-5 border-l-2 border-border pl-4">
+            <div className="space-y-3">
+              <SubHeading>Where the office is</SubHeading>
+              <div className="flex flex-wrap items-end gap-4">
+                <NumberField
+                  id="pol-office-lat"
+                  label="Latitude"
+                  value={officeLat}
+                  onChange={setOfficeLat}
+                  min={-90}
+                  max={90}
+                  step={0.0000001}
+                />
+                <NumberField
+                  id="pol-office-lng"
+                  label="Longitude"
+                  value={officeLng}
+                  onChange={setOfficeLng}
+                  min={-180}
+                  max={180}
+                  step={0.0000001}
+                />
+                <NumberField
+                  id="pol-office-radius"
+                  label="Allowed distance (metres)"
+                  value={officeRadius}
+                  onChange={setOfficeRadius}
+                  min={20}
+                  max={5000}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={pinCurrentLocation}
+                  disabled={locating}
+                >
+                  <MapPin />
+                  {locating ? "Locating…" : "Use my location"}
+                </Button>
+              </div>
+              <Hint>
+                Set this while you&apos;re sitting in the office — <strong>Use my location</strong>{" "}
+                fills both boxes from this device. Phone GPS is only accurate to roughly 10–20 m,
+                so keep the distance generous; <strong>200 m</strong> covers a building and its
+                car park without reaching the next block.
+              </Hint>
+            </div>
+
+            <SubDivider />
+
+            <div className="space-y-3">
+              <SubHeading>The office internet connection</SubHeading>
+              <IpList
+                ips={officeIps}
+                onChange={setOfficeIps}
+                yourIp={policy?.your_ip ?? null}
+              />
+              <Hint>
+                Everyone on the office Wi-Fi shares one public IP address, which is what makes
+                this work. Add it while you&apos;re <strong>on the office network</strong> — the
+                button above fills in the address this connection is using right now. Location
+                and IP must <strong>both</strong> match, so a spoofed GPS on home broadband still
+                fails.
+              </Hint>
+              <Hint>
+                If office time-ins suddenly start failing for everyone, the internet provider has
+                probably changed your address — come back here and add the new one. Ask them for a{" "}
+                <strong>static IP</strong> to stop that happening.
+              </Hint>
+            </div>
+
+            {geofenceIncomplete && (
+              <div className="rounded-lg border border-warning bg-warning-subtle p-3">
+                <p className="text-xs text-foreground">
+                  This is switched on but not finished — it needs <strong>both</strong> an office
+                  location and at least one IP address. Until then it is{" "}
+                  <strong>not being enforced</strong>: everyone times in normally, exactly as if
+                  the switch were off. That is deliberate — a half-finished setting must never
+                  lock the whole company out of the time clock.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <SaveButton
+          pending={saving === "geofence"}
+          onClick={() => saveCard("geofence", geofenceFields(), guardGeofence)}
         />
       </PolicySection>
 
@@ -870,6 +1072,76 @@ function AttendancePolicyEditor() {
 
 function Divider() {
   return <div className="h-px w-full bg-border" />;
+}
+
+// A cheap client-side sanity check so a typo gets a plain sentence instead of a 422 keyed
+// by array index. The server's `ip` rule is the real gate — this only has to be close.
+function isIpish(value: string): boolean {
+  if (value.includes(":")) return /^[0-9a-fA-F:]+$/.test(value); // IPv6, loosely
+  const parts = value.split(".");
+  return (
+    parts.length === 4 &&
+    parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)
+  );
+}
+
+// The allowed office IPs — one editable row each, plus a one-click add of whatever address
+// the SERVER currently sees this browser as (so HR never has to find it themselves).
+function IpList({
+  ips,
+  onChange,
+  yourIp,
+}: {
+  ips: string[];
+  onChange: (next: string[]) => void;
+  yourIp: string | null;
+}) {
+  const alreadyListed = yourIp != null && ips.map((i) => i.trim()).includes(yourIp);
+
+  return (
+    <div className="space-y-2">
+      {ips.length === 0 && (
+        <p className="text-sm text-muted-foreground">No addresses added yet.</p>
+      )}
+      {ips.map((ip, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <Input
+            aria-label={`Office IP address ${i + 1}`}
+            value={ip}
+            placeholder="203.0.113.10"
+            onChange={(e) => onChange(ips.map((v, j) => (j === i ? e.target.value : v)))}
+            className="w-56"
+          />
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            type="button"
+            onClick={() => onChange(ips.filter((_, j) => j !== i))}
+          >
+            <Trash2 />
+            <span className="sr-only">Remove address</span>
+          </Button>
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <Button size="sm" variant="outline" type="button" onClick={() => onChange([...ips, ""])}>
+          <Plus />
+          Add address
+        </Button>
+        {yourIp && (
+          <Button
+            size="sm"
+            variant="outline"
+            type="button"
+            disabled={alreadyListed}
+            onClick={() => onChange([...ips, yourIp])}
+          >
+            {alreadyListed ? `This connection (${yourIp}) is listed` : `Use this connection (${yourIp})`}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function PolicySection({

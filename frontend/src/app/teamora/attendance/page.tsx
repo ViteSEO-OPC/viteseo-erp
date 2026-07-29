@@ -14,6 +14,7 @@ import {
 import { AttendanceAdjustDialog } from "@/modules/hr/components/attendance-adjust-dialog";
 import { AttendanceMeetingDialog } from "@/modules/hr/components/attendance-meeting-dialog";
 import { AttendanceSummaryTiles } from "@/modules/hr/components/attendance-summary-tiles";
+import { FieldTimeInQueue } from "@/modules/hr/components/field-timein-queue";
 import {
   SoftBadge,
   deriveAttendanceStatus,
@@ -119,6 +120,13 @@ export default function AttendancePage() {
       {/* 8 summary tiles */}
       <div className="mt-6">
         <AttendanceSummaryTiles summary={summary} />
+      </div>
+
+      {/* Off-site time-ins awaiting review. Renders nothing when the queue is empty, so
+          this costs no space on a normal day. Above the roster because the people in it
+          are already working and aren't on the clock yet. */}
+      <div className="mt-4 empty:mt-0">
+        <FieldTimeInQueue />
       </div>
 
       <div className="mt-4">

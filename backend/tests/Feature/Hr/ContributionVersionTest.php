@@ -94,14 +94,17 @@ class ContributionVersionTest extends HrTestCase
     {
         $this->sss2026();
 
-        $this->assertSame(900.0, $this->slip('2025-06-15')['sss'], '4.5% — the pre-2026 rate');
+        // 2024, not 2025: the seeder carries the published 2025 schedule now (B8), so a 2025
+        // cycle correctly prices on that rather than on the opening version.
+        $this->assertSame(900.0, $this->slip('2024-06-15')['sss'], '4.5% — the opening rate');
         $this->assertSame(1000.0, $this->slip('2026-03-15')['sss']);
     }
 
     /** The employer add-on is the company's cost — it must not reach the employee. */
     public function test_the_employer_add_on_never_touches_net_pay(): void
     {
-        $before = $this->slip('2026-03-15');
+        // Measured against the opening version, before either published schedule applies.
+        $before = $this->slip('2024-03-15');
         $this->sss2026();
         $after = $this->slip('2026-03-15');
 

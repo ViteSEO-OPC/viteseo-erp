@@ -17,6 +17,7 @@ import {
   requiredMoney,
 } from "@/modules/hr/lib/employee-validation";
 import { useRecordSection } from "@/modules/hr/lib/use-record-section";
+import { StatutoryOverridesBlock } from "@/modules/hr/components/statutory-overrides-block";
 import {
   BANK_ACCOUNT_TYPES,
   PAY_FREQUENCIES,
@@ -154,24 +155,9 @@ export function EmployeeCompensationSection({
     },
     { name: "bank_account", label: "Bank account number", placeholder: "1234-5678-9012-34" },
     { name: "bank_account_name", label: "Bank account name" },
-    {
-      name: "sss_contribution",
-      label: "SSS",
-      kind: "number",
-      display: money(employee.sss_contribution),
-    },
-    {
-      name: "pagibig_contribution",
-      label: "Pag-IBIG",
-      kind: "number",
-      display: money(employee.pagibig_contribution),
-    },
-    {
-      name: "philhealth_contribution",
-      label: "PhilHealth",
-      kind: "number",
-      display: money(employee.philhealth_contribution),
-    },
+    // Slice B7 — SSS / PhilHealth / Pag-IBIG moved OUT of this grid into their own block below.
+    // Sitting here they read as three ordinary peso boxes beside the bank details, with nothing
+    // to say that filling one switches off the government rates for that employee.
     {
       name: "food_allowance",
       label: "Food allowance",
@@ -204,6 +190,17 @@ export function EmployeeCompensationSection({
     >
       <div className="space-y-8">
         <FieldGrid specs={pay} editing={editing} form={form} />
+
+        <StatutoryOverridesBlock
+          employeeId={employee.id}
+          employee={{
+            sss_contribution: employee.sss_contribution,
+            philhealth_contribution: employee.philhealth_contribution,
+            pagibig_contribution: employee.pagibig_contribution,
+          }}
+          editing={editing}
+          form={form}
+        />
 
         <div className="border-t border-border pt-6">
           <p className="mb-1 text-label font-semibold uppercase tracking-wide text-brand">

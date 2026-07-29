@@ -8,6 +8,7 @@ import {
   createEmployee,
   updateEmployee,
   getSalaryHistory,
+  getStatutoryPreview,
   activateEmployee,
   reopenOnboarding,
   setHrRole,
@@ -96,6 +97,19 @@ export function useSalaryHistory(id: number) {
   return useQuery({
     queryKey: [...EMPLOYEES_KEY, id, "salary-history"],
     queryFn: () => getSalaryHistory(id),
+    enabled: Number.isFinite(id),
+  });
+}
+
+/**
+ * What the rates would charge this employee, beside any per-employee override (Slice B7).
+ * `useUpdateEmployee` invalidates `EMPLOYEES_KEY` as a prefix, which covers this key too — so
+ * clearing an override refreshes the comparison without any extra wiring.
+ */
+export function useStatutoryPreview(id: number) {
+  return useQuery({
+    queryKey: [...EMPLOYEES_KEY, id, "statutory-preview"],
+    queryFn: () => getStatutoryPreview(id),
     enabled: Number.isFinite(id),
   });
 }
