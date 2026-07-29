@@ -49,7 +49,20 @@ export function NotificationBell({ className }: { className?: string }) {
           "relative flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors",
           "hover:bg-muted hover:text-secondary-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          "aria-expanded:bg-muted aria-expanded:text-secondary-foreground",
+          // Open state. `bg-accent` is the design system's own "this popup is open"
+          // surface — the same token dropdown-menu.tsx puts on a SubTrigger via
+          // `data-popup-open` — replacing `bg-muted`, which was the identical value
+          // `hover:` uses and so made an open dropdown look like a pointer resting
+          // on it. Keyed off `data-popup-open` (Base UI's attribute) rather than
+          // `aria-expanded`, to match how the rest of the kit expresses this.
+          //
+          // The icon carries the active colour too, because the surface alone cannot:
+          // in the dark theme `--accent` and `--muted` are the SAME value (#22262d),
+          // so background-only would collapse back into the hover look there. Teal is
+          // this feature's existing emphasis colour — the same pair already used by
+          // "Mark all as read" and "View all notifications" below.
+          "data-popup-open:bg-accent data-popup-open:text-teal-700",
+          "dark:data-popup-open:text-teal-400",
           className,
         )}
         aria-label={
