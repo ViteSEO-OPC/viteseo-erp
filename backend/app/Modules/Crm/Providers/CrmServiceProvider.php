@@ -134,6 +134,11 @@ class CrmServiceProvider extends ServiceProvider
         // Auto-load the crm_* migrations from inside the module.
         $this->loadMigrationsFrom(__DIR__ . '/../Migrations');
 
+        // Private broadcast channels for CRM real-time features (Reverb). Registered here — like
+        // the Projects module does — so the pod owns its own channel authorization. Requires the
+        // policies registered below, which is why this sits inside boot().
+        require __DIR__ . '/../Routes/channels.php';
+
         // Blade views owned by the CRM module, namespaced `crm::` — currently the single-lead PDF
         // template. Mirrors the HR module's `hr::` registration; no app-level views are touched.
         $this->loadViewsFrom(__DIR__ . '/../Resources/views', 'crm');
