@@ -44,10 +44,25 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // anywhere in the codebase. The Rules page already shows this control disabled;
             // this stops the API from accepting them behind its back.
             'early_arrival_mode' => ['sometimes', 'in:none'],
-            // Whether an early punch is REFUSED, which is a separate question from what
-            // early minutes are worth (early_arrival_mode above). AttendanceService::clockIn
-            // reads this one.
-            'block_early_clock_in' => ['sometimes', 'boolean'],
+            // What happens to an early punch, which is a separate question from what early
+            // minutes are WORTH (early_arrival_mode above). AttendanceService::clockIn reads
+            // this one. `defer` accepts the punch but stamps it at the shift start.
+            'early_clock_in_mode' => ['sometimes', 'in:allow,defer,block'],
+
+            // Geofenced clock-in. Deliberately NOT cross-validated against
+            // `geofence_enabled` — a half-configured policy must be SAVEABLE (HR pins the
+            // office, saves, fetches the IP, saves again), and the server fails open on it
+            // rather than blocking clock-ins. The pin is the one pair that has to move
+            // together: half a coordinate is meaningless, not merely incomplete.
+            'geofence_enabled' => ['sometimes', 'boolean'],
+            'office_lat' => ['sometimes', 'nullable', 'numeric', 'between:-90,90', 'required_with:office_lng'],
+            'office_lng' => ['sometimes', 'nullable', 'numeric', 'between:-180,180', 'required_with:office_lat'],
+            // Floor of 20 m: GPS itself is only accurate to ~10–20 m, so anything tighter
+            // would reject people standing in the office. 5 km is a generous ceiling.
+            'office_radius_m' => ['sometimes', 'integer', 'min:20', 'max:5000'],
+            'office_ips' => ['sometimes', 'nullable', 'array', 'max:20'],
+            'office_ips.*' => ['required', 'ip'],
+
             'overtime_mode' => ['sometimes', 'in:none,approved_only,auto_after_threshold'],
             'overtime_threshold_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
 
@@ -91,6 +106,19 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'task_format' => ['sometimes', 'array'],
             'task_format.require_english' => ['sometimes', 'boolean'],
             'task_format.uppercase' => ['sometimes', 'boolean'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            // The default renders as "The office_ips.0 field…", which shows HR an array index.
+            'office_ips.*.ip' => 'Each office IP must be a valid IP address (e.g. 203.0.113.10).',
+            'office_lat.required_with' => 'The office pin needs both a latitude and a longitude.',
+            'office_lng.required_with' => 'The office pin needs both a latitude and a longitude.',
         ];
     }
 

@@ -25,6 +25,10 @@ class BenefitProgramResource extends JsonResource
             'frequency' => $this->frequency,
             'tax_treatment' => $this->tax_treatment,
             'eligibility' => $this->eligibility,
+            'eligibility_statuses' => $this->eligibility_statuses ?? [],
+            // How many people the rule covers right now — the honest version of "who is on this".
+            'covered_count' => app(\App\Modules\Hr\Services\BenefitProgramService::class)
+                ->eligibleCount($this->resource),
             // HMO / company-plan config.
             'deduction_cadence' => $this->deduction_cadence,
             'tiers' => $this->tiers ?? [],

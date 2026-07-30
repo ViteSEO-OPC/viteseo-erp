@@ -2,7 +2,6 @@ import { apiClient } from "@/core/api-client";
 import type {
   BenefitProgram,
   BenefitProgramInput,
-  AssignBenefitsInput,
   MyBenefit,
 } from "@/modules/hr/types/benefits";
 
@@ -46,14 +45,6 @@ export async function createBenefitPlan(
   payload: Record<string, unknown>,
 ): Promise<BenefitProgram> {
   const res = await apiClient.post("/hr/benefit-programs", payload);
-  return res.data.data;
-}
-
-/** Assign allowances / an HMO plan to a set of employees. */
-export async function assignBenefits(
-  input: AssignBenefitsInput,
-): Promise<BenefitProgram[]> {
-  const res = await apiClient.post("/hr/benefit-programs/assign", input);
   return res.data.data;
 }
 

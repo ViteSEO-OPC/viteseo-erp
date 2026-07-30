@@ -22,9 +22,13 @@ import {
   useContributionVersions,
   useSaveContributionVersion,
 } from "@/modules/hr/hooks/use-benefits";
-import type { ContributionVersion } from "@/modules/hr/api/benefits";
+import type {
+  ContributionBand,
+  ContributionVersion,
+  ScheduleImportResult,
+} from "@/modules/hr/api/benefits";
+import { ScheduleUpload } from "@/modules/hr/components/schedule-upload";
 import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
-import { SimpleSelect } from "@/modules/hr/ui/select";
 
 /**
  * Record a dated change to a government contribution's rates (Slices B3a / B3b).
@@ -60,7 +64,7 @@ export function EditContributionDialog({
 /** How each contribution is calculated, in HR's words. */
 const GUIDE: Record<string, { how: string; fields: string }> = {
   sss: {
-    how: "SSS puts each salary into a bracket and charges the rate on that bracket's Monthly Salary Credit — not on the actual salary. The employer also pays a flat EC amount above a salary threshold.",
+    how: "SSS puts each salary into a bracket and charges the rate on that bracket's Monthly Salary Credit — not on the actual salary. The employer also pays an EC amount, which the published schedule prints for every bracket.",
     fields: "brackets",
   },
   philhealth: {
@@ -68,7 +72,7 @@ const GUIDE: Record<string, { how: string; fields: string }> = {
     fields: "range",
   },
   pagibig: {
-    how: "Pag-IBIG charges a percentage, but never more than a fixed peso amount per month. Both sides contribute the same.",
+    how: "Pag-IBIG charges a percentage of the monthly salary up to a ceiling — the “fund salary” — so the contribution never exceeds that ceiling times the rate. The employer matches the employee.",
     fields: "maximum",
   },
 };
@@ -95,25 +99,37 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
   const [addOn, setAddOn] = useState(String(latest?.fixed_employer_add_on ?? 0));
   const [addOnMin, setAddOnMin] = useState(String(latest?.add_on_min_salary ?? ""));
   const [note, setNote] = useState("");
-  const [csv, setCsv] = useState(
-    (latest?.brackets ?? []).map((b) => `${b.min_salary},${b.msc}`).join("\n"),
-  );
+  // Slice B8 — the bands in play: whatever an upload produced, else whatever this version
+  // already has. Sixty rows of government figures are never retyped.
+  const [imported, setImported] = useState<ScheduleImportResult | null>(null);
 
   // Brackets are SSS's model. The option only appears for a contribution that already uses it or
   // is the one that does — showing it on PhilHealth and Pag-IBIG invited the question "do these
   // have brackets too?", and the answer is no.
   const bracketsApply = guide.fields === "brackets" || latest?.basis === "bracket";
 
-  // The pasted table, as rows of numbers. HR then points at the two columns that matter — the
-  // published SSS table has five or six, and which one is the MSC differs between circulars.
-  const [minCol, setMinCol] = useState(0);
-  const [mscCol, setMscCol] = useState(1);
-  const allRows = parseRows(csv);
-  const width = dominantWidth(allRows);
-  const rows = allRows.filter((r) => r.length === width);
-  const skipped = allRows.length - rows.length;
-  const bands = bandsFrom(rows, minCol, mscCol);
+  const bands: ContributionBand[] = imported
+    ? imported.bands.map((b) => ({
+        min_salary: b.min_salary,
+        msc: b.msc,
+        employer_add_on: b.employer_add_on,
+      }))
+    : (latest?.brackets ?? []);
   const bandsValid = !bracketsApply || bands.length > 0;
+
+  // Slice B8 — does the table carry its own EC? If it does, the flat add-on below is dead weight:
+  // `ContributionCalculator` prefers the band's amount, so anything typed there would be ignored
+  // for every band that has one.
+  const ecAmounts = [
+    ...new Set(
+      bands.map((b) => b.employer_add_on).filter((a): a is number => a != null),
+    ),
+  ].sort((a, b) => a - b);
+  const ecFromTable = ecAmounts.length > 0;
+  const ecRange =
+    ecAmounts.length === 1
+      ? formatPeso(ecAmounts[0])
+      : `${formatPeso(ecAmounts[0])}–${formatPeso(ecAmounts[ecAmounts.length - 1])}`;
 
   // A live worked example, so HR checks against the published schedule instead of the form.
   const sample = 20000;
@@ -132,7 +148,18 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
   const employerPays = (salary: number) => {
     const raw = chargeableFor(salary) * toDecimal(employerRate);
     const capped = maxAmount.trim() === "" ? raw : Math.min(raw, Number(maxAmount));
-    return capped + (salary >= (Number(addOnMin) || 0) ? Number(addOn) || 0 : 0);
+    // Slice B8 — the band's own EC wins when the published table printed one, so the worked
+    // example shows what payroll will really charge rather than the flat-rule approximation.
+    const band = bracketsApply
+      ? [...bands].reverse().find((b) => salary >= b.min_salary)
+      : undefined;
+    const ec =
+      band?.employer_add_on != null
+        ? band.employer_add_on
+        : salary >= (Number(addOnMin) || 0)
+          ? Number(addOn) || 0
+          : 0;
+    return capped + ec;
   };
 
   // The mistake this exists to catch: no ceiling and no maximum means a high earner pays the full
@@ -140,6 +167,17 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
   // uncapped, and blocking would be wrong for it.
   const uncapped =
     !bracketsApply && salaryCap.trim() === "" && maxAmount.trim() === "" && toDecimal(employeeRate) > 0;
+
+  /** Apply what the importer read: the bands, and the rates and ceiling it inferred from them. */
+  function applyImport(result: ScheduleImportResult) {
+    setImported(result);
+    if (result.suggested.employee_rate != null) {
+      setEmployeeRate(toPct(result.suggested.employee_rate));
+    }
+    if (result.suggested.employer_rate != null) {
+      setEmployerRate(toPct(result.suggested.employer_rate));
+    }
+  }
 
   async function submit() {
     try {
@@ -151,11 +189,21 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
         // Only send what this contribution actually uses, so a stale value from another shape
         // can't linger on the version.
         salary_floor: bracketsApply ? null : numOrNull(salaryFloor),
-        salary_cap: bracketsApply ? null : numOrNull(salaryCap),
+        // For a bracket version the ceiling IS the top band's MSC, so it is derived rather than
+        // typed. It is still stored, because the engine falls back to percentage-of-salary if a
+        // version ever ends up with no bands (so an unfinished import can't wipe the deduction) —
+        // and with no ceiling that fallback would charge a ₱160,000 earner 5% of the lot, ₱8,000
+        // instead of ₱1,750. A safe fallback needs the ceiling to be there.
+        salary_cap: bracketsApply
+          ? (bands.length > 0 ? bands[bands.length - 1].msc : null)
+          : numOrNull(salaryCap),
         employee_amount_cap: bracketsApply ? null : numOrNull(maxAmount),
         employer_amount_cap: bracketsApply ? null : numOrNull(maxAmount),
-        fixed_employer_add_on: Number(addOn) || 0,
-        add_on_min_salary: numOrNull(addOnMin),
+        // Slice B8 — when the table prints an EC per band, the flat rule must be cleared rather
+        // than carried over. It would be inert for every band that has an amount, and then apply
+        // silently to any band that does not — a surprise nobody could see coming.
+        fixed_employer_add_on: ecFromTable ? 0 : Number(addOn) || 0,
+        add_on_min_salary: ecFromTable ? null : numOrNull(addOnMin),
         note: note.trim() || null,
         basis: bracketsApply ? "bracket" : "percentage",
         brackets: bracketsApply ? bands : undefined,
@@ -202,92 +250,11 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
         {/* SSS — the MSC table replaces floor/ceiling/maximum entirely. */}
         {bracketsApply && (
           <Section title="Salary brackets">
-            <p className="text-caption text-muted-foreground">
-              Paste the table straight from the SSS circular — select the rows in the PDF, copy,
-              and paste here. Columns, ₱ signs and thousands separators are all fine; you pick
-              which two columns to use below.
-            </p>
-            <textarea
-              rows={7}
-              value={csv}
-              onChange={(e) => setCsv(e.target.value)}
-              placeholder={"Below 5,250          5,000    250.00\n5,250 - 5,749.99     5,500    275.00\n19,750 - 20,249.99  20,000  1,000.00"}
-              className="mt-2 w-full rounded-lg border border-input bg-transparent px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            <ScheduleUpload
+              current={bands}
+              imported={imported}
+              onImported={applyImport}
             />
-
-            {rows.length === 0 ? (
-              <p className="mt-1.5 text-caption text-muted-foreground">
-                Nothing pasted yet.
-              </p>
-            ) : (
-              <div className="mt-3 space-y-3">
-                <div className="grid grid-cols-2 gap-4">
-                  <Field label="Salary column" hint="Where each bracket starts">
-                    <SimpleSelect
-                      value={String(minCol)}
-                      onValueChange={(v) => setMinCol(Number(v))}
-                      options={Array.from({ length: width }, (_, i) => ({
-                        value: String(i),
-                        label: `Column ${i + 1} — e.g. ${formatPeso(rows[0][i])}`,
-                      }))}
-                    />
-                  </Field>
-                  <Field label="MSC column" hint="What the rate is charged on">
-                    <SimpleSelect
-                      value={String(mscCol)}
-                      onValueChange={(v) => setMscCol(Number(v))}
-                      options={Array.from({ length: width }, (_, i) => ({
-                        value: String(i),
-                        label: `Column ${i + 1} — e.g. ${formatPeso(rows[0][i])}`,
-                      }))}
-                    />
-                  </Field>
-                </div>
-
-                {/* Check a few rows read correctly before trusting the other forty. */}
-                <div className="overflow-x-auto rounded-lg border border-border">
-                  <table className="w-full text-caption">
-                    <thead className="bg-muted/60 text-muted-foreground">
-                      <tr>
-                        <th className="px-3 py-1.5 text-left">Salary from</th>
-                        <th className="px-3 py-1.5 text-left">Charged on (MSC)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bands.slice(0, 4).map((b, i) => (
-                        <tr key={i} className="border-t border-border">
-                          <td className="px-3 py-1.5">{formatPeso(b.min_salary)}</td>
-                          <td className="px-3 py-1.5">{formatPeso(b.msc)}</td>
-                        </tr>
-                      ))}
-                      {bands.length > 4 && (
-                        <tr className="border-t border-border text-muted-foreground">
-                          <td className="px-3 py-1.5" colSpan={2}>
-                            …and {bands.length - 4} more, up to {formatPeso(bands[bands.length - 1].msc)}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <p className="text-caption text-muted-foreground">
-                  {bands.length} bracket{bands.length === 1 ? "" : "s"} · the lowest is set to start
-                  at ₱0 automatically, because the published table prints it as
-                  &ldquo;Below&rdquo; with no starting figure.
-                  {skipped > 0 && (
-                    <>
-                      {" "}
-                      <span className="font-medium text-warning">
-                        {skipped} line{skipped === 1 ? "" : "s"} skipped
-                      </span>{" "}
-                      — headings or notes with a different number of columns. Check the top and
-                      bottom of your paste.
-                    </>
-                  )}
-                </p>
-              </div>
-            )}
           </Section>
         )}
 
@@ -305,24 +272,60 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
           </Section>
         )}
 
-        {/* Pag-IBIG — a cap on the deduction itself. */}
+        {/* Pag-IBIG — the cap can be expressed either way, and BOTH are shown because both can be
+            in force. The rule Pag-IBIG actually publishes is a cap on the salary the rate applies
+            to ("fund salary"), and that is what the seeded version uses. Showing only the amount
+            cap hid the ₱10,000 salary cap that was really in force — the form said "no maximum"
+            while payroll was capping every contribution at ₱200. */}
         {!bracketsApply && guide.fields === "maximum" && (
           <Section title="Maximum contribution">
-            <Field
-              label="Never deduct more than (₱ per month)"
-              hint="Applies to both sides. Leave blank for no maximum."
-            >
-              <Input type="number" step="0.01" min={0} className="max-w-xs" placeholder="no maximum" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
-            </Field>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field
+                label="Maximum salary the rate applies to"
+                hint="Pag-IBIG's own rule: the “fund salary” ceiling. Anyone earning more is charged as if they earned this."
+              >
+                <Input type="number" step="0.01" min={0} placeholder="no maximum" value={salaryCap} onChange={(e) => setSalaryCap(e.target.value)} />
+              </Field>
+              <Field
+                label="Or never deduct more than (₱/month)"
+                hint="The same cap expressed as an amount. Only one of the two is needed."
+              >
+                <Input type="number" step="0.01" min={0} placeholder="no maximum" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
+              </Field>
+            </div>
+            <p className="mt-2 text-caption text-muted-foreground">
+              These are two ways of saying the same thing at a flat rate — a {formatPeso(10000)}{" "}
+              salary ceiling at 2% and a {formatPeso(200)} amount ceiling both come to{" "}
+              {formatPeso(200)}. Prefer the salary ceiling: it stays correct if the rate ever
+              changes.
+            </p>
           </Section>
         )}
 
-        {/* SSS EC — employer-only, so it lives on its own. */}
-        {bracketsApply && (
+        {/* SSS EC — employer-only, so it lives on its own.
+
+            Slice B8 — when the imported table prints an EC per band, THAT is what payroll charges
+            and these two fields are ignored entirely. Leaving them editable made a control that
+            looks live and isn't: type ₱50 here, and every band with its own amount keeps charging
+            what the schedule says. So they only appear when the table has no EC column of its
+            own, which is the one case the flat rule is still needed for. */}
+        {bracketsApply && ecFromTable && (
+          <Section title="Employer-only add-on">
+            <p className="text-caption text-muted-foreground">
+              Taken from the uploaded schedule, which prints an amount for every bracket — so
+              there is nothing to set here. Currently{" "}
+              <strong>{ecRange}</strong> depending on the bracket, paid by the company on top and
+              never deducted from the employee.
+            </p>
+          </Section>
+        )}
+
+        {bracketsApply && !ecFromTable && (
           <Section title="Employer-only add-on">
             <p className="text-caption text-muted-foreground">
               A flat amount the company pays on top, above a salary threshold. Never deducted from
-              the employee.
+              the employee. The published schedule normally prints this per bracket — if your
+              uploaded file has that column, point at it above and these two fields disappear.
             </p>
             <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Amount (₱)">
@@ -404,94 +407,6 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
       </DialogFooter>
     </>
   );
-}
-
-/**
- * Turn text pasted from an SSS circular (usually a PDF or a spreadsheet) into rows of numbers.
- *
- * The published table is multi-column and the numbers carry thousands separators, so the naive
- * "split on commas" approach shredded "5,250" into two values. This pulls every NUMBER out of a
- * line instead, which survives tabs, multiple spaces, ₱ signs, en-dashes and stray footnotes:
- *
- *   "Below 5,250        5,000   250.00"  →  [5250, 5000, 250]
- *   "5,250 - 5,749.99   5,500   275.00"  →  [5250, 5749.99, 5500, 275]
- *
- * Rows come out with different lengths (a "Below X" row has no range start), so the caller keeps
- * only the most common shape and lets HR point at the two columns that matter.
- */
-/**
- * A comma means "thousands" only when exactly three digits follow it — `5,250` is one number but
- * `0,5000` (how an existing table is prefilled below) is two. Without the lookahead the greedy
- * form reads `0,5000` as `05000` and the round-trip of a saved table silently corrupts it.
- */
-const NUMBER = /\d{1,3}(?:,\d{3})+(?![\d,])(?:\.\d+)?|\d+(?:\.\d+)?/g;
-
-export function parseRows(text: string): number[][] {
-  const raw = text
-    .split(/\r?\n/)
-    .map((line) => ({
-      line,
-      nums: (line.match(NUMBER) ?? []).map((n) => Number(n.replace(/,/g, ""))),
-    }))
-    .filter((r) => r.nums.length >= 2 && r.nums.every(Number.isFinite));
-
-  const width = dominantWidth(raw.map((r) => r.nums));
-
-  // The FIRST and LAST rows of the published table are shaped differently: "Below ₱5,250" has no
-  // range start, and "₱34,750 and above" has no range end. Both come out one number short, so a
-  // plain width filter drops exactly the two brackets that matter most — the bottom one, and the
-  // TOP one that every high earner is charged on. Pad them back into alignment.
-  return raw.map(({ line, nums }) => {
-    if (nums.length !== width - 1) {
-      return nums;
-    }
-    if (/below|less than|under/i.test(line)) {
-      return [0, ...nums]; // the missing range start is 0
-    }
-    if (/above|over|and up|onwards/i.test(line)) {
-      return [nums[0], nums[0], ...nums.slice(1)]; // no range end; only the start is ever read
-    }
-    return nums;
-  });
-}
-
-/** The row shape that appears most often — the table body, with headers and notes left out. */
-export function dominantWidth(rows: number[][]): number {
-  const counts = new Map<number, number>();
-  rows.forEach((r) => counts.set(r.length, (counts.get(r.length) ?? 0) + 1));
-  let best = 0;
-  let bestCount = 0;
-  counts.forEach((count, width) => {
-    if (count > bestCount || (count === bestCount && width > best)) {
-      best = width;
-      bestCount = count;
-    }
-  });
-  return best;
-}
-
-/**
- * Build the bands from two chosen columns.
- *
- * The lowest band is forced to start at 0: the published table's first row reads "Below ₱5,250",
- * so its range START is not printed anywhere. Without this every salary under the first printed
- * figure would fall into no band and contribute nothing.
- */
-export function bandsFrom(
-  rows: number[][],
-  minCol: number,
-  mscCol: number,
-): { min_salary: number; msc: number }[] {
-  const bands = rows
-    .filter((r) => r[minCol] !== undefined && r[mscCol] !== undefined)
-    .map((r) => ({ min_salary: r[minCol], msc: r[mscCol] }))
-    .sort((a, b) => a.min_salary - b.min_salary);
-
-  if (bands.length > 0) {
-    bands[0] = { ...bands[0], min_salary: 0 };
-  }
-
-  return bands;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

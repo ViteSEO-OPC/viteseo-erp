@@ -20,9 +20,11 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
  * the company, payroll paid ₱42,000 from three hard-coded `hr_employees` columns. Editing the page
  * changed nobody's payslip, and Gas Allowance had no column at all so it could never be paid.
  *
- * The behaviour that matters most here is the PRECEDENCE: a null pivot amount means "follow the
- * programme", a non-null one is a deliberate per-employee override. Get that backwards and either
- * editing a programme reaches nobody, or every carefully-set individual amount is wiped.
+ * The behaviour that matters most here is that there is ONE amount per allowance: the programme's.
+ * Editing it reaches everyone enrolled. B1 shipped with a per-employee override on the enrolment
+ * and a backfill that pinned all 56 of them, which meant an edit reached nobody at all; the
+ * override was dropped outright on 2026-07-29 (B6) — the company does not want per-employee
+ * amounts, so the enrolment carries no figure to disagree with.
  */
 class AllowanceSourceOfTruthTest extends HrTestCase
 {
@@ -92,37 +94,6 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         $this->assertSame(2500.0, $this->monthly());
     }
 
-    /** A pinned amount is a deliberate override and does NOT follow the programme. */
-    public function test_a_per_employee_override_wins(): void
-    {
-        $p = $this->programme('Meal Allowance', 2000);
-        $this->employee->benefitPrograms()->attach($p->id, ['amount' => 3000]);
-
-        $this->assertSame(3000.0, $this->monthly());
-
-        $p->update(['amount' => 2500]);
-        $this->assertSame(3000.0, $this->monthly(), 'the override is not swept along');
-    }
-
-    public function test_clearing_an_override_hands_them_back_to_the_programme(): void
-    {
-        $p = $this->programme('Meal Allowance', 2000);
-        $this->employee->benefitPrograms()->attach($p->id, ['amount' => 3000]);
-
-        app(AllowanceService::class)->clearOverride($this->employee, $p->id);
-
-        $this->assertSame(2000.0, $this->monthly());
-    }
-
-    /** A ₱0 override is a real decision ("enrolled but not paid"), not "unset". */
-    public function test_a_zero_override_is_respected(): void
-    {
-        $p = $this->programme('Gas Allowance', 1500);
-        $this->employee->benefitPrograms()->attach($p->id, ['amount' => 0]);
-
-        $this->assertSame(0.0, $this->monthly());
-    }
-
     public function test_an_inactive_programme_pays_nothing(): void
     {
         $p = $this->programme('Meal Allowance', 2000);
@@ -141,6 +112,22 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         $this->assertSame(5500.0, $this->monthly(), 'Gas pays now — it never could before');
     }
 
+    /**
+     * The enrolment carries NO amount at all (B6, 2026-07-29). Guarding the shape rather than the
+     * behaviour: a re-added pivot column would quietly restore the bug where editing an allowance
+     * reached nobody, and every other test here would still pass.
+     */
+    public function test_an_enrolment_carries_no_per_employee_amount(): void
+    {
+        $p = $this->programme('Meal Allowance', 2000);
+        $this->employee->benefitPrograms()->attach($p->id);
+
+        $columns = \Illuminate\Support\Facades\Schema::getColumnListing('hr_benefit_enrollments');
+
+        $this->assertNotContains('amount', $columns);
+        $this->assertSame(2000.0, $this->monthly());
+    }
+
     // --- payroll ---------------------------------------------------------------------
 
     public function test_the_allowance_reaches_the_payslip(): void
@@ -157,46 +144,65 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         $this->assertSame(1750.0, (float) $slip->allowances);
     }
 
-    // --- reconciliation --------------------------------------------------------------
+    // --- deleting an allowance --------------------------------------------------------
 
-    public function test_reconciliation_lists_only_real_differences(): void
+    /**
+     * Deleting stops future pay but must not rewrite what was already paid.
+     *
+     * `allowanceBreakdown()` snapshots the lines onto the payslip when the run happens, so the
+     * document keeps naming an allowance that no longer exists — which is what a payslip is for.
+     */
+    public function test_deleting_an_allowance_stops_future_pay_but_keeps_past_payslips(): void
     {
-        $matching = $this->programme('Meal Allowance', 2000);
-        $drifting = $this->programme('Transport Allowance', 1500);
-        $this->employee->benefitPrograms()->attach($matching->id, ['amount' => 2000]); // same
-        $this->employee->benefitPrograms()->attach($drifting->id, ['amount' => 0]);    // differs
+        $meal = $this->programme('Meal Allowance', 2000);
+        $this->programme('Transport Allowance', 1500);
 
-        $rows = app(AllowanceService::class)->reconciliation();
+        $run = app(PayrollService::class)
+            ->run('2026-03-01', '2026-03-15', 'semi_monthly', User::factory()->create());
+        $before = $run->payslips()->firstOrFail();
 
-        $this->assertCount(1, $rows);
-        $this->assertSame(-1500.0, $rows[0]['delta']);
-        $this->assertCount(1, $rows[0]['lines'], 'the matching line is not noise');
+        // ₱3,500/month × 12 ÷ 24 = ₱1,750.
+        $this->assertSame(1750.0, (float) $before->allowances);
+        $this->assertContains('Meal Allowance', array_column($before->allowances_breakdown, 'name'));
+
+        app(\App\Modules\Hr\Services\BenefitProgramService::class)->delete($meal);
+
+        // The old payslip is untouched, and still names the deleted allowance.
+        $before->refresh();
+        $this->assertSame(1750.0, (float) $before->allowances);
+        $this->assertContains('Meal Allowance', array_column($before->allowances_breakdown, 'name'));
+
+        // The next run pays only what is left.
+        $this->assertSame(1500.0, $this->monthly(), 'Transport only');
     }
 
-    public function test_the_endpoints_are_reachable(): void
+    public function test_a_deleted_allowance_disappears_from_the_catalogue(): void
     {
         $p = $this->programme('Meal Allowance', 2000);
-        $this->employee->benefitPrograms()->attach($p->id, ['amount' => 3000]);
+
+        $this->actingAsHr()->deleteJson("/api/v1/hr/benefit-programs/{$p->id}")->assertNoContent();
 
         $this->actingAsHr()
-            ->getJson('/api/v1/hr/benefit-programs/allowance-reconciliation')
+            ->getJson('/api/v1/hr/benefit-programs')
             ->assertOk()
-            ->assertJsonPath('data.0.delta', 1000);
+            ->assertJsonCount(0, 'data');
 
-        $this->actingAsHr()
-            ->deleteJson("/api/v1/hr/employees/{$this->employee->id}/allowance-overrides/{$p->id}")
-            ->assertOk();
-
-        $this->assertSame(2000.0, $this->monthly());
+        $this->assertSame(0.0, $this->monthly());
     }
 
     // --- new hires -------------------------------------------------------------------
 
-    /** Without this a new hire would silently earn no allowances at all. */
-    public function test_a_new_hire_is_enrolled_in_the_open_allowances(): void
+    /**
+     * A new hire picks up everything their rule covers, with nothing to remember.
+     *
+     * This used to enrol them explicitly in the open programmes, which meant a hire made before a
+     * new allowance existed never got it. Eligibility is a rule now, so the answer is computed
+     * rather than stored — and "Managers Only" correctly passes them by.
+     */
+    public function test_a_new_hire_gets_the_allowances_their_rule_covers(): void
     {
         $open = $this->programme('Meal Allowance', 2000);
-        $restricted = $this->programme('Managers Only', 5000, eligibility: 'regular');
+        $restricted = $this->programme('Managers Only', 5000, eligibility: 'management');
 
         // EmployeeService::create() assigns the hr_employee role to the new user.
         $this->hrUser();
@@ -207,9 +213,11 @@ class AllowanceSourceOfTruthTest extends HrTestCase
             'hire_date' => '2026-03-01', 'base_salary' => 25000,
         ]);
 
-        $enrolled = $hire->benefitPrograms()->pluck('hr_benefit_programs.id')->all();
+        $covered = app(\App\Modules\Hr\Services\BenefitProgramService::class)
+            ->allowancesFor($hire)->pluck('id')->all();
 
-        $this->assertContains($open->id, $enrolled);
-        $this->assertNotContains($restricted->id, $enrolled, 'restricted programmes stay HR\'s call');
+        $this->assertContains($open->id, $covered);
+        $this->assertNotContains($restricted->id, $covered, 'a management-only allowance passes them by');
+        $this->assertSame(2000.0, app(AllowanceService::class)->monthlyFor($hire), 'and it pays');
     }
 }

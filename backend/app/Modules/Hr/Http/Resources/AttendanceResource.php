@@ -29,6 +29,9 @@ class AttendanceResource extends JsonResource
             // 'manual' (a person entered it) vs 'system' (generated for exempt
             // management staff) — an audit has to be able to tell them apart.
             'source' => $this->source,
+            // How the clock-in proved where they were: ip_gps | ip_only | remote_approved,
+            // or null for "no check ran" (feature off, or the row predates it).
+            'location_verified_by' => $this->location_verified_by,
             'on_lunch' => $this->lunch_started_at !== null,
             'on_break' => $this->break_started_at !== null,
             'tasks' => $this->tasks ?? [],

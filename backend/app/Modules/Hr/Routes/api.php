@@ -2,6 +2,7 @@
 
 use App\Modules\Hr\Http\Controllers\AttendanceController;
 use App\Modules\Hr\Http\Controllers\AttendancePolicyController;
+use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
 use App\Modules\Hr\Http\Controllers\BenefitController;
 use App\Modules\Hr\Http\Controllers\BenefitProgramController;
 use App\Modules\Hr\Http\Controllers\ChangeRequestController;
@@ -81,6 +82,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('attendance/clock-in', [AttendanceController::class, 'clockIn']);
     Route::post('attendance/clock-out', [AttendanceController::class, 'clockOut']);
     Route::post('attendance/break', [AttendanceController::class, 'break']);
+    // Off-site time-in: submit a selfie for HR to approve, and read back its status.
+    Route::post('attendance/remote-checkin', [RemoteCheckinController::class, 'store']);
+    Route::get('me/remote-checkin', [RemoteCheckinController::class, 'me']);
 
     // Reimbursement — caller files + views own; HR sees all + decides.
     Route::get('reimbursements', [ReimbursementController::class, 'index']);
@@ -122,6 +126,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('reports/{key}/export', [ReportController::class, 'export']);
         Route::get('attendance', [AttendanceController::class, 'index']);
         Route::get('attendance/summary', [AttendanceController::class, 'summary']);
+        // Field time-ins queue. Declared BEFORE attendance/adjust is irrelevant, but these
+        // must stay above any `attendance/{param}` route if one is ever added.
+        Route::get('attendance/remote-checkins', [RemoteCheckinController::class, 'index']);
+        Route::post('attendance/remote-checkins/{remoteCheckin}/approve', [RemoteCheckinController::class, 'approve']);
+        Route::post('attendance/remote-checkins/{remoteCheckin}/reject', [RemoteCheckinController::class, 'reject']);
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).
@@ -237,10 +246,6 @@ Route::middleware('auth:sanctum')->group(function () {
         // Company → Benefits: flexible benefit-programs catalogue (HR-authored).
         Route::get('benefit-programs', [BenefitProgramController::class, 'index']);
         Route::post('benefit-programs', [BenefitProgramController::class, 'store']);
-        Route::post('benefit-programs/assign', [BenefitProgramController::class, 'assign']);
-        // Slice B1 — the allowance reconciliation working list, and its one action.
-        Route::get('benefit-programs/allowance-reconciliation', [BenefitProgramController::class, 'allowanceReconciliation']);
-        Route::delete('employees/{employee}/allowance-overrides/{program}', [BenefitProgramController::class, 'clearAllowanceOverride']);
         Route::match(['put', 'patch'], 'benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'update']);
         Route::delete('benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'destroy']);
 
@@ -249,9 +254,15 @@ Route::middleware('auth:sanctum')->group(function () {
         // Slice B3a — dated statutory rate versions.
         Route::get('contribution-versions', [BenefitController::class, 'versionsIndex']);
         Route::post('contribution-versions', [BenefitController::class, 'storeVersion']);
+        // Slice B8 — read the agency's published spreadsheet (a dry run; it saves nothing), and
+        // remove a version saved with the wrong date.
+        Route::post('contribution-versions/import-schedule', [BenefitController::class, 'importSchedule']);
+        Route::delete('contribution-versions/{contributionVersion}', [BenefitController::class, 'destroyVersion']);
         Route::match(['put', 'patch'], 'contribution-settings/{contributionSetting}', [BenefitController::class, 'updateSetting']);
         Route::get('employees/{employee}/benefits', [BenefitController::class, 'employeeBenefitsIndex']);
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);
+        // Slice B7 — what the rates would charge, beside any per-employee override.
+        Route::get('employees/{employee}/statutory-preview', [BenefitController::class, 'statutoryPreview']);
 
         // Company → Rules: work schedules + per-employee assignment + attendance policy.
         Route::get('work-schedules', [WorkScheduleController::class, 'index']);

@@ -58,12 +58,18 @@ class TaxableAllowanceTest extends HrTestCase
         ]);
     }
 
+    /**
+     * `custom` because these tests compare two employees side by side, and eligibility is now a
+     * RULE — an `all` programme would cover both of them and the comparison would be of one
+     * employee against themselves. `custom` is the mode that means "these named people", which is
+     * exactly what a two-employee comparison needs.
+     */
     private function programme(string $name, float $amount, string $treatment): BenefitProgram
     {
         return BenefitProgram::create([
             'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => $amount, 'frequency' => 'monthly', 'tax_treatment' => $treatment,
-            'eligibility' => 'all', 'is_active' => true,
+            'eligibility' => 'custom', 'is_active' => true,
         ]);
     }
 

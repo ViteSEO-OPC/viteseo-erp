@@ -81,6 +81,11 @@ class PayslipResource extends JsonResource
                 'employer_sss' => (float) $this->employer_sss,
                 'employer_philhealth' => (float) $this->employer_philhealth,
                 'employer_pagibig' => (float) $this->employer_pagibig,
+                // Slice B7 — which deductions came from a per-employee override rather than the
+                // rates. HR-only for the same reason as the employer shares: it is a remittance
+                // problem (the two halves can belong to different brackets), not something the
+                // employee can act on, and it must not appear on the document they receive.
+                'contribution_overrides' => $this->contribution_overrides ?? [],
             ]),
 
             'status' => $this->status,

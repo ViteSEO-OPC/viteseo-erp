@@ -24,6 +24,12 @@ export interface Attendance {
   on_lunch: boolean;
   on_break: boolean;
   tasks: DayTask[];
+  /**
+   * How the clock-in proved where the employee was. `null` means no check ran at all —
+   * the geofence was off, the row predates the feature, or the policy was enabled but
+   * unconfigured and deliberately failed open. Never read a null as "unverified".
+   */
+  location_verified_by: "ip_gps" | "ip_only" | "remote_approved" | null;
 }
 
 /**
@@ -31,13 +37,58 @@ export interface Attendance {
  * The panel only reads it — it never re-derives the rule.
  */
 export interface ClockInWindow {
-  /** HR requires everyone to wait for their scheduled start. */
-  strict: boolean;
+  /** How early punches are handled — see EarlyClockInMode in types/rules. */
+  mode: "allow" | "defer" | "block";
   /**
    * Manila "HH:MM" this employee's shift opens, or null when nothing holds them back
    * (strict off, a non-workday, or no scheduled start time).
    */
   opens_at: string | null;
+  /**
+   * `defer` mode only: the Manila "HH:MM" a punch made RIGHT NOW would be recorded at.
+   * Null once the shift has started, because from then on it's stamped normally.
+   */
+  defers_to: string | null;
+  /**
+   * Ask where the employee is before clocking in. This is "the server is actually
+   * enforcing a geofence", NOT the raw Company → Rules toggle: a policy switched on but
+   * left unconfigured fails open server-side and reports `false` here, so the panel never
+   * demands a location that is about to be ignored.
+   */
+  geofence: boolean;
+}
+
+/**
+ * A browser position fix, in the shape the clock-in endpoint takes.
+ * `accuracy` is the radius of confidence in metres — the server uses it to decide whether
+ * the reading is worth consulting at all, so it always travels with the coordinates.
+ */
+export interface LocationFix {
+  lat: number;
+  lng: number;
+  accuracy: number;
+}
+
+export type RemoteCheckinStatus = "pending" | "approved" | "rejected";
+
+/**
+ * An off-site time-in awaiting (or having had) a human decision.
+ *
+ * `submitted_at` IS the official time-in — approving one stamps attendance at that moment,
+ * not at the moment HR clicked approve, so nobody is marked late for HR's review delay.
+ */
+export interface RemoteCheckin {
+  id: number;
+  employee: { id: number; name: string | null; department: string | null };
+  photo_url: string;
+  lat: number | null;
+  lng: number | null;
+  has_location: boolean;
+  status: RemoteCheckinStatus;
+  submitted_at: string;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  rejection_note: string | null;
 }
 
 export interface MyAttendance {

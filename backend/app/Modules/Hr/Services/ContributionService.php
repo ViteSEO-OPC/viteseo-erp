@@ -104,7 +104,12 @@ class ContributionService
             $version->brackets()->createMany(
                 collect($brackets)
                     ->sortBy(fn ($b) => (float) $b['min_salary'])
-                    ->map(fn ($b) => ['min_salary' => $b['min_salary'], 'msc' => $b['msc']])
+                    ->map(fn ($b) => [
+                        'min_salary' => $b['min_salary'],
+                        'msc' => $b['msc'],
+                        // Slice B8 — the band's own EC amount, when the published table printed one.
+                        'employer_add_on' => $b['employer_add_on'] ?? null,
+                    ])
                     ->values()
                     ->all(),
             );
@@ -130,6 +135,30 @@ class ContributionService
         );
 
         return $version;
+    }
+
+    /**
+     * Remove a version (Slice B8) — a schedule saved against the wrong date has to be removable,
+     * or the only way out is to enter a corrected one on top and leave the mistake in the history.
+     *
+     * The caller checks that this is not the last version for its type. Bands go with it through
+     * the cascade on `hr_contribution_brackets`.
+     */
+    public function deleteVersion(ContributionVersion $version): void
+    {
+        $this->audit->log(
+            'removed',
+            'Benefits',
+            strtoupper($version->type) . ' schedule effective '
+                . $version->effective_from->format('M j, Y') . ' removed'
+                . ' — employee ' . round($version->employee_rate * 100, 3) . '%'
+                . ', employer ' . round($version->employer_rate * 100, 3) . '%',
+            $version,
+        );
+
+        $version->delete();
+
+        $this->versionMemo = []; // the rate in force may have just moved
     }
 
     /**
@@ -213,6 +242,53 @@ class ContributionService
             ->filter(fn ($v) => in_array($v->type, $active, true))
             ->mapWithKeys(fn (ContributionVersion $v) => [$v->type => $v->toConfig()])
             ->all();
+    }
+
+    /**
+     * What the government rates WOULD charge this employee, next to the per-employee override that
+     * is suppressing it (Slice B7).
+     *
+     * WHY THIS EXISTS. Ten profiles carry a peso amount typed into `sss_contribution` and friends.
+     * That amount replaces the EMPLOYEE side of the deduction and nothing else — the employer side
+     * still follows the rates — so the two halves of one payslip can belong to different salary
+     * brackets, and a remittance built from them cannot be filed. Nothing on the employee form said
+     * so: they read as three ordinary peso boxes next to the bank details. This is what the form
+     * shows beside each one.
+     *
+     * The arithmetic is `ContributionCalculator`, i.e. the same code payroll runs — a second
+     * implementation of "what SSS costs" would drift, which is the failure this whole audit is about.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function overridePreviewFor(Employee $employee, ?string $asOf = null): array
+    {
+        $config = $this->effectiveFor($employee, $asOf);
+        $base = (float) $employee->base_salary;
+
+        $overrides = [
+            'sss' => $employee->sss_contribution,
+            'philhealth' => $employee->philhealth_contribution,
+            'pagibig' => $employee->pagibig_contribution,
+        ];
+
+        $rows = [];
+
+        foreach ($overrides as $type => $override) {
+            $enrolled = isset($config[$type]);
+            $rows[] = [
+                'type' => $type,
+                // Not enrolled ⇒ nothing is deducted at all, and an override on it is inert. Saying
+                // so is the difference between "this is suppressed" and "this does nothing".
+                'enrolled' => $enrolled,
+                'override' => $override !== null ? round((float) $override, 2) : null,
+                'calculated_employee' => $enrolled ? ContributionCalculator::employee($config[$type], $base) : 0.0,
+                // Shown because it does NOT move with the override — the mismatch is the point.
+                'calculated_employer' => $enrolled ? ContributionCalculator::employer($config[$type], $base) : 0.0,
+                'basis' => $enrolled ? ($config[$type]['basis'] ?? 'percentage') : null,
+            ];
+        }
+
+        return $rows;
     }
 
     /**

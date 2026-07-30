@@ -9,13 +9,9 @@ import {
   updateBenefitProgram,
   patchBenefitProgram,
   deleteBenefitProgram,
-  assignBenefits,
   getMyBenefits,
 } from "@/modules/hr/api/benefit-programs";
-import type {
-  BenefitProgramInput,
-  AssignBenefitsInput,
-} from "@/modules/hr/types/benefits";
+import type { BenefitProgramInput } from "@/modules/hr/types/benefits";
 
 const PROGRAMS_KEY = ["hr", "benefit-programs"] as const;
 const MY_KEY = ["hr", "me", "benefits"] as const;
@@ -68,15 +64,7 @@ export function useCreateBenefitPlan() {
   });
 }
 
-// Assign allowances / an HMO plan to employees.
-export function useAssignBenefits() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: AssignBenefitsInput) => assignBenefits(input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: PROGRAMS_KEY }),
-  });
-}
-
 export function useMyBenefits() {
   return useQuery({ queryKey: MY_KEY, queryFn: getMyBenefits });
 }
+

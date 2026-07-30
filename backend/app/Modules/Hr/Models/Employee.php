@@ -183,8 +183,9 @@ class Employee extends Model
             'benefit_program_id',
         )
             // The per-employee columns on the pivot. `employee_share` is what payroll deducts
-            // (Slice 11a) — without this it reads as null and nothing is ever taken.
-            ->withPivot(['amount', 'tier', 'employee_share'])
+            // (Slice 11a) — without this it reads as null and nothing is ever taken. There is no
+            // per-employee allowance AMOUNT: an allowance is worth what its programme says (B6).
+            ->withPivot(['tier', 'employee_share'])
             ->withTimestamps();
     }
 

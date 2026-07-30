@@ -25,14 +25,15 @@ class BenefitProgramService
     public function create(array $data): BenefitProgram
     {
         $program = BenefitProgram::create($this->attributes($data));
+        $this->allowanceMemo = null;
         $ids = array_map('intval', $data['employee_ids'] ?? []);
         $this->syncEnrolment($program, $ids);
 
-        $this->audit->log('created', 'Benefits', "Created benefit '{$program->name}'", $program);
-
-        if (! empty($ids)) {
-            $this->audit->log('enrolled', 'Benefits', 'Enrolled ' . count($ids) . " employee(s) in '{$program->name}'", $program);
-        }
+        $this->audit->log(
+            'created', 'Benefits',
+            "Created benefit '{$program->name}' — " . $this->describeRule($program),
+            $program,
+        );
 
         return $program->load('employees:id');
     }
@@ -41,106 +42,47 @@ class BenefitProgramService
     public function update(BenefitProgram $program, array $data): BenefitProgram
     {
         $program->update($this->attributes($data, $program));
+        $this->allowanceMemo = null;
 
         // Only touch enrolment when the caller sent the list (keeps PATCHes safe).
         if (array_key_exists('employee_ids', $data)) {
             $this->syncEnrolment($program, array_map('intval', $data['employee_ids'] ?? []));
         }
 
-        $this->audit->log('updated', 'Benefits', "Updated benefit '{$program->name}'", $program);
+        $this->audit->log(
+            'updated', 'Benefits',
+            "Updated benefit '{$program->name}' — " . $this->describeRule($program),
+            $program,
+        );
 
         return $program->load('employees:id');
     }
 
+    /**
+     * Delete a programme. Soft, so the row survives for anything that references it.
+     *
+     * PAST PAYSLIPS ARE SAFE. `PayrollService::allowanceBreakdown()` snapshots the lines onto each
+     * payslip when the run happens, so a deleted allowance keeps appearing on the payslips that
+     * actually paid it, named as it was named then.
+     *
+     * FUTURE PAY CHANGES, and that is the point: everyone the rule covered stops being paid it
+     * from the next run. The count is in the audit line so the decision is legible afterwards.
+     */
     public function delete(BenefitProgram $program): void
     {
-        $program->delete(); // soft delete; pivot rows stay but are unreachable.
+        $covered = $this->eligibleCount($program);
 
-        $this->audit->log('removed', 'Benefits', "Removed benefit '{$program->name}'", $program);
-    }
+        $program->delete();
+        $this->allowanceMemo = null;
 
-    /**
-     * Assign benefits to a set of employees (the "Add a Plan" modal). Allowances
-     * attach to every ELIGIBLE selected employee with the allowance's amount; an HMO
-     * plan attaches with a per-employee tier + the tier's employee share.
-     *
-     * @param  array<string, mixed>  $data
-     */
-    public function assign(array $data): void
-    {
-        $employeeIds = array_map('intval', $data['employee_ids'] ?? []);
-        if (empty($employeeIds)) {
-            return;
-        }
-
-        $names = [];
-        $enrolled = [];
-
-        // Allowances → each allowance to each eligible selected employee.
-        foreach ($data['allowance_ids'] ?? [] as $allowanceId) {
-            $allowance = BenefitProgram::where('kind', 'allowance')->find($allowanceId);
-            if (! $allowance) {
-                continue;
-            }
-            $eligible = array_values(array_intersect($employeeIds, $this->eligibleEmployeeIds($allowance)));
-            $pivot = [];
-            foreach ($eligible as $eid) {
-                $pivot[$eid] = ['amount' => $allowance->amount];
-            }
-            if ($pivot) {
-                $allowance->employees()->syncWithoutDetaching($pivot);
-                $names[] = $allowance->name;
-                $enrolled = array_merge($enrolled, array_keys($pivot));
-            }
-        }
-
-        // HMO / company plan → per-employee tier + share.
-        if (! empty($data['hmo']['program_id'])) {
-            $hmo = BenefitProgram::where('kind', 'company')->find($data['hmo']['program_id']);
-            if ($hmo) {
-                $shares = collect($hmo->tiers ?? [])->keyBy('name');
-                // Slice B5.1 — the eligibility rule applied to allowances but not here, so a
-                // `regular`-only plan could be assigned to a probationary employee. The rule is a
-                // property of the programme, not of the kind of programme.
-                $eligibleForHmo = $this->eligibleEmployeeIds($hmo);
-                $pivot = [];
-                foreach ($data['hmo']['tiers'] ?? [] as $eid => $tierName) {
-                    if (! in_array((int) $eid, $employeeIds, true)) {
-                        continue;
-                    }
-                    if (! in_array((int) $eid, $eligibleForHmo, true)) {
-                        continue;
-                    }
-                    // Slice B5.2 — a tier name that isn't on the programme used to enrol the
-                    // employee with a NULL share, i.e. the company silently paying their whole
-                    // premium. A name we don't recognise is a mistake, so enrol nobody on it.
-                    if (! $shares->has($tierName)) {
-                        continue;
-                    }
-                    $pivot[(int) $eid] = [
-                        'tier' => $tierName,
-                        'employee_share' => $shares[$tierName]['employee_share'],
-                    ];
-                }
-                if ($pivot) {
-                    $hmo->employees()->syncWithoutDetaching($pivot);
-                    $names[] = $hmo->name;
-                    $enrolled = array_merge($enrolled, array_keys($pivot));
-                }
-            }
-        }
-
-        // Slice B5.5 — the trail said "Assigned X to 5 employee(s)" and nothing more, so there was
-        // no way to answer "who was put on this, and when?". `count($employeeIds)` was also the
-        // number SELECTED, not the number actually enrolled — with an eligibility rule in play
-        // those differ, and the log claimed more than happened.
-        $enrolled = array_values(array_unique($enrolled));
         $this->audit->log(
-            'enrolled',
-            'Benefits',
-            'Assigned ' . implode(', ', $names ?: ['benefits']) . ' to ' . count($enrolled) . ' of '
-                . count($employeeIds) . ' selected employee(s)'
-                . ($enrolled ? ' [ids: ' . implode(', ', $enrolled) . ']' : ''),
+            'removed', 'Benefits',
+            "Deleted benefit '{$program->name}'"
+                . ($program->kind === 'allowance'
+                    ? ' — ' . $covered . ' employee(s) stop being paid '
+                        . number_format((float) ($program->amount ?? 0), 2) . '/' . $program->frequency
+                    : ''),
+            $program,
         );
     }
 
@@ -175,28 +117,135 @@ class BenefitProgramService
     }
 
     /**
-     * The employee ids eligible for a program per its eligibility rule. 'regular'
-     * restricts to regular employees; 'all' and 'custom' leave the pick to HR.
+     * The employee ids a programme covers, per its rule.
+     *
+     * `custom` is the only mode that reads the enrolment pivot — for the others the rule IS the
+     * membership, so the answer is always current rather than a snapshot of who HR once picked.
      *
      * @return array<int, int>
      */
     public function eligibleEmployeeIds(BenefitProgram $program): array
     {
-        $q = Employee::query();
-        if ($program->eligibility === 'regular') {
-            $q->where('employment_status', 'regular');
+        if ($program->eligibility === 'custom') {
+            return $program->employees()->pluck('hr_employees.id')->map(fn ($id) => (int) $id)->all();
         }
 
-        return $q->pluck('id')->map(fn ($id) => (int) $id)->all();
+        return $this->ruleQuery($program)->pluck('id')->map(fn ($id) => (int) $id)->all();
     }
 
-    /** The active programs this employee is enrolled in — their "My Benefits" list. */
-    public function forEmployee(Employee $employee): Collection
+    /**
+     * The rule in words, for the audit trail. "Updated benefit 'Meal Allowance'" never said the
+     * one thing that decides who gets paid.
+     */
+    private function describeRule(BenefitProgram $program): string
     {
-        return $employee->benefitPrograms()
+        return match ($program->eligibility) {
+            'status' => 'for ' . implode(', ', $program->eligibility_statuses ?: ['no statuses']),
+            'management' => 'for management staff',
+            'custom' => 'for ' . $program->employees()->count() . ' named employee(s)',
+            default => 'for all employees',
+        };
+    }
+
+    /** How many employees the rule covers right now — what the cards and dialogs report. */
+    public function eligibleCount(BenefitProgram $program): int
+    {
+        return $program->eligibility === 'custom'
+            ? $program->employees()->count()
+            : $this->ruleQuery($program)->count();
+    }
+
+    /** Does this programme's rule cover this employee right now? */
+    public function covers(BenefitProgram $program, Employee $employee): bool
+    {
+        return match ($program->eligibility) {
+            'custom' => $program->employees()->whereKey($employee->id)->exists(),
+            'status' => in_array((string) $employee->employment_status, $program->eligibility_statuses ?? [], true),
+            'management' => (bool) $employee->is_management,
+            default => true, // 'all', and anything unrecognised — never narrower than intended
+        };
+    }
+
+    /**
+     * The active ALLOWANCE programmes this employee qualifies for right now.
+     *
+     * This is what payroll reads (via `AllowanceService`). Deliberately a fresh evaluation rather
+     * than a stored list: an employee who moves from probationary to regular starts or stops
+     * qualifying on their next payslip, with no enrolment to remember to update.
+     *
+     * COST. The catalogue is read ONCE per request and the rule is then evaluated in PHP — a
+     * payroll run walks every employee, and a query each would be an N+1 by construction (the
+     * performance test caught exactly that). The `custom` pivot is only read when a custom
+     * allowance actually exists, which today is never.
+     *
+     * @return Collection<int, BenefitProgram>
+     */
+    public function allowancesFor(Employee $employee): Collection
+    {
+        $catalogue = $this->activeAllowances();
+
+        if ($catalogue->isEmpty()) {
+            return new Collection;
+        }
+
+        $custom = $catalogue->contains(fn ($p) => $p->eligibility === 'custom')
+            ? $employee->benefitPrograms()->pluck('hr_benefit_programs.id')->all()
+            : [];
+
+        return $catalogue
+            ->filter(fn (BenefitProgram $p) => $p->eligibility === 'custom'
+                ? in_array((int) $p->id, array_map('intval', $custom), true)
+                : $this->covers($p, $employee))
+            ->values();
+    }
+
+    /**
+     * Per-request memo of the allowance catalogue. Cleared by every write below, so it cannot go
+     * stale within a request.
+     *
+     * @var Collection<int, BenefitProgram>|null
+     */
+    private ?Collection $allowanceMemo = null;
+
+    /** @return Collection<int, BenefitProgram> */
+    private function activeAllowances(): Collection
+    {
+        return $this->allowanceMemo ??= BenefitProgram::query()
+            ->where('kind', 'allowance')
             ->where('is_active', true)
             ->orderBy('name')
             ->get();
+    }
+
+    /**
+     * The active programs this employee has — their "My Benefits" list.
+     *
+     * Allowances come from the rule; company plans (HMO, retirement) come from the pivot, because
+     * those carry a per-employee tier and share that only an enrolment can hold.
+     */
+    public function forEmployee(Employee $employee): Collection
+    {
+        $plans = $employee->benefitPrograms()
+            ->where('is_active', true)
+            ->where('kind', '!=', 'allowance')
+            ->get();
+
+        return $this->allowancesFor($employee)
+            ->concat($plans)
+            ->sortBy('name')
+            ->values();
+    }
+
+    /** The employees a rule-based programme covers, as a query. */
+    private function ruleQuery(BenefitProgram $program): \Illuminate\Database\Eloquent\Builder
+    {
+        $q = Employee::query();
+
+        return match ($program->eligibility) {
+            'status' => $q->whereIn('employment_status', $program->eligibility_statuses ?: ['__none__']),
+            'management' => $q->where('is_management', true),
+            default => $q, // 'all'
+        };
     }
 
     /**
@@ -218,6 +267,11 @@ class BenefitProgramService
             'frequency' => $data['frequency'] ?? $existing?->frequency ?? 'monthly',
             'tax_treatment' => $data['tax_treatment'] ?? $existing?->tax_treatment ?? 'de_minimis',
             'eligibility' => $data['eligibility'] ?? $existing?->eligibility ?? 'all',
+            // Only meaningful in the `status` mode; cleared otherwise so a mode change can't leave
+            // a stale list behind that silently comes back if the mode is switched again.
+            'eligibility_statuses' => ($data['eligibility'] ?? $existing?->eligibility) === 'status'
+                ? array_values($data['eligibility_statuses'] ?? $existing?->eligibility_statuses ?? [])
+                : null,
             // HMO / company-plan config.
             'deduction_cadence' => $data['deduction_cadence'] ?? $existing?->deduction_cadence,
             'tiers' => array_key_exists('tiers', $data) ? $data['tiers'] : $existing?->tiers,

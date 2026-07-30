@@ -17,7 +17,7 @@ import {
   getDailyOverride,
   upsertDailyOverride,
 } from "@/modules/hr/api/attendance";
-import type { DayTask } from "@/modules/hr/types/attendance";
+import type { DayTask, LocationFix } from "@/modules/hr/types/attendance";
 
 const MY_KEY = ["hr", "me", "attendance"] as const;
 
@@ -30,7 +30,9 @@ export function useMyAttendance() {
 export function useClockIn() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: clockIn,
+    // Optional location — omitted entirely when the geofence is off, or when the browser
+    // couldn't produce a fix. Both are normal; the server treats them the same.
+    mutationFn: (fix?: LocationFix | null) => clockIn(fix),
     onSuccess: () => qc.invalidateQueries({ queryKey: MY_KEY }),
   });
 }

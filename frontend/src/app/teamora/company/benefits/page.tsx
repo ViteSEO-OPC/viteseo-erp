@@ -7,13 +7,12 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { formatPeso, formatDate } from "@/core/lib/format";
+import { statusLabel } from "@/modules/hr/types/employee";
 import { notify as toast } from "@/core/lib/notify";
 import { usePayrollSettings, useUpdatePayrollSettings } from "@/modules/hr/hooks/use-payroll";
 import { useContributionSettings } from "@/modules/hr/hooks/use-benefits";
 import { useBenefitPrograms } from "@/modules/hr/hooks/use-benefit-programs";
-import { useEmployees } from "@/modules/hr/hooks/use-employees";
-import { AssignBenefitsDialog } from "@/modules/hr/components/assign-benefits-dialog";
-import { EditAllowanceDialog } from "@/modules/hr/components/edit-allowance-dialog";
+import { AllowanceFormDialog } from "@/modules/hr/components/allowance-form-dialog";
 import { EditContributionDialog } from "@/modules/hr/components/edit-contribution-dialog";
 import { EditHmoDialog } from "@/modules/hr/components/edit-hmo-dialog";
 import {
@@ -40,15 +39,15 @@ const CATEGORY_LABEL: Record<string, string> = {
 export default function BenefitsPage() {
   const { data: settings } = useContributionSettings();
   const { data: programs, isLoading, isError } = useBenefitPrograms();
-  const { data: employees } = useEmployees();
 
   const allowances = (programs ?? []).filter((p) => p.kind === "allowance" && p.is_active);
   const company = (programs ?? []).filter((p) => p.kind === "company");
   const activeCount = (programs ?? []).filter((p) => p.is_active).length;
-  // Company plans with coverage tiers are assignable as an HMO / health plan.
-  const hmoPlans = company.filter((p) => p.tiers.length > 0);
 
-  const [assignOpen, setAssignOpen] = useState(false);
+  // One dialog for add and edit — `null` means a new allowance. "Add a Plan" was removed on
+  // 2026-07-29: a two-tab modal that assigned allowances, created plans inline AND enrolled people
+  // in an HMO was doing too many unrelated jobs to be understood at a glance.
+  const [allowanceOpen, setAllowanceOpen] = useState(false);
   const [editAllowance, setEditAllowance] = useState<BenefitProgram | null>(null);
   const [editContribution, setEditContribution] = useState<string | null>(null);
   const [editHmo, setEditHmo] = useState<BenefitProgram | null>(null);
@@ -61,12 +60,6 @@ export default function BenefitsPage() {
           programs
             ? `${activeCount} active ${activeCount === 1 ? "plan" : "plans"} · government contributions are system-managed`
             : "Allowances, company benefits, and system-managed government contributions."
-        }
-        actions={
-          <Button onClick={() => setAssignOpen(true)}>
-            <Plus />
-            Add a Plan
-          </Button>
         }
       />
 
@@ -88,7 +81,19 @@ export default function BenefitsPage() {
 
         {/* Allowances — HR editable. */}
         <section className="space-y-3">
-          <h2 className="text-h3 font-bold text-foreground">Allowances</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-h3 font-bold text-foreground">Allowances</h2>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditAllowance(null);
+                setAllowanceOpen(true);
+              }}
+            >
+              <Plus />
+              Add allowance
+            </Button>
+          </div>
 
           {/* The tax-free ceiling belongs with the allowances it governs, not on the payroll
               page. It is stored on the payroll settings because that is what payroll reads. */}
@@ -98,11 +103,18 @@ export default function BenefitsPage() {
           ) : isError ? (
             <p className="text-sm text-destructive">Could not load benefits. Please refresh.</p>
           ) : allowances.length === 0 ? (
-            <EmptyHint text="No allowances yet. Use “Add a Plan” to assign one." />
+            <EmptyHint text="No allowances yet. Use “Add allowance” to create one." />
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
               {allowances.map((p) => (
-                <AllowanceCard key={p.id} program={p} onEdit={() => setEditAllowance(p)} />
+                <AllowanceCard
+                  key={p.id}
+                  program={p}
+                  onEdit={() => {
+                    setEditAllowance(p);
+                    setAllowanceOpen(true);
+                  }}
+                />
               ))}
             </div>
           )}
@@ -123,21 +135,18 @@ export default function BenefitsPage() {
         </section>
       </div>
 
-      <AssignBenefitsDialog
-        open={assignOpen}
-        onOpenChange={setAssignOpen}
-        employees={employees ?? []}
-        allowances={allowances}
-        hmoPlans={hmoPlans}
-      />
       <EditContributionDialog
         type={editContribution}
         onOpenChange={(o) => !o && setEditContribution(null)}
       />
 
-      <EditAllowanceDialog
+      <AllowanceFormDialog
+        open={allowanceOpen}
         program={editAllowance}
-        onOpenChange={(o) => !o && setEditAllowance(null)}
+        onOpenChange={(o) => {
+          setAllowanceOpen(o);
+          if (!o) setEditAllowance(null);
+        }}
       />
       <EditHmoDialog program={editHmo} onOpenChange={(o) => !o && setEditHmo(null)} />
     </div>
@@ -278,7 +287,9 @@ function AllowanceCard({ program, onEdit }: { program: BenefitProgram; onEdit: (
       <p className="mt-4 text-3xl font-bold text-foreground">
         {program.amount != null ? formatPeso(program.amount) : "—"}
       </p>
-      <p className="mt-1 text-xs text-muted-foreground">Per month · added to payroll</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Per month · added to payroll · {eligibilitySummary(program)}
+      </p>
     </div>
   );
 }
@@ -316,6 +327,24 @@ function CompanyBenefitCard({ program, onEdit }: { program: BenefitProgram; onEd
       )}
     </div>
   );
+}
+
+/**
+ * Who the allowance is for, in one line. The count is computed from the rule server-side, so a
+ * status change or a new hire is reflected without anyone re-saving the allowance.
+ */
+function eligibilitySummary(program: BenefitProgram): string {
+  const n = program.covered_count;
+  const who =
+    program.eligibility === "status"
+      ? program.eligibility_statuses.map(statusLabel).join(", ")
+      : program.eligibility === "management"
+        ? "management"
+        : program.eligibility === "custom"
+          ? "specific employees"
+          : "everyone";
+
+  return `${who} (${n} ${n === 1 ? "person" : "people"})`;
 }
 
 function EditButton({ onClick }: { onClick: () => void }) {

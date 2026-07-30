@@ -6,6 +6,7 @@ import type {
   EmployeeDocument,
   MyDocument,
   SalaryHistoryEntry,
+  StatutoryPreviewRow,
 } from "@/modules/hr/types/employee";
 
 export async function getEmployees(search?: string): Promise<Employee[]> {
@@ -45,6 +46,16 @@ export async function uploadEmployeePhoto(id: number, photo: File): Promise<Empl
 
 export async function deleteEmployeePhoto(id: number): Promise<Employee> {
   const res = await apiClient.delete(`/hr/employees/${id}/photo`);
+  return res.data.data;
+}
+
+/**
+ * What the government rates would charge this employee, beside any per-employee override on
+ * their profile (Slice B7). Its own request rather than a field on the employee record: it
+ * resolves the dated rate versions, which the employee LIST has no reason to pay for.
+ */
+export async function getStatutoryPreview(id: number): Promise<StatutoryPreviewRow[]> {
+  const res = await apiClient.get(`/hr/employees/${id}/statutory-preview`);
   return res.data.data;
 }
 

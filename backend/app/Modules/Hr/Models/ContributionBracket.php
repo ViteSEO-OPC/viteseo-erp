@@ -15,11 +15,14 @@ class ContributionBracket extends Model
 {
     protected $table = 'hr_contribution_brackets';
 
-    protected $fillable = ['contribution_version_id', 'min_salary', 'msc'];
+    protected $fillable = ['contribution_version_id', 'min_salary', 'msc', 'employer_add_on'];
 
     protected $casts = [
         'min_salary' => 'decimal:2',
         'msc' => 'decimal:2',
+        // Slice B8 — the employer-only EC amount printed for this band. Null ⇒ fall back to the
+        // version's `fixed_employer_add_on` / `add_on_min_salary` rule.
+        'employer_add_on' => 'decimal:2',
     ];
 
     public function version(): BelongsTo

@@ -2,7 +2,9 @@
 
 namespace App\Modules\Hr\Http\Requests;
 
+use App\Modules\Hr\Models\BenefitProgram;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreBenefitProgramRequest extends FormRequest
 {
@@ -28,7 +30,12 @@ class StoreBenefitProgramRequest extends FormRequest
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'frequency' => ['sometimes', 'string', 'max:20'],
             'tax_treatment' => ['sometimes', 'in:de_minimis,taxable'],
-            'eligibility' => ['sometimes', 'in:all,regular,custom'],
+            // Who the programme is for. `status` carries the list below; `custom` carries
+            // `employee_ids`. The old `regular` value is gone — it was the only status the model
+            // could express, and is now `status` with one entry.
+            'eligibility' => ['sometimes', Rule::in(BenefitProgram::ELIGIBILITY_MODES)],
+            'eligibility_statuses' => ['sometimes', 'nullable', 'array'],
+            'eligibility_statuses.*' => ['string', 'max:40'],
             'deduction_cadence' => ['sometimes', 'nullable', 'in:per_cutoff,monthly'],
             'tiers' => ['sometimes', 'nullable', 'array'],
             'tiers.*.name' => ['required', 'string', 'max:40'],
@@ -58,6 +65,31 @@ class StoreBenefitProgramRequest extends FormRequest
             if ($kind === 'allowance' && $this->has('amount') && $this->input('amount') === null) {
                 $v->errors()->add('amount', 'An allowance needs an amount — it would pay nothing.');
             }
+
+            $this->validateEligibility($v);
         });
+    }
+
+    /**
+     * A rule that covers nobody is the failure mode worth blocking: the allowance saves cleanly,
+     * appears on the page, and quietly pays no one.
+     */
+    protected function validateEligibility(\Illuminate\Contracts\Validation\Validator $v): void
+    {
+        $mode = $this->input('eligibility');
+
+        if ($mode === 'status' && empty($this->input('eligibility_statuses'))) {
+            $v->errors()->add(
+                'eligibility_statuses',
+                'Choose at least one employment status, or this allowance covers nobody.',
+            );
+        }
+
+        if ($mode === 'custom' && empty($this->input('employee_ids'))) {
+            $v->errors()->add(
+                'employee_ids',
+                'Choose at least one employee, or this allowance covers nobody.',
+            );
+        }
     }
 }
