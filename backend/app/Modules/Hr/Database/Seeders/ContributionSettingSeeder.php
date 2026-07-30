@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Database\Seeders;
 
 use App\Modules\Hr\Models\ContributionSetting;
+use App\Modules\Hr\Models\ContributionVersion;
 use Illuminate\Database\Seeder;
 
 /**
@@ -41,6 +42,24 @@ class ContributionSettingSeeder extends Seeder
             ContributionSetting::firstOrCreate(
                 ['type' => $s['type']],
                 ['config' => $s['config'], 'is_active' => true],
+            );
+
+            // Slice B3a — payroll reads DATED VERSIONS, not this row's `config`. On a fresh
+            // install the backfill migration runs before this seeder and finds nothing, so
+            // without seeding an opening version every statutory deduction would be ₱0.
+            $c = $s['config'];
+            ContributionVersion::firstOrCreate(
+                ['type' => $s['type'], 'effective_from' => '2000-01-01'],
+                [
+                    'basis' => 'percentage',
+                    'employee_rate' => $c['rate'] ?? 0,
+                    'employer_rate' => $c['employer_rate'] ?? 0,
+                    'salary_floor' => $c['salary_floor'] ?? null,
+                    'salary_cap' => $c['salary_cap'] ?? null,
+                    'employee_amount_cap' => $c['cap'] ?? null,
+                    'employer_amount_cap' => $c['employer_cap'] ?? null,
+                    'note' => $c['note'] ?? 'Opening version — seeded defaults.',
+                ],
             );
         }
     }

@@ -13,6 +13,7 @@ import {
   getViolations,
   getMyViolations,
   resolveViolation,
+  reopenViolation,
   getDailyOverride,
   upsertDailyOverride,
 } from "@/modules/hr/api/attendance";
@@ -97,6 +98,17 @@ export function useResolveViolation() {
   return useMutation({
     mutationFn: (id: number) => resolveViolation(id),
     // A resolved flag changes the roster too, so refresh both.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["hr", "violations"] });
+      qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+    },
+  });
+}
+
+export function useReopenViolation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => reopenViolation(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hr", "violations"] });
       qc.invalidateQueries({ queryKey: ["hr", "attendance"] });

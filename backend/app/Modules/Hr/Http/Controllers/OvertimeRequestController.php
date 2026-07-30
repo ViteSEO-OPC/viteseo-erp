@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreOvertimeRequestRequest;
 use App\Modules\Hr\Http\Resources\OvertimeRequestResource;
 use App\Modules\Hr\Models\OvertimeRequest;
@@ -84,6 +85,15 @@ class OvertimeRequestController extends Controller
 
         return OvertimeRequestResource::make(
             $this->service->cancel($overtimeRequest, $request->user(), $data['reason']),
+        )->response();
+    }
+
+    // POST /api/v1/hr/overtime-requests/{overtimeRequest}/reopen — HR only: undo the
+    // decision and put the request back in the queue (cancel() ends it instead).
+    public function reopen(ReopenRequest $request, OvertimeRequest $overtimeRequest): JsonResponse
+    {
+        return OvertimeRequestResource::make(
+            $this->service->reopen($overtimeRequest, $request->validated('reason')),
         )->response();
     }
 }

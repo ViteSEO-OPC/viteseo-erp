@@ -17,7 +17,9 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { PayslipDocument } from "@/modules/hr/components/payslip-document";
 import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -29,9 +31,11 @@ import {
   useSetPayrollRunLock,
   useRunPayroll,
   useMarkPayslipDone,
+  useReopenPayslip,
   usePayrollSettings,
   useUpdatePayrollSettings,
   useThirteenthMonth,
+  useHrPayslip,
 } from "@/modules/hr/hooks/use-payroll";
 import type {
   PayrollBreakdownRow,
@@ -53,14 +57,19 @@ export default function PayrollPage() {
   const { data: runs } = usePayrollRuns();
   const runMut = useRunPayroll();
   const markDoneMut = useMarkPayslipDone();
+  const reopenPayslipMut = useReopenPayslip();
   const { data: thirteenth } = useThirteenthMonth();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [thirteenthOpen, setThirteenthOpen] = useState(false);
   const [viewRunId, setViewRunId] = useState<number | null>(null);
+  // The payslip opened from a breakdown row — the same document the employee sees.
+  const [payslipId, setPayslipId] = useState<number | null>(null);
   const [masked, setMasked] = useState(false);
   const [selectedFreq, setSelectedFreq] = useState<string>();
+
+  const { data: openPayslip } = useHrPayslip(payslipId ?? undefined);
 
   const peso = (v: number) => (masked ? "₱ ••••" : formatPeso(v));
 
@@ -77,7 +86,6 @@ export default function PayrollPage() {
     frequency?: string;
     deduction_timing?: string;
     tax_timing?: string;
-    deminimis_annual_cap?: number | null;
   }) {
     if (!settings) return;
     try {
@@ -154,7 +162,9 @@ export default function PayrollPage() {
     }
   }
 
-  const columns: Column<PayrollBreakdownRow>[] = [
+  // Built per run, not once: the same table renders the current run and a past one from
+  // the history modal, and whether a disbursement can be undone depends on that run's lock.
+  const makeColumns = (locked: boolean): Column<PayrollBreakdownRow>[] => [
     { header: "Employee", cell: (r) => <span className="font-semibold text-foreground">{r.employee}</span> },
     { header: "Department", cell: (r) => r.department ?? "—" },
     { header: "Gross", cell: (r) => peso(r.gross) },
@@ -165,7 +175,11 @@ export default function PayrollPage() {
       header: "Actions",
       align: "right",
       cell: (r) => (
-        <div className="flex items-center justify-end gap-2">
+        // The row itself opens the payslip, so the controls inside it must not.
+        <div
+          className="flex items-center justify-end gap-2"
+          onClick={(e) => e.stopPropagation()}
+        >
           <Button
             size="xs"
             variant="ghost"
@@ -176,9 +190,24 @@ export default function PayrollPage() {
             <span className="sr-only">Download payslip PDF</span>
           </Button>
           {r.status === "disbursed" ? (
-            <span className="inline-flex items-center gap-1 text-caption font-medium text-success">
-              <Check className="size-3.5" /> Disbursed
-            </span>
+            <>
+              <span className="inline-flex items-center gap-1 text-caption font-medium text-success">
+                <Check className="size-3.5" /> Disbursed
+              </span>
+              {locked ? null : (
+                <ReopenAction
+                  size="xs"
+                  label="Undo"
+                  title="Reverse this disbursement?"
+                  confirmLabel="Reverse payslip"
+                  successMessage="Disbursement reversed"
+                  subject={`${r.employee}'s ${peso(r.net)} payslip`}
+                  description={`${r.employee}'s ${peso(r.net)} payslip goes back to computed — it counts as unpaid again.`}
+                  consequence="Any reimbursements it settled go back to scheduled, and the run can be recomputed."
+                  onReopen={(reason) => reopenPayslipMut.mutateAsync({ id: r.id, reason })}
+                />
+              )}
+            </>
           ) : (
             <Button size="xs" variant="outline" disabled={markDoneMut.isPending} onClick={() => onMarkDone(r)}>
               Mark as disbursed
@@ -334,35 +363,6 @@ export default function PayrollPage() {
           />
           <p className="text-caption text-muted-foreground">When income tax is withheld.</p>
         </div>
-        {/* Slice 10 — allowances are tax-free only up to this. Blank = no ceiling. */}
-        <div className="space-y-1.5 sm:col-span-3">
-          <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
-            Tax-free allowance ceiling (per year)
-          </p>
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            inputMode="decimal"
-            defaultValue={settings?.deminimis_annual_cap ?? ""}
-            disabled={!settings || updateSettingsMut.isPending}
-            placeholder="No ceiling — allowances are fully tax-free"
-            className="h-9 w-full max-w-xs rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 sm:w-64"
-            onBlur={(e) => {
-              const raw = e.target.value.trim();
-              const next = raw === "" ? null : Number(raw);
-              if (next !== (settings?.deminimis_annual_cap ?? null)) {
-                saveSettings({ deminimis_annual_cap: next });
-              }
-            }}
-          />
-          <p className="text-caption text-muted-foreground">
-            Food, transport and load allowances are de-minimis (tax-free) up to this much a year;
-            anything above it is taxed as compensation. Leave blank for no ceiling — that is the
-            current behaviour. The BIR reference figure is ₱90,000, but the correct number for
-            your mix of benefits is yours to set.
-          </p>
-        </div>
       </div>
 
       {/* Pay group selector */}
@@ -416,7 +416,12 @@ export default function PayrollPage() {
         </div>
         {detail?.breakdown ? (
           <>
-            <DataTable columns={columns} rows={detail.breakdown} rowKey={(_r, i) => i} />
+            <DataTable
+              columns={makeColumns(!!detail.is_locked)}
+              rows={detail.breakdown}
+              rowKey={(_r, i) => i}
+              onRowClick={(r) => setPayslipId(r.id)}
+            />
             {/* Slice 8 — what these amounts were computed with. */}
             <RunRulesSnapshot snapshot={detail.policy_snapshot} />
           </>
@@ -491,7 +496,12 @@ export default function PayrollPage() {
                 <StatCard label="Net Payout" value={peso(viewRun.total_net)} />
               </div>
               <div className="max-h-[55vh] overflow-auto">
-                <DataTable columns={columns} rows={viewRun.breakdown} rowKey={(_r, i) => i} />
+                <DataTable
+                  columns={makeColumns(!!viewRun.is_locked)}
+                  rows={viewRun.breakdown}
+                  rowKey={(_r, i) => i}
+                  onRowClick={(r) => setPayslipId(r.id)}
+                />
               </div>
             </>
           ) : (
@@ -508,6 +518,37 @@ export default function PayrollPage() {
               <Button variant="outline">Close</Button>
             </DialogClose>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* One employee's payslip — opened by clicking a breakdown row. Identical to what the
+          employee sees, plus the employer share (which their own copy omits). */}
+      <Dialog open={payslipId != null} onOpenChange={(o) => !o && setPayslipId(null)}>
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto p-0 sm:max-w-3xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>
+              {openPayslip ? `Payslip · ${openPayslip.employee.name}` : "Payslip"}
+            </DialogTitle>
+            <DialogDescription>
+              The payslip as the employee receives it, with the employer share added.
+            </DialogDescription>
+          </DialogHeader>
+          {openPayslip ? (
+            <>
+              <PayslipDocument payslip={openPayslip} variant="hr" />
+              <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+                <Button variant="outline" onClick={() => onPayslipPdf(openPayslip.id)}>
+                  <FileDown />
+                  Download PDF
+                </Button>
+                <DialogClose asChild>
+                  <Button variant="outline">Close</Button>
+                </DialogClose>
+              </div>
+            </>
+          ) : (
+            <p className="py-16 text-center text-sm text-muted-foreground">Loading payslip…</p>
+          )}
         </DialogContent>
       </Dialog>
 

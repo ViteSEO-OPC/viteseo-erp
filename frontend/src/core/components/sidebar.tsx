@@ -139,6 +139,7 @@ export function Sidebar({
   variant,
   canSwitchView = false,
   onSwitchView,
+  avatar,
 }: {
   variant: ShellVariant;
   /**
@@ -150,6 +151,11 @@ export function Sidebar({
   canSwitchView?: boolean;
   /** Perform the switch. Without it the control does nothing, so it isn't shown. */
   onSwitchView?: () => void;
+  /**
+   * The signed-in user's face, when the owning portal has one to show — it knows
+   * where a profile picture comes from, this doesn't. Falls back to initials.
+   */
+  avatar?: React.ReactNode;
 }) {
   const pathname = usePathname();
   const { user, roles, permissions, employee, logout, hasRole } = useAuth();
@@ -263,9 +269,11 @@ export function Sidebar({
           onClick={() => setMenuOpen((o) => !o)}
           className="flex w-full items-center gap-3 rounded-card bg-sidebar-accent px-3 py-3 text-left transition-colors hover:bg-sidebar-accent/70"
         >
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-foreground">
-            {user ? initials(user.name) : "?"}
-          </span>
+          {avatar ?? (
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-foreground">
+              {user ? initials(user.name) : "?"}
+            </span>
+          )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-white">
               {user?.name ?? "—"}

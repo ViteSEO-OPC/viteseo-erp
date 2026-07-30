@@ -214,7 +214,7 @@ class RecruitmentService
     }
 
     /** The email types a candidate can be sent, and which stage each belongs to. */
-    public const EMAIL_TYPES = ['online_interview', 'final_interview', 'offer', 'rejection'];
+    public const EMAIL_TYPES = ['online_interview', 'final_interview', 'assessment', 'offer', 'rejection'];
 
     /** The email a candidate at this stage can receive, or null if none. */
     public static function emailTypeForStage(?string $stage): ?string
@@ -222,6 +222,7 @@ class RecruitmentService
         return match ($stage) {
             'online_interview' => 'online_interview',
             'final_interview' => 'final_interview',
+            'assessment' => 'assessment',
             'hired' => 'offer',
             'rejected' => 'rejection',
             default => null,
@@ -229,12 +230,18 @@ class RecruitmentService
     }
 
     /**
-     * Send a stage-specific email to a candidate (online/final interview invite, job
-     * offer, or rejection). The type must match the candidate's current stage. Records
-     * the type in `emails_sent` so the board shows per-stage "sent" state. Never fails
-     * the action if the mail transport is down.
+     * Send a stage-specific email to a candidate (online/final interview invite,
+     * assessment, job offer, or rejection). The type must match the candidate's current
+     * stage. Records the type in `emails_sent` so the board shows per-stage "sent" state.
+     * Never fails the action if the mail transport is down.
+     *
+     * The assessment email is the one HR composes: `$compose` carries the link,
+     * instructions and deadline, which are stored on the candidate as the record of what
+     * was sent (and so a re-send can repeat it).
+     *
+     * @param  array{link?: ?string, instructions?: ?string, deadline?: ?string}  $compose
      */
-    public function sendEmail(Candidate $candidate, string $type): Candidate
+    public function sendEmail(Candidate $candidate, string $type, array $compose = []): Candidate
     {
         if (! in_array($type, self::EMAIL_TYPES, true)) {
             throw ValidationException::withMessages(['type' => ['Unknown email type.']]);
@@ -247,6 +254,26 @@ class RecruitmentService
         if (self::emailTypeForStage($candidate->stage) !== $type) {
             throw ValidationException::withMessages([
                 'type' => ["This email doesn't match the candidate's current stage."],
+            ]);
+        }
+
+        if ($type === 'assessment') {
+            $link = trim((string) ($compose['link'] ?? '')) ?: null;
+            $instructions = trim((string) ($compose['instructions'] ?? '')) ?: null;
+
+            if (! $link && ! $instructions) {
+                throw ValidationException::withMessages([
+                    'instructions' => ['Give the candidate a link, instructions, or both.'],
+                ]);
+            }
+
+            // Persisted before sending so the mail renders from the same values HR will
+            // see on the candidate afterwards.
+            $candidate->update([
+                'assessment_link' => $link,
+                'assessment_instructions' => $instructions,
+                'assessment_deadline' => $compose['deadline'] ?? null,
+                'assessment_sent_at' => now(),
             ]);
         }
 
@@ -302,6 +329,7 @@ class RecruitmentService
         return match ($type) {
             'online_interview' => 'online interview',
             'final_interview' => 'final interview',
+            'assessment' => 'assessment',
             'offer' => 'offer',
             'rejection' => 'rejection',
             default => $type,

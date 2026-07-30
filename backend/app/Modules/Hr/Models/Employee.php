@@ -3,11 +3,13 @@
 namespace App\Modules\Hr\Models;
 
 use App\Models\User;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
 
 class Employee extends Model
 {
@@ -21,6 +23,7 @@ class Employee extends Model
         'manager_id',
         'work_schedule_id',
         'employee_no',
+        'photo_path',
         'job_title',
         'employment_status',
         'employment_type',
@@ -46,6 +49,11 @@ class Employee extends Model
         'sss_contribution',
         'pagibig_contribution',
         'philhealth_contribution',
+        // Membership NUMBERS for the payslip header — not the peso overrides above.
+        'tin',
+        'sss_number',
+        'philhealth_number',
+        'pagibig_number',
         'food_allowance',
         'transportation_allowance',
         'load_allowance',
@@ -68,7 +76,8 @@ class Employee extends Model
         'current_address',
         'mothers_maiden_name',
         'fathers_name',
-        'siblings_name',
+        'siblings',
+        'number_of_siblings',
         'high_school',
         'college_course',
         'university',
@@ -84,6 +93,9 @@ class Employee extends Model
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
         'is_management' => 'boolean',
+        // One entry per named sibling: [{ name, gender }].
+        'siblings' => 'array',
+        'number_of_siblings' => 'integer',
         'custom_workdays' => 'array',
         'custom_grace_minutes' => 'integer',
         'custom_unpaid_break_minutes' => 'integer',
@@ -94,6 +106,21 @@ class Employee extends Model
     public function isManagement(): bool
     {
         return (bool) $this->is_management;
+    }
+
+    /**
+     * Browser-facing URL for the profile picture, or null to fall back to initials.
+     *
+     * Lives here rather than in a Resource because the face belongs everywhere a person
+     * is listed — a dozen resources embed an identity block, and each building the URL
+     * itself is a dozen chances to build it differently. Deliberately not in `$appends`:
+     * every payload that carries it names it.
+     */
+    protected function photoUrl(): Attribute
+    {
+        return Attribute::get(
+            fn () => $this->photo_path ? Storage::disk('public')->url($this->photo_path) : null,
+        );
     }
 
     public function user(): BelongsTo

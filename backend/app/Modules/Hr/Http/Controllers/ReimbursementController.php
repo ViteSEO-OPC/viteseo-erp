@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreReimbursementRequest;
 use App\Modules\Hr\Http\Resources\ReimbursementResource;
 use App\Modules\Hr\Models\Reimbursement;
@@ -72,6 +73,14 @@ class ReimbursementController extends Controller
     {
         return ReimbursementResource::make(
             $this->service->markPaid($reimbursement, $request->user()),
+        )->response();
+    }
+
+    // POST .../reopen — undo the last mark (paid → approved, decided → pending).
+    public function reopen(ReopenRequest $request, Reimbursement $reimbursement): JsonResponse
+    {
+        return ReimbursementResource::make(
+            $this->service->reopen($reimbursement, $request->validated('reason')),
         )->response();
     }
 }

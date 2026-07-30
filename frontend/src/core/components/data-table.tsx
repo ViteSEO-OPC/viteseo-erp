@@ -14,8 +14,6 @@ export interface Column<T> {
   className?: string;
 }
 
-const DEFAULT_PAGE_SIZES = [10, 25, 50, 100];
-
 /** "in_progress" → "In Progress". Used for auto-generated status-filter labels. */
 function humanize(s: string): string {
   return s.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -59,7 +57,11 @@ function autoSearchText(row: unknown): string {
  * Styled list table per the Style Guide: uppercase gray column headers (13px),
  * rows with a bold title + gray subtitle pattern (see PrimaryCell), right-aligned
  * action columns, wrapped in a white 21px card. Supports client-side pagination
- * via `pageSize` (>0 enables it; 0 or undefined = show all rows).
+ * via `pageSize` (>0 enables it; 0 = show all rows).
+ *
+ * The page size is fixed by the caller — there is deliberately no rows-per-page
+ * selector, because letting readers pick 100 made these tables taller than the
+ * viewport on every screen.
  */
 export function DataTable<T>({
   columns,
@@ -70,7 +72,6 @@ export function DataTable<T>({
   onRowClick,
   rowClassName,
   pageSize = 10,
-  pageSizeOptions = DEFAULT_PAGE_SIZES,
   title,
   titleRight,
   needsAction,
@@ -91,8 +92,6 @@ export function DataTable<T>({
   rowClassName?: (row: T) => string | undefined;
   /** Rows per page. 0 = no pagination (show all). Default 10. */
   pageSize?: number;
-  /** Allowed rows-per-page values for the selector. */
-  pageSizeOptions?: number[];
   /** Optional card title, rendered as a header strip inside the table card. */
   title?: React.ReactNode;
   /** Optional right-aligned content in the title strip (e.g. a period label). */
@@ -123,7 +122,6 @@ export function DataTable<T>({
   toolbar?: React.ReactNode;
 }) {
   const [page, setPage] = useState(1);
-  const [size, setSize] = useState(pageSize);
   const [query, setQuery] = useState("");
   const [statusValue, setStatusValue] = useState("all");
 
@@ -170,16 +168,15 @@ export function DataTable<T>({
     return need.length && rest.length ? [...need, ...rest] : searchedRows;
   }, [searchedRows, needsAction]);
 
-  // Reset to page 1 whenever the row set or page size changes.
   const totalRows = orderedRows.length;
-  const usePaging = size > 0 && totalRows > size;
+  const usePaging = pageSize > 0 && totalRows > pageSize;
 
   const { pageRows, totalPages } = useMemo(() => {
     if (!usePaging) return { pageRows: orderedRows, totalPages: 1 };
-    const tp = Math.max(1, Math.ceil(totalRows / size));
-    const start = (Math.min(page, tp) - 1) * size;
-    return { pageRows: orderedRows.slice(start, start + size), totalPages: tp };
-  }, [orderedRows, usePaging, page, size, totalRows]);
+    const tp = Math.max(1, Math.ceil(totalRows / pageSize));
+    const start = (Math.min(page, tp) - 1) * pageSize;
+    return { pageRows: orderedRows.slice(start, start + pageSize), totalPages: tp };
+  }, [orderedRows, usePaging, page, pageSize, totalRows]);
 
   // Clamp page if rows shrink below current page.
   if (usePaging && page > totalPages && totalPages > 0) {
@@ -292,20 +289,8 @@ export function DataTable<T>({
 
       {usePaging && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-          <div className="flex items-center gap-2 text-caption text-muted-foreground">
-            <span>Rows per page</span>
-            <select
-              value={size}
-              onChange={(e) => { setSize(Number(e.target.value)); setPage(1); }}
-              className="h-7 rounded-md border border-input bg-card px-1.5 text-caption text-foreground outline-none focus-visible:border-ring"
-            >
-              {pageSizeOptions.map((n) => (
-                <option key={n} value={n}>{n}</option>
-              ))}
-            </select>
-            <span className="hidden sm:inline">
-              · Showing {(page - 1) * size + 1}–{Math.min(page * size, totalRows)} of {totalRows}
-            </span>
+          <div className="text-caption text-muted-foreground">
+            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalRows)} of {totalRows}
           </div>
 
           <div className="flex items-center gap-1">

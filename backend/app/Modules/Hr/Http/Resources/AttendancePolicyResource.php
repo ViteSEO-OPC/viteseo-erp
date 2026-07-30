@@ -25,6 +25,7 @@ class AttendancePolicyResource extends JsonResource
             'missing_clockout_mode' => $this->missing_clockout_mode,
 
             'early_arrival_mode' => $this->early_arrival_mode,
+            'block_early_clock_in' => (bool) $this->block_early_clock_in,
             'overtime_mode' => $this->overtime_mode,
             'overtime_threshold_minutes' => (int) $this->overtime_threshold_minutes,
 

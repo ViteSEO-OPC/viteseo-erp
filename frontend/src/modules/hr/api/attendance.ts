@@ -69,12 +69,22 @@ export async function resolveViolation(id: number): Promise<Violation> {
   return res.data.data;
 }
 
+/** Undo a resolve, putting the flag back in play for the escalation ladder. */
+export async function reopenViolation(id: number): Promise<Violation> {
+  const res = await apiClient.post(`/hr/violations/${id}/reopen`);
+  return res.data.data;
+}
+
 export interface AdjustAttendanceInput {
   employee_id: number;
   work_date: string;
-  // Status is derived server-side from the times — not sent by the client.
   time_in: string | null;
   time_out: string | null;
+  /**
+   * Slice 16 — null/omitted derives the status from the times (the old behaviour). A value
+   * here is an explicit HR override that wins over both the clock and the leave table.
+   */
+  status?: string | null;
   note: string | null;
 }
 

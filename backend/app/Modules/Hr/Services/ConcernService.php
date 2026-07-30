@@ -140,6 +140,33 @@ class ConcernService
     }
 
     /**
+     * Undo the last mark: resolved → under review, under review → pending. Any meeting
+     * already scheduled off this concern stays — reopening the case does not unbook it.
+     */
+    public function reopen(Concern $concern, ?string $reason = null): Concern
+    {
+        if ($concern->status === 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['This concern is still pending — there is nothing to undo.'],
+            ]);
+        }
+
+        $next = $concern->status === 'resolved' ? 'under_review' : 'pending';
+
+        $concern->update(['status' => $next, 'resolved_at' => null]);
+
+        // ANONYMITY: reference only — never the submitter's identity.
+        $this->audit->log(
+            'reopened',
+            'Concerns',
+            "Concern {$concern->reference_no} reopened as {$next}" . ($reason ? " — {$reason}" : ''),
+            $concern,
+        );
+
+        return $concern->load(['employee.user', 'meetings']);
+    }
+
+    /**
      * Schedule a meeting from a concern. A NAMED concern's meeting carries the
      * employee_id; an ANONYMOUS concern's meeting leaves it NULL and is routed to
      * the submitter through the concern link only.

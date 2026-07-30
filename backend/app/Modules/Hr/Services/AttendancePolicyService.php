@@ -29,6 +29,8 @@ class AttendancePolicyService
         'undertime_deduction_mode' => 'none',
         'missing_clockout_mode' => 'no_deduction_flag_for_review',
         'early_arrival_mode' => 'none',
+        // Off = today's behaviour: an early punch is accepted and recorded as-is.
+        'block_early_clock_in' => false,
         'overtime_mode' => 'approved_only',
         'overtime_threshold_minutes' => 0,
         // Premium & overtime rates (Phase 0) — seeded to the DOLE legal minimums (no-op).

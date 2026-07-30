@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Eye, EyeOff } from "lucide-react";
+import { Check, Eye, EyeOff, Paperclip } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
@@ -23,8 +23,15 @@ import {
   type StatusFilterOption,
 } from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
+import { DetailFields, DetailNote } from "@/modules/hr/components/request-detail-dialog";
 import { formatDate, formatDateTime } from "@/core/lib/format";
-import { useConcerns, useSetConcernStatus, useScheduleMeeting } from "@/modules/hr/hooks/use-concerns";
+import {
+  useConcerns,
+  useSetConcernStatus,
+  useScheduleMeeting,
+  useReopenConcern,
+} from "@/modules/hr/hooks/use-concerns";
 import { concernCategoryLabel, type Concern } from "@/modules/hr/types/concern";
 import { DateTimePicker } from "@/modules/hr/ui/date-time-picker";
 
@@ -37,9 +44,12 @@ const CONCERN_STATUS_OPTIONS: StatusFilterOption[] = [
 
 export default function ConcernsPage() {
   const { data: rows, isLoading, isError } = useConcerns();
-  const [selected, setSelected] = useState<Concern | null>(null);
+  // Track the id, not the row: the open modal then follows the list as HR marks the
+  // concern under review, resolves it or undoes that, instead of freezing on click.
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(rows ?? [], status);
+  const selected = (rows ?? []).find((c) => c.id === selectedId) ?? null;
 
   const columns: Column<Concern>[] = [
     {
@@ -85,7 +95,7 @@ export default function ConcernsPage() {
             columns={columns}
             rows={visible}
             rowKey={(c) => c.id}
-            onRowClick={(c) => setSelected(c)}
+            onRowClick={(c) => setSelectedId(c.id)}
             needsAction={(c) => c.status !== "resolved"}
             // HR sees the submitter (even anonymous), so name is searchable here — this
             // data is HR-only. The 'anonymous' keyword still matches anonymous concerns.
@@ -99,7 +109,7 @@ export default function ConcernsPage() {
         )}
       </div>
 
-      <ConcernDetail concern={selected} onOpenChange={(o) => !o && setSelected(null)} />
+      <ConcernDetail concern={selected} onOpenChange={(o) => !o && setSelectedId(null)} />
     </div>
   );
 }
@@ -144,6 +154,7 @@ function ConcernDetail({
 }) {
   const statusMut = useSetConcernStatus();
   const scheduleMut = useScheduleMeeting();
+  const reopenMut = useReopenConcern();
 
   // Inline schedule form, revealed by the "Schedule meeting" toggle.
   const [scheduling, setScheduling] = useState(false);
@@ -237,9 +248,42 @@ function ConcernDetail({
               </div>
             )}
 
-            <div className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3.5 py-3 text-sm text-foreground">
-              {concern.description}
-            </div>
+            <DetailFields
+              fields={[
+                // Category is already in the header line, per the Figma.
+                { label: "Person reported", value: concern.reported_person },
+                { label: "Submitted", value: formatDateTime(concern.submitted_at) },
+                {
+                  label: "Resolved",
+                  value: concern.resolved_at ? formatDateTime(concern.resolved_at) : undefined,
+                },
+              ]}
+            />
+
+            <DetailNote label="What happened" text={concern.description} />
+
+            {concern.attachments.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                  Evidence ({concern.attachments.length})
+                </p>
+                <ul className="space-y-1">
+                  {concern.attachments.map((a) => (
+                    <li key={a.url}>
+                      <a
+                        href={a.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+                      >
+                        <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{a.name}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {concern.meetings.length > 0 && (
               <p className="text-xs text-muted-foreground">
@@ -292,6 +336,20 @@ function ConcernDetail({
                 >
                   Mark resolved
                 </Button>
+              )}
+              {concern.status !== "pending" && (
+                <ReopenAction
+                  className="h-10 text-[13px]"
+                  label={concern.status === "resolved" ? "Undo resolve" : "Back to pending"}
+                  successMessage="Concern reopened"
+                  subject={`Concern ${concern.reference_no}`}
+                  description={
+                    concern.status === "resolved"
+                      ? `Concern ${concern.reference_no} goes back to under review and the resolved date is cleared.`
+                      : `Concern ${concern.reference_no} goes back to pending.`
+                  }
+                  onReopen={(reason) => reopenMut.mutateAsync({ id: concern.id, reason })}
+                />
               )}
             </div>
 

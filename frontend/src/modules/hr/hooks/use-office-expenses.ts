@@ -8,6 +8,7 @@ import {
   updateOfficeExpense,
   approveOfficeExpense,
   rejectOfficeExpense,
+  reopenOfficeExpense,
   deleteOfficeExpense,
 } from "@/modules/hr/api/office-expenses";
 import type { OfficeExpenseInput } from "@/modules/hr/types/office-expense";
@@ -48,6 +49,14 @@ export function useRejectOfficeExpense() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) => rejectOfficeExpense(id, reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+export function useReopenOfficeExpense() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenOfficeExpense(id, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 }

@@ -23,6 +23,7 @@ class OvertimeRequestService
         private readonly ScheduleService $schedule,
         private readonly HolidayService $holidays,
         private readonly AttendancePolicyService $policy,
+        private readonly PayrollFreezeService $freeze,
     ) {}
 
     /**
@@ -264,6 +265,52 @@ class OvertimeRequestService
             'Overtime',
             "Cancelled {$name}'s " . ($wasApproved ? 'approved ' : '')
                 . 'overtime request for ' . $request->work_date->format('M j') . " — {$reason}",
+            $request,
+        );
+
+        return $request;
+    }
+
+    /**
+     * Undo the decision — back to pending, so HR can rule on it again. Unlike cancel()
+     * (a final "this OT is off"), a reopened request is still live. Reopening an approved
+     * one takes the OT pay back out of the next recompute, so it is refused once payroll
+     * has settled that date; a rejected or cancelled one has nothing to take back.
+     */
+    public function reopen(OvertimeRequest $request, ?string $reason = null): OvertimeRequest
+    {
+        if ($request->status === 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['This request is still pending — there is nothing to undo.'],
+            ]);
+        }
+
+        if ($request->status === 'approved') {
+            $this->freeze->assertOpen(
+                $request->employee_id,
+                $request->work_date->toDateString(),
+                null,
+                'reopen this overtime request',
+            );
+        }
+
+        $request->update([
+            'status' => 'pending',
+            'review_note' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+            'cancelled_at' => null,
+            'cancelled_by' => null,
+            'cancel_reason' => null,
+        ]);
+
+        $request->load(['employee.user', 'reviewer', 'canceller']);
+        $name = $request->employee->user?->name ?? $request->employee->name;
+        $this->audit->log(
+            'reopened',
+            'Overtime',
+            "Reopened {$name}'s overtime request for " . $request->work_date->format('M j')
+                . ($reason ? " — {$reason}" : ''),
             $request,
         );
 

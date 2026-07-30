@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreDocumentRequestRequest;
 use App\Modules\Hr\Http\Resources\DocumentRequestResource;
 use App\Modules\Hr\Models\DocumentRequest;
@@ -58,6 +59,15 @@ class DocumentRequestController extends Controller
 
         return DocumentRequestResource::make(
             $this->service->reject($documentRequest, $request->user(), $data['reason'] ?? null),
+        )->response();
+    }
+
+    // POST /hr/document-requests/{documentRequest}/reopen — HR only: undo the decision
+    // and re-lock the employee's access (the attached file is discarded).
+    public function reopen(ReopenRequest $request, DocumentRequest $documentRequest): JsonResponse
+    {
+        return DocumentRequestResource::make(
+            $this->service->reopen($documentRequest, $request->validated('reason')),
         )->response();
     }
 }

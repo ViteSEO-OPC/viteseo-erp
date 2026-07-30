@@ -88,7 +88,8 @@ export interface AttendancePolicy {
   undertime_deduction_mode: UndertimeDeductionMode;
   missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct
 
-  early_arrival_mode: EarlyArrivalMode;
+  early_arrival_mode: EarlyArrivalMode; // what early minutes are WORTH (inert for now)
+  block_early_clock_in: boolean; // whether an early punch is REFUSED outright
   overtime_mode: OvertimeMode; // takes effect when OT requests ship
   overtime_threshold_minutes: number;
 

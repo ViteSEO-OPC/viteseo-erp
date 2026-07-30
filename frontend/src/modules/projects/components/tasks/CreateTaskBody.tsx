@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createTaskSchema, useValidatedForm } from '@/core/forms';
-import { Button, Field, Input, PlusIcon, PriorityBadge, Select, Textarea, TrashIcon } from '@/core/ui';
+import { Button, Field, Input, PlusIcon, PriorityBadge, SegmentedControl, SegmentedItem, Select, Textarea, TrashIcon } from '@/core/ui';
 import type { CreateTaskPayload, Priority, ProjectStatus } from '../../types';
 import { projectsApi } from '../../api';
-import { useCreateTask, useGroup, useGroups, useUsers } from '../../hooks';
+import { useCreateTask, useGroup, useGroups, useProject } from '../../hooks';
 import {
   AiBanner,
   CoAssigneePanel,
@@ -35,9 +35,11 @@ export function CreateTaskBody({
   projectSelector?: React.ReactNode;
 }) {
   const create = useCreateTask(projectId);
-  const usersQuery = useUsers();
+  // Assignees are restricted to this project's members — not the whole user
+  // directory. (Group members come from the selected group, see below.)
+  const projectQuery = useProject(projectId);
   const groupsQuery = useGroups(projectId);
-  const users = usersQuery.data ?? [];
+  const users = useMemo(() => projectQuery.data?.members ?? [], [projectQuery.data]);
   const groups = groupsQuery.data?.data ?? [];
 
   const [effort, setEffort] = useState(5);
@@ -442,22 +444,18 @@ export function CreateTaskBody({
       {/* RIGHT */}
       <div className="space-y-5">
         {/* Assignment target */}
-        <div className="inline-flex rounded-lg border border-line p-1">
+        <SegmentedControl>
           {(['individual', 'group'] as const).map((t) => (
-            <button
+            <SegmentedItem
               key={t}
-              type="button"
+              active={assignmentType === t}
               onClick={() => setValue('assignment_type', t)}
-              className={`rounded-md px-4 py-1.5 text-sm font-bold capitalize transition-colors ${
-                assignmentType === t
-                  ? 'bg-white text-[#0f766e] shadow-sm'
-                  : 'text-ink-soft hover:text-ink'
-              }`}
+              className="capitalize"
             >
               {t}
-            </button>
+            </SegmentedItem>
           ))}
-        </div>
+        </SegmentedControl>
 
         {assignmentType === 'individual' ? (
           <div>

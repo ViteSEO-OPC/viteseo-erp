@@ -23,7 +23,7 @@ export function OverdueBadge({ className = '' }: { className?: string }) {
     <span
       className={`inline-flex items-center gap-1 rounded-full bg-danger-soft px-2 py-0.5 text-[11px] font-bold text-danger ${className}`}
     >
-      <span aria-hidden>⚠</span> Overdue
+      <span aria-hidden>⚠</span> OVERDUE
     </span>
   );
 }

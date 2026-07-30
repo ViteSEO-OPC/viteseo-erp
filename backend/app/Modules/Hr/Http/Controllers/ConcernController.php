@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreConcernRequest;
 use App\Modules\Hr\Http\Resources\ConcernResource;
 use App\Modules\Hr\Http\Resources\MeetingResource;
@@ -57,6 +58,15 @@ class ConcernController extends Controller
         $data = $request->validate(['status' => ['required', 'in:under_review,resolved']]);
 
         return ConcernResource::make($this->service->setStatus($concern, $data['status'], $request->user()))->response();
+    }
+
+    // POST /hr/concerns/{concern}/reopen — HR only: step the status back
+    // (resolved → under review, under review → pending).
+    public function reopen(ReopenRequest $request, Concern $concern): JsonResponse
+    {
+        return ConcernResource::make(
+            $this->service->reopen($concern, $request->validated('reason')),
+        )->response();
     }
 
     // POST /hr/concerns/{concern}/meetings — schedule a meeting (HR only).

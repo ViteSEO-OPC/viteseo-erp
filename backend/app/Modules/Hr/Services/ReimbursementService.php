@@ -23,7 +23,10 @@ class ReimbursementService
         'other',
     ];
 
-    public function __construct(private readonly AuditService $audit) {}
+    public function __construct(
+        private readonly AuditService $audit,
+        private readonly PayrollFreezeService $freeze,
+    ) {}
 
     /** HR sees all claims; everyone else sees only their own. */
     public function list(User $user): Collection
@@ -119,6 +122,51 @@ class ReimbursementService
             'updated',
             'Reimbursement',
             "Marked {$employeeName}'s claim paid",
+            $claim,
+        );
+
+        return $claim;
+    }
+
+    /**
+     * Undo the last mark, one step back: paid → approved, approved/rejected → pending.
+     *
+     * A `scheduled` claim is refused outright — payroll has folded it into a payslip that
+     * hasn't gone out yet, so the run is the thing to change, not the claim. A `paid` claim
+     * that payroll settled is refused while that payslip stands (reverse the payslip first);
+     * one HR marked paid by hand has no payslip behind it and reverses freely.
+     */
+    public function reopen(Reimbursement $claim, ?string $reason = null): Reimbursement
+    {
+        $this->assertStatus($claim, ['approved', 'rejected', 'paid'], 'undo');
+
+        $wasPaid = $claim->status === 'paid';
+
+        if ($wasPaid) {
+            $this->freeze->assertPayslipOpen(
+                $claim->payroll_run_id,
+                $claim->employee_id,
+                'undo this payment',
+            );
+        }
+
+        // Paid steps back to approved (still owed); a decision steps back to undecided.
+        $claim->update($wasPaid ? ['status' => 'approved'] : [
+            'status' => 'pending',
+            'review_note' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+        ]);
+
+        $claim->load(['employee.user', 'reviewer']);
+        $employeeName = $claim->employee->user?->name ?? $claim->employee->name;
+        $this->audit->log(
+            'reopened',
+            'Reimbursement',
+            ($wasPaid
+                ? "Reversed the payment on {$employeeName}'s {$claim->category} claim"
+                : "Reopened {$employeeName}'s {$claim->category} claim")
+                . ($reason ? " — {$reason}" : ''),
             $claim,
         );
 

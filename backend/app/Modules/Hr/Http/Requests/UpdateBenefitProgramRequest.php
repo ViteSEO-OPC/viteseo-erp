@@ -22,6 +22,8 @@ class UpdateBenefitProgramRequest extends FormRequest
             'category' => ['sometimes', 'required', 'string', 'max:50'],
             'kind' => ['sometimes', 'in:allowance,company'],
             'amount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            // Slice B5.4 — see withValidator(): an allowance must keep an amount. The check lives
+            // there because `kind` may be absent on a PATCH and has to fall back to the saved row.
             'description' => ['sometimes', 'nullable', 'string', 'max:1000'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'frequency' => ['sometimes', 'string', 'max:20'],
@@ -44,5 +46,19 @@ class UpdateBenefitProgramRequest extends FormRequest
             'employee_ids' => ['sometimes', 'array'],
             'employee_ids.*' => ['integer', 'exists:hr_employees,id'],
         ];
+    }
+
+    public function withValidator(\Illuminate\Contracts\Validation\Validator $validator): void
+    {
+        $validator->after(function ($v) {
+            // Slice B5.4 — an allowance with no amount renders as ₱0 and pays ₱0, with nothing to
+            // say it was never finished. On a PATCH `kind` is usually absent, so the saved row
+            // decides: clearing the amount of an existing allowance must fail too.
+            $program = $this->route('benefitProgram');
+            $kind = $this->input('kind') ?? $program?->kind ?? 'allowance';
+            if ($kind === 'allowance' && $this->has('amount') && $this->input('amount') === null) {
+                $v->errors()->add('amount', 'An allowance needs an amount — it would pay nothing.');
+            }
+        });
     }
 }

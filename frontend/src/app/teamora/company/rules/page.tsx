@@ -296,6 +296,7 @@ function AttendancePolicyEditor() {
 
   // Early arrival & overtime.
   const [earlyArrival, setEarlyArrival] = useState<EarlyArrivalMode>(policy?.early_arrival_mode ?? "none");
+  const [blockEarlyClockIn, setBlockEarlyClockIn] = useState(policy?.block_early_clock_in ?? false);
   const [overtimeMode, setOvertimeMode] = useState<OvertimeMode>(policy?.overtime_mode ?? "approved_only");
   const [overtimeThreshold, setOvertimeThreshold] = useState(String(policy?.overtime_threshold_minutes ?? 0));
 
@@ -645,6 +646,28 @@ function AttendancePolicyEditor() {
         title="Early arrival &amp; overtime"
         description="Clocking in early, and how extra time past the schedule is treated."
       >
+        <SubHeading>Clocking in early</SubHeading>
+        <CheckBox
+          checked={blockEarlyClockIn}
+          onChange={setBlockEarlyClockIn}
+          label="Only let staff time in once their shift has started"
+        />
+        <Hint>
+          {blockEarlyClockIn ? (
+            <>
+              The <strong>Time in</strong> button stays disabled until each person&apos;s own
+              scheduled start, and the server refuses an early punch either way. Staff with no
+              schedule assigned are held to the default one. On a day that isn&apos;t one of their
+              workdays they can still clock in whenever — there&apos;s no shift that day to be early
+              for. Lateness is unaffected: this only sets the earliest they may start.
+            </>
+          ) : (
+            "Anyone can time in as early as they like, and the punch is recorded at the actual time. Turn this on to hold everyone to their scheduled start."
+          )}
+        </Hint>
+        <SubDivider />
+
+        <SubHeading>What early minutes are worth</SubHeading>
         <div className="flex flex-wrap items-end gap-4">
           <FieldSelect
             id="pol-early"
@@ -704,7 +727,13 @@ function AttendancePolicyEditor() {
           // Slice 14 — early_arrival_mode is deliberately NOT sent: the control is disabled
           // (no engine reads it) and the API now rejects anything but "none", so echoing a
           // stored value back would 422 and block HR from saving the overtime settings.
-          onClick={() => saveCard("early_ot", { overtime_mode: overtimeMode, overtime_threshold_minutes: Number(overtimeThreshold) })}
+          onClick={() =>
+            saveCard("early_ot", {
+              block_early_clock_in: blockEarlyClockIn,
+              overtime_mode: overtimeMode,
+              overtime_threshold_minutes: Number(overtimeThreshold),
+            })
+          }
         />
       </PolicySection>
 

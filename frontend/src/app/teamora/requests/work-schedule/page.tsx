@@ -6,10 +6,15 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
-import { Avatar } from "@/core/components/avatar";
+import { EmployeeCell } from "@/modules/hr/components/employee-cell";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
 import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
+import { ReopenAction } from "@/modules/hr/components/reopen-action";
+import {
+  RequestDetailDialog,
+  type DetailField,
+} from "@/modules/hr/components/request-detail-dialog";
 import {
   DataTable,
   type Column,
@@ -25,22 +30,26 @@ import {
   useApproveLeaveRequest,
   useRejectLeaveRequest,
   useCancelLeaveRequest,
+  useReopenLeaveRequest,
 } from "@/modules/hr/hooks/use-leave";
 import {
   useHalfDayRequests,
   useApproveHalfDayRequest,
   useRejectHalfDayRequest,
+  useReopenHalfDayRequest,
 } from "@/modules/hr/hooks/use-half-day";
 import {
   useEarlyOutRequests,
   useApproveEarlyOutRequest,
   useRejectEarlyOutRequest,
+  useReopenEarlyOutRequest,
 } from "@/modules/hr/hooks/use-early-out";
 import {
   useOvertimeRequests,
   useApproveOvertimeRequest,
   useRejectOvertimeRequest,
   useCancelOvertimeRequest,
+  useReopenOvertimeRequest,
 } from "@/modules/hr/hooks/use-overtime";
 import type {
   LeaveRequest,
@@ -57,15 +66,32 @@ const REQUEST_STATUS_OPTIONS: StatusFilterOption[] = [
   { value: "rejected", label: "Rejected" },
 ];
 
+/**
+ * Rows carry decision buttons AND open the detail modal, so a press on a button must
+ * not also count as a press on the row.
+ */
+function RowActions({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+      {children}
+    </div>
+  );
+}
+
 export default function TimeLeavePage() {
   const { data: requests, isLoading, isError } = useLeaveRequests();
   const approveMut = useApproveLeaveRequest();
   const rejectMut = useRejectLeaveRequest();
   const cancelMut = useCancelLeaveRequest();
+  const reopenMut = useReopenLeaveRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: LeaveRequest } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<LeaveRequest | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
+  // Held by id, then read back from the live list, so deciding inside the modal
+  // updates what the modal shows instead of leaving stale status on screen.
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (requests ?? []).find((r) => r.id === detailId) ?? null;
 
   // HR may cancel an approved leave only before it starts (Manila day), matching
   // the backend rule. Dates are stored as Y-m-d, so a string compare is safe.
@@ -105,24 +131,71 @@ export default function TimeLeavePage() {
     (rejectMut.isPending && rejectMut.variables?.id) ||
     null;
 
+  const dates = (r: LeaveRequest) =>
+    r.start_date === r.end_date
+      ? formatDate(r.start_date)
+      : `${formatDate(r.start_date)} – ${formatDate(r.end_date)}`;
+
+  /** The same decisions on the row and in the detail modal. */
+  function leaveActions(r: LeaveRequest) {
+    if (r.status === "pending") {
+      return (
+        <>
+          <Button
+            size="sm"
+            variant="success"
+            disabled={busyId === r.id}
+            onClick={() => setReview({ mode: "approve", r })}
+          >
+            <Check />
+            Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={busyId === r.id}
+            onClick={() => setReview({ mode: "reject", r })}
+          >
+            <X />
+            Reject
+          </Button>
+        </>
+      );
+    }
+    return (
+      <>
+        {canCancel(r) ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-danger text-danger hover:bg-danger/10 hover:text-danger"
+            disabled={cancelMut.isPending && cancelMut.variables?.id === r.id}
+            onClick={() => setCancelTarget(r)}
+          >
+            <Ban />
+            Cancel
+          </Button>
+        ) : null}
+        <ReopenAction
+          subject={`${r.employee.name}'s ${r.leave_type.name}`}
+          consequence={
+            r.status === "approved"
+              ? `The ${r.days} day(s) deducted from their balance will be credited back.`
+              : undefined
+          }
+          onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+        />
+      </>
+    );
+  }
+
   const columns: Column<LeaveRequest>[] = [
     {
       header: "Employee",
-      cell: (r) => (
-        <div className="flex items-center gap-2.5">
-          <Avatar name={r.employee.name ?? "?"} colorSeed={r.employee.id} size="sm" />
-          <span className="font-semibold text-foreground">{r.employee.name}</span>
-        </div>
-      ),
+      cell: (r) => <EmployeeCell employee={r.employee} />,
     },
     { header: "Type", cell: (r) => r.leave_type.name },
-    {
-      header: "Dates",
-      cell: (r) =>
-        r.start_date === r.end_date
-          ? formatDate(r.start_date)
-          : `${formatDate(r.start_date)} – ${formatDate(r.end_date)}`,
-    },
+    { header: "Dates", cell: (r) => dates(r) },
     { header: "Days", cell: (r) => r.days },
     {
       header: "Reason",
@@ -132,46 +205,31 @@ export default function TimeLeavePage() {
     {
       header: "Action",
       align: "right",
-      cell: (r) =>
-        r.status === "pending" ? (
-          <div className="flex justify-end gap-1.5">
-            <Button
-              size="sm"
-              variant="success"
-              disabled={busyId === r.id}
-              onClick={() => setReview({ mode: "approve", r })}
-            >
-              <Check />
-              Approve
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              disabled={busyId === r.id}
-              onClick={() => setReview({ mode: "reject", r })}
-            >
-              <X />
-              Reject
-            </Button>
-          </div>
-        ) : canCancel(r) ? (
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-danger text-danger hover:bg-danger/10 hover:text-danger"
-              disabled={cancelMut.isPending && cancelMut.variables?.id === r.id}
-              onClick={() => setCancelTarget(r)}
-            >
-              <Ban />
-              Cancel
-            </Button>
-          </div>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
+      cell: (r) => <RowActions>{leaveActions(r)}</RowActions>,
     },
   ];
+
+  const detailFields: DetailField[] = detail
+    ? [
+        { label: "Leave type", value: detail.leave_type.name },
+        { label: "Dates", value: dates(detail) },
+        {
+          label: "Days",
+          value: detail.is_half_day
+            ? `${detail.days} (half day · ${detail.half_day_period ?? "—"})`
+            : detail.days,
+        },
+        {
+          label: "Deducted from",
+          value:
+            detail.status === "approved"
+              ? "Their leave credits"
+              : detail.status === "cancelled"
+                ? "Credits returned"
+                : undefined,
+        },
+      ]
+    : [];
 
   return (
     <div className="p-4 sm:p-8">
@@ -204,6 +262,7 @@ export default function TimeLeavePage() {
             columns={columns}
             rows={visible}
             rowKey={(r) => r.id}
+            onRowClick={(r) => setDetailId(r.id)}
             needsAction={(r) => r.status === "pending"}
             getSearchText={(r) =>
               `${r.employee.name ?? ""} ${r.leave_type.name} ${r.reason} ${r.status}`
@@ -236,6 +295,42 @@ export default function TimeLeavePage() {
         onConfirm={onCancelConfirm}
       />
 
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title={detail.leave_type.name}
+          status={detail.status}
+          employee={detail.employee}
+          submitted={detail.created_at}
+          fields={detailFields}
+          note={{ label: "Reason", text: detail.reason }}
+          decision={{
+            by: detail.reviewed_by,
+            at: detail.reviewed_at,
+            note: detail.review_note,
+          }}
+          actions={leaveActions(detail)}
+        >
+          {detail.cancelled_at && (
+            <div className="space-y-1.5">
+              <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                Cancelled
+              </p>
+              <p className="text-caption text-muted-foreground">
+                {detail.cancelled_by ? `${detail.cancelled_by} · ` : ""}
+                {formatDate(detail.cancelled_at)}
+              </p>
+              {detail.cancel_reason && (
+                <p className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3.5 py-3 text-sm text-foreground">
+                  {detail.cancel_reason}
+                </p>
+              )}
+            </div>
+          )}
+        </RequestDetailDialog>
+      )}
+
       <HalfDaySection />
 
       <EarlyOutSection />
@@ -251,9 +346,12 @@ function HalfDaySection() {
   const { data: requests, isLoading } = useHalfDayRequests();
   const approveMut = useApproveHalfDayRequest();
   const rejectMut = useRejectHalfDayRequest();
+  const reopenMut = useReopenHalfDayRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: HalfDayRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (requests ?? []).find((r) => r.id === detailId) ?? null;
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -276,15 +374,36 @@ function HalfDaySection() {
     (rejectMut.isPending && rejectMut.variables?.id) ||
     null;
 
+  function halfDayActions(r: HalfDayRequest) {
+    if (r.status === "pending") {
+      return (
+        <>
+          <Button size="sm" variant="success" disabled={busyId === r.id} onClick={() => setReview({ mode: "approve", r })}>
+            <Check />
+            Approve
+          </Button>
+          <Button size="sm" variant="destructive" disabled={busyId === r.id} onClick={() => setReview({ mode: "reject", r })}>
+            <X />
+            Reject
+          </Button>
+        </>
+      );
+    }
+    return (
+      <ReopenAction
+        subject={`${r.employee.name}'s half-day`}
+        consequence={
+          r.status === "approved" ? "The 0.5-day deduction comes off this pay period." : undefined
+        }
+        onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+      />
+    );
+  }
+
   const columns: Column<HalfDayRequest>[] = [
     {
       header: "Employee",
-      cell: (r) => (
-        <div className="flex items-center gap-2.5">
-          <Avatar name={r.employee.name ?? "?"} colorSeed={r.employee.id} size="sm" />
-          <span className="font-semibold text-foreground">{r.employee.name}</span>
-        </div>
-      ),
+      cell: (r) => <EmployeeCell employee={r.employee} />,
     },
     { header: "Date", cell: (r) => formatDate(r.work_date) },
     { header: "Half", cell: (r) => r.period },
@@ -294,21 +413,7 @@ function HalfDaySection() {
     {
       header: "Action",
       align: "right",
-      cell: (r) =>
-        r.status === "pending" ? (
-          <div className="flex justify-end gap-1.5">
-            <Button size="sm" variant="success" disabled={busyId === r.id} onClick={() => setReview({ mode: "approve", r })}>
-              <Check />
-              Approve
-            </Button>
-            <Button size="sm" variant="destructive" disabled={busyId === r.id} onClick={() => setReview({ mode: "reject", r })}>
-              <X />
-              Reject
-            </Button>
-          </div>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
+      cell: (r) => <RowActions>{halfDayActions(r)}</RowActions>,
     },
   ];
 
@@ -326,6 +431,7 @@ function HalfDaySection() {
             columns={columns}
             rows={visible}
             rowKey={(r) => r.id}
+            onRowClick={(r) => setDetailId(r.id)}
             needsAction={(r) => r.status === "pending"}
             getSearchText={(r) =>
               `${r.employee.name ?? ""} ${r.period} ${r.reason} ${r.status}`
@@ -346,6 +452,29 @@ function HalfDaySection() {
         subject={review ? `${review.r.employee.name}'s half-day (${formatDate(review.r.work_date)} ${review.r.period})` : ""}
         onConfirm={onConfirm}
       />
+
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title="Half-Day"
+          status={detail.status}
+          employee={detail.employee}
+          submitted={detail.created_at}
+          fields={[
+            { label: "Date", value: formatDate(detail.work_date) },
+            { label: "Half", value: detail.period },
+            { label: "Pay", value: <span className="text-danger">Unpaid · 0.5 day</span> },
+          ]}
+          note={{ label: "Reason", text: detail.reason }}
+          decision={{
+            by: detail.reviewed_by,
+            at: detail.reviewed_at,
+            note: detail.review_note,
+          }}
+          actions={halfDayActions(detail)}
+        />
+      )}
     </div>
   );
 }
@@ -356,9 +485,12 @@ function EarlyOutSection() {
   const { data: requests, isLoading } = useEarlyOutRequests();
   const approveMut = useApproveEarlyOutRequest();
   const rejectMut = useRejectEarlyOutRequest();
+  const reopenMut = useReopenEarlyOutRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: EarlyOutRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (requests ?? []).find((r) => r.id === detailId) ?? null;
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -381,15 +513,36 @@ function EarlyOutSection() {
     (rejectMut.isPending && rejectMut.variables?.id) ||
     null;
 
+  function earlyOutActions(r: EarlyOutRequest) {
+    if (r.status === "pending") {
+      return (
+        <>
+          <Button size="sm" variant="success" disabled={busyId === r.id} onClick={() => setReview({ mode: "approve", r })}>
+            <Check />
+            Approve
+          </Button>
+          <Button size="sm" variant="destructive" disabled={busyId === r.id} onClick={() => setReview({ mode: "reject", r })}>
+            <X />
+            Reject
+          </Button>
+        </>
+      );
+    }
+    return (
+      <ReopenAction
+        subject={`${r.employee.name}'s early-out`}
+        consequence={
+          r.status === "approved" ? "The undertime deduction comes off this pay period." : undefined
+        }
+        onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+      />
+    );
+  }
+
   const columns: Column<EarlyOutRequest>[] = [
     {
       header: "Employee",
-      cell: (r) => (
-        <div className="flex items-center gap-2.5">
-          <Avatar name={r.employee.name ?? "?"} colorSeed={r.employee.id} size="sm" />
-          <span className="font-semibold text-foreground">{r.employee.name}</span>
-        </div>
-      ),
+      cell: (r) => <EmployeeCell employee={r.employee} />,
     },
     { header: "Date", cell: (r) => formatDate(r.work_date) },
     { header: "Leaves at", cell: (r) => r.early_out_time },
@@ -399,21 +552,7 @@ function EarlyOutSection() {
     {
       header: "Action",
       align: "right",
-      cell: (r) =>
-        r.status === "pending" ? (
-          <div className="flex justify-end gap-1.5">
-            <Button size="sm" variant="success" disabled={busyId === r.id} onClick={() => setReview({ mode: "approve", r })}>
-              <Check />
-              Approve
-            </Button>
-            <Button size="sm" variant="destructive" disabled={busyId === r.id} onClick={() => setReview({ mode: "reject", r })}>
-              <X />
-              Reject
-            </Button>
-          </div>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
+      cell: (r) => <RowActions>{earlyOutActions(r)}</RowActions>,
     },
   ];
 
@@ -432,6 +571,7 @@ function EarlyOutSection() {
             columns={columns}
             rows={visible}
             rowKey={(r) => r.id}
+            onRowClick={(r) => setDetailId(r.id)}
             needsAction={(r) => r.status === "pending"}
             getSearchText={(r) =>
               `${r.employee.name ?? ""} ${r.early_out_time} ${r.reason} ${r.status}`
@@ -452,6 +592,29 @@ function EarlyOutSection() {
         subject={review ? `${review.r.employee.name}'s early-out (${formatDate(review.r.work_date)} ${review.r.early_out_time})` : ""}
         onConfirm={onConfirm}
       />
+
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title="Early-Out"
+          status={detail.status}
+          employee={detail.employee}
+          submitted={detail.created_at}
+          fields={[
+            { label: "Date", value: formatDate(detail.work_date) },
+            { label: "Leaves at", value: detail.early_out_time },
+            { label: "Pay", value: <span className="text-danger">Unpaid · undertime</span> },
+          ]}
+          note={{ label: "Reason", text: detail.reason }}
+          decision={{
+            by: detail.reviewed_by,
+            at: detail.reviewed_at,
+            note: detail.review_note,
+          }}
+          actions={earlyOutActions(detail)}
+        />
+      )}
     </div>
   );
 }
@@ -463,12 +626,15 @@ function OvertimeSection() {
   const approveMut = useApproveOvertimeRequest();
   const rejectMut = useRejectOvertimeRequest();
   const cancelMut = useCancelOvertimeRequest();
+  const reopenMut = useReopenOvertimeRequest();
   const [review, setReview] = useState<{
     mode: "approve" | "reject" | "cancel";
     r: OvertimeRequest;
   } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = (requests ?? []).find((r) => r.id === detailId) ?? null;
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -495,15 +661,48 @@ function OvertimeSection() {
     (cancelMut.isPending && cancelMut.variables?.id) ||
     null;
 
+  function overtimeActions(r: OvertimeRequest) {
+    if (r.status === "pending") {
+      return (
+        <>
+          <Button size="sm" variant="success" disabled={busyId === r.id} onClick={() => setReview({ mode: "approve", r })}>
+            <Check />
+            Approve
+          </Button>
+          <Button size="sm" variant="destructive" disabled={busyId === r.id} onClick={() => setReview({ mode: "reject", r })}>
+            <X />
+            Reject
+          </Button>
+        </>
+      );
+    }
+    return (
+      <>
+        {r.status === "approved" ? (
+          // Slice 6 — an approved request is no longer frozen: HR can undo overtime
+          // that isn't going to happen, before payroll pays it.
+          <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => setReview({ mode: "cancel", r })}>
+            <X />
+            Cancel
+          </Button>
+        ) : null}
+        <ReopenAction
+          subject={`${r.employee.name}'s overtime`}
+          consequence={
+            r.status === "approved"
+              ? `The ${r.hours.toFixed(1)} overtime hours stop counting toward pay.`
+              : undefined
+          }
+          onReopen={(reason) => reopenMut.mutateAsync({ id: r.id, reason })}
+        />
+      </>
+    );
+  }
+
   const columns: Column<OvertimeRequest>[] = [
     {
       header: "Employee",
-      cell: (r) => (
-        <div className="flex items-center gap-2.5">
-          <Avatar name={r.employee.name ?? "?"} colorSeed={r.employee.id} size="sm" />
-          <span className="font-semibold text-foreground">{r.employee.name}</span>
-        </div>
-      ),
+      cell: (r) => <EmployeeCell employee={r.employee} />,
     },
     { header: "Date", cell: (r) => formatDate(r.work_date) },
     {
@@ -517,28 +716,7 @@ function OvertimeSection() {
     {
       header: "Action",
       align: "right",
-      cell: (r) =>
-        r.status === "pending" ? (
-          <div className="flex justify-end gap-1.5">
-            <Button size="sm" variant="success" disabled={busyId === r.id} onClick={() => setReview({ mode: "approve", r })}>
-              <Check />
-              Approve
-            </Button>
-            <Button size="sm" variant="destructive" disabled={busyId === r.id} onClick={() => setReview({ mode: "reject", r })}>
-              <X />
-              Reject
-            </Button>
-          </div>
-        ) : r.status === "approved" ? (
-          // Slice 6 — an approved request is no longer frozen: HR can undo overtime
-          // that isn't going to happen, before payroll pays it.
-          <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => setReview({ mode: "cancel", r })}>
-            <X />
-            Cancel
-          </Button>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
+      cell: (r) => <RowActions>{overtimeActions(r)}</RowActions>,
     },
   ];
 
@@ -557,6 +735,7 @@ function OvertimeSection() {
             columns={columns}
             rows={visible}
             rowKey={(r) => r.id}
+            onRowClick={(r) => setDetailId(r.id)}
             needsAction={(r) => r.status === "pending"}
             getSearchText={(r) => `${r.employee.name ?? ""} ${r.hours} ${r.reason} ${r.status}`}
             searchPlaceholder="Search employee, reason…"
@@ -585,6 +764,36 @@ function OvertimeSection() {
         subject={review ? `${review.r.employee.name}'s overtime (${formatDate(review.r.work_date)} · ${review.r.hours.toFixed(1)} hrs)` : ""}
         onConfirm={onConfirm}
       />
+
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title="Overtime"
+          status={detail.status}
+          employee={detail.employee}
+          submitted={detail.created_at}
+          fields={[
+            { label: "Date", value: formatDate(detail.work_date) },
+            {
+              label: "Window",
+              value:
+                detail.time_from && detail.time_to
+                  ? `${detail.time_from} – ${detail.time_to}`
+                  : undefined,
+            },
+            { label: "Hours", value: `${detail.hours.toFixed(1)} hrs` },
+            { label: "Pay", value: <span className="text-success">Paid · overtime</span> },
+          ]}
+          note={{ label: "Reason", text: detail.reason }}
+          decision={{
+            by: detail.reviewed_by,
+            at: detail.reviewed_at,
+            note: detail.review_note,
+          }}
+          actions={overtimeActions(detail)}
+        />
+      )}
     </div>
   );
 }

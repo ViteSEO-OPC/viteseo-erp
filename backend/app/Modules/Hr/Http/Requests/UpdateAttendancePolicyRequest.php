@@ -44,6 +44,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // anywhere in the codebase. The Rules page already shows this control disabled;
             // this stops the API from accepting them behind its back.
             'early_arrival_mode' => ['sometimes', 'in:none'],
+            // Whether an early punch is REFUSED, which is a separate question from what
+            // early minutes are worth (early_arrival_mode above). AttendanceService::clockIn
+            // reads this one.
+            'block_early_clock_in' => ['sometimes', 'boolean'],
             'overtime_mode' => ['sometimes', 'in:none,approved_only,auto_after_threshold'],
             'overtime_threshold_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
 

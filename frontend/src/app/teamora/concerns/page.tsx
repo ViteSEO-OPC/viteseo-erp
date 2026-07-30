@@ -21,7 +21,8 @@ import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
-import { formatDate } from "@/core/lib/format";
+import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
+import { formatDate, formatDateTime } from "@/core/lib/format";
 import { useMyConcerns, useCreateConcern } from "@/modules/hr/hooks/use-concerns";
 import {
   CONCERN_CATEGORIES,
@@ -276,6 +277,10 @@ function concernBadge(c: Concern): { status: string; label?: string } {
 function MyConcernsCard() {
   const { data: rows } = useMyConcerns();
   const all = rows ?? [];
+  // By id, then read back from the live list, so a status change or a newly
+  // scheduled meeting shows up without reopening.
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const detail = all.find((c) => c.id === detailId) ?? null;
 
   const columns: Column<Concern>[] = [
     {
@@ -315,23 +320,101 @@ function MyConcernsCard() {
   ];
 
   return (
-    <DataTable
-      title="My Concerns"
-      columns={columns}
-      rows={all}
-      rowKey={(c) => c.id}
-      // Privacy: search on reference/category/visibility/status only — never identity.
-      getSearchText={(c) =>
-        [
-          c.reference_no,
-          concernCategoryLabel(c.category),
-          c.is_anonymous ? "anonymous" : "named",
-          concernBadge(c).label ?? c.status,
-        ].join(" ")
-      }
-      searchPlaceholder="Search concerns…"
-      filterable={false}
-      empty="You haven't raised any concerns."
-    />
+    <>
+      <DataTable
+        title="My Concerns"
+        columns={columns}
+        rows={all}
+        rowKey={(c) => c.id}
+        onRowClick={(c) => setDetailId(c.id)}
+        // Privacy: search on reference/category/visibility/status only — never identity.
+        getSearchText={(c) =>
+          [
+            c.reference_no,
+            concernCategoryLabel(c.category),
+            c.is_anonymous ? "anonymous" : "named",
+            concernBadge(c).label ?? c.status,
+          ].join(" ")
+        }
+        searchPlaceholder="Search concerns…"
+        filterable={false}
+        empty="You haven't raised any concerns."
+      />
+
+      {detail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setDetailId(null)}
+          title={detail.reference_no}
+          status={concernBadge(detail).status}
+          statusLabel={concernBadge(detail).label}
+          submitted={detail.submitted_at}
+          fields={[
+            { label: "Category", value: concernCategoryLabel(detail.category) },
+            { label: "Person reported", value: detail.reported_person },
+            { label: "Filed as", value: detail.is_anonymous ? "Anonymous" : "Named" },
+            {
+              label: "Resolved",
+              value: detail.resolved_at ? formatDateTime(detail.resolved_at) : undefined,
+            },
+          ]}
+          note={{ label: "What you reported", text: detail.description }}
+        >
+          {detail.attachments.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                Files you attached ({detail.attachments.length})
+              </p>
+              <ul className="space-y-1">
+                {detail.attachments.map((a) => (
+                  <li key={a.url}>
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <FileText className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{a.name}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {detail.meetings.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                Meeting with HR
+              </p>
+              <ul className="space-y-1.5">
+                {detail.meetings.map((m) => (
+                  <li key={m.id} className="rounded-lg border border-border px-3 py-2 text-sm">
+                    <p className="font-medium text-foreground">
+                      {formatDateTime(m.scheduled_at)}
+                    </p>
+                    <p className="text-caption text-muted-foreground">
+                      {m.location || "Location to follow"}
+                      {m.agenda ? ` · ${m.agenda}` : ""}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {detail.is_anonymous && (
+            <div className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
+              <EyeOff className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                Filed anonymously. HR can see who submitted it to prevent abuse, but is
+                required to keep your identity private.
+              </span>
+            </div>
+          )}
+        </RequestDetailDialog>
+      )}
+    </>
   );
 }

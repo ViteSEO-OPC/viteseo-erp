@@ -92,14 +92,62 @@ export interface PayslipSummary {
   hardcopy_status: HardcopyStatus;
 }
 
+/** One named money line on the payslip (allowance component, benefit share, loan). */
+export interface PayslipLine {
+  name: string;
+  amount: number;
+}
+
+/**
+ * The document's subtotals, derived by the API so the screen and the PDF can't disagree.
+ * They satisfy `compensation - deductions - government + uncollected = net_pay`.
+ */
+export interface PayslipTotals {
+  /** Full period basic + every earning line. */
+  compensation: number;
+  /** The absence charge less the late/undertime portion of it. */
+  absences: number;
+  /** The late + undertime portion, clamped so the two absence rows can't over-total. */
+  late_undertime: number;
+  /** Absence charge + benefit shares + loans. */
+  deductions: number;
+  /** SSS + PhilHealth + Pag-IBIG + withholding tax. */
+  government: number;
+  /** Deductions that pay couldn't cover, credited back so the document reconciles. */
+  uncollected: number;
+}
+
 export interface Payslip {
   id: number;
   cycle_start: string;
   cycle_end: string;
-  employee: { id: number; name: string | null };
+  /** When the period pays out: cycle end + the run's pay delay. */
+  pay_date: string | null;
+  frequency: string | null;
+  /** When the run executed — distinct from pay_date. */
+  issued_at: string | null;
+  employee: {
+    id: number;
+    name: string | null;
+    employee_no: string | null;
+    job_title: string | null;
+    department: string | null;
+    address: string | null;
+    tin: string | null;
+    sss_number: string | null;
+    philhealth_number: string | null;
+    pagibig_number: string | null;
+  };
+  /** Full period basic BEFORE absences — what the payslip shows as "Basic Pay". */
+  period_base: number;
+  /** Basic pay after absences. `period_base - absence_deduction`. */
   base_salary: number;
+  /** The absence charge actually applied to basic pay. */
+  absence_deduction: number;
   reimbursements: number;
   allowances: number;
+  /** Allowances split by component, snapshot at run time. */
+  allowances_breakdown: PayslipLine[];
   holiday_premium: number;
   overtime_pay: number;
   overtime_minutes: number;
@@ -112,11 +160,16 @@ export interface Payslip {
   philhealth: number;
   pagibig: number;
   withholding_tax: number;
-  /** Slice 11a — recurring benefit shares (HMO, union dues). Post-tax. */
+  /** Slice 11a — recurring benefit shares (HMO, union dues) and loans. Post-tax. */
   other_deductions: number;
-  other_deductions_breakdown: { name: string; amount: number }[];
+  other_deductions_breakdown: PayslipLine[];
   total_deductions: number;
   net_pay: number;
+  totals: PayslipTotals;
+  /** Company counterpart contributions. HR-only — absent from an employee's own response. */
+  employer_sss?: number;
+  employer_philhealth?: number;
+  employer_pagibig?: number;
   status: string;
   processed_by: string | null;
   // Attendance basis — how base_salary was derived (0 on older payslips).

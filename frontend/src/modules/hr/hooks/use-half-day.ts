@@ -7,6 +7,7 @@ import {
   createHalfDayRequest,
   approveHalfDayRequest,
   rejectHalfDayRequest,
+  reopenHalfDayRequest,
 } from "@/modules/hr/api/half-day";
 
 const KEY = ["hr", "half-day-requests"] as const;
@@ -37,5 +38,18 @@ export function useRejectHalfDayRequest() {
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
       rejectHalfDayRequest(id, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+// An approved half-day is half an unpaid day, so undoing it moves attendance too.
+export function useReopenHalfDayRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) =>
+      reopenHalfDayRequest(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+    },
   });
 }

@@ -7,11 +7,13 @@ import {
   getPayrollRun,
   runPayroll,
   markPayslipDone,
+  reopenPayslip,
   lockPayrollRun,
   unlockPayrollRun,
   getMyNextPayday,
   getMyPayslips,
   getPayslip,
+  getHrPayslip,
   getPayrollSettings,
   getThirteenthMonth,
   updatePayrollSettings,
@@ -54,6 +56,8 @@ export function useRunPayroll() {
       qc.invalidateQueries({ queryKey: RUNS_KEY });
       qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
       qc.invalidateQueries({ queryKey: SETTINGS_KEY });
+      // A re-run recomputes the amounts, so an open payslip document is now stale.
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
     },
   });
 }
@@ -67,6 +71,21 @@ export function useMarkPayslipDone() {
       // reflects the new disbursed status/totals without a manual refetch.
       qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
       qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+    },
+  });
+}
+
+/** Undo a disbursement. Also refreshes claims — any it paid are owed again. */
+export function useReopenPayslip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenPayslip(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
     },
   });
 }
@@ -103,6 +122,15 @@ export function usePayslip(id: number | undefined) {
   return useQuery({
     queryKey: ["hr", "me", "payslip", id],
     queryFn: () => getPayslip(id!),
+    enabled: !!id,
+  });
+}
+
+/** HR reading one employee's payslip. Separate key from "me" — the payload differs by role. */
+export function useHrPayslip(id: number | undefined) {
+  return useQuery({
+    queryKey: ["hr", "payslip", id],
+    queryFn: () => getHrPayslip(id!),
     enabled: !!id,
   });
 }

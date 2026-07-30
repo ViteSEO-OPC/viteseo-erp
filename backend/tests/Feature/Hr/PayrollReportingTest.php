@@ -101,16 +101,22 @@ class PayrollReportingTest extends HrTestCase
 
     // --- item 6: employer shares reach the API --------------------------------------
 
-    public function test_employer_shares_are_exposed_on_the_payslip_resource(): void
+    /**
+     * The counterpart contributions HR remits. Since the payslip redesign these are gated to
+     * HR rather than served to everyone (see PayslipResource), so this reads them through the
+     * HR endpoint; PayslipDocumentTest holds the other half — that the employee can't see them.
+     */
+    public function test_employer_shares_are_exposed_to_hr_on_the_payslip_resource(): void
     {
         $run = $this->runPayroll();
         $payslip = $run->payslips()->firstOrFail();
 
-        $this->actingAsHr()
-            ->getJson("/api/v1/hr/me/payslips/{$payslip->id}")
+        $hr = $this->actingAsHr();
+
+        $hr->getJson("/api/v1/hr/me/payslips/{$payslip->id}")
             ->assertStatus(404); // not the caller's own payslip — ownership still enforced
 
-        $data = (new \App\Modules\Hr\Http\Resources\PayslipResource($payslip))->toArray(request());
+        $data = $hr->getJson("/api/v1/hr/payslips/{$payslip->id}")->assertOk()->json('data');
 
         $this->assertArrayHasKey('employer_sss', $data);
         $this->assertArrayHasKey('employer_philhealth', $data);

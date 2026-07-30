@@ -112,7 +112,7 @@ export default function AttendancePage() {
         title="Attendance"
         subtitle="Daily check-in status, timing, and violation flags — click a row to correct it."
         actions={
-          <DatePicker value={date} onChange={setDate} className="w-44" />
+          <DatePicker value={date} onChange={setDate} max={manilaToday()} className="w-44" />
         }
       />
 

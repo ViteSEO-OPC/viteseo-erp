@@ -137,7 +137,11 @@ class EmployeeDemoSeeder extends Seeder
             'current_address' => 'Quezon City, Metro Manila',
             'mothers_maiden_name' => 'Santos, Elena C.',
             'fathers_name' => 'Villanueva, Roberto M.',
-            'siblings_name' => 'Villanueva, Carlos R.',
+            'siblings' => [
+                ['name' => 'Villanueva, Carlos R.', 'gender' => 'Male'],
+                ['name' => 'Villanueva, Andrea R.', 'gender' => 'Female'],
+            ],
+            'number_of_siblings' => 3,
             'high_school' => 'Manila Science HS - 2007, Manila',
             'college_course' => 'BS Information Technology',
             'university' => 'University of the Philippines - 2011, Diliman',

@@ -53,3 +53,9 @@ export async function cancelOvertimeRequest(
   const res = await apiClient.post(`/hr/overtime-requests/${id}/cancel`, { reason });
   return res.data.data;
 }
+
+/** Back to pending for a fresh decision — unlike cancel, the request stays live. */
+export async function reopenOvertimeRequest(id: number, reason?: string): Promise<OvertimeRequest> {
+  const res = await apiClient.post(`/hr/overtime-requests/${id}/reopen`, { reason });
+  return res.data.data;
+}

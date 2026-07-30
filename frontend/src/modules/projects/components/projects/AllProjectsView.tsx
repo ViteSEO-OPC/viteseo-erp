@@ -102,7 +102,7 @@ export function AllProjectsView() {
   const rangeEnd = safePage * PAGE_SIZE + rows.length;
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       {/* Header */}
       <h1 className="text-2xl font-bold text-ink sm:text-[32px]">All Projects</h1>
 

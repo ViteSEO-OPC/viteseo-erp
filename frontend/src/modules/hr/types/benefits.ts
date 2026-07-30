@@ -1,10 +1,28 @@
 // Company → Benefits (Phase-2 Slice 13).
 
+/** The rate version actually in force today — what payroll charges (Slice B3a/b). */
+export interface CurrentContributionRates {
+  effective_from: string;
+  basis: string;
+  employee_rate: number;
+  employer_rate: number;
+  salary_floor: number | null;
+  salary_cap: number | null;
+  employee_amount_cap: number | null;
+  fixed_employer_add_on: number;
+  bracket_count: number;
+}
+
 export interface ContributionSetting {
   id: number;
   type: string; // sss | philhealth | pagibig
   config: Record<string, number | string>;
   is_active: boolean;
+  /**
+   * Read rates from HERE, not from `config` — `config` is the legacy row payroll no longer
+   * uses, and the two drifted apart (the card showed 4.5% while payroll charged 5%).
+   */
+  current: CurrentContributionRates | null;
 }
 
 export interface EmployeeBenefit {

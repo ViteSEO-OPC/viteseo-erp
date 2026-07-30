@@ -132,6 +132,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('violations', [ViolationController::class, 'index']);
         Route::post('violations/recompute', [ViolationController::class, 'recompute']);
         Route::post('violations/{violation}/resolve', [ViolationController::class, 'resolve']);
+        Route::post('violations/{violation}/reopen', [ViolationController::class, 'reopen']);
 
         // Payroll (HR only).
         Route::get('payroll/settings', [PayrollController::class, 'settings']);
@@ -144,6 +145,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
         Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
+        Route::post('payslips/{payslip}/reopen', [PayrollController::class, 'reopenPayslip']);
+        Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf']);
 
         // Recruitment (HR only).
@@ -160,18 +163,23 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('reimbursements/{reimbursement}/approve', [ReimbursementController::class, 'approve']);
         Route::post('reimbursements/{reimbursement}/reject', [ReimbursementController::class, 'reject']);
         Route::post('reimbursements/{reimbursement}/mark-paid', [ReimbursementController::class, 'markPaid']);
+        Route::post('reimbursements/{reimbursement}/reopen', [ReimbursementController::class, 'reopen']);
         // Approve/decline leave (HR only).
         Route::post('leave-requests/{leaveRequest}/approve', [LeaveController::class, 'approve']);
         Route::post('leave-requests/{leaveRequest}/reject', [LeaveController::class, 'reject']);
+        Route::post('leave-requests/{leaveRequest}/reopen', [LeaveController::class, 'reopen']);
         // Approve/decline half-day requests (HR only).
         Route::post('half-day-requests/{halfDayRequest}/approve', [HalfDayRequestController::class, 'approve']);
         Route::post('half-day-requests/{halfDayRequest}/reject', [HalfDayRequestController::class, 'reject']);
+        Route::post('half-day-requests/{halfDayRequest}/reopen', [HalfDayRequestController::class, 'reopen']);
         // Approve/decline early-out requests (HR only).
         Route::post('early-out-requests/{earlyOutRequest}/approve', [EarlyOutRequestController::class, 'approve']);
         Route::post('early-out-requests/{earlyOutRequest}/reject', [EarlyOutRequestController::class, 'reject']);
+        Route::post('early-out-requests/{earlyOutRequest}/reopen', [EarlyOutRequestController::class, 'reopen']);
         Route::post('overtime-requests/{overtimeRequest}/approve', [OvertimeRequestController::class, 'approve']);
         Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
         Route::post('overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel']);
+        Route::post('overtime-requests/{overtimeRequest}/reopen', [OvertimeRequestController::class, 'reopen']);
         Route::post('departments', [DepartmentController::class, 'store']);
         Route::match(['put', 'patch'], 'departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
@@ -182,14 +190,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('employees/{employee}', [EmployeeController::class, 'show']);
         Route::match(['put', 'patch'], 'employees/{employee}', [EmployeeController::class, 'update']);
         Route::get('employees/{employee}/salary-history', [EmployeeController::class, 'salaryHistory']);
+        // Profile picture: set/replace or clear (falls back to initials).
+        Route::post('employees/{employee}/photo', [EmployeeController::class, 'updatePhoto']);
+        Route::delete('employees/{employee}/photo', [EmployeeController::class, 'destroyPhoto']);
         // Loans & cash advances repaid through payroll (Slice 11b).
         Route::get('employees/{employee}/loans', [EmployeeLoanController::class, 'index']);
         Route::post('employees/{employee}/loans', [EmployeeLoanController::class, 'store']);
         Route::match(['put', 'patch'], 'loans/{loan}', [EmployeeLoanController::class, 'update']);
         Route::post('loans/{loan}/cancel', [EmployeeLoanController::class, 'cancel']);
+        Route::post('loans/{loan}/reopen', [EmployeeLoanController::class, 'reopen']);
         // Schedule a meeting with an employee (e.g. about attendance/violations).
         Route::post('employees/{employee}/meetings', [MeetingController::class, 'store']);
         Route::post('employees/{employee}/activate', [EmployeeController::class, 'activate']);
+        Route::post('employees/{employee}/reopen-onboarding', [EmployeeController::class, 'reopenOnboarding']);
         // Grant/revoke HR-officer access for this employee's user account.
         Route::post('employees/{employee}/hr-role', [EmployeeController::class, 'setHrRole']);
         // Documents tab: list / upload / delete.
@@ -225,11 +238,17 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('benefit-programs', [BenefitProgramController::class, 'index']);
         Route::post('benefit-programs', [BenefitProgramController::class, 'store']);
         Route::post('benefit-programs/assign', [BenefitProgramController::class, 'assign']);
+        // Slice B1 — the allowance reconciliation working list, and its one action.
+        Route::get('benefit-programs/allowance-reconciliation', [BenefitProgramController::class, 'allowanceReconciliation']);
+        Route::delete('employees/{employee}/allowance-overrides/{program}', [BenefitProgramController::class, 'clearAllowanceOverride']);
         Route::match(['put', 'patch'], 'benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'update']);
         Route::delete('benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'destroy']);
 
         // Company → Benefits: contribution settings + per-employee checklist.
         Route::get('contribution-settings', [BenefitController::class, 'settingsIndex']);
+        // Slice B3a — dated statutory rate versions.
+        Route::get('contribution-versions', [BenefitController::class, 'versionsIndex']);
+        Route::post('contribution-versions', [BenefitController::class, 'storeVersion']);
         Route::match(['put', 'patch'], 'contribution-settings/{contributionSetting}', [BenefitController::class, 'updateSetting']);
         Route::get('employees/{employee}/benefits', [BenefitController::class, 'employeeBenefitsIndex']);
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);
@@ -248,21 +267,26 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('document-requests', [DocumentRequestController::class, 'index']);
         Route::post('document-requests/{documentRequest}/fulfill', [DocumentRequestController::class, 'fulfill']);
         Route::post('document-requests/{documentRequest}/reject', [DocumentRequestController::class, 'reject']);
+        Route::post('document-requests/{documentRequest}/reopen', [DocumentRequestController::class, 'reopen']);
         Route::get('change-requests', [ChangeRequestController::class, 'index']);
         Route::post('change-requests/{changeRequest}/approve', [ChangeRequestController::class, 'approve']);
         Route::post('change-requests/{changeRequest}/reject', [ChangeRequestController::class, 'reject']);
+        Route::post('change-requests/{changeRequest}/reopen', [ChangeRequestController::class, 'reopen']);
 
         // Requests → Payroll (payslip requests + inquiries, HR only).
         Route::get('payslip-requests', [PayslipRequestController::class, 'index']);
         Route::post('payslip-requests/{payslipRequest}/approve', [PayslipRequestController::class, 'approve']);
         Route::post('payslip-requests/{payslipRequest}/reject', [PayslipRequestController::class, 'reject']);
+        Route::post('payslip-requests/{payslipRequest}/reopen', [PayslipRequestController::class, 'reopen']);
         Route::get('payroll-inquiries', [PayrollInquiryController::class, 'index']);
         Route::post('payroll-inquiries/{payrollInquiry}/progress', [PayrollInquiryController::class, 'progress']);
         Route::post('payroll-inquiries/{payrollInquiry}/resolve', [PayrollInquiryController::class, 'resolve']);
+        Route::post('payroll-inquiries/{payrollInquiry}/reopen', [PayrollInquiryController::class, 'reopen']);
 
         // Requests → Concerns (HR/Admin only). Anonymity enforced in ConcernResource.
         Route::get('concerns', [ConcernController::class, 'index']);
         Route::post('concerns/{concern}/status', [ConcernController::class, 'status']);
+        Route::post('concerns/{concern}/reopen', [ConcernController::class, 'reopen']);
         Route::post('concerns/{concern}/meetings', [ConcernController::class, 'scheduleMeeting']);
 
         // Finance → Office Expenses (HR only).
@@ -271,6 +295,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'office-expenses/{officeExpense}', [OfficeExpenseController::class, 'update']);
         Route::post('office-expenses/{officeExpense}/approve', [OfficeExpenseController::class, 'approve']);
         Route::post('office-expenses/{officeExpense}/reject', [OfficeExpenseController::class, 'reject']);
+        Route::post('office-expenses/{officeExpense}/reopen', [OfficeExpenseController::class, 'reopen']);
         Route::delete('office-expenses/{officeExpense}', [OfficeExpenseController::class, 'destroy']);
 
         // Company → Holiday List (HR only). country+year auto-loads from Nager.Date.

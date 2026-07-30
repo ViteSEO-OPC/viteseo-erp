@@ -88,9 +88,24 @@ export async function hireCandidate(id: number): Promise<Candidate> {
   return res.data.data;
 }
 
-/** Send a stage-specific email (online/final interview invite, offer, rejection). */
-export async function sendCandidateEmail(id: number, type: string): Promise<Candidate> {
-  const res = await apiClient.post(`/hr/candidates/${id}/email`, { type });
+/** What HR composes for an assessment email; ignored by the templated types. */
+export interface AssessmentCompose {
+  link?: string | null;
+  instructions?: string | null;
+  /** "yyyy-MM-dd" */
+  deadline?: string | null;
+}
+
+/**
+ * Send a stage-specific email (online/final interview invite, assessment, offer,
+ * rejection). `compose` applies to the assessment email, which HR writes.
+ */
+export async function sendCandidateEmail(
+  id: number,
+  type: string,
+  compose?: AssessmentCompose,
+): Promise<Candidate> {
+  const res = await apiClient.post(`/hr/candidates/${id}/email`, { type, ...compose });
   return res.data.data;
 }
 

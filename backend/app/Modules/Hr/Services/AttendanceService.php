@@ -151,6 +151,46 @@ class AttendanceService
         }
     }
 
+    /**
+     * When today's shift opens for clocking in, or null when nothing holds the employee
+     * back. Null for three distinct reasons, all of which must stay permissive:
+     * strict mode is off; today isn't one of their workdays (there is no shift to be
+     * early for); or the schedule has no start time at all — FALLBACK_START is a guess,
+     * and a guess must never lock someone out of their own time clock.
+     *
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
+     */
+    private function clockInOpensAt(array $eff, Carbon $local): ?Carbon
+    {
+        if (! $this->policy->get()->block_early_clock_in) {
+            return null;
+        }
+
+        if (! ($eff['is_workday'] ?? false) || ($eff['start_time'] ?? null) === null) {
+            return null;
+        }
+
+        return $this->scheduleStart($local, $eff);
+    }
+
+    /**
+     * What the employee's time clock needs to know about today beyond their own row.
+     * Computed here rather than in the panel so the strict rule has exactly one reader —
+     * a client that re-derived it could offer a button the server would refuse.
+     *
+     * @return array{strict: bool, opens_at: ?string}  opens_at is Manila "HH:MM"
+     */
+    public function clockInWindowFor(Employee $employee): array
+    {
+        $local = $this->localNow();
+        $eff = $this->schedule->effectiveFor($employee, $local);
+
+        return [
+            'strict' => (bool) $this->policy->get()->block_early_clock_in,
+            'opens_at' => $this->clockInOpensAt($eff, $local)?->format('H:i'),
+        ];
+    }
+
     public function clockIn(Employee $employee): Attendance
     {
         $this->assertNotManagement($employee);
@@ -182,6 +222,18 @@ class AttendanceService
         // Lateness is measured against the employee's EFFECTIVE schedule (start +
         // grace), resolved from override → assigned → default — not a fixed cutoff.
         $eff = $this->schedule->effectiveFor($employee, $local);
+
+        // Strict clock-in (Company → Rules): the shift can't be started before it begins.
+        $opensAt = $this->clockInOpensAt($eff, $local);
+        if ($opensAt && $local->lt($opensAt)) {
+            throw ValidationException::withMessages([
+                'time_in' => [
+                    'Your shift starts at ' . $opensAt->format('g:i A')
+                        . ' — you can clock in from then. Ask HR if you need to start earlier.',
+                ],
+            ]);
+        }
+
         $cutoff = $this->scheduleStart($local, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
 
         $att->time_in = now(); // stored UTC
@@ -312,9 +364,15 @@ class AttendanceService
             'note' => $att->note,
         ] : null;
 
-        // Status is DERIVED from the times, never sent by the client: no time-in means
-        // absent; otherwise present vs late is decided against the employee's effective
-        // schedule (start + grace) for that day — the same rule as a live clock-in.
+        // Slice 16 — HR may assert the status outright. Left blank it is DERIVED from the times
+        // exactly as before (no time-in ⇒ absent; otherwise present vs late against the
+        // employee's schedule + grace). Given explicitly it WINS, even against the clock: that is
+        // the whole point — "he worked, he just forgot to punch in".
+        $override = $data['status'] ?? null;
+        if ($override !== null && ! in_array($override, Attendance::HR_STATUSES, true)) {
+            $override = null;
+        }
+
         if (empty($data['time_in'])) {
             $att->time_in = null;
             $att->time_out = null;
@@ -344,11 +402,22 @@ class AttendanceService
             }
         }
 
+        // Apply HR's choice last, so it overrides whatever the times implied.
+        if ($override !== null) {
+            $att->status = $override;
+        }
+        $att->status_override = $override !== null;
+
         $att->note = $data['note'] ?? null;
         // A human just attested to this row, so it is no longer system-generated —
         // and the nightly management job will now leave it alone.
         $att->source = Attendance::SOURCE_MANUAL;
         $att->save();
+
+        // Slice 16 — a paid-leave day that turns out to have been WORKED gives the credit back.
+        // Done here, on a discrete HR action, and stamped: payroll re-runs constantly, so
+        // refunding there would inflate the balance a little on every run.
+        $this->settleLeaveCreditFor($employee, $att);
 
         // F-7: log the correction with before/after. Every other service in the module
         // audit-logs its writes; this one silently rewrote attendance until now.
@@ -364,6 +433,7 @@ class AttendanceService
                 'time_in' => $att->time_in?->toIso8601String(),
                 'time_out' => $att->time_out?->toIso8601String(),
                 'status' => $att->status,
+                'status_override' => (bool) $att->status_override,
                 'hours_worked' => (float) $att->hours_worked,
                 'note' => $att->note,
             ],
@@ -371,10 +441,92 @@ class AttendanceService
 
         $this->forgetRows(); // the row just changed
 
-        // A correction can change someone's flags — keep them in sync.
-        $this->violations->recompute();
+        // Slice 16 — recompute the month the EDIT is in, not "this month". recompute() defaults
+        // to the current month, so correcting a June date left June's flags untouched: a late
+        // added there raised no flag, and a late removed there kept its old one forever.
+        // Attendance is the source of truth for violations, so the flags must follow the edit.
+        $this->violations->recompute(Carbon::parse($workDate, $tz)->format('Y-m'));
 
         return $att;
+    }
+
+    /**
+     * Give back (or re-take) a paid-leave credit when a leave day turns out to have been worked
+     * — or stops having been worked (Slice 16).
+     *
+     * WHY PER DAY, NOT PER REQUEST. Leave is stored as a date RANGE. Someone who books Mon–Fri
+     * and comes in only on Wednesday must get exactly ONE credit back — cancelling the request
+     * would refund all five and dock the other four. So this refunds a single day at a time.
+     *
+     * WHY IDEMPOTENT. `leave_credit_refunded_at` stamps the row, so editing the same day twice
+     * can't refund twice, and clearing the attendance puts the credit back where it was.
+     *
+     * Unpaid leave draws no credit, so there is nothing to refund — only the pay changes, and
+     * that is handled in the day loop.
+     */
+    private function settleLeaveCreditFor(Employee $employee, Attendance $att): void
+    {
+        $date = $att->work_date->toDateString();
+
+        $leave = LeaveRequest::with('leaveType')
+            ->where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereDate('start_date', '<=', $date)
+            ->whereDate('end_date', '>=', $date)
+            ->first();
+
+        // Only PAID leave holds a credit worth returning.
+        $holdsCredit = $leave && $leave->leaveType && $leave->leaveType->is_paid;
+        // The day counts as worked when the clock says so, or when HR asserts they were in.
+        $worked = $att->time_in !== null
+            || ($att->status_override && in_array($att->status, ['present', 'late'], true));
+
+        if ($holdsCredit && $worked && $att->leave_credit_refunded_at === null) {
+            $this->moveLeaveCredit($leave, -1.0);
+            $att->forceFill(['leave_credit_refunded_at' => now()])->save();
+
+            $this->audit->log(
+                'updated', 'Leave',
+                "Returned 1 leave credit — {$date} was worked despite approved "
+                    . ($leave->leaveType?->name ?? 'leave'),
+                $leave,
+            );
+
+            return;
+        }
+
+        // The correction was undone (or the leave went away): take the credit back.
+        if ($att->leave_credit_refunded_at !== null && (! $holdsCredit || ! $worked)) {
+            if ($holdsCredit) {
+                $this->moveLeaveCredit($leave, 1.0);
+            }
+            $att->forceFill(['leave_credit_refunded_at' => null])->save();
+        }
+    }
+
+    /**
+     * Shift one leave request's used_days by `$delta`, against the SAME bucket it was deducted
+     * from at approval (`deducted_from`) — a mode flip between approve and now must not restore
+     * the wrong table. Mirrors LeaveService::cancel()'s reversal.
+     */
+    private function moveLeaveCredit(LeaveRequest $leave, float $delta): void
+    {
+        $year = $leave->start_date->year;
+
+        $balance = match ($leave->deducted_from) {
+            'pool' => \App\Modules\Hr\Models\SharedLeaveBalance::where('employee_id', $leave->employee_id)
+                ->where('year', $year)->first(),
+            'per_type' => \App\Modules\Hr\Models\LeaveBalance::where('employee_id', $leave->employee_id)
+                ->where('leave_type_id', $leave->leave_type_id)
+                ->where('year', $year)->first(),
+            // Legacy rows approved before the bucket was stamped: fall back to per-type, which is
+            // what a paid type used before shared mode existed.
+            default => \App\Modules\Hr\Models\LeaveBalance::where('employee_id', $leave->employee_id)
+                ->where('leave_type_id', $leave->leave_type_id)
+                ->where('year', $year)->first(),
+        };
+
+        $balance?->update(['used_days' => max(0, (float) $balance->used_days + $delta)]);
     }
 
     /** The employee's rows for the current Manila week (Mon–Sun), newest first. */
@@ -487,7 +639,9 @@ class AttendanceService
                     ? $this->arrivalCategory($att->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)
                     : null;
 
-                if ($att && $att->time_in) {
+                if ($att && $att->status_override) {
+                    $status = $att->status; // Slice 16 — HR asserted this; it wins outright.
+                } elseif ($att && $att->time_in) {
                     $status = $att->status; // present | late
                 } elseif ($leaveName) {
                     $status = 'on_leave';
@@ -509,6 +663,7 @@ class AttendanceService
                 return [
                     'employee_id' => $emp->id,
                     'name' => $emp->user?->name,
+                    'photo_url' => $emp->photo_url,
                     'department' => $emp->department?->name,
                     'hire_date' => $emp->hire_date?->format('Y-m-d'),
                     'schedule' => [
@@ -524,8 +679,14 @@ class AttendanceService
                     'time_out' => $att?->time_out,
                     'first_in' => $att?->time_in,
                     'last_out' => $att?->time_out,
+                    // Lunch is unpaid, so it's part of how hours_worked was reached —
+                    // HR's correction dialog needs it to show the same figure.
+                    'lunch_minutes' => (int) ($att?->lunch_minutes ?? 0),
+                    'break_minutes' => (int) ($att?->break_minutes ?? 0),
                     'hours_worked' => $att ? (float) $att->hours_worked : 0,
                     'status' => $status,
+                    // Slice 16 — lets the UI show HR that this status was set by hand.
+                    'status_override' => (bool) ($att?->status_override),
                     'leave_type' => $leaveName,
                     'timing' => $timing,
                     'flag' => $flags[$emp->id] ?? null,
@@ -993,11 +1154,56 @@ class AttendanceService
                 }
             }
 
+            $row = $rows->get($dateStr);
+
+            // --- HR's explicit status wins (Slice 16) -------------------------------------
+            // HR asserting a status beats BOTH the clock and the leave table: it exists exactly
+            // for the cases the automatic rules get wrong ("he worked, he just forgot to clock
+            // in", "that was a rest day for her"). Every value is priced here — a status with no
+            // rule would be a control that silently does nothing.
+            if ($row && $row->status_override) {
+                switch ($row->status) {
+                    case 'absent':
+                        $unpaid += 1.0;
+                        $prevWorkdayUnpaid = true;
+
+                        continue 2;
+                    case 'half_day':
+                        $unpaid += 0.5;
+                        $prevWorkdayUnpaid = false;
+
+                        continue 2;
+                    case 'rest_day':
+                    case 'holiday':
+                        // Not a working day at all — it can neither be unpaid nor break the
+                        // "absent the day before" chain.
+                        continue 2;
+                    case 'on_leave':
+                        // Defer to the leave that covers it; unpaid leave still costs a day.
+                        $covering = $leaves->first(fn ($l) => $dateStr >= Carbon::parse($l->start_date)->toDateString()
+                            && $dateStr <= Carbon::parse($l->end_date)->toDateString());
+                        $isUnpaidLeave = $covering && $covering->leaveType && ! $covering->leaveType->is_paid;
+                        if ($isUnpaidLeave) {
+                            $unpaid += 1.0;
+                        }
+                        $prevWorkdayUnpaid = $isUnpaidLeave;
+
+                        continue 2;
+                    // 'present' / 'late' fall through to the normal worked-day path below, so
+                    // late/undertime still price and the late tally still counts.
+                }
+            }
+
             // Approved leave covering this day: paid leave → no deduction; unpaid leave
             // (LWOP) → the full day is deducted (leave is full-day only).
+            //
+            // Slice 16 — UNLESS THEY ACTUALLY CAME IN. A clock-in is proof the leave wasn't
+            // taken, so the day is worked and paid. Before this the leave branch ran first and
+            // always `continue`d, so someone on unpaid leave who turned up was docked a full day
+            // despite working it, and HR marking them present changed nothing.
             $leave = $leaves->first(fn ($l) => $dateStr >= Carbon::parse($l->start_date)->toDateString()
                 && $dateStr <= Carbon::parse($l->end_date)->toDateString());
-            if ($leave) {
+            if ($leave && ! ($row && $row->time_in)) {
                 $isUnpaidLeave = $leave->leaveType && ! $leave->leaveType->is_paid;
                 if ($isUnpaidLeave) {
                     $unpaid += 1.0;
@@ -1008,8 +1214,6 @@ class AttendanceService
 
                 continue;
             }
-
-            $row = $rows->get($dateStr);
 
             // Approved half-day request(s): 0.5 each. With two halves the whole day is off.
             // With one half off, the employee is expected to work the OTHER half — so a

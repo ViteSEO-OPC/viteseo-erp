@@ -1,6 +1,11 @@
 // Company → Leave Type (Phase-2 Slice 13). Reuses LeaveType/LeaveBalance from
 // types/leave.ts; adds the allotment-default and config-input shapes.
 
+import {
+  EMPLOYMENT_STATUSES as STATUS_VALUES,
+  statusLabel,
+} from "@/modules/hr/types/employee";
+
 export interface LeaveTypeAllotment {
   id: number;
   leave_type_id: number;
@@ -45,11 +50,10 @@ export interface LeaveTypeInput {
   backdate_limit_days?: number | null;
 }
 
-// The employment statuses leave allotments are keyed on (mirrors the backend
-// EmployeeService::STATUSES). Labels for display.
-export const EMPLOYMENT_STATUSES = [
-  { value: "regular", label: "Regular" },
-  { value: "probationary", label: "Probationary" },
-  { value: "contract", label: "Contract" },
-  { value: "part_time", label: "Part-time" },
-] as const;
+// The employment statuses leave allotments are keyed on — derived from the one
+// list in types/employee.ts so a new status can't appear on the employee record
+// without a column in the allotment grids.
+export const EMPLOYMENT_STATUSES = STATUS_VALUES.map((value) => ({
+  value,
+  label: statusLabel(value),
+}));

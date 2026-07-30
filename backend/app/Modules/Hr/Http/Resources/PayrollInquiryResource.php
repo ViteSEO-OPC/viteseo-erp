@@ -31,11 +31,13 @@ class PayrollInquiryResource extends JsonResource
                 ])
                 ->all(),
             'resolved_at' => $this->resolved_at,
+            'resolved_by' => $this->whenLoaded('resolver', fn () => $this->resolver?->name),
             'payslip_id' => $this->payslip_id,
             'payslip_cycle' => $this->payslipCycle(),
             'employee' => [
                 'id' => $this->employee_id,
                 'name' => $this->whenLoaded('employee', fn () => $this->employee->user?->name),
+                'photo_url' => $this->whenLoaded('employee', fn () => $this->employee->photo_url),
             ],
             'created_at' => $this->created_at,
         ];

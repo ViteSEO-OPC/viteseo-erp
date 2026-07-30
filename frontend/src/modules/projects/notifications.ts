@@ -25,7 +25,7 @@ export interface AppNotification {
 export interface NotificationDto {
   id: string;
   type: string;
-  data: { title?: string; snippet?: string } | null;
+  data: { title?: string; snippet?: string; status?: string } | null;
   read: boolean;
   read_at: string | null;
   created_at: string;
@@ -74,6 +74,10 @@ function messageFor(dto: NotificationDto): string {
       return dto.data?.snippet
         ? `commented on “${title}”: ${dto.data.snippet}`
         : `commented on “${title}”`;
+    case "task.status_changed":
+      return dto.data?.status
+        ? `moved “${title}” to ${dto.data.status}`
+        : `updated the status of “${title}”`;
     default:
       return "sent you a notification";
   }

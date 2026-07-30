@@ -8,8 +8,8 @@ import {
   useEffect,
   useState,
 } from "react";
-
-const STORAGE_KEY = "sidebar-collapsed";
+import { useAuth } from "@/core/auth-context";
+import { usePersistentState } from "@/core/use-persistent-state";
 
 type SidebarContextValue = {
   /** Desktop (≥ lg) icon-only rail state. Persisted to localStorage. */
@@ -24,36 +24,20 @@ type SidebarContextValue = {
 const SidebarContext = createContext<SidebarContextValue | null>(null);
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
-  // Lazy initializer keeps SSR deterministic (false) and reads localStorage
-  // only once we're on the client during the first render pass.
-  const [collapsed, setCollapsed] = useState(false);
+  const { user } = useAuth();
+  // Desktop rail state persists per user; the key stays null until the user
+  // resolves (SSR-safe default = expanded), then loads that user's preference.
+  const [collapsed, setCollapsed] = usePersistentState<boolean>(
+    user ? `sidebar-collapsed:${user.id}` : null,
+    false,
+  );
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
 
-  // Read the persisted collapsed preference on mount (client only).
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      // Sync from an external system (localStorage) after mount to avoid an
-      // SSR/client hydration mismatch on the persisted preference.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (stored !== null) setCollapsed(stored === "true");
-    } catch {
-      /* localStorage may be unavailable (private mode / SSR) — ignore */
-    }
-  }, []);
-
-  const toggleCollapsed = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(STORAGE_KEY, String(next));
-      } catch {
-        /* ignore persistence failures */
-      }
-      return next;
-    });
-  }, []);
+  const toggleCollapsed = useCallback(
+    () => setCollapsed((prev) => !prev),
+    [setCollapsed],
+  );
 
   const openMobile = useCallback(() => setMobileOpen(true), []);
   const closeMobile = useCallback(() => setMobileOpen(false), []);

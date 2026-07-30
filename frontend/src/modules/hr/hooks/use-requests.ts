@@ -8,21 +8,25 @@ import {
   createDocumentRequest,
   fulfillDocumentRequest,
   rejectDocumentRequest,
+  reopenDocumentRequest,
   getChangeRequests,
   getMyChangeRequests,
   createChangeRequest,
   approveChangeRequest,
   rejectChangeRequest,
+  reopenChangeRequest,
   getPayslipRequests,
   getMyPayslipRequests,
   createPayslipRequest,
   approvePayslipRequest,
   rejectPayslipRequest,
+  reopenPayslipRequest,
   getPayrollInquiries,
   getMyPayrollInquiries,
   createPayrollInquiry,
   progressPayrollInquiry,
   resolvePayrollInquiry,
+  reopenPayrollInquiry,
 } from "@/modules/hr/api/requests";
 
 const DOCS_KEY = ["hr", "document-requests"] as const;
@@ -72,6 +76,19 @@ export function useRejectDocumentRequest() {
   });
 }
 
+export function useReopenDocumentRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenDocumentRequest(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: DOCS_KEY });
+      // Re-locks the employee's download, so their own views change too.
+      qc.invalidateQueries({ queryKey: MY_DOCS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "me", "documents"] });
+    },
+  });
+}
+
 // --- Change requests ---
 
 export function useChangeRequests() {
@@ -107,6 +124,18 @@ export function useRejectChangeRequest() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) => rejectChangeRequest(id, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: CHANGES_KEY }),
+  });
+}
+
+export function useReopenChangeRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenChangeRequest(id, reason),
+    // May put the employee's previous value back, so refresh employees too.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: CHANGES_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "employees"] });
+    },
   });
 }
 
@@ -149,6 +178,19 @@ export function useRejectPayslipRequest() {
   });
 }
 
+export function useReopenPayslipRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenPayslipRequest(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: PAYSLIP_REQS_KEY });
+      // The employee's payslip history shows hardcopy_status, which just moved.
+      qc.invalidateQueries({ queryKey: MY_PAYSLIP_REQS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "me", "payslips"] });
+    },
+  });
+}
+
 // --- Payroll inquiries ---
 
 export function usePayrollInquiries() {
@@ -181,5 +223,16 @@ export function useResolvePayrollInquiry() {
     mutationFn: ({ id, note, files }: { id: number; note: string; files?: File[] }) =>
       resolvePayrollInquiry(id, note, files),
     onSuccess: () => qc.invalidateQueries({ queryKey: INQUIRIES_KEY }),
+  });
+}
+
+export function useReopenPayrollInquiry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenPayrollInquiry(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: INQUIRIES_KEY });
+      qc.invalidateQueries({ queryKey: MY_INQUIRIES_KEY });
+    },
   });
 }

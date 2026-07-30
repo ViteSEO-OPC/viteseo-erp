@@ -22,6 +22,9 @@ class LeaveTypeAllotmentSeeder extends Seeder
             'probationary' => 0.5,
             'contract' => 0.75,
             'part_time' => 0.5,
+            'project_based' => 0.75,
+            // Interns start with none; HR grants credits per person where warranted.
+            'ojt' => 0.0,
         ];
 
         foreach (LeaveType::all() as $type) {

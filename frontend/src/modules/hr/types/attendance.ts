@@ -26,9 +26,24 @@ export interface Attendance {
   tasks: DayTask[];
 }
 
+/**
+ * Today's clock-in window, decided by the server (Company → Rules → strict clock-in).
+ * The panel only reads it — it never re-derives the rule.
+ */
+export interface ClockInWindow {
+  /** HR requires everyone to wait for their scheduled start. */
+  strict: boolean;
+  /**
+   * Manila "HH:MM" this employee's shift opens, or null when nothing holds them back
+   * (strict off, a non-workday, or no scheduled start time).
+   */
+  opens_at: string | null;
+}
+
 export interface MyAttendance {
   today: Attendance | null;
   week: Attendance[];
+  clock_in: ClockInWindow;
 }
 
 export type Severity = "green" | "yellow" | "orange" | "red";
@@ -77,6 +92,8 @@ export interface EmployeeSchedule {
 export interface HrAttendanceRow {
   employee_id: number;
   name: string | null;
+  /** Profile picture; null falls back to initials. */
+  photo_url: string | null;
   department: string | null;
   /** 'YYYY-MM-DD' — bounds how far back violation history can be browsed. */
   hire_date: string | null;
@@ -87,8 +104,13 @@ export interface HrAttendanceRow {
   time_out: string | null;
   first_in: string | null;
   last_out: string | null;
+  /** Unpaid lunch already deducted from hours_worked. */
+  lunch_minutes: number;
+  break_minutes: number;
   hours_worked: number;
   status: string;
+  /** Slice 16 — a human asserted this status; it beats the clock and the leave table. */
+  status_override: boolean;
   leave_type: string | null;
   timing: AttendanceTiming | null;
   flag: ViolationFlag | null;

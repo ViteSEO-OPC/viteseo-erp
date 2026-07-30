@@ -25,6 +25,12 @@ export async function setConcernStatus(id: number, status: string): Promise<Conc
   return res.data.data;
 }
 
+// Steps the status back one: resolved → under review, under review → pending.
+export async function reopenConcern(id: number, reason?: string): Promise<Concern> {
+  const res = await apiClient.post(`/hr/concerns/${id}/reopen`, { reason });
+  return res.data.data;
+}
+
 export async function scheduleMeeting(
   concernId: number,
   input: { scheduled_at: string; location: string | null; agenda: string | null },

@@ -3,8 +3,10 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\SetHrRoleRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeeDocumentRequest;
+use App\Modules\Hr\Http\Requests\StoreEmployeePhotoRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeeRequest;
 use App\Modules\Hr\Http\Requests\UpdateEmployeeRequest;
 use App\Modules\Hr\Http\Resources\EmployeeDocumentResource;
@@ -54,6 +56,20 @@ class EmployeeController extends Controller
         $employee = $this->service->update($employee, $request->validated());
 
         return EmployeeResource::make($employee)->response();
+    }
+
+    // POST /api/v1/hr/employees/{employee}/photo — set/replace the profile picture.
+    public function updatePhoto(StoreEmployeePhotoRequest $request, Employee $employee): JsonResponse
+    {
+        $employee = $this->service->setPhoto($employee, $request->file('photo'));
+
+        return EmployeeResource::make($employee)->response();
+    }
+
+    // DELETE /api/v1/hr/employees/{employee}/photo — back to initials.
+    public function destroyPhoto(Employee $employee): JsonResponse
+    {
+        return EmployeeResource::make($this->service->removePhoto($employee))->response();
     }
 
     // GET /api/v1/hr/employees/{employee}/documents — Documents tab.
@@ -109,6 +125,14 @@ class EmployeeController extends Controller
     public function activate(Employee $employee): JsonResponse
     {
         return EmployeeResource::make($this->service->activate($employee))->response();
+    }
+
+    // POST /api/v1/hr/employees/{employee}/reopen-onboarding — undo the above.
+    public function reopenOnboarding(ReopenRequest $request, Employee $employee): JsonResponse
+    {
+        return EmployeeResource::make(
+            $this->service->reopenOnboarding($employee, $request->validated('reason')),
+        )->response();
     }
 
     // POST /api/v1/hr/employees/{employee}/hr-role — grant/revoke HR-officer access.

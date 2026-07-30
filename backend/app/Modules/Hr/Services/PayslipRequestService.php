@@ -81,11 +81,46 @@ class PayslipRequestService
         return $request->load(['employee.user', 'reviewer', 'payslip.payrollRun']);
     }
 
+    /**
+     * Undo the decision — back to pending, reviewer stamps cleared. Safe to reverse:
+     * this only gates who may collect a signed hard copy, it never touches pay.
+     */
+    public function reopen(PayslipRequest $request, ?string $reason = null): PayslipRequest
+    {
+        $this->assertDecided($request);
+
+        $request->update([
+            'status' => 'pending',
+            'review_note' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+        ]);
+
+        $employeeName = $request->employee->user?->name ?? $request->employee->name;
+        $this->audit->log(
+            'reopened',
+            'Payroll',
+            "Reopened {$employeeName}'s signed hard-copy request" . ($reason ? " — {$reason}" : ''),
+            $request,
+        );
+
+        return $request->load(['employee.user', 'reviewer', 'payslip.payrollRun']);
+    }
+
     private function assertPending(PayslipRequest $request, string $action): void
     {
         if ($request->status !== 'pending') {
             throw ValidationException::withMessages([
                 'status' => ["Cannot {$action} a request that is {$request->status}."],
+            ]);
+        }
+    }
+
+    private function assertDecided(PayslipRequest $request): void
+    {
+        if ($request->status === 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['This request is still pending — there is nothing to undo.'],
             ]);
         }
     }

@@ -54,6 +54,17 @@ class ViolationService
     }
 
     /**
+     * Undo a resolve, putting the flag back in play. The row itself is never
+     * recomputed away, so this simply re-arms it for the escalation ladder.
+     */
+    public function unresolve(Violation $violation): Violation
+    {
+        $violation->update(['resolved' => false]);
+
+        return $violation;
+    }
+
+    /**
      * Worst unresolved flag + count per employee, for the roster. `work_date` is the
      * date of the violation DRIVING the severity (worst severity, most recent on a
      * tie) — the roster flag can point to a past month, so the detail modal uses this
@@ -216,6 +227,19 @@ class ViolationService
                 // arrival on a worked holiday is still flagged.
                 if (isset($holidays[$dateStr]) && ! ($row && $row->time_in !== null)) {
                     continue;
+                }
+
+                // Slice 16 — attendance is the source of truth for flags, and an HR override is
+                // the strongest form of it. A day HR marked on-leave / rest-day / holiday raises
+                // nothing and clears the streaks; `absent` and `late` fall through so they still
+                // flag. Without this, correcting a record left its old flag standing.
+                if ($row && $row->status_override && in_array($row->status, Attendance::PAID_STATUSES, true)) {
+                    if ($row->status !== 'late') {
+                        $lateStreak = 0;
+                        $absentStreak = 0;
+
+                        continue;
+                    }
                 }
 
                 $isPast = $d->lt($today);

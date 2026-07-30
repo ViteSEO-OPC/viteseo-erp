@@ -4,12 +4,12 @@ import { useState, useMemo } from "react";
 import {
   Download,
   FileSignature,
-  MessageCircleQuestion,
   Clock,
   Plus,
   X,
   ChevronLeft,
   ChevronRight,
+  Paperclip,
 } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
@@ -36,10 +36,14 @@ import {
   useMyPayslipRequests,
 } from "@/modules/hr/hooks/use-requests";
 import { PayrollInquiryDialog } from "@/modules/hr/components/payroll-inquiry-dialog";
+import { PayslipDocument } from "@/modules/hr/components/payslip-document";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
-import { SimpleSelect } from "@/modules/hr/ui/select";
-import type { Payslip, PayslipSummary } from "@/modules/hr/types/payroll";
+import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
+import type { PayslipSummary } from "@/modules/hr/types/payroll";
 import type { PayslipRequest } from "@/modules/hr/types/request";
+
+// Fixed rows per page — deliberately not user-selectable (see DataTable).
+const PAGE_SIZE = 10;
 
 function cycleLabel(start: string, end: string) {
   return `${formatDate(start)} – ${formatDate(end)}`;
@@ -87,15 +91,17 @@ export default function PayslipsPage() {
 
   const { data: inquiries } = useMyPayrollInquiries();
   const [inqPage, setInqPage] = useState(1);
-  const [inqSize, setInqSize] = useState(5);
+  // By id, then read back from the live list, so the modal picks up HR's reply
+  // if it lands while the employee has it open.
+  const [inqDetailId, setInqDetailId] = useState<number | null>(null);
 
   const inquiryList = inquiries ?? [];
-  const inqPageSizes = [5, 10, 20, 50];
-  const inqTotalPages = Math.max(1, Math.ceil(inquiryList.length / inqSize));
+  const inqDetail = inquiryList.find((q) => q.id === inqDetailId) ?? null;
+  const inqTotalPages = Math.max(1, Math.ceil(inquiryList.length / PAGE_SIZE));
   const inqSafePage = Math.min(inqPage, inqTotalPages);
   const pagedInquiries = useMemo(
-    () => inquiryList.slice((inqSafePage - 1) * inqSize, inqSafePage * inqSize),
-    [inquiryList, inqSafePage, inqSize],
+    () => inquiryList.slice((inqSafePage - 1) * PAGE_SIZE, inqSafePage * PAGE_SIZE),
+    [inquiryList, inqSafePage],
   );
 
   return (
@@ -136,28 +142,9 @@ export default function PayslipsPage() {
 
         {/* Detail — only for an unlocked (approved) payslip */}
         {selected?.unlocked && detail ? (
-          <div className="print-area rounded-card border border-border bg-card p-6 shadow-sm sm:p-8">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-h2 font-bold text-foreground">
-                  Payslip — {cycleLabel(detail.payslip.cycle_start, detail.payslip.cycle_end)}
-                </h2>
-                <p className="text-body text-muted-foreground">
-                  {detail.payslip.employee.name} · Viteseo Inc.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setClosed(true)}
-                aria-label="Close payslip"
-                className="print-hide shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                <X className="size-6" />
-              </button>
-            </div>
-
-            {/* Actions retained from the platform (not in the mock, kept for parity) */}
-            <div className="print-hide mt-4 flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-col gap-3">
+            {/* Platform actions live outside the document, so the payslip stays a payslip. */}
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <HardCopyControl
                 status={selected?.hardcopy_status ?? "none"}
                 onRequest={() => setCopyId(detail.payslip.id)}
@@ -172,92 +159,20 @@ export default function PayslipsPage() {
                 <Download />
                 {pdfBusy ? "Downloading…" : "Download PDF"}
               </Button>
+              <button
+                type="button"
+                onClick={() => setClosed(true)}
+                aria-label="Close payslip"
+                className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="size-5" />
+              </button>
             </div>
 
-            <Section title="Earnings">
-              <Row label="Base salary" value={formatPeso(detail.payslip.base_salary)} />
-              {detail.payslip.allowances > 0 && (
-                <Row label="Allowances" value={formatPeso(detail.payslip.allowances)} />
-              )}
-              {detail.payslip.holiday_premium > 0 && (
-                <Row label="Holiday premium" value={formatPeso(detail.payslip.holiday_premium)} />
-              )}
-              {detail.payslip.overtime_pay > 0 && (
-                <Row
-                  label={`Overtime (${(detail.payslip.overtime_minutes / 60).toFixed(1)} hrs)`}
-                  value={formatPeso(detail.payslip.overtime_pay)}
-                />
-              )}
-              {detail.payslip.night_diff_pay > 0 && (
-                <Row
-                  label={`Night differential (${(detail.payslip.night_diff_minutes / 60).toFixed(1)} hrs)`}
-                  value={formatPeso(detail.payslip.night_diff_pay)}
-                />
-              )}
-              {detail.payslip.rest_day_premium > 0 && (
-                <Row
-                  label={`Rest day worked (${(detail.payslip.rest_day_minutes / 60).toFixed(1)} hrs)`}
-                  value={formatPeso(detail.payslip.rest_day_premium)}
-                />
-              )}
-              {detail.payslip.reimbursements > 0 && (
-                <Row label="Reimbursement" value={formatPeso(detail.payslip.reimbursements)} />
-              )}
-            </Section>
-
-            <AttendanceBasis payslip={detail.payslip} />
-
-            <Section title="Deductions">
-              <Row label="SSS" value={formatPeso(detail.payslip.sss)} negative />
-              <Row label="PhilHealth" value={formatPeso(detail.payslip.philhealth)} negative />
-              <Row label="Pag-IBIG" value={formatPeso(detail.payslip.pagibig)} negative />
-              <Row label="Withholding tax" value={formatPeso(detail.payslip.withholding_tax)} negative />
-              {/* Slice 11a — benefit shares, named individually rather than one lump. */}
-              {(detail.payslip.other_deductions_breakdown ?? []).map((d) => (
-                <Row key={d.name} label={d.name} value={formatPeso(d.amount)} negative />
-              ))}
-            </Section>
-
-            <div className="mt-4 flex items-center justify-between border-t-2 border-brand py-5">
-              <span className="text-h3 font-bold text-foreground">Net pay</span>
-              <span className="text-h1 font-bold text-brand">
-                {formatPeso(detail.payslip.net_pay)}
-              </span>
-            </div>
-
-            {/* YTD */}
-            <div className="grid grid-cols-1 gap-4 rounded-lg border border-border p-5 shadow-sm sm:grid-cols-3 sm:divide-x sm:divide-border">
-              <Ytd label="YTD Gross" value={formatPeso(detail.ytd.gross)} />
-              <Ytd label="YTD Deductions" value={formatPeso(detail.ytd.deductions)} className="sm:pl-4" />
-              <Ytd label="YTD Net" value={formatPeso(detail.ytd.net)} className="sm:pl-4" />
-            </div>
-
-            {/* 13th-month accrual (basic pay earned this year ÷ 12) */}
-            <div className="mt-3 flex items-center justify-between rounded-lg border border-brand/30 bg-brand-subtle px-4 py-3">
-              <div>
-                <p className="text-caption font-semibold text-foreground">13th-Month Pay (accrued)</p>
-                <p className="text-caption text-muted-foreground">
-                  Basic pay earned this year ÷ 12 · finalizes at year-end
-                </p>
-              </div>
-              <p className="text-lg font-bold text-brand">
-                {formatPeso(detail.ytd.thirteenth_month)}
-              </p>
-            </div>
-
-            {/* Signatures (prints with the payslip) */}
-            <div className="mt-8 flex items-end justify-between gap-8">
-              <div className="flex-1">
-                <div className="border-t border-foreground pt-1 text-sm font-medium text-foreground">
-                  {detail.payslip.processed_by ?? "—"}
-                </div>
-                <p className="text-caption text-muted-foreground">Processed by (HR)</p>
-              </div>
-              <div className="flex-1">
-                <div className="mt-6 border-t border-foreground pt-1 text-sm">&nbsp;</div>
-                <p className="text-caption text-muted-foreground">Employee signature</p>
-              </div>
-            </div>
+            <PayslipDocument
+              payslip={detail.payslip}
+              className="border border-border shadow-sm"
+            />
           </div>
         ) : (
           <EmptyPanel
@@ -274,7 +189,19 @@ export default function PayslipsPage() {
           <h2 className="mb-3 text-h3 font-bold text-foreground">My Inquiries</h2>
           <div className="divide-y divide-border">
             {pagedInquiries.map((q) => (
-              <div key={q.id} className="py-3">
+              <div
+                key={q.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setInqDetailId(q.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setInqDetailId(q.id);
+                  }
+                }}
+                className="cursor-pointer py-3 transition-colors hover:bg-muted/40"
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-foreground">
@@ -295,19 +222,11 @@ export default function PayslipsPage() {
               </div>
             ))}
           </div>
-          {inquiryList.length > inqSize && (
+          {inquiryList.length > PAGE_SIZE && (
             <div className="-mx-6 -mb-6 flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-              <div className="flex items-center gap-2 text-caption text-muted-foreground">
-                <span>Rows per page</span>
-                <SimpleSelect
-                  className="h-7 w-16"
-                  value={String(inqSize)}
-                  onValueChange={(v) => { setInqSize(Number(v)); setInqPage(1); }}
-                  options={inqPageSizes.map((n) => ({ value: String(n), label: String(n) }))}
-                />
-                <span className="hidden sm:inline">
-                  · Showing {(inqSafePage - 1) * inqSize + 1}–{Math.min(inqSafePage * inqSize, inquiryList.length)} of {inquiryList.length}
-                </span>
+              <div className="text-caption text-muted-foreground">
+                Showing {(inqSafePage - 1) * PAGE_SIZE + 1}–
+                {Math.min(inqSafePage * PAGE_SIZE, inquiryList.length)} of {inquiryList.length}
               </div>
 
               <div className="flex items-center gap-1">
@@ -353,6 +272,70 @@ export default function PayslipsPage() {
         title="Hard-copy request declined"
         reason={declinedCopy?.review_note ?? null}
       />
+
+      {inqDetail && (
+        <RequestDetailDialog
+          open
+          onOpenChange={(o) => !o && setInqDetailId(null)}
+          title={inqDetail.subject || inqDetail.topic || "Payroll inquiry"}
+          status={inqDetail.status}
+          submitted={inqDetail.created_at}
+          fields={[
+            { label: "Pay period", value: inqDetail.payslip_cycle ?? "Not specific" },
+            { label: "Topic", value: inqDetail.topic },
+            {
+              label: "Priority",
+              value:
+                inqDetail.priority === "high" ? (
+                  <span className="font-semibold text-danger">High</span>
+                ) : (
+                  <span className="capitalize">{inqDetail.priority}</span>
+                ),
+            },
+          ]}
+          note={{ label: "What you asked", text: inqDetail.message }}
+          decision={{
+            label: "HR's reply",
+            by: inqDetail.resolved_by,
+            at: inqDetail.resolved_at,
+            note: inqDetail.resolution_note,
+          }}
+        >
+          {inqDetail.attachment_url && (
+            <a
+              href={inqDetail.attachment_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+            >
+              <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+              The file you attached
+            </a>
+          )}
+          {inqDetail.resolution_attachments.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                Attached by HR ({inqDetail.resolution_attachments.length})
+              </p>
+              <ul className="space-y-1">
+                {inqDetail.resolution_attachments.map((a, i) => (
+                  <li key={i}>
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      <Paperclip className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{a.name}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </RequestDetailDialog>
+      )}
     </div>
   );
 }
@@ -548,85 +531,3 @@ function PayslipCopyDialog({
   );
 }
 
-// Attendance basis (step 7): explains how base salary was derived — working days, daily
-// rate, and any late/undertime that reduced it. Base salary already reflects these, so
-// this is shown as context, not extra deductions. Hidden on older payslips (no data).
-function AttendanceBasis({ payslip }: { payslip: Payslip }) {
-  if (payslip.working_days <= 0) return null;
-
-  const hasReductions =
-    payslip.unpaid_days > 0 || payslip.late_minutes > 0 || payslip.undertime_minutes > 0;
-
-  return (
-    <Section title="Attendance basis">
-      <Row label="Working days this period" value={String(payslip.working_days)} />
-      <Row label="Daily rate" value={formatPeso(payslip.daily_rate)} />
-      {payslip.unpaid_days > 0 && (
-        <Row label="Unpaid days" value={payslip.unpaid_days.toFixed(2)} />
-      )}
-      {payslip.late_minutes > 0 && (
-        <Row
-          label={`Late (${payslip.late_minutes} min)`}
-          value={formatPeso(payslip.late_deduction)}
-          negative
-        />
-      )}
-      {/* Item 13b.13 — the per-N-lates penalty used to vanish into "Unpaid days". */}
-      {payslip.late_penalty_days > 0 && (
-        <Row
-          label={`Tardiness penalty (${payslip.late_penalty_days} ${
-            payslip.late_penalty_days === 1 ? "day" : "days"
-          })`}
-          value={formatPeso(payslip.late_penalty_days * payslip.daily_rate)}
-          negative
-        />
-      )}
-      {payslip.undertime_minutes > 0 && (
-        <Row
-          label={`Undertime (${payslip.undertime_minutes} min)`}
-          value={formatPeso(payslip.undertime_deduction)}
-          negative
-        />
-      )}
-      {hasReductions && (
-        <p className="pt-1 text-xs text-muted-foreground">
-          Your base salary above already reflects these. Questions? File a payroll inquiry below.
-        </p>
-      )}
-    </Section>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mt-6">
-      <div className="border-b border-border pb-2.5">
-        <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-          {title}
-        </p>
-      </div>
-      <div className="mt-1">{children}</div>
-    </div>
-  );
-}
-
-function Row({ label, value, negative }: { label: string; value: string; negative?: boolean }) {
-  return (
-    <div className="flex items-center justify-between py-3 text-body">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={cn(negative ? "text-danger" : "text-foreground")}>
-        {negative ? "− " : ""}
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function Ytd({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <div className={className}>
-      <p className="text-sm font-medium text-muted-foreground">{label}</p>
-      <p className="mt-1 text-body font-medium text-foreground">{value}</p>
-    </div>
-  );
-}

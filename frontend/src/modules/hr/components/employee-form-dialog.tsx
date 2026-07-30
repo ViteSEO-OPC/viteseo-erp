@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -19,108 +19,114 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 import { useDepartments } from "@/modules/hr/hooks/use-departments";
+import { useCreateEmployee, useEmployees } from "@/modules/hr/hooks/use-employees";
+import { SiblingsFields } from "@/modules/hr/components/siblings-fields";
 import {
-  useCreateEmployee,
-  useUpdateEmployee,
-  useEmployees,
-} from "@/modules/hr/hooks/use-employees";
-import {
-  useEmployeeSchedule,
-  useUpdateEmployeeSchedule,
-  useWorkSchedules,
-} from "@/modules/hr/hooks/use-rules";
-import {
-  WEEKDAYS,
-  type EmployeeSchedule,
-  type EmployeeScheduleInput,
-  type WorkSchedule,
-} from "@/modules/hr/types/rules";
+  emailField,
+  numberOrNull,
+  optionalChoice,
+  optionalCount,
+  optionalMoney,
+  optionalPastDate,
+  optionalPhone,
+  optionalText,
+  requiredChoice,
+  requiredDate,
+  requiredMoney,
+  requiredText,
+} from "@/modules/hr/lib/employee-validation";
 import {
   EMPLOYMENT_STATUSES,
   GENDERS,
   CIVIL_STATUSES,
-  JOB_TYPES,
   PAY_FREQUENCIES,
   BANK_ACCOUNT_TYPES,
-  SALARY_CHANGE_TYPES,
   statusLabel,
-  type Employee,
   type EmployeeInput,
 } from "@/modules/hr/types/employee";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
-import { TimePicker } from "@/modules/hr/ui/time-picker";
+import { manilaToday, manilaYear } from "@/modules/hr/lib/manila-date";
 
-const ROLE_CHANGE_TYPES = [
-  { value: "promotion", label: "Promotion" },
-  { value: "transfer", label: "Transfer" },
-  { value: "lateral", label: "Lateral move" },
-  { value: "correction", label: "Correction (fix title, no new entry)" },
-] as const;
+const PAY_FREQUENCY_VALUES = PAY_FREQUENCIES.map((f) => f.value);
 
-export type EmployeeEditSection = "personal" | "job" | "compensation";
-
-const SECTION_LABEL: Record<EmployeeEditSection, string> = {
-  personal: "Personal",
-  job: "Job",
-  compensation: "Compensation",
-};
-
-const schema = z.object({
-  first_name: z.string().min(1, "First name is required"),
-  last_name: z.string().min(1, "Last name is required"),
-  middle_name: z.string(),
-  name_extension: z.string(),
-  email: z.string().email("Enter a valid email"),
-  phone: z.string(),
-  gender: z.string(),
-  civil_status: z.string(),
-  nationality: z.string(),
-  date_of_birth: z.string(),
-  place_of_birth: z.string(),
-  address: z.string(),
-  current_address: z.string(),
-  mothers_maiden_name: z.string(),
-  fathers_name: z.string(),
-  siblings_name: z.string(),
-  high_school: z.string(),
-  college_course: z.string(),
-  university: z.string(),
-  emergency_contact_name: z.string(),
-  emergency_contact_relationship: z.string(),
-  emergency_contact_phone: z.string(),
-  department_id: z.string().min(1, "Select a department"),
-  manager_id: z.string(),
-  job_title: z.string().min(1, "Job title is required"),
-  employment_status: z.string().min(1),
-  employment_type: z.string(),
-  work_location: z.string(),
-  employee_role: z.string(),
-  hire_date: z.string().min(1, "Hire date is required"),
-  base_salary: z.string().min(1, "Salary is required"),
-  is_management: z.boolean(),
-  bank_name: z.string(),
-  bank_account: z.string(),
-  height: z.string(),
-  weight: z.string(),
-  health_condition: z.string(),
-  pay_frequency: z.string(),
-  currency: z.string(),
-  bank_account_type: z.string(),
-  bank_account_name: z.string(),
-  sss_contribution: z.string(),
-  pagibig_contribution: z.string(),
-  philhealth_contribution: z.string(),
-  food_allowance: z.string(),
-  transportation_allowance: z.string(),
-  load_allowance: z.string(),
-  salary_change_reason: z.string(),
-  salary_change_type: z.string(),
-  role_change_type: z.string(),
-  role_change_reason: z.string(),
-});
+/**
+ * Creating an employee. Editing happens inline on the record itself
+ * (see employee-record.tsx), so this dialog only ever adds someone new.
+ */
+const schema = z
+  .object({
+    first_name: requiredText("First name"),
+    last_name: requiredText("Last name"),
+    middle_name: optionalText(),
+    name_extension: optionalText(50),
+    email: emailField,
+    phone: optionalPhone(),
+    gender: optionalChoice(GENDERS, "Gender"),
+    civil_status: optionalChoice(CIVIL_STATUSES, "Civil status"),
+    nationality: optionalText(100),
+    date_of_birth: optionalPastDate("Date of birth"),
+    place_of_birth: optionalText(),
+    address: optionalText(500),
+    current_address: optionalText(500),
+    mothers_maiden_name: optionalText(),
+    fathers_name: optionalText(),
+    siblings: z.array(z.object({ name: requiredText("Sibling's name"), gender: z.string() })),
+    number_of_siblings: optionalCount("Number of siblings"),
+    high_school: optionalText(),
+    college_course: optionalText(),
+    university: optionalText(),
+    emergency_contact_name: optionalText(),
+    emergency_contact_relationship: optionalText(100),
+    emergency_contact_phone: optionalPhone("Emergency contact number"),
+    height: optionalText(50),
+    weight: optionalText(50),
+    health_condition: optionalText(500),
+    department_id: z.string().min(1, "Select a department"),
+    manager_id: z.string(),
+    job_title: requiredText("Job title"),
+    employment_status: requiredChoice(EMPLOYMENT_STATUSES, "Employment status"),
+    work_location: optionalText(),
+    employee_role: optionalText(),
+    hire_date: requiredDate("Hire date"),
+    base_salary: requiredMoney("Base salary"),
+    is_management: z.boolean(),
+    bank_name: optionalText(),
+    bank_account: optionalText(100),
+    bank_account_name: optionalText(),
+    bank_account_type: optionalChoice(BANK_ACCOUNT_TYPES, "Bank type"),
+    pay_frequency: optionalChoice(PAY_FREQUENCY_VALUES, "Pay frequency"),
+    currency: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || /^[A-Za-z]{3}$/.test(v), "Use a 3-letter code, e.g. PHP"),
+    sss_contribution: optionalMoney("SSS"),
+    pagibig_contribution: optionalMoney("Pag-IBIG"),
+    philhealth_contribution: optionalMoney("PhilHealth"),
+    food_allowance: optionalMoney("Food allowance"),
+    transportation_allowance: optionalMoney("Transportation allowance"),
+    load_allowance: optionalMoney("Load allowance"),
+    tin: optionalText(32),
+    sss_number: optionalText(32),
+    philhealth_number: optionalText(32),
+    pagibig_number: optionalText(32),
+  })
+  // You needn't name every sibling, but the total can't be fewer than the names given.
+  .superRefine((v, ctx) => {
+    if (v.number_of_siblings === "") return;
+    const named = v.siblings.filter((s) => s.name.trim() !== "").length;
+    if (Number(v.number_of_siblings) < named) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["number_of_siblings"],
+        message:
+          named === 1
+            ? "One sibling is listed, so this cannot be 0."
+            : `${named} siblings are listed, so this cannot be lower than ${named}.`,
+      });
+    }
+  });
 
 type FormValues = z.infer<typeof schema>;
 
@@ -128,44 +134,30 @@ const EMPTY: FormValues = {
   first_name: "", last_name: "", middle_name: "", name_extension: "", email: "",
   phone: "", gender: "", civil_status: "", nationality: "", date_of_birth: "",
   place_of_birth: "", address: "", current_address: "", mothers_maiden_name: "",
-  fathers_name: "", siblings_name: "", high_school: "", college_course: "",
-  university: "", emergency_contact_name: "", emergency_contact_relationship: "",
-  emergency_contact_phone: "", department_id: "", manager_id: "", job_title: "",
-  employment_status: "regular", employment_type: "", work_location: "", employee_role: "",
+  fathers_name: "", siblings: [], number_of_siblings: "", high_school: "",
+  college_course: "", university: "", emergency_contact_name: "",
+  emergency_contact_relationship: "", emergency_contact_phone: "",
+  department_id: "", manager_id: "", job_title: "",
+  employment_status: "regular", work_location: "", employee_role: "",
   hire_date: "", base_salary: "", is_management: false, bank_name: "",
   bank_account: "", height: "", weight: "", health_condition: "",
   pay_frequency: "semi_monthly", currency: "PHP", bank_account_type: "",
   bank_account_name: "", sss_contribution: "", pagibig_contribution: "",
   philhealth_contribution: "", food_allowance: "", transportation_allowance: "",
   load_allowance: "",
-  salary_change_reason: "", salary_change_type: "", role_change_type: "", role_change_reason: "",
+  tin: "", sss_number: "", philhealth_number: "", pagibig_number: "",
 };
 
 export function EmployeeFormDialog({
   open,
   onOpenChange,
-  employee,
-  section = "personal",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  employee?: Employee | null;
-  /** Which tab's fields to edit. Ignored when creating (all sections show). */
-  section?: EmployeeEditSection;
 }) {
-  const isEdit = !!employee;
   const { data: departments } = useDepartments();
   const { data: allEmployees } = useEmployees();
   const createMut = useCreateEmployee();
-  const updateMut = useUpdateEmployee();
-
-  // Work schedule is edited inside the Job section and saved via its own endpoint
-  // on the same "Save changes" click (no query fires until we have an employee id).
-  const { data: scheduleData } = useEmployeeSchedule(employee?.id ?? null);
-  const scheduleMut = useUpdateEmployeeSchedule(employee?.id ?? 0);
-  const { data: workSchedules } = useWorkSchedules();
-  // The schedule sub-form bubbles its current values up here (null = untouched).
-  const [schedulePayload, setSchedulePayload] = useState<EmployeeScheduleInput | null>(null);
 
   const {
     register,
@@ -173,71 +165,18 @@ export function EmployeeFormDialog({
     handleSubmit,
     reset,
     setError,
+    setValue,
     watch,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: EMPTY });
 
   useEffect(() => {
-    if (!open) return;
-    reset(
-      employee
-        ? {
-            first_name: employee.first_name ?? "",
-            last_name: employee.last_name ?? "",
-            middle_name: employee.middle_name ?? "",
-            name_extension: employee.name_extension ?? "",
-            email: employee.email,
-            phone: employee.phone ?? "",
-            gender: employee.gender ?? "",
-            civil_status: employee.civil_status ?? "",
-            nationality: employee.nationality ?? "",
-            date_of_birth: employee.date_of_birth ?? "",
-            place_of_birth: employee.place_of_birth ?? "",
-            address: employee.address ?? "",
-            current_address: employee.current_address ?? "",
-            mothers_maiden_name: employee.mothers_maiden_name ?? "",
-            fathers_name: employee.fathers_name ?? "",
-            siblings_name: employee.siblings_name ?? "",
-            high_school: employee.high_school ?? "",
-            college_course: employee.college_course ?? "",
-            university: employee.university ?? "",
-            emergency_contact_name: employee.emergency_contact_name ?? "",
-            emergency_contact_relationship: employee.emergency_contact_relationship ?? "",
-            emergency_contact_phone: employee.emergency_contact_phone ?? "",
-            department_id: employee.department ? String(employee.department.id) : "",
-            manager_id: employee.manager ? String(employee.manager.id) : "",
-            job_title: employee.job_title,
-            employment_status: employee.employment_status,
-            employment_type: employee.employment_type ?? "",
-            work_location: employee.work_location ?? "",
-            employee_role: employee.employee_role ?? "",
-            hire_date: employee.hire_date,
-            base_salary: String(parseFloat(employee.base_salary)),
-            is_management: employee.is_management ?? false,
-            bank_name: employee.bank_name ?? "",
-            bank_account: employee.bank_account ?? "",
-            height: employee.height ?? "",
-            weight: employee.weight ?? "",
-            health_condition: employee.health_condition ?? "",
-            pay_frequency: employee.pay_frequency ?? "semi_monthly",
-            currency: employee.currency ?? "PHP",
-            bank_account_type: employee.bank_account_type ?? "",
-            bank_account_name: employee.bank_account_name ?? "",
-            sss_contribution: employee.sss_contribution ?? "",
-            pagibig_contribution: employee.pagibig_contribution ?? "",
-            philhealth_contribution: employee.philhealth_contribution ?? "",
-            food_allowance: employee.food_allowance ?? "",
-            transportation_allowance: employee.transportation_allowance ?? "",
-            load_allowance: employee.load_allowance ?? "",
-            // Audit inputs are always blank per edit.
-            salary_change_reason: "", salary_change_type: "", role_change_type: "", role_change_reason: "",
-          }
-        : EMPTY,
-    );
-  }, [open, employee, reset]);
+    if (open) reset(EMPTY);
+  }, [open, reset]);
 
   async function onSubmit(v: FormValues) {
-    const s = (x: string) => x || undefined;
+    // Blank optional fields are omitted; the columns default to empty.
+    const s = (x: string) => x.trim() || undefined;
     const input: EmployeeInput = {
       first_name: v.first_name,
       last_name: v.last_name,
@@ -248,7 +187,6 @@ export function EmployeeFormDialog({
       manager_id: v.manager_id ? Number(v.manager_id) : null,
       job_title: v.job_title,
       employment_status: v.employment_status,
-      employment_type: s(v.employment_type),
       work_location: s(v.work_location),
       employee_role: s(v.employee_role),
       hire_date: v.hire_date,
@@ -264,7 +202,10 @@ export function EmployeeFormDialog({
       place_of_birth: s(v.place_of_birth),
       mothers_maiden_name: s(v.mothers_maiden_name),
       fathers_name: s(v.fathers_name),
-      siblings_name: s(v.siblings_name),
+      siblings: v.siblings
+        .filter((sibling) => sibling.name.trim() !== "")
+        .map((sibling) => ({ name: sibling.name.trim(), gender: sibling.gender || null })),
+      number_of_siblings: numberOrNull(v.number_of_siblings),
       high_school: s(v.high_school),
       college_course: s(v.college_course),
       university: s(v.university),
@@ -277,7 +218,7 @@ export function EmployeeFormDialog({
       weight: s(v.weight),
       health_condition: s(v.health_condition),
       pay_frequency: s(v.pay_frequency),
-      currency: s(v.currency),
+      currency: s(v.currency)?.toUpperCase(),
       bank_account_type: s(v.bank_account_type),
       bank_account_name: s(v.bank_account_name),
       sss_contribution: s(v.sss_contribution),
@@ -286,24 +227,15 @@ export function EmployeeFormDialog({
       food_allowance: s(v.food_allowance),
       transportation_allowance: s(v.transportation_allowance),
       load_allowance: s(v.load_allowance),
-      salary_change_reason: s(v.salary_change_reason),
-      salary_change_type: s(v.salary_change_type),
-      role_change_type: s(v.role_change_type),
-      role_change_reason: s(v.role_change_reason),
+      tin: s(v.tin),
+      sss_number: s(v.sss_number),
+      philhealth_number: s(v.philhealth_number),
+      pagibig_number: s(v.pagibig_number),
     };
 
     try {
-      if (employee) {
-        await updateMut.mutateAsync({ id: employee.id, input });
-        // Schedule is only edited from the Job tab; save it on the same click.
-        if (section === "job" && scheduleData) {
-          await scheduleMut.mutateAsync(schedulePayload ?? scheduleToInput(scheduleData));
-        }
-        toast.success("Employee updated");
-      } else {
-        await createMut.mutateAsync(input);
-        toast.success("Employee created — login provisioned");
-      }
+      await createMut.mutateAsync(input);
+      toast.success("Employee created — login provisioned");
       onOpenChange(false);
     } catch (err) {
       if (err instanceof AxiosError && err.response?.status === 422) {
@@ -311,14 +243,12 @@ export function EmployeeFormDialog({
         for (const field of Object.keys(serverErrors)) {
           setError(field as keyof FormValues, { message: serverErrors[field][0] });
         }
+        toast.error("Please fix the highlighted fields.");
       } else {
         toast.error("Something went wrong. Please try again.");
       }
     }
   }
-
-  // Managers = everyone except the person being edited (no self-management).
-  const managerOptions = (allEmployees ?? []).filter((e) => e.id !== employee?.id);
 
   // Employee role options come from the selected department's positions catalog.
   // Falls back to a free-text input when that department has no positions yet.
@@ -326,45 +256,39 @@ export function EmployeeFormDialog({
   const positionOptions =
     (departments ?? []).find((d) => String(d.id) === selectedDeptId)?.positions ?? [];
 
-  // When creating, show every section; when editing, only the chosen tab's fields.
-  const show = (key: EmployeeEditSection) => !isEdit || section === key;
-  const title = isEdit ? `Edit ${SECTION_LABEL[section]} Information` : "Add employee";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle>Add employee</DialogTitle>
           <DialogDescription>
-            {isEdit
-              ? `Update this employee's ${SECTION_LABEL[section].toLowerCase()} details.`
-              : "Creates the employee, their login (password: password), and leave balances."}
+            Creates the employee, their login (password: password), and leave balances.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
           <div className="max-h-[60vh] space-y-6 overflow-y-auto overflow-x-hidden px-0.5">
             {/* Personal */}
-            <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-2", !show("personal") && "hidden")}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="First name" error={errors.first_name?.message}>
                 <Input placeholder="Juan" {...register("first_name")} />
               </Field>
               <Field label="Last name" error={errors.last_name?.message}>
                 <Input placeholder="Dela Cruz" {...register("last_name")} />
               </Field>
-              <Field label="Middle name">
+              <Field label="Middle name" error={errors.middle_name?.message}>
                 <Input {...register("middle_name")} />
               </Field>
-              <Field label="Name extension">
+              <Field label="Name extension" error={errors.name_extension?.message}>
                 <Input placeholder="Jr., III" {...register("name_extension")} />
               </Field>
               <Field label="Email address" error={errors.email?.message}>
                 <Input type="email" placeholder="juan@viteseo.ph" {...register("email")} />
               </Field>
-              <Field label="Contact number">
+              <Field label="Contact number" error={errors.phone?.message}>
                 <Input placeholder="+63 917 000 0000" {...register("phone")} />
               </Field>
-              <Field label="Gender">
+              <Field label="Gender" error={errors.gender?.message}>
                 <Controller
                   control={control}
                   name="gender"
@@ -378,7 +302,7 @@ export function EmployeeFormDialog({
                   )}
                 />
               </Field>
-              <Field label="Civil status">
+              <Field label="Civil status" error={errors.civil_status?.message}>
                 <Controller
                   control={control}
                   name="civil_status"
@@ -392,224 +316,197 @@ export function EmployeeFormDialog({
                   )}
                 />
               </Field>
-              <Field label="Nationality">
+              <Field label="Nationality" error={errors.nationality?.message}>
                 <Input placeholder="Filipino" {...register("nationality")} />
               </Field>
-              <Field label="Date of birth">
+              <Field label="Date of birth" error={errors.date_of_birth?.message}>
                 <Controller
                   control={control}
                   name="date_of_birth"
                   render={({ field }) => (
-                    <DatePicker value={field.value} onChange={field.onChange} />
+                    <DatePicker
+                      value={field.value}
+                      onChange={field.onChange}
+                      max={manilaToday()}
+                      fromYear={manilaYear() - 80}
+                      aria-invalid={!!errors.date_of_birth}
+                    />
                   )}
                 />
               </Field>
-              <Field label="Place of birth">
+              <Field label="Place of birth" error={errors.place_of_birth?.message}>
                 <Input {...register("place_of_birth")} />
               </Field>
-              <Field label="Home address">
+              <Field label="Home address" error={errors.address?.message}>
                 <Input placeholder="City, Province" {...register("address")} />
               </Field>
-              <Field label="Current address">
+              <Field label="Current address" error={errors.current_address?.message}>
                 <Input {...register("current_address")} />
               </Field>
-              <Field label="Mother's maiden name">
+              <Field label="Mother's maiden name" error={errors.mothers_maiden_name?.message}>
                 <Input {...register("mothers_maiden_name")} />
               </Field>
-              <Field label="Father's name">
+              <Field label="Father's name" error={errors.fathers_name?.message}>
                 <Input {...register("fathers_name")} />
               </Field>
-              <Field label="Siblings name">
-                <Input {...register("siblings_name")} />
-              </Field>
-              <Field label="High school">
+
+              <div className="border-t border-border pt-4 sm:col-span-2">
+                <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
+                  Siblings
+                </p>
+                <SiblingsFields
+                  siblings={watch("siblings")}
+                  onSiblingsChange={(next) => setValue("siblings", next, { shouldDirty: true })}
+                  count={watch("number_of_siblings")}
+                  onCountChange={(next) =>
+                    setValue("number_of_siblings", next, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                  countError={errors.number_of_siblings?.message}
+                  nameErrors={watch("siblings").map((_, i) => errors.siblings?.[i]?.name?.message)}
+                />
+              </div>
+
+              <Field label="High school" error={errors.high_school?.message}>
                 <Input {...register("high_school")} />
               </Field>
-              <Field label="College course">
+              <Field label="College course" error={errors.college_course?.message}>
                 <Input {...register("college_course")} />
               </Field>
-              <Field label="University/College">
+              <Field label="University/College" error={errors.university?.message}>
                 <Input {...register("university")} />
               </Field>
-              <Field label="Emergency contact name">
+              <Field label="Emergency contact name" error={errors.emergency_contact_name?.message}>
                 <Input {...register("emergency_contact_name")} />
               </Field>
-              <Field label="Emergency contact relationship">
+              <Field
+                label="Emergency contact relationship"
+                error={errors.emergency_contact_relationship?.message}
+              >
                 <Input placeholder="Father" {...register("emergency_contact_relationship")} />
               </Field>
-              <Field label="Emergency contact phone">
+              <Field
+                label="Emergency contact phone"
+                error={errors.emergency_contact_phone?.message}
+              >
                 <Input {...register("emergency_contact_phone")} />
               </Field>
-              <Field label="Height">
+              <Field label="Height" error={errors.height?.message}>
                 <Input placeholder="162 cm" {...register("height")} />
               </Field>
-              <Field label="Weight">
+              <Field label="Weight" error={errors.weight?.message}>
                 <Input placeholder="55 kg" {...register("weight")} />
               </Field>
-              <Field label="Health concern/condition">
+              <Field label="Health concern/condition" error={errors.health_condition?.message}>
                 <Input placeholder="None" {...register("health_condition")} />
               </Field>
             </div>
 
             {/* Job */}
-            <div className={cn("space-y-4", !show("job") && "hidden")}>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Job title" error={errors.job_title?.message}>
-                  <Input placeholder="Software Engineer" {...register("job_title")} />
-                </Field>
-                <Field label="Department" error={errors.department_id?.message}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Job title" error={errors.job_title?.message}>
+                <Input placeholder="Software Engineer" {...register("job_title")} />
+              </Field>
+              <Field label="Department" error={errors.department_id?.message}>
+                <Controller
+                  control={control}
+                  name="department_id"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      placeholder="Select…"
+                      aria-invalid={!!errors.department_id}
+                      options={(departments ?? []).map((d) => ({
+                        value: String(d.id),
+                        label: d.name,
+                      }))}
+                    />
+                  )}
+                />
+              </Field>
+              <Field label="Manager">
+                <Controller
+                  control={control}
+                  name="manager_id"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value || "none"}
+                      onValueChange={(v) => field.onChange(v === "none" ? "" : v)}
+                      options={[
+                        { value: "none", label: "None" },
+                        ...(allEmployees ?? []).map((e) => ({
+                          value: String(e.id),
+                          label: e.name,
+                        })),
+                      ]}
+                    />
+                  )}
+                />
+              </Field>
+              <Field label="Employment status" error={errors.employment_status?.message}>
+                <Controller
+                  control={control}
+                  name="employment_status"
+                  render={({ field }) => (
+                    <SimpleSelect
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      options={EMPLOYMENT_STATUSES.map((st) => ({
+                        value: st,
+                        label: statusLabel(st),
+                      }))}
+                    />
+                  )}
+                />
+              </Field>
+              <Field label="Employee role" error={errors.employee_role?.message}>
+                {positionOptions.length > 0 ? (
                   <Controller
                     control={control}
-                    name="department_id"
-                    render={({ field }) => (
-                      <SimpleSelect
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        placeholder="Select…"
-                        aria-invalid={!!errors.department_id}
-                        options={(departments ?? []).map((d) => ({ value: String(d.id), label: d.name }))}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label="Manager">
-                  <Controller
-                    control={control}
-                    name="manager_id"
+                    name="employee_role"
                     render={({ field }) => (
                       <SimpleSelect
                         value={field.value || "none"}
                         onValueChange={(v) => field.onChange(v === "none" ? "" : v)}
+                        placeholder="Select…"
                         options={[
                           { value: "none", label: "None" },
-                          ...managerOptions.map((e) => ({ value: String(e.id), label: e.name })),
+                          ...positionOptions.map((p) => ({ value: p.name, label: p.name })),
                         ]}
                       />
                     )}
                   />
-                </Field>
-                <Field label="Employment status">
-                  <Controller
-                    control={control}
-                    name="employment_status"
-                    render={({ field }) => (
-                      <SimpleSelect
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        options={EMPLOYMENT_STATUSES.map((st) => ({ value: st, label: statusLabel(st) }))}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label="Type">
-                  <Controller
-                    control={control}
-                    name="employment_type"
-                    render={({ field }) => (
-                      <SimpleSelect
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        placeholder="Select…"
-                        options={JOB_TYPES.map((t) => ({ value: t, label: t }))}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label="Employee role">
-                  {positionOptions.length > 0 ? (
-                    <Controller
-                      control={control}
-                      name="employee_role"
-                      render={({ field }) => {
-                        // Keep a legacy/free-text value selectable so editing an
-                        // existing employee never silently drops their role.
-                        const extra =
-                          field.value &&
-                          !positionOptions.some((p) => p.name === field.value)
-                            ? [{ value: field.value, label: `${field.value} (current)` }]
-                            : [];
-                        return (
-                          <SimpleSelect
-                            value={field.value || "none"}
-                            onValueChange={(v) => field.onChange(v === "none" ? "" : v)}
-                            placeholder="Select…"
-                            options={[
-                              { value: "none", label: "None" },
-                              ...positionOptions.map((p) => ({ value: p.name, label: p.name })),
-                              ...extra,
-                            ]}
-                          />
-                        );
-                      }}
+                ) : (
+                  <Input placeholder="Senior Product Manager" {...register("employee_role")} />
+                )}
+              </Field>
+              <Field label="Location" error={errors.work_location?.message}>
+                <Input placeholder="Manila HQ · Hybrid" {...register("work_location")} />
+              </Field>
+              <Field label="Hire date" error={errors.hire_date?.message}>
+                <Controller
+                  control={control}
+                  name="hire_date"
+                  render={({ field }) => (
+                    <DatePicker
+                      value={field.value}
+                      onChange={field.onChange}
+                      aria-invalid={!!errors.hire_date}
                     />
-                  ) : (
-                    <Input placeholder="Senior Product Manager" {...register("employee_role")} />
                   )}
-                </Field>
-                <Field label="Location">
-                  <Input placeholder="Manila HQ · Hybrid" {...register("work_location")} />
-                </Field>
-                <Field label="Hire date" error={errors.hire_date?.message}>
-                  <Controller
-                    control={control}
-                    name="hire_date"
-                    render={({ field }) => (
-                      <DatePicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        aria-invalid={!!errors.hire_date}
-                      />
-                    )}
-                  />
-                </Field>
-              </div>
-
-              {/* Role-change log — only when editing an existing employee. */}
-              {isEdit && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Change type">
-                    <Controller
-                      control={control}
-                      name="role_change_type"
-                      render={({ field }) => (
-                        <SimpleSelect
-                          value={field.value || "generic"}
-                          onValueChange={(v) => field.onChange(v === "generic" ? "" : v)}
-                          options={[
-                            { value: "generic", label: "— (logs a generic role change)" },
-                            ...ROLE_CHANGE_TYPES.map((t) => ({ value: t.value, label: t.label })),
-                          ]}
-                        />
-                      )}
-                    />
-                  </Field>
-                  <Field label="Reason for change">
-                    <Input placeholder="e.g. Promoted after Q2 review" {...register("role_change_reason")} />
-                  </Field>
-                  <p className="text-xs text-muted-foreground sm:col-span-2">
-                    Only applies if you change the job title — it&apos;s recorded in the employment history.
-                  </p>
-                </div>
-              )}
-
-              {/* Work schedule (was the separate Work Details tab). Re-mounts when
-                  the fetched schedule arrives so it initialises from real values. */}
-              {isEdit && scheduleData && (
-                <ScheduleFields
-                  key={employee!.id}
-                  initial={scheduleData}
-                  workSchedules={workSchedules ?? []}
-                  onChange={setSchedulePayload}
                 />
-              )}
+              </Field>
             </div>
 
             {/* Compensation */}
-            <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-2", !show("compensation") && "hidden")}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Base salary (₱ / month)" error={errors.base_salary?.message}>
                 <Input type="number" min="0" step="0.01" placeholder="45000" {...register("base_salary")} />
               </Field>
-              <Field label="Pay frequency">
+              <Field label="Pay frequency" error={errors.pay_frequency?.message}>
                 <Controller
                   control={control}
                   name="pay_frequency"
@@ -622,13 +519,13 @@ export function EmployeeFormDialog({
                   )}
                 />
               </Field>
-              <Field label="Currency">
+              <Field label="Currency" error={errors.currency?.message}>
                 <Input placeholder="PHP" {...register("currency")} />
               </Field>
-              <Field label="Bank name">
+              <Field label="Bank name" error={errors.bank_name?.message}>
                 <Input placeholder="BPI" {...register("bank_name")} />
               </Field>
-              <Field label="Bank type">
+              <Field label="Bank type" error={errors.bank_account_type?.message}>
                 <Controller
                   control={control}
                   name="bank_account_type"
@@ -642,30 +539,57 @@ export function EmployeeFormDialog({
                   )}
                 />
               </Field>
-              <Field label="Bank account number">
+              <Field label="Bank account number" error={errors.bank_account?.message}>
                 <Input placeholder="1234-5678-9012-34" {...register("bank_account")} />
               </Field>
-              <Field label="Bank account name">
+              <Field label="Bank account name" error={errors.bank_account_name?.message}>
                 <Input placeholder="Juan Dela Cruz" {...register("bank_account_name")} />
               </Field>
-              <Field label="SSS (₱ / mo)">
+              <Field label="SSS (₱ / mo)" error={errors.sss_contribution?.message}>
                 <Input type="number" min="0" step="0.01" {...register("sss_contribution")} />
               </Field>
-              <Field label="Pag-IBIG (₱ / mo)">
+              <Field label="Pag-IBIG (₱ / mo)" error={errors.pagibig_contribution?.message}>
                 <Input type="number" min="0" step="0.01" {...register("pagibig_contribution")} />
               </Field>
-              <Field label="PhilHealth (₱ / mo)">
+              <Field label="PhilHealth (₱ / mo)" error={errors.philhealth_contribution?.message}>
                 <Input type="number" min="0" step="0.01" {...register("philhealth_contribution")} />
               </Field>
-              <Field label="Food allowance (₱ / mo)">
+              <Field label="Food allowance (₱ / mo)" error={errors.food_allowance?.message}>
                 <Input type="number" min="0" step="0.01" {...register("food_allowance")} />
               </Field>
-              <Field label="Transportation allowance (₱ / mo)">
+              <Field
+                label="Transportation allowance (₱ / mo)"
+                error={errors.transportation_allowance?.message}
+              >
                 <Input type="number" min="0" step="0.01" {...register("transportation_allowance")} />
               </Field>
-              <Field label="Load allowance (₱ / mo)">
+              <Field label="Load allowance (₱ / mo)" error={errors.load_allowance?.message}>
                 <Input type="number" min="0" step="0.01" {...register("load_allowance")} />
               </Field>
+
+              {/* Membership numbers, not amounts — these print on the payslip header.
+                  Kept apart from the ₱ overrides above so "SSS" can't mean two things. */}
+              <div className="border-t border-border pt-4 sm:col-span-2">
+                <p className="text-label font-semibold uppercase tracking-wide text-brand">
+                  Government IDs
+                </p>
+                <p className="mt-1 text-caption text-muted-foreground">
+                  Printed on the payslip. Blank fields show as “—”.
+                </p>
+              </div>
+              <Field label="TIN" error={errors.tin?.message}>
+                <Input placeholder="123-456-789-000" {...register("tin")} />
+              </Field>
+              <Field label="SSS number" error={errors.sss_number?.message}>
+                <Input placeholder="34-5678901-2" {...register("sss_number")} />
+              </Field>
+              <Field label="PhilHealth number" error={errors.philhealth_number?.message}>
+                <Input placeholder="12-009876543-1" {...register("philhealth_number")} />
+              </Field>
+              <Field label="Pag-IBIG number" error={errors.pagibig_number?.message}>
+                <Input placeholder="1211-0098-7654" {...register("pagibig_number")} />
+              </Field>
+
               <label className="flex items-start gap-2.5 rounded-lg border border-input p-3 sm:col-span-2">
                 <input
                   type="checkbox"
@@ -679,32 +603,6 @@ export function EmployeeFormDialog({
                   </span>
                 </span>
               </label>
-              {isEdit && (
-                <>
-                  <Field label="Salary change type">
-                    <Controller
-                      control={control}
-                      name="salary_change_type"
-                      render={({ field }) => (
-                        <SimpleSelect
-                          value={field.value || "generic"}
-                          onValueChange={(v) => field.onChange(v === "generic" ? "" : v)}
-                          options={[
-                            { value: "generic", label: "— (generic adjustment)" },
-                            ...SALARY_CHANGE_TYPES.map((t) => ({ value: t.value, label: t.label })),
-                          ]}
-                        />
-                      )}
-                    />
-                  </Field>
-                  <Field label="Reason for salary change">
-                    <Input placeholder="e.g. Annual increase" {...register("salary_change_reason")} />
-                  </Field>
-                  <p className="text-xs text-muted-foreground sm:col-span-2">
-                    Type &amp; reason only apply if you change the base salary — recorded in the compensation history.
-                  </p>
-                </>
-              )}
             </div>
           </div>
 
@@ -713,7 +611,7 @@ export function EmployeeFormDialog({
               <Button type="button" variant="outline">Cancel</Button>
             </DialogClose>
             <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "Saving…" : isEdit ? "Save changes" : "Create employee"}
+              {isSubmitting ? "Saving…" : "Create employee"}
             </Button>
           </DialogFooter>
         </form>
@@ -732,117 +630,10 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("space-y-1.5")}>
+    <div className="space-y-1.5">
       <Label>{label}</Label>
       {children}
       {error && <p className="text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-
-function scheduleToInput(s: EmployeeSchedule): EmployeeScheduleInput {
-  return {
-    work_schedule_id: s.work_schedule_id ?? null,
-    custom_workdays: s.custom_workdays?.length ? s.custom_workdays : null,
-    custom_start_time: s.custom_start_time || null,
-    custom_end_time: s.custom_end_time || null,
-    custom_grace_minutes: s.custom_grace_minutes ?? null,
-  };
-}
-
-// Self-contained schedule editor: initialises from `initial` (via a remount key in
-// the parent) and reports its current values up through `onChange` — no state-sync
-// effect, so the parent stays simple.
-function ScheduleFields({
-  initial,
-  workSchedules,
-  onChange,
-}: {
-  initial: EmployeeSchedule;
-  workSchedules: WorkSchedule[];
-  onChange: (p: EmployeeScheduleInput) => void;
-}) {
-  const [schedId, setSchedId] = useState(
-    initial.work_schedule_id != null ? String(initial.work_schedule_id) : "",
-  );
-  const [workdays, setWorkdays] = useState<number[]>(initial.custom_workdays ?? []);
-  const [ovStart, setOvStart] = useState(initial.custom_start_time ?? "");
-  const [ovEnd, setOvEnd] = useState(initial.custom_end_time ?? "");
-  const [ovGrace, setOvGrace] = useState(
-    initial.custom_grace_minutes != null ? String(initial.custom_grace_minutes) : "",
-  );
-
-  // Report current values up (onChange only mutates a ref — no re-render cascade).
-  useEffect(() => {
-    onChange({
-      work_schedule_id: schedId ? Number(schedId) : null,
-      custom_workdays: workdays.length ? workdays : null,
-      custom_start_time: ovStart || null,
-      custom_end_time: ovEnd || null,
-      custom_grace_minutes: ovGrace !== "" ? Number(ovGrace) : null,
-    });
-  }, [schedId, workdays, ovStart, ovEnd, ovGrace, onChange]);
-
-  function toggleDay(day: number) {
-    setWorkdays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
-  }
-
-  return (
-    <div className="space-y-3 rounded-lg border border-border p-3">
-      <p className="text-label font-semibold uppercase tracking-wide text-muted-foreground">
-        Work schedule
-      </p>
-      <div className="space-y-1.5">
-        <Label>Assigned schedule</Label>
-        <SimpleSelect
-          value={schedId || "default"}
-          onValueChange={(v) => setSchedId(v === "default" ? "" : v)}
-          options={[
-            { value: "default", label: "Default schedule" },
-            ...workSchedules.map((ws) => ({ value: String(ws.id), label: ws.name })),
-          ]}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Override workdays (optional)</Label>
-        <div className="flex flex-wrap gap-1.5">
-          {WEEKDAYS.map((d) => {
-            const on = workdays.includes(d.value);
-            return (
-              <button
-                key={d.value}
-                type="button"
-                onClick={() => toggleDay(d.value)}
-                className={cn(
-                  "rounded-lg border px-2.5 py-1 text-sm font-medium transition-colors",
-                  on
-                    ? "border-brand bg-brand text-brand-foreground"
-                    : "border-input text-muted-foreground hover:bg-muted",
-                )}
-              >
-                {d.label}
-              </button>
-            );
-          })}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Leave all off to use the assigned schedule&apos;s days.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="space-y-1.5">
-          <Label>Override start</Label>
-          <TimePicker value={ovStart} onChange={setOvStart} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Override end</Label>
-          <TimePicker value={ovEnd} onChange={setOvEnd} />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Override grace</Label>
-          <Input type="number" min="0" max="240" value={ovGrace} onChange={(e) => setOvGrace(e.target.value)} />
-        </div>
-      </div>
     </div>
   );
 }

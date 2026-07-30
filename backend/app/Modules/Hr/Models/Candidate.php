@@ -18,6 +18,7 @@ class Candidate extends Model
         'expected_salary', 'location', 'feedback', 'interview_email_sent_at',
         'emails_sent', 'rejection_reason', 'rejected_at',
         'resume_path',
+        'assessment_link', 'assessment_instructions', 'assessment_deadline', 'assessment_sent_at',
     ];
 
     protected $casts = [
@@ -27,6 +28,8 @@ class Candidate extends Model
         'interview_email_sent_at' => 'datetime',
         'emails_sent' => 'array',
         'rejected_at' => 'datetime',
+        'assessment_deadline' => 'date',
+        'assessment_sent_at' => 'datetime',
     ];
 
     public function requisition(): BelongsTo

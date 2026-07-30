@@ -32,3 +32,9 @@ export async function markReimbursementPaid(id: number): Promise<Reimbursement> 
   const res = await apiClient.post(`/hr/reimbursements/${id}/mark-paid`);
   return res.data.data;
 }
+
+/** Undo the last mark, one step: paid → approved (still owed), decided → pending. */
+export async function reopenReimbursement(id: number, reason?: string): Promise<Reimbursement> {
+  const res = await apiClient.post(`/hr/reimbursements/${id}/reopen`, { reason });
+  return res.data.data;
+}

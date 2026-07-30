@@ -15,7 +15,10 @@ use Illuminate\Validation\ValidationException;
  */
 class HalfDayRequestService
 {
-    public function __construct(private readonly AuditService $audit) {}
+    public function __construct(
+        private readonly AuditService $audit,
+        private readonly PayrollFreezeService $freeze,
+    ) {}
 
     /** HR sees all; an employee sees only their own. */
     public function list(User $user): Collection
@@ -91,6 +94,46 @@ class HalfDayRequestService
             'declined',
             'Leave',
             "Declined {$employeeName}'s half-day request",
+            $request,
+        );
+
+        return $request;
+    }
+
+    /**
+     * Undo the decision — back to pending. An approved half-day costs the employee
+     * 0.5 unpaid day, so this is refused once payroll has settled that date.
+     */
+    public function reopen(HalfDayRequest $request, ?string $reason = null): HalfDayRequest
+    {
+        if ($request->status === 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['This request is still pending — there is nothing to undo.'],
+            ]);
+        }
+
+        if ($request->status === 'approved') {
+            $this->freeze->assertOpen(
+                $request->employee_id,
+                $request->work_date->toDateString(),
+                null,
+                'reopen this half-day request',
+            );
+        }
+
+        $request->update([
+            'status' => 'pending',
+            'review_note' => null,
+            'reviewed_by' => null,
+            'reviewed_at' => null,
+        ]);
+
+        $request->load(['employee.user', 'reviewer']);
+        $employeeName = $request->employee->user?->name ?? $request->employee->name;
+        $this->audit->log(
+            'reopened',
+            'Leave',
+            "Reopened {$employeeName}'s half-day request" . ($reason ? " — {$reason}" : ''),
             $request,
         );
 

@@ -4,16 +4,14 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   Avatar,
-  Badge,
   Button,
-  CalendarIcon,
   Card,
   ChevronRightIcon,
   ConfirmDialog,
   PencilIcon,
   PlusIcon,
 } from "@/core/ui";
-import { useIsManager } from "@/core/auth/AuthProvider";
+import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import type { StatusKey } from "../../types";
 import { useProjectChannel } from "../../useProjectChannel";
 import { useForbiddenRedirect } from "../../useForbiddenRedirect";
@@ -30,6 +28,16 @@ import {
 import { EditProjectModal } from "./EditProjectModal";
 import { MemberPickerModal } from "../team/MemberPickerModal";
 import { buildGroupsByUser, MemberGroupTags } from "../team/TeamShared";
+import { NotesCard } from "../notes/NotesCard";
+import { ListView } from "../workspaces/views/ListView";
+import {
+  colIdOf,
+  type StatusColumn,
+  type WorkItem,
+} from "../workspaces/views/shared";
+import { TaskModal } from "../tasks/TaskModal";
+import { useOpenTask } from "../tasks/useTaskModal";
+import { ProjectStatusBadge } from "../status/ProjectStatusBadge";
 import { STATUS_COLORS, StatusDonut } from "../status/StatusDonut";
 
 export interface ProjectDetailViewProps {
@@ -55,6 +63,8 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const statusesQuery = useStatuses(projectId);
   const tasksQuery = useTasks(projectId);
   const isManager = useIsManager();
+  const { user } = useAuth();
+  const openTask = useOpenTask();
 
   const project = projectQuery.data;
   const workspaceId = project?.workspace_id ?? "";
@@ -66,6 +76,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);
+  const [addTaskOpen, setAddTaskOpen] = useState(false);
   const updateProject = useUpdateProject();
   const isDone = project?.status === "done";
 
@@ -133,15 +144,68 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const pct = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 100));
   const donePct = pct(counts.done);
 
-  const projectStatus = isDone
-    ? "Done"
-    : total === 0
-      ? "Not Started"
-      : counts.done === total
-        ? "Completed"
-        : counts.in_progress > 0 || counts.done > 0
-          ? "In Progress"
-          : "Not Started";
+  // What this viewer may see in the task table. A manager gets the project; a
+  // member gets what's actually theirs — tasks assigned to them, plus a group
+  // task when they lead the group that owns it (`leads_my_group` is resolved
+  // server-side from the token, so it can't be spoofed by the client).
+  const visibleTasks = useMemo(() => {
+    const all = tasksQuery.data?.data ?? [];
+    if (isManager) return all;
+    return all.filter(
+      (t) => t.assignee_id === user?.id || (t.leads_my_group ?? false),
+    );
+  }, [tasksQuery.data, isManager, user?.id]);
+
+  // The board's List view speaks WorkItem, not Task — same shape the workspace
+  // board builds, minus the drag/subtask handling that only applies there.
+  const taskItems = useMemo<WorkItem[]>(
+    () =>
+      visibleTasks.map((t) => ({
+        kind: "task",
+        key: `task-${t.id}`,
+        id: t.id,
+        projectId: t.project_id,
+        projectColor: project?.color ?? "#6366f1",
+        title: t.title,
+        priority: t.priority,
+        statusName: t.status?.name ?? null,
+        statusKey: t.status?.key ?? null,
+        statusColor: t.status?.color ?? null,
+        assignee: t.assignee,
+        assigneeId: t.assignee_id,
+        groupName: t.group?.name ?? null,
+        groupColor: t.group?.color ?? null,
+        deadline: t.deadline,
+        hasMySubtask: t.has_my_subtask ?? false,
+        leadsMyGroup: t.leads_my_group ?? false,
+      })),
+    [visibleTasks, project?.color],
+  );
+
+  // This project's custom statuses get their own sections, so an empty one
+  // still shows up rather than silently vanishing.
+  const customStatusColumns = useMemo<StatusColumn[]>(
+    () =>
+      (statusesQuery.data ?? [])
+        .filter((s) => s.key === "custom")
+        .map((s) => ({
+          colId: colIdOf(s.key, s.name),
+          label: s.name,
+          color: s.color ?? "#9ca3af",
+        })),
+    [statusesQuery.data],
+  );
+
+  const projectNameById = useMemo(
+    () => new Map(project ? [[project.id, project.name]] : []),
+    [project],
+  );
+  // ListView wants a non-null colour per project; fall back to the same indigo
+  // the board uses for a project that has none set.
+  const projectColorById = useMemo(
+    () => new Map(project ? [[project.id, project.color ?? "#6366f1"]] : []),
+    [project],
+  );
 
   const members = useMemo(() => project?.members ?? [], [project]);
   const memberIds = useMemo(() => members.map((m) => m.id), [members]);
@@ -158,7 +222,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 
   if (forbidden) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <p className="text-ink-soft">Redirecting…</p>
       </div>
     );
@@ -169,7 +233,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   // for a moment before the 403 arrives and redirects them.
   if (projectQuery.isLoading) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <p className="text-ink-soft">Loading project…</p>
       </div>
     );
@@ -177,7 +241,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 
   if (isError) {
     return (
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <div className="px-4 py-4 sm:px-6 lg:px-8">
         <Card className="p-8 text-center">
           <p className="font-semibold text-danger">
             Couldn&apos;t load this project.
@@ -191,7 +255,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="px-4 py-4 sm:px-6 lg:px-8">
       {/* Header — "Back to workspace" only for managers; members can't open the
           workspace detail view, so the link would dead-end for them. */}
       {isManager && project && (
@@ -205,27 +269,56 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           Back to workspace
         </Link>
       )}
-      <div className="mt-1 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-ink sm:text-[32px]">
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-x-4 gap-y-5">
+        {/* `min-w-0` + `wrap-break-word` so an unbroken run in the name or the
+            description breaks instead of spilling across the header. */}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-4">
+            <h1 className="min-w-0 text-2xl font-bold text-ink wrap-break-word sm:text-3xl">
               {project?.name ?? "Project"}
             </h1>
-            {isDone && <Badge tone="success">Done</Badge>}
+            {/* Status belongs beside the name, not buried in a card below. */}
+            <ProjectStatusBadge project={project} counts={counts} />
           </div>
           {project?.description && (
-            <p className="mt-1 max-w-2xl text-ink-soft">{project.description}</p>
+            <p className="mt-2.5 max-w-2xl text-sm leading-relaxed text-ink-soft wrap-break-word">
+              {project.description}
+            </p>
           )}
+          {/* Facts that were previously four bordered boxes in their own card.
+              They're reference data, so they read as one quiet line here. */}
+          <dl className="mt-5 flex flex-wrap items-center gap-x-8 gap-y-3 text-xs">
+            <MetaItem label="Workspace" value={workspace?.name ?? "—"} />
+            <MetaItem label="Created" value={formatDate(project?.created_at)} />
+            <MetaItem label="Updated" value={formatDate(project?.updated_at)} />
+            {project?.priority && (
+              <MetaItem
+                label="Priority"
+                value={
+                  project.priority.charAt(0).toUpperCase() +
+                  project.priority.slice(1)
+                }
+              />
+            )}
+          </dl>
         </div>
         {isManager && project && (
-          <div className="flex shrink-0 items-center gap-2">
-            <Button variant="outline" onClick={() => setEditOpen(true)}>
+          // Full-width and split evenly once the header wraps, so the actions
+          // read as a deliberate row instead of two buttons stranded under the
+          // title. Content-width again from sm up.
+          <div className="flex w-full shrink-0 items-center gap-3 sm:w-auto">
+            <Button
+              variant="outline"
+              onClick={() => setEditOpen(true)}
+              className="flex-1 sm:flex-none"
+            >
               <PencilIcon className="h-4 w-4" />
               Edit
             </Button>
             <Button
               variant={isDone ? "outline" : "default"}
               onClick={() => setConfirmDone(true)}
+              className="flex-1 sm:flex-none"
             >
               {isDone ? "Reopen project" : "Mark as Done"}
             </Button>
@@ -233,59 +326,60 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
         )}
       </div>
 
-      <div className="mt-8 grid grid-cols-1 items-start gap-6 lg:grid-cols-[1fr_400px]">
-        {/* LEFT COLUMN */}
-        <div className="space-y-6">
-          {/* Details card */}
-          <Card className="rounded-2xl p-6 sm:p-8">
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              <div>
-                <p className="text-sm font-bold text-ink">Workspace</p>
-                <div className="mt-2 rounded-lg border border-line px-4 py-2.5 text-sm text-ink">
-                  {workspace?.name ?? "—"}
-                </div>
-              </div>
-              <div>
-                <p className="text-sm font-bold text-ink">Project Status</p>
-                <div className="mt-2">
-                  <Badge
-                    tone="info"
-                    className="rounded-md px-2.5 py-1 normal-case"
-                  >
-                    {projectStatus}
-                  </Badge>
-                </div>
-              </div>
+      {/* The right column carries member rows (avatar + name + group tags) and
+          the notes editor, both of which want room — it widens again at xl
+          where the page has the space to give. */}
+      <div className="mt-10 grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_460px]">
+        {/* LEFT — counts, progress, then the groups working on this project.
+            The tiles live inside this column (not spanning the page) so the
+            right-hand column starts level with them instead of half a card
+            lower. */}
+        <div className="space-y-5">
+          {/* At-a-glance counts. These were three oversized numbers buried at
+              the bottom of the progress card; up here they answer "how big is
+              this project and where does it stand" before any scrolling. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile label="Total tasks" value={total} />
+            <StatTile
+              label="To Do"
+              value={counts.todo}
+              dot={STATUS_COLORS.todo}
+            />
+            <StatTile
+              label="In Progress"
+              value={counts.in_progress}
+              dot={STATUS_COLORS.in_progress}
+            />
+            <StatTile
+              label="Done"
+              value={counts.done}
+              dot={STATUS_COLORS.done}
+            />
+          </div>
+
+          {/* Deliberately small: the tiles above already carry the counts, so
+              this card only has to show the split and how far along the project
+              is. The legend is percentages only — repeating the counts here is
+              what made it oversized. */}
+          {/* A container query, not a viewport breakpoint: this card is full
+              width on small screens but sits in the narrow left column at lg,
+              so viewport size doesn't tell us whether the donut and its metrics
+              fit side by side. Measuring the card itself does. */}
+          <Card className="@container/progress gap-3 p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-ink">Overall Progress</h2>
+              <span className="text-sm font-bold text-ink">
+                {donePct}% complete
+              </span>
             </div>
 
-            <p className="mt-6 text-sm font-bold text-ink">
-              Project Timeline (Duration)
-            </p>
-            <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <p className="text-xs text-ink-soft">Start Date</p>
-                <div className="mt-1 flex items-center gap-2 rounded-lg border border-line px-4 py-2.5 text-sm text-ink">
-                  <CalendarIcon className="h-4 w-4 text-ink-soft" />
-                  {formatDate(project?.created_at)}
-                </div>
-              </div>
-              <div>
-                <p className="text-xs text-ink-soft">Due Date</p>
-                <div className="mt-1 flex items-center gap-2 rounded-lg border border-line px-4 py-2.5 text-sm text-ink">
-                  <CalendarIcon className="h-4 w-4 text-ink-soft" />
-                  {formatDate(project?.updated_at)}
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {/* Overall Progress card */}
-          <Card className="rounded-2xl p-6 sm:p-8">
-            <h2 className="text-2xl font-bold text-ink">Overall Progress</h2>
-
-            <div className="mt-6 flex flex-col items-center gap-8 sm:flex-row sm:items-center">
-              <StatusDonut counts={counts} />
-              <div className="space-y-3">
+            {/* The chart is the point of this card, so it gets the size. The
+                legend AND the completion bar share the column beside it, which
+                fills the donut's height instead of stacking below it — a bigger
+                chart without a taller card. */}
+            <div className="flex flex-col items-center gap-5 @md/progress:flex-row @md/progress:gap-6">
+              <StatusDonut counts={counts} size={168} stroke={20} />
+              <div className="w-full min-w-0 space-y-2 @md/progress:flex-1">
                 <LegendRow
                   color={STATUS_COLORS.done}
                   label="Done"
@@ -301,115 +395,177 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
                   label="To Do"
                   pct={pct(counts.todo)}
                 />
-              </div>
-            </div>
 
-            <div className="mt-8">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-bold text-ink">Completed Tasks</p>
-                <p className="text-sm font-bold text-ink">{donePct}%</p>
-              </div>
-              <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-black/10">
-                <div
-                  className="h-full rounded-full bg-brand"
-                  style={{ width: `${donePct}%` }}
-                />
-              </div>
-              <p className="mt-2 text-xs text-ink-soft">
-                {counts.done} of {total} tasks completed
-              </p>
-            </div>
-
-            <p className="mt-8 text-sm font-bold text-ink">Task Breakdown</p>
-            <div className="mt-3 flex gap-10">
-              <BreakdownStat value={counts.todo} label="To Do" />
-              <BreakdownStat
-                value={counts.in_progress}
-                label="In Progress"
-                color="text-brand"
-              />
-              <BreakdownStat value={counts.done} label="Done" />
-            </div>
-          </Card>
-        </div>
-
-        {/* RIGHT COLUMN — Team Members + Groups */}
-        <div className="space-y-6">
-        <Card className="rounded-2xl p-6 sm:p-8">
-          <h2 className="text-2xl font-bold text-ink">Team Members</h2>
-          <div className="mt-6 space-y-1">
-            {members.length === 0 ? (
-              <p className="py-4 text-sm text-ink-soft">
-                No members assigned yet.
-              </p>
-            ) : (
-              members.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-center gap-3 border-b border-line py-3 last:border-0"
-                >
-                  <Avatar name={m.name} src={m.avatar} size={40} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-bold text-ink">{m.name}</p>
-                    <p className="truncate text-sm text-ink-soft">
-                      {m.role ?? m.email}
-                    </p>
-                    <MemberGroupTags
-                      tags={groupsByUser.get(m.id) ?? []}
-                      className="mt-1"
+                <div className="pt-2">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-black/10">
+                    <div
+                      className="h-full rounded-full bg-brand transition-[width] duration-500"
+                      style={{ width: `${donePct}%` }}
                     />
                   </div>
+                  <p className="mt-1.5 text-xs text-ink-soft">
+                    {counts.done} of {total} tasks completed
+                  </p>
                 </div>
-              ))
-            )}
-          </div>
-          {isManager && (
-            <button
-              type="button"
-              onClick={() => setPickerOpen(true)}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-4 py-2 text-sm font-bold text-[#0f766e] transition-colors hover:bg-brand/10"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Add Member
-            </button>
-          )}
-        </Card>
+              </div>
+            </div>
+          </Card>
+            {/* Tasks — full width below the columns, since a table wants the room.
+            A manager sees the whole project; a member sees only what's theirs. */}
+          <Card className="mt-5 gap-3 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-ink">
+                  {isManager ? "Tasks" : "My Tasks"}
+                </h2>
+                <span className="text-xs font-bold text-ink-faint">
+                  {visibleTasks.length}
+                </span>
+              </div>
+              {isManager && (
+                <Button onClick={() => setAddTaskOpen(true)}>
+                  <PlusIcon className="h-4 w-4" />
+                  Add Task
+                </Button>
+              )}
+            </div>
 
-        {/* Groups — auto-attached when all of a group's members are on this
-            project. Read-only here; managed on the Groups page. */}
-        <Card className="rounded-2xl p-6 sm:p-8">
-          <h2 className="text-2xl font-bold text-ink">Groups</h2>
-          <div className="mt-4 space-y-2">
+            {tasksQuery.isLoading ? (
+              <p className="text-sm text-ink-soft">Loading tasks…</p>
+            ) : visibleTasks.length === 0 ? (
+              <p className="py-6 text-center text-sm text-ink-soft">
+                {isManager
+                  ? "No tasks in this project yet."
+                  : "Nothing assigned to you in this project yet."}
+              </p>
+            ) : (
+              // The board's own List view — same status sections, columns, row
+              // behaviour and lazy loading the user already knows from All Tasks.
+              <ListView
+                items={taskItems}
+                customColumns={customStatusColumns}
+                projectName={projectNameById}
+                projectColor={projectColorById}
+                onOpen={openTask}
+              />
+            )}
+          </Card>
+
+          {isManager && addTaskOpen && (
+            <TaskModal
+              open
+              onClose={() => setAddTaskOpen(false)}
+              projectId={projectId}
+              statuses={statusesQuery.data ?? []}
+              mode="create"
+            />
+          )}
+
+        </div>
+
+        {/* RIGHT — people, then the viewer's private notes */}
+        <div className="space-y-5">
+
+          {/* Private to the viewer — collapsible so the space can be reclaimed. */}
+          {projectId && (
+            <NotesCard
+              target={{ scope: "project", projectId }}
+              uiName={`project-card:${projectId}`}
+              collapsible
+            />
+          )}
+          <Card className="gap-3 p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-bold text-ink">Team Members</h2>
+              <span className="text-xs font-bold text-ink-faint">
+                {members.length}
+              </span>
+            </div>
+
+            {members.length === 0 ? (
+              <p className="text-sm text-ink-soft">No members assigned yet.</p>
+            ) : (
+              /* Two-up between sm and lg, where this card spans the full page
+                 width; back to one column inside the narrow lg rail. */
+              <div className="grid grid-cols-1 gap-x-5 sm:grid-cols-2 lg:grid-cols-1">
+                {members.map((m) => (
+                  <div
+                    key={m.id}
+                    className="flex items-center gap-2.5 border-b border-line py-2.5 last:border-0"
+                  >
+                    <Avatar name={m.name} src={m.avatar} size={34} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-ink">
+                        {m.name}
+                      </p>
+                      <p className="truncate text-xs text-ink-soft">
+                        {m.role ?? m.email}
+                      </p>
+                      <MemberGroupTags
+                        tags={groupsByUser.get(m.id) ?? []}
+                        className="mt-1"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {isManager && (
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="inline-flex items-center gap-1.5 self-start rounded-lg border border-brand px-3 py-1.5 text-sm font-bold text-[#0f766e] transition-colors hover:bg-brand/10"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add Member
+              </button>
+            )}
+          </Card>
+
+          {/* Groups sit directly under the people they're made of — auto-attached
+              when all of a group's members are on this project. Read-only here;
+              managed on the Groups page. */}
+          <Card className="gap-3 p-5">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-bold text-ink">Groups</h2>
+              <span className="text-xs font-bold text-ink-faint">
+                {(project?.groups ?? []).length}
+              </span>
+            </div>
             {(project?.groups ?? []).length === 0 ? (
-              <p className="py-2 text-sm text-ink-soft">
+              <p className="text-sm text-ink-soft">
                 No groups yet. A group joins automatically once every one of its
                 members is on this project.
               </p>
             ) : (
-              (project?.groups ?? []).map((g) => (
-                <div
-                  key={g.id}
-                  className="flex items-center gap-3 rounded-lg border border-line px-3 py-2.5"
-                >
-                  <span
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                    style={{ backgroundColor: g.color }}
-                    aria-hidden
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                {(project?.groups ?? []).map((g) => (
+                  <div
+                    key={g.id}
+                    className="flex items-center gap-2.5 rounded-lg border border-line px-3 py-2"
                   >
-                    {g.name.charAt(0).toUpperCase()}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-bold text-ink">{g.name}</p>
-                    <p className="truncate text-xs text-ink-soft">
-                      {g.members_count ?? g.members?.length ?? 0} members
-                      {g.leader ? ` · Led by ${g.leader.name}` : ""}
-                    </p>
+                    <span
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                      style={{ backgroundColor: g.color }}
+                      aria-hidden
+                    >
+                      {g.name.charAt(0).toUpperCase()}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-ink">
+                        {g.name}
+                      </p>
+                      <p className="truncate text-xs text-ink-soft">
+                        {g.members_count ?? g.members?.length ?? 0} members
+                        {g.leader ? ` · ${g.leader.name}` : ""}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
-          </div>
-        </Card>
+          </Card>
         </div>
       </div>
 
@@ -459,6 +615,45 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   );
 }
 
+/** One fact in the header's meta line — label above, value below. */
+function MetaItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[11px] font-bold uppercase tracking-wide text-ink-faint">
+        {label}
+      </dt>
+      <dd className="mt-1 truncate text-sm font-semibold text-ink">{value}</dd>
+    </div>
+  );
+}
+
+/** A compact count tile for the row under the header. */
+function StatTile({
+  label,
+  value,
+  dot,
+}: {
+  label: string;
+  value: number;
+  dot?: string;
+}) {
+  return (
+    <Card className="gap-1 p-4">
+      <div className="flex items-center gap-1.5">
+        {dot && (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: dot }}
+            aria-hidden
+          />
+        )}
+        <p className="truncate text-xs font-semibold text-ink-soft">{label}</p>
+      </div>
+      <p className="text-2xl font-bold leading-none text-ink">{value}</p>
+    </Card>
+  );
+}
+
 function LegendRow({
   color,
   label,
@@ -471,28 +666,11 @@ function LegendRow({
   return (
     <div className="flex items-center gap-2 text-sm">
       <span
-        className="h-2.5 w-2.5 rounded-full"
+        className="h-2.5 w-2.5 shrink-0 rounded-full"
         style={{ backgroundColor: color }}
       />
-      <span className="text-ink-soft">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-ink-soft">{label}</span>
       <span className="font-bold text-ink">{pct}%</span>
-    </div>
-  );
-}
-
-function BreakdownStat({
-  value,
-  label,
-  color = "text-ink",
-}: {
-  value: number;
-  label: string;
-  color?: string;
-}) {
-  return (
-    <div>
-      <p className={`text-3xl font-bold leading-none ${color}`}>{value}</p>
-      <p className="mt-1 text-sm text-ink-soft">{label}</p>
     </div>
   );
 }
