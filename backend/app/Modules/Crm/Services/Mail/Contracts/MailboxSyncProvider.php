@@ -3,8 +3,6 @@
 namespace App\Modules\Crm\Services\Mail\Contracts;
 
 use App\Modules\Crm\Services\Mail\Inbound\MailboxFetchResult;
-use App\Modules\Crm\Services\Mail\Inbound\NotificationCursor;
-use App\Modules\Crm\Services\Mail\Inbound\WatchRegistration;
 
 /**
  * Inbound mailbox synchronization — the inbound counterpart to EmailProvider, kept as a
@@ -13,23 +11,26 @@ use App\Modules\Crm\Services\Mail\Inbound\WatchRegistration;
  *
  * The business layer (InboundEmailService) depends only on this contract + the Inbound DTOs,
  * so Gmail / Microsoft Graph / IMAP are interchangeable with no business-layer change.
+ *
+ * PULL-BASED. The contract used to carry `watch()`, `unwatch()` and `parseNotification()` for
+ * provider push subscriptions (Gmail → Pub/Sub → webhook). Inbound is now driven by a scheduled
+ * poll, so a provider needs to answer exactly one question — "what has arrived since this cursor?"
+ * — and nothing about subscriptions or push envelopes. That also widens the contract's reach:
+ * plain IMAP could not have implemented the push methods at all.
  */
 interface MailboxSyncProvider
 {
-    /** Arm the push watch / subscription for a mailbox; returns the initial cursor + expiry. */
-    public function watch(string $mailbox): WatchRegistration;
-
-    /** Best-effort teardown of the watch. */
-    public function unwatch(string $mailbox): void;
-
-    /** Fetch messages newer than $cursor, normalized to InboundMessage, plus the advanced cursor. */
-    public function fetchSince(string $mailbox, ?string $cursor): MailboxFetchResult;
-
     /**
-     * Decode a provider push payload (e.g. a Pub/Sub envelope) into {mailbox, cursor}.
-     * Pull providers (IMAP) return the mailbox with a null cursor.
+     * Fetch messages newer than $cursor, normalized to InboundMessage, plus the advanced cursor.
      *
-     * @param  array<string, mixed>  $payload
+     * A NULL cursor means "this mailbox has never been synced" and the provider is expected to
+     * BOOTSTRAP: ingest a bounded recent window and return a usable cursor to resume from. It must
+     * not return an empty result, or a fresh mailbox would never begin syncing. Returning a null
+     * cursor in the result means "nothing to advance to"; the caller then keeps the cursor it has.
+     *
+     * Implementations must tolerate being called again over a range they have already returned —
+     * ingest is idempotent on (provider, message_id), and both bootstrap and stale-cursor recovery
+     * deliberately re-offer messages.
      */
-    public function parseNotification(array $payload): NotificationCursor;
+    public function fetchSince(string $mailbox, ?string $cursor): MailboxFetchResult;
 }

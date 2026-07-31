@@ -22,17 +22,36 @@ return [
     'inbound_provider' => env('OUTREACH_INBOUND_PROVIDER', 'gmail'),
     'mailbox' => env('OUTREACH_MAILBOX', env('MAIL_FROM_ADDRESS')),
 
-    // Inbound recovery (R5): when Gmail prunes the stored historyId (404 on the delta sync), the provider
-    // re-syncs the last N days of INBOX and re-baselines the cursor. Bounded so a long gap can't trigger an
-    // unbounded backfill; mail older than the window in such a gap is logged (outreach.inbound.cursor_expired),
-    // never silently dropped. Configuration only — no schema.
+    // The provider must (re)establish a cursor in two situations. They share mechanics — ingest a
+    // bounded window of INBOX, then baseline the cursor to "now" — but they are DIFFERENT decisions
+    // and therefore have separate settings. Idempotent ingest dedupes the overlap either one
+    // re-offers; both log the window they used, so the boundary is never silent.
     'inbound' => [
+        // ── Onboarding a mailbox (no cursor yet) ──────────────────────────────────────────────
+        // How much existing mail to import the FIRST time a mailbox is polled.
+        //   0  → baseline only: take a cursor, import nothing, sync everything from now on (default)
+        //   7  → also import the last 7 days
+        //   30 → also import the last 30 days
+        // Logged as outreach.inbound.cursor_bootstrapped.
+        //
+        // Defaults to 0 because the alternative is a surprise: pointing the CRM at a busy shared
+        // inbox would otherwise dump weeks of unrelated mail into the timeline on the first
+        // scheduler tick. Opt IN to history; don't inherit it.
+        'initial_sync_days' => (int) env('OUTREACH_INITIAL_SYNC_DAYS', 0),
+
+        // ── Recovering a pruned cursor (Gmail 404 on the delta sync) ──────────────────────────
+        // How far back to re-sync when Gmail has expired the stored historyId. Logged as
+        // outreach.inbound.cursor_expired (ERROR — it means a gap we cannot measure).
+        //
+        // Deliberately NOT the same knob as initial_sync_days: setting that to 0 means "start this
+        // mailbox from today", not "throw mail away whenever a cursor lapses". Mail older than this
+        // window is not recovered.
         'resync_window_days' => (int) env('OUTREACH_RESYNC_WINDOW_DAYS', 7),
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Gmail push provider
+    | Gmail inbound provider
     |--------------------------------------------------------------------------
     | Authentication is KEYLESS by default (org policy iam.disableServiceAccountKeyCreation —
     | no downloadable service-account JSON key). Domain-wide delegation is performed by signing
@@ -50,23 +69,23 @@ return [
         'auth' => env('OUTREACH_GMAIL_AUTH', 'keyless'),
         'service_account' => env('GMAIL_SYNC_SERVICE_ACCOUNT'),
         'credentials' => env('GOOGLE_APPLICATION_CREDENTIALS'),
-        'topic' => env('GMAIL_PUBSUB_TOPIC'),
         'scopes' => ['https://www.googleapis.com/auth/gmail.readonly'],
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Inbound webhook verification (Pub/Sub OIDC push token)
+    | REMOVED: Pub/Sub push configuration
     |--------------------------------------------------------------------------
-    | Google signs each push with an OIDC JWT. We verify its audience + the
-    | authorized service account. `verify` MUST be true in production; it exists
-    | only so the endpoint can be exercised locally before Cloud infra is wired.
+    | `gmail.topic` (GMAIL_PUBSUB_TOPIC) and the whole `webhook` block
+    | (GMAIL_WEBHOOK_VERIFY / GMAIL_WEBHOOK_AUDIENCE / GMAIL_PUBSUB_SERVICE_ACCOUNT)
+    | existed for the Gmail push → Pub/Sub → public webhook trigger. Inbound is now a
+    | scheduled poll (`outreach:sync`, every five minutes), so none of that Google Cloud
+    | surface is required: no topic, no push subscription, no OIDC verification, and no
+    | public HTTPS endpoint. Those env vars are inert and can be deleted from deployments.
+    |
+    | Still required: the Gmail API itself + domain-wide delegation (gmail.readonly) for the
+    | service account above. Polling changed the trigger, not the Gmail access model.
     */
-    'webhook' => [
-        'verify' => (bool) env('GMAIL_WEBHOOK_VERIFY', true),
-        'audience' => env('GMAIL_WEBHOOK_AUDIENCE'),
-        'service_account' => env('GMAIL_PUBSUB_SERVICE_ACCOUNT'),
-    ],
 
     /*
     |--------------------------------------------------------------------------

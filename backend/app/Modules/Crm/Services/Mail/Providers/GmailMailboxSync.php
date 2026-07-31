@@ -5,8 +5,6 @@ namespace App\Modules\Crm\Services\Mail\Providers;
 use App\Modules\Crm\Services\Mail\Contracts\MailboxSyncProvider;
 use App\Modules\Crm\Services\Mail\Inbound\InboundMessage;
 use App\Modules\Crm\Services\Mail\Inbound\MailboxFetchResult;
-use App\Modules\Crm\Services\Mail\Inbound\NotificationCursor;
-use App\Modules\Crm\Services\Mail\Inbound\WatchRegistration;
 use Google\Auth\ApplicationDefaultCredentials;
 use Google\Client as GoogleClient;
 use Google\Service\Exception as GoogleServiceException;
@@ -14,59 +12,53 @@ use Google\Service\Gmail;
 use Google\Service\Gmail\ListHistoryResponse;
 use Google\Service\Gmail\Message as GmailMessage;
 use Google\Service\Gmail\MessagePart;
-use Google\Service\Gmail\WatchRequest;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
- * Gmail push implementation of MailboxSyncProvider (Phase-1 inbound provider). Uses a
- * Google Workspace service account with domain-wide delegation to read the mailbox, and
- * normalizes each Gmail message to the provider-agnostic InboundMessage. The business layer
- * (InboundEmailService) never sees anything Gmail-specific.
+ * Gmail implementation of MailboxSyncProvider (Phase-1 inbound provider). Uses a Google Workspace
+ * service account with domain-wide delegation to read the mailbox, and normalizes each Gmail message
+ * to the provider-agnostic InboundMessage. The business layer (InboundEmailService) never sees
+ * anything Gmail-specific.
+ *
+ * PULL, NOT PUSH. This class previously also armed a Gmail `users.watch` against a Pub/Sub topic and
+ * decoded the push envelopes that came back. The delta-sync engine below is unchanged from that era —
+ * only the trigger moved. What `watch()` uniquely provided was the INITIAL cursor, so that job now
+ * belongs to fetchSince(): see the null-cursor branch.
  */
 class GmailMailboxSync implements MailboxSyncProvider
 {
     private const PROVIDER = 'gmail';
 
     /**
-     * @param  array<string, mixed>  $config  keys: credentials (SA key path), topic (Pub/Sub), scopes
+     * @param  array<string, mixed>  $config  keys: auth, service_account, credentials, scopes
      */
     public function __construct(private readonly array $config) {}
 
-    public function watch(string $mailbox): WatchRegistration
-    {
-        $response = $this->gmail($mailbox)->users->watch('me', new WatchRequest([
-            'topicName' => $this->config['topic'],
-            'labelIds' => ['INBOX'],
-            'labelFilterBehavior' => 'INCLUDE',
-        ]));
-
-        $expiration = $response->getExpiration();
-
-        return new WatchRegistration(
-            cursor: (string) $response->getHistoryId(),
-            expiresAt: $expiration !== null
-                ? Carbon::createFromTimestampMs((int) $expiration)->toIso8601String()
-                : null,
-        );
-    }
-
-    public function unwatch(string $mailbox): void
-    {
-        $this->gmail($mailbox)->users->stop('me');
-    }
-
     public function fetchSince(string $mailbox, ?string $cursor): MailboxFetchResult
     {
-        // Without a cursor there is nothing to replay — watch() must establish one first.
-        if ($cursor === null) {
-            return new MailboxFetchResult([], null);
-        }
-
         $gmail = $this->gmail($mailbox);
+
+        // No cursor yet — a mailbox being synced for the first time. Under push, watch() established
+        // the baseline and this returned nothing; polling has no such step, so a null cursor would
+        // mean the mailbox NEVER syncs. Bootstrapping here is what makes the integration
+        // self-starting: no arming command, no Google Cloud resource, just a scheduler tick.
+        //
+        // How much history a first sync imports is an OPERATIONAL decision, not this class's to make
+        // — see `outreach.inbound.initial_sync_days`. It is deliberately a different setting from the
+        // recovery window below: importing history on purpose and salvaging it after losing a cursor
+        // are different intents that happen to share mechanics.
+        if ($cursor === null) {
+            return $this->baseline(
+                $gmail,
+                $mailbox,
+                (int) config('outreach.inbound.initial_sync_days', 0),
+                'outreach.inbound.cursor_bootstrapped',
+                ['mailbox' => $mailbox],
+            );
+        }
 
         try {
             [$messageIds, $latestCursor] = $this->collectHistory($gmail, $cursor);
@@ -117,26 +109,70 @@ class GmailMailboxSync implements MailboxSyncProvider
     }
 
     /**
-     * Recovery path (R5): the stored historyId has expired. Log it, re-sync the last N days of INBOX
-     * (bounded — config `outreach.inbound.resync_window_days`, default 7), then re-baseline the cursor to
-     * the mailbox's CURRENT historyId so incremental sync resumes cleanly. Idempotent ingest dedupes any
-     * overlap. Mail older than the window inside a long gap is not recovered — logged, never silent.
+     * Recovery path (R5): the stored historyId has expired (Gmail pruned it). Re-sync the last N days
+     * of INBOX and re-baseline, exactly as a first-time bootstrap does — the two situations differ
+     * only in how alarming they are, so they share the mechanics and differ in log level.
+     *
+     * A pruned cursor means a gap we cannot measure; that is an operational problem worth an ERROR.
      */
     private function recoverFromExpiredCursor(Gmail $gmail, string $mailbox, string $staleCursor): MailboxFetchResult
     {
-        $windowDays = (int) config('outreach.inbound.resync_window_days', 7);
+        return $this->baseline(
+            $gmail,
+            $mailbox,
+            // NOT `initial_sync_days`. That setting expresses "how much history do we want when
+            // onboarding a mailbox", and an operator who sets it to 0 is saying "start from now" —
+            // they are not saying "silently discard mail when a cursor expires". Recovery keeps its
+            // own window so tuning one cannot quietly disarm the other.
+            (int) config('outreach.inbound.resync_window_days', 7),
+            'outreach.inbound.cursor_expired',
+            ['mailbox' => $mailbox, 'stale_cursor' => $staleCursor],
+            failure: true,
+        );
+    }
 
-        Log::error('outreach.inbound.cursor_expired', [
-            'mailbox' => $mailbox,
-            'stale_cursor' => $staleCursor,
-            'resync_window_days' => $windowDays,
-        ]);
+    /**
+     * Establish (or re-establish) a cursor: optionally ingest a bounded recent window of INBOX, then
+     * baseline to the mailbox's current historyId so incremental sync resumes cleanly from here.
+     *
+     * Shared by the first-time bootstrap and the expired-cursor recovery; they differ only in the
+     * window they pass and how loudly they log. Bounded on purpose — an unbounded backfill would drag
+     * a mailbox's entire history into the CRM. Idempotent ingest dedupes the overlap this necessarily
+     * re-offers, which is what makes re-baselining safe to do more than once.
+     *
+     * $windowDays <= 0 means BASELINE ONLY: take a cursor, import nothing. The cursor is still
+     * returned, so syncing starts from this moment forward — which is the point, and why zero is a
+     * meaningful setting rather than a disabled one.
+     *
+     * Mail older than the window is NOT imported. That is a deliberate trade, and it is logged rather
+     * than silent so the boundary is visible after the fact.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    private function baseline(
+        Gmail $gmail,
+        string $mailbox,
+        int $windowDays,
+        string $event,
+        array $context,
+        bool $failure = false,
+    ): MailboxFetchResult {
+        // Clamped rather than trusted: a negative value would otherwise reach Gmail as the nonsense
+        // query `newer_than:-3d`.
+        $windowDays = max(0, $windowDays);
+        $context['window_days'] = $windowDays;
 
-        $ids = $this->listRecentMessageIds($gmail, $windowDays);
-        $messages = $this->hydrateAll($gmail, $mailbox, $ids);
-        $freshCursor = $this->currentHistoryId($gmail);
+        // A first sync is expected and routine; a pruned cursor means lost mail. Same code, different
+        // severity — an INFO for the normal path keeps the ERROR channel meaningful.
+        $failure ? Log::error($event, $context) : Log::info($event, $context);
 
-        return new MailboxFetchResult($messages, $freshCursor);
+        // Skip the listing entirely at zero. Not just an optimisation: `newer_than:0d` is not a
+        // reliable way to express "nothing", so asking at all could import today's mail.
+        $messages = $windowDays === 0
+            ? []
+            : $this->hydrateAll($gmail, $mailbox, $this->listRecentMessageIds($gmail, $windowDays));
+
+        return new MailboxFetchResult($messages, $this->currentHistoryId($gmail));
     }
 
     /**
@@ -234,19 +270,6 @@ class GmailMailboxSync implements MailboxSyncProvider
         return (string) $gmail->users->getProfile('me')->getHistoryId();
     }
 
-    public function parseNotification(array $payload): NotificationCursor
-    {
-        $data = $payload['message']['data'] ?? null;
-        $decoded = is_string($data) ? json_decode((string) base64_decode($data, true), true) : null;
-
-        $mailbox = is_array($decoded) ? (string) ($decoded['emailAddress'] ?? '') : '';
-        $cursor = is_array($decoded) && isset($decoded['historyId'])
-            ? (string) $decoded['historyId']
-            : null;
-
-        return new NotificationCursor(mailbox: $mailbox, cursor: $cursor);
-    }
-
     /**
      * Build a Gmail client authenticated to impersonate $mailbox via domain-wide delegation.
      *
@@ -254,7 +277,7 @@ class GmailMailboxSync implements MailboxSyncProvider
      * is signed via the IAM Credentials signJwt API using the runtime identity (ADC / Workload Identity
      * Federation), never a local private key. The legacy JSON-key path is retained only as an optional
      * `auth=key` fallback for environments where key creation is permitted. Only the authentication
-     * mechanism differs; every caller (watch/unwatch/fetchSince) is unchanged.
+     * mechanism differs; the caller (fetchSince) is unchanged.
      */
     protected function gmail(string $mailbox): Gmail
     {

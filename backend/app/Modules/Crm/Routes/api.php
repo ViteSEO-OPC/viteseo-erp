@@ -11,7 +11,6 @@ use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
-use App\Modules\Crm\Controllers\GmailWebhookController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
 use App\Modules\Crm\Controllers\LeadFollowUpController;
@@ -36,9 +35,9 @@ use Illuminate\Support\Facades\Route;
  * namespaced `crm.*`; roles are the platform Spatie roles (super_admin/crm_admin/crm_bd).
  */
 Route::prefix('v1/crm')->group(function (): void {
-    // Public inbound webhook (Gmail Pub/Sub push). Authenticated by the Google-signed OIDC token
-    // inside the controller, NOT by Sanctum — Pub/Sub cannot present a bearer session token.
-    Route::post('/webhooks/gmail', GmailWebhookController::class)->middleware('throttle:120,1');
+    // NOTE: there is deliberately no public inbound webhook. Inbound email is pulled by the
+    // scheduled `outreach:sync` poll, so the CRM exposes no unauthenticated endpoint for it and
+    // needs no Pub/Sub push subscription, OIDC verification, or public HTTPS callback.
 
     Route::middleware('auth:sanctum')->group(function () {
         // CRM-shaped profile payload + self-service update (own name + phone only).

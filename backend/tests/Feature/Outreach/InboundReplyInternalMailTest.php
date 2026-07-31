@@ -238,8 +238,8 @@ class InboundReplyInternalMailTest extends TestCase
      * transaction: an absolute level of 0 is unreachable here, so equality with the baseline is the real
      * signal that ingest() opened and closed its own transaction before dispatching.
      *
-     * Also guards the two production callers (ProcessInboundNotificationJob, ReconcileMailboxJob), which
-     * today call ingest() with no transaction of their own — wrapping either one later would trip this.
+     * Also guards the production caller (SyncMailboxJob), which today calls ingest() with no
+     * transaction of its own — wrapping it later would trip this.
      */
     public function test_event_is_dispatched_only_after_the_transaction_commits(): void
     {

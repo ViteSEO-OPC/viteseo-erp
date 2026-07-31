@@ -4,7 +4,7 @@ namespace App\Modules\Crm\Providers;
 
 use App\Models\User;
 use App\Modules\Crm\Console\Commands\BackfillNichesCommand;
-use App\Modules\Crm\Console\Commands\MailboxWatchCommand;
+use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
@@ -16,8 +16,6 @@ use App\Modules\Crm\Events\OutboundEmailSent;
 use App\Modules\Crm\Events\PlannerReminderDue;
 use App\Modules\Crm\Events\ProposalSent;
 use App\Modules\Crm\Events\ScheduledEmailDue;
-use App\Modules\Crm\Jobs\ReconcileMailboxJob;
-use App\Modules\Crm\Jobs\RenewMailboxWatchJob;
 use App\Modules\Crm\Jobs\SendDueRemindersJob;
 use App\Modules\Crm\Jobs\SendScheduledEmailsJob;
 use App\Modules\Crm\Listeners\EmitDealWonWebhook;
@@ -111,13 +109,12 @@ class CrmServiceProvider extends ServiceProvider
             return $app->make($class);
         });
 
-        // Inbound mailbox sync provider (Gmail). The credentials/topic default to null when the
-        // Google env vars are unset, so binding here never crashes on boot — the provider is only
-        // exercised by the queued mailbox jobs, which require Gmail creds + a queue worker at deploy.
+        // Inbound mailbox sync provider (Gmail). The credentials default to null when the Google env
+        // vars are unset, so binding here never crashes on boot — the provider is only exercised by
+        // the queued SyncMailboxJob, which requires Gmail creds + a queue worker at deploy.
         $this->app->bind(MailboxSyncProvider::class, function (): MailboxSyncProvider {
             return new GmailMailboxSync([
                 'credentials' => config('outreach.gmail.credentials'),
-                'topic' => config('outreach.gmail.topic'),
                 'scopes' => config('outreach.gmail.scopes', []),
                 'auth' => config('outreach.gmail.auth', 'keyless'),
                 'service_account' => config('outreach.gmail.service_account'),
@@ -194,7 +191,7 @@ class CrmServiceProvider extends ServiceProvider
         // until a scheduler/queue worker runs at deploy (and Gmail creds are configured).
         if ($this->app->runningInConsole()) {
             $this->commands([
-                MailboxWatchCommand::class,
+                SyncMailboxesCommand::class,
                 RecomputeLeadScoresCommand::class,
                 N8nTokenCommand::class,
                 PruneReadNotifications::class,
@@ -206,8 +203,15 @@ class CrmServiceProvider extends ServiceProvider
 
         $this->app->booted(function (): void {
             $schedule = $this->app->make(Schedule::class);
-            $schedule->job(new RenewMailboxWatchJob)->daily();
-            $schedule->job(new ReconcileMailboxJob)->hourly();
+            // Inbound email. THE trigger for mailbox synchronization: the command fans out one
+            // SyncMailboxJob per mailbox and returns immediately. Five minutes is the latency the
+            // Pub/Sub push used to deliver in seconds — the deliberate trade for needing no Google
+            // Cloud topic, no push subscription, and no public webhook.
+            //
+            // withoutOverlapping() guards the FAN-OUT (a scheduler tick that somehow runs long must
+            // not stack); SyncMailboxJob::uniqueId() separately guards each mailbox's actual sync,
+            // which is the one that matters because the queue, not the scheduler, does the work.
+            $schedule->command('outreach:sync')->everyFiveMinutes()->withoutOverlapping();
 
             // RC3 Send-Later: dispatch due scheduled outbound emails through the single outbound pipeline.
             $schedule->job(new SendScheduledEmailsJob)->everyMinute();
