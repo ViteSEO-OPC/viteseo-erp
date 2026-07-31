@@ -3,7 +3,7 @@
 namespace App\Modules\Crm\Jobs;
 
 use App\Modules\Crm\Models\MailboxSync;
-use App\Modules\Crm\Services\Mail\Contracts\MailboxSyncProvider;
+use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Outreach\InboundEmailService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -72,7 +72,7 @@ class SyncMailboxJob implements ShouldBeUnique, ShouldQueue
         return $this->mailbox;
     }
 
-    public function handle(MailboxSyncProvider $provider, InboundEmailService $inbound): void
+    public function handle(MailboxSyncManager $mailboxes, InboundEmailService $inbound): void
     {
         // firstOrCreate, not findOrFail: `outreach:sync --mailbox=` may name a mailbox that has no
         // row yet, and a null cursor is a valid starting state (the provider bootstraps from it).
@@ -82,7 +82,11 @@ class SyncMailboxJob implements ShouldBeUnique, ShouldQueue
         );
 
         try {
-            $result = $provider->fetchSince($sync->email, $sync->sync_cursor);
+            // Resolved from THIS mailbox's row, not from a global binding, so mailboxes on different
+            // providers can be polled by the same scheduler tick. Inside the try on purpose: an
+            // unresolvable provider is a sync failure for this mailbox like any other, and must mark
+            // it degraded rather than escape as a bare container error.
+            $result = $mailboxes->for($sync)->fetchSince($sync->email, $sync->sync_cursor);
         } catch (\Throwable $e) {
             // Mark the mailbox degraded and rethrow: the queue's retry/backoff is the right place to
             // handle a transient Gmail failure, and swallowing it here would report success.

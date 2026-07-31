@@ -8,6 +8,7 @@ use App\Modules\Crm\Models\MailboxSync;
 use App\Modules\Crm\Services\Mail\Contracts\MailboxSyncProvider;
 use App\Modules\Crm\Services\Mail\Inbound\InboundMessage;
 use App\Modules\Crm\Services\Mail\Inbound\MailboxFetchResult;
+use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Outreach\InboundEmailService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
@@ -24,6 +25,16 @@ use Tests\TestCase;
 class MailboxPollingTest extends TestCase
 {
     use RefreshDatabase;
+
+    /**
+     * The job resolves its provider through the manager, so a fake has to be registered as a driver
+     * rather than handed over directly. Registered under `gmail` because that is what these
+     * mailboxes' rows say — which is precisely the resolution being exercised.
+     */
+    private function managerFor(MailboxSyncProvider $provider): MailboxSyncManager
+    {
+        return (new MailboxSyncManager($this->app))->extend('gmail', fn () => $provider);
+    }
 
     /** A provider that returns a fixed batch and cursor, and counts how often it was asked. */
     private function fakeProvider(array $messages, ?string $cursor): MailboxSyncProvider
@@ -146,8 +157,8 @@ class MailboxPollingTest extends TestCase
         $provider = $this->fakeProvider($messages, '300');
         $inbound = app(InboundEmailService::class);
 
-        (new SyncMailboxJob('crm@company.test'))->handle($provider, $inbound);
-        (new SyncMailboxJob('crm@company.test'))->handle($provider, $inbound);
+        (new SyncMailboxJob('crm@company.test'))->handle($this->managerFor($provider), $inbound);
+        (new SyncMailboxJob('crm@company.test'))->handle($this->managerFor($provider), $inbound);
 
         $this->assertSame(2, $provider->calls, 'Both polls must really have run.');
         $this->assertSame(2, Email::where('direction', 'inbound')->count());
@@ -160,9 +171,9 @@ class MailboxPollingTest extends TestCase
         $inbound = app(InboundEmailService::class);
 
         (new SyncMailboxJob('one@company.test'))
-            ->handle($this->fakeProvider([$this->message('one-1@x', 'one@company.test')], '111'), $inbound);
+            ->handle($this->managerFor($this->fakeProvider([$this->message('one-1@x', 'one@company.test')], '111')), $inbound);
         (new SyncMailboxJob('two@company.test'))
-            ->handle($this->fakeProvider([$this->message('two-1@x', 'two@company.test')], '222'), $inbound);
+            ->handle($this->managerFor($this->fakeProvider([$this->message('two-1@x', 'two@company.test')], '222')), $inbound);
 
         $this->assertSame('111', MailboxSync::where('email', 'one@company.test')->first()->sync_cursor);
         $this->assertSame('222', MailboxSync::where('email', 'two@company.test')->first()->sync_cursor);
@@ -175,7 +186,7 @@ class MailboxPollingTest extends TestCase
     {
         Notification::fake();
 
-        (new SyncMailboxJob('new@company.test'))->handle($this->fakeProvider([], '900'), app(InboundEmailService::class));
+        (new SyncMailboxJob('new@company.test'))->handle($this->managerFor($this->fakeProvider([], '900')), app(InboundEmailService::class));
 
         $sync = MailboxSync::where('email', 'new@company.test')->first();
         $this->assertNotNull($sync, 'The poll must register a mailbox it has never seen.');
@@ -193,7 +204,7 @@ class MailboxPollingTest extends TestCase
             'sync_cursor' => '500', 'status' => 'active',
         ]);
 
-        (new SyncMailboxJob('crm@company.test'))->handle($this->fakeProvider([], null), app(InboundEmailService::class));
+        (new SyncMailboxJob('crm@company.test'))->handle($this->managerFor($this->fakeProvider([], null)), app(InboundEmailService::class));
 
         $this->assertSame('500', MailboxSync::where('email', 'crm@company.test')->first()->sync_cursor);
     }
@@ -213,7 +224,7 @@ class MailboxPollingTest extends TestCase
         };
 
         try {
-            (new SyncMailboxJob('crm@company.test'))->handle($failing, app(InboundEmailService::class));
+            (new SyncMailboxJob('crm@company.test'))->handle($this->managerFor($failing), app(InboundEmailService::class));
             $this->fail('The job must rethrow so the queue retries it.');
         } catch (\RuntimeException $e) {
             $this->assertSame('gmail unreachable', $e->getMessage());
@@ -231,7 +242,7 @@ class MailboxPollingTest extends TestCase
             'sync_cursor' => '10', 'status' => 'error',
         ]);
 
-        (new SyncMailboxJob('crm@company.test'))->handle($this->fakeProvider([], '11'), app(InboundEmailService::class));
+        (new SyncMailboxJob('crm@company.test'))->handle($this->managerFor($this->fakeProvider([], '11')), app(InboundEmailService::class));
 
         $this->assertSame('active', MailboxSync::where('email', 'crm@company.test')->first()->status);
     }

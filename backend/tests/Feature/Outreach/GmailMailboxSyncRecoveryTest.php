@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Outreach;
 
+use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
 use App\Modules\Crm\Services\Mail\Inbound\InboundMessage;
 use App\Modules\Crm\Services\Mail\Providers\GmailMailboxSync;
 use Google\Client as GoogleClient;
@@ -26,7 +27,14 @@ class GmailMailboxSyncRecoveryTest extends TestCase
      */
     private function makeProvider(): GmailMailboxSync
     {
-        return new class([]) extends GmailMailboxSync
+        // Credentials are never exercised — gmail() is stubbed below — but the constructor now names
+        // the dependency, which is the point: authentication is no longer this class's business.
+        $credentials = new class implements GoogleCredentialSource
+        {
+            public function authorize(GoogleClient $client, string $mailbox): void {}
+        };
+
+        return new class($credentials) extends GmailMailboxSync
         {
             /** @var callable(string, ?string): ListHistoryResponse */
             public $onFetchHistoryPage;

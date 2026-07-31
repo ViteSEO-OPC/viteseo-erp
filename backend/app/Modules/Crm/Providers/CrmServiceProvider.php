@@ -45,8 +45,9 @@ use App\Modules\Crm\Policies\UserPolicy;
 use App\Modules\Crm\Services\BusinessRules\ScoringConfigProvider;
 use App\Modules\Crm\Services\Kpi\KpiConfig;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
-use App\Modules\Crm\Services\Mail\Contracts\MailboxSyncProvider;
-use App\Modules\Crm\Services\Mail\Providers\GmailMailboxSync;
+use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
+use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
+use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Mail\Providers\SmtpEmailProvider;
 use App\Modules\Crm\Services\Ranking\RankingConfig;
 use App\Modules\Crm\Services\Scoring\ScoringConfig;
@@ -109,16 +110,22 @@ class CrmServiceProvider extends ServiceProvider
             return $app->make($class);
         });
 
-        // Inbound mailbox sync provider (Gmail). The credentials default to null when the Google env
-        // vars are unset, so binding here never crashes on boot — the provider is only exercised by
-        // the queued SyncMailboxJob, which requires Gmail creds + a queue worker at deploy.
-        $this->app->bind(MailboxSyncProvider::class, function (): MailboxSyncProvider {
-            return new GmailMailboxSync([
-                'credentials' => config('outreach.gmail.credentials'),
-                'scopes' => config('outreach.gmail.scopes', []),
-                'auth' => config('outreach.gmail.auth', 'keyless'),
-                'service_account' => config('outreach.gmail.service_account'),
-            ]);
+        // How a Google client proves it may read a mailbox: keyless domain-wide delegation by
+        // default, the legacy JSON key under auth=key. Resolved lazily and never contacted at boot,
+        // so a deployment with the Google env vars unset still boots — the credential is only
+        // exercised by the queued SyncMailboxJob.
+        $this->app->singleton(GoogleCredentialSource::class, function (): GoogleCredentialSource {
+            /** @var array<string, mixed> $gmail */
+            $gmail = (array) config('outreach.gmail', []);
+
+            return GoogleCredentialSourceFactory::fromConfig($gmail);
+        });
+
+        // Inbound sync providers, resolved PER MAILBOX from crm_mailbox_syncs.provider rather than
+        // from one global binding — see MailboxSyncManager. Gmail remains the only registered
+        // driver and the configured default, so current behaviour is unchanged.
+        $this->app->singleton(MailboxSyncManager::class, function (Application $app): MailboxSyncManager {
+            return new MailboxSyncManager($app);
         });
     }
 
