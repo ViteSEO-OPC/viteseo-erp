@@ -16,6 +16,19 @@ export const NOTIFICATION_TYPE_OPTIONS: ReadonlyArray<{ value: string; label: st
   { value: "lead_assigned", label: "Lead assignments" },
 ];
 
+/**
+ * How far back the bell dropdown reaches, in days — the frontend half of the backend's
+ * `NotificationInbox::WINDOW_DAYS`.
+ *
+ * The server is what actually applies the window (`scope=inbox`); nothing is filtered
+ * here. This value exists for the two things only the client can do with it: tell the
+ * reader about the rule in the dropdown footer, and decide whether a row a mutation
+ * touched belonged to the bell's count as well as History's. Both are presentation
+ * decisions about a rule that lives on the server, which is why duplicating the number
+ * is acceptable — but the two must be changed together.
+ */
+export const NOTIFICATION_INBOX_WINDOW_DAYS = 7;
+
 export type NotificationDto = {
   id: string;
   type: string;
@@ -25,5 +38,8 @@ export type NotificationDto = {
   data: Record<string, unknown>;
   read: boolean;
   read_at: string | null;
+  /** Taken off the bell dropdown by the reader. Always false in the `scope=inbox` feed. */
+  dismissed: boolean;
+  dismissed_at: string | null;
   created_at: string | null;
 };

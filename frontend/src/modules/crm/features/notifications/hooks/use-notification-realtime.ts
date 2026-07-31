@@ -58,7 +58,14 @@ export function useNotificationRealtime(): Announcement | null {
     const onCreated = (payload: BroadcastNotification) => {
       if (payload.module !== "crm") return;
 
-      const countKey = queryKeys.notifications.unreadCount();
+      // Both badges. A notification that has just arrived is unread, undismissed and
+      // brand new, so it belongs to the bell's inbox count AND to History's total —
+      // there is no scope it can fail to qualify for. Patching only one would leave
+      // the other frozen until its next refetch.
+      const countKeys = [
+        queryKeys.notifications.unreadCount("all"),
+        queryKeys.notifications.unreadCount("inbox"),
+      ];
       const listKey = queryKeys.notifications.list();
 
       // WHY THE IN-FLIGHT CHECK. A local write cannot defend itself against a
@@ -76,15 +83,17 @@ export function useNotificationRealtime(): Announcement | null {
       // the real number (`invalidateQueries` defaults to `cancelRefetch: true`,
       // so this replaces that request rather than queueing behind it). The extra
       // request happens only on the narrow overlap, never on the common path.
-      if (qc.getQueryState(countKey)?.fetchStatus === "fetching") {
-        qc.invalidateQueries({ queryKey: countKey });
-      } else {
-        // Badge first: it is the part the user sees without opening anything.
-        // Left alone when the count has never loaded — the bell's own query will
-        // fetch the true number.
-        qc.setQueryData<number>(countKey, (prev) =>
-          typeof prev === "number" ? prev + 1 : prev,
-        );
+      for (const countKey of countKeys) {
+        if (qc.getQueryState(countKey)?.fetchStatus === "fetching") {
+          qc.invalidateQueries({ queryKey: countKey });
+        } else {
+          // Badge first: it is the part the user sees without opening anything.
+          // Left alone when the count has never loaded — the bell's own query will
+          // fetch the true number.
+          qc.setQueryData<number>(countKey, (prev) =>
+            typeof prev === "number" ? prev + 1 : prev,
+          );
+        }
       }
 
       // The list carries the identical hazard: an in-flight response predates

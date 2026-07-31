@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Requests;
 
 use App\Modules\Crm\Enums\NotificationType;
+use App\Modules\Crm\Support\NotificationInbox;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -53,6 +54,14 @@ class IndexNotificationRequest extends FormRequest
             // cursor is anchored to a row rather than a count, so head insertions
             // cannot shift it.
             'paginate' => ['nullable', Rule::in(['page', 'cursor'])],
+
+            // Which slice of the feed. Opt-in for the same reason `paginate` is: absent
+            // means `all`, the complete feed History reads and every caller read before
+            // this parameter existed. The bell sends `inbox` — undismissed rows from the
+            // last few days — because the dropdown is a working inbox, not the archive.
+            // The rule itself is {@see NotificationInbox}'s, so the accepted values and
+            // the query that implements them cannot drift apart.
+            'scope' => ['nullable', Rule::in(NotificationInbox::SCOPES)],
         ];
     }
 }

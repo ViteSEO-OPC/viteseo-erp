@@ -58,6 +58,10 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::patch('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
         Route::patch('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
         Route::patch('/notifications/{id}/unread', [NotificationController::class, 'markAsUnread']);
+        // Dismiss = take the row off the bell dropdown (`scope=inbox`). PATCH, not
+        // DELETE: nothing is removed — History still lists it, and the retention
+        // command remains the only thing that deletes a notification.
+        Route::patch('/notifications/{id}/dismiss', [NotificationController::class, 'dismiss']);
 
         Route::get('/leads', [LeadController::class, 'index'])->can('viewAny', Lead::class);
         // Leads-page Priority Summary cards: High/Medium/Low counts aggregated from leads.priority

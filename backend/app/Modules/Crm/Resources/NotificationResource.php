@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Enums\NotificationType;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Str;
@@ -51,6 +52,20 @@ class NotificationResource extends JsonResource
             'data' => $data,
             'read' => $this->read_at !== null,
             'read_at' => $this->read_at?->toIso8601String(),
+            // Dismissed rows are excluded from the bell feed server-side, so this is
+            // never true there; it is exposed for History, which still lists them, and
+            // for the frontend's optimistic cache maths.
+            //
+            // Parsed rather than read as a date because the cast list belongs to
+            // Laravel's own DatabaseNotification model — the framework's, not ours —
+            // which knows about `read_at` and not about a column the CRM added. There
+            // is no seam to register the cast through (`Notifiable::notifications()`
+            // hard-codes the model), so the conversion happens at the one place that
+            // renders it.
+            'dismissed' => $this->dismissed_at !== null,
+            'dismissed_at' => $this->dismissed_at
+                ? Carbon::parse($this->dismissed_at)->toIso8601String()
+                : null,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

@@ -4,7 +4,9 @@ namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Crm\Requests\IndexNotificationRequest;
+use App\Modules\Crm\Requests\NotificationScopeRequest;
 use App\Modules\Crm\Resources\NotificationResource;
+use App\Modules\Crm\Support\NotificationInbox;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -36,6 +38,13 @@ class NotificationController extends Controller
         // Scoped to the caller by the relation, before any filter is applied — every
         // narrowing below can only ever narrow the user's own rows.
         $query = $request->user()->notifications();
+
+        // The bell's inbox view: undismissed, and recent. Opt-in — absent, this is the
+        // complete feed History reads. Applied FIRST so the filters below compose on
+        // top of it rather than around it.
+        if (($filters['scope'] ?? NotificationInbox::SCOPE_ALL) === NotificationInbox::SCOPE_INBOX) {
+            NotificationInbox::apply($query);
+        }
 
         if (($filters['filter'] ?? 'all') === 'unread') {
             $query->whereNull('read_at');
@@ -86,11 +95,26 @@ class NotificationController extends Controller
         return NotificationResource::collection($notifications);
     }
 
-    /** Real unread count for the header badge. */
-    public function unreadCount(Request $request): JsonResponse
+    /**
+     * Real unread count for the header badge.
+     *
+     * Takes the SAME `scope` the feed takes, and this is not a convenience — it is what
+     * keeps the bell honest. The badge and the dropdown must describe the same set of
+     * rows: count everything while the dropdown shows only the inbox and the bell reads
+     * "3" over a panel that says "You're all caught up". The bell therefore asks for
+     * `scope=inbox`; History, whose Unread filter really does span the whole feed, asks
+     * for nothing and gets the unchanged total.
+     */
+    public function unreadCount(NotificationScopeRequest $request): JsonResponse
     {
+        $query = $request->user()->unreadNotifications();
+
+        if ($request->validated('scope') === NotificationInbox::SCOPE_INBOX) {
+            NotificationInbox::apply($query);
+        }
+
         return response()->json([
-            'count' => $request->user()->unreadNotifications()->count(),
+            'count' => $query->count(),
         ]);
     }
 
@@ -112,6 +136,34 @@ class NotificationController extends Controller
     {
         $notification = $request->user()->notifications()->findOrFail($id);
         $notification->markAsUnread();
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Dismiss one notification — take it off the bell dropdown for good.
+     *
+     * Same scoped findOrFail as the read mutations, so another user's id 404s rather
+     * than revealing that it exists.
+     *
+     * DISMISSING ALSO READS. An unread row that has been taken off the list is a
+     * contradiction the badge cannot express: it would keep counting a notification the
+     * reader can no longer reach from the bell. Removing it from your inbox IS
+     * acknowledging it, so the two move together — and History then shows it as read,
+     * which is the truth about what the reader did.
+     *
+     * Idempotent by construction: re-dismissing keeps the original timestamps rather
+     * than back-dating the row on every retry, so a double-click or a client replay
+     * costs nothing.
+     */
+    public function dismiss(Request $request, string $id): JsonResponse
+    {
+        $notification = $request->user()->notifications()->findOrFail($id);
+
+        $notification->fill([
+            'dismissed_at' => $notification->dismissed_at ?? now(),
+            'read_at' => $notification->read_at ?? now(),
+        ])->save();
 
         return response()->json(['ok' => true]);
     }
