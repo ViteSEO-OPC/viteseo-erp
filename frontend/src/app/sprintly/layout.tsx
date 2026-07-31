@@ -2,6 +2,7 @@
 
 import { RequireAuth } from "@/core/auth-context";
 import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
+import { ProjectNotificationListener } from "@/modules/projects/use-project-notifications";
 import { Sidebar } from "@/core/layout/Sidebar";
 import { Topbar } from "@/core/layout/Topbar";
 import { SidebarProvider } from "@/core/layout/SidebarContext";
@@ -21,6 +22,11 @@ export default function ProjectsLayout({
   return (
     <RequireAuth>
       <RealtimeProvider>
+        {/* Projects' own live-notification handler. It used to be embedded inside
+            RealtimeProvider, which is how platform infrastructure ended up owning one
+            module's business logic — and how its cleanup could silence the CRM's
+            handler on the shared `user.{id}` channel. Mounted explicitly here. */}
+        <ProjectNotificationListener />
         <SidebarProvider>
           <div className="flex h-screen overflow-hidden bg-canvas">
             <Sidebar />

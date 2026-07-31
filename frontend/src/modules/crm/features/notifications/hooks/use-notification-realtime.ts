@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getEcho } from "@/core/realtime/echo";
+import { useRealtimeEvent, useRealtimeReconnect } from "@/core/realtime/use-realtime";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import type { NotificationDto } from "@/modules/crm/features/notifications/types/notification-types";
@@ -18,15 +18,16 @@ export type Announcement = { seq: number; text: string };
 /**
  * Live notifications for the CRM bell.
  *
- * Patches the caches the SHIPPED bell and dropdown already read — it adds no UI and
+ * Patches the caches the shipped bell and dropdown already read — it adds no UI and
  * replaces no hook. `useUnreadCount` and `useNotifications` are unchanged; this only
- * removes their dependence on a window-focus change to notice a new notification,
- * which is the limitation their own comments described.
+ * removes their dependence on a window-focus change to notice a new notification.
  *
- * CHANNEL OWNERSHIP. `user.{id}` is shared: RealtimeProvider owns its lifecycle and
- * Projects listens on it too. This attaches and detaches ONLY its own handler —
- * echo.leave() here would take platform notifications down with it — and filters on
- * `module` so another module's payload is never mistaken for a CRM notification.
+ * CHANNEL OWNERSHIP. `user.{id}` is shared — Projects listens on it too — and this
+ * hook no longer touches the channel at all. It registers a callback with the
+ * realtime manager, which owns joining and leaving; there is no `echo.leave()` here
+ * to take another module's handlers down with it, and no `getEcho()` whose result
+ * could be stale by the time cleanup runs. The `module` filter still applies, so
+ * another module's payload is never mistaken for a CRM notification.
  */
 export function useNotificationRealtime(): Announcement | null {
   const { user } = useAuth();
@@ -41,21 +42,10 @@ export function useNotificationRealtime(): Announcement | null {
   const [announcement, setAnnouncement] = useState<Announcement | null>(null);
   const seq = useRef(0);
 
-  // Distinguishes the first connect from a re-connect: on the first, the REST
-  // fetches already reflect current state and a refetch would be pure noise.
-  const connectedOnce = useRef(false);
-
-  useEffect(() => {
-    if (userId == null) return;
-
-    // Captured once — the cleanup must not call getEcho() again, since the CRM
-    // shell may already have torn the singleton down by the time it runs.
-    const echo = getEcho();
-    if (!echo) return;
-
-    const channel = echo.private(`user.${userId}`);
-
-    const onCreated = (payload: BroadcastNotification) => {
+  useRealtimeEvent<BroadcastNotification>(
+    userId == null ? null : `user.${userId}`,
+    NOTIFICATION_CREATED,
+    (payload) => {
       if (payload.module !== "crm") return;
 
       // Both badges. A notification that has just arrived is unread, undismissed and
@@ -133,37 +123,20 @@ export function useNotificationRealtime(): Announcement | null {
         seq: seq.current,
         text: payload.title ? `Notification: ${payload.title}` : "New notification",
       });
-    };
+    },
+  );
 
-    channel.listen(NOTIFICATION_CREATED, onCreated);
-
-    // Reconnect backfill. Anything broadcast while the socket was down was missed
-    // outright — without this the badge silently under-counts until the next focus
-    // change, which is exactly the staleness realtime is here to remove.
-    const pusher = (
-      echo.connector as unknown as {
-        pusher?: {
-          connection?: {
-            bind?: (e: string, cb: () => void) => void;
-            unbind?: (e: string, cb: () => void) => void;
-          };
-        };
-      }
-    ).pusher;
-
-    const onConnected = () => {
-      if (connectedOnce.current) {
-        qc.invalidateQueries({ queryKey: queryKeys.notifications.all });
-      }
-      connectedOnce.current = true;
-    };
-    pusher?.connection?.bind?.("connected", onConnected);
-
-    return () => {
-      channel.stopListening(NOTIFICATION_CREATED, onCreated);
-      pusher?.connection?.unbind?.("connected", onConnected);
-    };
-  }, [userId, qc]);
+  // Reconnect backfill. Anything broadcast while the socket was down was missed
+  // outright — without this the badge silently under-counts until the next focus
+  // change, which is exactly the staleness realtime is here to remove.
+  //
+  // The manager decides what counts as a RE-connect. The hand-rolled version this
+  // replaces always skipped the first `connected` event it saw, which was wrong for
+  // the common case: mounting while the socket is already up means the next connect
+  // IS a genuine reconnect, and the backfill was being skipped exactly then.
+  useRealtimeReconnect(() => {
+    qc.invalidateQueries({ queryKey: queryKeys.notifications.all });
+  });
 
   return announcement;
 }

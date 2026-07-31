@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { getEcho } from "@/core/realtime/echo";
+import { useRealtimeEvent } from "@/core/realtime/use-realtime";
 import { notify as toast } from "@/core/lib/notify";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
@@ -69,39 +69,27 @@ function invalidateForAssignment(qc: QueryClient, leadId: string): void {
  * Admin-only while the new owner must be a BD, the actor and the recipient can
  * never be the same account.
  *
- * CHANNEL OWNERSHIP. `user.{id}` belongs to RealtimeProvider, which also carries
- * platform notifications on it. This hook therefore attaches and detaches ONLY its
- * own listener — calling echo.leave() here would silently kill notifications too.
+ * CHANNEL OWNERSHIP. `user.{id}` is shared — CRM notifications and Projects
+ * notifications ride the same channel. This hook registers a callback and nothing
+ * else: joining and leaving the channel belong to the realtime manager, so there is
+ * no way for this hook's unmount to remove anyone else's handlers.
  */
 export function useAssignedLeadToasts(): void {
   const { user } = useAuth();
   const qc = useQueryClient();
   const userId = user?.id;
 
-  useEffect(() => {
-    if (userId == null) return;
-
-    // Captured once: the cleanup must never call getEcho() again, because the CRM
-    // shell may already have torn the singleton down by the time it runs.
-    const echo = getEcho();
-    if (!echo) return;
-
-    const channel = echo.private(`user.${userId}`);
-
-    const onAssigned = (payload: LeadAssignedPayload) => {
+  useRealtimeEvent<LeadAssignedPayload>(
+    userId == null ? null : `user.${userId}`,
+    LEAD_ASSIGNED,
+    (payload) => {
       toast.success(
         "New lead assigned to you",
         `"${payload.business ?? "Lead"}" — assigned by ${payload.assignedBy?.name ?? "an admin"}`,
       );
       invalidateForAssignment(qc, payload.leadId);
-    };
-
-    channel.listen(LEAD_ASSIGNED, onAssigned);
-
-    return () => {
-      channel.stopListening(LEAD_ASSIGNED, onAssigned);
-    };
-  }, [userId, qc]);
+    },
+  );
 }
 
 /**
@@ -140,18 +128,20 @@ export function useLeadChannel(leadId: string | undefined): { lostAccess: boolea
     setLostAccess(false);
   }
 
-  useEffect(() => {
-    if (!leadId) return;
-
-    const echo = getEcho();
-    if (!echo) return;
-
-    const channelName = `crm.lead.${leadId}`;
-    const channel = echo.private(channelName);
-    // Set when the handler has already unsubscribed, so cleanup does not repeat it.
-    let leftOnOwnershipChange = false;
-
-    const onAssigned = (payload: LeadAssignedPayload) => {
+  // Passing null unsubscribes. That is the whole mechanism for "we just lost access":
+  // the hook stops wanting the channel, and the manager leaves it once no listener
+  // remains — which here is immediately, since this hook is its only subscriber. The
+  // previous version called echo.leave() from inside the handler and carried a flag
+  // so cleanup would not repeat it; expressing it as intent removes both.
+  //
+  // Unlike `user.{id}` this channel usually has one subscriber, but "usually" is not
+  // a guarantee worth relying on — two Lead Details for the same lead would share it,
+  // and refcounting means the first to unmount no longer cuts off the second.
+  useRealtimeEvent<LeadAssignedPayload>(
+    leadId && !lostAccess ? `crm.lead.${leadId}` : null,
+    LEAD_ASSIGNED,
+    (payload) => {
+      if (!leadId) return;
       const newOwnerId = payload.assignedTo?.id ?? null;
 
       // Patch the open detail first: the header shows the new owner immediately,
@@ -171,21 +161,10 @@ export function useLeadChannel(leadId: string | undefined): { lostAccess: boolea
       invalidateForAssignment(qc, leadId);
 
       if (!seesEveryLead && viewerId != null && newOwnerId !== String(viewerId)) {
-        leftOnOwnershipChange = true;
         setLostAccess(true);
-        echo.leave(channelName);
       }
-    };
-
-    channel.listen(LEAD_ASSIGNED, onAssigned);
-
-    // Unlike `user.{id}`, this channel is opened by this hook alone, so leaving it
-    // on unmount is correct — navigating away from a lead must not leave a
-    // subscription behind.
-    return () => {
-      if (!leftOnOwnershipChange) echo.leave(channelName);
-    };
-  }, [leadId, qc, seesEveryLead, viewerId]);
+    },
+  );
 
   return { lostAccess };
 }

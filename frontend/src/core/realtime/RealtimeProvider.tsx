@@ -1,109 +1,50 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, type ReactNode } from "react";
 import { useAuth } from "@/core/auth-context";
-import {
-  fromResource,
-  type AppNotification,
-  type NotificationDto,
-} from "@/modules/projects/notifications";
-import { notificationKeys } from "@/modules/projects/useNotifications";
-import { getEcho, teardownEcho } from "./echo";
+import { acquireRealtime, releaseRealtime } from "./realtime-manager";
 
 /**
- * What actually arrives on `user.{id}`: a module's own notification resource plus
- * the platform event's `module` tag. Kept separate from NotificationDto because
- * that type describes the REST shape, which needs no discriminator — the REST
- * endpoints are already per-module.
- */
-type BroadcastNotification = NotificationDto & { module?: string };
-
-/**
- * Owns the WebSocket lifecycle: connect Echo while authenticated, subscribe the
- * private `user.{id}` channel for live notifications, and tear the socket down
- * on logout.
+ * Declares that this section of the app wants a realtime connection, for as long as
+ * the user is authenticated. That is its ENTIRE job.
  *
- * Mounted by the CRM section layout (src/app/zerem/layout.tsx), NOT the root
- * layout — realtime is CRM-scoped for now, so no socket is opened for HRIS,
- * Sprintly or any other app. It still relies on the root layout for both of its
- * contexts: AuthProvider (to read the user) and QueryProvider (to patch the
- * cache). Sprintly's own `useProjectChannel` calls getEcho() directly and is
- * unaffected by where this is mounted.
+ * It used to do considerably more — create the Echo singleton, subscribe
+ * `user.{id}`, carry the Projects notification handler, `echo.leave()` that channel
+ * on cleanup and `teardownEcho()` on any unauthenticated render. Those last two are
+ * why the Notification Center could silently stop receiving events: `leave()` drops
+ * EVERY handler on a shared channel, including the CRM's, and whether that happened
+ * before or after the CRM attached its own was decided by React effect ordering
+ * across two different auth contexts. Owning both the transport and one module's
+ * business logic is what made that possible, so the two are now separated:
  *
- * Reads the platform auth context directly rather than the Projects module's
- * auth shim: this is platform infrastructure and must not depend on a module.
- * `authChecked` / `isAuthenticated` are derived here from `loading` / `user`,
- * which is exactly what that shim was doing.
+ *   - the transport belongs to `realtime-manager`, which nothing else touches;
+ *   - Projects' notification handler belongs to Projects
+ *     (`modules/projects/use-project-notifications`), mounted as a listener
+ *     alongside the CRM's, with neither able to disturb the other.
+ *
+ * Mounted per section (CRM and Projects each mount one) rather than at the root, so
+ * HRIS and the rest of the platform still open no socket. The claim is REFCOUNTED in
+ * the manager: navigating CRM → Projects overlaps the two providers, and refcounting
+ * keeps the socket up across the handover instead of letting the outgoing layout
+ * close a connection the incoming one just opened.
+ *
+ * Reads the platform auth context, not any module's shim — this is platform
+ * infrastructure and must not depend on a module.
  */
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
-  const qc = useQueryClient();
-  const connectedOnce = useRef(false);
-
-  const authChecked = !loading;
-  const isAuthenticated = !!user;
   const userId = user?.id;
 
   useEffect(() => {
-    // Not (yet) authenticated → ensure the socket is down.
-    if (!authChecked || !isAuthenticated || userId == null) {
-      teardownEcho();
-      connectedOnce.current = false;
-      return;
-    }
+    // Nothing to own until there is an authenticated user. Note what is NOT here any
+    // more: an `else` branch tearing the socket down. Releasing the claim on cleanup
+    // covers logout, and the old eager teardown was exactly the call that could kill
+    // a channel a child had already subscribed to.
+    if (loading || userId == null) return;
 
-    const echo = getEcho();
-    if (!echo) return;
-
-    // Live notifications on the user's private channel.
-    //
-    // `user.{id}` is a SHARED stream: a user has one notification channel however
-    // many modules they work in, and every module broadcasts the same platform
-    // NotificationCreated event on it. The `module` tag says whose payload this is,
-    // so this handler keeps only Projects' and ignores the rest — without it, a
-    // notification from another module would be mapped by fromResource() and
-    // written straight into the Projects cache.
-    const userChannel = echo.private(`user.${userId}`);
-    userChannel.listen(".NotificationCreated", (dto: BroadcastNotification) => {
-      if (dto.module !== "projects") return;
-
-      const item = fromResource(dto);
-      qc.setQueryData<AppNotification[]>(notificationKeys.all, (prev) => {
-        if (!prev) return [item];
-        if (prev.some((n) => n.id === item.id)) return prev;
-        return [item, ...prev];
-      });
-    });
-
-    // Reconnect backfill: after a dropped connection re-establishes, refetch
-    // active queries so any events missed while offline are picked up. Skip the
-    // very first connect (the initial REST fetches already cover current state).
-    const pusher = (
-      echo.connector as unknown as {
-        pusher?: { connection?: { bind?: (e: string, cb: () => void) => void; unbind?: (e: string, cb: () => void) => void } };
-      }
-    ).pusher;
-    const onConnected = () => {
-      if (connectedOnce.current) {
-        qc.invalidateQueries({ queryKey: notificationKeys.all });
-        qc.invalidateQueries({ queryKey: ["projects"] });
-      }
-      connectedOnce.current = true;
-    };
-    pusher?.connection?.bind?.("connected", onConnected);
-
-    return () => {
-      echo.leave(`user.${userId}`);
-      pusher?.connection?.unbind?.("connected", onConnected);
-    };
-  }, [authChecked, isAuthenticated, userId, qc]);
-
-  // Because this is mounted per-app rather than at the root, unmounting means the
-  // user has navigated out of the CRM. The effect above only leaves the channel;
-  // this closes the transport too, so an idle socket never follows them into
-  // HRIS or Sprintly. Re-entering the CRM lazily rebuilds it via getEcho().
-  useEffect(() => teardownEcho, []);
+    acquireRealtime();
+    return () => releaseRealtime();
+  }, [loading, userId]);
 
   return <>{children}</>;
 }
