@@ -142,6 +142,13 @@ class CrmServiceProvider extends ServiceProvider
             ->middleware('api')
             ->group(__DIR__ . '/../Routes/api.php');
 
+        // The Google OAuth callback, mounted at the ROOT with no prefix so its path is exactly
+        // /auth/google/callback — the string registered as GOOGLE_REDIRECT_URI on the OAuth client,
+        // which Google matches literally. `api` middleware rather than `web`: the flow authenticates
+        // by a cache-backed state nonce, so it wants no session or CSRF cookie machinery.
+        Route::middleware('api')
+            ->group(__DIR__ . '/../Routes/oauth.php');
+
         // Auto-load the crm_* migrations from inside the module.
         $this->loadMigrationsFrom(__DIR__ . '/../Migrations');
 

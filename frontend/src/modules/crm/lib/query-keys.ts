@@ -164,6 +164,12 @@ export const queryKeys = {
     history: (filters: NotificationHistoryFilters) =>
       [...queryKeys.notifications.historyAll(), filters] as const,
   },
+  integrations: {
+    // Settings → Integrations. One key per integration so connecting Gmail never invalidates
+    // another provider's status; `all` is the prefix for "refresh every integration card".
+    all: ["integrations"] as const,
+    gmail: () => [...queryKeys.integrations.all, "gmail"] as const,
+  },
   businessRules: {
     // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved
     // kpi/ranking modules stay cached separately. `all` prefix lets a single mutation invalidate the

@@ -115,6 +115,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | CRM SPA origin — where OAuth returns the browser
+    |--------------------------------------------------------------------------
+    | ORIGIN ONLY (scheme + host + port), never a full URL with a path: the path is a
+    | frontend-routing fact and lives in code (GmailOAuthController), so the two cannot
+    | drift. Used for exactly one thing — bouncing the browser back to Settings →
+    | Integrations after Google consent, with a non-secret ?gmail=… status.
+    |
+    | This is a FIXED configuration value and is never read from the request. An OAuth
+    | callback that accepted a redirect target from its own query string would be an open
+    | redirect wearing a Google-shaped badge.
+    |
+    | Defaults to the local Next dev server (the frontend is not containerised — see
+    | docker-compose.yml). A deployment sets FRONTEND_URL; if it is blank the callback
+    | falls back to returning minimal JSON rather than guessing a host.
+    */
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:3000'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Default sender identity for outbound outreach email
     |--------------------------------------------------------------------------
     | Falls back to the framework MAIL_FROM_* so a single SMTP config works with

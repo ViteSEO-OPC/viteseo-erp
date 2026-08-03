@@ -11,6 +11,7 @@ use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
+use App\Modules\Crm\Controllers\GmailOAuthController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
 use App\Modules\Crm\Controllers\LeadFollowUpController;
@@ -372,6 +373,24 @@ Route::prefix('v1/crm')->group(function (): void {
                 Route::post('/{module}/publish', [BusinessRuleController::class, 'publish']);
                 Route::post('/{module}/rollback', [BusinessRuleController::class, 'rollback']);
             });
+        });
+
+        // Settings → Integrations: connect the CRM's shared mailbox to Google (Gmail OAuth consent).
+        // Admin/Super-Admin only — this authorizes access to the ORG's mail, not a personal setting,
+        // so it is gated like the other org-configuration surfaces rather than by ownership.
+        //
+        // POST because it has an effect: each call mints a single-use, short-lived state nonce. It
+        // returns only a URL; nothing is connected until the user comes back through the ROOT-level
+        // /auth/google/callback (Routes/oauth.php), which Google reaches with no bearer token and
+        // which therefore cannot live inside this authenticated group.
+        //
+        // GET returns safe metadata only (mailbox / provider / connected / status) — no token, no
+        // expiry, no ciphertext. DELETE revokes at Google where it can and always drops the local
+        // grant, so a disconnect cannot be blocked by a Google outage.
+        Route::middleware('role:super_admin|crm_admin')->group(function () {
+            Route::get('/settings/integrations/gmail', [GmailOAuthController::class, 'show']);
+            Route::delete('/settings/integrations/gmail', [GmailOAuthController::class, 'destroy']);
+            Route::post('/settings/integrations/gmail/authorization', [GmailOAuthController::class, 'store']);
         });
     });
 });
