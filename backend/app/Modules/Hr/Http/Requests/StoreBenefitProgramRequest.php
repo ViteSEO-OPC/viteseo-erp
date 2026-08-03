@@ -22,7 +22,7 @@ class StoreBenefitProgramRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'category' => ['sometimes', 'string', 'max:50'],
-            'kind' => ['sometimes', 'in:allowance,company'],
+            'kind' => ['sometimes', Rule::in(BenefitProgram::KINDS)],
             // Slice B5.4 — required for an allowance (it would otherwise pay ₱0 silently);
             // nullable for a company plan, which prices by tier instead.
             'amount' => ['required_if:kind,allowance', 'nullable', 'numeric', 'min:0'],

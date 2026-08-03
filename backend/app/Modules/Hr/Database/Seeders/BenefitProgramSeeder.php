@@ -79,7 +79,7 @@ class BenefitProgramSeeder extends Seeder
                 ['name' => $c['name']],
                 [
                     'category' => $c['category'],
-                    'kind' => 'company',
+                    'kind' => 'plan',
                     'description' => $c['description'],
                     'color' => $c['color'],
                     'status' => $c['status'],

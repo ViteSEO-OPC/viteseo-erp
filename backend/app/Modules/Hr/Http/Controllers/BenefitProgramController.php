@@ -127,6 +127,109 @@ class BenefitProgramController extends Controller
     }
 
     /**
+     * GET /api/v1/hr/benefit-programs/{benefitProgram}/enrollments — Slice B2, hr_officer only.
+     *
+     * Who is on this plan, at what tier and share, since when — plus everyone the plan's rule
+     * allows who is NOT on it, because "who could I add" is the other half of the screen.
+     */
+    public function planEnrollments(BenefitProgram $benefitProgram): JsonResponse
+    {
+        return response()->json($this->enrolmentPayload($benefitProgram));
+    }
+
+    /**
+     * PUT /api/v1/hr/benefit-programs/{benefitProgram}/enrollments — Slice B2, hr_officer only.
+     *
+     * Enrol people on a plan, or change their tier, share or dates. A row the plan's rule does not
+     * cover, or one naming a tier the plan does not have, is REPORTED BACK rather than written —
+     * the two faults B5 items 1 and 2 closed for the assignment path that has since been deleted.
+     */
+    public function updatePlanEnrollments(Request $request, BenefitProgram $benefitProgram): JsonResponse
+    {
+        if ($benefitProgram->kind !== 'plan') {
+            return response()->json([
+                'message' => 'Only a company plan has enrolments. An allowance covers people by its rule.',
+                'errors' => ['kind' => ['This programme is not a plan.']],
+            ], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $data = $request->validate([
+            'enrollments' => ['required', 'array'],
+            'enrollments.*.employee_id' => ['required', 'integer', 'exists:hr_employees,id'],
+            'enrollments.*.tier' => ['nullable', 'string', 'max:40'],
+            'enrollments.*.employee_share' => ['nullable', 'numeric', 'min:0', 'max:9999999.99'],
+            'enrollments.*.enrolled_at' => ['nullable', 'date'],
+            'enrollments.*.ended_at' => ['nullable', 'date'],
+        ]);
+
+        $result = $this->service->syncPlanEnrolments(
+            $benefitProgram,
+            $data['enrollments'],
+            $request->user()?->id,
+        );
+
+        // 200 with the rejections listed, not a blanket 422: enrolling eight people should not be
+        // undone because one of them turned out to be ineligible.
+        return response()->json(
+            $this->enrolmentPayload($benefitProgram->fresh()) + ['rejected' => $result['rejected']],
+        );
+    }
+
+    /**
+     * DELETE /api/v1/hr/benefit-programs/{benefitProgram}/enrollments/{employee} — Slice B2.
+     *
+     * Ends the enrolment on a date rather than deleting the row: the row is what lets a past
+     * payslip explain the deduction it charged.
+     */
+    public function endPlanEnrollment(BenefitProgram $benefitProgram, Employee $employee): JsonResponse
+    {
+        // 404 rather than a 200 that changed nothing: taking somebody off a plan they were never
+        // on is a mistake worth surfacing, not absorbing.
+        abort_unless($this->service->endPlanEnrolment($benefitProgram, $employee), 404);
+
+        return response()->json($this->enrolmentPayload($benefitProgram->fresh()));
+    }
+
+    /** @return array<string, mixed> */
+    private function enrolmentPayload(BenefitProgram $program): array
+    {
+        $enrolled = $program->employees()->with('user')->get()->map(fn (Employee $e) => [
+            'employee_id' => (int) $e->id,
+            'name' => $e->user?->name ?? trim($e->first_name . ' ' . $e->last_name),
+            'tier' => $e->pivot->tier,
+            'employee_share' => $e->pivot->employee_share,
+            'enrolled_at' => $e->pivot->enrolled_at,
+            'ended_at' => $e->pivot->ended_at,
+        ])->values();
+
+        $onPlan = $enrolled->pluck('employee_id')->all();
+
+        $eligible = Employee::with('user')
+            ->whereIn('id', $this->service->eligibleEmployeeIds($program))
+            ->whereNotIn('id', $onPlan ?: [0])
+            ->get()
+            ->map(fn (Employee $e) => [
+                'employee_id' => (int) $e->id,
+                'name' => $e->user?->name ?? trim($e->first_name . ' ' . $e->last_name),
+            ])
+            ->values();
+
+        $active = $enrolled->filter(fn ($r) => $r['ended_at'] === null);
+
+        return [
+            'data' => ['enrolled' => $enrolled, 'eligible' => $eligible],
+            'meta' => [
+                'tiers' => $program->tiers ?? [],
+                'deduction_cadence' => $program->deduction_cadence,
+                // B2 item 3 — "deducts every cutoff" plus "nobody has a share" means deduct
+                // nothing, which is almost never what HR intended and looks finished on screen.
+                'deducts_but_no_shares' => $program->deduction_cadence !== null
+                    && $active->every(fn ($r) => ! ((float) ($r['employee_share'] ?? 0) > 0)),
+            ],
+        ];
+    }
+
+    /**
      * GET /api/v1/hr/me/benefit-programs — the caller's own benefits, with what each is worth.
      *
      * Slice B12 — the money comes from `AllowanceService`, the same code payroll runs, so the

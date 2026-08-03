@@ -17,7 +17,7 @@ class BenefitProgramResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'category' => $this->category,
-            'kind' => $this->kind, // 'allowance' | 'company'
+            'kind' => $this->kind, // allowance (adds to gross) | plan (deducts per period) | loan_policy
             'amount' => $this->amount,
             'description' => $this->description,
             'color' => $this->color,

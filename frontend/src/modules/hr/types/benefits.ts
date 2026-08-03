@@ -95,7 +95,8 @@ export interface BenefitProgram {
   id: number;
   name: string;
   category: string;
-  kind: "allowance" | "company"; // which section on the Benefits page
+  /** What it does to a payslip: adds to gross | deducts per period | the product a loan is issued under. */
+  kind: "allowance" | "plan" | "loan_policy";
   amount: string | null; // allowance peso / month (raw decimal string)
   description: string | null; // company-benefit blurb
   color: string | null; // card dot colour
@@ -122,6 +123,34 @@ export interface BenefitProgram {
   employee_ids: number[];
 }
 
+/** One person's enrolment on a company plan (B2). */
+export interface PlanEnrollment {
+  employee_id: number;
+  name: string;
+  tier: string | null;
+  /** What is deducted from their pay. Null/0 ⇒ the company pays the whole premium. */
+  employee_share: string | null;
+  enrolled_at: string | null;
+  /** Set ⇒ they have left the plan; nothing is deducted after this date. */
+  ended_at: string | null;
+}
+
+/** The plan-enrolment screen's payload: who is on it, and who could be added. */
+export interface PlanEnrollments {
+  data: {
+    enrolled: PlanEnrollment[];
+    eligible: { employee_id: number; name: string }[];
+  };
+  meta: {
+    tiers: BenefitTier[];
+    deduction_cadence: string | null;
+    /** "Deducts every cutoff" + "nobody has a share" = deducts nothing. Almost never intended. */
+    deducts_but_no_shares: boolean;
+  };
+  /** Rows the server refused — ineligible employee, unknown tier. Never silently dropped. */
+  rejected?: string[];
+}
+
 /** One allowance as it applies to ONE employee (B14) — the employee-profile view. */
 export interface EmployeeAllowance {
   program_id: number;
@@ -142,7 +171,7 @@ export interface MyBenefit {
   id: number;
   name: string;
   category: string;
-  kind: "allowance" | "company";
+  kind: "allowance" | "plan" | "loan_policy";
   color: string | null;
   status: string;
   /** Allowances only: what THIS employee is paid per month. Never the company standard. */

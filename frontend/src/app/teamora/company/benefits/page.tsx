@@ -15,6 +15,7 @@ import { useBenefitPrograms } from "@/modules/hr/hooks/use-benefit-programs";
 import { AllowanceFormDialog } from "@/modules/hr/components/allowance-form-dialog";
 import { EditContributionDialog } from "@/modules/hr/components/edit-contribution-dialog";
 import { EditHmoDialog } from "@/modules/hr/components/edit-hmo-dialog";
+import { PlanEnrollmentDialog } from "@/modules/hr/components/plan-enrollment-dialog";
 import {
   CONTRIBUTION_LABELS,
   type BenefitProgram,
@@ -44,7 +45,7 @@ export default function BenefitsPage() {
   // endpoint never returns a deleted one (B13 item 4). The two lists used to disagree about that
   // — allowances were filtered by `is_active` and company plans were not.
   const allowances = (programs ?? []).filter((p) => p.kind === "allowance");
-  const company = (programs ?? []).filter((p) => p.kind === "company");
+  const company = (programs ?? []).filter((p) => p.kind === "plan");
   const activeCount = (programs ?? []).length;
 
   // One dialog for add and edit — `null` means a new allowance. "Add a Plan" was removed on
@@ -54,6 +55,9 @@ export default function BenefitsPage() {
   const [editAllowance, setEditAllowance] = useState<BenefitProgram | null>(null);
   const [editContribution, setEditContribution] = useState<string | null>(null);
   const [editHmo, setEditHmo] = useState<BenefitProgram | null>(null);
+  // Slice B2 — who is ON a plan is a separate job from what the plan IS, and conflating the two
+  // is what made "Add a Plan" impossible to understand.
+  const [membersOf, setMembersOf] = useState<BenefitProgram | null>(null);
 
   return (
     <div className="p-4 sm:p-8">
@@ -131,7 +135,12 @@ export default function BenefitsPage() {
           ) : (
             <div className="space-y-4">
               {company.map((p) => (
-                <CompanyBenefitCard key={p.id} program={p} onEdit={() => setEditHmo(p)} />
+                <CompanyBenefitCard
+                  key={p.id}
+                  program={p}
+                  onEdit={() => setEditHmo(p)}
+                  onMembers={() => setMembersOf(p)}
+                />
               ))}
             </div>
           )}
@@ -152,6 +161,10 @@ export default function BenefitsPage() {
         }}
       />
       <EditHmoDialog program={editHmo} onOpenChange={(o) => !o && setEditHmo(null)} />
+      <PlanEnrollmentDialog
+        program={membersOf}
+        onOpenChange={(o) => !o && setMembersOf(null)}
+      />
     </div>
   );
 }
@@ -298,7 +311,15 @@ function AllowanceCard({ program, onEdit }: { program: BenefitProgram; onEdit: (
 }
 
 // A company benefit (HMO, retirement, …) — HR editable, full width.
-function CompanyBenefitCard({ program, onEdit }: { program: BenefitProgram; onEdit: () => void }) {
+function CompanyBenefitCard({
+  program,
+  onEdit,
+  onMembers,
+}: {
+  program: BenefitProgram;
+  onEdit: () => void;
+  onMembers: () => void;
+}) {
   const isDraft = /soon|draft/i.test(program.status);
 
   return (
@@ -323,11 +344,17 @@ function CompanyBenefitCard({ program, onEdit }: { program: BenefitProgram; onEd
         <p className="mt-3 text-sm text-muted-foreground">{program.description}</p>
       )}
 
-      {isDraft && (
-        <Button variant="outline" size="sm" className="mt-4" onClick={onEdit}>
-          Set up as draft
+      {/* Slice B2 — a plan nobody can be put on is a brochure. This is the way on. */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" onClick={onMembers}>
+          Who is on it
         </Button>
-      )}
+        {isDraft && (
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            Set up as draft
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -22,7 +22,7 @@ class UpdateBenefitProgramRequest extends FormRequest
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'category' => ['sometimes', 'required', 'string', 'max:50'],
-            'kind' => ['sometimes', 'in:allowance,company'],
+            'kind' => ['sometimes', Rule::in(BenefitProgram::KINDS)],
             'amount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             // Slice B5.4 — see withValidator(): an allowance must keep an amount. The check lives
             // there because `kind` may be absent on a PATCH and has to fall back to the saved row.

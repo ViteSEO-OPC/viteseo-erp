@@ -12,6 +12,9 @@ import {
   getMyBenefits,
   getEmployeeAllowances,
   setEmployeeAllowance,
+  getPlanEnrollments,
+  updatePlanEnrollments,
+  endPlanEnrollment,
 } from "@/modules/hr/api/benefit-programs";
 import type { BenefitProgramInput } from "@/modules/hr/types/benefits";
 
@@ -68,6 +71,49 @@ export function useCreateBenefitPlan() {
 
 export function useMyBenefits() {
   return useQuery({ queryKey: MY_KEY, queryFn: getMyBenefits });
+}
+
+// ---- Company-plan enrolment (Slice B2) ----
+
+const planEnrollmentsKey = (programId: number) =>
+  ["hr", "benefit-programs", programId, "enrollments"] as const;
+
+export function usePlanEnrollments(programId: number | null) {
+  return useQuery({
+    queryKey: planEnrollmentsKey(programId ?? 0),
+    queryFn: () => getPlanEnrollments(programId as number),
+    enabled: programId != null,
+  });
+}
+
+export function useUpdatePlanEnrollments(programId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      enrollments: {
+        employee_id: number;
+        tier?: string | null;
+        employee_share?: number | null;
+        enrolled_at?: string | null;
+        ended_at?: string | null;
+      }[],
+    ) => updatePlanEnrollments(programId, enrollments),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: planEnrollmentsKey(programId) });
+      qc.invalidateQueries({ queryKey: PROGRAMS_KEY });
+    },
+  });
+}
+
+export function useEndPlanEnrollment(programId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (employeeId: number) => endPlanEnrollment(programId, employeeId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: planEnrollmentsKey(programId) });
+      qc.invalidateQueries({ queryKey: PROGRAMS_KEY });
+    },
+  });
 }
 
 // ---- One employee's own allowance amounts (Slice B14) ----

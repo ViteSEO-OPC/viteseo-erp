@@ -185,7 +185,13 @@ class Employee extends Model
             // `amount` is a DELIBERATE allowance override (B14): null means the employee follows
             // the programme, which is the default and must stay the common case. It is not a
             // membership — the eligibility rule decides that.
-            ->withPivot(['tier', 'employee_share', 'amount', 'amount_set_by', 'amount_set_at'])
+            // `enrolled_at` / `ended_at` MUST be listed here (B2): a pivot column absent from
+            // withPivot is silently dropped on write and reads as null, so the dates looked saved
+            // and every dated enrolment charged from the beginning of time.
+            ->withPivot([
+                'tier', 'employee_share', 'amount', 'amount_set_by', 'amount_set_at',
+                'enrolled_at', 'ended_at',
+            ])
             ->withTimestamps();
     }
 

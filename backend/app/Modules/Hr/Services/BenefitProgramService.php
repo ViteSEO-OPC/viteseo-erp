@@ -332,6 +332,114 @@ class BenefitProgramService
     }
 
     /**
+     * Who is on a company plan, what tier, what they pay — Slice B2.
+     *
+     * A PLAN'S MEMBERSHIP IS AN EXPLICIT LIST, not a rule, and that is the decision this slice
+     * takes (B5 item 3's last open piece). An allowance is the same for everybody it covers, so a
+     * rule can decide membership; a plan carries a per-person tier and share that only an
+     * enrolment can hold, and nothing can derive "Dana is on Family at ₱500" from a rule. The
+     * eligibility rule still applies as a GATE — it says who may be enrolled — but being enrolled
+     * stays a deliberate act.
+     *
+     * @param  array<int, array{employee_id:int, tier?:?string, employee_share?:?float, enrolled_at?:?string, ended_at?:?string}>  $rows
+     * @return array{enrolled:int, rejected:array<int, string>}
+     */
+    public function syncPlanEnrolments(BenefitProgram $program, array $rows, ?int $actorId = null): array
+    {
+        $tiers = collect($program->tiers ?? [])->pluck('name')->all();
+        $rejected = [];
+        $applied = [];
+
+        foreach ($rows as $row) {
+            $employee = Employee::find($row['employee_id']);
+
+            if ($employee === null) {
+                $rejected[] = "Employee {$row['employee_id']} does not exist.";
+
+                continue;
+            }
+
+            // The rule is the gate. Enrolling somebody a `regular`-only plan excludes is the same
+            // fault B5 item 1 fixed for assignment, arriving through a different door.
+            if (! $this->covers($program, $employee)) {
+                $rejected[] = ($employee->user?->name ?? "Employee {$employee->id}")
+                    . ' is not eligible for this plan.';
+
+                continue;
+            }
+
+            // B5 item 2 — an unrecognised tier used to enrol them with a NULL share, which meant
+            // the company silently paying their whole premium.
+            $tier = $row['tier'] ?? null;
+            if ($tier !== null && $tiers !== [] && ! in_array($tier, $tiers, true)) {
+                $rejected[] = ($employee->user?->name ?? "Employee {$employee->id}")
+                    . ": '{$tier}' is not a tier on this plan.";
+
+                continue;
+            }
+
+            // Default the share from the chosen tier — the figure HR already typed once when they
+            // configured the plan; making them retype it per person is how the two drift apart.
+            // An explicit share still wins. Written long-hand because `firstWhere` returns null
+            // when the tier has no entry, and indexing null is a warning, not a default.
+            $tierRow = $tier === null ? null : collect($program->tiers ?? [])->firstWhere('name', $tier);
+            $share = $row['employee_share'] ?? ($tierRow['employee_share'] ?? null);
+
+            $applied[$employee->id] = [
+                'tier' => $tier,
+                'employee_share' => $share,
+                // Dates exist so a mid-month joiner is not charged for the period before they
+                // joined, and a leaver stops being charged on a date rather than by deletion.
+                'enrolled_at' => $row['enrolled_at'] ?? now(config('app.timezone_local'))->toDateString(),
+                'ended_at' => $row['ended_at'] ?? null,
+            ];
+        }
+
+        if ($applied !== []) {
+            $program->employees()->syncWithoutDetaching($applied);
+        }
+
+        $this->audit->log(
+            'enrolled', 'Benefits',
+            "Enrolment updated on '{$program->name}' — " . count($applied) . ' of ' . count($rows)
+                . ' employee(s): ' . (implode(', ', array_keys($applied)) ?: 'none')
+                . ($rejected === [] ? '' : ' · rejected: ' . implode(' ', $rejected)),
+            $program,
+        );
+
+        return ['enrolled' => count($applied), 'rejected' => $rejected];
+    }
+
+    /**
+     * Take someone off a plan. Soft in effect: the row keeps the dates that priced past payslips.
+     *
+     * Returns false when they were not on it. `updateExistingPivot` is a SILENT no-op for a
+     * missing row — it would answer "done" and change nothing, which is the exact trap B6 found
+     * on the override endpoints.
+     */
+    public function endPlanEnrolment(BenefitProgram $program, Employee $employee, ?string $on = null): bool
+    {
+        $enrolled = $program->employees()->whereKey($employee->id)->exists();
+
+        if (! $enrolled) {
+            return false;
+        }
+
+        $program->employees()->updateExistingPivot($employee->id, [
+            'ended_at' => $on ?? now(config('app.timezone_local'))->toDateString(),
+        ]);
+
+        $this->audit->log(
+            'removed', 'Benefits',
+            "{$employee->user?->name} leaves '{$program->name}' — no share is deducted after "
+                . ($on ?? now(config('app.timezone_local'))->toDateString()),
+            $program,
+        );
+
+        return true;
+    }
+
+    /**
      * How many of the people a programme covers follow it, and how many carry their own amount.
      *
      * The edit dialog claims an edit will reach N people; without this it counted enrolments and

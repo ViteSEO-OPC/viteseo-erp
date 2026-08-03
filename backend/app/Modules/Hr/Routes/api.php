@@ -250,6 +250,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'destroy']);
         // Slice B14 — one employee's own allowance amounts. NOT `/benefits`: that path is the
         // statutory checklist, a different table with a near-identical name (B5 item 8).
+        // Slice B2 — who is on a company plan, at what tier and share. The capability that went
+        // with "Add a Plan": without it a plan can be published and nobody can ever be put on it.
+        Route::get('benefit-programs/{benefitProgram}/enrollments', [BenefitProgramController::class, 'planEnrollments']);
+        Route::match(['put', 'patch'], 'benefit-programs/{benefitProgram}/enrollments', [BenefitProgramController::class, 'updatePlanEnrollments']);
+        Route::delete('benefit-programs/{benefitProgram}/enrollments/{employee}', [BenefitProgramController::class, 'endPlanEnrollment']);
         Route::get('employees/{employee}/allowances', [BenefitProgramController::class, 'employeeAllowances']);
         Route::match(['put', 'patch'], 'employees/{employee}/allowances/{benefitProgram}', [BenefitProgramController::class, 'setEmployeeAllowance']);
 

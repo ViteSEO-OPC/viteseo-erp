@@ -182,7 +182,14 @@ class PayrollService
         // Slice 11a — recurring benefit shares (HMO, union dues) from Company → Benefits.
         // `count` is how many periods this calendar month has, so a MONTHLY share is split
         // the same way statutory contributions are.
-        $otherDeductions = $this->benefitDeductions->forPeriod($employee, max(1, (int) ($dist['count'] ?? 1)));
+        // The cycle dates are passed so an enrolment that starts or ends mid-year is charged only
+        // for the periods it actually covers (Slice B2).
+        $otherDeductions = $this->benefitDeductions->forPeriod(
+            $employee,
+            max(1, (int) ($dist['count'] ?? 1)),
+            $dist['cycle_start'] ?? null,
+            $dist['cycle_end'] ?? null,
+        );
 
         $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium, $otherDeductions);
 
@@ -1082,6 +1089,8 @@ class PayrollService
                 'deminimis_annual_cap' => $setting->deminimis_annual_cap,
                 // Slice B3a — resolves the statutory rates in force for this period.
                 'cycle_end' => $cycleEnd,
+                // Slice B2 — decides whether a dated plan enrolment covers this period at all.
+                'cycle_start' => $cycleStart,
             ];
 
             // Refresh semantics: reuse this group+period's run if one exists, otherwise
