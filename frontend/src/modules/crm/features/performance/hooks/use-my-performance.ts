@@ -30,6 +30,8 @@ export type PerformanceSummary = {
   conversionRate: number | null;
   /** Follow-up Planner events completed this calendar month (real `completed_at`, ownership-scoped). */
   completedFollowUps: number;
+  /** Monthly converted-leads goal from Goal Management, or null when none is configured. */
+  personalTarget: { value: number; progress: number } | null;
   /** Overdue-and-not-completed Planner events by type (the PO-frozen "missed" rule), ownership-scoped. */
   followUpDiscipline: {
     missedFollowUps: number;

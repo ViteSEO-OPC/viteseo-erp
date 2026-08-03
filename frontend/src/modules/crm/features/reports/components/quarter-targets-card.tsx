@@ -8,19 +8,27 @@ import { useReportsAnalytics } from "@/modules/crm/features/reports/hooks/use-re
 /**
  * Quarter targets & follow-through. The RIGHT tiles are LIVE: missed follow-ups / appointments / calls
  * (the PO-frozen "missed" rule) and outreach completion %. The LEFT column shows the real progress
- * counts (leads contacted, consultations actually held, confirmed) but carries a **Pending** marker instead of a
- * fabricated goal bar — targets arrive with Goal Management (frozen Business Decision: no hardcoded
- * goals). Every number here is server-computed; nothing is invented to fill the mockup.
+ * counts (leads contacted, consultations actually held, confirmed) against the quarterly goals set in
+ * Goal Management — and keeps its **Pending** marker for any metric with no goal configured, rather
+ * than inventing a denominator. Goals exist only when a single BD is in scope: All Reports carries
+ * none, because a team aggregate target is a business object nobody has defined.
+ *
+ * Every number here is server-computed; the goal supplies the denominator only.
  */
 export function QuarterTargetsCard({ className }: { className?: string }) {
   const { data, isLoading, isError } = useReportsAnalytics();
   const f = data?.followThrough;
+  const goals = f?.goals ?? null;
 
   const progress = [
-    { label: "Leads contacted", value: f?.leadsContacted },
-    { label: "Consultations", value: f?.consultations },
-    { label: "Confirmed clients", value: f?.confirmedClients },
+    { label: "Leads contacted", value: f?.leadsContacted, goal: goals?.leadsContacted ?? null },
+    { label: "Consultations", value: f?.consultations, goal: goals?.consultations ?? null },
+    { label: "Confirmed clients", value: f?.confirmedClients, goal: goals?.confirmedClients ?? null },
   ];
+
+  // Only claim "goals are not set" when none of the three is configured; otherwise the card carries
+  // real targets and the per-row markers say which individual metric is still pending.
+  const anyGoal = progress.some((p) => p.goal !== null);
 
   const tiles = [
     { label: "Missed follow-ups", value: f?.missedFollowUps, tone: "text-red-500" },
@@ -41,11 +49,19 @@ export function QuarterTargetsCard({ className }: { className?: string }) {
   return (
     <ChartCard
       title="Quarter targets & follow-through"
-      subtitle="Live team counts for management review; goals arrive with Goal Management"
+      subtitle={
+        anyGoal
+          ? "Live counts against the quarterly goals set in Goal Management"
+          : "Live team counts for management review; no quarterly goals are set"
+      }
       className={className}
       isLoading={isLoading}
       isError={isError}
-      filter={<PendingBadge reason="Quarter targets await the Goal Management module — counts are live, goals are not set" />}
+      filter={
+        anyGoal ? undefined : (
+          <PendingBadge reason="No quarterly goals are configured for this scope — counts are live, goals are not set" />
+        )
+      }
     >
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="flex flex-1 flex-col justify-center gap-4">
@@ -57,7 +73,7 @@ export function QuarterTargetsCard({ className }: { className?: string }) {
                   {p.value ?? "—"}
                 </span>
                 <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  / target pending
+                  {p.goal !== null ? `/ ${p.goal}` : "/ target pending"}
                 </span>
               </span>
             </div>

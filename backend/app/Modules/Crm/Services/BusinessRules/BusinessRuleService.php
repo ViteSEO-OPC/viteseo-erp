@@ -39,6 +39,15 @@ use Illuminate\Validation\ValidationException;
 final class BusinessRuleService
 {
     /**
+     * The frozen KPI definition catalog, sorted. The formulas are code-defined in KpiCalculator and this is
+     * the join back to them, so the set is fixed: the management surface edits a definition's metadata, it
+     * never invents an M-07 that no formula computes.
+     *
+     * @var list<string>
+     */
+    private const KPI_CATALOG_KEYS = ['M-01', 'M-02', 'M-03', 'M-04', 'M-05', 'M-06'];
+
+    /**
      * @param  ScoringConfigProvider  $provider  Used ONLY for its write-only cache `invalidate()` after a
      *         publish/rollback commits (§5.7). The service never reads scoring configuration through it.
      * @param  BaselineValidator  $validator  Shared, stateless completeness check reused to confirm a draft
@@ -158,6 +167,15 @@ final class BusinessRuleService
             }
 
             if (array_key_exists('point_value', $changes)) {
+                // A KPI definition has no point value — the column is NULL for the whole catalog because a
+                // metric is not worth points. Refusing the edit here (rather than silently ignoring it)
+                // keeps the frozen "point_value is not a KPI input" rule enforced at the write boundary.
+                if ($module === BusinessRuleModule::KPI) {
+                    throw ValidationException::withMessages([
+                        'point_value' => 'A KPI definition has no point value.',
+                    ]);
+                }
+
                 $pointValue = $this->validatePointValue($changes['point_value']);
                 if ($pointValue !== $rule->point_value) {
                     $before['point_value'] = $rule->point_value;
@@ -276,7 +294,7 @@ final class BusinessRuleService
             if ($draft === null) {
                 throw ValidationException::withMessages(['draft' => 'There is no draft to publish.']);
             }
-            $this->assertPublishable($draft); // completeness gate (§5.6) — never publish a partial ruleset.
+            $this->assertPublishable($module, $draft); // completeness gate (§5.6) — never publish a partial ruleset.
 
             $active = $this->getActiveConfiguration($module);
             if ($active !== null) {
@@ -301,7 +319,7 @@ final class BusinessRuleService
             return $draft;
         });
 
-        $this->afterActiveVersionChanged($published->version_number);
+        $this->afterActiveVersionChanged($module, $published->version_number);
 
         return $published->load('rules');
     }
@@ -335,7 +353,7 @@ final class BusinessRuleService
                 throw ValidationException::withMessages(['target_version' => 'That version is already active.']);
             }
 
-            $this->assertPublishable($target); // never roll back to a corrupt/incomplete version.
+            $this->assertPublishable($module, $target); // never roll back to a corrupt/incomplete version.
 
             // Forward-only: a NEW active version that copies the target's rules (a fresh identity).
             $restored = new BusinessRuleVersion();
@@ -375,7 +393,7 @@ final class BusinessRuleService
             return $restored;
         });
 
-        $this->afterActiveVersionChanged($created->version_number);
+        $this->afterActiveVersionChanged($module, $created->version_number);
 
         return $created->load('rules');
     }
@@ -386,20 +404,41 @@ final class BusinessRuleService
      * Post-commit side effects for a change to the ACTIVE version (§5.7/§5.8). Runs OUTSIDE and AFTER the
      * transaction: invalidate the provider cache so the next resolution serves the new active version, then
      * dispatch the version-pinned recompute. Never invoked on a rolled-back transaction.
+     *
+     * SCOPED TO lead_scoring. Both side effects are lead-scoring concerns: the provider cache holds the
+     * scoring parameters (its key and its query are module-specific), and the recompute job is pinned to a
+     * LEAD_SCORING version number. Publishing a `kpi` version must not touch either — dispatching the job
+     * with a KPI version number would recompute every lead score against the wrong version, and KPI
+     * definitions are metadata that feed no score at all (the M-01…M-06 formulas stay code-defined).
      */
-    private function afterActiveVersionChanged(int $resultingVersionNumber): void
+    private function afterActiveVersionChanged(BusinessRuleModule $module, int $resultingVersionNumber): void
     {
+        if ($module !== BusinessRuleModule::LEAD_SCORING) {
+            return;
+        }
+
         $this->provider->invalidate();
         RecomputeLeadScoresJob::dispatch($resultingVersionNumber);
     }
 
     /**
-     * Confirm a version is a complete, publishable ruleset (§5.6), reusing the shared stateless validator so
-     * "complete" is defined once (and matches what the provider requires at read time). Throws a 422 with the
-     * specific reason if not.
+     * Confirm a version is a complete, publishable ruleset (§5.6). Throws a 422 with the specific reason.
+     *
+     * The gate is PER MODULE because "complete" means different things. A lead_scoring version must satisfy
+     * every baseline check the provider applies at read time — including a valid category and an integer
+     * point value on each rule — so it reuses the shared stateless validator and that definition stays in
+     * one place. A `kpi` version carries neither: its rules are catalog metadata whose formulas live in
+     * KpiCalculator, so running the scoring validator over it would fail on the scoring keys it does not
+     * have and on the nulls it is supposed to have.
      */
-    private function assertPublishable(BusinessRuleVersion $version): void
+    private function assertPublishable(BusinessRuleModule $module, BusinessRuleVersion $version): void
     {
+        if ($module === BusinessRuleModule::KPI) {
+            $this->assertKpiPublishable($version);
+
+            return;
+        }
+
         $requiredKeys = array_keys(config('scoring.points', []));
         $result = $this->validator->validate(
             collect([$version->loadMissing('rules')]),
@@ -414,6 +453,28 @@ final class BusinessRuleService
         }
     }
 
+    /**
+     * Completeness for the KPI definition catalog: exactly the frozen M-01…M-06 keys, no duplicates and none
+     * missing. That is the whole contract — a KPI row describes a metric the engine already computes, so
+     * there is no category, point value or cap to check. Anything else would be a definition of nothing,
+     * which is also why the management surface can neither add nor remove a key.
+     */
+    private function assertKpiPublishable(BusinessRuleVersion $version): void
+    {
+        $keys = $version->loadMissing('rules')->rules->map(fn (BusinessRule $rule): string => $rule->rule_key);
+
+        if ($keys->count() !== $keys->unique()->count()) {
+            throw ValidationException::withMessages([
+                'configuration' => 'The configuration is not publishable (duplicate_rule_key).',
+            ]);
+        }
+
+        if ($keys->sort()->values()->all() !== self::KPI_CATALOG_KEYS) {
+            throw ValidationException::withMessages([
+                'configuration' => 'The configuration is not publishable (missing_rule_key).',
+            ]);
+        }
+    }
 
     private function setEnabled(BusinessRuleModule $module, string $ruleKey, bool $enabled, User $actor): BusinessRule
     {

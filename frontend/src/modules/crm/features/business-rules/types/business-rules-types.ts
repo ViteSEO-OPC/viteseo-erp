@@ -21,8 +21,12 @@ export type BusinessRule = {
   id: string;
   ruleKey: string;
   description: string;
-  category: BusinessRuleCategory;
-  pointValue: number;
+  /**
+   * Null for modules with no scoring semantics (`kpi`): a KPI definition carries neither an
+   * arithmetic sign nor a point value, so both come back null rather than as a fabricated 0.
+   */
+  category: BusinessRuleCategory | null;
+  pointValue: number | null;
   isSubtractive: boolean;
   isEnabled: boolean;
   displayOrder: number;
