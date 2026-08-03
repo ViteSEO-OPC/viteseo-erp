@@ -12,6 +12,7 @@ use Google\Service\Gmail;
 use Google\Service\Gmail\ListHistoryResponse;
 use Google\Service\Gmail\Message as GmailMessage;
 use Google\Service\Gmail\MessagePart;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
 /**
