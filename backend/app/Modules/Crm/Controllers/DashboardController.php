@@ -18,9 +18,49 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Carbon;
 
 class DashboardController extends Controller
 {
+    /**
+     * The pending follow-up set — the ONE definition behind every follow-up queue figure this
+     * controller serves (the dashboard's Follow-ups Due KPI and the reports page's overdue/today/
+     * upcoming buckets).
+     *
+     * Frozen rule (Reports & Performance milestone): a Planner event of type `follow-up` that is
+     * DATED and NOT completed, scoped by PlannerEvent::visibleTo — Admin/SA see the whole CRM, a BD
+     * sees their own events plus events on the leads they own. An outbound email is deliberately NOT
+     * a follow-up (PO ruling 2026-07-09); only real Planner events count here.
+     *
+     * Returned as a builder factory rather than a builder so each caller gets a fresh query — the
+     * bucket counts below run four of them off this one definition.
+     *
+     * @return callable(): Builder<PlannerEvent>
+     */
+    private function pendingFollowUps(User $user): callable
+    {
+        return fn (): Builder => PlannerEvent::query()
+            ->visibleTo($user)
+            ->where('event_type', 'follow-up')
+            ->where('status', '!=', 'completed')
+            ->whereNotNull('starts_at');
+    }
+
+    /**
+     * The Asia/Manila day boundary as half-open UTC windows, `[todayStart, todayEnd)`.
+     *
+     * Datetimes are stored UTC but the business day is Manila's (the platform rule), and the windows
+     * are half-open so an event landing exactly on midnight is counted once — never in two buckets.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function manilaDayWindow(): array
+    {
+        $tz = 'Asia/Manila';
+
+        return [now($tz)->startOfDay()->utc(), now($tz)->startOfDay()->addDay()->utc()];
+    }
+
     /**
      * Supported KPI counts (backend-computable only) + per-status breakdown.
      * Scoped by ownership: Admin/SA see all leads; a BD sees only their own (Lead::scopeVisibleTo).
@@ -44,6 +84,11 @@ class DashboardController extends Controller
                 'totalLeads' => Lead::query()->active()->visibleTo($user)->count(),
                 'highPriority' => Lead::query()->active()->visibleTo($user)->where('priority', 'high')->count(),
                 'interested' => (int) $statusCounts->get('interested', 0),
+                // Follow-ups Due — the WHOLE scoped pending set (overdue + today + upcoming), which
+                // is the same "actionable items" reading the Planner sidebar badge already uses. It
+                // rides the shared pendingFollowUps() definition, so this card and the reports
+                // page's three buckets can never drift apart: this is their sum by construction.
+                'followUpsDue' => ($this->pendingFollowUps($user))()->count(),
                 // Raw per-status counts (frozen enum keys). The UI applies its own
                 // label mapping — keeping this response terminology-neutral.
                 'statusCounts' => [
@@ -447,16 +492,12 @@ class DashboardController extends Controller
         ];
 
         // ---- Pending follow-ups — the team's action queue. Overdue/today/upcoming by the Asia/Manila
-        // day boundary (dates stored UTC, day computed in Manila — the platform rule). ----
-        $tz = 'Asia/Manila';
-        $todayStart = now($tz)->startOfDay()->utc();
-        $todayEnd = now($tz)->startOfDay()->addDay()->utc();
+        // day boundary (dates stored UTC, day computed in Manila — the platform rule). Both the set
+        // and the window come from the shared helpers, so the dashboard's Follow-ups Due KPI counts
+        // exactly the rows these three buckets partition. ----
+        [$todayStart, $todayEnd] = $this->manilaDayWindow();
 
-        $pending = fn (): Builder => PlannerEvent::query()
-            ->visibleTo($user)
-            ->where('event_type', 'follow-up')
-            ->where('status', '!=', 'completed')
-            ->whereNotNull('starts_at');
+        $pending = $this->pendingFollowUps($user);
 
         $rows = $pending()
             ->with('lead:id,business_name')
