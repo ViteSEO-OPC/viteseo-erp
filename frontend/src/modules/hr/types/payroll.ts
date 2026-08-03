@@ -201,6 +201,18 @@ export interface PayslipYtd {
 }
 
 // One row of the HR 13th-month view: basic earned this year ÷ 12, per employee.
+/** What a 13th-month RUN would pay one employee (Slice B17) — not the projection. */
+export interface ThirteenthMonthPayRow {
+  employee_id: number;
+  name: string | null;
+  thirteenth_month: number;
+  /** The year's allowance excess, which shares the ₱90,000 exemption with it. */
+  other_benefits: number;
+  taxable_excess: number;
+  tax: number;
+  net: number;
+}
+
 export interface ThirteenthMonthRow {
   employee_id: number;
   employee: string | null;

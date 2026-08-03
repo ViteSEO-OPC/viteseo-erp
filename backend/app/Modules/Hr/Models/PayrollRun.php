@@ -16,6 +16,8 @@ class PayrollRun extends Model
 
     protected $fillable = [
         'cycle_start', 'cycle_end', 'frequency', 'status',
+        // Slice B17 — 'regular' or 'thirteenth_month'.
+        'type',
         'total_gross', 'total_deductions', 'total_net',
         'employee_count', 'run_at', 'run_by',
         // Slice 5 — a locked run can never be recomputed.

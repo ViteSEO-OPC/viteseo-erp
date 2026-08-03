@@ -7,6 +7,7 @@ import type {
   PayslipSummary,
   PayslipYtd,
   ThirteenthMonthRow,
+  ThirteenthMonthPayRow,
 } from "@/modules/hr/types/payroll";
 
 export async function getPayrollSettings(): Promise<PayrollSettings> {
@@ -77,6 +78,32 @@ export async function getThirteenthMonth(
     params: year ? { year } : undefined,
   });
   return { rows: res.data.data, year: res.data.meta.year };
+}
+
+/** Exactly what a 13th-month run would pay — computed, saved nowhere (Slice B17). */
+export async function previewThirteenthMonth(year?: number): Promise<{
+  rows: ThirteenthMonthPayRow[];
+  gross: number;
+  tax: number;
+  count: number;
+  meta: {
+    year: number;
+    already_run: boolean;
+    run_id: number | null;
+    run_at: string | null;
+    is_locked: boolean;
+  };
+}> {
+  const res = await apiClient.get("/hr/payroll/thirteenth-month/preview", {
+    params: year ? { year } : undefined,
+  });
+  return { ...res.data.data, meta: res.data.meta };
+}
+
+/** Pay it. Re-runnable: recomputes the same run in place, and refuses once locked. */
+export async function runThirteenthMonth(year: number): Promise<{ id: number }> {
+  const res = await apiClient.post("/hr/payroll/thirteenth-month/run", { year });
+  return res.data.data;
 }
 
 export async function getMyNextPayday(): Promise<NextPayday> {

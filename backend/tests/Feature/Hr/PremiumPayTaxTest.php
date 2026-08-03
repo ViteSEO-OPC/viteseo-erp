@@ -115,7 +115,7 @@ class PremiumPayTaxTest extends HrTestCase
 
     // --- de-minimis ceiling ---------------------------------------------------------
 
-    private function withAllowances(float $monthly, ?float $cap, ?float $ceiling = null): array
+    private function withAllowances(float $monthly, float $cap, ?float $ceiling = null): array
     {
         // Slice B1 — allowances are read from Company → Benefits, not the employee's columns.
         // Slice B16 — `$ceiling` is this BENEFIT's own de-minimis limit; `$cap` is the separate
@@ -149,8 +149,11 @@ class PremiumPayTaxTest extends HrTestCase
     /** No ceiling recorded on the benefit → entirely tax-free, exactly as before. */
     public function test_a_benefit_with_no_ceiling_is_not_taxed(): void
     {
-        $none = $this->withAllowances(0, null);
-        $withAllowance = $this->withAllowances(5000, null);
+        // The ₱90,000 exemption always exists (TRAIN) — B17 made the column NOT NULL for that
+        // reason. What makes this allowance tax-free is having no ceiling of its OWN, so nothing
+        // of it ever enters the bucket.
+        $none = $this->withAllowances(0, 90000);
+        $withAllowance = $this->withAllowances(5000, 90000);
 
         $this->assertSame($none['withholding_tax'], $withAllowance['withholding_tax']);
         // …but it still reaches gross.

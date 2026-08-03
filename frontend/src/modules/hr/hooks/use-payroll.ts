@@ -16,6 +16,8 @@ import {
   getHrPayslip,
   getPayrollSettings,
   getThirteenthMonth,
+  previewThirteenthMonth,
+  runThirteenthMonth,
   updatePayrollSettings,
 } from "@/modules/hr/api/payroll";
 
@@ -107,6 +109,28 @@ export function useThirteenthMonth(year?: number) {
   return useQuery({
     queryKey: ["hr", "payroll", "thirteenth-month", year ?? "current"],
     queryFn: () => getThirteenthMonth(year),
+  });
+}
+
+/** Slice B17 — what the run would pay, so the confirmation shows real figures. */
+export function useThirteenthMonthPreview(year?: number, enabled = true) {
+  return useQuery({
+    queryKey: ["hr", "payroll", "thirteenth-month", "preview", year ?? "current"],
+    queryFn: () => previewThirteenthMonth(year),
+    enabled,
+  });
+}
+
+export function useRunThirteenthMonth() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (year: number) => runThirteenthMonth(year),
+    onSuccess: () => {
+      // It IS a payroll run — the history, the run detail and the accrual view all move.
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "thirteenth-month"] });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+    },
   });
 }
 

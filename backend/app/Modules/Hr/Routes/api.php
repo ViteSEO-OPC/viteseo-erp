@@ -148,6 +148,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('payroll/settings', [PayrollController::class, 'updateSettings']);
         Route::get('payroll/runs', [PayrollController::class, 'runsIndex']);
         Route::get('payroll/thirteenth-month', [PayrollController::class, 'thirteenthMonth']);
+        Route::get('payroll/thirteenth-month/preview', [PayrollController::class, 'previewThirteenthMonth']);
+        // Slice B17 — pay it, and withhold on what it pushes past the ₱90,000 exemption.
+        Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth']);
         Route::post('payroll/run', [PayrollController::class, 'run']);
         Route::get('payroll/runs/{payrollRun}', [PayrollController::class, 'show']);
         Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun']);

@@ -21,6 +21,10 @@ class Payslip extends Model
         // Positive pay lines (OT-1 / ND-1) — must be fillable or run()'s updateOrCreate drops them.
         'overtime_pay', 'overtime_minutes', 'night_diff_pay', 'night_diff_minutes',
         'rest_day_premium', 'rest_day_minutes',
+        // Slice B17 — what this slip paid as 13th month, this period's contribution to the
+        // ₱90,000 bucket, and the taxable pay behind it. Stored so a year can be read back from
+        // what was actually paid rather than recomputed from today's configuration.
+        'thirteenth_month', 'other_benefits', 'taxable_pay',
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
         // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
         'other_deductions', 'other_deductions_breakdown',

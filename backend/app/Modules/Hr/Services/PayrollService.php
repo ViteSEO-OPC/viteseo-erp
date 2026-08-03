@@ -181,6 +181,13 @@ class PayrollService
             $dist['other_benefits_annual_cap'] ?? null,
         );
 
+        // Slice B17 — this period's contribution to the ₱90,000 bucket, recorded on the payslip so
+        // December can add up what was actually PAID during the year. Recomputing it from the
+        // catalogue at year-end would let a mid-year allowance change rewrite history.
+        $perPeriodOtherBenefits = $periodsPerYear > 0
+            ? round(($allowanceSplit['other_benefits'] * 12) / $periodsPerYear, 2)
+            : 0.0;
+
         // Slice 11a — recurring benefit shares (HMO, union dues) from Company → Benefits.
         // `count` is how many periods this calendar month has, so a MONTHLY share is split
         // the same way statutory contributions are.
@@ -200,6 +207,10 @@ class PayrollService
         // ACTUALLY applied, which is not `unpaidDays × dailyRate` whenever basePay clamped at
         // zero — deriving it at display time would then subtract more than was taken and the
         // document wouldn't add up to net pay.
+        // Slice B17 — the two figures December needs, and one it cannot derive later.
+        $slip['other_benefits'] = $perPeriodOtherBenefits;
+        $slip['thirteenth_month'] = 0.0; // an ordinary slip pays none
+
         $slip['period_base'] = round($perPeriodBase, 2);
         $slip['absence_deduction'] = round($perPeriodBase - $basePay, 2);
         $slip['allowances_breakdown'] = $this->allowanceBreakdown($employee, $periodsPerYear, $perPeriodAllowance);
@@ -434,6 +445,13 @@ class PayrollService
         $tf = $this->timingFactor($dist['tax_timing'] ?? 'every', $dist['index'] ?? 0, $dist['count'] ?? 1);
         $wht = round($monthlyTax * $tf, 2);
 
+        // Slice B17 — THIS PERIOD's taxable compensation, net of the employee's own contributions.
+        // Stored per slip because the year's total is what the tax on 13th month is computed
+        // against, and it must be a sum of what happened rather than a projection: twelve
+        // annualised projections of a year are not a year.
+        $periodsPerYear = max(1, (int) ($dist['periods_per_year'] ?? (($dist['count'] ?? 1) * 12)));
+        $taxablePay = round($annualTaxable / $periodsPerYear, 2);
+
         // All four premium lines are in gross AND in the withholding base (Slice 10) — the
         // caller folds them into `taxableMonthly` before calling.
         $gross = round($basePay + $allowances + $reimb + $holidayPremium + $overtimePay + $nightDiffPay + $restDayPremium, 2);
@@ -464,6 +482,7 @@ class PayrollService
             'philhealth' => $philhealth,
             'pagibig' => $pagibig,
             'withholding_tax' => $wht,
+            'taxable_pay' => $taxablePay,
             // Slice 11a — recurring benefit shares, with the breakdown so the payslip can
             // name them rather than show one opaque figure.
             'other_deductions' => $otherTotal,
@@ -899,6 +918,199 @@ class PayrollService
         return round(max(0, $tax), 2);
     }
 
+    /**
+     * Pay the year's 13th month — Slice B17.
+     *
+     * WHAT THIS CLOSES. 13th month was a report and nothing more: no payslip carried it, so no tax
+     * was ever withheld on it. It is also the largest item in the ₱90,000 exemption it shares with
+     * the excess de minimis (B16), so for anyone whose 13th month clears that figure the company
+     * was under-withholding and would have found out at year-end.
+     *
+     * THE BUCKET IS READ BACK, NOT RECOMPUTED. Both halves come from the payslips actually issued
+     * during the year — `thirteenth_month` from the basic pay they paid, `other_benefits` from
+     * what each period contributed. Deriving either from today's catalogue would let a mid-year
+     * allowance change rewrite the year a December run is measured against.
+     *
+     * THE TAX IS MARGINAL, which is what annualisation means: the exemption's excess is added on
+     * top of the compensation the employee has actually been taxed on for the year, and the tax is
+     * the difference. Taxing the excess in isolation would charge it from the bottom bracket up
+     * and under-withhold for everybody.
+     *
+     * NOT A STATUTORY-CONTRIBUTION EVENT. SSS, PhilHealth and Pag-IBIG are charged on monthly
+     * compensation and are not levied again on 13th month, so this run carries none.
+     */
+    /**
+     * What a 13th-month run WOULD pay, without writing anything — Slice B17.
+     *
+     * The dialog that offers the button shows a *projection* built from a different query, and the
+     * two differ whenever the year is partial. Confirming a payroll run against a figure it is not
+     * going to pay is the kind of small dishonesty that costs trust the first time someone checks.
+     * Same shape as B8's schedule import: read it, show it, save nothing until HR says yes.
+     *
+     * @return array{rows: array<int, array<string, mixed>>, gross: float, tax: float, count: int}
+     */
+    public function thirteenthMonthPreview(int $year): array
+    {
+        $cap = (float) (PayrollSetting::current()->other_benefits_annual_cap ?? 0);
+        $rows = $this->computeThirteenthMonth($year, $cap);
+
+        return [
+            'rows' => array_values($rows),
+            'gross' => round(array_sum(array_column($rows, 'thirteenth_month')), 2),
+            'tax' => round(array_sum(array_column($rows, 'tax')), 2),
+            'count' => count($rows),
+        ];
+    }
+
+    /**
+     * The arithmetic behind both the preview and the run, so they cannot disagree.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function computeThirteenthMonth(int $year, float $cap): array
+    {
+        // What the year actually paid, per employee, from the REGULAR runs only — including a
+        // 13th-month run's own figures would compound it on a re-run.
+        $ytd = DB::table('hr_payslips')
+            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+            ->join('hr_employees', 'hr_payslips.employee_id', '=', 'hr_employees.id')
+            ->leftJoin('users', 'hr_employees.user_id', '=', 'users.id')
+            ->whereNull('hr_payslips.deleted_at')
+            ->whereNull('hr_payroll_runs.deleted_at')
+            ->where('hr_payroll_runs.type', 'regular')
+            ->whereYear('hr_payroll_runs.cycle_start', $year)
+            ->groupBy('hr_payslips.employee_id', 'users.name')
+            ->select('hr_payslips.employee_id', 'users.name')
+            ->selectRaw('SUM(hr_payslips.base_salary) AS basic')
+            ->selectRaw('SUM(hr_payslips.other_benefits) AS other_benefits')
+            ->selectRaw('SUM(hr_payslips.taxable_pay) AS taxable_pay')
+            ->get();
+
+        $rows = [];
+
+        foreach ($ytd as $row) {
+            // PH law: total BASIC salary earned in the year ÷ 12. Allowances and premium pay are
+            // not part of it.
+            $thirteenth = round(((float) $row->basic) / 12, 2);
+
+            if ($thirteenth <= 0) {
+                continue;
+            }
+
+            $otherBenefits = round((float) $row->other_benefits, 2);
+            $excess = max(0.0, $thirteenth + $otherBenefits - $cap);
+            $alreadyTaxed = max(0.0, (float) $row->taxable_pay);
+
+            $tax = $excess > 0
+                ? round(
+                    $this->annualWithholdingTax($alreadyTaxed + $excess)
+                        - $this->annualWithholdingTax($alreadyTaxed),
+                    2,
+                )
+                : 0.0;
+
+            $rows[] = [
+                'employee_id' => (int) $row->employee_id,
+                'name' => $row->name,
+                'thirteenth_month' => $thirteenth,
+                'other_benefits' => $otherBenefits,
+                'taxable_excess' => round($excess, 2),
+                'tax' => $tax,
+                'net' => round($thirteenth - $tax, 2),
+            ];
+        }
+
+        return $rows;
+    }
+
+    public function runThirteenthMonth(int $year, User $runner): PayrollRun
+    {
+        return DB::transaction(function () use ($year, $runner) {
+            $setting = PayrollSetting::current();
+            $cap = (float) ($setting->other_benefits_annual_cap ?? 0);
+
+            // December, but on its own frequency so the unique (start, end, frequency) index can
+            // never collide with an ordinary December run.
+            $cycleStart = "{$year}-12-01";
+            $cycleEnd = "{$year}-12-31";
+
+            $run = PayrollRun::where('cycle_start', $cycleStart)
+                ->where('cycle_end', $cycleEnd)
+                ->where('frequency', 'thirteenth_month')
+                ->lockForUpdate()
+                ->first();
+
+            if ($run && $run->isLocked()) {
+                throw ValidationException::withMessages([
+                    'year' => ['The ' . $year . ' 13th-month run is locked and can no longer be recomputed.'],
+                ]);
+            }
+
+            $run ??= new PayrollRun;
+            $run->fill([
+                'cycle_start' => $cycleStart,
+                'cycle_end' => $cycleEnd,
+                'frequency' => 'thirteenth_month',
+                'type' => 'thirteenth_month',
+                'status' => 'completed',
+                'run_at' => now(),
+                'run_by' => $runner->id,
+                'policy_snapshot' => $this->policySnapshot($setting, $cycleEnd),
+            ]);
+            $run->save();
+
+            $gross = 0.0;
+            $deductions = 0.0;
+            $count = 0;
+
+            foreach ($this->computeThirteenthMonth($year, $cap) as $row) {
+                Payslip::updateOrCreate(
+                    ['payroll_run_id' => $run->id, 'employee_id' => $row['employee_id']],
+                    [
+                        'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
+                        'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
+                        'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                        'rest_day_premium' => 0,
+                        'thirteenth_month' => $row['thirteenth_month'],
+                        // The bucket this slip was measured against, kept so the payslip can
+                        // explain a withholding figure that has nothing to do with its own gross.
+                        'other_benefits' => $row['other_benefits'],
+                        'taxable_pay' => $row['taxable_excess'],
+                        'gross' => $row['thirteenth_month'],
+                        'sss' => 0, 'philhealth' => 0, 'pagibig' => 0,
+                        'employer_sss' => 0, 'employer_philhealth' => 0, 'employer_pagibig' => 0,
+                        'withholding_tax' => $row['tax'],
+                        'other_deductions' => 0, 'other_deductions_breakdown' => [],
+                        'total_deductions' => $row['tax'],
+                        'deduction_carryover' => 0,
+                        'net_pay' => $row['net'],
+                        'status' => 'computed',
+                    ],
+                );
+
+                $gross += $row['thirteenth_month'];
+                $deductions += $row['tax'];
+                $count++;
+            }
+
+            $run->update([
+                'total_gross' => round($gross, 2),
+                'total_deductions' => round($deductions, 2),
+                'total_net' => round($gross - $deductions, 2),
+                'employee_count' => $count,
+            ]);
+
+            $this->audit->log(
+                'ran', 'Payroll',
+                "13th month pay for {$year} — {$count} employee(s), ₱" . number_format($gross, 2)
+                    . ' gross, ₱' . number_format($deductions, 2) . ' withheld',
+                $run,
+            );
+
+            return $run->fresh();
+        });
+    }
+
     public function listRuns(): Collection
     {
         return PayrollRun::withCount('payslips')->latest('cycle_start')->get();
@@ -1094,6 +1306,8 @@ class PayrollService
                 'cycle_end' => $cycleEnd,
                 // Slice B2 — decides whether a dated plan enrolment covers this period at all.
                 'cycle_start' => $cycleStart,
+                // Slice B17 — so a period can record its own share of the year's taxable pay.
+                'periods_per_year' => $periodsPerYear,
             ];
 
             // Refresh semantics: reuse this group+period's run if one exists, otherwise
