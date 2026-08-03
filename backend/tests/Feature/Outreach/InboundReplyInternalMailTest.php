@@ -89,9 +89,15 @@ class InboundReplyInternalMailTest extends TestCase
     public function test_internal_mail_is_off_by_default(): void
     {
         Notification::fake();
+        // Pinned to the SHIPPED default rather than inherited from the ambient environment. It used
+        // to set nothing, which read as "the default is off" but actually asserted whatever the
+        // machine running the tests had in .env — so the moment an environment legitimately enabled
+        // the channel (local Resend verification did exactly that), this failed while nothing about
+        // the shipped behaviour had changed. What is worth pinning is the behaviour: with the channel
+        // off, ingestion delivers the in-app alert and no staff mail.
+        $this->enableMailChannel(false);
         [$bd, $lead, $outbound] = $this->scenario();
 
-        // Deliberately does NOT enable the flag — the shipped default must send no internal mail.
         app(InboundEmailService::class)->ingest($this->reply($lead, $outbound));
 
         Notification::assertNotSentTo($bd, InboundReplyMailNotification::class);
@@ -277,5 +283,59 @@ class InboundReplyInternalMailTest extends TestCase
             ShouldQueue::class,
             new InboundReplyMailNotification(new Lead, new Email),
         );
+    }
+
+    /** A lead that exists only in memory — these cases assert URL construction, nothing persisted. */
+    private function leadStub(int $id = 144): Lead
+    {
+        $lead = new Lead(['business_name' => 'Prime Properties']);
+        $lead->id = $id;
+
+        return $lead;
+    }
+
+    /**
+     * The "Open the lead" button must point at the SPA, not the API.
+     *
+     * It was built from APP_URL, which is the API origin wherever the two are split — locally the API
+     * is :8001 and Next is :3000, so the only link in the alert 404'd. APP_URL is set to a DIFFERENT
+     * origin here on purpose: if the old source were still used, or silently used as a fallback, this
+     * would fail rather than pass by coincidence.
+     */
+    public function test_the_lead_link_uses_the_configured_frontend_origin(): void
+    {
+        config()->set('outreach.frontend_url', 'https://crm.example.test');
+        config()->set('app.url', 'https://api.example.test');
+
+        $mail = (new InboundReplyMailNotification($this->leadStub(), new Email))
+            ->toMail(User::factory()->make());
+
+        $this->assertSame('https://crm.example.test/zerem/leads/144', $mail->actionUrl);
+    }
+
+    /** A trailing slash on the configured origin must not produce a double slash in the path. */
+    public function test_a_trailing_slash_on_the_frontend_origin_is_normalised(): void
+    {
+        config()->set('outreach.frontend_url', 'https://crm.example.test/');
+
+        $mail = (new InboundReplyMailNotification($this->leadStub(), new Email))
+            ->toMail(User::factory()->make());
+
+        $this->assertSame('https://crm.example.test/zerem/leads/144', $mail->actionUrl);
+    }
+
+    /**
+     * No configured origin → no button, rather than a link to nowhere. Asserted while APP_URL IS set,
+     * which is what proves the old source is not quietly serving as a fallback.
+     */
+    public function test_no_button_is_rendered_when_no_frontend_origin_is_configured(): void
+    {
+        config()->set('outreach.frontend_url', '');
+        config()->set('app.url', 'https://api.example.test');
+
+        $mail = (new InboundReplyMailNotification($this->leadStub(), new Email))
+            ->toMail(User::factory()->make());
+
+        $this->assertNull($mail->actionUrl);
     }
 }
