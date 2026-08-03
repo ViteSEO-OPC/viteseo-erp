@@ -10,14 +10,19 @@ import {
   SelectItem,
 } from "@/modules/crm/components/ui/select";
 import { Button } from "@/modules/crm/components/ui/button";
+import { useExportPerformancePdf } from "@/modules/crm/features/performance/hooks/use-export-performance-pdf";
 
-// Presentation-only toolbar. The range selector and Export PDF are Demo affordances — there is no
-// date-range or export backend this milestone (both deferred per BD-PERF-COMP-SPEC). The selector
-// holds local UI state only (it drives no query); Export is disabled until the KPI Engine lands.
+// Export PDF is live: it downloads the BD's OWN scorecard, rendered server-side from the same
+// computation this page reads (no user_id is sent — the server resolves the requester's scope).
+//
+// The range selector remains presentation-only: no performance endpoint accepts a date range, so it
+// still drives no query. It deliberately does NOT feed the export — the PDF prints no global
+// reporting period precisely so it cannot imply a filter the backend does not apply.
 const RANGES = ["Last 30 Days", "Last 7 Days", "This Quarter", "This Year"];
 
 export function MyPerformanceToolbar() {
   const [range, setRange] = useState(RANGES[0]);
+  const { exportPerformancePdf, isExporting } = useExportPerformancePdf();
 
   return (
     <div className="flex items-center justify-between gap-3">
@@ -34,9 +39,14 @@ export function MyPerformanceToolbar() {
         </SelectContent>
       </Select>
 
-      <Button variant="outline" size="sm" disabled title="Available with the KPI Engine">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => void exportPerformancePdf()}
+        disabled={isExporting}
+      >
         <Download className="h-4 w-4" />
-        Export PDF
+        {isExporting ? "Exporting…" : "Export PDF"}
       </Button>
     </div>
   );

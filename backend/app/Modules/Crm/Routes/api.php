@@ -333,6 +333,13 @@ Route::prefix('v1/crm')->group(function (): void {
             // (All Reports, or one BD via ?user_id — the latter authorized to crm.reports.view holders).
             Route::get('/reports-analytics', [DashboardController::class, 'reportsAnalytics']);
 
+            // Performance scorecard as a PDF — the ONE export behind both My Performance (BD, own
+            // scope) and Reports & Performance (Admin/SA: one BD via ?user_id, or the CRM-wide All
+            // Reports default). Same PerformanceScopeRequest seam as the JSON endpoints above, so a
+            // BD passing ?user_id is refused 403 here exactly as it is there — no separate export
+            // permission, because reading the figures and downloading them are the same privilege.
+            Route::get('/performance-export-pdf', [DashboardController::class, 'exportPerformancePdf']);
+
             // Management Dashboard "BD Performance Overview" — Admin/Super Admin only. Aggregates
             // one live row per active Business Development Manager (BDs have dashboard.view but must
             // not see the team roster, so this is restricted beyond the group's permission gate).

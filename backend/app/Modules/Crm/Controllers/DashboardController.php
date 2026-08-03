@@ -5,7 +5,6 @@ namespace App\Modules\Crm\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Modules\Crm\Enums\ConsultationOutcome;
-use App\Modules\Crm\Models\Deal;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -13,6 +12,8 @@ use App\Modules\Crm\Requests\PerformanceScopeRequest;
 use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Services\Kpi\BdKpiService;
 use App\Modules\Crm\Services\Kpi\KpiMetric;
+use App\Modules\Crm\Services\Performance\PerformancePdfExporter;
+use App\Modules\Crm\Services\Performance\PerformanceSummaryService;
 use App\Modules\Crm\Services\Ranking\BdRankingRow;
 use App\Modules\Crm\Services\Ranking\BdRankingService;
 use Illuminate\Database\Eloquent\Builder;
@@ -20,6 +21,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Carbon;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class DashboardController extends Controller
 {
@@ -281,77 +283,30 @@ class DashboardController extends Controller
      * My Performance; an Admin/SA's "All Reports" aggregate). `?user_id` drills into one BD and is
      * management-only (`crm.reports.view`). The whole method body scopes through the resolved subject.
      */
-    public function performanceSummary(PerformanceScopeRequest $request): JsonResponse
+    public function performanceSummary(PerformanceScopeRequest $request, PerformanceSummaryService $summary): JsonResponse
     {
-        $user = $request->scope()->subject;
+        // The figures themselves live in PerformanceSummaryService — the one implementation the PDF
+        // export also consumes, so the document and this endpoint can never disagree. The response
+        // shape is unchanged.
+        return response()->json(['data' => $summary->for($request->scope()->subject)]);
+    }
 
-        // Frozen ACTIVE_SET (BD-PERF-COMP-SPEC R-1): all statuses except `declined`.
-        $activeSet = ['new', 'interested', 'awaiting-reply', 'call-back-req'];
+    /**
+     * The performance scorecard as a downloadable PDF — the one export behind both surfaces (a BD's
+     * My Performance and Admin/SA's Reports & Performance, whether drilled into one BD or the
+     * CRM-wide All Reports scope).
+     *
+     * Authorization is inherited, not re-implemented: PerformanceScopeRequest is the same seam the
+     * JSON endpoints use, so a BD passing `?user_id` is rejected 403 by its authorize() exactly as
+     * it is on performance-summary, and only `crm.reports.view` holders can drill into a BD. There
+     * is deliberately no separate permission for "exporting" — if you may read the figures, you may
+     * download them; if you may not, neither route will serve you.
+     */
+    public function exportPerformancePdf(PerformanceScopeRequest $request, PerformancePdfExporter $exporter): SymfonyResponse
+    {
+        $scope = $request->scope();
 
-        $assignedLeads = Lead::query()->active()->visibleTo($user)->count();
-        $activeLeads = Lead::query()->active()->visibleTo($user)->whereIn('status', $activeSet)->count();
-
-        // Engagement basis (M-04): any outreach started OR any calling activity.
-        $engagedLeads = Lead::query()->active()->visibleTo($user)
-            ->where(fn (Builder $q) => $q->where('email_outreach', '!=', 'none')
-                ->orWhere('cold_calling', '!=', 'not-called'))
-            ->count();
-
-        // Converted leads + revenue from the deals table, scoped to the user's visible leads.
-        $convertedLeads = Lead::query()->active()->visibleTo($user)->has('deals')->count();
-        $visibleLeadIds = Lead::query()->active()->visibleTo($user)->pluck('id');
-        // REVENUE = realized, won business → Σ deals.amount ONLY (never leads.amount). Unchanged.
-        $overallRevenue = $visibleLeadIds->isEmpty()
-            ? 0.0
-            : (float) Deal::query()->whereIn('lead_id', $visibleLeadIds)->sum('amount');
-
-        // ESTIMATED PIPELINE VALUE = prospect-stage Estimated Deal Value → Σ leads.amount, ownership-
-        // scoped. Distinct from Revenue: this is the sum of `leads.amount` (an estimate on open leads),
-        // NOT realized revenue. Single source of truth for the pipeline figure — computed only here.
-        $estimatedPipelineValue = (float) Lead::query()->active()->visibleTo($user)->sum('amount');
-
-        // Conversion Rate = converted ÷ engaged (approved). Zero denominator → null (undefined).
-        $conversionRate = $engagedLeads > 0
-            ? round($convertedLeads / $engagedLeads * 100, 1)
-            : null;
-
-        // Planner-based follow-up metrics — scoped exactly like the lead metrics, via
-        // PlannerEvent::visibleTo (a BD sees their own events, Admin/SA all).
-        //
-        // Follow-up discipline (PO-frozen rule): "missed" = an event whose `starts_at` is in the past
-        // and whose `status` is not `completed` — grouped by event_type (follow-up / meeting / call).
-        $missedFor = fn (string $type): int => PlannerEvent::query()
-            ->visibleTo($user)
-            ->where('event_type', $type)
-            ->whereNotNull('starts_at')
-            ->where('starts_at', '<', now())
-            ->where('status', '!=', 'completed')
-            ->count();
-
-        // Completed Follow-ups — count for the CURRENT month, timestamped by the real `completed_at`
-        // (never `updated_at`). Rows completed before `completed_at` existed carry null and are excluded.
-        $completedFollowUps = PlannerEvent::query()
-            ->visibleTo($user)
-            ->where('event_type', 'follow-up')
-            ->where('status', 'completed')
-            ->where('completed_at', '>=', now()->startOfMonth())
-            ->count();
-
-        return response()->json(['data' => [
-            'assignedLeads' => $assignedLeads,
-            'activeLeads' => $activeLeads,
-            'engagedLeads' => $engagedLeads,
-            'convertedLeads' => $convertedLeads,
-            'overallRevenue' => $overallRevenue,
-            'estimatedPipelineValue' => $estimatedPipelineValue,
-            'conversionRate' => $conversionRate,
-            'completedFollowUps' => $completedFollowUps,
-            'followUpDiscipline' => [
-                'missedFollowUps' => $missedFor('follow-up'),
-                'missedMeetings' => $missedFor('meeting'),
-                'missedCalls' => $missedFor('call'),
-            ],
-        ]]);
+        return $exporter->render($scope)->download($exporter->filename($scope));
     }
 
     /**
