@@ -27,15 +27,21 @@ const KPI_BASE: KpiStat[] = [
   // Planner-backed: the whole scoped pending follow-up set. An outbound email is NOT a follow-up
   // (PO ruling) — only real Planner `follow-up` events count.
   { id: "follow-ups-due", label: "FOLLOW-UPS DUE", value: "0", valueVariant: "neutral", caption: "Overdue, today and upcoming" },
-  // No approved "completed outreach" metric exists. Deliberately NOT mapped to Engagement Coverage,
-  // completed follow-ups, or any email count — those are different business metrics. Stays honest
-  // until a definition is approved.
-  { id: "completed-outreach", label: "COMPLETED OUTREACH", value: "—", valueVariant: "neutral", pending: true, pendingReason: "Pending approved business definition" },
+  // Outbound emails the system actually sent — an effort count, not lead coverage (coverage is
+  // M-04 Engagement Coverage, a deliberately separate metric). Emailing one lead three times
+  // counts three times.
+  { id: "completed-outreach", label: "COMPLETED OUTREACH", value: "0", valueVariant: "neutral", caption: "Outbound emails sent" },
   { id: "interested-leads", label: "INTERESTED LEADS", value: "0", valueVariant: "neutral", caption: "Marked interested" },
   { id: "conversion-rate", label: "CONVERSION RATE", value: "—", valueVariant: "neutral", caption: "Of engaged leads" },
 ];
 
-type KpiApi = { totalLeads: number; highPriority: number; interested: number; followUpsDue: number };
+type KpiApi = {
+  totalLeads: number;
+  highPriority: number;
+  interested: number;
+  followUpsDue: number;
+  completedOutreach: number;
+};
 
 export function useDashboardKpis() {
   const query = useQuery<KpiApi>({
@@ -59,10 +65,12 @@ export function useDashboardKpis() {
         // Straight from the backend — the count is never recomputed here, so this card and the
         // reports page's overdue/today/upcoming buckets always agree.
         return { ...kpi, value: api ? String(api.followUpsDue) : kpi.value, href: "/zerem/planner" };
+      case "completed-outreach":
+        return { ...kpi, value: api ? String(api.completedOutreach) : kpi.value };
       case "conversion-rate":
         return summary ? { ...kpi, value: formatConversionRate(summary.conversionRate) } : kpi;
       default:
-        return kpi; // Completed Outreach — no approved definition, shown as Pending.
+        return kpi;
     }
   });
 
