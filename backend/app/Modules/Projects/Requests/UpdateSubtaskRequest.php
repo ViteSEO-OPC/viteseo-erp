@@ -71,7 +71,8 @@ class UpdateSubtaskRequest extends FormRequest
             'assignee_id' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
             'status_id' => ['sometimes', 'required', 'integer', 'exists:pm_project_statuses,id'],
             'priority' => ['sometimes', 'required', Rule::in(array_column(TaskPriority::cases(), 'value'))],
-            'effort_score' => ['sometimes', 'required', 'integer', 'min:0'],
+            // Effort runs on a fixed 0–10 scale (matches the UI slider/input).
+            'effort_score' => ['sometimes', 'required', 'integer', 'min:0', 'max:10'],
             'deadline' => ['sometimes', 'nullable', 'date'],
         ];
     }

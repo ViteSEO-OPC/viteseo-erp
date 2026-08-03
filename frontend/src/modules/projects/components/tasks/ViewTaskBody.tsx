@@ -24,6 +24,7 @@ import {
   CollapsiblePanel,
   DetailsPanel,
   effortRing,
+  EffortScoreInput,
   EffortSlider,
   formatDate,
   formatDateTime,
@@ -233,12 +234,10 @@ function SubtaskRow({
               </Select>
             </Field>
             <Field label="Effort Score">
-              <Input
-                type="number"
-                min={0}
-                max={10}
+              <EffortScoreInput
                 value={effort}
-                onChange={(e) => setEffort(Number(e.target.value))}
+                // A cleared field falls back to 0 — effort_score is required.
+                onChange={(v) => setEffort(v === '' ? 0 : Number(v))}
               />
             </Field>
             <Field label="Deadline">

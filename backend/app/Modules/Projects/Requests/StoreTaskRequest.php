@@ -82,10 +82,12 @@ class StoreTaskRequest extends FormRequest
                 'integer',
                 'exists:users,id',
             ],
+            // Effort runs on a fixed 0–10 scale (matches the UI slider).
             'effort_score' => [
                 'nullable',
                 'integer',
                 'min:0',
+                'max:10',
             ],
         ];
     }

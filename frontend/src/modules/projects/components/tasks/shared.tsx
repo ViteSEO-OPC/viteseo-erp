@@ -218,6 +218,51 @@ export function EffortSlider({
   );
 }
 
+/** Effort scores run on a fixed 0–10 scale (see EffortSlider). */
+export const EFFORT_MIN = 0;
+export const EFFORT_MAX = 10;
+
+/**
+ * Sanitise a typed effort score. `min`/`max` on <input type="number"> only
+ * constrain the spinner buttons — a user can still type "-4" or "42" — so the
+ * raw string is stripped of everything but digits and clamped to 0–10 before it
+ * reaches state. Returns '' for an empty field so "not filled in yet" survives.
+ */
+export function clampEffortInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits === '') return '';
+  return String(Math.min(EFFORT_MAX, Math.max(EFFORT_MIN, Number(digits))));
+}
+
+/** Number input bound to the 0–10 effort scale, used by the subtask forms. */
+export function EffortScoreInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: number | string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <Input
+      type="number"
+      inputMode="numeric"
+      min={EFFORT_MIN}
+      max={EFFORT_MAX}
+      step={1}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(clampEffortInput(e.target.value))}
+      // type=number accepts these characters but none are valid on a 0–10
+      // integer scale; blocking them keeps the field from going blank mid-typing.
+      onKeyDown={(e) => {
+        if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
+      }}
+    />
+  );
+}
+
 /** PLACEHOLDER — AI scheduling suggestion (no backend yet). */
 export function AiBanner() {
   return (
@@ -547,14 +592,7 @@ export function SubtaskFields({
           </Select>
         </Field>
         <Field label="Effort Score">
-          <Input
-            type="number"
-            min={0}
-            max={10}
-            value={effort}
-            onChange={(e) => onEffort(e.target.value)}
-            placeholder="Required"
-          />
+          <EffortScoreInput value={effort} onChange={onEffort} placeholder="Required (0–10)" />
         </Field>
         <Field label="Deadline">
           {/* Not in the past, and no later than the parent task's due date. */}

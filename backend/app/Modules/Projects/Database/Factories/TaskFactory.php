@@ -35,7 +35,7 @@ class TaskFactory extends Factory
             'assignee_id' => User::factory(),
             'status_id' => ProjectStatus::factory(),
             'priority' => fake()->randomElement(TaskPriority::cases()),
-            'effort_score' => fake()->numberBetween(1, 13),
+            'effort_score' => fake()->numberBetween(1, 10),
             'deadline' => fake()->optional()->dateTimeBetween('+1 day', '+30 days'),
         ];
     }

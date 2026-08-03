@@ -65,7 +65,8 @@ class StoreSubtaskRequest extends FormRequest
             'assignee_id' => ['nullable', 'integer', 'exists:users,id'],
             'status_id' => ['required', 'integer', 'exists:pm_project_statuses,id'],
             'priority' => ['required', Rule::in(array_column(TaskPriority::cases(), 'value'))],
-            'effort_score' => ['required', 'integer', 'min:0'],
+            // Effort runs on a fixed 0–10 scale (matches the UI slider/input).
+            'effort_score' => ['required', 'integer', 'min:0', 'max:10'],
             'deadline' => ['nullable', 'date', 'after_or_equal:today'],
         ];
     }
