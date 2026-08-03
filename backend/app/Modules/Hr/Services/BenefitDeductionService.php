@@ -40,8 +40,9 @@ class BenefitDeductionService
         $lines = [];
         $total = 0.0;
 
+        // A deleted programme stops deducting: the soft-delete scope is the whole "is it live"
+        // test since B13 item 4 removed `is_active`.
         $enrolments = $employee->benefitPrograms()
-            ->where('is_active', true)
             ->whereNotNull('deduction_cadence')
             ->orderBy('name')
             ->get();

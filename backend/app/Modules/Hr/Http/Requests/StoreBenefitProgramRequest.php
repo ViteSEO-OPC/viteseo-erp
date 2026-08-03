@@ -49,7 +49,8 @@ class StoreBenefitProgramRequest extends FormRequest
             'progress.percent' => ['required_with:progress', 'numeric', 'min:0', 'max:100'],
             'progress.caption' => ['nullable', 'string', 'max:120'],
             'footer_label' => ['nullable', 'string', 'max:60'],
-            'is_active' => ['boolean'],
+            // No `is_active` — B13 item 4 left a soft delete as the only way to switch a
+            // programme off, so that it is always reversible from the screen that did it.
             'employee_ids' => ['array'],
             'employee_ids.*' => ['integer', 'exists:hr_employees,id'],
         ];

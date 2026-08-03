@@ -114,7 +114,6 @@ export interface BenefitProgram {
   details: BenefitDetail[];
   progress: BenefitProgress | null;
   footer_label: string | null;
-  is_active: boolean;
   employee_ids: number[];
 }
 
@@ -137,7 +136,8 @@ export interface BenefitProgramInput {
   details: BenefitDetail[];
   progress: BenefitProgress | null;
   footer_label: string | null;
-  is_active?: boolean;
+  // No `is_active` — deleting is the only way to switch a programme off (B13 item 4), so that it
+  // is always reversible from the same screen that did it.
   employee_ids: number[];
 }
 

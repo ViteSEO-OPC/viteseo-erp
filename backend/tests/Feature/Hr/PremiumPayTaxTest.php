@@ -123,7 +123,7 @@ class PremiumPayTaxTest extends HrTestCase
             $program = \App\Modules\Hr\Models\BenefitProgram::create([
                 'name' => 'Meal Allowance ' . uniqid(), 'category' => 'allowance', 'kind' => 'allowance',
                 'amount' => $monthly, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
-                'eligibility' => 'all', 'is_active' => true,
+                'eligibility' => 'all',
             ]);
             $this->employee->benefitPrograms()->attach($program->id);
         }

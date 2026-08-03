@@ -212,7 +212,7 @@ class PayslipDocumentTest extends HrTestCase
     {
         $program = BenefitProgram::create([
             'name' => 'Emergency Loan', 'category' => 'other', 'kind' => 'deduction',
-            'deduction_cadence' => 'per_cutoff', 'is_active' => true,
+            'deduction_cadence' => 'per_cutoff',
         ]);
         $this->employee->benefitPrograms()->attach($program->id, ['employee_share' => 50000]);
 
@@ -230,7 +230,7 @@ class PayslipDocumentTest extends HrTestCase
         $program = BenefitProgram::create([
             'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => $monthly, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
-            'eligibility' => 'all', 'is_active' => true,
+            'eligibility' => 'all',
         ]);
         $this->employee->benefitPrograms()->attach($program->id);
     }

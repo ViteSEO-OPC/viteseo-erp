@@ -36,7 +36,6 @@ class BenefitProgramResource extends JsonResource
             'details' => $this->details ?? [],
             'progress' => $this->progress,
             'footer_label' => $this->footer_label,
-            'is_active' => $this->is_active,
             'employee_ids' => $this->whenLoaded('employees', fn () => $this->employees->pluck('id')),
             'created_at' => $this->created_at,
         ];

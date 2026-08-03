@@ -69,7 +69,7 @@ class TaxableAllowanceTest extends HrTestCase
         return BenefitProgram::create([
             'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => $amount, 'frequency' => 'monthly', 'tax_treatment' => $treatment,
-            'eligibility' => 'custom', 'is_active' => true,
+            'eligibility' => 'custom',
         ]);
     }
 

@@ -47,7 +47,6 @@ class BenefitProgram extends Model
         'details',
         'progress',
         'footer_label',
-        'is_active',
     ];
 
     protected $casts = [
@@ -56,7 +55,6 @@ class BenefitProgram extends Model
         'tiers' => 'array',
         'eligibility_statuses' => 'array',
         'amount' => 'decimal:2',
-        'is_active' => 'boolean',
     ];
 
     public function employees(): BelongsToMany

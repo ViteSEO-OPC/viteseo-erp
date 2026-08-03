@@ -130,7 +130,11 @@ class BenefitProgramService
             return $program->employees()->pluck('hr_employees.id')->map(fn ($id) => (int) $id)->all();
         }
 
-        return $this->ruleQuery($program)->pluck('id')->map(fn ($id) => (int) $id)->all();
+        return $this->roster()
+            ->filter(fn (Employee $e) => $this->covers($program, $e))
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     /**
@@ -152,7 +156,7 @@ class BenefitProgramService
     {
         return $program->eligibility === 'custom'
             ? $program->employees()->count()
-            : $this->ruleQuery($program)->count();
+            : $this->roster()->filter(fn (Employee $e) => $this->covers($program, $e))->count();
     }
 
     /** Does this programme's rule cover this employee right now? */
@@ -210,9 +214,9 @@ class BenefitProgramService
     /** @return Collection<int, BenefitProgram> */
     private function activeAllowances(): Collection
     {
+        // "Active" is now exactly "not deleted" (B13 item 4) — the soft-delete scope does it.
         return $this->allowanceMemo ??= BenefitProgram::query()
             ->where('kind', 'allowance')
-            ->where('is_active', true)
             ->orderBy('name')
             ->get();
     }
@@ -226,7 +230,6 @@ class BenefitProgramService
     public function forEmployee(Employee $employee): Collection
     {
         $plans = $employee->benefitPrograms()
-            ->where('is_active', true)
             ->where('kind', '!=', 'allowance')
             ->get();
 
@@ -236,16 +239,38 @@ class BenefitProgramService
             ->values();
     }
 
-    /** The employees a rule-based programme covers, as a query. */
-    private function ruleQuery(BenefitProgram $program): \Illuminate\Database\Eloquent\Builder
-    {
-        $q = Employee::query();
+    /**
+     * Per-request memo of the employees a programme can cover. Cleared by nothing, because the
+     * roster is not what this service writes — it cannot go stale within a request.
+     *
+     * @var Collection<int, Employee>|null
+     */
+    private ?Collection $rosterMemo = null;
 
-        return match ($program->eligibility) {
-            'status' => $q->whereIn('employment_status', $program->eligibility_statuses ?: ['__none__']),
-            'management' => $q->where('is_management', true),
-            default => $q, // 'all'
-        };
+    /**
+     * Everyone currently employed — the population every rule is evaluated against.
+     *
+     * SEPARATED EMPLOYEES ARE EXCLUDED (B13 item 6). This used to be a bare `Employee::query()`,
+     * so a leaver still counted toward "everyone (14 people)" on the allowance card and toward the
+     * "N employees stop being paid this" warning on delete, while `PayrollService` had already
+     * stopped paying them. The filter is the same one payroll calls "currently employed": no
+     * separation recorded, and not soft-deleted (Eloquent's own scope).
+     *
+     * A future-dated hire IS counted, deliberately: the programme does cover them, and their first
+     * payslip is the thing that waits for their start date.
+     *
+     * ONE QUERY, not one per programme. The catalogue endpoint asks for a count per card, and
+     * `BenefitProgramResource` resolves this service for each — a count query each was an N+1 in
+     * the same shape the payroll performance test caught in `allowancesFor()`.
+     *
+     * @return Collection<int, Employee>
+     */
+    private function roster(): Collection
+    {
+        return $this->rosterMemo ??= Employee::query()
+            ->whereNull('separation_type')
+            ->whereNull('separation_date')
+            ->get(['id', 'employment_status', 'is_management']);
     }
 
     /**
@@ -275,7 +300,14 @@ class BenefitProgramService
             // HMO / company-plan config.
             'deduction_cadence' => $data['deduction_cadence'] ?? $existing?->deduction_cadence,
             'tiers' => array_key_exists('tiers', $data) ? $data['tiers'] : $existing?->tiers,
-            'status' => $data['status'] ?? $existing?->status ?? 'Enrolled',
+            // `status` is the draft/published state of a COMPANY plan. An allowance has no such
+            // state — it exists or it is deleted — so it is stored as "Active" and the employee
+            // card derives its badge anyway (B13 item 4). New allowances used to save as
+            // "Enrolled" while seeded ones said "Active", which put two words for one thing on
+            // the same page.
+            'status' => $data['status']
+                ?? $existing?->status
+                ?? (($data['kind'] ?? $existing?->kind ?? 'allowance') === 'allowance' ? 'Active' : 'Enrolled'),
             'details' => $data['details'] ?? $existing?->details ?? [],
             // progress is nullable and intentionally clearable, so respect an explicit key.
             'progress' => array_key_exists('progress', $data)
@@ -284,7 +316,6 @@ class BenefitProgramService
             'footer_label' => array_key_exists('footer_label', $data)
                 ? $data['footer_label']
                 : $existing?->footer_label,
-            'is_active' => $data['is_active'] ?? $existing?->is_active ?? true,
         ];
     }
 }

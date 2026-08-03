@@ -593,10 +593,20 @@ class ReportService
         }
 
         // Benefits coverage — % of employees enrolled in each contribution.
+        //
+        // BOTH SIDES OF THIS FRACTION MUST MEAN THE SAME PEOPLE (B13 item 7 / B9 item 4). The
+        // numerator counted every row in `hr_employee_benefits` while the denominator counted only
+        // live employees, and a checklist row outlives the employee it belongs to — 7 soft-deleted
+        // employees × 3 contributions left 21 rows against 14 people, so this tile read **150%**.
+        // The rows are deliberately kept (an employee can be restored, and their enrolment should
+        // come back with them), so the fix is to count through the employee, not to delete them.
         $total = max(1, Employee::count());
         $coverage = [];
         foreach (['sss' => 'SSS', 'philhealth' => 'PhilHealth', 'pagibig' => 'Pag-IBIG'] as $type => $label) {
-            $enrolled = EmployeeBenefit::where('contribution_type', $type)->where('enrolled', true)->count();
+            $enrolled = EmployeeBenefit::where('contribution_type', $type)
+                ->where('enrolled', true)
+                ->whereIn('employee_id', Employee::query()->select('id'))
+                ->count();
             $pct = (int) round($enrolled / $total * 100);
             $coverage[] = ['label' => $label, 'value' => $pct, 'display' => "{$pct}%"];
         }

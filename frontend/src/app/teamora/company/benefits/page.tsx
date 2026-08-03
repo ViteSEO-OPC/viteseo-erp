@@ -40,9 +40,12 @@ export default function BenefitsPage() {
   const { data: settings } = useContributionSettings();
   const { data: programs, isLoading, isError } = useBenefitPrograms();
 
-  const allowances = (programs ?? []).filter((p) => p.kind === "allowance" && p.is_active);
+  // Everything the API returns is live: a programme is switched off by deleting it, and the
+  // endpoint never returns a deleted one (B13 item 4). The two lists used to disagree about that
+  // — allowances were filtered by `is_active` and company plans were not.
+  const allowances = (programs ?? []).filter((p) => p.kind === "allowance");
   const company = (programs ?? []).filter((p) => p.kind === "company");
-  const activeCount = (programs ?? []).filter((p) => p.is_active).length;
+  const activeCount = (programs ?? []).length;
 
   // One dialog for add and edit — `null` means a new allowance. "Add a Plan" was removed on
   // 2026-07-29: a two-tab modal that assigned allowances, created plans inline AND enrolled people

@@ -59,7 +59,7 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         return BenefitProgram::create([
             'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => $amount, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
-            'eligibility' => $eligibility, 'is_active' => true,
+            'eligibility' => $eligibility,
         ]);
     }
 
@@ -94,11 +94,12 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         $this->assertSame(2500.0, $this->monthly());
     }
 
-    public function test_an_inactive_programme_pays_nothing(): void
+    public function test_a_deleted_programme_pays_nothing(): void
     {
+        // B13 item 4 — deleting IS the off switch now; `is_active` was a second, unreachable one.
         $p = $this->programme('Meal Allowance', 2000);
-        $p->update(['is_active' => false]);
         $this->employee->benefitPrograms()->attach($p->id);
+        $p->delete();
 
         $this->assertSame(0.0, $this->monthly());
     }

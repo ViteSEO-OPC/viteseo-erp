@@ -49,7 +49,7 @@ class UpdateBenefitProgramRequest extends FormRequest
             'progress.percent' => ['required_with:progress', 'numeric', 'min:0', 'max:100'],
             'progress.caption' => ['nullable', 'string', 'max:120'],
             'footer_label' => ['sometimes', 'nullable', 'string', 'max:60'],
-            'is_active' => ['sometimes', 'boolean'],
+            // No `is_active` — see StoreBenefitProgramRequest. Deleting is the off switch.
             'employee_ids' => ['sometimes', 'array'],
             'employee_ids.*' => ['integer', 'exists:hr_employees,id'],
         ];

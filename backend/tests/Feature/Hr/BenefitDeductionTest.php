@@ -55,10 +55,16 @@ class BenefitDeductionTest extends HrTestCase
         $program = BenefitProgram::create([
             'name' => $name, 'category' => 'hmo', 'kind' => 'company',
             'frequency' => 'monthly', 'deduction_cadence' => $cadence,
-            'tax_treatment' => 'de_minimis', 'is_active' => $active,
+            'tax_treatment' => 'de_minimis',
         ]);
 
         $this->employee->benefitPrograms()->attach($program->id, ['employee_share' => $share]);
+
+        // B13 item 4 — a programme is switched off by deleting it; the enrolment row stays, so
+        // this still exercises "enrolled in something that is no longer live".
+        if (! $active) {
+            $program->delete();
+        }
 
         return $program;
     }
