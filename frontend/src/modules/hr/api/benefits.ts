@@ -9,9 +9,14 @@ export async function getContributionSettings(): Promise<ContributionSetting[]> 
   return res.data.data;
 }
 
+/**
+ * Whether the company operates this contribution at all — NOT its rates (those are dated
+ * versions, see `saveContributionVersion`). Slice B9 item 5 removed the free-form `config`
+ * write: it edited a field payroll stopped pricing from in B3a.
+ */
 export async function updateContributionSetting(
   id: number,
-  input: { config?: Record<string, number | string>; is_active?: boolean },
+  input: { is_active: boolean },
 ): Promise<ContributionSetting> {
   const res = await apiClient.put(`/hr/contribution-settings/${id}`, input);
   return res.data.data;

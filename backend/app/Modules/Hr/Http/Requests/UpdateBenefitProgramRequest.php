@@ -22,7 +22,7 @@ class UpdateBenefitProgramRequest extends FormRequest
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'category' => ['sometimes', 'required', 'string', 'max:50'],
-            'kind' => ['sometimes', 'in:allowance,company'],
+            'kind' => ['sometimes', Rule::in(BenefitProgram::KINDS)],
             'amount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             // Slice B5.4 — see withValidator(): an allowance must keep an amount. The check lives
             // there because `kind` may be absent on a PATCH and has to fall back to the saved row.
@@ -30,6 +30,18 @@ class UpdateBenefitProgramRequest extends FormRequest
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'frequency' => ['sometimes', 'string', 'max:20'],
             'tax_treatment' => ['sometimes', 'in:de_minimis,taxable'],
+            // Slice B16 — this benefit's OWN statutory ceiling. Null = none recorded, which keeps
+            // the whole amount exempt. Ceilings are per item and are never pooled.
+            // Slice B11 — the date this price applies from. Defaults to today; HR sets it
+            // deliberately when a rise is agreed in arrears.
+            'effective_from' => ['sometimes', 'nullable', 'date'],
+            'deminimis_ceiling' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:9999999.99'],
+            // Slice B15 — loan-policy config. Typed per kind rather than shared into one loose
+            // shape: a loan policy and an HMO have nothing in common but a name.
+            'loan_max_principal' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999'],
+            'loan_term_periods' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:600'],
+            'loan_interest_rate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'ceiling_period' => ['sometimes', 'nullable', 'in:monthly,semester,annual'],
             // Who the programme is for. `status` carries the list below; `custom` carries
             // `employee_ids`. The old `regular` value is gone — it was the only status the model
             // could express, and is now `status` with one entry.
@@ -49,7 +61,7 @@ class UpdateBenefitProgramRequest extends FormRequest
             'progress.percent' => ['required_with:progress', 'numeric', 'min:0', 'max:100'],
             'progress.caption' => ['nullable', 'string', 'max:120'],
             'footer_label' => ['sometimes', 'nullable', 'string', 'max:60'],
-            'is_active' => ['sometimes', 'boolean'],
+            // No `is_active` — see StoreBenefitProgramRequest. Deleting is the off switch.
             'employee_ids' => ['sometimes', 'array'],
             'employee_ids.*' => ['integer', 'exists:hr_employees,id'],
         ];

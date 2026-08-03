@@ -35,6 +35,8 @@ import {
   usePayrollSettings,
   useUpdatePayrollSettings,
   useThirteenthMonth,
+  useThirteenthMonthPreview,
+  useRunThirteenthMonth,
   useHrPayslip,
 } from "@/modules/hr/hooks/use-payroll";
 import type {
@@ -59,10 +61,15 @@ export default function PayrollPage() {
   const markDoneMut = useMarkPayslipDone();
   const reopenPayslipMut = useReopenPayslip();
   const { data: thirteenth } = useThirteenthMonth();
+  const runThirteenthMut = useRunThirteenthMonth();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [thirteenthOpen, setThirteenthOpen] = useState(false);
+  const [payThirteenthOpen, setPayThirteenthOpen] = useState(false);
+  // Slice B17 — what the RUN would pay, which differs from the projection above whenever the year
+  // is partial. Declared after `thirteenthOpen` because it reads it; fetched only while open.
+  const { data: thirteenthPay } = useThirteenthMonthPreview(undefined, thirteenthOpen);
   const [viewRunId, setViewRunId] = useState<number | null>(null);
   // The payslip opened from a breakdown row — the same document the employee sees.
   const [payslipId, setPayslipId] = useState<number | null>(null);
@@ -558,8 +565,10 @@ export default function PayrollPage() {
           <DialogHeader>
             <DialogTitle>13th-Month Pay{thirteenth ? ` · ${thirteenth.year}` : ""}</DialogTitle>
             <DialogDescription>
-              Accrued per employee — total basic salary earned this year ÷ 12. Projected;
-              finalizes at year-end.
+              Total basic salary earned this year ÷ 12.{" "}
+              {thirteenthPay?.meta.already_run
+                ? `Paid on ${formatDate(thirteenthPay.meta.run_at ?? "")} — see run history.`
+                : "Projected; nothing has been paid yet."}
             </DialogDescription>
           </DialogHeader>
           {(thirteenth?.rows ?? []).length > 0 ? (
@@ -590,6 +599,90 @@ export default function PayrollPage() {
             <DialogClose asChild>
               <Button variant="outline">Close</Button>
             </DialogClose>
+            {/* Slice B17 — paying it lives HERE rather than in the page header: this is already
+                the screen that answers "what does 13th month look like this year", and the header
+                carries five actions as it is. */}
+            {(thirteenthPay?.count ?? 0) > 0 && !thirteenthPay?.meta.is_locked && (
+              <Button onClick={() => setPayThirteenthOpen(true)}>
+                <Gift />
+                {thirteenthPay?.meta.already_run ? "Recompute" : "Pay"} 13th month
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Slice B17 — a payroll run, so it names its consequence rather than asking "are you
+          sure", and it quotes the figures the RUN produces, not the projection behind it. */}
+      <Dialog open={payThirteenthOpen} onOpenChange={setPayThirteenthOpen}>
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {thirteenthPay?.meta.already_run ? "Recompute" : "Pay"} 13th month
+              {thirteenthPay ? ` · ${thirteenthPay.meta.year}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {thirteenthPay?.meta.already_run
+                ? "This recomputes the existing run in place — it does not pay anyone twice."
+                : "This creates a payroll run and pays the year's 13th month."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 rounded-lg border border-border bg-card p-4 text-sm">
+            <Row label="Employees" value={String(thirteenthPay?.count ?? 0)} />
+            <Row label="Gross" value={peso(thirteenthPay?.gross ?? 0)} />
+            <Row
+              label="Withholding tax"
+              value={peso(thirteenthPay?.tax ?? 0)}
+              hint={
+                (thirteenthPay?.tax ?? 0) === 0
+                  ? "Nobody is over the ₱90,000 exemption"
+                  : "Only the amount over the ₱90,000 exemption is taxed"
+              }
+            />
+            <div className="border-t border-border pt-2">
+              <Row
+                label="Net to pay"
+                value={peso((thirteenthPay?.gross ?? 0) - (thirteenthPay?.tax ?? 0))}
+              />
+            </div>
+          </div>
+
+          <p className="text-caption text-muted-foreground">
+            13th month is total basic salary earned this year ÷ 12. It carries no SSS, PhilHealth
+            or Pag-IBIG — those are charged on monthly pay. The ₱90,000 exemption is shared with
+            any allowance paid above its own tax-free ceiling.
+          </p>
+
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button
+              disabled={runThirteenthMut.isPending}
+              onClick={async () => {
+                try {
+                  await runThirteenthMut.mutateAsync(
+                    thirteenthPay?.meta.year ?? new Date().getFullYear(),
+                  );
+                  toast.success(
+                    thirteenthPay?.meta.already_run
+                      ? "13th month recomputed"
+                      : `13th month paid — ${peso(thirteenthPay?.gross ?? 0)} across ${thirteenthPay?.count ?? 0} employees`,
+                  );
+                  setPayThirteenthOpen(false);
+                  setThirteenthOpen(false);
+                } catch {
+                  toast.error("Could not run 13th month.");
+                }
+              }}
+            >
+              {runThirteenthMut.isPending
+                ? "Running…"
+                : thirteenthPay?.meta.already_run
+                  ? "Recompute"
+                  : "Pay 13th month"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -628,6 +721,19 @@ export default function PayrollPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/** A label/value line in the 13th-month confirmation (Slice B17). */
+function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <span className="text-muted-foreground">{label}</span>
+        {hint && <p className="text-caption text-muted-foreground">{hint}</p>}
+      </div>
+      <span className="font-semibold text-foreground">{value}</span>
     </div>
   );
 }

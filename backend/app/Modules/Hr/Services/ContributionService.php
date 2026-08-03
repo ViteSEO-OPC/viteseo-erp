@@ -33,22 +33,23 @@ class ContributionService
     /** @param array<string, mixed> $data */
     public function updateSetting(ContributionSetting $setting, array $data): ContributionSetting
     {
-        // Item 13b.12 — these rates set every statutory deduction on every payslip, so the
-        // audit line has to carry the old and new values, not just "settings updated".
-        $before = ['config' => $setting->config, 'is_active' => (bool) $setting->is_active];
+        // Item 13b.12 — this decides whether a statutory deduction appears on every payslip in
+        // the company, so the audit line carries the old and new value, not just "updated".
+        //
+        // Slice B9 item 5 — `config` is no longer writable here. The rates live on
+        // `hr_contribution_versions` and this row is now only "does the company operate this
+        // contribution at all".
+        $before = ['is_active' => (bool) $setting->is_active];
 
-        $setting->update([
-            'config' => $data['config'] ?? $setting->config,
-            'is_active' => $data['is_active'] ?? $setting->is_active,
-        ]);
-        $this->settingsMemo = null; // the rates just changed
+        $setting->update(['is_active' => $data['is_active'] ?? $setting->is_active]);
+        $this->settingsMemo = null;
 
-        $after = ['config' => $setting->config, 'is_active' => (bool) $setting->is_active];
+        $after = ['is_active' => (bool) $setting->is_active];
 
         $this->audit->log(
             'updated',
             'Benefits',
-            "{$setting->type} contribution settings updated",
+            $setting->type . ' is ' . ($setting->is_active ? 'operated company-wide' : 'switched OFF for everyone — it will not be deducted'),
             $setting,
             $before,
             $after,
@@ -198,6 +199,12 @@ class ContributionService
      */
     public function updateBenefits(Employee $employee, array $rows): Collection
     {
+        // Slice B9 — record WHAT changed, not that something did. Un-enrolling somebody removes a
+        // statutory deduction from every payslip they get from then on; "Updated contribution
+        // enrolment for Dana Reyes" cannot answer "who stopped her SSS, and when?". Same
+        // correction B5 item 5 made for programme enrolments.
+        $before = $employee->benefits()->pluck('enrolled', 'contribution_type');
+
         foreach ($rows as $row) {
             EmployeeBenefit::updateOrCreate(
                 ['employee_id' => $employee->id, 'contribution_type' => $row['contribution_type']],
@@ -205,7 +212,21 @@ class ContributionService
             );
         }
 
-        $this->audit->log('enrolled', 'Benefits', "Updated contribution enrolment for {$employee->user?->name}", $employee);
+        $changes = [];
+        foreach ($rows as $row) {
+            $was = $before->get($row['contribution_type']);
+            if ($was === null || (bool) $was !== (bool) $row['enrolled']) {
+                $changes[] = strtoupper($row['contribution_type'])
+                    . ($row['enrolled'] ? ' on' : ' OFF — no longer deducted');
+            }
+        }
+
+        $this->audit->log(
+            'enrolled', 'Benefits',
+            "Updated contribution enrolment for {$employee->user?->name}"
+                . ($changes === [] ? ' — no change' : ': ' . implode(', ', $changes)),
+            $employee,
+        );
 
         return $employee->benefits()->orderBy('contribution_type')->get();
     }

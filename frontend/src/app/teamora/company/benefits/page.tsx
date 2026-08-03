@@ -14,7 +14,9 @@ import { useContributionSettings } from "@/modules/hr/hooks/use-benefits";
 import { useBenefitPrograms } from "@/modules/hr/hooks/use-benefit-programs";
 import { AllowanceFormDialog } from "@/modules/hr/components/allowance-form-dialog";
 import { EditContributionDialog } from "@/modules/hr/components/edit-contribution-dialog";
-import { EditHmoDialog } from "@/modules/hr/components/edit-hmo-dialog";
+import { BenefitPlanDialog } from "@/modules/hr/components/benefit-plan-dialog";
+import { PlanEnrollmentDialog } from "@/modules/hr/components/plan-enrollment-dialog";
+import { LoanPolicyDialog } from "@/modules/hr/components/loan-policy-dialog";
 import {
   CONTRIBUTION_LABELS,
   type BenefitProgram,
@@ -40,9 +42,15 @@ export default function BenefitsPage() {
   const { data: settings } = useContributionSettings();
   const { data: programs, isLoading, isError } = useBenefitPrograms();
 
-  const allowances = (programs ?? []).filter((p) => p.kind === "allowance" && p.is_active);
-  const company = (programs ?? []).filter((p) => p.kind === "company");
-  const activeCount = (programs ?? []).filter((p) => p.is_active).length;
+  // Everything the API returns is live: a programme is switched off by deleting it, and the
+  // endpoint never returns a deleted one (B13 item 4). The two lists used to disagree about that
+  // — allowances were filtered by `is_active` and company plans were not.
+  const allowances = (programs ?? []).filter((p) => p.kind === "allowance");
+  const company = (programs ?? []).filter((p) => p.kind === "plan");
+  // Slice B15 — loan policies are a third behaviour: they deduct against a balance rather than
+  // adding to gross or taking a fixed share.
+  const loanPolicies = (programs ?? []).filter((p) => p.kind === "loan_policy");
+  const activeCount = (programs ?? []).length;
 
   // One dialog for add and edit — `null` means a new allowance. "Add a Plan" was removed on
   // 2026-07-29: a two-tab modal that assigned allowances, created plans inline AND enrolled people
@@ -50,7 +58,15 @@ export default function BenefitsPage() {
   const [allowanceOpen, setAllowanceOpen] = useState(false);
   const [editAllowance, setEditAllowance] = useState<BenefitProgram | null>(null);
   const [editContribution, setEditContribution] = useState<string | null>(null);
-  const [editHmo, setEditHmo] = useState<BenefitProgram | null>(null);
+  // One dialog for add and edit, like allowances and loans. Company benefits had no way to ADD
+  // one at all, so the catalogue was frozen at whatever the seeder created.
+  const [planOpen, setPlanOpen] = useState(false);
+  const [editPlan, setEditPlan] = useState<BenefitProgram | null>(null);
+  // Slice B2 — who is ON a plan is a separate job from what the plan IS, and conflating the two
+  // is what made "Add a Plan" impossible to understand.
+  const [membersOf, setMembersOf] = useState<BenefitProgram | null>(null);
+  const [loanOpen, setLoanOpen] = useState(false);
+  const [editLoan, setEditLoan] = useState<BenefitProgram | null>(null);
 
   return (
     <div className="p-4 sm:p-8">
@@ -120,15 +136,68 @@ export default function BenefitsPage() {
           )}
         </section>
 
+        {/* Loans — the third behaviour: deducts against a balance until it reaches zero. */}
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-h3 font-bold text-foreground">Loans</h2>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditLoan(null);
+                setLoanOpen(true);
+              }}
+            >
+              <Plus />
+              Add loan
+            </Button>
+          </div>
+          {isLoading ? null : loanPolicies.length === 0 ? (
+            <EmptyHint text="No loans offered yet. Use “Add loan” to define one." />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {loanPolicies.map((p) => (
+                <LoanPolicyCard
+                  key={p.id}
+                  program={p}
+                  onEdit={() => {
+                    setEditLoan(p);
+                    setLoanOpen(true);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
         {/* Company benefits — HR editable. */}
         <section className="space-y-3">
-          <h2 className="text-h3 font-bold text-foreground">Company benefits</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-h3 font-bold text-foreground">Company benefits</h2>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditPlan(null);
+                setPlanOpen(true);
+              }}
+            >
+              <Plus />
+              Add benefit
+            </Button>
+          </div>
           {isLoading ? null : company.length === 0 ? (
-            <EmptyHint text="No company benefits yet." />
+            <EmptyHint text="No company benefits yet. Use “Add benefit” to create one." />
           ) : (
             <div className="space-y-4">
               {company.map((p) => (
-                <CompanyBenefitCard key={p.id} program={p} onEdit={() => setEditHmo(p)} />
+                <CompanyBenefitCard
+                  key={p.id}
+                  program={p}
+                  onEdit={() => {
+                    setEditPlan(p);
+                    setPlanOpen(true);
+                  }}
+                  onMembers={() => setMembersOf(p)}
+                />
               ))}
             </div>
           )}
@@ -148,7 +217,26 @@ export default function BenefitsPage() {
           if (!o) setEditAllowance(null);
         }}
       />
-      <EditHmoDialog program={editHmo} onOpenChange={(o) => !o && setEditHmo(null)} />
+      <BenefitPlanDialog
+        open={planOpen}
+        program={editPlan}
+        onOpenChange={(o) => {
+          setPlanOpen(o);
+          if (!o) setEditPlan(null);
+        }}
+      />
+      <PlanEnrollmentDialog
+        program={membersOf}
+        onOpenChange={(o) => !o && setMembersOf(null)}
+      />
+      <LoanPolicyDialog
+        open={loanOpen}
+        policy={editLoan}
+        onOpenChange={(o) => {
+          setLoanOpen(o);
+          if (!o) setEditLoan(null);
+        }}
+      />
     </div>
   );
 }
@@ -220,7 +308,7 @@ function DeMinimisCeiling() {
         frequency: settings.frequency,
         deduction_timing: settings.deduction_timing,
         tax_timing: settings.tax_timing,
-        deminimis_annual_cap: next,
+        other_benefits_annual_cap: next,
       });
       toast.success(next === null ? "Ceiling removed" : "Tax-free ceiling updated");
     } catch {
@@ -231,31 +319,35 @@ function DeMinimisCeiling() {
   return (
     <div className="rounded-card border border-border bg-card p-4">
       <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
-        Tax-free ceiling (per year)
+        13th month pay &amp; other benefits — tax-free ceiling (per year)
       </p>
       <input
         type="number"
         min={0}
         step="0.01"
         inputMode="decimal"
-        defaultValue={settings?.deminimis_annual_cap ?? ""}
+        defaultValue={settings?.other_benefits_annual_cap ?? ""}
         disabled={!settings || updateMut.isPending}
-        placeholder="No ceiling — allowances are fully tax-free"
+        placeholder="₱90,000 — the statutory figure"
         className="mt-1.5 h-9 w-full max-w-sm rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         onBlur={(e) => {
           const raw = e.target.value.trim();
           const next = raw === "" ? null : Number(raw);
-          if (next !== (settings?.deminimis_annual_cap ?? null)) {
+          if (next !== (settings?.other_benefits_annual_cap ?? null)) {
             save(next);
           }
         }}
       />
+      {/* Slice B16 — this box used to be labelled the de-minimis cap and applied to the total of
+          every tax-free allowance. That is two different rules run together: each de-minimis
+          benefit has its OWN ceiling (set on the allowance itself), and ₱90,000 is the separate
+          exemption covering 13th month pay and other benefits. */}
       <p className="mt-2 text-caption text-muted-foreground">
-        Allowances marked <strong>tax-free</strong> below stay untaxed up to this much a year;
-        anything above it is taxed as compensation on the payslip. Allowances marked{" "}
-        <strong>taxable</strong> are compensation in full and ignore this ceiling. Leave blank for
-        no ceiling. The BIR reference figure is ₱90,000, but the right number for your mix of
-        benefits is yours to set.
+        The statutory <strong>₱90,000</strong> covers 13th month pay, bonuses, and anything an
+        allowance pays <em>above its own de-minimis ceiling</em>. Each allowance carries that
+        ceiling itself — set it when you add or edit one. Only what exceeds ₱90,000 in a year is
+        taxed as compensation. Allowances marked <strong>taxable</strong> are compensation in full
+        and never touch this.
       </p>
     </div>
   );
@@ -294,8 +386,46 @@ function AllowanceCard({ program, onEdit }: { program: BenefitProgram; onEdit: (
   );
 }
 
+// A loan policy — what may be borrowed, by whom, over how long (Slice B15).
+function LoanPolicyCard({ program, onEdit }: { program: BenefitProgram; onEdit: () => void }) {
+  return (
+    <div className="rounded-card border border-border bg-card p-5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <Dot color={program.color ?? "#8b5cf6"} />
+          <div>
+            <p className="font-bold text-foreground">{program.name}</p>
+            <p className="text-xs text-muted-foreground">
+              Loan · repaid from pay · {eligibilitySummary(program)}
+            </p>
+          </div>
+        </div>
+        <EditButton onClick={onEdit} />
+      </div>
+      <p className="mt-4 text-3xl font-bold text-foreground">
+        {program.loan_max_principal ? formatPeso(program.loan_max_principal) : "No limit"}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Most that can be borrowed
+        {program.loan_term_periods ? ` · within ${program.loan_term_periods} payslips` : ""}
+        {Number(program.loan_interest_rate ?? 0) > 0
+          ? ` · ${program.loan_interest_rate}% a year`
+          : " · interest-free"}
+      </p>
+    </div>
+  );
+}
+
 // A company benefit (HMO, retirement, …) — HR editable, full width.
-function CompanyBenefitCard({ program, onEdit }: { program: BenefitProgram; onEdit: () => void }) {
+function CompanyBenefitCard({
+  program,
+  onEdit,
+  onMembers,
+}: {
+  program: BenefitProgram;
+  onEdit: () => void;
+  onMembers: () => void;
+}) {
   const isDraft = /soon|draft/i.test(program.status);
 
   return (
@@ -320,11 +450,17 @@ function CompanyBenefitCard({ program, onEdit }: { program: BenefitProgram; onEd
         <p className="mt-3 text-sm text-muted-foreground">{program.description}</p>
       )}
 
-      {isDraft && (
-        <Button variant="outline" size="sm" className="mt-4" onClick={onEdit}>
-          Set up as draft
+      {/* Slice B2 — a plan nobody can be put on is a brochure. This is the way on. */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" onClick={onMembers}>
+          Who is on it
         </Button>
-      )}
+        {isDraft && (
+          <Button variant="outline" size="sm" onClick={onEdit}>
+            Set up as draft
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

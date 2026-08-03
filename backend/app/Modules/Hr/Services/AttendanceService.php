@@ -1211,6 +1211,67 @@ class AttendanceService
      * the payslip can explain its deduction (step 4b). The total is identical to
      * unpaidDaysFor(); the breakdown is all-zero until a per-hour/tiered mode is enabled.
      */
+    /**
+     * How much of a pay period this employee was actually EMPLOYED for — Slice B10.
+     *
+     * Returns the share of the period's scheduled workdays that fall inside the employment window:
+     * 1.0 for anybody employed throughout, less for a mid-cycle hire or leaver, 0.0 for somebody
+     * the period does not touch at all.
+     *
+     * WHY IT IS NOT `unpaidDaysDetailFor()`. That method answers "how many days is this employee
+     * not owed pay for", which folds together two different things: days they were ABSENT and days
+     * they were NOT YET (or no longer) EMPLOYED. Basic pay is right to charge both. An allowance
+     * must follow only the second — B10's whole point is that an allowance is deliberately not
+     * prorated for absence, but a person hired on the 25th was not owed a full month of it either.
+     *
+     * The DIVISOR is the full period's scheduled workdays, matching the daily-rate basis: shrinking
+     * it would hand a part-period employee a full period's allowance, which is the bug being fixed.
+     */
+    public function employmentFractionFor(Employee $employee, string $start, string $end): float
+    {
+        $employmentStart = $employee->hire_date?->toDateString();
+        $employmentEnd = $employee->separation_date?->toDateString();
+
+        // Nothing to prorate — the overwhelmingly common case, and worth answering without walking
+        // the calendar, since payroll asks this once per employee per run.
+        if ($employmentStart === null && $employmentEnd === null) {
+            return 1.0;
+        }
+
+        if (($employmentStart !== null && $employmentStart <= $start)
+            && ($employmentEnd === null || $employmentEnd >= $end)) {
+            return 1.0;
+        }
+
+        $tz = config('app.timezone_local');
+        $last = Carbon::parse($end, $tz)->startOfDay();
+
+        $total = 0;
+        $employed = 0;
+
+        for ($d = Carbon::parse($start, $tz)->startOfDay(); $d->lte($last); $d->addDay()) {
+            if (! $this->schedule->effectiveFor($employee, $d)['is_workday']) {
+                continue; // a rest day is not owed to anybody, employed or not
+            }
+
+            $total++;
+            $date = $d->toDateString();
+
+            if ($employmentStart !== null && $date < $employmentStart) {
+                continue;
+            }
+            if ($employmentEnd !== null && $date > $employmentEnd) {
+                continue;
+            }
+
+            $employed++;
+        }
+
+        // A period with no scheduled workdays at all cannot be prorated by workdays; paying the
+        // full amount is the employee-favourable reading and matches what basic pay does.
+        return $total === 0 ? 1.0 : round($employed / $total, 6);
+    }
+
     public function unpaidDaysDetailFor(Employee $employee, string $start, string $end, ?AttendancePolicy $policyOverride = null): UnpaidDaysResult
     {
         // Management staff are on a FIXED salary — they never accrue unpaid days,

@@ -79,7 +79,7 @@ class PayrollController extends Controller
             'tax_timing' => $setting->tax_timing,
             'anchor_date' => $setting->anchor_date?->toDateString(),
             'pay_delay_days' => $setting->pay_delay_days,
-            'deminimis_annual_cap' => $setting->deminimis_annual_cap === null ? null : (float) $setting->deminimis_annual_cap,
+            'other_benefits_annual_cap' => $setting->other_benefits_annual_cap === null ? null : (float) $setting->other_benefits_annual_cap,
             'periods_per_year' => PayScheduleService::periodsPerYear($setting->frequency),
             'current_period' => $this->schedule->currentPeriod($setting),
             // Active pay groups (per-employee frequencies) — each runs on its own period.
@@ -117,6 +117,52 @@ class PayrollController extends Controller
             'data' => $this->service->thirteenthMonth($year),
             'meta' => ['year' => $year],
         ]);
+    }
+
+    /**
+     * GET /api/v1/hr/payroll/thirteenth-month/preview — Slice B17, hr_officer only.
+     *
+     * Exactly what the run would pay, computed and saved nowhere. The accrual table HR is looking
+     * at is a projection built from a different query; confirming a payroll run against a figure
+     * it will not pay is a small dishonesty that costs trust the first time somebody checks.
+     */
+    public function previewThirteenthMonth(Request $request): JsonResponse
+    {
+        $year = (int) ($request->query('year') ?: now(config('app.timezone_local'))->year);
+        $existing = PayrollRun::where('type', 'thirteenth_month')
+            ->whereYear('cycle_start', $year)
+            ->first();
+
+        return response()->json([
+            'data' => $this->service->thirteenthMonthPreview($year),
+            'meta' => [
+                'year' => $year,
+                // So the screen can say "recompute" rather than "pay", and stop offering a button
+                // that a locked run would refuse anyway.
+                'already_run' => $existing !== null,
+                'run_id' => $existing?->id,
+                'run_at' => $existing?->run_at?->toDateTimeString(),
+                'is_locked' => (bool) $existing?->locked_at,
+            ],
+        ]);
+    }
+
+    /**
+     * POST /api/v1/hr/payroll/thirteenth-month/run — Slice B17, hr_officer only.
+     *
+     * Pays the year's 13th month as a real payroll run and withholds on whatever it pushes past
+     * the ₱90,000 exemption. Re-runnable: it recomputes the same run in place, like an ordinary
+     * cycle, and refuses once the run is locked.
+     */
+    public function runThirteenthMonth(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'year' => ['required', 'integer', 'min:2000', 'max:2100'],
+        ]);
+
+        $run = $this->service->runThirteenthMonth($data['year'], $request->user());
+
+        return response()->json(['data' => $this->service->runWithBreakdown($run)]);
     }
 
     // GET /api/v1/hr/payroll/runs/{payrollRun} — run + per-employee breakdown.

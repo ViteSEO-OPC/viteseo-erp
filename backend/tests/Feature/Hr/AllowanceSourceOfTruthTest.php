@@ -49,7 +49,12 @@ class AllowanceSourceOfTruthTest extends HrTestCase
             'user_id' => User::factory()->create()->id, 'department_id' => $dept->id,
             'employee_no' => 'E-001', 'job_title' => 'Staff', 'hire_date' => '2020-01-01',
             'base_salary' => 30000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
-            // Deliberately set: these columns must no longer reach a payslip.
+        ]);
+
+        // Deliberately set, and deliberately NOT through the model: Slice B9 took these three off
+        // `$fillable`, so mass assignment would drop them silently and the test below would pass
+        // without ever putting a number in the columns it exists to prove are dead.
+        \Illuminate\Support\Facades\DB::table('hr_employees')->where('id', $this->employee->id)->update([
             'food_allowance' => 9999, 'transportation_allowance' => 9999, 'load_allowance' => 9999,
         ]);
     }
@@ -59,7 +64,7 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         return BenefitProgram::create([
             'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => $amount, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
-            'eligibility' => $eligibility, 'is_active' => true,
+            'eligibility' => $eligibility,
         ]);
     }
 
@@ -94,11 +99,12 @@ class AllowanceSourceOfTruthTest extends HrTestCase
         $this->assertSame(2500.0, $this->monthly());
     }
 
-    public function test_an_inactive_programme_pays_nothing(): void
+    public function test_a_deleted_programme_pays_nothing(): void
     {
+        // B13 item 4 — deleting IS the off switch now; `is_active` was a second, unreachable one.
         $p = $this->programme('Meal Allowance', 2000);
-        $p->update(['is_active' => false]);
         $this->employee->benefitPrograms()->attach($p->id);
+        $p->delete();
 
         $this->assertSame(0.0, $this->monthly());
     }
@@ -113,18 +119,25 @@ class AllowanceSourceOfTruthTest extends HrTestCase
     }
 
     /**
-     * The enrolment carries NO amount at all (B6, 2026-07-29). Guarding the shape rather than the
-     * behaviour: a re-added pivot column would quietly restore the bug where editing an allowance
-     * reached nobody, and every other test here would still pass.
+     * REPLACED 2026-08-03, deliberately. This asserted that `hr_benefit_enrollments` has NO
+     * `amount` column — a shape guard written by B6 so the "editing an allowance reaches nobody"
+     * bug could not creep back unnoticed. B14 re-adds the column on Joshua's instruction, so the
+     * guard has to be retired by a decision rather than deleted quietly when it went red.
+     *
+     * WHAT REPLACES IT is the property that actually mattered: an enrolment carries no amount
+     * UNLESS a person set one. B1's bug was a migration writing amounts onto all 56 rows, not the
+     * existence of the column — so the test now pins the default (attach ⇒ follows the programme)
+     * and `AllowanceOverrideTest` covers the deliberate case.
      */
-    public function test_an_enrolment_carries_no_per_employee_amount(): void
+    public function test_an_enrolment_follows_the_programme_unless_someone_sets_otherwise(): void
     {
         $p = $this->programme('Meal Allowance', 2000);
         $this->employee->benefitPrograms()->attach($p->id);
 
-        $columns = \Illuminate\Support\Facades\Schema::getColumnListing('hr_benefit_enrollments');
-
-        $this->assertNotContains('amount', $columns);
+        $this->assertNull(
+            $this->employee->benefitPrograms()->where('hr_benefit_programs.id', $p->id)->first()?->pivot?->amount,
+            'Enrolling somebody must never write an amount — that is the bug B1 shipped.',
+        );
         $this->assertSame(2000.0, $this->monthly());
     }
 

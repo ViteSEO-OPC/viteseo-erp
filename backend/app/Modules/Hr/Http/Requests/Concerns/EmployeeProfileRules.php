@@ -67,9 +67,8 @@ trait EmployeeProfileRules
             'sss_contribution' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
             'pagibig_contribution' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
             'philhealth_contribution' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
-            'food_allowance' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
-            'transportation_allowance' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
-            'load_allowance' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
+            // No allowance rules — Slice B9. An allowance is a programme in Company → Benefits,
+            // and three fixed columns could never express a catalogue that grows and shrinks.
             // Government membership numbers for the payslip header. Free-form strings on
             // purpose: agencies format these inconsistently and a strict mask would reject
             // legitimate older numbers.

@@ -10,6 +10,11 @@ import {
   patchBenefitProgram,
   deleteBenefitProgram,
   getMyBenefits,
+  getEmployeeAllowances,
+  setEmployeeAllowance,
+  getPlanEnrollments,
+  updatePlanEnrollments,
+  endPlanEnrollment,
 } from "@/modules/hr/api/benefit-programs";
 import type { BenefitProgramInput } from "@/modules/hr/types/benefits";
 
@@ -66,5 +71,75 @@ export function useCreateBenefitPlan() {
 
 export function useMyBenefits() {
   return useQuery({ queryKey: MY_KEY, queryFn: getMyBenefits });
+}
+
+// ---- Company-plan enrolment (Slice B2) ----
+
+const planEnrollmentsKey = (programId: number) =>
+  ["hr", "benefit-programs", programId, "enrollments"] as const;
+
+export function usePlanEnrollments(programId: number | null) {
+  return useQuery({
+    queryKey: planEnrollmentsKey(programId ?? 0),
+    queryFn: () => getPlanEnrollments(programId as number),
+    enabled: programId != null,
+  });
+}
+
+export function useUpdatePlanEnrollments(programId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      enrollments: {
+        employee_id: number;
+        tier?: string | null;
+        employee_share?: number | null;
+        enrolled_at?: string | null;
+        ended_at?: string | null;
+      }[],
+    ) => updatePlanEnrollments(programId, enrollments),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: planEnrollmentsKey(programId) });
+      qc.invalidateQueries({ queryKey: PROGRAMS_KEY });
+    },
+  });
+}
+
+export function useEndPlanEnrollment(programId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (employeeId: number) => endPlanEnrollment(programId, employeeId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: planEnrollmentsKey(programId) });
+      qc.invalidateQueries({ queryKey: PROGRAMS_KEY });
+    },
+  });
+}
+
+// ---- One employee's own allowance amounts (Slice B14) ----
+
+const employeeAllowancesKey = (employeeId: number) =>
+  ["hr", "employees", employeeId, "allowances"] as const;
+
+export function useEmployeeAllowances(employeeId: number) {
+  return useQuery({
+    queryKey: employeeAllowancesKey(employeeId),
+    queryFn: () => getEmployeeAllowances(employeeId),
+    enabled: Number.isFinite(employeeId),
+  });
+}
+
+export function useSetEmployeeAllowance(employeeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programId, amount }: { programId: number; amount: number | null }) =>
+      setEmployeeAllowance(employeeId, programId, amount),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: employeeAllowancesKey(employeeId) });
+      // The catalogue carries following/overridden counts, so the edit dialog would otherwise
+      // keep promising an edit reaches somebody it no longer reaches.
+      qc.invalidateQueries({ queryKey: PROGRAMS_KEY });
+    },
+  });
 }
 

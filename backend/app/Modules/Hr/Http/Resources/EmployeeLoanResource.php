@@ -22,6 +22,17 @@ class EmployeeLoanResource extends JsonResource
             'start_date' => $this->start_date?->format('Y-m-d'),
             'status' => $this->status,
             'notes' => $this->notes,
+            // Slice B15 — the policy it was issued under, and the consent that makes any deduction
+            // lawful. `authorized_at` being null is the whole reason a loan may sit uncollected.
+            'benefit_program_id' => $this->benefit_program_id,
+            'policy_name' => $this->whenLoaded('policy', fn () => $this->policy?->name),
+            'requested_at' => $this->requested_at,
+            'approved_at' => $this->approved_at,
+            'decision_note' => $this->decision_note,
+            'authorized_at' => $this->authorized_at,
+            // What the screen needs to decide which button to show, without re-deriving the rules.
+            'needs_authorization' => $this->status === 'pending_authorization',
+            'is_collectible' => $this->status === 'active',
             // Derived from the payment ledger — never a stored column (see EmployeeLoan).
             'paid' => $this->paid(),
             'outstanding' => $this->outstanding(),

@@ -54,9 +54,6 @@ class Employee extends Model
         'sss_number',
         'philhealth_number',
         'pagibig_number',
-        'food_allowance',
-        'transportation_allowance',
-        'load_allowance',
         'custom_workdays',
         'custom_start_time',
         'custom_end_time',
@@ -183,9 +180,18 @@ class Employee extends Model
             'benefit_program_id',
         )
             // The per-employee columns on the pivot. `employee_share` is what payroll deducts
-            // (Slice 11a) — without this it reads as null and nothing is ever taken. There is no
-            // per-employee allowance AMOUNT: an allowance is worth what its programme says (B6).
-            ->withPivot(['tier', 'employee_share'])
+            // (Slice 11a) — without this it reads as null and nothing is ever taken.
+            //
+            // `amount` is a DELIBERATE allowance override (B14): null means the employee follows
+            // the programme, which is the default and must stay the common case. It is not a
+            // membership — the eligibility rule decides that.
+            // `enrolled_at` / `ended_at` MUST be listed here (B2): a pivot column absent from
+            // withPivot is silently dropped on write and reads as null, so the dates looked saved
+            // and every dated enrolment charged from the beginning of time.
+            ->withPivot([
+                'tier', 'employee_share', 'amount', 'amount_set_by', 'amount_set_at',
+                'enrolled_at', 'ended_at',
+            ])
             ->withTimestamps();
     }
 

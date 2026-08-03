@@ -35,16 +35,46 @@ class BenefitDeductionService
      * @param  int  $periodsInMonth  how many periods this calendar month has (from PayScheduleService)
      * @return array{total: float, lines: array<int, array{name: string, amount: float}>}
      */
-    public function forPeriod(Employee $employee, int $periodsInMonth = 1): array
-    {
+    public function forPeriod(
+        Employee $employee,
+        int $periodsInMonth = 1,
+        ?string $cycleStart = null,
+        ?string $cycleEnd = null,
+    ): array {
         $lines = [];
         $total = 0.0;
 
+        // A deleted programme stops deducting: the soft-delete scope is the whole "is it live"
+        // test since B13 item 4 removed `is_active`.
         $enrolments = $employee->benefitPrograms()
-            ->where('is_active', true)
             ->whereNotNull('deduction_cadence')
             ->orderBy('name')
             ->get();
+
+        // Slice B2 — an enrolment has dates now. Somebody who joins on the 20th is not charged for
+        // the cycle that ended on the 15th, and a leaver stops on a date rather than by having
+        // their row deleted (which would rewrite what past payslips can explain).
+        //
+        // WHOLE PERIODS, not part ones: if the enrolment overlaps the cycle at all, the full
+        // instalment is charged. A plan premium is a monthly price, not an accrual — proration
+        // would need the insurer's own rule, and guessing one is worse than a stated convention.
+        if ($cycleEnd !== null) {
+            // Compared as Y-m-d strings, which sort correctly — but only once both sides ARE
+            // Y-m-d. A pivot date can arrive as "2026-08-20 00:00:00" depending on the driver,
+            // and that sorts AFTER "2026-08-20", which would drop the very cycle somebody joined.
+            $day = fn ($value) => $value === null ? null : substr((string) $value, 0, 10);
+
+            $enrolments = $enrolments->filter(function ($program) use ($cycleStart, $cycleEnd, $day) {
+                $from = $day($program->pivot->enrolled_at ?? null);
+                $until = $day($program->pivot->ended_at ?? null);
+
+                if ($from !== null && $from > $cycleEnd) {
+                    return false; // joins after this cycle
+                }
+
+                return ! ($until !== null && $cycleStart !== null && $until < $cycleStart);
+            });
+        }
 
         foreach ($enrolments as $program) {
             // The pivot carries the per-employee amount; a null/zero share means the company

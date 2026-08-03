@@ -30,7 +30,7 @@ export function useUpdateContributionSetting() {
       input,
     }: {
       id: number;
-      input: { config?: Record<string, number | string>; is_active?: boolean };
+      input: { is_active: boolean };
     }) => updateContributionSetting(id, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: SETTINGS_KEY }),
   });

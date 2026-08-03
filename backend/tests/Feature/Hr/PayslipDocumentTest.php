@@ -69,7 +69,6 @@ class PayslipDocumentTest extends HrTestCase
             'base_salary' => 20000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
             // Allowances so the breakdown has something to split, and government numbers so the
             // identity block isn't all em dashes.
-            'transportation_allowance' => 1000, 'food_allowance' => 500, // legacy columns — no longer read (Slice B1)
             'tin' => '123-456-789-000', 'sss_number' => '34-5678901-2',
             'philhealth_number' => '12-009876543-1', 'pagibig_number' => '1211-0098-7654',
         ]);
@@ -212,7 +211,7 @@ class PayslipDocumentTest extends HrTestCase
     {
         $program = BenefitProgram::create([
             'name' => 'Emergency Loan', 'category' => 'other', 'kind' => 'deduction',
-            'deduction_cadence' => 'per_cutoff', 'is_active' => true,
+            'deduction_cadence' => 'per_cutoff',
         ]);
         $this->employee->benefitPrograms()->attach($program->id, ['employee_share' => 50000]);
 
@@ -230,7 +229,7 @@ class PayslipDocumentTest extends HrTestCase
         $program = BenefitProgram::create([
             'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => $monthly, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
-            'eligibility' => 'all', 'is_active' => true,
+            'eligibility' => 'all',
         ]);
         $this->employee->benefitPrograms()->attach($program->id);
     }
@@ -371,7 +370,6 @@ class PayslipDocumentTest extends HrTestCase
     public function test_the_pdf_renders_for_a_payslip_with_no_optional_figures(): void
     {
         $this->employee->update([
-            'transportation_allowance' => 0, 'food_allowance' => 0, 'load_allowance' => 0,
             'tin' => null, 'sss_number' => null, 'philhealth_number' => null, 'pagibig_number' => null,
             'address' => null,
         ]);

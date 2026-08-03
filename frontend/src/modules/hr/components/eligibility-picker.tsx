@@ -15,18 +15,26 @@ import { ELIGIBILITY_MODES, type EligibilityMode } from "@/modules/hr/types/bene
  * evaluated when payroll runs, so a promotion or a new hire is picked up with nothing to remember.
  *
  * `custom` is the exception and keeps a list, because "these named people" IS the rule.
+ *
+ * `modes` NARROWS THE CHOICES, and one caller needs it: on a company PLAN the enrolment pivot is
+ * the membership, so a `custom` rule would write the same rows that "Who is on it" writes — and
+ * silently enrol those people with no tier and no share. A plan therefore offers everything except
+ * `custom` (B18).
  */
 export function EligibilityPicker({
   mode,
   statuses,
   employeeIds,
   employees,
+  modes = ELIGIBILITY_MODES,
   onModeChange,
   onStatusesChange,
   onEmployeeIdsChange,
 }: {
   mode: EligibilityMode;
   statuses: string[];
+  /** Defaults to every mode. */
+  modes?: readonly { value: EligibilityMode; label: string }[];
   employeeIds: number[];
   employees: Employee[];
   onModeChange: (mode: EligibilityMode) => void;
@@ -48,7 +56,7 @@ export function EligibilityPicker({
       <div className="space-y-1.5">
         <Label>Who gets this allowance</Label>
         <div className="flex flex-wrap gap-2">
-          {ELIGIBILITY_MODES.map((o) => (
+          {modes.map((o) => (
             <button
               key={o.value}
               type="button"

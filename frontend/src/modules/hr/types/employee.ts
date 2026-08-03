@@ -56,9 +56,6 @@ export interface Employee {
   sss_contribution: string | null;
   pagibig_contribution: string | null;
   philhealth_contribution: string | null;
-  food_allowance: string | null;
-  transportation_allowance: string | null;
-  load_allowance: string | null;
   // Government membership NUMBERS for the payslip header — not the peso overrides above.
   tin: string | null;
   sss_number: string | null;
@@ -145,9 +142,6 @@ export interface EmployeeInput {
   sss_contribution?: string;
   pagibig_contribution?: string;
   philhealth_contribution?: string;
-  food_allowance?: string;
-  transportation_allowance?: string;
-  load_allowance?: string;
   tin?: string;
   sss_number?: string;
   philhealth_number?: string;

@@ -95,18 +95,32 @@ export interface BenefitProgram {
   id: number;
   name: string;
   category: string;
-  kind: "allowance" | "company"; // which section on the Benefits page
+  /** What it does to a payslip: adds to gross | deducts per period | the product a loan is issued under. */
+  kind: "allowance" | "plan" | "loan_policy";
   amount: string | null; // allowance peso / month (raw decimal string)
   description: string | null; // company-benefit blurb
   color: string | null; // card dot colour
   // Allowance config.
   frequency: string; // monthly | semi_monthly | annual
   tax_treatment: string; // de_minimis | taxable
+  /** This benefit's OWN statutory ceiling (B16). Null = none recorded ⇒ fully tax-free. */
+  deminimis_ceiling: string | null;
+  /** The period the ceiling is stated in: monthly | semester | annual. */
+  ceiling_period: string | null;
+  // Loan-policy config (B15), only meaningful when kind is "loan_policy".
+  loan_max_principal: string | null;
+  loan_term_periods: number | null;
+  loan_interest_rate: string | null;
   eligibility: string; // all | status | management | custom
   /** Only meaningful when `eligibility` is "status". */
   eligibility_statuses: string[];
   /** How many employees the rule covers right now — computed, not stored. */
   covered_count: number;
+  /**
+   * Of those, how many an edit to `amount` would actually reach (B14). `overridden` are the
+   * people carrying their own amount, who will not move.
+   */
+  reach: { following: number; overridden: number };
   // HMO / company-plan config.
   deduction_cadence: string | null; // per_cutoff | monthly
   tiers: BenefitTier[];
@@ -114,16 +128,68 @@ export interface BenefitProgram {
   details: BenefitDetail[];
   progress: BenefitProgress | null;
   footer_label: string | null;
-  is_active: boolean;
   employee_ids: number[];
 }
 
-/** Employee "My Benefits" view — card content only. */
+/** One person's enrolment on a company plan (B2). */
+export interface PlanEnrollment {
+  employee_id: number;
+  name: string;
+  tier: string | null;
+  /** What is deducted from their pay. Null/0 ⇒ the company pays the whole premium. */
+  employee_share: string | null;
+  enrolled_at: string | null;
+  /** Set ⇒ they have left the plan; nothing is deducted after this date. */
+  ended_at: string | null;
+}
+
+/** The plan-enrolment screen's payload: who is on it, and who could be added. */
+export interface PlanEnrollments {
+  data: {
+    enrolled: PlanEnrollment[];
+    eligible: { employee_id: number; name: string }[];
+  };
+  meta: {
+    tiers: BenefitTier[];
+    deduction_cadence: string | null;
+    /** "Deducts every cutoff" + "nobody has a share" = deducts nothing. Almost never intended. */
+    deducts_but_no_shares: boolean;
+  };
+  /** Rows the server refused — ineligible employee, unknown tier. Never silently dropped. */
+  rejected?: string[];
+}
+
+/** One allowance as it applies to ONE employee (B14) — the employee-profile view. */
+export interface EmployeeAllowance {
+  program_id: number;
+  name: string;
+  frequency: string;
+  tax_treatment: string;
+  color: string | null;
+  /** What the programme pays everybody. */
+  program_amount: number;
+  /** This employee's own amount, or null when they follow the programme. */
+  amount: number | null;
+  set_by: string | null;
+  set_at: string | null;
+}
+
+/** Employee "My Benefits" view — their own benefits and what each is worth (B12). */
 export interface MyBenefit {
   id: number;
   name: string;
   category: string;
+  kind: "allowance" | "plan" | "loan_policy";
+  color: string | null;
   status: string;
+  /** Allowances only: what THIS employee is paid per month. Never the company standard. */
+  monthly_amount: number | null;
+  /** Company plans only: what is deducted from their pay. Null ⇒ the company pays it all. */
+  employee_share: string | null;
+  tier: string | null;
+  /** Allowances only — it changes their withholding, so it is theirs to see. */
+  tax_treatment: string | null;
+  description: string | null;
   details: BenefitDetail[];
   progress: BenefitProgress | null;
   footer_label: string | null;
@@ -137,7 +203,8 @@ export interface BenefitProgramInput {
   details: BenefitDetail[];
   progress: BenefitProgress | null;
   footer_label: string | null;
-  is_active?: boolean;
+  // No `is_active` — deleting is the only way to switch a programme off (B13 item 4), so that it
+  // is always reversible from the same screen that did it.
   employee_ids: number[];
 }
 

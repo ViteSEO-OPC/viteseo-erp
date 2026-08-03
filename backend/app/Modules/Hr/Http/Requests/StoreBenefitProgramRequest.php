@@ -22,7 +22,7 @@ class StoreBenefitProgramRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'category' => ['sometimes', 'string', 'max:50'],
-            'kind' => ['sometimes', 'in:allowance,company'],
+            'kind' => ['sometimes', Rule::in(BenefitProgram::KINDS)],
             // Slice B5.4 — required for an allowance (it would otherwise pay ₱0 silently);
             // nullable for a company plan, which prices by tier instead.
             'amount' => ['required_if:kind,allowance', 'nullable', 'numeric', 'min:0'],
@@ -30,6 +30,18 @@ class StoreBenefitProgramRequest extends FormRequest
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'frequency' => ['sometimes', 'string', 'max:20'],
             'tax_treatment' => ['sometimes', 'in:de_minimis,taxable'],
+            // Slice B16 — this benefit's OWN statutory ceiling. Null = none recorded, which keeps
+            // the whole amount exempt. Ceilings are per item and are never pooled.
+            // Slice B11 — the date this price applies from. Defaults to today; HR sets it
+            // deliberately when a rise is agreed in arrears.
+            'effective_from' => ['sometimes', 'nullable', 'date'],
+            'deminimis_ceiling' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:9999999.99'],
+            // Slice B15 — loan-policy config. Typed per kind rather than shared into one loose
+            // shape: a loan policy and an HMO have nothing in common but a name.
+            'loan_max_principal' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999'],
+            'loan_term_periods' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:600'],
+            'loan_interest_rate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'ceiling_period' => ['sometimes', 'nullable', 'in:monthly,semester,annual'],
             // Who the programme is for. `status` carries the list below; `custom` carries
             // `employee_ids`. The old `regular` value is gone — it was the only status the model
             // could express, and is now `status` with one entry.
@@ -49,7 +61,8 @@ class StoreBenefitProgramRequest extends FormRequest
             'progress.percent' => ['required_with:progress', 'numeric', 'min:0', 'max:100'],
             'progress.caption' => ['nullable', 'string', 'max:120'],
             'footer_label' => ['nullable', 'string', 'max:60'],
-            'is_active' => ['boolean'],
+            // No `is_active` — B13 item 4 left a soft delete as the only way to switch a
+            // programme off, so that it is always reversible from the screen that did it.
             'employee_ids' => ['array'],
             'employee_ids.*' => ['integer', 'exists:hr_employees,id'],
         ];

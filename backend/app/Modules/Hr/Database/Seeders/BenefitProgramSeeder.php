@@ -55,7 +55,13 @@ class BenefitProgramSeeder extends Seeder
         $employeeIds = Employee::pluck('id')->all();
 
         foreach ($allowances as $a) {
-            $program = BenefitProgram::firstOrCreate(
+            // NO ENROLMENT ROWS FOR AN ALLOWANCE. Membership is the eligibility rule now
+            // (2026-07-29), and these four are `all`. The seeder went on writing a pivot row per
+            // employee that nothing read — and a stale one is not inert: switching an allowance to
+            // `custom` would turn those leftovers into the rule, so the seed data would decide who
+            // gets paid. The 2026-07-29 migration deleted them on the live database; this stops a
+            // fresh seed putting them back.
+            BenefitProgram::firstOrCreate(
                 ['name' => $a['name']],
                 [
                     'category' => 'allowance',
@@ -64,10 +70,8 @@ class BenefitProgramSeeder extends Seeder
                     'color' => $a['color'],
                     'status' => 'Active',
                     'details' => [],
-                    'is_active' => true,
                 ],
             );
-            $program->employees()->syncWithoutDetaching($employeeIds);
         }
 
         foreach ($company as $c) {
@@ -75,14 +79,13 @@ class BenefitProgramSeeder extends Seeder
                 ['name' => $c['name']],
                 [
                     'category' => $c['category'],
-                    'kind' => 'company',
+                    'kind' => 'plan',
                     'description' => $c['description'],
                     'color' => $c['color'],
                     'status' => $c['status'],
                     'deduction_cadence' => $c['deduction_cadence'] ?? null,
                     'tiers' => $c['tiers'] ?? [],
                     'details' => [],
-                    'is_active' => true,
                 ],
             );
             if ($c['enroll']) {

@@ -87,6 +87,13 @@ function AllowanceForm({
   const [amount, setAmount] = useState(program?.amount ?? "");
   const [frequency, setFrequency] = useState(program?.frequency ?? "monthly");
   const [tax, setTax] = useState(program?.tax_treatment ?? "de_minimis");
+  // Slice B16 — this allowance's OWN de-minimis ceiling. Blank means none recorded, which keeps
+  // the whole amount tax-free; ceilings are per item and are never pooled with another benefit's.
+  const [ceiling, setCeiling] = useState(program?.deminimis_ceiling ?? "");
+  const [ceilingPeriod, setCeilingPeriod] = useState(program?.ceiling_period ?? "monthly");
+  // Slice B11 — the date this amount applies FROM. An old cycle re-run before it keeps the
+  // figure that applied then, so this is the field that decides whose payslip moves.
+  const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [mode, setMode] = useState<EligibilityMode>(
     (program?.eligibility as EligibilityMode) ?? "all",
   );
@@ -108,9 +115,12 @@ function AllowanceForm({
       amount: Number(amount),
       frequency,
       tax_treatment: tax,
+      deminimis_ceiling: tax === "taxable" || ceiling === "" ? null : Number(ceiling),
+      ceiling_period: tax === "taxable" || ceiling === "" ? null : ceilingPeriod,
       eligibility: mode,
       // Sent only for the mode that uses them, so switching mode cannot leave a stale rule behind.
       eligibility_statuses: mode === "status" ? statuses : [],
+      effective_from: effectiveFrom,
       employee_ids: mode === "custom" ? employeeIds : [],
     };
 
@@ -160,7 +170,7 @@ function AllowanceForm({
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="a-amount">Amount per period</Label>
             <Input
@@ -181,9 +191,69 @@ function AllowanceForm({
               options={ALLOWANCE_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
             />
           </div>
+          {/* Slice B11 — payroll prices an allowance as of the cycle END, so a period that closed
+              before this date keeps whatever applied then. Without it, raising an amount rewrote
+              every payslip that had not yet been paid out. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="a-eff">Applies from</Label>
+            <Input
+              id="a-eff"
+              type="date"
+              value={effectiveFrom}
+              onChange={(e) => setEffectiveFrom(e.target.value)}
+            />
+          </div>
         </div>
 
+        <p className="text-caption text-muted-foreground">
+          Payslips for periods that ended before <strong>{effectiveFrom}</strong> keep the amount
+          that applied then, even if they are re-run.
+        </p>
+
         <Segmented label="Tax treatment" options={TAX_TREATMENTS} value={tax} onChange={setTax} />
+
+        {/* Slice B16 — a de-minimis benefit is exempt only UP TO its own statutory ceiling, and
+            the ceilings cannot be pooled. Anything above joins the ₱90,000 13th-month-and-other-
+            benefits exemption rather than being taxed outright. */}
+        {tax !== "taxable" && (
+          <div className="rounded-lg border border-border bg-card p-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-40 flex-1 space-y-1.5">
+                <Label htmlFor="a-ceiling">Tax-free ceiling for this allowance</Label>
+                <Input
+                  id="a-ceiling"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="None — fully tax-free"
+                  value={ceiling}
+                  onChange={(e) => setCeiling(e.target.value)}
+                />
+              </div>
+              {ceiling !== "" && (
+                <div className="min-w-36 space-y-1.5">
+                  <Label htmlFor="a-ceiling-period">Per</Label>
+                  <SimpleSelect
+                    id="a-ceiling-period"
+                    value={ceilingPeriod}
+                    onValueChange={setCeilingPeriod}
+                    options={[
+                      { value: "monthly", label: "Month" },
+                      { value: "semester", label: "Semester" },
+                      { value: "annual", label: "Year" },
+                    ]}
+                  />
+                </div>
+              )}
+            </div>
+            <p className="mt-2 text-caption text-muted-foreground">
+              BIR sets a limit per benefit — rice ₱2,500/month, uniform ₱8,000/year, medical cash
+              allowance ₱2,000/semester. Anything above the limit is not taxed straight away: it
+              counts toward the ₱90,000 covering 13th month pay and other benefits. Leave blank if
+              this allowance has no statutory limit.
+            </p>
+          </div>
+        )}
 
         <EligibilityPicker
           mode={mode}
@@ -195,10 +265,28 @@ function AllowanceForm({
           onEmployeeIdsChange={setEmployeeIds}
         />
 
+        {/* Slice B14 — say who this edit actually REACHES. The old copy promised it applied to
+            everyone, which stopped being true the moment one person could be paid their own
+            amount; B6's version of this dialog claimed "14 enrolled employees will be affected"
+            when the true answer was nought, and that is the mistake worth not repeating. */}
         <div className="rounded-lg border border-warning/40 bg-warning-subtle px-3 py-2.5 text-xs text-foreground">
-          {isNew
-            ? "Everyone this covers is paid it from the next payroll cutoff."
-            : "Everyone this covers is paid this amount from the next payroll cutoff. There is one amount per allowance — it applies to all of them."}
+          {isNew ? (
+            "Everyone this covers is paid it from the next payroll cutoff."
+          ) : program.reach.overridden > 0 ? (
+            <>
+              <strong>
+                {program.reach.following} employee{program.reach.following === 1 ? "" : "s"}
+              </strong>{" "}
+              follow this amount and move with it from the next payroll cutoff.{" "}
+              <strong>
+                {program.reach.overridden} {program.reach.overridden === 1 ? "has" : "have"} their
+                own amount
+              </strong>{" "}
+              and will not change — set on their profile, under Compensation.
+            </>
+          ) : (
+            "Everyone this covers is paid this amount from the next payroll cutoff. Nobody has been given their own amount, so it reaches all of them."
+          )}
         </div>
 
         {!isNew && (

@@ -122,7 +122,7 @@ export async function getMyEmployee(): Promise<Employee> {
   return res.data.data;
 }
 
-// --- Loans & cash advances (Slice 11b) -------------------------------------------
+// --- Loans & cash advances (Slice 11b; policies + consent in B15) -----------------
 
 export interface EmployeeLoan {
   id: number;
@@ -132,14 +132,35 @@ export interface EmployeeLoan {
   principal: number;
   per_period_amount: number;
   start_date: string;
-  status: "active" | "settled" | "cancelled" | "on_hold";
+  /**
+   * Slice B15 — a loan no longer starts collectible. `pending_authorization` is the state that
+   * matters: the employee has not yet consented to the deduction, and payroll skips it.
+   */
+  status:
+    | "requested"
+    | "rejected"
+    | "pending_authorization"
+    | "active"
+    | "settled"
+    | "cancelled"
+    | "on_hold";
   notes: string | null;
   /** Derived from the payment ledger — never a stored column. */
   paid: number;
   outstanding: number;
+  // Slice B15 — the policy behind it, and the consent that makes any deduction lawful.
+  benefit_program_id: number | null;
+  policy_name?: string | null;
+  requested_at: string | null;
+  approved_at: string | null;
+  decision_note: string | null;
+  authorized_at: string | null;
+  needs_authorization: boolean;
+  is_collectible: boolean;
 }
 
 export interface EmployeeLoanInput {
+  benefit_program_id?: number | null;
   type?: EmployeeLoan["type"];
   reference?: string | null;
   principal: number;
@@ -175,5 +196,43 @@ export async function reopenEmployeeLoan(
   reason?: string,
 ): Promise<EmployeeLoan> {
   const res = await apiClient.post(`/hr/loans/${loanId}/reopen`, { reason });
+  return res.data.data;
+}
+
+// --- The employee's own loans (Slice B15) -----------------------------------------
+//
+// Separate from the HR endpoints above: these resolve the employee from the token, and the
+// authorization is the employee's own act — Labor Code Art. 113 wants the worker's consent, not
+// a record HR could create on their behalf.
+
+export async function getMyLoans(): Promise<EmployeeLoan[]> {
+  const res = await apiClient.get("/hr/me/loans");
+  return res.data.data;
+}
+
+export async function requestLoan(input: {
+  benefit_program_id: number;
+  principal: number;
+  per_period_amount: number;
+  start_date: string;
+  notes?: string | null;
+}): Promise<EmployeeLoan> {
+  const res = await apiClient.post("/hr/me/loans", input);
+  return res.data.data;
+}
+
+/** Consent to the deduction. Nothing is collected before this. */
+export async function authorizeLoan(loanId: number): Promise<EmployeeLoan> {
+  const res = await apiClient.post(`/hr/me/loans/${loanId}/authorize`);
+  return res.data.data;
+}
+
+export async function approveLoan(loanId: number, note?: string): Promise<EmployeeLoan> {
+  const res = await apiClient.post(`/hr/loans/${loanId}/approve`, { note });
+  return res.data.data;
+}
+
+export async function rejectLoan(loanId: number, reason: string): Promise<EmployeeLoan> {
+  const res = await apiClient.post(`/hr/loans/${loanId}/reject`, { reason });
   return res.data.data;
 }

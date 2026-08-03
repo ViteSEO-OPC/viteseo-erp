@@ -54,7 +54,7 @@ class BenefitAssignmentGapsTest extends HrTestCase
         return BenefitProgram::create([
             'name' => 'Test Allowance', 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => 1000, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
-            'eligibility' => $eligibility, 'eligibility_statuses' => $statuses, 'is_active' => true,
+            'eligibility' => $eligibility, 'eligibility_statuses' => $statuses,
         ]);
     }
 
@@ -63,7 +63,7 @@ class BenefitAssignmentGapsTest extends HrTestCase
         return BenefitProgram::create([
             'name' => 'HMO', 'category' => 'health', 'kind' => 'company',
             'tiers' => self::TIERS, 'eligibility' => $eligibility,
-            'deduction_cadence' => 'monthly', 'is_active' => true,
+            'deduction_cadence' => 'monthly',
         ]);
     }
 

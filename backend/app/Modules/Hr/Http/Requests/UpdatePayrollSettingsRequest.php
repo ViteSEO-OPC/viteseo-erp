@@ -25,7 +25,9 @@ class UpdatePayrollSettingsRequest extends FormRequest
             'anchor_date' => ['nullable', 'date'],
             'pay_delay_days' => ['nullable', 'integer', 'min:0', 'max:31'],
             // Null = no ceiling, i.e. allowances stay entirely non-taxable.
-            'deminimis_annual_cap' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
+            // Slice B16 — ₱90,000 governs 13th month AND OTHER BENEFITS, not de minimis. Each
+            // de-minimis item has its own ceiling, held on the benefit itself.
+            'other_benefits_annual_cap' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
         ];
     }
 }

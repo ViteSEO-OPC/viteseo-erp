@@ -111,6 +111,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/meetings', [MeetingController::class, 'meIndex']);
     Route::post('me/meetings/{meeting}/respond', [MeetingController::class, 'respond']);
 
+    // Slice B15 — the caller's own loans: what they owe, and the authorization that makes any
+    // deduction lawful. Not hr_officer-gated: this is the employee's own record and consent.
+    Route::get('me/loans', [EmployeeLoanController::class, 'mine']);
+    Route::post('me/loans', [EmployeeLoanController::class, 'requestLoan']);
+    Route::post('me/loans/{loan}/authorize', [EmployeeLoanController::class, 'authorizeDeduction']);
+
     // My Benefits — the caller's own enrolled benefit programs (identity from token).
     Route::get('me/benefit-programs', [BenefitProgramController::class, 'mine']);
 
@@ -148,6 +154,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('payroll/settings', [PayrollController::class, 'updateSettings']);
         Route::get('payroll/runs', [PayrollController::class, 'runsIndex']);
         Route::get('payroll/thirteenth-month', [PayrollController::class, 'thirteenthMonth']);
+        Route::get('payroll/thirteenth-month/preview', [PayrollController::class, 'previewThirteenthMonth']);
+        // Slice B17 — pay it, and withhold on what it pushes past the ₱90,000 exemption.
+        Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth']);
         Route::post('payroll/run', [PayrollController::class, 'run']);
         Route::get('payroll/runs/{payrollRun}', [PayrollController::class, 'show']);
         Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun']);
@@ -208,6 +217,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'loans/{loan}', [EmployeeLoanController::class, 'update']);
         Route::post('loans/{loan}/cancel', [EmployeeLoanController::class, 'cancel']);
         Route::post('loans/{loan}/reopen', [EmployeeLoanController::class, 'reopen']);
+        // Slice B15 — HR decides on an employee's request. Neither starts a deduction.
+        Route::post('loans/{loan}/approve', [EmployeeLoanController::class, 'approve']);
+        Route::post('loans/{loan}/reject', [EmployeeLoanController::class, 'reject']);
         // Schedule a meeting with an employee (e.g. about attendance/violations).
         Route::post('employees/{employee}/meetings', [MeetingController::class, 'store']);
         Route::post('employees/{employee}/activate', [EmployeeController::class, 'activate']);
@@ -248,6 +260,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('benefit-programs', [BenefitProgramController::class, 'store']);
         Route::match(['put', 'patch'], 'benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'update']);
         Route::delete('benefit-programs/{benefitProgram}', [BenefitProgramController::class, 'destroy']);
+        // Slice B14 — one employee's own allowance amounts. NOT `/benefits`: that path is the
+        // statutory checklist, a different table with a near-identical name (B5 item 8).
+        // Slice B2 — who is on a company plan, at what tier and share. The capability that went
+        // with "Add a Plan": without it a plan can be published and nobody can ever be put on it.
+        Route::get('benefit-programs/{benefitProgram}/enrollments', [BenefitProgramController::class, 'planEnrollments']);
+        Route::match(['put', 'patch'], 'benefit-programs/{benefitProgram}/enrollments', [BenefitProgramController::class, 'updatePlanEnrollments']);
+        Route::delete('benefit-programs/{benefitProgram}/enrollments/{employee}', [BenefitProgramController::class, 'endPlanEnrollment']);
+        Route::get('employees/{employee}/allowances', [BenefitProgramController::class, 'employeeAllowances']);
+        Route::match(['put', 'patch'], 'employees/{employee}/allowances/{benefitProgram}', [BenefitProgramController::class, 'setEmployeeAllowance']);
 
         // Company → Benefits: contribution settings + per-employee checklist.
         Route::get('contribution-settings', [BenefitController::class, 'settingsIndex']);

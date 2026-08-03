@@ -28,12 +28,21 @@ class BenefitController extends Controller
         return ContributionSettingResource::collection($this->service->settings())->response();
     }
 
-    // PUT/PATCH /hr/contribution-settings/{contributionSetting}
+    /**
+     * PUT/PATCH /hr/contribution-settings/{contributionSetting} — whether the company operates
+     * this contribution at all. NOT the rates: those are dated versions (B3a).
+     *
+     * Slice B9 item 5 — `config` is no longer accepted. It took `['sometimes','array']`, so
+     * anything at all saved cleanly into a field payroll has not priced from since B3a: a typo
+     * (`raet`) was a 200, and the only thing still reading it was the Compensation report's
+     * legend, which item 2 has now pointed at the version in force. An unvalidated write to a
+     * dead field, behind a button labelled "update rates", is the exact trap this audit keeps
+     * finding. The column stays for the historical run snapshots that captured it.
+     */
     public function updateSetting(Request $request, ContributionSetting $contributionSetting): JsonResponse
     {
         $data = $request->validate([
-            'config' => ['sometimes', 'array'],
-            'is_active' => ['sometimes', 'boolean'],
+            'is_active' => ['required', 'boolean'],
         ]);
 
         $setting = $this->service->updateSetting($contributionSetting, $data);
@@ -159,7 +168,11 @@ class BenefitController extends Controller
     {
         $data = $request->validate([
             'benefits' => ['required', 'array'],
-            'benefits.*.contribution_type' => ['required', 'string'],
+            // Slice B9 — the type is checked against the three that exist. It was `['required',
+            // 'string']`, so a typo saved a checklist row matching no contribution: the write
+            // answered 200, the screen showed the change, and nothing was ever deducted or not
+            // deducted because of it. Same shape as the mistyped tier B5 item 2 closed.
+            'benefits.*.contribution_type' => ['required', 'in:sss,philhealth,pagibig'],
             'benefits.*.enrolled' => ['required', 'boolean'],
         ]);
 
