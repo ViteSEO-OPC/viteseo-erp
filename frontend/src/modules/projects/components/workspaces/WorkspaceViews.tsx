@@ -19,6 +19,7 @@ import {
   SegmentedItem,
   Select,
 } from "@/core/ui";
+import { CountBubble } from "../shared/Pills";
 import { projectsApi } from "../../api";
 import type { NoteTarget } from "../../notes/types";
 import {
@@ -230,7 +231,9 @@ function WorkspaceViewsInner({
       !i.leadsMyGroup
     )
       return false;
-    if (memberIds.length) {
+    // Only an unlocked board offers the member filter, so a locked one ignores
+    // any selection left over from before it locked.
+    if (lockedAssigneeId == null && memberIds.length) {
       const wantsUnassigned = memberIds.includes(UNASSIGNED_ID);
       const matchesMember =
         i.assigneeId != null && memberIds.includes(i.assigneeId);
@@ -356,6 +359,10 @@ function WorkspaceViewsInner({
             setMemberIds={setMemberIds}
             deadlineSort={deadlineSort}
             setDeadlineSort={setDeadlineSort}
+            // A locked board already shows one person's work and nothing else,
+            // so filtering it by member could only ever narrow to "them" or to
+            // nothing. Hide the section rather than offer a no-op control.
+            showMemberFilter={lockedAssigneeId == null}
           />
 
           {/* Notes sits immediately right of Filter, same height and shape, so
@@ -481,6 +488,7 @@ function FilterPopover({
   setMemberIds,
   deadlineSort,
   setDeadlineSort,
+  showMemberFilter = true,
 }: {
   projects: Project[];
   members: User[];
@@ -490,11 +498,20 @@ function FilterPopover({
   setMemberIds: (ids: number[]) => void;
   deadlineSort: DeadlineSort;
   setDeadlineSort: (s: DeadlineSort) => void;
+  /**
+   * False on a board already locked to one assignee (a member's own tasks),
+   * where every visible row belongs to the same person.
+   */
+  showMemberFilter?: boolean;
 }): React.ReactElement {
   const [open, setOpen] = useState(false);
 
+  // A hidden section can't contribute to the badge — otherwise a stale member
+  // selection would show a count with no control to clear it.
   const activeCount =
-    projectIds.length + memberIds.length + (deadlineSort ? 1 : 0);
+    projectIds.length +
+    (showMemberFilter ? memberIds.length : 0) +
+    (deadlineSort ? 1 : 0);
 
   const toggleProject = (id: string): void =>
     setProjectIds(
@@ -539,9 +556,7 @@ function FilterPopover({
         <FilterIcon className="h-4 w-4" />
         Filters
         {activeCount > 0 && (
-          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0f766e] px-1 text-xs font-bold text-white">
-            {activeCount}
-          </span>
+          <CountBubble>{activeCount}</CountBubble>
         )}
         <ChevronDownIcon className="h-4 w-4" />
       </button>
@@ -628,41 +643,43 @@ function FilterPopover({
               </div>
             </div>
 
-            {/* Member / Unassigned */}
-            <div className="mt-2 border-t border-line px-1 pt-2">
-              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
-                Member
-              </p>
-              <div className="max-h-40 space-y-0.5 overflow-y-auto">
-                <button
-                  type="button"
-                  onClick={() => toggleMember(UNASSIGNED_ID)}
-                  className={row}
-                >
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/5 text-xs text-ink-faint">
-                    —
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">Unassigned</span>
-                  {memberIds.includes(UNASSIGNED_ID) && (
-                    <span className="text-xs font-bold text-brand">✓</span>
-                  )}
-                </button>
-                {members.map((m) => (
+            {/* Member / Unassigned — omitted on a board locked to one assignee. */}
+            {showMemberFilter && (
+              <div className="mt-2 border-t border-line px-1 pt-2">
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
+                  Member
+                </p>
+                <div className="max-h-40 space-y-0.5 overflow-y-auto">
                   <button
-                    key={m.id}
                     type="button"
-                    onClick={() => toggleMember(m.id)}
+                    onClick={() => toggleMember(UNASSIGNED_ID)}
                     className={row}
                   >
-                    <Avatar name={m.name} src={m.avatar} size={24} />
-                    <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                    {memberIds.includes(m.id) && (
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/5 text-xs text-ink-faint">
+                      —
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">Unassigned</span>
+                    {memberIds.includes(UNASSIGNED_ID) && (
                       <span className="text-xs font-bold text-brand">✓</span>
                     )}
                   </button>
-                ))}
+                  {members.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => toggleMember(m.id)}
+                      className={row}
+                    >
+                      <Avatar name={m.name} src={m.avatar} size={24} />
+                      <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                      {memberIds.includes(m.id) && (
+                        <span className="text-xs font-bold text-brand">✓</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </>
       )}

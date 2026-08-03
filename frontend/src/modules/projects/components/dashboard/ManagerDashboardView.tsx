@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Button, Card, PlusIcon, PriorityBadge, StatCard, Tabs } from "@/core/ui";
+import { CountBubble } from "../shared/Pills";
 import { isOverdue, OverdueBadge } from "../../overdue";
 import { useOpenTask } from "../tasks/useTaskModal";
 import { NotesCard } from "../notes/NotesCard";
@@ -266,9 +267,7 @@ export function ManagerDashboardView(): React.ReactElement {
           <section className="mt-10">
             <div className="flex items-center gap-2 w-full bg-danger-soft px-4 py-2 rounded-lg">
               <h2 className="text-lg font-bold text-ink">Unassigned Tasks</h2>
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-danger-soft px-1.5 text-xs font-bold text-danger">
-                {unassigned.length}
-              </span>
+              <CountBubble tone="danger">{unassigned.length}</CountBubble>
             </div>
             {loading ? (
               <Card className="mt-4">

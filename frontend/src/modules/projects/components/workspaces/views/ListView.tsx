@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Avatar, PriorityBadge } from "@/core/ui";
+import { Avatar, Badge, PriorityBadge } from "@/core/ui";
+import { ProjectPill } from "../../shared/Pills";
 import { isOverdue, OverdueBadge } from "../../../overdue";
 import {
   BATCH_SIZE,
@@ -21,25 +22,17 @@ export function StatusPill({
   statusName: string | null;
   statusColor: string | null;
 }) {
-  const base =
-    "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold";
-
   // No status (custom status was deleted).
   if (!statusKey) {
-    return (
-      <span className={`${base} bg-black/5 text-ink-faint`}>No status</span>
-    );
+    return <Badge className="text-ink-faint">No status</Badge>;
   }
 
   // Custom status → tint from its own color.
   if (statusKey === "custom" && statusColor) {
     return (
-      <span
-        className={base}
-        style={{ backgroundColor: `${statusColor}1f`, color: statusColor }}
-      >
+      <Badge style={{ backgroundColor: `${statusColor}1f`, color: statusColor }}>
         {statusName ?? "Custom"}
-      </span>
+      </Badge>
     );
   }
 
@@ -49,9 +42,9 @@ export function StatusPill({
     done: "bg-emerald-50 text-[#10b981]",
   };
   return (
-    <span className={`${base} ${colorMap[statusKey] ?? "bg-black/5 text-ink-soft"}`}>
+    <Badge className={colorMap[statusKey]}>
       {statusName ?? STATUS_LABELS[statusKey] ?? statusKey}
-    </span>
+    </Badge>
   );
 }
 
@@ -127,16 +120,11 @@ function StatusSection({
               onClick={() => onOpen(i.id)}
               className="grid w-full min-w-[720px] grid-cols-[160px_minmax(200px,1fr)_84px_160px_92px] items-center gap-4 px-5 py-3.5 text-left transition-colors hover:bg-black/[0.02]"
             >
-              <span className="flex items-center">
-                <span
-                  className="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-bold"
-                  style={{
-                    backgroundColor: `${projectColor.get(i.projectId) ?? "#6366f1"}15`,
-                    color: projectColor.get(i.projectId) ?? "#6366f1",
-                  }}
-                >
-                  {projectName.get(i.projectId) ?? "—"}
-                </span>
+              <span className="flex min-w-0 items-center">
+                <ProjectPill
+                  name={projectName.get(i.projectId) ?? "—"}
+                  color={projectColor.get(i.projectId)}
+                />
               </span>
               <span className="min-w-0 truncate font-medium text-ink">
                 {i.title}
@@ -228,16 +216,13 @@ function StatusSection({
             className="w-full rounded-xl border border-line bg-surface p-4 text-left transition-colors hover:bg-black/[0.02]"
           >
             <div className="flex items-start justify-between gap-3">
-              <span
-                className="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-bold"
-                style={{
-                  backgroundColor: `${projectColor.get(i.projectId) ?? "#6366f1"}15`,
-                  color: projectColor.get(i.projectId) ?? "#6366f1",
-                }}
-              >
-                {projectName.get(i.projectId) ?? "—"}
+              <ProjectPill
+                name={projectName.get(i.projectId) ?? "—"}
+                color={projectColor.get(i.projectId)}
+              />
+              <span className="shrink-0">
+                <PriorityBadge priority={i.priority} />
               </span>
-              <PriorityBadge priority={i.priority} />
             </div>
             <p className="mt-2 font-medium text-ink">{i.title}</p>
             {i.kind === "subtask" && i.parentTitle && (

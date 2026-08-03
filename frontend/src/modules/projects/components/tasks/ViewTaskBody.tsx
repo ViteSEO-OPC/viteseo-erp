@@ -24,6 +24,7 @@ import {
   CollapsiblePanel,
   DetailsPanel,
   effortRing,
+  EffortScoreInput,
   EffortSlider,
   formatDate,
   formatDateTime,
@@ -233,12 +234,10 @@ function SubtaskRow({
               </Select>
             </Field>
             <Field label="Effort Score">
-              <Input
-                type="number"
-                min={0}
-                max={10}
+              <EffortScoreInput
                 value={effort}
-                onChange={(e) => setEffort(Number(e.target.value))}
+                // A cleared field falls back to 0 — effort_score is required.
+                onChange={(v) => setEffort(v === '' ? 0 : Number(v))}
               />
             </Field>
             <Field label="Deadline">
@@ -561,7 +560,9 @@ export function ViewTaskBody({
               placeholder="Task name"
             />
           ) : (
-            <h1 className="min-w-0 text-2xl font-bold text-ink wrap-break-word sm:text-3xl">
+            // 24px was set for the 900px modal; on a ~344px phone card it
+            // dominates the panel, so the ladder starts a step lower.
+            <h1 className="min-w-0 text-xl font-bold text-ink wrap-break-word sm:text-2xl md:text-3xl">
               {task.title}
             </h1>
           )}
@@ -645,7 +646,7 @@ export function ViewTaskBody({
                 </Select>
               ) : (
                 <span
-                  className={`inline-flex rounded-lg px-2.5 py-2 text-[11px] font-bold uppercase ${statusPill}`}
+                  className={`inline-flex rounded-lg px-2.5 py-2 text-xs font-bold uppercase tracking-wide ${statusPill}`}
                 >
                   {task.status?.name ?? 'No status'}
                 </span>
@@ -706,23 +707,18 @@ export function ViewTaskBody({
                 />
               ) : (
                 <div
-                  className={`${readonlyField} ${
-                    isOverdue(task.deadline, task.status?.key)
-                      ? 'border-danger/40 font-semibold text-danger'
-                      : ''
-                  }`}
+                  className={`${readonlyField}`}
                 >
                   <CalendarIcon
                     className={`h-4 w-4 shrink-0 ${
                       isOverdue(task.deadline, task.status?.key) ? 'text-danger' : 'text-ink-faint'
                     }`}
                   />
-                  {formatDate(task.deadline)}
-                  {isOverdue(task.deadline, task.status?.key) && (
-                    <span className="shrink-0" title="Overdue" aria-label="Overdue">
-                      ⚠
-                    </span>
-                  )}
+                 <p className={`${
+                    isOverdue(task.deadline, task.status?.key)
+                      ? 'border-danger/40 font-semibold text-danger'
+                      : ''
+                  }`}>{formatDate(task.deadline)}</p>
                 </div>
               )}
             </div>
@@ -1006,7 +1002,9 @@ export function ViewTaskBody({
             </button>
           </div>
 
-          <ul className="mt-4 h-64 space-y-4 overflow-y-auto pr-1">
+          {/* Capped, not fixed — a short or empty thread takes only the room it
+              needs instead of reserving the full scroll height. */}
+          <ul className="mt-4 max-h-64 space-y-4 overflow-y-auto pr-1">
             {comments.map((c) => (
               <li key={c.id} className="flex gap-2">
                 {c.author && <Avatar name={c.author.name} src={c.author.avatar} size={28} />}
@@ -1028,7 +1026,7 @@ export function ViewTaskBody({
         {/* History / activity log */}
         <div className="border-t border-line pt-4 pb-10">
           <p className={`mb-3 ${sectionLabel}`}>History</p>
-          <ul className="space-y-3 overflow-y-auto h-30">
+          <ul className="max-h-30 space-y-3 overflow-y-auto">
             {activity.map((log) => (
               <li key={log.id} className="flex items-start gap-2 text-sm">
                 <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />

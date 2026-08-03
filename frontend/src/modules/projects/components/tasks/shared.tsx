@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Avatar, Badge, ChevronDownIcon, Field, Input, Select, UsersIcon, XIcon } from '@/core/ui';
 import type { User } from '@/core/types';
+import { NamePill } from '../shared/Pills';
 import { useGroupWorkload, useUserWorkload } from '../../hooks';
 import type { ActivityLog, Group, Priority, ProjectStatus, StatusKey, WorkloadLevel } from '../../types';
 
@@ -20,7 +21,7 @@ export const TEAL_OUTLINE = 'border border-[#0f766e] bg-white text-[#0f766e] hov
  * `priorityPill` for the tint.
  */
 export const PILL_SELECT =
-  'h-auto rounded-lg border-0 py-2 pl-2.5 pr-7 text-[11px] font-bold uppercase shadow-none';
+  'h-auto rounded-lg border-0 py-2 pl-2.5 pr-7 text-xs font-bold uppercase tracking-wide shadow-none';
 
 export const statusPill = 'bg-ink-soft/10 text-ink-soft';
 
@@ -31,9 +32,14 @@ export function priorityPill(priority: Priority): string {
   return 'bg-success-soft text-success';
 }
 
-/** Read-only field box in the details panel — white, hairline, rounded (Figma 801:24655). */
+/**
+ * Read-only field box in the details panel — white, hairline, rounded (Figma
+ * 801:24655). Steps down a point below `sm`: the details grid stays two columns
+ * on a phone, and at 14px a full date ("Jul 28, 2026") wrapped onto a second
+ * line inside the box.
+ */
 export const readonlyField =
-  'flex h-10 items-center gap-2.5 rounded-lg border border-line bg-surface px-3 text-sm text-ink';
+  'flex h-10 items-center gap-2 rounded-lg border border-line bg-surface px-2.5 text-[13px] text-ink sm:gap-2.5 sm:px-3 sm:text-sm';
 
 export function formatDate(value?: string | null): string {
   if (!value) return '—';
@@ -75,14 +81,32 @@ export function effortRing(priority: Priority): string {
   return 'border-success text-success';
 }
 
+/**
+ * Every action the backend writes, mapped to the phrase that follows the actor's
+ * name in the History list. Actions are namespaced `entity.verb` (see
+ * TaskService / SubtaskService), which the old generic formatter rendered raw —
+ * "Marco Cruz task.created".
+ */
+const ACTIVITY_PHRASES: Record<string, string> = {
+  'task.created': 'created this task',
+  'task.status_changed': 'changed the status',
+  'subtask.created': 'added a sub-task',
+  'subtask.status_changed': 'changed a sub-task status',
+};
+
 /** Human-readable one-line summary of an activity-log entry. */
 export function activityLine(log: ActivityLog): string {
   const who = log.user?.name ?? 'Someone';
-  if (log.field_changed === 'status_id' || log.action === 'status_changed') {
-    return `${who} changed status`;
-  }
-  const field = log.field_changed ? log.field_changed.replace(/_id$/, '').replace(/_/g, ' ') : '';
-  const verb = log.action.replace(/_/g, ' ');
+
+  const phrase = ACTIVITY_PHRASES[log.action];
+  if (phrase) return `${who} ${phrase}`;
+
+  // Unknown action (an older row, or one this build predates). Never surface the
+  // raw key: drop the `entity.` namespace and humanise what's left.
+  if (log.field_changed === 'status_id') return `${who} changed the status`;
+
+  const verb = (log.action.split('.').pop() ?? log.action).replace(/_/g, ' ');
+  const field = log.field_changed?.replace(/_id$/, '').replace(/_/g, ' ');
   return field ? `${who} ${verb} ${field}` : `${who} ${verb}`;
 }
 
@@ -116,14 +140,14 @@ export function ModalShell({
         aria-label={projectName}
         className="relative z-10 flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-hidden rounded-2xl bg-surface shadow-xl"
       >
-        <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:px-6 sm:py-4">
-          <span className="inline-flex items-center rounded-full bg-[#e8f1fb] px-3.5 py-1.5 text-sm font-semibold text-[#005cb9]">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-6 sm:py-4">
+          <NamePill tone="info" title={projectName}>
             {projectName}
-          </span>
+          </NamePill>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-ink-faint outline-none transition-colors hover:bg-black/5 hover:text-ink focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-faint outline-none transition-colors hover:bg-black/5 hover:text-ink focus-visible:ring-[3px] focus-visible:ring-ring/50"
             aria-label="Close"
           >
             <XIcon className="h-4 w-4" />
@@ -191,6 +215,51 @@ export function EffortSlider({
         <span>10</span>
       </div>
     </div>
+  );
+}
+
+/** Effort scores run on a fixed 0–10 scale (see EffortSlider). */
+export const EFFORT_MIN = 0;
+export const EFFORT_MAX = 10;
+
+/**
+ * Sanitise a typed effort score. `min`/`max` on <input type="number"> only
+ * constrain the spinner buttons — a user can still type "-4" or "42" — so the
+ * raw string is stripped of everything but digits and clamped to 0–10 before it
+ * reaches state. Returns '' for an empty field so "not filled in yet" survives.
+ */
+export function clampEffortInput(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  if (digits === '') return '';
+  return String(Math.min(EFFORT_MAX, Math.max(EFFORT_MIN, Number(digits))));
+}
+
+/** Number input bound to the 0–10 effort scale, used by the subtask forms. */
+export function EffortScoreInput({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: number | string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <Input
+      type="number"
+      inputMode="numeric"
+      min={EFFORT_MIN}
+      max={EFFORT_MAX}
+      step={1}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(clampEffortInput(e.target.value))}
+      // type=number accepts these characters but none are valid on a 0–10
+      // integer scale; blocking them keeps the field from going blank mid-typing.
+      onKeyDown={(e) => {
+        if (['e', 'E', '+', '-', '.', ','].includes(e.key)) e.preventDefault();
+      }}
+    />
   );
 }
 
@@ -523,14 +592,7 @@ export function SubtaskFields({
           </Select>
         </Field>
         <Field label="Effort Score">
-          <Input
-            type="number"
-            min={0}
-            max={10}
-            value={effort}
-            onChange={(e) => onEffort(e.target.value)}
-            placeholder="Required"
-          />
+          <EffortScoreInput value={effort} onChange={onEffort} placeholder="Required (0–10)" />
         </Field>
         <Field label="Deadline">
           {/* Not in the past, and no later than the parent task's due date. */}

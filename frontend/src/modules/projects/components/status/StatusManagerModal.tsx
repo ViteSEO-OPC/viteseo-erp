@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import {
+  Badge,
   Button,
   ConfirmDialog,
   Field,
@@ -143,9 +144,7 @@ export function StatusManagerModal({
                       {s.name}
                     </span>
                     {s.is_protected ? (
-                      <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] font-semibold text-ink-faint">
-                        Default
-                      </span>
+                      <Badge>Default</Badge>
                     ) : (
                       <button
                         type="button"
