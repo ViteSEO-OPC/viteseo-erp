@@ -10,6 +10,8 @@ import {
   patchBenefitProgram,
   deleteBenefitProgram,
   getMyBenefits,
+  getEmployeeAllowances,
+  setEmployeeAllowance,
 } from "@/modules/hr/api/benefit-programs";
 import type { BenefitProgramInput } from "@/modules/hr/types/benefits";
 
@@ -66,5 +68,32 @@ export function useCreateBenefitPlan() {
 
 export function useMyBenefits() {
   return useQuery({ queryKey: MY_KEY, queryFn: getMyBenefits });
+}
+
+// ---- One employee's own allowance amounts (Slice B14) ----
+
+const employeeAllowancesKey = (employeeId: number) =>
+  ["hr", "employees", employeeId, "allowances"] as const;
+
+export function useEmployeeAllowances(employeeId: number) {
+  return useQuery({
+    queryKey: employeeAllowancesKey(employeeId),
+    queryFn: () => getEmployeeAllowances(employeeId),
+    enabled: Number.isFinite(employeeId),
+  });
+}
+
+export function useSetEmployeeAllowance(employeeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ programId, amount }: { programId: number; amount: number | null }) =>
+      setEmployeeAllowance(employeeId, programId, amount),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: employeeAllowancesKey(employeeId) });
+      // The catalogue carries following/overridden counts, so the edit dialog would otherwise
+      // keep promising an edit reaches somebody it no longer reaches.
+      qc.invalidateQueries({ queryKey: PROGRAMS_KEY });
+    },
+  });
 }
 

@@ -29,6 +29,11 @@ class BenefitProgramResource extends JsonResource
             // How many people the rule covers right now — the honest version of "who is on this".
             'covered_count' => app(\App\Modules\Hr\Services\BenefitProgramService::class)
                 ->eligibleCount($this->resource),
+            // Slice B14 — of those, how many an edit to this amount would actually reach. The
+            // dialog claimed "14 enrolled employees will be affected" when the true answer was
+            // nought (B6); it has to be able to say "12 following · 2 with their own amount".
+            'reach' => app(\App\Modules\Hr\Services\BenefitProgramService::class)
+                ->reachOf($this->resource),
             // HMO / company-plan config.
             'deduction_cadence' => $this->deduction_cadence,
             'tiers' => $this->tiers ?? [],

@@ -195,10 +195,28 @@ function AllowanceForm({
           onEmployeeIdsChange={setEmployeeIds}
         />
 
+        {/* Slice B14 — say who this edit actually REACHES. The old copy promised it applied to
+            everyone, which stopped being true the moment one person could be paid their own
+            amount; B6's version of this dialog claimed "14 enrolled employees will be affected"
+            when the true answer was nought, and that is the mistake worth not repeating. */}
         <div className="rounded-lg border border-warning/40 bg-warning-subtle px-3 py-2.5 text-xs text-foreground">
-          {isNew
-            ? "Everyone this covers is paid it from the next payroll cutoff."
-            : "Everyone this covers is paid this amount from the next payroll cutoff. There is one amount per allowance — it applies to all of them."}
+          {isNew ? (
+            "Everyone this covers is paid it from the next payroll cutoff."
+          ) : program.reach.overridden > 0 ? (
+            <>
+              <strong>
+                {program.reach.following} employee{program.reach.following === 1 ? "" : "s"}
+              </strong>{" "}
+              follow this amount and move with it from the next payroll cutoff.{" "}
+              <strong>
+                {program.reach.overridden} {program.reach.overridden === 1 ? "has" : "have"} their
+                own amount
+              </strong>{" "}
+              and will not change — set on their profile, under Compensation.
+            </>
+          ) : (
+            "Everyone this covers is paid this amount from the next payroll cutoff. Nobody has been given their own amount, so it reaches all of them."
+          )}
         </div>
 
         {!isNew && (

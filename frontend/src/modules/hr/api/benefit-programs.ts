@@ -2,6 +2,7 @@ import { apiClient } from "@/core/api-client";
 import type {
   BenefitProgram,
   BenefitProgramInput,
+  EmployeeAllowance,
   MyBenefit,
 } from "@/modules/hr/types/benefits";
 
@@ -45,6 +46,35 @@ export async function createBenefitPlan(
   payload: Record<string, unknown>,
 ): Promise<BenefitProgram> {
   const res = await apiClient.post("/hr/benefit-programs", payload);
+  return res.data.data;
+}
+
+// ---- One employee's own allowance amounts (Slice B14) ----
+
+/**
+ * What this employee is paid, allowance by allowance. Built from the catalogue server-side, so a
+ * new allowance appears here with no code change.
+ *
+ * NOT `/benefits` — that path is the statutory SSS/PhilHealth/Pag-IBIG checklist, a different
+ * table with a near-identical name.
+ */
+export async function getEmployeeAllowances(
+  employeeId: number,
+): Promise<EmployeeAllowance[]> {
+  const res = await apiClient.get(`/hr/employees/${employeeId}/allowances`);
+  return res.data.data;
+}
+
+/** `amount: null` hands the employee back to the programme's amount. */
+export async function setEmployeeAllowance(
+  employeeId: number,
+  programId: number,
+  amount: number | null,
+): Promise<EmployeeAllowance[]> {
+  const res = await apiClient.put(
+    `/hr/employees/${employeeId}/allowances/${programId}`,
+    { amount },
+  );
   return res.data.data;
 }
 

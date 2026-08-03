@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Services;
 use App\Modules\Hr\Models\BenefitProgram;
 use App\Modules\Hr\Models\Employee;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Company → Benefits: the flexible benefit-programs catalogue and per-employee
@@ -237,6 +238,123 @@ class BenefitProgramService
             ->concat($plans)
             ->sortBy('name')
             ->values();
+    }
+
+    /**
+     * This employee's deliberate per-allowance amounts (B14), as `program_id => amount`.
+     *
+     * Empty for almost everybody: an override exists only where somebody typed one, so the common
+     * answer is `[]` and the employee is paid what each programme says.
+     *
+     * ONE QUERY FOR THE WHOLE RUN, not one per employee. Payroll walks every employee and asks
+     * this for each; a query each is the N+1 the performance test already caught once in
+     * `allowancesFor()`. Only rows that actually carry an amount are read, which today is a
+     * handful at most.
+     *
+     * @return array<int, float>
+     */
+    public function overridesFor(Employee $employee): array
+    {
+        return $this->overrideMemo()[(int) $employee->id] ?? [];
+    }
+
+    /** @return array<int, array<int, float>> employee_id => [program_id => amount] */
+    private function overrideMemo(): array
+    {
+        if ($this->overrideMemo !== null) {
+            return $this->overrideMemo;
+        }
+
+        $map = [];
+
+        foreach (
+            DB::table('hr_benefit_enrollments')
+                ->whereNotNull('amount')
+                ->get(['employee_id', 'benefit_program_id', 'amount']) as $row
+        ) {
+            $map[(int) $row->employee_id][(int) $row->benefit_program_id] = (float) $row->amount;
+        }
+
+        return $this->overrideMemo = $map;
+    }
+
+    /** @var array<int, array<int, float>>|null */
+    private ?array $overrideMemo = null;
+
+    /**
+     * Set or clear one employee's own amount for one allowance (B14).
+     *
+     * `$amount === null` hands them back to the programme. Anything else is a deliberate figure,
+     * recorded with who set it and when — without that, a typed amount and a migrated one look
+     * identical, which is precisely what made B6's 56 frozen rows impossible to work through.
+     *
+     * REFUSED IF THE RULE DOES NOT COVER THEM. An override is not a way onto an allowance:
+     * membership is the eligibility rule, and an amount for someone outside it would pay nothing
+     * while looking on screen like an arrangement. Returns false so the caller can 422.
+     */
+    public function setAllowanceAmount(
+        BenefitProgram $program,
+        Employee $employee,
+        ?float $amount,
+        ?int $actorId,
+    ): bool {
+        if ($program->kind !== 'allowance' || ! $this->covers($program, $employee)) {
+            return false;
+        }
+
+        $before = $employee->benefitPrograms()
+            ->where('hr_benefit_programs.id', $program->id)
+            ->first()?->pivot?->amount;
+
+        $values = $amount === null
+            ? ['amount' => null, 'amount_set_by' => null, 'amount_set_at' => null]
+            : ['amount' => round($amount, 2), 'amount_set_by' => $actorId, 'amount_set_at' => now()];
+
+        // A rule-based allowance has no enrolment rows at all, so the row is created BY setting an
+        // override. It means "paid differently", not "a member" — `allowancesFor()` never reads it
+        // as membership.
+        $employee->benefitPrograms()->syncWithoutDetaching([$program->id => $values]);
+
+        $this->overrideMemo = null;
+
+        $programmeAmount = (float) ($program->amount ?? 0);
+        $this->audit->log(
+            'updated', 'Benefits',
+            $amount === null
+                ? "{$employee->user?->name} follows the programme amount for '{$program->name}'"
+                    . ' — ' . number_format((float) $before, 2) . ' → ' . number_format($programmeAmount, 2)
+                : "{$employee->user?->name} is paid " . number_format($amount, 2)
+                    . " for '{$program->name}' instead of " . number_format($programmeAmount, 2),
+            $employee,
+        );
+
+        return true;
+    }
+
+    /**
+     * How many of the people a programme covers follow it, and how many carry their own amount.
+     *
+     * The edit dialog claims an edit will reach N people; without this it counted enrolments and
+     * was wrong for every one of them (B6). An override means the edit does NOT reach that person,
+     * which is the one thing HR needs to know before saving a new figure.
+     *
+     * @return array{following: int, overridden: int}
+     */
+    public function reachOf(BenefitProgram $program): array
+    {
+        $covered = $this->eligibleEmployeeIds($program);
+        $overrides = $this->overrideMemo();
+
+        // Counted off the memo the catalogue has already loaded, not a query per card: the
+        // resource asks this for every programme on the page.
+        $overridden = 0;
+        foreach ($covered as $employeeId) {
+            if (isset($overrides[$employeeId][(int) $program->id])) {
+                $overridden++;
+            }
+        }
+
+        return ['following' => count($covered) - $overridden, 'overridden' => $overridden];
     }
 
     /**

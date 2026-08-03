@@ -180,9 +180,12 @@ class Employee extends Model
             'benefit_program_id',
         )
             // The per-employee columns on the pivot. `employee_share` is what payroll deducts
-            // (Slice 11a) — without this it reads as null and nothing is ever taken. There is no
-            // per-employee allowance AMOUNT: an allowance is worth what its programme says (B6).
-            ->withPivot(['tier', 'employee_share'])
+            // (Slice 11a) — without this it reads as null and nothing is ever taken.
+            //
+            // `amount` is a DELIBERATE allowance override (B14): null means the employee follows
+            // the programme, which is the default and must stay the common case. It is not a
+            // membership — the eligibility rule decides that.
+            ->withPivot(['tier', 'employee_share', 'amount', 'amount_set_by', 'amount_set_at'])
             ->withTimestamps();
     }
 

@@ -12,11 +12,14 @@ use App\Modules\Hr\Models\Employee;
  * `hr_employees` (₱42,000/month). Editing the page changed nobody's payslip, and Gas Allowance had
  * no column at all so it could never be paid. Benefits is now the single source of truth.
  *
- * ONE AMOUNT PER ALLOWANCE (decided 2026-07-29, Slice B6). An enrolment says the employee gets the
- * programme, and the programme says what it is worth — there is no per-employee figure anywhere.
- * Editing an allowance therefore reaches everyone enrolled in it, which is the property this whole
- * slice exists to guarantee. The pivot `amount` that B1's backfill wrote is dropped, along with
- * the reconciliation screen that existed to work through it.
+ * ONE AMOUNT PER ALLOWANCE, UNLESS SOMEONE DELIBERATELY SAYS OTHERWISE (B6, amended by B14 on
+ * 2026-08-03). The programme's amount is what everybody gets, so editing it reaches everybody —
+ * that is the property this whole audit exists to guarantee. A per-employee figure exists only
+ * where a person typed one, and it is stamped with who and when.
+ *
+ * The difference from the bug B1 shipped is provenance, not mechanism: B1's migration wrote an
+ * amount onto all 56 enrolments, so "has its own amount" meant nothing and the Benefits page drove
+ * nobody's pay. Here the column is written by a person or not at all.
  */
 class AllowanceService
 {
@@ -43,14 +46,19 @@ class AllowanceService
         // A status change is therefore followed automatically, which is the drift B5 item 3 and
         // B10 both described.
         $programmes = $this->programs->allowancesFor($employee);
+        $overrides = $this->programs->overridesFor($employee);
 
         $lines = [];
 
         foreach ($programmes as $programme) {
+            // Slice B14 — a deliberate per-employee amount wins over the programme's. Null (the
+            // normal case) means this person follows the programme, so an edit there reaches them.
+            $amount = $overrides[(int) $programme->id] ?? $programme->amount ?? 0;
+
             $lines[] = [
                 'program_id' => (int) $programme->id,
                 'name' => (string) $programme->name,
-                'amount' => $this->toMonthly((float) ($programme->amount ?? 0), (string) $programme->frequency),
+                'amount' => $this->toMonthly((float) $amount, (string) $programme->frequency),
                 // Slice B4 — payroll needs this to know which allowances are compensation.
                 // Unknown values fall back to `de_minimis`, matching the column default: guessing
                 // "taxable" for a value we don't understand would over-withhold.

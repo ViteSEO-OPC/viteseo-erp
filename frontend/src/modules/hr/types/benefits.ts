@@ -107,6 +107,11 @@ export interface BenefitProgram {
   eligibility_statuses: string[];
   /** How many employees the rule covers right now — computed, not stored. */
   covered_count: number;
+  /**
+   * Of those, how many an edit to `amount` would actually reach (B14). `overridden` are the
+   * people carrying their own amount, who will not move.
+   */
+  reach: { following: number; overridden: number };
   // HMO / company-plan config.
   deduction_cadence: string | null; // per_cutoff | monthly
   tiers: BenefitTier[];
@@ -115,6 +120,21 @@ export interface BenefitProgram {
   progress: BenefitProgress | null;
   footer_label: string | null;
   employee_ids: number[];
+}
+
+/** One allowance as it applies to ONE employee (B14) — the employee-profile view. */
+export interface EmployeeAllowance {
+  program_id: number;
+  name: string;
+  frequency: string;
+  tax_treatment: string;
+  color: string | null;
+  /** What the programme pays everybody. */
+  program_amount: number;
+  /** This employee's own amount, or null when they follow the programme. */
+  amount: number | null;
+  set_by: string | null;
+  set_at: string | null;
 }
 
 /** Employee "My Benefits" view — card content only. */

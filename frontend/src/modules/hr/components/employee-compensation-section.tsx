@@ -19,6 +19,7 @@ import {
 import { useRecordSection } from "@/modules/hr/lib/use-record-section";
 import { StatutoryOverridesBlock } from "@/modules/hr/components/statutory-overrides-block";
 import { ContributionEnrolmentBlock } from "@/modules/hr/components/contribution-enrolment-block";
+import { EmployeeAllowancesBlock } from "@/modules/hr/components/employee-allowances-block";
 import {
   BANK_ACCOUNT_TYPES,
   PAY_FREQUENCIES,
@@ -169,6 +170,10 @@ export function EmployeeCompensationSection({
     >
       <div className="space-y-8">
         <FieldGrid specs={pay} editing={editing} form={form} />
+
+        {/* Slice B14 — what replaces the three fixed allowance boxes B9 removed. Rendered from
+            the catalogue, so it follows however many allowances the company has. */}
+        <EmployeeAllowancesBlock employeeId={employee.id} />
 
         <StatutoryOverridesBlock
           employeeId={employee.id}

@@ -119,18 +119,25 @@ class AllowanceSourceOfTruthTest extends HrTestCase
     }
 
     /**
-     * The enrolment carries NO amount at all (B6, 2026-07-29). Guarding the shape rather than the
-     * behaviour: a re-added pivot column would quietly restore the bug where editing an allowance
-     * reached nobody, and every other test here would still pass.
+     * REPLACED 2026-08-03, deliberately. This asserted that `hr_benefit_enrollments` has NO
+     * `amount` column — a shape guard written by B6 so the "editing an allowance reaches nobody"
+     * bug could not creep back unnoticed. B14 re-adds the column on Joshua's instruction, so the
+     * guard has to be retired by a decision rather than deleted quietly when it went red.
+     *
+     * WHAT REPLACES IT is the property that actually mattered: an enrolment carries no amount
+     * UNLESS a person set one. B1's bug was a migration writing amounts onto all 56 rows, not the
+     * existence of the column — so the test now pins the default (attach ⇒ follows the programme)
+     * and `AllowanceOverrideTest` covers the deliberate case.
      */
-    public function test_an_enrolment_carries_no_per_employee_amount(): void
+    public function test_an_enrolment_follows_the_programme_unless_someone_sets_otherwise(): void
     {
         $p = $this->programme('Meal Allowance', 2000);
         $this->employee->benefitPrograms()->attach($p->id);
 
-        $columns = \Illuminate\Support\Facades\Schema::getColumnListing('hr_benefit_enrollments');
-
-        $this->assertNotContains('amount', $columns);
+        $this->assertNull(
+            $this->employee->benefitPrograms()->where('hr_benefit_programs.id', $p->id)->first()?->pivot?->amount,
+            'Enrolling somebody must never write an amount — that is the bug B1 shipped.',
+        );
         $this->assertSame(2000.0, $this->monthly());
     }
 
