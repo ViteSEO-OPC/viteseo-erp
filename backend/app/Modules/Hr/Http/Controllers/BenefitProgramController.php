@@ -9,6 +9,7 @@ use App\Modules\Hr\Http\Resources\BenefitProgramResource;
 use App\Modules\Hr\Http\Resources\MyBenefitResource;
 use App\Modules\Hr\Models\BenefitProgram;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Services\AllowanceService;
 use App\Modules\Hr\Services\BenefitProgramService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -125,8 +126,15 @@ class BenefitProgramController extends Controller
         return $this->employeeAllowances($employee->fresh());
     }
 
-    // GET /api/v1/hr/me/benefit-programs — the caller's own enrolled programs.
-    public function mine(Request $request): JsonResponse
+    /**
+     * GET /api/v1/hr/me/benefit-programs — the caller's own benefits, with what each is worth.
+     *
+     * Slice B12 — the money comes from `AllowanceService`, the same code payroll runs, so the
+     * total on this page and the allowance line on the payslip cannot disagree. A second
+     * implementation of "what an allowance is worth" is exactly the drift this audit exists to
+     * remove.
+     */
+    public function mine(Request $request, AllowanceService $allowances): JsonResponse
     {
         $employee = $request->user()->employee;
 
@@ -134,6 +142,21 @@ class BenefitProgramController extends Controller
             return response()->json(['data' => []]);
         }
 
-        return MyBenefitResource::collection($this->service->forEmployee($employee))->response();
+        // Monthly, per programme, honouring frequency and this employee's own amount (B14).
+        $lines = collect($allowances->linesFor($employee))->keyBy('program_id');
+
+        $programs = $this->service->forEmployee($employee)->each(function (BenefitProgram $program) use ($lines) {
+            if ($program->kind === 'allowance') {
+                $program->setAttribute('monthly_amount', $lines[$program->id]['amount'] ?? 0);
+
+                return;
+            }
+
+            // A company plan's numbers are per-enrolment, so they come off the pivot.
+            $program->setAttribute('employee_share_amount', $program->pivot?->employee_share);
+            $program->setAttribute('employee_tier', $program->pivot?->tier);
+        });
+
+        return MyBenefitResource::collection($programs)->response();
     }
 }

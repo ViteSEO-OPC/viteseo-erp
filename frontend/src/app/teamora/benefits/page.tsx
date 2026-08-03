@@ -1,8 +1,10 @@
 "use client";
 
-import { Headset, Info } from "lucide-react";
+import Link from "next/link";
+import { Headset } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { formatPeso } from "@/core/lib/format";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { BenefitCard } from "@/modules/hr/components/benefit-card";
 import { useMyBenefits } from "@/modules/hr/hooks/use-benefit-programs";
@@ -11,6 +13,13 @@ export default function BenefitsPage() {
   const { data: benefits, isLoading, isError } = useMyBenefits();
   const list = benefits ?? [];
 
+  // Slice B12 — the figure an employee actually wants: what their allowances add up to, so they
+  // can check it against the allowances line on their payslip. Company plans are excluded because
+  // a plan is not money added to pay; its share is a deduction and is shown on its own card.
+  const monthlyAllowances = list
+    .filter((b) => b.kind === "allowance")
+    .reduce((sum, b) => sum + (b.monthly_amount ?? 0), 0);
+
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
@@ -18,14 +27,25 @@ export default function BenefitsPage() {
         subtitle="Overview of your active insurance and allowance programs."
       />
 
-      {/* Open-enrolment notice */}
-      <div className="mt-6 flex items-start gap-3 rounded-card border border-brand/40 bg-brand-subtle px-4 py-3">
-        <Info className="mt-0.5 size-4 shrink-0 text-brand" />
-        <p className="text-sm text-foreground">
-          Your enrolled plans are shown below. Changes can only be made during open
-          enrollment (Nov 1–30, 2026).
-        </p>
-      </div>
+      {/* Slice B12 — what the allowances are worth in total, which is the number that should
+          match the payslip. The banner that used to sit here announced an open-enrolment window
+          (Nov 1–30, 2026) that nothing in the system enforces and no screen can act on; a date
+          invented in the markup is worse than no date. */}
+      {monthlyAllowances > 0 && (
+        <div className="mt-6 rounded-card border border-border bg-card px-4 py-3">
+          <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
+            Your allowances
+          </p>
+          <p className="mt-1 text-2xl font-bold text-foreground">
+            {formatPeso(monthlyAllowances)}
+            <span className="ml-1.5 text-sm font-normal text-muted-foreground">per month</span>
+          </p>
+          <p className="mt-1 text-caption text-muted-foreground">
+            Added to your pay and spread across your payslips — this is the total behind the
+            allowances line on each one.
+          </p>
+        </div>
+      )}
 
       {/* Benefit cards */}
       {isLoading ? (
@@ -59,15 +79,17 @@ export default function BenefitsPage() {
           </span>
           <div>
             <p className="text-sm font-bold text-foreground">
-              Need help with your benefits?
+              Something look wrong?
             </p>
             <p className="text-caption text-muted-foreground">
-              Our support team is available Mon–Fri, 9am – 6pm PHT.
+              Amounts here are what payroll uses. Ask HR if one does not match your payslip.
             </p>
           </div>
         </div>
+        {/* Slice B12 — raise it in the app, where it gets a record and a reply, rather than a
+            mailto address hardcoded in the markup. Concerns already exist as a feature. */}
         <Button asChild variant="outline">
-          <a href="mailto:hr@viteseo.ph?subject=Benefits%20question">Contact Benefits HR</a>
+          <Link href="/teamora/concerns">Raise a concern</Link>
         </Button>
       </div>
     </div>

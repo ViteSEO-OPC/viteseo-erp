@@ -137,12 +137,22 @@ export interface EmployeeAllowance {
   set_at: string | null;
 }
 
-/** Employee "My Benefits" view — card content only. */
+/** Employee "My Benefits" view — their own benefits and what each is worth (B12). */
 export interface MyBenefit {
   id: number;
   name: string;
   category: string;
+  kind: "allowance" | "company";
+  color: string | null;
   status: string;
+  /** Allowances only: what THIS employee is paid per month. Never the company standard. */
+  monthly_amount: number | null;
+  /** Company plans only: what is deducted from their pay. Null ⇒ the company pays it all. */
+  employee_share: string | null;
+  tier: string | null;
+  /** Allowances only — it changes their withholding, so it is theirs to see. */
+  tax_treatment: string | null;
+  description: string | null;
   details: BenefitDetail[];
   progress: BenefitProgress | null;
   footer_label: string | null;
