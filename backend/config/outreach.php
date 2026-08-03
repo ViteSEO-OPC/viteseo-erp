@@ -60,15 +60,41 @@ return [
     | service account on-GCP) which must hold roles/iam.serviceAccountTokenCreator on the sync SA.
     |
     | `auth`            keyless (preferred, no key) | key (legacy JSON-key fallback only)
+    |                   | oauth (per-mailbox user consent — see below)
     | `service_account` the SA impersonated for delegation (keyless mode); e.g. crm-inbound-sync@…
     | `credentials`     path to a downloadable SA JSON key — used ONLY when auth=key (fallback)
     |
     | gmail.readonly is sufficient for sync; switch to gmail.modify only if we later mark read.
+    | The scopes below are shared by ALL THREE auth modes — changing them forces every OAuth-
+    | connected mailbox back through consent, so treat the list as a migration, not a setting.
+    |
+    |--------------------------------------------------------------------------
+    | auth=oauth — per-mailbox user consent
+    |--------------------------------------------------------------------------
+    | Delegation proves "this Workspace's admin authorised us for every mailbox in the domain",
+    | which is impossible for a mailbox on someone else's Workspace or on consumer Gmail. Those
+    | can only be reached by the user consenting, leaving us holding a per-mailbox refresh token
+    | (crm_mailbox_oauth_tokens, encrypted at rest). Same GoogleCredentialSource seam, different
+    | proof — GmailMailboxSync is unchanged either way.
+    |
+    | `client_id` / `client_secret`  the OAuth client the grants are issued to; required only when
+    |                                auth=oauth, and read at refresh time, never at boot
+    | `redirect_uri`                 where Google returns the user after consent. Not used by the
+    |                                credential itself — it belongs to the consent flow, and is
+    |                                surfaced here so both halves read the ONE value. Must match a
+    |                                redirect URI registered on the OAuth client EXACTLY.
+    |
+    | NOT ACTIVE. `auth` still defaults to keyless; setting OUTREACH_GMAIL_AUTH=oauth before a
+    | consent flow exists would leave every mailbox with no stored grant and therefore no way to
+    | authenticate. The capability is wired; switching it on is a later, deliberate step.
     */
     'gmail' => [
         'auth' => env('OUTREACH_GMAIL_AUTH', 'keyless'),
         'service_account' => env('GMAIL_SYNC_SERVICE_ACCOUNT'),
         'credentials' => env('GOOGLE_APPLICATION_CREDENTIALS'),
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect_uri' => env('GOOGLE_REDIRECT_URI'),
         'scopes' => ['https://www.googleapis.com/auth/gmail.readonly'],
     ],
 

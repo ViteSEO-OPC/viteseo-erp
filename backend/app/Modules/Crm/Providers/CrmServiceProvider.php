@@ -47,6 +47,7 @@ use App\Modules\Crm\Services\Kpi\KpiConfig;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
 use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
+use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
 use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Mail\Providers\SmtpEmailProvider;
 use App\Modules\Crm\Services\Ranking\RankingConfig;
@@ -111,14 +112,18 @@ class CrmServiceProvider extends ServiceProvider
         });
 
         // How a Google client proves it may read a mailbox: keyless domain-wide delegation by
-        // default, the legacy JSON key under auth=key. Resolved lazily and never contacted at boot,
-        // so a deployment with the Google env vars unset still boots — the credential is only
-        // exercised by the queued SyncMailboxJob.
-        $this->app->singleton(GoogleCredentialSource::class, function (): GoogleCredentialSource {
+        // default, the legacy JSON key under auth=key, per-mailbox user consent under auth=oauth.
+        // Resolved lazily and never contacted at boot, so a deployment with the Google env vars
+        // unset still boots — the credential is only exercised by the queued SyncMailboxJob.
+        //
+        // The token store is resolved from the container rather than left to the factory's default
+        // so that one binding governs it everywhere: the eventual consent flow writes grants through
+        // the same instance (and the same expiry skew) this reads them through.
+        $this->app->singleton(GoogleCredentialSource::class, function (Application $app): GoogleCredentialSource {
             /** @var array<string, mixed> $gmail */
             $gmail = (array) config('outreach.gmail', []);
 
-            return GoogleCredentialSourceFactory::fromConfig($gmail);
+            return GoogleCredentialSourceFactory::fromConfig($gmail, $app->make(MailboxOauthTokenStore::class));
         });
 
         // Inbound sync providers, resolved PER MAILBOX from crm_mailbox_syncs.provider rather than

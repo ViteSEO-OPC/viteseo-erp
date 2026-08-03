@@ -8,13 +8,18 @@ use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
 use App\Modules\Crm\Services\Mail\Contracts\MailboxSyncProvider;
 use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
 use App\Modules\Crm\Services\Mail\Google\KeylessDelegatedCredentials;
+use App\Modules\Crm\Services\Mail\Google\OAuthUserCredentials;
 use App\Modules\Crm\Services\Mail\Google\ServiceAccountKeyCredentials;
 use App\Modules\Crm\Services\Mail\Inbound\MailboxFetchResult;
+use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
 use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Mail\Providers\GmailMailboxSync;
 use App\Modules\Crm\Services\Outreach\InboundEmailService;
 use Google\Client as GoogleClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Env;
+use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
 use RuntimeException;
 use Tests\TestCase;
@@ -185,6 +190,152 @@ class MailboxSyncResolutionTest extends TestCase
 
         (new KeylessDelegatedCredentials('', ['https://www.googleapis.com/auth/gmail.readonly']))
             ->authorize(new GoogleClient, 'crm@company.test');
+    }
+
+    // ── auth=oauth: the third credential, wired but not switched on ─────────────────────────────
+
+    /** Exact-match opt-in, like `key` — the branch exists, nothing selects it by accident. */
+    public function test_the_factory_builds_oauth_credentials_when_auth_is_oauth(): void
+    {
+        $this->assertInstanceOf(
+            OAuthUserCredentials::class,
+            GoogleCredentialSourceFactory::fromConfig([
+                'auth' => 'oauth',
+                'client_id' => 'client-id.apps.googleusercontent.com',
+                'client_secret' => 'client-secret',
+            ]),
+        );
+    }
+
+    /** A typo must not silently switch a deployment's auth mode — it falls back like any other value. */
+    public function test_a_misspelled_oauth_value_still_falls_back_to_keyless(): void
+    {
+        $this->assertInstanceOf(
+            KeylessDelegatedCredentials::class,
+            GoogleCredentialSourceFactory::fromConfig(['auth' => 'oauht']),
+        );
+    }
+
+    /**
+     * THE regression guard for this step: wiring OAuth in must not change what a deployment gets
+     * when it configures nothing. Read from the config FILE with the env var cleared, NOT from
+     * `config('outreach.gmail.auth')`.
+     *
+     * The earlier version asserted the resolved value, which conflated two different facts: what
+     * the code ships as its default, and what the machine running the tests happens to have in its
+     * .env. The moment an environment legitimately opted into OUTREACH_GMAIL_AUTH=oauth, that
+     * assertion began failing while nothing about the shipped code had changed — a test reporting
+     * on its own environment rather than on the codebase. Only the first fact is an invariant, and
+     * it is the one this pins.
+     *
+     * The other half of the old assertion is not lost: that the container honours whatever IS
+     * configured is covered by test_the_container_resolves_the_configured_credential_source and
+     * test_the_container_resolves_oauth_credentials_when_configured, and that an unset or
+     * unrecognised value lands on keyless is covered by the two factory tests above — all of them
+     * env-independent because they pass the config in explicitly.
+     */
+    public function test_the_shipped_config_default_is_keyless(): void
+    {
+        $previous = Env::get('OUTREACH_GMAIL_AUTH');
+
+        // Cleared from all three adapters Laravel's env repository reads (putenv, $_ENV, $_SERVER),
+        // so `env('OUTREACH_GMAIL_AUTH', …)` inside the config file falls through to its default.
+        putenv('OUTREACH_GMAIL_AUTH');
+        unset($_ENV['OUTREACH_GMAIL_AUTH'], $_SERVER['OUTREACH_GMAIL_AUTH']);
+
+        try {
+            /** @var array{gmail: array{auth: string}} $shipped */
+            $shipped = require base_path('config/outreach.php');
+        } finally {
+            // Restored in a finally so a failure here cannot leak an altered environment into the
+            // rest of the suite.
+            if ($previous !== null) {
+                putenv('OUTREACH_GMAIL_AUTH='.$previous);
+                $_ENV['OUTREACH_GMAIL_AUTH'] = $previous;
+                $_SERVER['OUTREACH_GMAIL_AUTH'] = $previous;
+            }
+        }
+
+        $this->assertSame('keyless', $shipped['gmail']['auth']);
+    }
+
+    /** The container selects OAuth from config, the same way it already selects the other two. */
+    public function test_the_container_resolves_oauth_credentials_when_configured(): void
+    {
+        config([
+            'outreach.gmail.auth' => 'oauth',
+            'outreach.gmail.client_id' => 'client-id.apps.googleusercontent.com',
+            'outreach.gmail.client_secret' => 'client-secret',
+        ]);
+
+        $this->assertInstanceOf(OAuthUserCredentials::class, app(GoogleCredentialSource::class));
+    }
+
+    /**
+     * The config block exposes the OAuth client settings at all. Asserted as key EXISTENCE only,
+     * never as values: a failed assertion prints what it compared, and this array holds the client
+     * secret in a real deployment.
+     */
+    public function test_the_gmail_config_block_exposes_the_oauth_client_settings(): void
+    {
+        /** @var array<string, mixed> $gmail */
+        $gmail = (array) config('outreach.gmail');
+
+        $this->assertTrue(array_key_exists('client_id', $gmail));
+        $this->assertTrue(array_key_exists('client_secret', $gmail));
+        $this->assertTrue(array_key_exists('redirect_uri', $gmail));
+    }
+
+    /**
+     * Wiring proven by behaviour, not by instanceof: the credential must use the CONTAINER's token
+     * store, so the consent flow that writes grants and the sync that reads them share one instance
+     * and one expiry skew.
+     *
+     * A store with a 10-minute skew calls a token expiring in 5 minutes spent; the factory's own
+     * default (60s) would call it perfectly usable. So a refresh happening at all is proof the
+     * container's instance reached the credential.
+     */
+    public function test_the_credential_uses_the_containers_token_store(): void
+    {
+        Http::preventStrayRequests();
+        Http::fake(['https://oauth2.googleapis.com/token' => Http::response([
+            'access_token' => 'refreshed-by-the-container-store', 'expires_in' => 3600,
+        ])]);
+
+        $this->app->singleton(MailboxOauthTokenStore::class, fn () => new MailboxOauthTokenStore(600));
+        config([
+            'outreach.gmail.auth' => 'oauth',
+            'outreach.gmail.client_id' => 'client-id.apps.googleusercontent.com',
+            'outreach.gmail.client_secret' => 'client-secret',
+        ]);
+
+        app(MailboxOauthTokenStore::class)
+            ->put('crm@company.test', 'stored-access', 'stored-refresh', Carbon::now()->addMinutes(5));
+
+        $client = new GoogleClient;
+        app(GoogleCredentialSource::class)->authorize($client, 'crm@company.test');
+
+        $this->assertSame('refreshed-by-the-container-store', $client->getAccessToken()['access_token']);
+    }
+
+    /** OAuth inherits the one scope list, so all three credentials ask Google for the same access. */
+    public function test_oauth_credentials_apply_the_configured_scopes(): void
+    {
+        Http::preventStrayRequests();
+        $store = new MailboxOauthTokenStore;
+        $store->put('crm@company.test', 'stored-access', 'stored-refresh', Carbon::now()->addHour());
+
+        $credentials = GoogleCredentialSourceFactory::fromConfig([
+            'auth' => 'oauth',
+            'client_id' => 'client-id.apps.googleusercontent.com',
+            'client_secret' => 'client-secret',
+            'scopes' => ['https://www.googleapis.com/auth/gmail.readonly'],
+        ], $store);
+
+        $client = new GoogleClient;
+        $credentials->authorize($client, 'crm@company.test');
+
+        $this->assertSame(['https://www.googleapis.com/auth/gmail.readonly'], $client->getScopes());
     }
 
     /**
