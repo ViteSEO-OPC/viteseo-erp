@@ -87,6 +87,10 @@ function AllowanceForm({
   const [amount, setAmount] = useState(program?.amount ?? "");
   const [frequency, setFrequency] = useState(program?.frequency ?? "monthly");
   const [tax, setTax] = useState(program?.tax_treatment ?? "de_minimis");
+  // Slice B16 — this allowance's OWN de-minimis ceiling. Blank means none recorded, which keeps
+  // the whole amount tax-free; ceilings are per item and are never pooled with another benefit's.
+  const [ceiling, setCeiling] = useState(program?.deminimis_ceiling ?? "");
+  const [ceilingPeriod, setCeilingPeriod] = useState(program?.ceiling_period ?? "monthly");
   const [mode, setMode] = useState<EligibilityMode>(
     (program?.eligibility as EligibilityMode) ?? "all",
   );
@@ -108,6 +112,8 @@ function AllowanceForm({
       amount: Number(amount),
       frequency,
       tax_treatment: tax,
+      deminimis_ceiling: tax === "taxable" || ceiling === "" ? null : Number(ceiling),
+      ceiling_period: tax === "taxable" || ceiling === "" ? null : ceilingPeriod,
       eligibility: mode,
       // Sent only for the mode that uses them, so switching mode cannot leave a stale rule behind.
       eligibility_statuses: mode === "status" ? statuses : [],
@@ -184,6 +190,49 @@ function AllowanceForm({
         </div>
 
         <Segmented label="Tax treatment" options={TAX_TREATMENTS} value={tax} onChange={setTax} />
+
+        {/* Slice B16 — a de-minimis benefit is exempt only UP TO its own statutory ceiling, and
+            the ceilings cannot be pooled. Anything above joins the ₱90,000 13th-month-and-other-
+            benefits exemption rather than being taxed outright. */}
+        {tax !== "taxable" && (
+          <div className="rounded-lg border border-border bg-card p-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-40 flex-1 space-y-1.5">
+                <Label htmlFor="a-ceiling">Tax-free ceiling for this allowance</Label>
+                <Input
+                  id="a-ceiling"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="None — fully tax-free"
+                  value={ceiling}
+                  onChange={(e) => setCeiling(e.target.value)}
+                />
+              </div>
+              {ceiling !== "" && (
+                <div className="min-w-36 space-y-1.5">
+                  <Label htmlFor="a-ceiling-period">Per</Label>
+                  <SimpleSelect
+                    id="a-ceiling-period"
+                    value={ceilingPeriod}
+                    onValueChange={setCeilingPeriod}
+                    options={[
+                      { value: "monthly", label: "Month" },
+                      { value: "semester", label: "Semester" },
+                      { value: "annual", label: "Year" },
+                    ]}
+                  />
+                </div>
+              )}
+            </div>
+            <p className="mt-2 text-caption text-muted-foreground">
+              BIR sets a limit per benefit — rice ₱2,500/month, uniform ₱8,000/year, medical cash
+              allowance ₱2,000/semester. Anything above the limit is not taxed straight away: it
+              counts toward the ₱90,000 covering 13th month pay and other benefits. Leave blank if
+              this allowance has no statutory limit.
+            </p>
+          </div>
+        )}
 
         <EligibilityPicker
           mode={mode}

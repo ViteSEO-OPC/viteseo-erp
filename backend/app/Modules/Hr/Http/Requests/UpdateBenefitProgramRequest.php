@@ -30,6 +30,10 @@ class UpdateBenefitProgramRequest extends FormRequest
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'frequency' => ['sometimes', 'string', 'max:20'],
             'tax_treatment' => ['sometimes', 'in:de_minimis,taxable'],
+            // Slice B16 — this benefit's OWN statutory ceiling. Null = none recorded, which keeps
+            // the whole amount exempt. Ceilings are per item and are never pooled.
+            'deminimis_ceiling' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:9999999.99'],
+            'ceiling_period' => ['sometimes', 'nullable', 'in:monthly,semester,annual'],
             // Who the programme is for. `status` carries the list below; `custom` carries
             // `employee_ids`. The old `regular` value is gone — it was the only status the model
             // could express, and is now `status` with one entry.

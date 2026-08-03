@@ -115,19 +115,23 @@ class PremiumPayTaxTest extends HrTestCase
 
     // --- de-minimis ceiling ---------------------------------------------------------
 
-    private function withAllowances(float $monthly, ?float $cap): array
+    private function withAllowances(float $monthly, ?float $cap, ?float $ceiling = null): array
     {
         // Slice B1 — allowances are read from Company → Benefits, not the employee's columns.
+        // Slice B16 — `$ceiling` is this BENEFIT's own de-minimis limit; `$cap` is the separate
+        // ₱90,000 exemption for 13th month pay and other benefits, which the excess joins.
         $this->employee->benefitPrograms()->detach();
         if ($monthly > 0) {
             $program = \App\Modules\Hr\Models\BenefitProgram::create([
                 'name' => 'Meal Allowance ' . uniqid(), 'category' => 'allowance', 'kind' => 'allowance',
                 'amount' => $monthly, 'frequency' => 'monthly', 'tax_treatment' => 'de_minimis',
+                'deminimis_ceiling' => $ceiling,
+                'ceiling_period' => $ceiling === null ? null : 'monthly',
                 'eligibility' => 'all',
             ]);
             $this->employee->benefitPrograms()->attach($program->id);
         }
-        PayrollSetting::current()->update(['deminimis_annual_cap' => $cap]);
+        PayrollSetting::current()->update(['other_benefits_annual_cap' => $cap]);
 
         return app(PayrollService::class)->payslipFor(
             employee: $this->employee->fresh(),
@@ -137,36 +141,54 @@ class PremiumPayTaxTest extends HrTestCase
             workingDaysInPeriod: 11,
             dist: [
                 'index' => 0, 'count' => 2, 'deduction_timing' => 'every', 'tax_timing' => 'every',
-                'deminimis_annual_cap' => $cap,
+                'other_benefits_annual_cap' => $cap,
             ],
         );
     }
 
-    /** No ceiling set → allowances stay entirely tax-free, exactly as before. */
-    public function test_without_a_ceiling_allowances_are_not_taxed(): void
+    /** No ceiling recorded on the benefit → entirely tax-free, exactly as before. */
+    public function test_a_benefit_with_no_ceiling_is_not_taxed(): void
     {
         $none = $this->withAllowances(0, null);
         $withAllowance = $this->withAllowances(5000, null);
 
         $this->assertSame($none['withholding_tax'], $withAllowance['withholding_tax']);
-        // …but they still reach gross.
+        // …but it still reaches gross.
         $this->assertGreaterThan($none['gross'], $withAllowance['gross']);
     }
 
-    /** Below the ceiling → still tax-free. */
-    public function test_allowances_under_the_ceiling_are_not_taxed(): void
+    /** Under the benefit's own ceiling → tax-free, and the ₱90,000 bucket never comes into it. */
+    public function test_an_amount_under_the_benefits_own_ceiling_is_not_taxed(): void
     {
         $none = $this->withAllowances(0, 90000);
-        $under = $this->withAllowances(5000, 90000); // 60,000/yr, under 90,000
+        $under = $this->withAllowances(2000, 90000, 2500); // rice, under its ₱2,500 ceiling
 
         $this->assertSame($none['withholding_tax'], $under['withholding_tax']);
     }
 
-    /** Above it → only the EXCESS is taxed. */
-    public function test_only_the_excess_over_the_ceiling_is_taxed(): void
+    /**
+     * REWRITTEN FOR B16. This asserted the old rule — that anything above a single pooled cap was
+     * taxed immediately. It is not: the excess over a benefit's own ceiling joins the ₱90,000
+     * exemption for 13th month pay and other benefits, and only what is over THAT is taxable.
+     */
+    public function test_an_excess_under_the_annual_bucket_is_still_not_taxed(): void
     {
-        $under = $this->withAllowances(5000, 90000);   // 60,000/yr
-        $over = $this->withAllowances(10000, 90000);   // 120,000/yr → 30,000 excess
+        $none = $this->withAllowances(0, 90000);
+        // ₱500/month over the ceiling ⇒ ₱6,000 a year, nowhere near ₱90,000.
+        $over = $this->withAllowances(3000, 90000, 2500);
+
+        $this->assertSame(
+            $none['withholding_tax'],
+            $over['withholding_tax'],
+            'A small excess used to be taxed in full — that over-withheld for almost everybody.',
+        );
+    }
+
+    /** Only what exceeds the ₱90,000 bucket is compensation. */
+    public function test_only_the_amount_over_the_annual_bucket_is_taxed(): void
+    {
+        $under = $this->withAllowances(3000, 90000, 2500);   // ₱6,000/yr into the bucket
+        $over = $this->withAllowances(15000, 90000, 2500);   // ₱150,000/yr ⇒ ₱60,000 over
 
         $this->assertGreaterThan($under['withholding_tax'], $over['withholding_tax']);
     }

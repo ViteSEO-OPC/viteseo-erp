@@ -79,7 +79,7 @@ class PayrollController extends Controller
             'tax_timing' => $setting->tax_timing,
             'anchor_date' => $setting->anchor_date?->toDateString(),
             'pay_delay_days' => $setting->pay_delay_days,
-            'deminimis_annual_cap' => $setting->deminimis_annual_cap === null ? null : (float) $setting->deminimis_annual_cap,
+            'other_benefits_annual_cap' => $setting->other_benefits_annual_cap === null ? null : (float) $setting->other_benefits_annual_cap,
             'periods_per_year' => PayScheduleService::periodsPerYear($setting->frequency),
             'current_period' => $this->schedule->currentPeriod($setting),
             // Active pay groups (per-employee frequencies) — each runs on its own period.

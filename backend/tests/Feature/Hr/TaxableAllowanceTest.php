@@ -64,11 +64,18 @@ class TaxableAllowanceTest extends HrTestCase
      * employee against themselves. `custom` is the mode that means "these named people", which is
      * exactly what a two-employee comparison needs.
      */
-    private function programme(string $name, float $amount, string $treatment): BenefitProgram
-    {
+    private function programme(
+        string $name,
+        float $amount,
+        string $treatment,
+        ?float $ceiling = null,
+    ): BenefitProgram {
         return BenefitProgram::create([
             'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => $amount, 'frequency' => 'monthly', 'tax_treatment' => $treatment,
+            // Slice B16 — the benefit's OWN de-minimis ceiling. Null keeps it fully exempt.
+            'deminimis_ceiling' => $ceiling,
+            'ceiling_period' => $ceiling === null ? null : 'monthly',
             'eligibility' => 'custom',
         ]);
     }
@@ -83,7 +90,7 @@ class TaxableAllowanceTest extends HrTestCase
             periodsPerYear: 24, workingDaysInPeriod: 11,
             dist: [
                 'index' => 0, 'count' => 2, 'deduction_timing' => 'every', 'tax_timing' => 'every',
-                'cycle_end' => '2026-07-31', 'deminimis_annual_cap' => $cap,
+                'cycle_end' => '2026-07-31', 'other_benefits_annual_cap' => $cap,
             ],
         );
     }
@@ -151,17 +158,23 @@ class TaxableAllowanceTest extends HrTestCase
         $this->assertSame($mixed, $this->slip($control, 90000)['withholding_tax']);
     }
 
-    /** The de-minimis excess is still taxed — Slice 10's rule survives the split. */
-    public function test_de_minimis_above_the_ceiling_is_still_taxed(): void
+    /**
+     * REWRITTEN FOR B16. This used to prove that the de-minimis excess is taxed immediately
+     * against one pooled cap. It is not, and it never was: the excess over a benefit's OWN
+     * ceiling joins the ₱90,000 exemption for 13th month pay and other benefits, and only the
+     * amount over THAT is compensation. What survives from Slice 10 is the shape — an excess is
+     * eventually taxable — not the arithmetic.
+     */
+    public function test_the_excess_over_a_benefits_ceiling_is_taxed_only_above_the_annual_bucket(): void
     {
         $employee = $this->employee('E-001');
-        $employee->benefitPrograms()->attach($this->programme('Meal', 5000, 'de_minimis')->id);
+        // ₱5,000/mo against a ₱2,500 ceiling ⇒ ₱30,000 a year into the bucket.
+        $employee->benefitPrograms()->attach($this->programme('Meal', 5000, 'de_minimis', 2500)->id);
 
-        // ₱5,000/mo = ₱60,000/yr. A ₱12,000 ceiling leaves ₱48,000 taxable.
-        $tight = $this->slip($employee, 12000)['withholding_tax'];
-        $loose = $this->slip($employee, 90000)['withholding_tax'];
+        $tight = $this->slip($employee, 12000)['withholding_tax'];   // bucket ₱12,000 ⇒ ₱18,000 over
+        $loose = $this->slip($employee, 90000)['withholding_tax'];   // bucket ₱90,000 ⇒ nothing over
 
-        $this->assertGreaterThan($loose, $tight, 'the excess above the ceiling is compensation');
+        $this->assertGreaterThan($loose, $tight, 'only what exceeds the bucket is compensation');
     }
 
     /** No ceiling set means the de-minimis side is entirely tax-free, as before. */

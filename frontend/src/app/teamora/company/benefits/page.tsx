@@ -236,7 +236,7 @@ function DeMinimisCeiling() {
         frequency: settings.frequency,
         deduction_timing: settings.deduction_timing,
         tax_timing: settings.tax_timing,
-        deminimis_annual_cap: next,
+        other_benefits_annual_cap: next,
       });
       toast.success(next === null ? "Ceiling removed" : "Tax-free ceiling updated");
     } catch {
@@ -247,31 +247,35 @@ function DeMinimisCeiling() {
   return (
     <div className="rounded-card border border-border bg-card p-4">
       <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
-        Tax-free ceiling (per year)
+        13th month pay &amp; other benefits — tax-free ceiling (per year)
       </p>
       <input
         type="number"
         min={0}
         step="0.01"
         inputMode="decimal"
-        defaultValue={settings?.deminimis_annual_cap ?? ""}
+        defaultValue={settings?.other_benefits_annual_cap ?? ""}
         disabled={!settings || updateMut.isPending}
-        placeholder="No ceiling — allowances are fully tax-free"
+        placeholder="₱90,000 — the statutory figure"
         className="mt-1.5 h-9 w-full max-w-sm rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         onBlur={(e) => {
           const raw = e.target.value.trim();
           const next = raw === "" ? null : Number(raw);
-          if (next !== (settings?.deminimis_annual_cap ?? null)) {
+          if (next !== (settings?.other_benefits_annual_cap ?? null)) {
             save(next);
           }
         }}
       />
+      {/* Slice B16 — this box used to be labelled the de-minimis cap and applied to the total of
+          every tax-free allowance. That is two different rules run together: each de-minimis
+          benefit has its OWN ceiling (set on the allowance itself), and ₱90,000 is the separate
+          exemption covering 13th month pay and other benefits. */}
       <p className="mt-2 text-caption text-muted-foreground">
-        Allowances marked <strong>tax-free</strong> below stay untaxed up to this much a year;
-        anything above it is taxed as compensation on the payslip. Allowances marked{" "}
-        <strong>taxable</strong> are compensation in full and ignore this ceiling. Leave blank for
-        no ceiling. The BIR reference figure is ₱90,000, but the right number for your mix of
-        benefits is yours to set.
+        The statutory <strong>₱90,000</strong> covers 13th month pay, bonuses, and anything an
+        allowance pays <em>above its own de-minimis ceiling</em>. Each allowance carries that
+        ceiling itself — set it when you add or edit one. Only what exceeds ₱90,000 in a year is
+        taxed as compensation. Allowances marked <strong>taxable</strong> are compensation in full
+        and never touch this.
       </p>
     </div>
   );

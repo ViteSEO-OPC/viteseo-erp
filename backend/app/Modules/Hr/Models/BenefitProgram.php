@@ -54,6 +54,8 @@ class BenefitProgram extends Model
         'status',
         'frequency',
         'tax_treatment',
+        'deminimis_ceiling',
+        'ceiling_period',
         'eligibility',
         'eligibility_statuses',
         'deduction_cadence',

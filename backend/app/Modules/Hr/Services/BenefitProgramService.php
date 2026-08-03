@@ -517,6 +517,15 @@ class BenefitProgramService
             // Allowance config.
             'frequency' => $data['frequency'] ?? $existing?->frequency ?? 'monthly',
             'tax_treatment' => $data['tax_treatment'] ?? $existing?->tax_treatment ?? 'de_minimis',
+            // Slice B16 — the per-item de-minimis ceiling. Cleared when the allowance is marked
+            // taxable, because a ceiling on compensation-in-full means nothing and would come
+            // back to life if the treatment were switched again.
+            'deminimis_ceiling' => ($data['tax_treatment'] ?? $existing?->tax_treatment) === 'taxable'
+                ? null
+                : (array_key_exists('deminimis_ceiling', $data) ? $data['deminimis_ceiling'] : $existing?->deminimis_ceiling),
+            'ceiling_period' => ($data['tax_treatment'] ?? $existing?->tax_treatment) === 'taxable'
+                ? null
+                : (array_key_exists('ceiling_period', $data) ? $data['ceiling_period'] : $existing?->ceiling_period),
             'eligibility' => $data['eligibility'] ?? $existing?->eligibility ?? 'all',
             // Only meaningful in the `status` mode; cleared otherwise so a mode change can't leave
             // a stale list behind that silently comes back if the mode is switched again.

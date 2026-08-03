@@ -24,6 +24,9 @@ class BenefitProgramResource extends JsonResource
             // Allowance config.
             'frequency' => $this->frequency,
             'tax_treatment' => $this->tax_treatment,
+            // Slice B16 — this benefit's own de-minimis ceiling and the period it is stated in.
+            'deminimis_ceiling' => $this->deminimis_ceiling,
+            'ceiling_period' => $this->ceiling_period,
             'eligibility' => $this->eligibility,
             'eligibility_statuses' => $this->eligibility_statuses ?? [],
             // How many people the rule covers right now — the honest version of "who is on this".

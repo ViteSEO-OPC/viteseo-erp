@@ -103,6 +103,10 @@ export interface BenefitProgram {
   // Allowance config.
   frequency: string; // monthly | semi_monthly | annual
   tax_treatment: string; // de_minimis | taxable
+  /** This benefit's OWN statutory ceiling (B16). Null = none recorded ⇒ fully tax-free. */
+  deminimis_ceiling: string | null;
+  /** The period the ceiling is stated in: monthly | semester | annual. */
+  ceiling_period: string | null;
   eligibility: string; // all | status | management | custom
   /** Only meaningful when `eligibility` is "status". */
   eligibility_statuses: string[];

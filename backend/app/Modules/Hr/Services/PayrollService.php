@@ -159,24 +159,26 @@ class PayrollService
         // the programme, so marking one "taxable" changed nothing on the payslip and the company
         // quietly under-withheld. Gross pay is unaffected either way: the split only decides how
         // much of the same money is compensation.
-        $allowanceSplit = $this->allowances->monthlyByTaxTreatmentFor($employee);
+        $allowanceSplit = $this->allowances->monthlyTaxBucketsFor($employee);
 
-        // A taxable allowance is compensation in full — the de-minimis ceiling has nothing to do
-        // with it. Already a MONTHLY figure, which is what the withholding base is measured in.
+        // A taxable allowance is compensation in full — no ceiling applies to it at all. Already a
+        // MONTHLY figure, which is what the withholding base is measured in.
         $taxableMonthly += $allowanceSplit['taxable'];
 
-        // De-minimis allowances are tax-free only up to the company's annual ceiling; the excess
-        // is compensation. The ceiling is measured against the de-minimis portion ALONE — counting
-        // taxable allowances toward it would let a taxable allowance consume the tax-free room
-        // that belongs to the de-minimis ones, and tax that room a second time.
-        // No ceiling set ⇒ nothing extra is taxable, as before.
-        $perPeriodDeMinimis = $periodsPerYear > 0
-            ? round(($allowanceSplit['de_minimis'] * 12) / $periodsPerYear, 2)
-            : 0.0;
-        $taxableMonthly += $this->taxableAllowanceMonthly(
-            $perPeriodDeMinimis,
-            $periodsPerYear,
-            $dist['deminimis_annual_cap'] ?? null,
+        // Slice B16 — the amount above each benefit's OWN statutory ceiling is not taxed here. It
+        // joins the "13th month pay and other benefits" bucket, which is exempt up to ₱90,000 a
+        // year (TRAIN); only what is over that figure is compensation.
+        //
+        // The old code taxed the excess immediately against a single pooled cap, which over-withheld
+        // for everybody whose benefits sit under ₱90,000 — the normal case — and applied a rule
+        // (one aggregate de-minimis cap) that does not exist.
+        //
+        // 13th-month pay is NOT added here: this system reports it but never pays it, and
+        // withholding on money no payslip disbursed would be worse than the gap it closes. The
+        // bucket is built to take it the moment a 13th-month run exists (B17).
+        $taxableMonthly += $this->otherBenefitsTaxableMonthly(
+            $allowanceSplit['other_benefits'] * 12,
+            $dist['other_benefits_annual_cap'] ?? null,
         );
 
         // Slice 11a — recurring benefit shares (HMO, union dues) from Company → Benefits.
@@ -275,14 +277,15 @@ class PayrollService
      * limits we can't keep current would be worse than no table. HR sets one annual ceiling for
      * the total instead. A null ceiling means "all of it is tax-free", exactly as before.
      */
-    private function taxableAllowanceMonthly(float $perPeriodAllowance, int $periodsPerYear, mixed $annualCap): float
+    private function otherBenefitsTaxableMonthly(float $annualOtherBenefits, mixed $annualCap): float
     {
-        if ($annualCap === null || $periodsPerYear <= 0) {
+        // No ceiling recorded ⇒ nothing extra is taxable. The statutory figure is ₱90,000 and the
+        // migration seeds it, so this is the "somebody deliberately cleared it" case.
+        if ($annualCap === null || $annualOtherBenefits <= 0) {
             return 0.0;
         }
 
-        $annualAllowance = $perPeriodAllowance * $periodsPerYear;
-        $excess = max(0.0, $annualAllowance - max(0.0, (float) $annualCap));
+        $excess = max(0.0, $annualOtherBenefits - max(0.0, (float) $annualCap));
 
         return round($excess / 12, 2);
     }
@@ -371,7 +374,7 @@ class PayrollService
             // Frequency sets per-period pay; the timings decide which cutoff deductions land on.
             //
             // Built from the model's fillable, NOT hand-listed. The five keys here used to be
-            // written out by hand, and Slice 10 added `deminimis_annual_cap` to the settings two
+            // written out by hand, and Slice 10 added the benefits ceiling to the settings two
             // slices later without adding it here — so a payslip could not explain its
             // taxable-allowance line. Slice 8 existed to stop exactly this drift and had fixed
             // only its attendance-policy half.
@@ -1086,7 +1089,7 @@ class PayrollService
                 'deduction_timing' => $setting->deduction_timing,
                 'tax_timing' => $setting->tax_timing,
                 // Slice 10 — the ceiling above which allowances become taxable (null = none).
-                'deminimis_annual_cap' => $setting->deminimis_annual_cap,
+                'other_benefits_annual_cap' => $setting->other_benefits_annual_cap,
                 // Slice B3a — resolves the statutory rates in force for this period.
                 'cycle_end' => $cycleEnd,
                 // Slice B2 — decides whether a dated plan enrolment covers this period at all.

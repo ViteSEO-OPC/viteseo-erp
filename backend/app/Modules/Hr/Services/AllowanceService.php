@@ -38,7 +38,7 @@ class AllowanceService
      * One line per enrolled allowance. Lets a payslip name what made it up rather than showing one
      * opaque figure.
      *
-     * @return array<int, array{program_id:int, name:string, amount:float, tax_treatment:string}>
+     * @return array<int, array{program_id:int, name:string, amount:float, tax_treatment:string, deminimis_ceiling:mixed, ceiling_period:?string}>
      */
     public function linesFor(Employee $employee): array
     {
@@ -63,10 +63,83 @@ class AllowanceService
                 // Unknown values fall back to `de_minimis`, matching the column default: guessing
                 // "taxable" for a value we don't understand would over-withhold.
                 'tax_treatment' => $programme->tax_treatment === 'taxable' ? 'taxable' : 'de_minimis',
+                // Slice B16 — this benefit's own statutory ceiling, and the period it is stated
+                // in. Null means none recorded, which keeps the whole amount exempt.
+                'deminimis_ceiling' => $programme->deminimis_ceiling,
+                'ceiling_period' => $programme->ceiling_period,
             ];
         }
 
         return $lines;
+    }
+
+    /**
+     * The employee's monthly allowances split into the three things tax does with them (B16).
+     *
+     * THE CHAIN, which the old single-cap version collapsed into two steps:
+     *
+     *   exempt          a de-minimis benefit UP TO its own statutory ceiling. Ceilings are per
+     *                   item and cannot be pooled — a small uniform allowance does not create
+     *                   room for a large rice subsidy.
+     *   other_benefits  the amount ABOVE that ceiling. NOT taxable by itself: it joins the
+     *                   13th-month-and-other-benefits bucket, which is exempt up to ₱90,000 a
+     *                   year. Taxing it directly over-withheld for everyone under that figure.
+     *   taxable         an allowance HR marked taxable — compensation in full, no ceiling.
+     *
+     * A de-minimis programme with NO ceiling recorded is treated as fully exempt, which is what
+     * it does today: guessing a statutory limit for an allowance nobody has classified would
+     * change pay on an assumption.
+     *
+     * The three buckets sum to `monthlyFor()` exactly — every line is already 2dp, so splitting
+     * them cannot move gross pay.
+     *
+     * @return array{exempt: float, other_benefits: float, taxable: float}
+     */
+    public function monthlyTaxBucketsFor(Employee $employee): array
+    {
+        $split = ['exempt' => 0.0, 'other_benefits' => 0.0, 'taxable' => 0.0];
+
+        foreach ($this->linesFor($employee) as $line) {
+            if ($line['tax_treatment'] === 'taxable') {
+                $split['taxable'] += $line['amount'];
+
+                continue;
+            }
+
+            $ceiling = $this->monthlyCeiling($line['deminimis_ceiling'], $line['ceiling_period']);
+
+            if ($ceiling === null) {
+                $split['exempt'] += $line['amount'];
+
+                continue;
+            }
+
+            $split['exempt'] += min($line['amount'], $ceiling);
+            $split['other_benefits'] += max(0.0, $line['amount'] - $ceiling);
+        }
+
+        return [
+            'exempt' => round($split['exempt'], 2),
+            'other_benefits' => round($split['other_benefits'], 2),
+            'taxable' => round($split['taxable'], 2),
+        ];
+    }
+
+    /**
+     * A ceiling as a MONTHLY figure. The BIR states them per month, per semester and per year;
+     * normalising by hand in each place that needs one is where transcription errors live.
+     */
+    private function monthlyCeiling(mixed $ceiling, ?string $period): ?float
+    {
+        if ($ceiling === null) {
+            return null;
+        }
+
+        return round(match ($period) {
+            'annual', 'yearly' => (float) $ceiling / 12,
+            'semester' => (float) $ceiling / 6,
+            default => (float) $ceiling, // 'monthly', and anything unrecognised
+        }, 2);
     }
 
     /**
