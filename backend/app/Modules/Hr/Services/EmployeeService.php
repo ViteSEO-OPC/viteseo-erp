@@ -65,7 +65,9 @@ class EmployeeService
         'bank_name', 'bank_account', 'height', 'weight', 'health_condition',
         'pay_frequency', 'currency', 'bank_account_type', 'bank_account_name',
         'sss_contribution', 'pagibig_contribution', 'philhealth_contribution',
-        'food_allowance', 'transportation_allowance', 'load_allowance',
+        // Slice B9 — the three allowance columns are gone from here. Payroll stopped reading them
+        // in B1 and Company → Benefits is the catalogue now, so writing them only produced a
+        // number on the profile that no payslip agreed with.
         'tin', 'sss_number', 'philhealth_number', 'pagibig_number',
     ];
 

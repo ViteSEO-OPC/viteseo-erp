@@ -49,7 +49,12 @@ class AllowanceSourceOfTruthTest extends HrTestCase
             'user_id' => User::factory()->create()->id, 'department_id' => $dept->id,
             'employee_no' => 'E-001', 'job_title' => 'Staff', 'hire_date' => '2020-01-01',
             'base_salary' => 30000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
-            // Deliberately set: these columns must no longer reach a payslip.
+        ]);
+
+        // Deliberately set, and deliberately NOT through the model: Slice B9 took these three off
+        // `$fillable`, so mass assignment would drop them silently and the test below would pass
+        // without ever putting a number in the columns it exists to prove are dead.
+        \Illuminate\Support\Facades\DB::table('hr_employees')->where('id', $this->employee->id)->update([
             'food_allowance' => 9999, 'transportation_allowance' => 9999, 'load_allowance' => 9999,
         ]);
     }

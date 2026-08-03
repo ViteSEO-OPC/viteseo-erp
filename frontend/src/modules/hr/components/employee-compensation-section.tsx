@@ -18,6 +18,7 @@ import {
 } from "@/modules/hr/lib/employee-validation";
 import { useRecordSection } from "@/modules/hr/lib/use-record-section";
 import { StatutoryOverridesBlock } from "@/modules/hr/components/statutory-overrides-block";
+import { ContributionEnrolmentBlock } from "@/modules/hr/components/contribution-enrolment-block";
 import {
   BANK_ACCOUNT_TYPES,
   PAY_FREQUENCIES,
@@ -43,9 +44,6 @@ const schema = z.object({
   sss_contribution: optionalMoney("SSS"),
   pagibig_contribution: optionalMoney("Pag-IBIG"),
   philhealth_contribution: optionalMoney("PhilHealth"),
-  food_allowance: optionalMoney("Food allowance"),
-  transportation_allowance: optionalMoney("Transportation allowance"),
-  load_allowance: optionalMoney("Load allowance"),
   tin: optionalText(32),
   sss_number: optionalText(32),
   philhealth_number: optionalText(32),
@@ -70,9 +68,6 @@ function toValues(employee: Employee): Values {
     sss_contribution: employee.sss_contribution ?? "",
     pagibig_contribution: employee.pagibig_contribution ?? "",
     philhealth_contribution: employee.philhealth_contribution ?? "",
-    food_allowance: employee.food_allowance ?? "",
-    transportation_allowance: employee.transportation_allowance ?? "",
-    load_allowance: employee.load_allowance ?? "",
     tin: employee.tin ?? "",
     sss_number: employee.sss_number ?? "",
     philhealth_number: employee.philhealth_number ?? "",
@@ -96,9 +91,6 @@ function toPayload(v: Values): EmployeeUpdateInput {
     sss_contribution: orNull(v.sss_contribution),
     pagibig_contribution: orNull(v.pagibig_contribution),
     philhealth_contribution: orNull(v.philhealth_contribution),
-    food_allowance: orNull(v.food_allowance),
-    transportation_allowance: orNull(v.transportation_allowance),
-    load_allowance: orNull(v.load_allowance),
     tin: orNull(v.tin),
     sss_number: orNull(v.sss_number),
     philhealth_number: orNull(v.philhealth_number),
@@ -158,24 +150,11 @@ export function EmployeeCompensationSection({
     // Slice B7 — SSS / PhilHealth / Pag-IBIG moved OUT of this grid into their own block below.
     // Sitting here they read as three ordinary peso boxes beside the bank details, with nothing
     // to say that filling one switches off the government rates for that employee.
-    {
-      name: "food_allowance",
-      label: "Food allowance",
-      kind: "number",
-      display: money(employee.food_allowance),
-    },
-    {
-      name: "transportation_allowance",
-      label: "Transportation allowance",
-      kind: "number",
-      display: money(employee.transportation_allowance),
-    },
-    {
-      name: "load_allowance",
-      label: "Load allowance",
-      kind: "number",
-      display: money(employee.load_allowance),
-    },
+    //
+    // Slice B9 — the food / transportation / load boxes that used to close this list are gone.
+    // Payroll stopped reading them in B1, so raising someone's food allowance here changed
+    // nothing on their payslip. Allowances are programmes in Company → Benefits, and the
+    // catalogue is not three of anything — it grows and shrinks as HR adds and deletes them.
   ];
 
   return (
@@ -201,6 +180,11 @@ export function EmployeeCompensationSection({
           editing={editing}
           form={form}
         />
+
+        {/* Slice B9 item 3 — who pays into what. Sits under the overrides on purpose: this is
+            the honest way to express "this person is exempt", and the block above is the one
+            that cannot express it without breaking the remittance. */}
+        <ContributionEnrolmentBlock employeeId={employee.id} />
 
         <div className="border-t border-border pt-6">
           <p className="mb-1 text-label font-semibold uppercase tracking-wide text-brand">

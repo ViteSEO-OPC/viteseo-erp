@@ -12,7 +12,6 @@ use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\SharedLeaveBalance;
-use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\ReportExport;
@@ -37,7 +36,11 @@ class ReportService
         'recruitment', 'diversity', 'health_safety', 'audit',
     ];
 
-    public function __construct(private readonly AuditService $audit) {}
+    public function __construct(
+        private readonly AuditService $audit,
+        // Slice B9 — the legend resolves the dated rate version payroll actually priced with.
+        private readonly ContributionService $contributions,
+    ) {}
 
     /** @param array<string, mixed> $filters */
     public function get(string $key, array $filters = []): ?array
@@ -556,11 +559,28 @@ class ReportService
         $months = (int) ($filters['months'] ?? 9);
         $since = now(config('app.timezone_local'))->startOfMonth()->subMonths(max(0, $months - 1));
 
-        // Contribution rates (for legend labels), from the editable settings.
-        $cfg = ContributionSetting::pluck('config', 'type');
-        $rate = fn (string $type) => isset($cfg[$type]['rate'])
-            ? ' ' . rtrim(rtrim(number_format($cfg[$type]['rate'] * 100, 2), '0'), '.') . '%'
-            : '';
+        // Contribution rates for the legend labels — from the DATED VERSION IN FORCE (Slice B9
+        // item 2), not the legacy `hr_contribution_settings.config`.
+        //
+        // That config is the row B3a replaced: payroll has priced from `hr_contribution_versions`
+        // since then and nothing writes the old one, so the legend read whatever was last left
+        // there. It agreed by luck — both said 2.5% — and would have been wrong the first time a
+        // rate changed, labelling a chart of real payslips with a rate none of them used.
+        //
+        // Resolved as of TODAY rather than per run: one legend serves bars from several cycles, so
+        // there is no single cycle-end to resolve against. A rate change mid-chart is a labelling
+        // limit worth accepting; a rate that was never in force is not.
+        $versions = $this->contributions->versionsAsOf(now(config('app.timezone_local'))->toDateString());
+        $rate = function (string $type) use ($versions): string {
+            $version = $versions->get($type);
+            if ($version === null) {
+                return '';
+            }
+
+            $pct = (float) $version->employee_rate * 100;
+
+            return ' ' . rtrim(rtrim(number_format($pct, 2), '0'), '.') . '%';
+        };
 
         // Gross-to-net stacked per payroll run: net pay + the 3 gov contributions
         // (excludes withholding tax, matching the design's legend). Values in ₱ '000s.

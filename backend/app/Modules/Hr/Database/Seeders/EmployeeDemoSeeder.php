@@ -126,7 +126,10 @@ class EmployeeDemoSeeder extends Seeder
                 // regardless of a salary range from ₱30k to ₱160k — suppressing ₱15,375/month of
                 // deductions and producing employee/employer pairs that exist on no SSS table.
                 // A demo dataset must show the engine working, not a company-wide exception.
-                'food_allowance' => 2000, 'transportation_allowance' => 1500, 'load_allowance' => 500,
+                //
+                // Slice B9 — the three allowance columns are not seeded either. Payroll reads
+                // allowances from Company → Benefits, so a figure here is a number on the profile
+                // that no payslip agrees with.
             ]);
             // Note: EmployeeService::create already opened each person's employment
             // history with their starting role, so no entry is created here.
@@ -163,8 +166,7 @@ class EmployeeDemoSeeder extends Seeder
             'bank_account_type' => 'Savings',
             'bank_account' => '1234-5678-9012-34',
             'bank_account_name' => 'Maya R. Villanueva',
-            // No statutory overrides here either — see the note above.
-            'food_allowance' => 3000, 'transportation_allowance' => 2500, 'load_allowance' => 500,
+            // No statutory overrides and no allowance columns here either — see the notes above.
             'base_salary' => 160000,
         ]);
 

@@ -137,17 +137,54 @@ class PayrollReportingTest extends HrTestCase
         $this->assertSame(150, (int) ($log->after['overtime_ordinary_pct'] ?? 0));
     }
 
-    public function test_contribution_rate_changes_record_before_and_after(): void
+    /**
+     * Slice B9 item 2 — the Compensation legend labels a chart of REAL payslips, so it has to
+     * carry the rate those payslips were priced at.
+     *
+     * THE BUG: it read `hr_contribution_settings.config`, the row B3a replaced. Nothing has
+     * written that since, so the label was whatever was last left there — it agreed with the
+     * engine only by luck, and a rate change would have put a figure on the chart that no payslip
+     * in it ever used.
+     */
+    public function test_the_compensation_legend_reads_the_rate_version_in_force(): void
+    {
+        // Move PhilHealth to 3% employee, effective today, the way HR does it.
+        app(ContributionService::class)->saveVersion([
+            'type' => 'philhealth',
+            'effective_from' => now(config('app.timezone_local'))->toDateString(),
+            'basis' => 'percentage',
+            'employee_rate' => 0.03,
+            'employer_rate' => 0.03,
+        ], User::factory()->create());
+
+        // Leave the legacy config saying something else entirely — if the legend still reads it,
+        // this is the number that shows up.
+        ContributionSetting::where('type', 'philhealth')->update(['config' => ['rate' => 0.9]]);
+
+        $series = app(\App\Modules\Hr\Services\ReportService::class)
+            ->get('compensation')['stacked']['series'];
+
+        $philhealth = collect($series)->first(fn ($s) => str_starts_with($s['name'], 'PhilHealth'));
+
+        $this->assertSame('PhilHealth 3%', $philhealth['name']);
+    }
+
+    /**
+     * Slice B9 item 5 — this used to write a free-form `config` array, which is no longer
+     * accepted: the rates are dated versions (their audit trail is `ContributionVersionTest`),
+     * and this setting now means only "does the company operate this contribution at all".
+     * Switching one off removes a deduction from every payslip, so it is still audited both ways.
+     */
+    public function test_switching_a_contribution_off_records_before_and_after(): void
     {
         $setting = ContributionSetting::where('type', 'sss')->firstOrFail();
 
-        app(ContributionService::class)->updateSetting($setting, [
-            'config' => ['rate' => 0.09],
-        ]);
+        app(ContributionService::class)->updateSetting($setting, ['is_active' => false]);
 
         $log = AuditLog::where('module', 'Benefits')->latest('id')->firstOrFail();
-        $this->assertNotNull($log->before);
-        $this->assertSame(0.09, (float) ($log->after['config']['rate'] ?? 0));
+        $this->assertTrue((bool) ($log->before['is_active'] ?? null));
+        $this->assertFalse((bool) ($log->after['is_active'] ?? true));
+        $this->assertStringContainsString('switched OFF', $log->description);
     }
 
     public function test_payroll_settings_changes_are_audited(): void

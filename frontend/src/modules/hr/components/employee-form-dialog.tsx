@@ -104,9 +104,6 @@ const schema = z
     sss_contribution: optionalMoney("SSS"),
     pagibig_contribution: optionalMoney("Pag-IBIG"),
     philhealth_contribution: optionalMoney("PhilHealth"),
-    food_allowance: optionalMoney("Food allowance"),
-    transportation_allowance: optionalMoney("Transportation allowance"),
-    load_allowance: optionalMoney("Load allowance"),
     tin: optionalText(32),
     sss_number: optionalText(32),
     philhealth_number: optionalText(32),
@@ -143,8 +140,7 @@ const EMPTY: FormValues = {
   bank_account: "", height: "", weight: "", health_condition: "",
   pay_frequency: "semi_monthly", currency: "PHP", bank_account_type: "",
   bank_account_name: "", sss_contribution: "", pagibig_contribution: "",
-  philhealth_contribution: "", food_allowance: "", transportation_allowance: "",
-  load_allowance: "",
+  philhealth_contribution: "",
   tin: "", sss_number: "", philhealth_number: "", pagibig_number: "",
 };
 
@@ -224,9 +220,6 @@ export function EmployeeFormDialog({
       sss_contribution: s(v.sss_contribution),
       pagibig_contribution: s(v.pagibig_contribution),
       philhealth_contribution: s(v.philhealth_contribution),
-      food_allowance: s(v.food_allowance),
-      transportation_allowance: s(v.transportation_allowance),
-      load_allowance: s(v.load_allowance),
       tin: s(v.tin),
       sss_number: s(v.sss_number),
       philhealth_number: s(v.philhealth_number),
@@ -554,18 +547,9 @@ export function EmployeeFormDialog({
               <Field label="PhilHealth (₱ / mo)" error={errors.philhealth_contribution?.message}>
                 <Input type="number" min="0" step="0.01" {...register("philhealth_contribution")} />
               </Field>
-              <Field label="Food allowance (₱ / mo)" error={errors.food_allowance?.message}>
-                <Input type="number" min="0" step="0.01" {...register("food_allowance")} />
-              </Field>
-              <Field
-                label="Transportation allowance (₱ / mo)"
-                error={errors.transportation_allowance?.message}
-              >
-                <Input type="number" min="0" step="0.01" {...register("transportation_allowance")} />
-              </Field>
-              <Field label="Load allowance (₱ / mo)" error={errors.load_allowance?.message}>
-                <Input type="number" min="0" step="0.01" {...register("load_allowance")} />
-              </Field>
+              {/* Slice B9 — no allowance boxes here. Allowances are programmes in
+                  Company → Benefits: the catalogue grows and shrinks, so three fixed fields
+                  could never describe it, and payroll stopped reading these columns in B1. */}
 
               {/* Membership numbers, not amounts — these print on the payslip header.
                   Kept apart from the ₱ overrides above so "SSS" can't mean two things. */}

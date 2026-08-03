@@ -69,7 +69,6 @@ class PayslipDocumentTest extends HrTestCase
             'base_salary' => 20000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
             // Allowances so the breakdown has something to split, and government numbers so the
             // identity block isn't all em dashes.
-            'transportation_allowance' => 1000, 'food_allowance' => 500, // legacy columns — no longer read (Slice B1)
             'tin' => '123-456-789-000', 'sss_number' => '34-5678901-2',
             'philhealth_number' => '12-009876543-1', 'pagibig_number' => '1211-0098-7654',
         ]);
@@ -371,7 +370,6 @@ class PayslipDocumentTest extends HrTestCase
     public function test_the_pdf_renders_for_a_payslip_with_no_optional_figures(): void
     {
         $this->employee->update([
-            'transportation_allowance' => 0, 'food_allowance' => 0, 'load_allowance' => 0,
             'tin' => null, 'sss_number' => null, 'philhealth_number' => null, 'pagibig_number' => null,
             'address' => null,
         ]);
