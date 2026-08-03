@@ -29,9 +29,9 @@ class AllowanceService
      * The employee's total monthly allowance. Payroll spreads this across the pay periods, so it
      * must be a MONTHLY figure regardless of how a programme is described.
      */
-    public function monthlyFor(Employee $employee): float
+    public function monthlyFor(Employee $employee, ?string $asOf = null): float
     {
-        return round(array_sum(array_column($this->linesFor($employee), 'amount')), 2);
+        return round(array_sum(array_column($this->linesFor($employee, $asOf), 'amount')), 2);
     }
 
     /**
@@ -40,7 +40,7 @@ class AllowanceService
      *
      * @return array<int, array{program_id:int, name:string, amount:float, tax_treatment:string, deminimis_ceiling:mixed, ceiling_period:?string}>
      */
-    public function linesFor(Employee $employee): array
+    public function linesFor(Employee $employee, ?string $asOf = null): array
     {
         // The programmes whose RULE covers this employee today — not a stored enrolment list.
         // A status change is therefore followed automatically, which is the drift B5 item 3 and
@@ -48,25 +48,39 @@ class AllowanceService
         $programmes = $this->programs->allowancesFor($employee);
         $overrides = $this->programs->overridesFor($employee);
 
+        // Slice B11 — what each allowance was worth ON THIS CYCLE, not today. Re-running an old
+        // period used to price it at the current figure, so a September rise silently rewrote
+        // August. Null asOf ⇒ today, which is what every screen wants.
+        $pricing = $asOf === null ? [] : $this->programs->pricingAsOf($asOf);
+
         $lines = [];
 
         foreach ($programmes as $programme) {
             // Slice B14 — a deliberate per-employee amount wins over the programme's. Null (the
             // normal case) means this person follows the programme, so an edit there reaches them.
-            $amount = $overrides[(int) $programme->id] ?? $programme->amount ?? 0;
+            $version = $pricing[(int) $programme->id] ?? null;
+
+            // A deliberate per-employee amount (B14) still wins: it is a figure a person typed for
+            // this employee, not a company-wide price, so it is not versioned alongside one.
+            $amount = $overrides[(int) $programme->id]
+                ?? ($version->amount ?? $programme->amount)
+                ?? 0;
+            $frequency = (string) ($version->frequency ?? $programme->frequency);
 
             $lines[] = [
                 'program_id' => (int) $programme->id,
                 'name' => (string) $programme->name,
-                'amount' => $this->toMonthly((float) $amount, (string) $programme->frequency),
+                'amount' => $this->toMonthly((float) $amount, $frequency),
                 // Slice B4 — payroll needs this to know which allowances are compensation.
                 // Unknown values fall back to `de_minimis`, matching the column default: guessing
                 // "taxable" for a value we don't understand would over-withhold.
-                'tax_treatment' => $programme->tax_treatment === 'taxable' ? 'taxable' : 'de_minimis',
+                'tax_treatment' => ($version->tax_treatment ?? $programme->tax_treatment) === 'taxable'
+                    ? 'taxable'
+                    : 'de_minimis',
                 // Slice B16 — this benefit's own statutory ceiling, and the period it is stated
                 // in. Null means none recorded, which keeps the whole amount exempt.
-                'deminimis_ceiling' => $programme->deminimis_ceiling,
-                'ceiling_period' => $programme->ceiling_period,
+                'deminimis_ceiling' => $version->deminimis_ceiling ?? $programme->deminimis_ceiling,
+                'ceiling_period' => $version->ceiling_period ?? $programme->ceiling_period,
             ];
         }
 
@@ -95,11 +109,11 @@ class AllowanceService
      *
      * @return array{exempt: float, other_benefits: float, taxable: float}
      */
-    public function monthlyTaxBucketsFor(Employee $employee): array
+    public function monthlyTaxBucketsFor(Employee $employee, ?string $asOf = null): array
     {
         $split = ['exempt' => 0.0, 'other_benefits' => 0.0, 'taxable' => 0.0];
 
-        foreach ($this->linesFor($employee) as $line) {
+        foreach ($this->linesFor($employee, $asOf) as $line) {
             if ($line['tax_treatment'] === 'taxable') {
                 $split['taxable'] += $line['amount'];
 

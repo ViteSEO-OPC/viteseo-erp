@@ -91,6 +91,9 @@ function AllowanceForm({
   // the whole amount tax-free; ceilings are per item and are never pooled with another benefit's.
   const [ceiling, setCeiling] = useState(program?.deminimis_ceiling ?? "");
   const [ceilingPeriod, setCeilingPeriod] = useState(program?.ceiling_period ?? "monthly");
+  // Slice B11 — the date this amount applies FROM. An old cycle re-run before it keeps the
+  // figure that applied then, so this is the field that decides whose payslip moves.
+  const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [mode, setMode] = useState<EligibilityMode>(
     (program?.eligibility as EligibilityMode) ?? "all",
   );
@@ -117,6 +120,7 @@ function AllowanceForm({
       eligibility: mode,
       // Sent only for the mode that uses them, so switching mode cannot leave a stale rule behind.
       eligibility_statuses: mode === "status" ? statuses : [],
+      effective_from: effectiveFrom,
       employee_ids: mode === "custom" ? employeeIds : [],
     };
 
@@ -166,7 +170,7 @@ function AllowanceForm({
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="a-amount">Amount per period</Label>
             <Input
@@ -187,7 +191,24 @@ function AllowanceForm({
               options={ALLOWANCE_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
             />
           </div>
+          {/* Slice B11 — payroll prices an allowance as of the cycle END, so a period that closed
+              before this date keeps whatever applied then. Without it, raising an amount rewrote
+              every payslip that had not yet been paid out. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="a-eff">Applies from</Label>
+            <Input
+              id="a-eff"
+              type="date"
+              value={effectiveFrom}
+              onChange={(e) => setEffectiveFrom(e.target.value)}
+            />
+          </div>
         </div>
+
+        <p className="text-caption text-muted-foreground">
+          Payslips for periods that ended before <strong>{effectiveFrom}</strong> keep the amount
+          that applied then, even if they are re-run.
+        </p>
 
         <Segmented label="Tax treatment" options={TAX_TREATMENTS} value={tax} onChange={setTax} />
 

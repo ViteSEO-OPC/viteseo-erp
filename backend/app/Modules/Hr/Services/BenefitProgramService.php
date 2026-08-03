@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\BenefitProgram;
+use App\Modules\Hr\Models\BenefitProgramVersion;
 use App\Modules\Hr\Models\Employee;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +28,7 @@ class BenefitProgramService
     {
         $program = BenefitProgram::create($this->attributes($data));
         $this->allowanceMemo = null;
+        $this->recordVersion($program, $data);
         $ids = array_map('intval', $data['employee_ids'] ?? []);
         $this->syncEnrolment($program, $ids);
 
@@ -42,8 +44,15 @@ class BenefitProgramService
     /** @param array<string, mixed> $data */
     public function update(BenefitProgram $program, array $data): BenefitProgram
     {
+        $before = $this->pricing($program);
         $program->update($this->attributes($data, $program));
         $this->allowanceMemo = null;
+
+        // Slice B11 — a new dated version only when what the allowance COSTS changed. Renaming it
+        // or recolouring its card must not create a price.
+        if ($this->pricing($program->fresh()) !== $before) {
+            $this->recordVersion($program->fresh(), $data);
+        }
 
         // Only touch enrolment when the caller sent the list (keeps PATCHes safe).
         if (array_key_exists('employee_ids', $data)) {
@@ -86,6 +95,92 @@ class BenefitProgramService
             $program,
         );
     }
+
+    /**
+     * The fields that decide what an allowance costs — Slice B11.
+     *
+     * Deliberately NOT the name, colour or eligibility rule: renaming an allowance should not
+     * create a new price, and who it covers is answered as of today on purpose (somebody who has
+     * since left should not reappear on a re-run of an old cycle).
+     *
+     * @return array<string, mixed>
+     */
+    private function pricing(BenefitProgram $program): array
+    {
+        return [
+            'amount' => $program->amount === null ? null : (string) $program->amount,
+            'frequency' => $program->frequency,
+            'tax_treatment' => $program->tax_treatment,
+            'deminimis_ceiling' => $program->deminimis_ceiling === null ? null : (string) $program->deminimis_ceiling,
+            'ceiling_period' => $program->ceiling_period,
+        ];
+    }
+
+    /**
+     * Write the dated version an old payroll run will resolve against.
+     *
+     * `effective_from` defaults to TODAY rather than to the cycle currently open: an amount HR
+     * types now is the amount from now, and back-dating it silently would rewrite payslips that
+     * have already been computed. HR can pass a date deliberately when a rise is agreed in arrears.
+     *
+     * Saving twice on the same date UPDATES that version rather than failing on the unique index —
+     * correcting a figure typed a minute ago is the common case, and a duplicate-key error is a
+     * poor way to say so.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function recordVersion(BenefitProgram $program, array $data): void
+    {
+        if ($program->kind !== 'allowance') {
+            return; // only allowances are priced this way; a plan's cost is per enrolment
+        }
+
+        BenefitProgramVersion::updateOrCreate(
+            [
+                'benefit_program_id' => $program->id,
+                'effective_from' => $data['effective_from']
+                    ?? now(config('app.timezone_local'))->toDateString(),
+            ],
+            $this->pricing($program) + ['created_by' => auth()->id()],
+        );
+
+        $this->versionMemo = [];
+    }
+
+    /**
+     * Every allowance's amount as it stood on a date, keyed by programme id — Slice B11.
+     *
+     * ONE QUERY FOR THE WHOLE RUN. Payroll asks per employee; resolving per employee would be an
+     * N+1 in the same shape `allowancesFor()` and the override map already avoid. Memoized per
+     * date, because a run resolves one date for everybody.
+     *
+     * @return array<int, BenefitProgramVersion>
+     */
+    public function pricingAsOf(string $asOf): array
+    {
+        if (isset($this->versionMemo[$asOf])) {
+            return $this->versionMemo[$asOf];
+        }
+
+        $map = [];
+
+        // Ordered ascending so the LAST row written per programme is the latest one on or before
+        // the date — the same "latest row wins" resolution B3a uses for contribution versions.
+        foreach (
+            BenefitProgramVersion::query()
+                ->whereDate('effective_from', '<=', $asOf)
+                ->orderBy('effective_from')
+                ->orderBy('id')
+                ->get() as $version
+        ) {
+            $map[(int) $version->benefit_program_id] = $version;
+        }
+
+        return $this->versionMemo[$asOf] = $map;
+    }
+
+    /** @var array<string, array<int, BenefitProgramVersion>> */
+    private array $versionMemo = [];
 
     /**
      * Set a programme's enrolment list WITHOUT destroying the pivot of anyone who stays (B5.6).

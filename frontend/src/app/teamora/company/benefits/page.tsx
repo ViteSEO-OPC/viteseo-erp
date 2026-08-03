@@ -14,7 +14,7 @@ import { useContributionSettings } from "@/modules/hr/hooks/use-benefits";
 import { useBenefitPrograms } from "@/modules/hr/hooks/use-benefit-programs";
 import { AllowanceFormDialog } from "@/modules/hr/components/allowance-form-dialog";
 import { EditContributionDialog } from "@/modules/hr/components/edit-contribution-dialog";
-import { EditHmoDialog } from "@/modules/hr/components/edit-hmo-dialog";
+import { BenefitPlanDialog } from "@/modules/hr/components/benefit-plan-dialog";
 import { PlanEnrollmentDialog } from "@/modules/hr/components/plan-enrollment-dialog";
 import { LoanPolicyDialog } from "@/modules/hr/components/loan-policy-dialog";
 import {
@@ -58,7 +58,10 @@ export default function BenefitsPage() {
   const [allowanceOpen, setAllowanceOpen] = useState(false);
   const [editAllowance, setEditAllowance] = useState<BenefitProgram | null>(null);
   const [editContribution, setEditContribution] = useState<string | null>(null);
-  const [editHmo, setEditHmo] = useState<BenefitProgram | null>(null);
+  // One dialog for add and edit, like allowances and loans. Company benefits had no way to ADD
+  // one at all, so the catalogue was frozen at whatever the seeder created.
+  const [planOpen, setPlanOpen] = useState(false);
+  const [editPlan, setEditPlan] = useState<BenefitProgram | null>(null);
   // Slice B2 — who is ON a plan is a separate job from what the plan IS, and conflating the two
   // is what made "Add a Plan" impossible to understand.
   const [membersOf, setMembersOf] = useState<BenefitProgram | null>(null);
@@ -168,16 +171,31 @@ export default function BenefitsPage() {
 
         {/* Company benefits — HR editable. */}
         <section className="space-y-3">
-          <h2 className="text-h3 font-bold text-foreground">Company benefits</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-h3 font-bold text-foreground">Company benefits</h2>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditPlan(null);
+                setPlanOpen(true);
+              }}
+            >
+              <Plus />
+              Add benefit
+            </Button>
+          </div>
           {isLoading ? null : company.length === 0 ? (
-            <EmptyHint text="No company benefits yet." />
+            <EmptyHint text="No company benefits yet. Use “Add benefit” to create one." />
           ) : (
             <div className="space-y-4">
               {company.map((p) => (
                 <CompanyBenefitCard
                   key={p.id}
                   program={p}
-                  onEdit={() => setEditHmo(p)}
+                  onEdit={() => {
+                    setEditPlan(p);
+                    setPlanOpen(true);
+                  }}
                   onMembers={() => setMembersOf(p)}
                 />
               ))}
@@ -199,7 +217,14 @@ export default function BenefitsPage() {
           if (!o) setEditAllowance(null);
         }}
       />
-      <EditHmoDialog program={editHmo} onOpenChange={(o) => !o && setEditHmo(null)} />
+      <BenefitPlanDialog
+        open={planOpen}
+        program={editPlan}
+        onOpenChange={(o) => {
+          setPlanOpen(o);
+          if (!o) setEditPlan(null);
+        }}
+      />
       <PlanEnrollmentDialog
         program={membersOf}
         onOpenChange={(o) => !o && setMembersOf(null)}

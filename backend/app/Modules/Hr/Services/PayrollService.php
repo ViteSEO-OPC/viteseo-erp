@@ -125,8 +125,37 @@ class PayrollService
         // Gas Allowance had no column at all, so it could never be paid however HR configured it.
         // The backfill migration pinned each employee's old column value onto their enrolment, so
         // this change paid exactly what the columns did on the first run.
-        $monthlyAllowance = $this->allowances->monthlyFor($employee);
+        // Slice B11 — priced as of the CYCLE END, like salary (13c) and the statutory rates
+        // (B3a). Re-running August after a September rise used to pay September's figure.
+        $pricedAsOf = $dist['cycle_end'] ?? null;
+        $monthlyAllowance = $this->allowances->monthlyFor($employee, $pricedAsOf);
         $perPeriodAllowance = $periodsPerYear > 0 ? round(($monthlyAllowance * 12) / $periodsPerYear, 2) : 0.0;
+
+        // Slice B10 — PART-MONTHS. A mid-cycle hire or leaver used to receive a whole period's
+        // allowance while their basic pay was prorated for the days they were actually employed.
+        // Someone starting on the 25th got the full month. It is wrong on the first and last
+        // payslip anybody gets — the two most closely read payslips in a career.
+        //
+        // NOT the same as absence proration, which stays deliberately off (an allowance is a fixed
+        // benefit, not attendance-earned). This follows the EMPLOYMENT WINDOW only: days before a
+        // hire date or after a last working day were never owed.
+        //
+        // Management is excluded to match their basic pay, which `unpaidDaysDetailFor()` never
+        // prorates either — prorating one and not the other would make their payslip inconsistent
+        // with itself. (Whether a management hire should get a full first month is a separate
+        // question, and an older one than this slice.)
+        $employmentFraction = 1.0;
+        if (! $employee->isManagement() && isset($dist['cycle_start'], $dist['cycle_end'])) {
+            $employmentFraction = $this->attendance->employmentFractionFor(
+                $employee,
+                (string) $dist['cycle_start'],
+                (string) $dist['cycle_end'],
+            );
+
+            if ($employmentFraction < 1.0) {
+                $perPeriodAllowance = round($perPeriodAllowance * $employmentFraction, 2);
+            }
+        }
 
         // Only the contributions this employee is enrolled in, at the rates in force for THIS
         // period (Slice B3a) — not whatever they are today.
@@ -159,7 +188,17 @@ class PayrollService
         // the programme, so marking one "taxable" changed nothing on the payslip and the company
         // quietly under-withheld. Gross pay is unaffected either way: the split only decides how
         // much of the same money is compensation.
-        $allowanceSplit = $this->allowances->monthlyTaxBucketsFor($employee);
+        $allowanceSplit = $this->allowances->monthlyTaxBucketsFor($employee, $pricedAsOf);
+
+        // Slice B10 — a part-period employee is taxed on the allowance they were actually paid.
+        // Without this they would be withheld on a full month of a taxable allowance they only
+        // received part of, which is the same error the proration above exists to fix.
+        if ($employmentFraction < 1.0) {
+            $allowanceSplit = array_map(
+                fn (float $v) => round($v * $employmentFraction, 2),
+                $allowanceSplit,
+            );
+        }
 
         // A taxable allowance is compensation in full — no ceiling applies to it at all. Already a
         // MONTHLY figure, which is what the withholding base is measured in.
@@ -213,7 +252,13 @@ class PayrollService
 
         $slip['period_base'] = round($perPeriodBase, 2);
         $slip['absence_deduction'] = round($perPeriodBase - $basePay, 2);
-        $slip['allowances_breakdown'] = $this->allowanceBreakdown($employee, $periodsPerYear, $perPeriodAllowance);
+        $slip['allowances_breakdown'] = $this->allowanceBreakdown(
+            $employee,
+            $periodsPerYear,
+            $perPeriodAllowance,
+            $employmentFraction,
+            $pricedAsOf,
+        );
 
         // Step 4b — persist how base_salary was derived, so the payslip explains itself.
         // The minute-level portion is all-zero until a deduction mode is enabled.
@@ -248,8 +293,13 @@ class PayrollService
      *
      * @return list<array{name:string, amount:float}>
      */
-    private function allowanceBreakdown(Employee $employee, int $periodsPerYear, float $perPeriodAllowance): array
-    {
+    private function allowanceBreakdown(
+        Employee $employee,
+        int $periodsPerYear,
+        float $perPeriodAllowance,
+        float $employmentFraction = 1.0,
+        ?string $pricedAsOf = null,
+    ): array {
         if ($periodsPerYear <= 0 || $perPeriodAllowance <= 0) {
             return [];
         }
@@ -258,8 +308,10 @@ class PayrollService
         // hard-coded `hr_employees` columns. That is what lets a fourth allowance (Gas) appear on
         // a payslip at all, and it means the names shown are the ones HR actually configured.
         $lines = [];
-        foreach ($this->allowances->linesFor($employee) as $line) {
-            $perPeriod = round(($line['amount'] * 12) / $periodsPerYear, 2);
+        foreach ($this->allowances->linesFor($employee, $pricedAsOf) as $line) {
+            // Slice B10 — scaled by the same part-period fraction as the total, or the lines
+            // would sum past it and the residual would swallow the whole proration.
+            $perPeriod = round((($line['amount'] * 12) / $periodsPerYear) * $employmentFraction, 2);
             if ($perPeriod > 0) {
                 $lines[] = ['name' => $line['name'], 'amount' => $perPeriod];
             }

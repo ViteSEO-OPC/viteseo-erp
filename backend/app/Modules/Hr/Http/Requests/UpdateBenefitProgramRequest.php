@@ -32,6 +32,9 @@ class UpdateBenefitProgramRequest extends FormRequest
             'tax_treatment' => ['sometimes', 'in:de_minimis,taxable'],
             // Slice B16 — this benefit's OWN statutory ceiling. Null = none recorded, which keeps
             // the whole amount exempt. Ceilings are per item and are never pooled.
+            // Slice B11 — the date this price applies from. Defaults to today; HR sets it
+            // deliberately when a rise is agreed in arrears.
+            'effective_from' => ['sometimes', 'nullable', 'date'],
             'deminimis_ceiling' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:9999999.99'],
             // Slice B15 — loan-policy config. Typed per kind rather than shared into one loose
             // shape: a loan policy and an HMO have nothing in common but a name.
