@@ -20,6 +20,9 @@ class StoreEmployeeLoanRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Slice B15 — the policy this loan is issued under. Optional: an ad-hoc arrangement
+            // has no product behind it, and the service validates the fit when one is given.
+            'benefit_program_id' => ['sometimes', 'nullable', 'integer', 'exists:hr_benefit_programs,id'],
             'type' => ['sometimes', Rule::in(EmployeeLoan::TYPES)],
             'reference' => ['nullable', 'string', 'max:60'],
             'principal' => ['required', 'numeric', 'min:0.01', 'max:99999999'],

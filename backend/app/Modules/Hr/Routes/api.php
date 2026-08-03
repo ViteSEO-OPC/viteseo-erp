@@ -111,6 +111,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/meetings', [MeetingController::class, 'meIndex']);
     Route::post('me/meetings/{meeting}/respond', [MeetingController::class, 'respond']);
 
+    // Slice B15 — the caller's own loans: what they owe, and the authorization that makes any
+    // deduction lawful. Not hr_officer-gated: this is the employee's own record and consent.
+    Route::get('me/loans', [EmployeeLoanController::class, 'mine']);
+    Route::post('me/loans', [EmployeeLoanController::class, 'requestLoan']);
+    Route::post('me/loans/{loan}/authorize', [EmployeeLoanController::class, 'authorizeDeduction']);
+
     // My Benefits — the caller's own enrolled benefit programs (identity from token).
     Route::get('me/benefit-programs', [BenefitProgramController::class, 'mine']);
 
@@ -211,6 +217,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'loans/{loan}', [EmployeeLoanController::class, 'update']);
         Route::post('loans/{loan}/cancel', [EmployeeLoanController::class, 'cancel']);
         Route::post('loans/{loan}/reopen', [EmployeeLoanController::class, 'reopen']);
+        // Slice B15 — HR decides on an employee's request. Neither starts a deduction.
+        Route::post('loans/{loan}/approve', [EmployeeLoanController::class, 'approve']);
+        Route::post('loans/{loan}/reject', [EmployeeLoanController::class, 'reject']);
         // Schedule a meeting with an employee (e.g. about attendance/violations).
         Route::post('employees/{employee}/meetings', [MeetingController::class, 'store']);
         Route::post('employees/{employee}/activate', [EmployeeController::class, 'activate']);

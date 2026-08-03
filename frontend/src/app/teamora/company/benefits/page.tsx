@@ -16,6 +16,7 @@ import { AllowanceFormDialog } from "@/modules/hr/components/allowance-form-dial
 import { EditContributionDialog } from "@/modules/hr/components/edit-contribution-dialog";
 import { EditHmoDialog } from "@/modules/hr/components/edit-hmo-dialog";
 import { PlanEnrollmentDialog } from "@/modules/hr/components/plan-enrollment-dialog";
+import { LoanPolicyDialog } from "@/modules/hr/components/loan-policy-dialog";
 import {
   CONTRIBUTION_LABELS,
   type BenefitProgram,
@@ -46,6 +47,9 @@ export default function BenefitsPage() {
   // — allowances were filtered by `is_active` and company plans were not.
   const allowances = (programs ?? []).filter((p) => p.kind === "allowance");
   const company = (programs ?? []).filter((p) => p.kind === "plan");
+  // Slice B15 — loan policies are a third behaviour: they deduct against a balance rather than
+  // adding to gross or taking a fixed share.
+  const loanPolicies = (programs ?? []).filter((p) => p.kind === "loan_policy");
   const activeCount = (programs ?? []).length;
 
   // One dialog for add and edit — `null` means a new allowance. "Add a Plan" was removed on
@@ -58,6 +62,8 @@ export default function BenefitsPage() {
   // Slice B2 — who is ON a plan is a separate job from what the plan IS, and conflating the two
   // is what made "Add a Plan" impossible to understand.
   const [membersOf, setMembersOf] = useState<BenefitProgram | null>(null);
+  const [loanOpen, setLoanOpen] = useState(false);
+  const [editLoan, setEditLoan] = useState<BenefitProgram | null>(null);
 
   return (
     <div className="p-4 sm:p-8">
@@ -127,6 +133,39 @@ export default function BenefitsPage() {
           )}
         </section>
 
+        {/* Loans — the third behaviour: deducts against a balance until it reaches zero. */}
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-h3 font-bold text-foreground">Loans</h2>
+            <Button
+              size="sm"
+              onClick={() => {
+                setEditLoan(null);
+                setLoanOpen(true);
+              }}
+            >
+              <Plus />
+              Add loan
+            </Button>
+          </div>
+          {isLoading ? null : loanPolicies.length === 0 ? (
+            <EmptyHint text="No loans offered yet. Use “Add loan” to define one." />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              {loanPolicies.map((p) => (
+                <LoanPolicyCard
+                  key={p.id}
+                  program={p}
+                  onEdit={() => {
+                    setEditLoan(p);
+                    setLoanOpen(true);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+
         {/* Company benefits — HR editable. */}
         <section className="space-y-3">
           <h2 className="text-h3 font-bold text-foreground">Company benefits</h2>
@@ -164,6 +203,14 @@ export default function BenefitsPage() {
       <PlanEnrollmentDialog
         program={membersOf}
         onOpenChange={(o) => !o && setMembersOf(null)}
+      />
+      <LoanPolicyDialog
+        open={loanOpen}
+        policy={editLoan}
+        onOpenChange={(o) => {
+          setLoanOpen(o);
+          if (!o) setEditLoan(null);
+        }}
       />
     </div>
   );
@@ -309,6 +356,36 @@ function AllowanceCard({ program, onEdit }: { program: BenefitProgram; onEdit: (
       </p>
       <p className="mt-1 text-xs text-muted-foreground">
         Per month · added to payroll · {eligibilitySummary(program)}
+      </p>
+    </div>
+  );
+}
+
+// A loan policy — what may be borrowed, by whom, over how long (Slice B15).
+function LoanPolicyCard({ program, onEdit }: { program: BenefitProgram; onEdit: () => void }) {
+  return (
+    <div className="rounded-card border border-border bg-card p-5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <Dot color={program.color ?? "#8b5cf6"} />
+          <div>
+            <p className="font-bold text-foreground">{program.name}</p>
+            <p className="text-xs text-muted-foreground">
+              Loan · repaid from pay · {eligibilitySummary(program)}
+            </p>
+          </div>
+        </div>
+        <EditButton onClick={onEdit} />
+      </div>
+      <p className="mt-4 text-3xl font-bold text-foreground">
+        {program.loan_max_principal ? formatPeso(program.loan_max_principal) : "No limit"}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Most that can be borrowed
+        {program.loan_term_periods ? ` · within ${program.loan_term_periods} payslips` : ""}
+        {Number(program.loan_interest_rate ?? 0) > 0
+          ? ` · ${program.loan_interest_rate}% a year`
+          : " · interest-free"}
       </p>
     </div>
   );

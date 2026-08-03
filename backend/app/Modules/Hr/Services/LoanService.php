@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Services;
 
 use App\Models\User;
+use App\Modules\Hr\Models\BenefitProgram;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeLoan;
 use App\Modules\Hr\Models\LoanPayment;
@@ -32,23 +33,39 @@ class LoanService
     public function forEmployee(Employee $employee): Collection
     {
         return EmployeeLoan::where('employee_id', $employee->id)
-            ->with('payments')
+            ->with(['payments', 'policy'])
             ->orderByDesc('start_date')
             ->orderByDesc('id')
             ->get();
     }
 
-    /** @param array<string, mixed> $data */
+    /**
+     * HR issues a loan — Slice B15, path one.
+     *
+     * IT DOES NOT START `active` ANY MORE. A deduction for a debt owed to the employer needs the
+     * employee's written consent (Labor Code Art. 113), so an issued loan waits at
+     * `pending_authorization` until they give it. `collectForPeriod()` only reads `active`, so
+     * nothing is collected in the meantime — by construction, not by a reminder.
+     *
+     * @param  array<string, mixed>  $data
+     */
     public function create(Employee $employee, array $data, User $actor): EmployeeLoan
     {
+        $policy = $this->policyFor($data['benefit_program_id'] ?? null);
+        $this->assertWithinPolicy($policy, $employee, $data);
+
         $loan = EmployeeLoan::create([
             'employee_id' => $employee->id,
+            'benefit_program_id' => $policy?->id,
             'type' => $data['type'] ?? 'loan',
             'reference' => $data['reference'] ?? null,
             'principal' => $data['principal'],
             'per_period_amount' => $data['per_period_amount'],
             'start_date' => $data['start_date'],
-            'status' => 'active',
+            // Issued by HR, so the decision is already taken — what is missing is the employee's.
+            'status' => 'pending_authorization',
+            'approved_by' => $actor->id,
+            'approved_at' => now(),
             'notes' => $data['notes'] ?? null,
             'created_by' => $actor->id,
         ]);
@@ -63,6 +80,193 @@ class LoanService
         );
 
         return $loan;
+    }
+
+    /**
+     * The employee asks to borrow — Slice B15, path two.
+     *
+     * Nothing is decided and nothing is collectible: it sits at `requested` until HR approves, and
+     * even then it still needs the employee's authorization. The rule on the policy decides
+     * whether they may ask at all, which is the same rule an allowance uses to decide who it
+     * covers — one rule engine, not two.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function request(Employee $employee, array $data): EmployeeLoan
+    {
+        $policy = $this->policyFor($data['benefit_program_id'] ?? null);
+        $this->assertWithinPolicy($policy, $employee, $data);
+
+        $loan = EmployeeLoan::create([
+            'employee_id' => $employee->id,
+            'benefit_program_id' => $policy?->id,
+            'type' => $data['type'] ?? 'loan',
+            'principal' => $data['principal'],
+            'per_period_amount' => $data['per_period_amount'],
+            'start_date' => $data['start_date'],
+            'status' => 'requested',
+            'requested_at' => now(),
+            'notes' => $data['notes'] ?? null,
+            'created_by' => $employee->user_id,
+        ]);
+
+        $employee->loadMissing('user');
+        $this->audit->log(
+            'requested', 'Loans',
+            ($employee->user?->name ?? "Employee {$employee->id}") . ' requested ₱'
+                . number_format((float) $loan->principal, 2)
+                . ($policy ? " under '{$policy->name}'" : '')
+                . ' at ₱' . number_format((float) $loan->per_period_amount, 2) . '/period',
+            $loan,
+        );
+
+        return $loan;
+    }
+
+    /** HR approves a request. Still not collectible — the employee has to authorize it. */
+    public function approve(EmployeeLoan $loan, User $actor, ?string $note = null): EmployeeLoan
+    {
+        if ($loan->status !== 'requested') {
+            throw ValidationException::withMessages([
+                'status' => ["Only a requested loan can be approved; this one is {$loan->status}."],
+            ]);
+        }
+
+        $loan->update([
+            'status' => 'pending_authorization',
+            'approved_by' => $actor->id,
+            'approved_at' => now(),
+            'decision_note' => $note,
+        ]);
+
+        $this->audit->log(
+            'approved', 'Loans',
+            "Approved loan #{$loan->id} — ₱" . number_format((float) $loan->principal, 2)
+                . '. Nothing is deducted until the employee authorizes it.',
+            $loan,
+        );
+
+        return $loan->fresh('payments');
+    }
+
+    public function reject(EmployeeLoan $loan, User $actor, string $reason): EmployeeLoan
+    {
+        if ($loan->status !== 'requested') {
+            throw ValidationException::withMessages([
+                'status' => ["Only a requested loan can be rejected; this one is {$loan->status}."],
+            ]);
+        }
+
+        $loan->update([
+            'status' => 'rejected',
+            'approved_by' => $actor->id,
+            'approved_at' => now(),
+            'decision_note' => $reason,
+        ]);
+
+        $this->audit->log('rejected', 'Loans', "Rejected loan #{$loan->id} — {$reason}", $loan);
+
+        return $loan->fresh('payments');
+    }
+
+    /**
+     * The employee authorizes the deduction — the gate everything else exists to reach.
+     *
+     * THE EMPLOYEE DOES THIS, NOT HR. Art. 113 wants the worker's own consent; a record HR could
+     * create on their behalf would be worth nothing. The caller passes the authenticated user and
+     * this refuses anyone but the borrower.
+     */
+    public function authorize(EmployeeLoan $loan, User $actor): EmployeeLoan
+    {
+        if ($loan->status !== 'pending_authorization') {
+            throw ValidationException::withMessages([
+                'status' => ["This loan is {$loan->status} — there is nothing to authorize."],
+            ]);
+        }
+
+        $loan->loadMissing('employee');
+
+        if ($loan->employee?->user_id !== $actor->id) {
+            throw ValidationException::withMessages([
+                'authorization' => ['Only the employee whose pay is deducted can authorize it.'],
+            ]);
+        }
+
+        $loan->update([
+            'status' => 'active',
+            'authorized_at' => now(),
+            'authorized_by' => $actor->id,
+        ]);
+
+        $this->audit->log(
+            'authorized', 'Loans',
+            "{$actor->name} authorized ₱" . number_format((float) $loan->per_period_amount, 2)
+                . '/period to be deducted from their pay for loan #' . $loan->id
+                . ' (₱' . number_format((float) $loan->principal, 2) . ')',
+            $loan,
+        );
+
+        return $loan->fresh('payments');
+    }
+
+    /** The policy a loan is issued under, if any. */
+    private function policyFor(mixed $programId): ?BenefitProgram
+    {
+        if ($programId === null) {
+            return null;
+        }
+
+        $policy = BenefitProgram::find($programId);
+
+        if ($policy === null || $policy->kind !== 'loan_policy') {
+            throw ValidationException::withMessages([
+                'benefit_program_id' => ['That is not a loan policy.'],
+            ]);
+        }
+
+        return $policy;
+    }
+
+    /**
+     * A loan must fit the product it is issued under, or the product is decoration.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertWithinPolicy(?BenefitProgram $policy, Employee $employee, array $data): void
+    {
+        if ($policy === null) {
+            return;
+        }
+
+        $errors = [];
+
+        if (! app(BenefitProgramService::class)->covers($policy, $employee)) {
+            $errors['benefit_program_id'] = ["{$policy->name} is not available to this employee."];
+        }
+
+        $principal = (float) ($data['principal'] ?? 0);
+        if ($policy->loan_max_principal !== null && $principal > (float) $policy->loan_max_principal) {
+            $errors['principal'] = [
+                '₱' . number_format($principal, 2) . ' is over the ₱'
+                    . number_format((float) $policy->loan_max_principal, 2) . " maximum for {$policy->name}.",
+            ];
+        }
+
+        // Term is expressed as periods, so it is checked as periods: principal ÷ instalment.
+        $perPeriod = (float) ($data['per_period_amount'] ?? 0);
+        if ($policy->loan_term_periods !== null && $perPeriod > 0) {
+            $periods = (int) ceil($principal / $perPeriod);
+            if ($periods > $policy->loan_term_periods) {
+                $errors['per_period_amount'] = [
+                    "That instalment repays over {$periods} periods; {$policy->name} allows "
+                        . $policy->loan_term_periods . '.',
+                ];
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     /** @param array<string, mixed> $data */

@@ -56,6 +56,10 @@ class BenefitProgram extends Model
         'tax_treatment',
         'deminimis_ceiling',
         'ceiling_period',
+        // Slice B15 — loan-policy config (kind = loan_policy).
+        'loan_max_principal',
+        'loan_term_periods',
+        'loan_interest_rate',
         'eligibility',
         'eligibility_statuses',
         'deduction_cadence',

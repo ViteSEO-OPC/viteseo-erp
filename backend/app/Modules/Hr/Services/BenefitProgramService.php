@@ -532,6 +532,17 @@ class BenefitProgramService
             'eligibility_statuses' => ($data['eligibility'] ?? $existing?->eligibility) === 'status'
                 ? array_values($data['eligibility_statuses'] ?? $existing?->eligibility_statuses ?? [])
                 : null,
+            // Slice B15 — loan-policy config, kept only on a loan policy so a kind change cannot
+            // leave a maximum behind on an allowance.
+            'loan_max_principal' => ($data['kind'] ?? $existing?->kind) === 'loan_policy'
+                ? ($data['loan_max_principal'] ?? $existing?->loan_max_principal)
+                : null,
+            'loan_term_periods' => ($data['kind'] ?? $existing?->kind) === 'loan_policy'
+                ? ($data['loan_term_periods'] ?? $existing?->loan_term_periods)
+                : null,
+            'loan_interest_rate' => ($data['kind'] ?? $existing?->kind) === 'loan_policy'
+                ? ($data['loan_interest_rate'] ?? $existing?->loan_interest_rate)
+                : null,
             // HMO / company-plan config.
             'deduction_cadence' => $data['deduction_cadence'] ?? $existing?->deduction_cadence,
             'tiers' => array_key_exists('tiers', $data) ? $data['tiers'] : $existing?->tiers,

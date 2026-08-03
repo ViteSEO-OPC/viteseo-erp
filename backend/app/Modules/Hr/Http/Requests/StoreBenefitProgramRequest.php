@@ -33,6 +33,11 @@ class StoreBenefitProgramRequest extends FormRequest
             // Slice B16 — this benefit's OWN statutory ceiling. Null = none recorded, which keeps
             // the whole amount exempt. Ceilings are per item and are never pooled.
             'deminimis_ceiling' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:9999999.99'],
+            // Slice B15 — loan-policy config. Typed per kind rather than shared into one loose
+            // shape: a loan policy and an HMO have nothing in common but a name.
+            'loan_max_principal' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999'],
+            'loan_term_periods' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:600'],
+            'loan_interest_rate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'ceiling_period' => ['sometimes', 'nullable', 'in:monthly,semester,annual'],
             // Who the programme is for. `status` carries the list below; `custom` carries
             // `employee_ids`. The old `regular` value is gone — it was the only status the model

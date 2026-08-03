@@ -22,6 +22,11 @@ import {
   createEmployeeLoan,
   cancelEmployeeLoan,
   reopenEmployeeLoan,
+  getMyLoans,
+  requestLoan,
+  authorizeLoan,
+  approveLoan,
+  rejectLoan,
   type EmployeeLoanInput,
 } from "@/modules/hr/api/employees";
 import type { EmployeeInput, EmployeeUpdateInput } from "@/modules/hr/types/employee";
@@ -210,5 +215,40 @@ export function useReopenEmployeeLoan(id: number) {
     mutationFn: ({ loanId, reason }: { loanId: number; reason?: string }) =>
       reopenEmployeeLoan(loanId, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id, "loans"] }),
+  });
+}
+
+// --- The employee's own loans (Slice B15) -----------------------------------------
+
+const MY_LOANS_KEY = ["hr", "me", "loans"] as const;
+
+export function useMyLoans() {
+  return useQuery({ queryKey: MY_LOANS_KEY, queryFn: getMyLoans });
+}
+
+export function useRequestLoan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: requestLoan,
+    onSuccess: () => qc.invalidateQueries({ queryKey: MY_LOANS_KEY }),
+  });
+}
+
+/** The consent that makes the deduction lawful — the employee's own act. */
+export function useAuthorizeLoan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (loanId: number) => authorizeLoan(loanId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: MY_LOANS_KEY }),
+  });
+}
+
+/** HR's decision on a request. Neither outcome starts a deduction. */
+export function useDecideLoan(employeeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ loanId, approve, reason }: { loanId: number; approve: boolean; reason?: string }) =>
+      approve ? approveLoan(loanId, reason) : rejectLoan(loanId, reason ?? ""),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, employeeId, "loans"] }),
   });
 }

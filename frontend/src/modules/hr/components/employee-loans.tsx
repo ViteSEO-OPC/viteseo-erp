@@ -17,6 +17,7 @@ import {
   useCreateEmployeeLoan,
   useCancelEmployeeLoan,
   useReopenEmployeeLoan,
+  useDecideLoan,
 } from "@/modules/hr/hooks/use-employees";
 import type { EmployeeLoan } from "@/modules/hr/api/employees";
 import { SimpleSelect } from "@/modules/hr/ui/select";
@@ -45,6 +46,8 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
   const createMut = useCreateEmployeeLoan(employeeId);
   const cancelMut = useCancelEmployeeLoan(employeeId);
   const reopenMut = useReopenEmployeeLoan(employeeId);
+  // Slice B15 — HR decides on a request. Neither outcome starts a deduction.
+  const decideMut = useDecideLoan(employeeId);
 
   const [adding, setAdding] = useState(false);
   const [cancelling, setCancelling] = useState<EmployeeLoan | null>(null);
@@ -217,6 +220,49 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                     <StatusBadge status={l.status} />
                   </td>
                   <td className="px-4 py-2.5 text-right">
+                    {/* Slice B15 — approving is the COMPANY's decision. The deduction still waits
+                        on the employee's own authorization (Labor Code Art. 113), which is why
+                        there is no "activate" here for HR to press. */}
+                    {l.status === "requested" && (
+                      <span className="inline-flex gap-1">
+                        <Button
+                          size="xs"
+                          disabled={decideMut.isPending}
+                          onClick={async () => {
+                            try {
+                              await decideMut.mutateAsync({ loanId: l.id, approve: true });
+                              toast.success("Approved — waiting on the employee to authorize it");
+                            } catch {
+                              toast.error("Could not approve this request.");
+                            }
+                          }}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          disabled={decideMut.isPending}
+                          onClick={async () => {
+                            const reason = window.prompt("Why is this being rejected?")?.trim();
+                            if (!reason) return;
+                            try {
+                              await decideMut.mutateAsync({ loanId: l.id, approve: false, reason });
+                              toast.success("Rejected");
+                            } catch {
+                              toast.error("Could not reject this request.");
+                            }
+                          }}
+                        >
+                          Reject
+                        </Button>
+                      </span>
+                    )}
+                    {l.status === "pending_authorization" && (
+                      <span className="text-caption text-muted-foreground">
+                        Waiting on {"the employee"}&apos;s authorization
+                      </span>
+                    )}
                     {l.status === "active" && (
                       <Button size="xs" variant="ghost" onClick={() => setCancelling(l)}>
                         <Ban className="size-3.5" />
