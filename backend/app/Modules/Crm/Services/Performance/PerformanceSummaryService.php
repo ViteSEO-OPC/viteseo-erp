@@ -3,6 +3,8 @@
 namespace App\Modules\Crm\Services\Performance;
 
 use App\Models\User;
+use App\Modules\Crm\Enums\PerformanceTargetMetric;
+use App\Modules\Crm\Enums\PerformanceTargetPeriod;
 use App\Modules\Crm\Models\Deal;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -28,11 +30,13 @@ use Illuminate\Database\Eloquent\Builder;
  */
 class PerformanceSummaryService
 {
+    public function __construct(private readonly PerformanceTargetService $targets) {}
+
     /**
      * @return array{
      *     assignedLeads: int, activeLeads: int, engagedLeads: int, convertedLeads: int,
      *     overallRevenue: float, estimatedPipelineValue: float, conversionRate: float|null,
-     *     completedFollowUps: int,
+     *     completedFollowUps: int, personalTarget: array{value:int, progress:int}|null,
      *     followUpDiscipline: array{missedFollowUps: int, missedMeetings: int, missedCalls: int}
      * }
      */
@@ -90,6 +94,16 @@ class PerformanceSummaryService
             ->where('completed_at', '>=', now()->startOfMonth())
             ->count();
 
+        // Personal Target — the monthly converted-leads goal from Goal Management, or null when
+        // none is configured. NULL IS THE HONEST ANSWER: every consumer keeps its existing Pending
+        // state rather than showing a fabricated denominator. The target supplies the denominator
+        // only; `convertedLeads` above remains the authoritative computed numerator.
+        $targetValue = $this->targets->valueFor(
+            $user->id,
+            PerformanceTargetPeriod::MONTH,
+            PerformanceTargetMetric::CONVERTED_LEADS,
+        );
+
         return [
             'assignedLeads' => $assignedLeads,
             'activeLeads' => $activeLeads,
@@ -99,6 +113,9 @@ class PerformanceSummaryService
             'estimatedPipelineValue' => $estimatedPipelineValue,
             'conversionRate' => $conversionRate,
             'completedFollowUps' => $completedFollowUps,
+            'personalTarget' => $targetValue === null
+                ? null
+                : ['value' => $targetValue, 'progress' => $convertedLeads],
             'followUpDiscipline' => [
                 'missedFollowUps' => $missedFor('follow-up'),
                 'missedMeetings' => $missedFor('meeting'),

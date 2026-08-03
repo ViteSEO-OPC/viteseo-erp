@@ -222,6 +222,20 @@ class RolesAndPermissionsSeeder extends Seeder
         // the Business Development Manager get no access.
         $crmAdmin->givePermissionTo($businessRulesPermissions);
 
+        // --- Performance Management (Reports & Performance → Manage Performance) ---
+        // Goal Management CRUD + KPI-definition mutations. Held by SUPER ADMIN and ADMIN
+        // (PO decision: performance management is a management capability, not an owner-only one).
+        // crm_bd is deliberately excluded — a BD reads their own performance and configures nothing.
+        //
+        // It remains a permission SEPARATE from crm.business_rules.manage even though both roles now
+        // hold both: they are different capabilities, and keeping them distinct means Lead Scoring
+        // administration and Performance management can be narrowed independently later — in
+        // particular when the temporary Admin grant above is revisited before production.
+        $performancePermission = 'crm.performance.manage';
+        Permission::firstOrCreate(['name' => $performancePermission, 'guard_name' => 'web']);
+        $superAdmin->givePermissionTo($performancePermission);
+        $crmAdmin->givePermissionTo($performancePermission);
+
         // Demo login users + their employee records are created by the HR module's
         // EmployeeDemoSeeder (via EmployeeService, so they also get leave balances).
     }

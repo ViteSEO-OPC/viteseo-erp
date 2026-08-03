@@ -44,6 +44,13 @@ export function OutreachTargetCard({ className }: { className?: string }) {
     m04?.evaluable && typeof m04.value === "number" ? m04.value : null;
   const pct = coverage !== null ? Math.round(coverage) : 0; // round for display only, not computation
 
+  // Personal Target comes from the backend (Goal Management); null means none configured, which the
+  // card renders as its existing Pending state. Only the display percentage is derived here.
+  const target = s?.personalTarget ?? null;
+  const targetPct = target && target.value > 0
+    ? Math.min(100, Math.round((target.progress / target.value) * 100))
+    : 0;
+
   // Raw counts — descriptive footer data only (never used to derive the percentage).
   const assigned = s?.assignedLeads ?? 0;
   const engaged = s?.engagedLeads ?? 0;
@@ -77,18 +84,31 @@ export function OutreachTargetCard({ className }: { className?: string }) {
           </p>
         </div>
 
-        {/* Personal Target — pending configuration (no monthly target module) */}
+        {/* Personal Target — live once a monthly target exists in Goal Management; the honest
+            Pending state is preserved when none is configured (never a fabricated denominator). */}
         <div>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="text-sm font-bold text-card-foreground">Personal Target</h3>
               <p className="text-xs text-muted-foreground">{copy.targetSubtitle}</p>
             </div>
-            <PendingBadge reason="Pending configuration — no monthly target has been set" />
+            {target ? (
+              <span className="text-lg font-bold text-card-foreground">
+                {target.progress}/{target.value}
+              </span>
+            ) : (
+              <PendingBadge reason="Pending configuration — no monthly target has been set" />
+            )}
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Set a monthly conversion target to track progress here.
-          </p>
+          {target ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {target.progress} of {target.value} converted this month · {targetPct}% of target
+            </p>
+          ) : (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Set a monthly conversion target to track progress here.
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -11,6 +11,7 @@ import { AlertBanner } from "@/modules/crm/components/shared/alert-banner/alert-
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
+import { LEAD_SCORING } from "@/modules/crm/features/business-rules/types/business-rules-types";
 import {
   useActiveConfig,
   useAudit,
@@ -45,28 +46,48 @@ function fmt(iso: string | null): string {
   return iso ? new Date(iso).toLocaleString() : "—";
 }
 
-export function BusinessRulesPage() {
+/**
+ * `module` selects which configurable computation this surface administers. It defaults to
+ * lead_scoring so the existing Settings → Business Rules page is unchanged; Performance Management
+ * passes "kpi" to render the KPI definition catalog through the SAME components rather than a second
+ * CRUD implementation.
+ *
+ * `managePermission` follows, because the two modules are gated by different permissions: KPI
+ * definitions require crm.performance.manage on top of the shared view permission.
+ *
+ * `showHeader` is off when an outer page already titles the surface (Performance Management renders
+ * its own heading and tab strip), so the KPI tab does not stack a second "Business Rules" title.
+ */
+export function BusinessRulesPage({
+  module = LEAD_SCORING,
+  managePermission = "crm.business_rules.manage",
+  showHeader = true,
+}: {
+  module?: string;
+  managePermission?: string;
+  showHeader?: boolean;
+} = {}) {
   const { can } = usePermissions();
   const canView = can("crm.business_rules.view");
-  const canManage = can("crm.business_rules.manage");
+  const canManage = can(managePermission);
 
   const [tab, setTab] = useState<Tab>("configuration");
   const [publishOpen, setPublishOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [rollbackTarget, setRollbackTarget] = useState<BusinessRuleVersion | null>(null);
 
-  const active = useActiveConfig();
-  const draftQuery = useDraft();
-  const versions = useVersions();
-  const audit = useAudit();
+  const active = useActiveConfig(module);
+  const draftQuery = useDraft(module);
+  const versions = useVersions(module);
+  const audit = useAudit(module);
 
-  const ensureDraft = useEnsureDraft();
-  const updateRule = useUpdateRule();
-  const setEnabled = useSetRuleEnabled();
-  const reorder = useReorderRules();
-  const discard = useDiscardDraft();
-  const publish = usePublish();
-  const rollback = useRollback();
+  const ensureDraft = useEnsureDraft(module);
+  const updateRule = useUpdateRule(module);
+  const setEnabled = useSetRuleEnabled(module);
+  const reorder = useReorderRules(module);
+  const discard = useDiscardDraft(module);
+  const publish = usePublish(module);
+  const rollback = useRollback(module);
 
   if (!canView) {
     return <AlertBanner variant="warning" message="You don’t have permission to view Business Rules." />;
@@ -108,15 +129,17 @@ export function BusinessRulesPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-foreground">Business Rules</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Configure the Lead Scoring rules. Computed results (Lead Scores, BD Performance) are never edited
-            here — they recompute automatically when a change is published.
-          </p>
-        </div>
-      </header>
+      {showHeader && (
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Business Rules</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Configure the Lead Scoring rules. Computed results (Lead Scores, BD Performance) are never edited
+              here — they recompute automatically when a change is published.
+            </p>
+          </div>
+        </header>
+      )}
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-border">

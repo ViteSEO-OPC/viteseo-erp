@@ -5,6 +5,8 @@ namespace App\Modules\Crm\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Modules\Crm\Enums\ConsultationOutcome;
+use App\Modules\Crm\Enums\PerformanceTargetMetric;
+use App\Modules\Crm\Enums\PerformanceTargetPeriod;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -14,6 +16,7 @@ use App\Modules\Crm\Services\Kpi\BdKpiService;
 use App\Modules\Crm\Services\Kpi\KpiMetric;
 use App\Modules\Crm\Services\Performance\PerformancePdfExporter;
 use App\Modules\Crm\Services\Performance\PerformanceSummaryService;
+use App\Modules\Crm\Services\Performance\PerformanceTargetService;
 use App\Modules\Crm\Services\Ranking\BdRankingRow;
 use App\Modules\Crm\Services\Ranking\BdRankingService;
 use Illuminate\Database\Eloquent\Builder;
@@ -315,8 +318,10 @@ class DashboardController extends Controller
      * ONE ownership-scoped read (same {@link PerformanceScopeRequest} seam as performanceSummary — All
      * Reports, or one BD via `?user_id`); every figure is a real, server-computed aggregate over the
      * subject's visible leads / Planner events. No fabricated numbers, and — per the frozen Business
-     * Decision — **no goals or targets are invented**: `followThrough.targetsPending` is surfaced so the
-     * UI shows the live counts without a made-up denominator (Goal Management is a later sprint).
+     * Decision — **no goals or targets are invented**: goal denominators come from Goal Management via
+     * `followThrough.goals` and ONLY for a drilled BD, since a target belongs to one BD and no team
+     * aggregate exists. Where none is configured the value is null and `followThrough.targetsPending`
+     * stays true, so the UI shows the live counts without a made-up denominator.
      *
      * Stage/channel definitions are documented inline because the mockup labels don't map 1:1 to the
      * frozen `status` enum — each is derived from a concrete, existing lead field:
@@ -330,9 +335,10 @@ class DashboardController extends Controller
      *   Outreach Email  completed=`replied` · in-progress=`sent`+`opened` · not-started=`none`.
      *           Call   completed=`called` · in-progress=`scheduled` · not-started=`not-called`.
      */
-    public function reportsAnalytics(PerformanceScopeRequest $request): JsonResponse
+    public function reportsAnalytics(PerformanceScopeRequest $request, PerformanceTargetService $targets): JsonResponse
     {
-        $user = $request->scope()->subject;
+        $scope = $request->scope();
+        $user = $scope->subject;
 
         // Fresh scoped lead query per use (the `active()` set — every status incl. declined — visible to the subject).
         $leads = fn (): Builder => Lead::query()->active()->visibleTo($user);
@@ -414,8 +420,8 @@ class DashboardController extends Controller
             ->map(fn ($r): array => ['niche' => (string) $r->industry, 'value' => (int) $r->c])
             ->values();
 
-        // ---- Quarter follow-through — live counts only. The PO-frozen rule: no fabricated targets, so
-        // the goal denominators are omitted (`targetsPending`) and the UI shows the raw numerators. ----
+        // ---- Quarter follow-through — live counts, plus the configured goals from Goal Management. The
+        // PO-frozen rule still holds: nothing is fabricated, so an unconfigured goal stays null. ----
         $missedFor = fn (string $type): int => PlannerEvent::query()
             ->visibleTo($user)
             ->where('event_type', $type)
@@ -427,6 +433,17 @@ class DashboardController extends Controller
         $outreachCompletionPct = ($emailTotal + $callTotal) > 0
             ? (int) round(($emailCompleted + $callCompleted) / ($emailTotal + $callTotal) * 100)
             : null;
+
+        // Quarter goals from Goal Management — per BD, for the quarter containing today. Each entry is
+        // null when nothing is configured, so a row keeps its honest Pending marker rather than showing
+        // a fabricated denominator. Only the drilled-BD scope can carry goals: a target belongs to a
+        // Business Development Manager, and All Reports deliberately does NOT fabricate a team
+        // aggregate (that would be a new business object, not a sum of existing ones).
+        $goals = $scope->mode === 'bd' ? [
+            'leadsContacted' => $targets->valueFor($user->id, PerformanceTargetPeriod::QUARTER, PerformanceTargetMetric::LEADS_CONTACTED),
+            'consultations' => $targets->valueFor($user->id, PerformanceTargetPeriod::QUARTER, PerformanceTargetMetric::CONSULTATIONS),
+            'confirmedClients' => $targets->valueFor($user->id, PerformanceTargetPeriod::QUARTER, PerformanceTargetMetric::CONFIRMED_CLIENTS),
+        ] : null;
 
         // ---- Consultations — 🔒 FROZEN business rule (PDR-002 §4b) ----------------------------------
         //
@@ -464,8 +481,17 @@ class DashboardController extends Controller
             'missedMeetings' => $missedFor('meeting'),
             'missedCalls' => $missedFor('call'),
             'outreachCompletionPct' => $outreachCompletionPct,
-            // No goals invented — Goal Management is a later sprint (frozen Business Decision).
-            'targetsPending' => true,
+            // Quarter goals from Goal Management — per BD, for the quarter containing today. Each is
+            // null when nothing is configured, so a tile keeps its honest Pending marker rather than
+            // showing a fabricated denominator. Only the drilled-BD scope can carry goals: targets
+            // belong to a Business Development Manager, and All Reports deliberately does NOT
+            // fabricate a team aggregate (that would be a new business object).
+            'goals' => $goals,
+            // Still true whenever NO goal applies to this scope — which is always the case for All
+            // Reports, and the case for a BD until one is configured. It is no longer hardcoded: now
+            // that Goal Management can supply real denominators, reporting "pending" beside a
+            // configured goal would be the fabrication this flag exists to prevent.
+            'targetsPending' => $goals === null || array_filter($goals, fn (?int $g): bool => $g !== null) === [],
         ];
 
         // ---- Pending follow-ups — the team's action queue. Overdue/today/upcoming by the Asia/Manila

@@ -65,6 +65,16 @@ export type ReportsAnalytics = {
     missedCalls: number;
     /** Completed outreach ÷ total across both channels; `null` when there is no outreach yet. */
     outreachCompletionPct: number | null;
+    /**
+     * Quarterly goals from Goal Management for the drilled BD, or `null` for All Reports — targets
+     * belong to one BD and no team aggregate is fabricated. Each metric is independently `null`
+     * when nothing is configured, so its row keeps the honest Pending marker.
+     */
+    goals: {
+      leadsContacted: number | null;
+      consultations: number | null;
+      confirmedClients: number | null;
+    } | null;
     /** true → goal denominators are intentionally omitted (Goal Management is a later sprint). */
     targetsPending: boolean;
   };
