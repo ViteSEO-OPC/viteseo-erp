@@ -5,22 +5,65 @@ namespace App\Modules\Crm\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Modules\Crm\Enums\ConsultationOutcome;
-use App\Modules\Crm\Models\Deal;
+use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
 use App\Modules\Crm\Requests\PerformanceScopeRequest;
 use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Services\Kpi\BdKpiService;
 use App\Modules\Crm\Services\Kpi\KpiMetric;
+use App\Modules\Crm\Services\Performance\PerformancePdfExporter;
+use App\Modules\Crm\Services\Performance\PerformanceSummaryService;
 use App\Modules\Crm\Services\Ranking\BdRankingRow;
 use App\Modules\Crm\Services\Ranking\BdRankingService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Carbon;
+use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 class DashboardController extends Controller
 {
+    /**
+     * The pending follow-up set — the ONE definition behind every follow-up queue figure this
+     * controller serves (the dashboard's Follow-ups Due KPI and the reports page's overdue/today/
+     * upcoming buckets).
+     *
+     * Frozen rule (Reports & Performance milestone): a Planner event of type `follow-up` that is
+     * DATED and NOT completed, scoped by PlannerEvent::visibleTo — Admin/SA see the whole CRM, a BD
+     * sees their own events plus events on the leads they own. An outbound email is deliberately NOT
+     * a follow-up (PO ruling 2026-07-09); only real Planner events count here.
+     *
+     * Returned as a builder factory rather than a builder so each caller gets a fresh query — the
+     * bucket counts below run four of them off this one definition.
+     *
+     * @return callable(): Builder<PlannerEvent>
+     */
+    private function pendingFollowUps(User $user): callable
+    {
+        return fn (): Builder => PlannerEvent::query()
+            ->visibleTo($user)
+            ->where('event_type', 'follow-up')
+            ->where('status', '!=', 'completed')
+            ->whereNotNull('starts_at');
+    }
+
+    /**
+     * The Asia/Manila day boundary as half-open UTC windows, `[todayStart, todayEnd)`.
+     *
+     * Datetimes are stored UTC but the business day is Manila's (the platform rule), and the windows
+     * are half-open so an event landing exactly on midnight is counted once — never in two buckets.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function manilaDayWindow(): array
+    {
+        $tz = 'Asia/Manila';
+
+        return [now($tz)->startOfDay()->utc(), now($tz)->startOfDay()->addDay()->utc()];
+    }
+
     /**
      * Supported KPI counts (backend-computable only) + per-status breakdown.
      * Scoped by ownership: Admin/SA see all leads; a BD sees only their own (Lead::scopeVisibleTo).
@@ -44,6 +87,32 @@ class DashboardController extends Controller
                 'totalLeads' => Lead::query()->active()->visibleTo($user)->count(),
                 'highPriority' => Lead::query()->active()->visibleTo($user)->where('priority', 'high')->count(),
                 'interested' => (int) $statusCounts->get('interested', 0),
+                // Follow-ups Due — the WHOLE scoped pending set (overdue + today + upcoming), which
+                // is the same "actionable items" reading the Planner sidebar badge already uses. It
+                // rides the shared pendingFollowUps() definition, so this card and the reports
+                // page's three buckets can never drift apart: this is their sum by construction.
+                'followUpsDue' => ($this->pendingFollowUps($user))()->count(),
+                // Completed Outreach (PO decision) — outbound emails the system actually SENT.
+                //
+                // Counts ACTIONS, not leads: emailing one lead three times is three completed
+                // outreach actions, which is what makes this an effort metric rather than a
+                // coverage one (coverage is M-04, deliberately a different KPI).
+                //
+                // `crm_emails.status = 'sent'` is the source because it is written by the send
+                // path itself. `crm_leads.email_outreach` is deliberately NOT used: nothing in the
+                // codebase ever writes its `sent` value — only `replied`, by the inbound processor
+                // — so it records what happened TO us, not what we did. Using it would let an
+                // inbound reply credit outreach that was never performed.
+                //
+                // Every other status is excluded by being unequal to 'sent': draft, scheduled,
+                // queued, failed, cancelled. Inbound mail cannot leak in — it is a different
+                // direction AND carries `received`. Calls and Planner follow-ups are out of scope
+                // by PO decision; no combined channel rule is invented here.
+                'completedOutreach' => Email::query()
+                    ->where('direction', 'outbound')
+                    ->where('status', 'sent')
+                    ->whereIn('lead_id', Lead::query()->active()->visibleTo($user)->select('id'))
+                    ->count(),
                 // Raw per-status counts (frozen enum keys). The UI applies its own
                 // label mapping — keeping this response terminology-neutral.
                 'statusCounts' => [
@@ -214,77 +283,30 @@ class DashboardController extends Controller
      * My Performance; an Admin/SA's "All Reports" aggregate). `?user_id` drills into one BD and is
      * management-only (`crm.reports.view`). The whole method body scopes through the resolved subject.
      */
-    public function performanceSummary(PerformanceScopeRequest $request): JsonResponse
+    public function performanceSummary(PerformanceScopeRequest $request, PerformanceSummaryService $summary): JsonResponse
     {
-        $user = $request->scope()->subject;
+        // The figures themselves live in PerformanceSummaryService — the one implementation the PDF
+        // export also consumes, so the document and this endpoint can never disagree. The response
+        // shape is unchanged.
+        return response()->json(['data' => $summary->for($request->scope()->subject)]);
+    }
 
-        // Frozen ACTIVE_SET (BD-PERF-COMP-SPEC R-1): all statuses except `declined`.
-        $activeSet = ['new', 'interested', 'awaiting-reply', 'call-back-req'];
+    /**
+     * The performance scorecard as a downloadable PDF — the one export behind both surfaces (a BD's
+     * My Performance and Admin/SA's Reports & Performance, whether drilled into one BD or the
+     * CRM-wide All Reports scope).
+     *
+     * Authorization is inherited, not re-implemented: PerformanceScopeRequest is the same seam the
+     * JSON endpoints use, so a BD passing `?user_id` is rejected 403 by its authorize() exactly as
+     * it is on performance-summary, and only `crm.reports.view` holders can drill into a BD. There
+     * is deliberately no separate permission for "exporting" — if you may read the figures, you may
+     * download them; if you may not, neither route will serve you.
+     */
+    public function exportPerformancePdf(PerformanceScopeRequest $request, PerformancePdfExporter $exporter): SymfonyResponse
+    {
+        $scope = $request->scope();
 
-        $assignedLeads = Lead::query()->active()->visibleTo($user)->count();
-        $activeLeads = Lead::query()->active()->visibleTo($user)->whereIn('status', $activeSet)->count();
-
-        // Engagement basis (M-04): any outreach started OR any calling activity.
-        $engagedLeads = Lead::query()->active()->visibleTo($user)
-            ->where(fn (Builder $q) => $q->where('email_outreach', '!=', 'none')
-                ->orWhere('cold_calling', '!=', 'not-called'))
-            ->count();
-
-        // Converted leads + revenue from the deals table, scoped to the user's visible leads.
-        $convertedLeads = Lead::query()->active()->visibleTo($user)->has('deals')->count();
-        $visibleLeadIds = Lead::query()->active()->visibleTo($user)->pluck('id');
-        // REVENUE = realized, won business → Σ deals.amount ONLY (never leads.amount). Unchanged.
-        $overallRevenue = $visibleLeadIds->isEmpty()
-            ? 0.0
-            : (float) Deal::query()->whereIn('lead_id', $visibleLeadIds)->sum('amount');
-
-        // ESTIMATED PIPELINE VALUE = prospect-stage Estimated Deal Value → Σ leads.amount, ownership-
-        // scoped. Distinct from Revenue: this is the sum of `leads.amount` (an estimate on open leads),
-        // NOT realized revenue. Single source of truth for the pipeline figure — computed only here.
-        $estimatedPipelineValue = (float) Lead::query()->active()->visibleTo($user)->sum('amount');
-
-        // Conversion Rate = converted ÷ engaged (approved). Zero denominator → null (undefined).
-        $conversionRate = $engagedLeads > 0
-            ? round($convertedLeads / $engagedLeads * 100, 1)
-            : null;
-
-        // Planner-based follow-up metrics — scoped exactly like the lead metrics, via
-        // PlannerEvent::visibleTo (a BD sees their own events, Admin/SA all).
-        //
-        // Follow-up discipline (PO-frozen rule): "missed" = an event whose `starts_at` is in the past
-        // and whose `status` is not `completed` — grouped by event_type (follow-up / meeting / call).
-        $missedFor = fn (string $type): int => PlannerEvent::query()
-            ->visibleTo($user)
-            ->where('event_type', $type)
-            ->whereNotNull('starts_at')
-            ->where('starts_at', '<', now())
-            ->where('status', '!=', 'completed')
-            ->count();
-
-        // Completed Follow-ups — count for the CURRENT month, timestamped by the real `completed_at`
-        // (never `updated_at`). Rows completed before `completed_at` existed carry null and are excluded.
-        $completedFollowUps = PlannerEvent::query()
-            ->visibleTo($user)
-            ->where('event_type', 'follow-up')
-            ->where('status', 'completed')
-            ->where('completed_at', '>=', now()->startOfMonth())
-            ->count();
-
-        return response()->json(['data' => [
-            'assignedLeads' => $assignedLeads,
-            'activeLeads' => $activeLeads,
-            'engagedLeads' => $engagedLeads,
-            'convertedLeads' => $convertedLeads,
-            'overallRevenue' => $overallRevenue,
-            'estimatedPipelineValue' => $estimatedPipelineValue,
-            'conversionRate' => $conversionRate,
-            'completedFollowUps' => $completedFollowUps,
-            'followUpDiscipline' => [
-                'missedFollowUps' => $missedFor('follow-up'),
-                'missedMeetings' => $missedFor('meeting'),
-                'missedCalls' => $missedFor('call'),
-            ],
-        ]]);
+        return $exporter->render($scope)->download($exporter->filename($scope));
     }
 
     /**
@@ -447,16 +469,12 @@ class DashboardController extends Controller
         ];
 
         // ---- Pending follow-ups — the team's action queue. Overdue/today/upcoming by the Asia/Manila
-        // day boundary (dates stored UTC, day computed in Manila — the platform rule). ----
-        $tz = 'Asia/Manila';
-        $todayStart = now($tz)->startOfDay()->utc();
-        $todayEnd = now($tz)->startOfDay()->addDay()->utc();
+        // day boundary (dates stored UTC, day computed in Manila — the platform rule). Both the set
+        // and the window come from the shared helpers, so the dashboard's Follow-ups Due KPI counts
+        // exactly the rows these three buckets partition. ----
+        [$todayStart, $todayEnd] = $this->manilaDayWindow();
 
-        $pending = fn (): Builder => PlannerEvent::query()
-            ->visibleTo($user)
-            ->where('event_type', 'follow-up')
-            ->where('status', '!=', 'completed')
-            ->whereNotNull('starts_at');
+        $pending = $this->pendingFollowUps($user);
 
         $rows = $pending()
             ->with('lead:id,business_name')

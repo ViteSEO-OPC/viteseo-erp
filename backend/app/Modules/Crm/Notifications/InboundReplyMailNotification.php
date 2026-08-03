@@ -83,13 +83,22 @@ class InboundReplyMailNotification extends Notification implements ShouldQueue
     }
 
     /**
-     * Deep link to the lead. APP_URL is the production site root that also serves the frontend
-     * (see the CTO deployment cookbook), and the lead detail route is /zerem/leads/{id}. Returns null
-     * when APP_URL is unset so a misconfigured environment yields no button rather than a broken link.
+     * Deep link to the lead in the CRM SPA.
+     *
+     * Built from `outreach.frontend_url` — the SPA ORIGIN — not from APP_URL. Those are the same
+     * host only when one origin serves both the API and the frontend; anywhere they are split (this
+     * repo's local setup runs the API on :8001 and Next on :3000) APP_URL produced a link to the API
+     * host, which 404s. The frontend origin is already configured for exactly this purpose, so the
+     * button now resolves wherever the SPA actually lives.
+     *
+     * Origin from config, path in code — the same split the OAuth callback's return URL uses, so a
+     * change to the SPA's routing is a code change next to the route it mirrors rather than an env
+     * edit across every deployment. Returns null when no origin is configured, so a misconfigured
+     * environment yields no button rather than a broken link.
      */
     private function leadUrl(): ?string
     {
-        $base = rtrim((string) config('app.url'), '/');
+        $base = rtrim((string) config('outreach.frontend_url', ''), '/');
 
         return $base === '' ? null : "{$base}/zerem/leads/{$this->lead->id}";
     }

@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getStoredToken, removeToken } from "@/modules/crm/lib/auth";
+import { getSocketId } from "@/core/realtime/echo";
 
 /**
  * CRM module API client.
@@ -45,6 +46,12 @@ apiClient.interceptors.request.use((config) => {
   const token = getStoredToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Same contract as the shared core client: identifies the originating socket
+  // so a ->toOthers() broadcast skips the actor's own connection.
+  const socketId = getSocketId();
+  if (socketId) {
+    config.headers["X-Socket-Id"] = socketId;
   }
   return config;
 });

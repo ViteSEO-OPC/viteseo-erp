@@ -4,14 +4,15 @@ declare(strict_types=1);
 
 namespace App\Modules\Projects\Services;
 
+use App\Events\NotificationCreated;
 use App\Models\User;
 use App\Modules\Projects\Enums\AssignmentType;
 use App\Modules\Projects\Enums\UserRole;
-use App\Modules\Projects\Events\NotificationCreated;
 use App\Modules\Projects\Models\Comment;
 use App\Modules\Projects\Models\Notification;
 use App\Modules\Projects\Models\Task;
-use App\Modules\Projects\Support\SafeBroadcast;
+use App\Modules\Projects\Resources\NotificationResource;
+use App\Support\SafeBroadcast;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -125,9 +126,20 @@ class NotificationService
      * Broadcast only after the surrounding DB transaction commits, so a
      * rolled-back notification row never reaches a client. (Runs immediately
      * when there is no open transaction.)
+     *
+     * The event is the platform's, and the payload is built HERE from this
+     * module's own Resource — the shared `user.{id}` stream carries every
+     * module's notifications, tagged with `module` so each client listener keeps
+     * only its own. Relations are eager-loaded before resolving so the payload is
+     * complete without a re-fetch at broadcast time.
      */
     private function dispatch(Notification $notification): void
     {
-        DB::afterCommit(fn () => SafeBroadcast::dispatch(new NotificationCreated($notification)));
+        $notification->loadMissing('actor', 'task', 'project');
+        $payload = (new NotificationResource($notification))->resolve(request());
+
+        DB::afterCommit(fn () => SafeBroadcast::dispatch(
+            new NotificationCreated((int) $notification->user_id, 'projects', $payload)
+        ));
     }
 }

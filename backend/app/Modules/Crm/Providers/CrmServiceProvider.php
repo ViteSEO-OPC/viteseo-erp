@@ -4,7 +4,7 @@ namespace App\Modules\Crm\Providers;
 
 use App\Models\User;
 use App\Modules\Crm\Console\Commands\BackfillNichesCommand;
-use App\Modules\Crm\Console\Commands\MailboxWatchCommand;
+use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
@@ -16,8 +16,6 @@ use App\Modules\Crm\Events\OutboundEmailSent;
 use App\Modules\Crm\Events\PlannerReminderDue;
 use App\Modules\Crm\Events\ProposalSent;
 use App\Modules\Crm\Events\ScheduledEmailDue;
-use App\Modules\Crm\Jobs\ReconcileMailboxJob;
-use App\Modules\Crm\Jobs\RenewMailboxWatchJob;
 use App\Modules\Crm\Jobs\SendDueRemindersJob;
 use App\Modules\Crm\Jobs\SendScheduledEmailsJob;
 use App\Modules\Crm\Listeners\EmitDealWonWebhook;
@@ -27,6 +25,7 @@ use App\Modules\Crm\Listeners\EmitOutboundEmailSentWebhook;
 use App\Modules\Crm\Listeners\EmitProposalSentWebhook;
 use App\Modules\Crm\Listeners\EmitReminderDueWebhook;
 use App\Modules\Crm\Listeners\EscalateUnansweredFollowUp;
+use App\Modules\Crm\Listeners\BroadcastCrmNotification;
 use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
@@ -46,12 +45,15 @@ use App\Modules\Crm\Policies\UserPolicy;
 use App\Modules\Crm\Services\BusinessRules\ScoringConfigProvider;
 use App\Modules\Crm\Services\Kpi\KpiConfig;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
-use App\Modules\Crm\Services\Mail\Contracts\MailboxSyncProvider;
-use App\Modules\Crm\Services\Mail\Providers\GmailMailboxSync;
+use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
+use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
+use App\Modules\Crm\Services\Mail\MailboxOauthTokenStore;
+use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Mail\Providers\SmtpEmailProvider;
 use App\Modules\Crm\Services\Ranking\RankingConfig;
 use App\Modules\Crm\Services\Scoring\ScoringConfig;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -109,17 +111,26 @@ class CrmServiceProvider extends ServiceProvider
             return $app->make($class);
         });
 
-        // Inbound mailbox sync provider (Gmail). The credentials/topic default to null when the
-        // Google env vars are unset, so binding here never crashes on boot — the provider is only
-        // exercised by the queued mailbox jobs, which require Gmail creds + a queue worker at deploy.
-        $this->app->bind(MailboxSyncProvider::class, function (): MailboxSyncProvider {
-            return new GmailMailboxSync([
-                'credentials' => config('outreach.gmail.credentials'),
-                'topic' => config('outreach.gmail.topic'),
-                'scopes' => config('outreach.gmail.scopes', []),
-                'auth' => config('outreach.gmail.auth', 'keyless'),
-                'service_account' => config('outreach.gmail.service_account'),
-            ]);
+        // How a Google client proves it may read a mailbox: keyless domain-wide delegation by
+        // default, the legacy JSON key under auth=key, per-mailbox user consent under auth=oauth.
+        // Resolved lazily and never contacted at boot, so a deployment with the Google env vars
+        // unset still boots — the credential is only exercised by the queued SyncMailboxJob.
+        //
+        // The token store is resolved from the container rather than left to the factory's default
+        // so that one binding governs it everywhere: the eventual consent flow writes grants through
+        // the same instance (and the same expiry skew) this reads them through.
+        $this->app->singleton(GoogleCredentialSource::class, function (Application $app): GoogleCredentialSource {
+            /** @var array<string, mixed> $gmail */
+            $gmail = (array) config('outreach.gmail', []);
+
+            return GoogleCredentialSourceFactory::fromConfig($gmail, $app->make(MailboxOauthTokenStore::class));
+        });
+
+        // Inbound sync providers, resolved PER MAILBOX from crm_mailbox_syncs.provider rather than
+        // from one global binding — see MailboxSyncManager. Gmail remains the only registered
+        // driver and the configured default, so current behaviour is unchanged.
+        $this->app->singleton(MailboxSyncManager::class, function (Application $app): MailboxSyncManager {
+            return new MailboxSyncManager($app);
         });
     }
 
@@ -131,8 +142,20 @@ class CrmServiceProvider extends ServiceProvider
             ->middleware('api')
             ->group(__DIR__ . '/../Routes/api.php');
 
+        // The Google OAuth callback, mounted at the ROOT with no prefix so its path is exactly
+        // /auth/google/callback — the string registered as GOOGLE_REDIRECT_URI on the OAuth client,
+        // which Google matches literally. `api` middleware rather than `web`: the flow authenticates
+        // by a cache-backed state nonce, so it wants no session or CSRF cookie machinery.
+        Route::middleware('api')
+            ->group(__DIR__ . '/../Routes/oauth.php');
+
         // Auto-load the crm_* migrations from inside the module.
         $this->loadMigrationsFrom(__DIR__ . '/../Migrations');
+
+        // Private broadcast channels for CRM real-time features (Reverb). Registered here — like
+        // the Projects module does — so the pod owns its own channel authorization. Requires the
+        // policies registered below, which is why this sits inside boot().
+        require __DIR__ . '/../Routes/channels.php';
 
         // Blade views owned by the CRM module, namespaced `crm::` — currently the single-lead PDF
         // template. Mirrors the HR module's `hr::` registration; no app-level views are touched.
@@ -176,11 +199,18 @@ class CrmServiceProvider extends ServiceProvider
         // customer communication continues to flow through the shared outreach mailbox.
         Event::listen(InboundReplyReceived::class, InboundReplyDeliveryDispatcher::class);
 
+        // Notification Center realtime. Hooks Laravel's own notification lifecycle
+        // rather than each producer, so EVERY CRM in-app notification — the two that
+        // exist and every one added later — is pushed to its recipient without the
+        // producer knowing anything about broadcasting. There is deliberately no
+        // second path that creates a notification.
+        Event::listen(NotificationSent::class, BroadcastCrmNotification::class);
+
         // Console commands + inbound-sync maintenance schedule. Registering the schedule is inert
         // until a scheduler/queue worker runs at deploy (and Gmail creds are configured).
         if ($this->app->runningInConsole()) {
             $this->commands([
-                MailboxWatchCommand::class,
+                SyncMailboxesCommand::class,
                 RecomputeLeadScoresCommand::class,
                 N8nTokenCommand::class,
                 PruneReadNotifications::class,
@@ -192,8 +222,15 @@ class CrmServiceProvider extends ServiceProvider
 
         $this->app->booted(function (): void {
             $schedule = $this->app->make(Schedule::class);
-            $schedule->job(new RenewMailboxWatchJob)->daily();
-            $schedule->job(new ReconcileMailboxJob)->hourly();
+            // Inbound email. THE trigger for mailbox synchronization: the command fans out one
+            // SyncMailboxJob per mailbox and returns immediately. Five minutes is the latency the
+            // Pub/Sub push used to deliver in seconds — the deliberate trade for needing no Google
+            // Cloud topic, no push subscription, and no public webhook.
+            //
+            // withoutOverlapping() guards the FAN-OUT (a scheduler tick that somehow runs long must
+            // not stack); SyncMailboxJob::uniqueId() separately guards each mailbox's actual sync,
+            // which is the one that matters because the queue, not the scheduler, does the work.
+            $schedule->command('outreach:sync')->everyFiveMinutes()->withoutOverlapping();
 
             // RC3 Send-Later: dispatch due scheduled outbound emails through the single outbound pipeline.
             $schedule->job(new SendScheduledEmailsJob)->everyMinute();

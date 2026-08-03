@@ -24,16 +24,24 @@ import type { WebsiteStatus } from "@/modules/crm/features/leads/types/lead-type
 const KPI_BASE: KpiStat[] = [
   { id: "total-leads", label: "TOTAL LEADS", value: "0", valueVariant: "neutral", caption: "In your pipeline" },
   { id: "high-priority", label: "HIGH PRIORITY", value: "0", valueVariant: "neutral", caption: "Flagged high priority" },
-  // No follow-up/appointment module yet (an outbound email is not a follow-up).
-  { id: "follow-ups-due", label: "FOLLOW-UPS DUE", value: "—", valueVariant: "neutral", pending: true, pendingReason: "Pending Planner integration — no follow-up module yet" },
-  // No approved "completed outreach" metric exists (the approved engagement metric is a coverage %,
-  // not a count) — surfaced honestly rather than mapped to an unapproved value.
-  { id: "completed-outreach", label: "COMPLETED OUTREACH", value: "—", valueVariant: "neutral", pending: true, pendingReason: "Pending — no approved completed-outreach metric" },
+  // Planner-backed: the whole scoped pending follow-up set. An outbound email is NOT a follow-up
+  // (PO ruling) — only real Planner `follow-up` events count.
+  { id: "follow-ups-due", label: "FOLLOW-UPS DUE", value: "0", valueVariant: "neutral", caption: "Overdue, today and upcoming" },
+  // Outbound emails the system actually sent — an effort count, not lead coverage (coverage is
+  // M-04 Engagement Coverage, a deliberately separate metric). Emailing one lead three times
+  // counts three times.
+  { id: "completed-outreach", label: "COMPLETED OUTREACH", value: "0", valueVariant: "neutral", caption: "Outbound emails sent" },
   { id: "interested-leads", label: "INTERESTED LEADS", value: "0", valueVariant: "neutral", caption: "Marked interested" },
   { id: "conversion-rate", label: "CONVERSION RATE", value: "—", valueVariant: "neutral", caption: "Of engaged leads" },
 ];
 
-type KpiApi = { totalLeads: number; highPriority: number; interested: number };
+type KpiApi = {
+  totalLeads: number;
+  highPriority: number;
+  interested: number;
+  followUpsDue: number;
+  completedOutreach: number;
+};
 
 export function useDashboardKpis() {
   const query = useQuery<KpiApi>({
@@ -53,10 +61,16 @@ export function useDashboardKpis() {
         return { ...kpi, value: api ? String(api.highPriority) : kpi.value, href: "/zerem/leads?priority=high" };
       case "interested-leads":
         return { ...kpi, value: api ? String(api.interested) : kpi.value, href: "/zerem/leads?status=interested" };
+      case "follow-ups-due":
+        // Straight from the backend — the count is never recomputed here, so this card and the
+        // reports page's overdue/today/upcoming buckets always agree.
+        return { ...kpi, value: api ? String(api.followUpsDue) : kpi.value, href: "/zerem/planner" };
+      case "completed-outreach":
+        return { ...kpi, value: api ? String(api.completedOutreach) : kpi.value };
       case "conversion-rate":
         return summary ? { ...kpi, value: formatConversionRate(summary.conversionRate) } : kpi;
       default:
-        return kpi; // Follow-ups Due / Completed Outreach — no approved source, shown as Pending.
+        return kpi;
     }
   });
 

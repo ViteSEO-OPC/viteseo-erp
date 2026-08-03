@@ -5,14 +5,12 @@ import type { User, UserRole } from "@/core/types";
 import { Card, Input, SearchIcon } from "@/core/ui";
 import { useGroups, useUsers } from "../../hooks";
 import {
-  FilterSelect,
-  GroupCard,
+  GroupsPanel,
   MembersTable,
   PAGE_SIZE,
   Pagination,
-  ROLE_OPTIONS,
+  TeamFilterPopover,
   buildGroupsByUser,
-  roleLabel,
 } from "./TeamShared";
 
 /**
@@ -77,7 +75,7 @@ export function MemberTeamView() {
       </div>
 
       {/* Stat cards — two wide cards (Total Members, Groups) */}
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:gap-4">
         <Card className="rounded-xl p-4">
           <p className="text-[13px] text-ink-soft">Total Members</p>
           <p className="mt-2 text-[24px] font-extrabold text-ink">
@@ -94,7 +92,7 @@ export function MemberTeamView() {
 
       {/* Filters */}
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+        <div className="relative min-w-0 flex-1">
           <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <Input
             value={search}
@@ -103,32 +101,13 @@ export function MemberTeamView() {
             className="h-10 rounded-[10px] pl-10"
           />
         </div>
-        <FilterSelect
-          label="Job Roles:"
-          value={roleFilter}
-          onChange={(v) =>
-            resetPage(() => setRoleFilter(v as "all" | UserRole))
-          }
-        >
-          <option value="all">All</option>
-          {ROLE_OPTIONS.map((r) => (
-            <option key={r} value={r}>
-              {roleLabel(r)}
-            </option>
-          ))}
-        </FilterSelect>
-        <FilterSelect
-          label="Groups:"
-          value={groupFilter}
-          onChange={(v) => resetPage(() => setGroupFilter(v))}
-        >
-          <option value="all">All</option>
-          {groups.map((g) => (
-            <option key={g.id} value={g.name}>
-              {g.name}
-            </option>
-          ))}
-        </FilterSelect>
+        <TeamFilterPopover
+          roleFilter={roleFilter}
+          onRoleChange={(v) => resetPage(() => setRoleFilter(v))}
+          groupFilter={groupFilter}
+          onGroupChange={(v) => resetPage(() => setGroupFilter(v))}
+          groups={groups}
+        />
       </div>
 
       {/* Body */}
@@ -142,9 +121,12 @@ export function MemberTeamView() {
           </p>
         </Card>
       ) : (
-        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_380px]">
+        // Rows stretch (the grid default) so the groups panel fills the same
+        // height as the members card — GroupsPanel takes itself out of flow at
+        // lg so only the card decides what that height is.
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
           {/* LEFT — Member List (read-only) */}
-          <Card className="rounded-xl p-6">
+          <Card className="min-w-0 rounded-xl p-4 sm:p-6">
             <MembersTable
               rows={pageRows}
               groupsByUser={groupsByUser}
@@ -159,23 +141,7 @@ export function MemberTeamView() {
           </Card>
 
           {/* RIGHT — Groups (read-only) */}
-          <div>
-            <h2 className="text-lg font-bold text-ink">Groups</h2>
-            <div className="mt-4 space-y-4">
-              {isLoading ? (
-                <p className="text-ink-soft">Loading groups...</p>
-              ) : groups.length === 0 ? (
-                <Card className="rounded-xl p-6 text-center">
-                  <p className="text-sm font-bold text-ink">No groups yet</p>
-                  <p className="mt-1 text-xs text-ink-soft">
-                    Groups will appear here once they&apos;re created.
-                  </p>
-                </Card>
-              ) : (
-                groups.map((g) => <GroupCard key={g.id} group={g} />)
-              )}
-            </div>
-          </div>
+          <GroupsPanel groups={groups} isLoading={isLoading} />
         </div>
       )}
     </div>

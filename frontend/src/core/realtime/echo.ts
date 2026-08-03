@@ -8,6 +8,17 @@ import { getToken } from '@/core/tokens';
  * /broadcasting/auth endpoint carrying the Sanctum Bearer token. We use `fetch`
  * (not apiClient) here to avoid an import cycle with the axios client, which
  * itself reads this module's socket id for the `X-Socket-Id` header.
+ *
+ * ⚠ PRIVATE TO `core/realtime`. `getEcho` and `teardownEcho` construct and destroy
+ * the transport, and the ONLY legitimate caller is `realtime-manager.ts` — the single
+ * owner of the connection and of every channel subscription. A feature that reaches
+ * for the instance can `leave()` a shared channel out from under another module,
+ * which is the lifecycle race this layer was restructured to make impossible. The
+ * `no-restricted-imports` rule in eslint.config.mjs enforces this; features use
+ * `useRealtimeEvent` / `useRealtimeReconnect` instead.
+ *
+ * `getSocketId` is the exception and is safe to import anywhere: it reads an id and
+ * owns nothing.
  */
 let echo: Echo<'reverb'> | null = null;
 

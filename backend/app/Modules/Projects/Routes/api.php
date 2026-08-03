@@ -11,6 +11,7 @@ use App\Modules\Projects\Controllers\NoteController;
 use App\Modules\Projects\Controllers\NotificationController;
 use App\Modules\Projects\Controllers\ProjectController;
 use App\Modules\Projects\Controllers\ProjectStatusController;
+use App\Modules\Projects\Controllers\SearchController;
 use App\Modules\Projects\Controllers\SubtaskController;
 use App\Modules\Projects\Controllers\TaskController;
 use App\Modules\Projects\Controllers\UserDirectoryController;
@@ -21,6 +22,10 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): void {
     // User directory for member/assignee pickers (shared users table).
     Route::get('users', [UserDirectoryController::class, 'index']);
+
+    // Global search (topbar jump-to menu) across projects and tasks. Called on
+    // a debounced keystroke, so it carries its own throttle.
+    Route::get('search', [SearchController::class, 'index'])->middleware('throttle:120,1');
 
     // Workspaces
     Route::apiResource('workspaces', WorkspaceController::class);

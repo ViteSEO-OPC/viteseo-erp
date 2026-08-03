@@ -7,6 +7,7 @@ import {
   Archive,
   Users,
   Lock,
+  Plug,
   SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
@@ -31,6 +32,10 @@ const GROUPS: NavGroup[] = [
     items: [
       { label: "Team Accounts", href: "/zerem/settings/team-accounts", icon: Users },
       { label: "Rules & Permissions", href: "/zerem/settings/rules-permissions", icon: Lock },
+      // Integrations (Gmail connect/disconnect). No `permission` gate: the whole /zerem/settings
+      // area is already minRole crm_admin in PAGE_ACCESS, and the endpoints behind it are
+      // role:super_admin|crm_admin server-side — a nav-level check would add nothing.
+      { label: "Integrations", href: "/zerem/settings/integrations", icon: Plug },
       // Business Rules Administration — gated by the read permission (Super Admin + temporary Admin).
       {
         label: "Business Rules",

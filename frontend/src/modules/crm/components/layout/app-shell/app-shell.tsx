@@ -19,6 +19,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/zerem/reports": "Reports & Performance",
   "/zerem/my-performance": "My Performance",
   "/zerem/activity-logs": "Activity Logs",
+  "/zerem/notifications": "Notifications",
   "/zerem/settings": "Settings",
 };
 

@@ -1,3 +1,10 @@
+/** The Notification History filter set — part of its cache key, so each combination pages independently. */
+export type NotificationHistoryFilters = {
+  filter: "all" | "unread";
+  type: string | null;
+  search: string;
+};
+
 export const queryKeys = {
   dashboard: {
     all: ["dashboard"] as const,
@@ -140,7 +147,28 @@ export const queryKeys = {
     // refresh both the list and the unread-count badge at once.
     all: ["notifications"] as const,
     list: () => [...queryKeys.notifications.all, "list"] as const,
-    unreadCount: () => [...queryKeys.notifications.all, "unread-count"] as const,
+    // Unread count, keyed by SCOPE. The bell counts its own inbox (undismissed, recent)
+    // and History counts the whole feed, so the same endpoint answers two different
+    // questions and they must not share a cache entry — one would overwrite the other
+    // and whichever surface mounted last would win. `unreadCounts` is the prefix to
+    // snapshot/restore when a mutation moves both at once.
+    unreadCounts: () => [...queryKeys.notifications.all, "unread-count"] as const,
+    unreadCount: (scope: "all" | "inbox" = "all") =>
+      [...queryKeys.notifications.unreadCounts(), scope] as const,
+    // History page. Kept UNDER the `all` prefix on purpose: the existing mark-read /
+    // mark-all invalidations already target that prefix, so History reconciles with
+    // them without either side learning about the other. `historyAll` is the prefix
+    // to invalidate when the filter set is unknown — every filter combination is a
+    // separate cursor walk and therefore a separate cache entry.
+    historyAll: () => [...queryKeys.notifications.all, "history"] as const,
+    history: (filters: NotificationHistoryFilters) =>
+      [...queryKeys.notifications.historyAll(), filters] as const,
+  },
+  integrations: {
+    // Settings → Integrations. One key per integration so connecting Gmail never invalidates
+    // another provider's status; `all` is the prefix for "refresh every integration card".
+    all: ["integrations"] as const,
+    gmail: () => [...queryKeys.integrations.all, "gmail"] as const,
   },
   businessRules: {
     // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved

@@ -2,15 +2,13 @@
 
 namespace Tests\Feature\Outreach;
 
-use App\Modules\Crm\Jobs\ProcessInboundNotificationJob;
-use App\Modules\Crm\Jobs\ReconcileMailboxJob;
+use App\Modules\Crm\Jobs\SyncMailboxJob;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\MailboxSync;
 use App\Modules\Crm\Services\Mail\Contracts\MailboxSyncProvider;
 use App\Modules\Crm\Services\Mail\Inbound\InboundMessage;
 use App\Modules\Crm\Services\Mail\Inbound\MailboxFetchResult;
-use App\Modules\Crm\Services\Mail\Inbound\NotificationCursor;
-use App\Modules\Crm\Services\Mail\Inbound\WatchRegistration;
+use App\Modules\Crm\Services\Mail\MailboxSyncManager;
 use App\Modules\Crm\Services\Outreach\InboundEmailService;
 use App\Modules\Crm\Services\Outreach\InboundReplyProcessor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -19,12 +17,15 @@ use Tests\TestCase;
 
 /**
  * Item #1 (R7) — poison-message isolation. A single message that fails to ingest must never abort the
- * batch or block the cursor advance; otherwise the unchanged cursor is re-fetched on every redelivery and
- * the whole mailbox stalls. These pin the isolation at the two ingest loops (push job + reconcile job).
+ * batch or block the cursor advance; otherwise the unchanged cursor is re-fetched on every poll and the
+ * whole mailbox stalls forever. Pinned at the ingest loop in SyncMailboxJob, which is now the only one
+ * (the push job and the hourly reconcile job it also covered were removed with the Pub/Sub trigger).
  *
  * The provider-level hydration isolation (GmailMailboxSync::fetchSince, per-message get+parse) mirrors this
- * ingest-level isolation but is not unit-tested here: GmailMailboxSync builds its Gmail client internally
- * (not injectable), consistent with the suite's existing strategy of faking the MailboxSyncProvider wholesale.
+ * ingest-level isolation but is not unit-tested here: GmailMailboxSync still builds its own Gmail client
+ * (only the CREDENTIAL is injected, via GoogleCredentialSource — the API calls are not), consistent with the
+ * suite's existing strategy of faking the MailboxSyncProvider wholesale. GmailMailboxSyncRecoveryTest
+ * reaches that orchestration through the class's protected seams instead.
  */
 class InboundPoisonIsolationTest extends TestCase
 {
@@ -32,30 +33,26 @@ class InboundPoisonIsolationTest extends TestCase
 
     private const POISON = 'poison@x';
 
-    /** Fixed-message fake provider (mirrors ProcessInboundNotificationJobTest::fakeProvider). */
-    private function fakeProvider(string $mailbox, array $messages, ?string $advancedCursor): MailboxSyncProvider
+    /**
+     * The job resolves its provider per mailbox now, so the fake is registered as the `gmail` driver
+     * — which is the provider these mailboxes' rows name.
+     */
+    private function managerFor(MailboxSyncProvider $provider): MailboxSyncManager
     {
-        return new class($mailbox, $messages, $advancedCursor) implements MailboxSyncProvider
+        return (new MailboxSyncManager($this->app))->extend('gmail', fn () => $provider);
+    }
+
+    /** Fixed-message fake provider. */
+    private function fakeProvider(array $messages, ?string $advancedCursor): MailboxSyncProvider
+    {
+        return new class($messages, $advancedCursor) implements MailboxSyncProvider
         {
             /** @param list<InboundMessage> $messages */
-            public function __construct(private string $mailbox, private array $messages, private ?string $advancedCursor) {}
-
-            public function watch(string $mailbox): WatchRegistration
-            {
-                return new WatchRegistration('1', null);
-            }
-
-            public function unwatch(string $mailbox): void {}
+            public function __construct(private array $messages, private ?string $advancedCursor) {}
 
             public function fetchSince(string $mailbox, ?string $cursor): MailboxFetchResult
             {
                 return new MailboxFetchResult($this->messages, $this->advancedCursor);
-            }
-
-            /** @param array<string, mixed> $payload */
-            public function parseNotification(array $payload): NotificationCursor
-            {
-                return new NotificationCursor($this->mailbox, '100');
             }
         };
     }
@@ -90,9 +87,9 @@ class InboundPoisonIsolationTest extends TestCase
     {
         Notification::fake();
         $messages = [$this->message('good-1@x'), $this->message(self::POISON), $this->message('good-2@x')];
-        $provider = $this->fakeProvider('crm@company.test', $messages, '205');
+        $provider = $this->fakeProvider($messages, '205');
 
-        (new ProcessInboundNotificationJob(['message' => []]))->handle($provider, $this->poisonAwareInbound());
+        (new SyncMailboxJob('crm@company.test'))->handle($this->managerFor($provider), $this->poisonAwareInbound());
 
         // The two good messages persisted; the poison one was skipped, not fatal.
         $this->assertSame(2, Email::where('direction', 'inbound')->count());
@@ -108,27 +105,28 @@ class InboundPoisonIsolationTest extends TestCase
     public function test_job_advances_the_cursor_even_when_every_message_poisons(): void
     {
         Notification::fake();
-        $provider = $this->fakeProvider('crm@company.test', [$this->message(self::POISON)], '208');
+        $provider = $this->fakeProvider([$this->message(self::POISON)], '208');
 
-        (new ProcessInboundNotificationJob(['message' => []]))->handle($provider, $this->poisonAwareInbound());
+        (new SyncMailboxJob('crm@company.test'))->handle($this->managerFor($provider), $this->poisonAwareInbound());
 
         $this->assertSame(0, Email::where('direction', 'inbound')->count());
         // The whole batch failed to ingest, but the cursor STILL advances so the poison is never re-fetched.
         $this->assertSame('208', MailboxSync::where('email', 'crm@company.test')->first()->sync_cursor);
     }
 
-    public function test_reconcile_skips_a_poison_message_and_advances_that_mailbox_cursor(): void
+    /** The same isolation for a mailbox that already has a cursor (the steady-state poll). */
+    public function test_poll_skips_a_poison_message_and_advances_an_existing_mailbox_cursor(): void
     {
         Notification::fake();
         $sync = MailboxSync::create([
             'email' => 'crm@company.test', 'provider' => 'gmail',
             'sync_cursor' => '100', 'status' => 'active',
         ]);
-        $provider = $this->fakeProvider('crm@company.test', [$this->message(self::POISON), $this->message('good-3@x')], '211');
+        $provider = $this->fakeProvider([$this->message(self::POISON), $this->message('good-3@x')], '211');
 
-        (new ReconcileMailboxJob)->handle($provider, $this->poisonAwareInbound());
+        (new SyncMailboxJob('crm@company.test'))->handle($this->managerFor($provider), $this->poisonAwareInbound());
 
-        // Good message ingested, poison skipped, and this mailbox's cursor advanced (no hourly re-stall).
+        // Good message ingested, poison skipped, and this mailbox's cursor advanced (no re-stall).
         $this->assertSame(1, Email::where('direction', 'inbound')->count());
         $this->assertSame('211', $sync->fresh()->sync_cursor);
     }

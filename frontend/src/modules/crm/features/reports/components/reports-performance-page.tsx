@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { Download } from "lucide-react";
+import { Button } from "@/modules/crm/components/ui/button";
+import { useExportPerformancePdf } from "@/modules/crm/features/performance/hooks/use-export-performance-pdf";
 import {
   ALL_SCOPE,
   PerformanceScopeProvider,
@@ -39,10 +42,25 @@ import { LeadsByNicheCard } from "@/modules/crm/features/reports/components/lead
 export function ReportsPerformancePage() {
   const [scope, setScope] = useState<PerformanceScope>(ALL_SCOPE);
   const isAllReports = scope.mode === "all";
+  const { exportPerformancePdf, isExporting } = useExportPerformancePdf();
 
   return (
     <div className="flex flex-col gap-6">
-      <ReportsScopeSelector scope={scope} onChange={setScope} />
+      {/* Export follows the selected report context: a drilled BD exports that BD, All Reports
+          exports the CRM-wide scope. The same hook and endpoint as My Performance — the server
+          resolves and authorizes the scope from the same `user_id` param the page's queries use. */}
+      <div className="flex items-center justify-between gap-3">
+        <ReportsScopeSelector scope={scope} onChange={setScope} />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void exportPerformancePdf(scope.mode === "bd" ? scope.userId : undefined)}
+          disabled={isExporting}
+        >
+          <Download className="h-4 w-4" />
+          {isExporting ? "Exporting…" : "Export PDF"}
+        </Button>
+      </div>
 
       <PerformanceScopeProvider scope={scope}>
         {isAllReports ? (

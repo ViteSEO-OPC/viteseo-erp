@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, CalendarClock, Mail, type LucideIcon } from "lucide-react";
+import { Bell, CalendarClock, Mail, UserPlus, type LucideIcon } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 import type { NotificationDto } from "@/modules/crm/features/notifications/types/notification-types";
@@ -11,6 +11,7 @@ import type { NotificationDto } from "@/modules/crm/features/notifications/types
 const ICON_BY_TYPE: Record<string, LucideIcon> = {
   inbound_reply: Mail,
   planner_reminder: CalendarClock,
+  lead_assigned: UserPlus,
 };
 
 type Props = {

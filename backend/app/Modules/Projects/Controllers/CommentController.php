@@ -13,7 +13,7 @@ use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Requests\StoreCommentRequest;
 use App\Modules\Projects\Resources\CommentResource;
 use App\Modules\Projects\Services\CommentService;
-use App\Modules\Projects\Support\SafeBroadcast;
+use App\Support\SafeBroadcast;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Response;

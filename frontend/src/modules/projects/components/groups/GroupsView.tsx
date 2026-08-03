@@ -79,6 +79,10 @@ export function GroupsView(): React.ReactElement {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [toDelete, setToDelete] = useState<Group | null>(null);
+  const [memberToRemove, setMemberToRemove] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
   const isManager = useIsManager();
   const deleteGroup = useDeleteGroup();
 
@@ -394,7 +398,9 @@ export function GroupsView(): React.ReactElement {
                             <button
                               type="button"
                               disabled={memberBusy}
-                              onClick={() => groupMembers.remove.mutate(m.id)}
+                              onClick={() =>
+                                setMemberToRemove({ id: m.id, name: m.name })
+                              }
                               aria-label={`Remove ${m.name}`}
                               className="flex h-7 w-7 items-center justify-center rounded-full text-danger transition-colors hover:bg-danger-soft disabled:opacity-50"
                             >
@@ -433,6 +439,30 @@ export function GroupsView(): React.ReactElement {
       {editOpen && selected && (
         <EditGroupModal group={selected} onClose={() => setEditOpen(false)} />
       )}
+
+      <ConfirmDialog
+        open={memberToRemove !== null}
+        onClose={() => setMemberToRemove(null)}
+        onConfirm={async () => {
+          if (!memberToRemove) return;
+          await groupMembers.remove.mutateAsync(memberToRemove.id);
+          setMemberToRemove(null);
+        }}
+        title="Remove member"
+        confirmLabel="Remove member"
+        isPending={groupMembers.remove.isPending}
+        description={
+          <>
+            Remove{" "}
+            <span className="font-bold text-ink">{memberToRemove?.name}</span>{" "}
+            from <span className="font-bold text-ink">{selected?.name}</span>?
+            {memberToRemove !== null && selected?.leader?.id === memberToRemove.id && (
+              <> They are this group&apos;s leader.</>
+            )}{" "}
+            The group may also leave a project if its roster no longer fits.
+          </>
+        }
+      />
 
       <ConfirmDialog
         open={toDelete !== null}

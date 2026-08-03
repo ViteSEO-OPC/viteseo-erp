@@ -13,6 +13,7 @@ import type {
   Project,
   ProjectStatus,
   GroupWorkload,
+  SearchResults,
   Subtask,
   Task,
   Workload,
@@ -49,6 +50,22 @@ export const projectsApi = {
   getGroupWorkload: async (groupId: string): Promise<GroupWorkload> => {
     const { data } = await apiClient.get<ApiResource<GroupWorkload>>(
       `${BASE}/groups/${groupId}/workload`,
+    );
+    return data.data;
+  },
+
+  // Global search across projects and tasks (topbar jump-to menu). `q` must be
+  // at least SEARCH_MIN_LENGTH characters or the API rejects it with a 422.
+  // `signal` comes from TanStack Query so a superseded keystroke's request is
+  // aborted instead of racing the current one.
+  search: async (
+    q: string,
+    limit = 5,
+    signal?: AbortSignal,
+  ): Promise<SearchResults> => {
+    const { data } = await apiClient.get<ApiResource<SearchResults>>(
+      `${BASE}/search`,
+      { params: { q, limit }, signal },
     );
     return data.data;
   },

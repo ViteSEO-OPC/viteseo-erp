@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Avatar, Card, PriorityBadge } from "@/core/ui";
+import { Avatar, Badge, Card, PriorityBadge } from "@/core/ui";
+import { CountBubble, ProjectPill } from "../../shared/Pills";
 import { isOverdue, OverdueBadge } from "../../../overdue";
 import {
   BATCH_SIZE,
@@ -74,20 +75,11 @@ function KanbanCard({
         {/* Project pill — the overdue chip rides along on the same row so the
             card keeps one meta row instead of two. */}
         <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            className="inline-flex min-w-0 items-center truncate rounded-md px-2 py-0.5 text-[11px] font-bold"
-            style={{
-              backgroundColor: `${item.projectColor ?? "#6366f1"}15`,
-              color: item.projectColor ?? "#6366f1",
-            }}
-          >
-            {projectName.get(item.projectId) ?? ""}
-          </span>
-          {item.kind === "subtask" && (
-            <span className="inline-flex shrink-0 items-center rounded-md bg-black/5 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink-soft">
-              Subtask
-            </span>
-          )}
+          <ProjectPill
+            name={projectName.get(item.projectId) ?? ""}
+            color={item.projectColor}
+          />
+          {item.kind === "subtask" && <Badge>Subtask</Badge>}
           {isOverdue(item.deadline, item.statusKey) && (
             <OverdueBadge className="ml-auto shrink-0" />
           )}
@@ -314,9 +306,7 @@ function KanbanColumn({
         <span className="pl-2 text-sm font-bold" style={{ color: col.color }}>
           {col.label}
         </span>
-        <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-surface px-1.5 text-xs font-bold text-ink-soft">
-          {total}
-        </span>
+        <CountBubble tone="neutral" className="ml-auto">{total}</CountBubble>
       </div>
 
       <div

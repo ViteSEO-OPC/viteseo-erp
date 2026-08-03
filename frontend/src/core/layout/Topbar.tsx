@@ -9,6 +9,7 @@ import { useAuth } from "@/core/auth-context";
 import { getAccessibleModules } from "@/core/access";
 import { useSidebar } from "@/core/layout/SidebarContext";
 import { NotificationDropdown } from "@/modules/projects/components/notifications/NotificationDropdown";
+import { GlobalSearch } from "@/modules/projects/components/search/GlobalSearch";
 import { useOpenTask } from "@/modules/projects/components/tasks/useTaskModal";
 import type { AppNotification } from "@/modules/projects/notifications";
 import {
@@ -65,8 +66,8 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-10 border-b border-line bg-canvas/80 backdrop-blur">
-      <div className="flex items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 px-4 py-4 sm:px-6 lg:px-8">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           {/* Hamburger — opens the off-canvas drawer on mobile (< lg) */}
           <button
             type="button"
@@ -80,7 +81,7 @@ export function Topbar() {
           </button>
 
           {/* Switch app — back to the launcher (multi-system users only). */}
-          {canSwitchApp && (
+          {/* {canSwitchApp && (
             <Link
               href="/"
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-ink-soft transition-colors hover:bg-line hover:text-ink"
@@ -88,10 +89,13 @@ export function Topbar() {
               <LayoutGrid className="h-4 w-4" />
               <span className="hidden sm:inline">Switch app</span>
             </Link>
-          )}
+          )} */}
+
+          {/* Global search — jump to any project or task. */}
+          <GlobalSearch />
         </div>
 
-        <div className="relative" ref={ref}>
+        <div className="relative shrink-0" ref={ref}>
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}

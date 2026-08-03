@@ -29,6 +29,12 @@ export const apiClient = axios.create({
 });
 
 // Automatically attach the Sanctum token (saved at login) to every request.
+//
+// No X-Socket-Id here on purpose. That header only matters to a caller whose
+// writes are broadcast with ->toOthers(), which today is CRM alone, and it is
+// set by the CRM client (modules/crm/lib/axios.ts). Keeping it out of the shared
+// client leaves HR and the platform sending byte-identical requests to before
+// Reverb existed, and keeps laravel-echo/pusher-js out of their bundles.
 apiClient.interceptors.request.use((config) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("token");

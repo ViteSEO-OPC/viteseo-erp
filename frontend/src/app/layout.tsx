@@ -29,6 +29,10 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <QueryProvider>
+          {/* Realtime is deliberately NOT mounted here. The WebSocket layer is
+              CRM-scoped and starts in src/app/zerem/layout.tsx, so HRIS,
+              Sprintly and the rest of the platform open no socket and keep their
+              existing behaviour. */}
           <AuthProvider>{children}</AuthProvider>
         </QueryProvider>
         <Toaster />

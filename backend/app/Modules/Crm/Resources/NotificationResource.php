@@ -2,83 +2,82 @@
 
 namespace App\Modules\Crm\Resources;
 
+use App\Modules\Crm\Enums\NotificationType;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Notifications\DatabaseNotification;
 use Illuminate\Support\Str;
 
 /**
- * Presents a standard Laravel Database Notification (the RC2 `notifications` table) for the in-app
- * Notification Center. Read-only: it derives a human title/message and a deep-link to the related CRM
- * record from the existing `data` payload written by the Notification classes (InboundReplyNotification,
- * PlannerReminderNotification, …). No new storage, no business logic — just presentation.
+ * Presents a standard Laravel Database Notification (the RC2 `notifications` table)
+ * for the in-app Notification Center. Read-only: title, message and deep-link are
+ * derived from the `data` payload the Notification classes already write. No new
+ * storage, no business logic — just presentation.
+ *
+ * ⚠ CONVENTION (approved 2026-07-16, unchanged): every notification type MUST define
+ * a meaningful title, message and deep-link, plus its icon in the frontend
+ * `ICON_BY_TYPE`. What changed is enforcement: the three `match` statements that used
+ * to live here are now one presenter per type behind NotificationType::presenter(),
+ * which matches exhaustively — a new case without a presenter throws instead of
+ * quietly rendering a humanised type string. See NotificationCatalogTest.
  *
  * @mixin DatabaseNotification
  */
 class NotificationResource extends JsonResource
 {
-    // ⚠ CONVENTION (approved 2026-07-16): every notification type MUST explicitly define its
-    // title (deriveTitle), message (deriveMessage) and deep-link (deriveLink) here, AND its icon in
-    // the frontend `ICON_BY_TYPE` (notification-item.tsx). The `default` arms below are a safety net
-    // to avoid crashes — NOT an acceptable end state. A new Notification class is not "done" until it
-    // has meaningful title/icon/deep-link, never the generic fallback.
-
     /** @return array<string, mixed> */
     public function toArray(Request $request): array
     {
         /** @var array<string, mixed> $data */
         $data = (array) $this->data;
+        // The catalog key lives in the payload; the `type` COLUMN holds the
+        // Notification class FQCN. class_basename covers rows written before the
+        // producer set an explicit `data->type`.
         $type = (string) ($data['type'] ?? class_basename($this->type));
+
+        $presenter = NotificationType::tryFrom($type)?->presenter();
 
         return [
             'id' => (string) $this->id,
             'type' => $type,
-            'title' => $this->deriveTitle($type, $data),
-            'message' => $this->deriveMessage($type, $data),
-            // Deep-link to the related CRM record; null when the payload has no addressable target.
-            'link' => $this->deriveLink($data),
+            // The fallbacks below are for UNREGISTERED types only — legacy rows, or a
+            // type retired from the catalog while its rows live on. They are not a
+            // path a current type can take: every enum case has a presenter, and the
+            // catalog test proves it. Kept so old rows degrade to something readable
+            // instead of vanishing or throwing mid-render.
+            'title' => $presenter?->title($data) ?? Str::headline($type),
+            'message' => $presenter?->message($data),
+            'link' => $presenter?->link($data) ?? $this->legacyLink($data),
             'data' => $data,
             'read' => $this->read_at !== null,
             'read_at' => $this->read_at?->toIso8601String(),
+            // Dismissed rows are excluded from the bell feed server-side, so this is
+            // never true there; it is exposed for History, which still lists them, and
+            // for the frontend's optimistic cache maths.
+            //
+            // Parsed rather than read as a date because the cast list belongs to
+            // Laravel's own DatabaseNotification model — the framework's, not ours —
+            // which knows about `read_at` and not about a column the CRM added. There
+            // is no seam to register the cast through (`Notifiable::notifications()`
+            // hard-codes the model), so the conversion happens at the one place that
+            // renders it.
+            'dismissed' => $this->dismissed_at !== null,
+            'dismissed_at' => $this->dismissed_at
+                ? Carbon::parse($this->dismissed_at)->toIso8601String()
+                : null,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }
 
     /**
-     * @param  array<string, mixed>  $data
-     */
-    private function deriveTitle(string $type, array $data): string
-    {
-        return match ($type) {
-            'inbound_reply' => 'New reply from '.(string) ($data['from_name'] ?? $data['from'] ?? 'a prospect'),
-            'planner_reminder' => 'Reminder: '.(string) ($data['title'] ?? 'Upcoming event'),
-            default => Str::headline($type),
-        };
-    }
-
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    private function deriveMessage(string $type, array $data): ?string
-    {
-        return match ($type) {
-            'inbound_reply' => (string) ($data['subject'] ?? $data['preview'] ?? '') ?: null,
-            'planner_reminder' => trim(implode(' · ', array_filter([
-                isset($data['event_type']) ? Str::headline((string) $data['event_type']) : null,
-                isset($data['lead_name']) ? (string) $data['lead_name'] : null,
-            ]))) ?: null,
-            default => null,
-        };
-    }
-
-    /**
-     * Centralized deep-link derivation. A lead-scoped payload always points at the Lead detail page;
-     * a Planner reminder without a lead falls back to the Planner. Extend here as new notification
-     * types are added — the frontend stays generic.
+     * Deep-link for a type with no presenter. Mirrors the generic derivation that
+     * applied to every type before the registry existed, so an unregistered row
+     * keeps resolving exactly where it has since RC2.
      *
      * @param  array<string, mixed>  $data
      */
-    private function deriveLink(array $data): ?string
+    private function legacyLink(array $data): ?string
     {
         if (! empty($data['lead_id'])) {
             return '/zerem/leads/'.$data['lead_id'];

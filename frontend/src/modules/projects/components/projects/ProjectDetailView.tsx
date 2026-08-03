@@ -12,7 +12,7 @@ import {
   PlusIcon,
 } from "@/core/ui";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
-import type { StatusKey } from "../../types";
+import type { StatusKey, Task } from "../../types";
 import { useProjectChannel } from "../../useProjectChannel";
 import { useForbiddenRedirect } from "../../useForbiddenRedirect";
 import {
@@ -144,43 +144,73 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const pct = (n: number) => (total === 0 ? 0 : Math.round((n / total) * 100));
   const donePct = pct(counts.done);
 
-  // What this viewer may see in the task table. A manager gets the project; a
-  // member gets what's actually theirs — tasks assigned to them, plus a group
-  // task when they lead the group that owns it (`leads_my_group` is resolved
-  // server-side from the token, so it can't be spoofed by the client).
-  const visibleTasks = useMemo(() => {
+  // What this viewer may see in the task table, as the WorkItem shape the
+  // board's List view speaks. A manager gets the whole project; a member gets
+  // what's actually theirs — tasks assigned to them, a group task when they
+  // lead the group that owns it (`leads_my_group` is resolved server-side from
+  // the token, so it can't be spoofed), and any subtask assigned to them,
+  // surfaced as its own row the same way the "My Tasks" board does it.
+  const taskItems = useMemo<WorkItem[]>(() => {
     const all = tasksQuery.data?.data ?? [];
-    if (isManager) return all;
-    return all.filter(
-      (t) => t.assignee_id === user?.id || (t.leads_my_group ?? false),
-    );
-  }, [tasksQuery.data, isManager, user?.id]);
+    const color = project?.color ?? "#6366f1";
 
-  // The board's List view speaks WorkItem, not Task — same shape the workspace
-  // board builds, minus the drag/subtask handling that only applies there.
-  const taskItems = useMemo<WorkItem[]>(
-    () =>
-      visibleTasks.map((t) => ({
-        kind: "task",
-        key: `task-${t.id}`,
+    const taskRow = (t: Task): WorkItem => ({
+      kind: "task",
+      key: `task-${t.id}`,
+      id: t.id,
+      projectId: t.project_id,
+      projectColor: color,
+      title: t.title,
+      priority: t.priority,
+      statusName: t.status?.name ?? null,
+      statusKey: t.status?.key ?? null,
+      statusColor: t.status?.color ?? null,
+      assignee: t.assignee,
+      assigneeId: t.assignee_id,
+      groupName: t.group?.name ?? null,
+      groupColor: t.group?.color ?? null,
+      deadline: t.deadline,
+      hasMySubtask: t.has_my_subtask ?? false,
+      leadsMyGroup: t.leads_my_group ?? false,
+    });
+
+    if (isManager) return all.map(taskRow);
+
+    return all.flatMap<WorkItem>((t) => {
+      const leadsMyGroup = t.leads_my_group ?? false;
+      // `my_subtasks` is already scoped to the requesting user server-side.
+      const mySubs = t.my_subtasks ?? [];
+      const rows: WorkItem[] = mySubs.map((s) => ({
+        kind: "subtask",
+        key: `subtask-${s.id}`,
+        // Opening a subtask row opens its parent task's modal.
         id: t.id,
+        subtaskId: s.id,
+        parentTitle: t.title,
         projectId: t.project_id,
-        projectColor: project?.color ?? "#6366f1",
-        title: t.title,
-        priority: t.priority,
-        statusName: t.status?.name ?? null,
-        statusKey: t.status?.key ?? null,
-        statusColor: t.status?.color ?? null,
-        assignee: t.assignee,
-        assigneeId: t.assignee_id,
-        groupName: t.group?.name ?? null,
-        groupColor: t.group?.color ?? null,
-        deadline: t.deadline,
-        hasMySubtask: t.has_my_subtask ?? false,
-        leadsMyGroup: t.leads_my_group ?? false,
-      })),
-    [visibleTasks, project?.color],
-  );
+        projectColor: color,
+        title: s.name,
+        priority: s.priority,
+        statusName: s.status?.name ?? null,
+        statusKey: s.status?.key ?? null,
+        statusColor: s.status?.color ?? null,
+        assignee: null,
+        assigneeId: user?.id ?? null,
+        groupName: null,
+        groupColor: null,
+        deadline: s.deadline,
+        hasMySubtask: true,
+        leadsMyGroup: false,
+      }));
+
+      // The parent task itself belongs to a member who owns it directly or
+      // leads the group it's assigned to; for everyone else the stake in it is
+      // the subtask rows above, so the parent is left out.
+      if (t.assignee_id === user?.id || leadsMyGroup) rows.push(taskRow(t));
+
+      return rows;
+    });
+  }, [tasksQuery.data, isManager, user?.id, project?.color]);
 
   // This project's custom statuses get their own sections, so an empty one
   // still shows up rather than silently vanishing.
@@ -419,7 +449,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
                   {isManager ? "Tasks" : "My Tasks"}
                 </h2>
                 <span className="text-xs font-bold text-ink-faint">
-                  {visibleTasks.length}
+                  {taskItems.length}
                 </span>
               </div>
               {isManager && (
@@ -432,7 +462,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
 
             {tasksQuery.isLoading ? (
               <p className="text-sm text-ink-soft">Loading tasks…</p>
-            ) : visibleTasks.length === 0 ? (
+            ) : taskItems.length === 0 ? (
               <p className="py-6 text-center text-sm text-ink-soft">
                 {isManager
                   ? "No tasks in this project yet."
