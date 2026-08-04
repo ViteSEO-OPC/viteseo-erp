@@ -346,9 +346,10 @@ class DashboardController extends Controller
         // ---- Conversion funnel — a true SURVIVAL funnel: each qualification stage is a subset of the
         // one before it (cumulative AND filters), so the funnel narrows monotonically and each bar reads
         // as "leads that progressed at least this far". Definitions in the method docblock. ----
-        $engaged = fn (): Builder => $leads()
-            ->where(fn (Builder $q) => $q->where('email_outreach', '!=', 'none')
-                ->orWhere('cold_calling', '!=', 'not-called'));
+        // `Contacted` = the single canonical engagement definition ({@see Lead::scopeEngaged}) — declared
+        // outreach OR Zerem-verified activity. Shared verbatim with M-04 and the Conversion Rate
+        // denominator, so this stage can never disagree with Outreach Progress again.
+        $engaged = fn (): Builder => $leads()->engaged();
         // "In active conversation" statuses (responded / progressing) — engaged beyond `new`, excl. `declined`.
         $activeConversation = ['interested', 'awaiting-reply', 'call-back-req'];
 

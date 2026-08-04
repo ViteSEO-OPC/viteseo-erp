@@ -48,11 +48,10 @@ class PerformanceSummaryService
         $assignedLeads = Lead::query()->active()->visibleTo($user)->count();
         $activeLeads = Lead::query()->active()->visibleTo($user)->whereIn('status', $activeSet)->count();
 
-        // Engagement basis (M-04): any outreach started OR any calling activity.
-        $engagedLeads = Lead::query()->active()->visibleTo($user)
-            ->where(fn (Builder $q) => $q->where('email_outreach', '!=', 'none')
-                ->orWhere('cold_calling', '!=', 'not-called'))
-            ->count();
+        // Engagement basis (M-04): declared outreach OR Zerem-verified outreach activity — the single
+        // canonical definition ({@see Lead::scopeEngaged}), shared with the KPI Engine and the Reports
+        // funnel. Also the Conversion Rate denominator below, whose FORMULA is unchanged.
+        $engagedLeads = Lead::query()->active()->visibleTo($user)->engaged()->count();
 
         // Converted leads + revenue from the deals table, scoped to the user's visible leads.
         $convertedLeads = Lead::query()->active()->visibleTo($user)->has('deals')->count();
