@@ -19,10 +19,14 @@ import {
   previewThirteenthMonth,
   runThirteenthMonth,
   updatePayrollSettings,
+  runAdjustment,
+  getRetroFlags,
+  resolveRetroFlag,
 } from "@/modules/hr/api/payroll";
 
 const RUNS_KEY = ["hr", "payroll", "runs"] as const;
 const SETTINGS_KEY = ["hr", "payroll", "settings"] as const;
+const RETRO_KEY = ["hr", "payroll", "retro-flags"] as const;
 
 export function usePayrollSettings() {
   return useQuery({ queryKey: SETTINGS_KEY, queryFn: getPayrollSettings });
@@ -156,5 +160,35 @@ export function useHrPayslip(id: number | undefined) {
     queryKey: ["hr", "payslip", id],
     queryFn: () => getHrPayslip(id!),
     enabled: !!id,
+  });
+}
+
+/**
+ * Pay an off-cycle correction (FIN-010).
+ *
+ * Invalidates the run list AND the retro-flag queue: an adjustment is usually how an `owed`
+ * difference gets settled, so the queue is stale the moment one succeeds.
+ */
+export function useRunAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runAdjustment,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: RETRO_KEY });
+    },
+  });
+}
+
+/** Retroactive pay differences still outstanding (FIN-009). */
+export function useRetroFlags() {
+  return useQuery({ queryKey: RETRO_KEY, queryFn: getRetroFlags });
+}
+
+export function useResolveRetroFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, note }: { id: number; note: string }) => resolveRetroFlag(id, note),
+    onSuccess: () => qc.invalidateQueries({ queryKey: RETRO_KEY }),
   });
 }

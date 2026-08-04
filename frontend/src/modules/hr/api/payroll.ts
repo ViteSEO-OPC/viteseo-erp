@@ -8,6 +8,8 @@ import type {
   PayslipYtd,
   ThirteenthMonthRow,
   ThirteenthMonthPayRow,
+  AdjustmentLine,
+  RetroFlag,
 } from "@/modules/hr/types/payroll";
 
 export async function getPayrollSettings(): Promise<PayrollSettings> {
@@ -21,6 +23,11 @@ export async function updatePayrollSettings(input: {
   tax_timing?: string;
   /** Slice 10 — null clears the ceiling (allowances fully tax-free). */
   other_benefits_annual_cap?: number | null;
+  /**
+   * FIN-025 — the date these settings take effect. Omitted means today. Payroll resolves settings
+   * as of the cycle end, so this is what stops a change reaching back into periods already run.
+   */
+  effective_from?: string;
 }): Promise<PayrollSettings> {
   const res = await apiClient.put("/hr/payroll/settings", input);
   return res.data.data;
@@ -160,5 +167,33 @@ export async function getPayslip(
  */
 export async function getHrPayslip(id: number): Promise<Payslip> {
   const res = await apiClient.get(`/hr/payslips/${id}`);
+  return res.data.data;
+}
+
+/**
+ * Pay an off-cycle correction (FIN-010).
+ *
+ * The window is when the correction is ISSUED, not a period it prices — what it corrects belongs
+ * in `reason`. It does not recompute anything: it pays the stated amounts and withholds tax.
+ */
+export async function runAdjustment(input: {
+  cycle_start: string;
+  cycle_end: string;
+  reason: string;
+  lines: AdjustmentLine[];
+}): Promise<PayrollRun> {
+  const res = await apiClient.post("/hr/payroll/adjustment", input);
+  return res.data.data;
+}
+
+/** Retroactive pay differences still waiting to be settled (FIN-009). */
+export async function getRetroFlags(): Promise<RetroFlag[]> {
+  const res = await apiClient.get("/hr/retro-flags");
+  return res.data.data;
+}
+
+/** Mark one settled — the note is required, and says how it was paid. */
+export async function resolveRetroFlag(id: number, note: string): Promise<RetroFlag> {
+  const res = await apiClient.post(`/hr/retro-flags/${id}/resolve`, { note });
   return res.data.data;
 }

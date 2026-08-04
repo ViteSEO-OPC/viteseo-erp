@@ -500,6 +500,7 @@ class PayrollService
         $monthlyTax = $this->annualWithholdingTax($annualTaxable, $dist['cycle_end'] ?? null) / 12;
         $tf = $this->timingFactor($dist['tax_timing'] ?? 'every', $dist['index'] ?? 0, $dist['count'] ?? 1);
         $wht = round($monthlyTax * $tf, 2);
+        $taxAnnualisation = 0.0;
 
         // Slice B17 — THIS PERIOD's taxable compensation, net of the employee's own contributions.
         // Stored per slip because the year's total is what the tax on 13th month is computed
@@ -507,6 +508,29 @@ class PayrollService
         // annualised projections of a year are not a year.
         $periodsPerYear = max(1, (int) ($dist['periods_per_year'] ?? (($dist['count'] ?? 1) * 12)));
         $taxablePay = round($annualTaxable / $periodsPerYear, 2);
+
+        // FIN-028 — YEAR-END TRUE-UP. On the cycle containing 31 December, stop projecting and
+        // settle the year: tax actually due on what was actually earned, minus everything already
+        // withheld. The caller supplies the prior totals; this is the only place that can apply
+        // them, because it is the only place that knows this period's own taxable share.
+        //
+        // The result is deliberately allowed to be NEGATIVE. Over-withholding across the year is
+        // the common case (a good month early on projects a higher bracket than the year lands in),
+        // and the correction is a refund on this payslip. Nothing below clamps it: `min($total,
+        // $gross)` leaves a negative total alone, and `max(0, $gross - $total)` then makes net pay
+        // larger than gross, which is exactly what a refund is.
+        if (isset($dist['year_end_true_up'])) {
+            $priorTaxable = (float) ($dist['year_end_true_up']['taxable_prior'] ?? 0);
+            $priorWithheld = (float) ($dist['year_end_true_up']['withheld_prior'] ?? 0);
+
+            $annualDue = $this->annualWithholdingTax($priorTaxable + $taxablePay, $dist['cycle_end'] ?? null);
+            $settled = round($annualDue - $priorWithheld, 2);
+
+            // Recorded as the DIFFERENCE from what this period would otherwise have withheld, so
+            // the payslip can name the adjustment rather than show an unexplained December figure.
+            $taxAnnualisation = round($settled - $wht, 2);
+            $wht = $settled;
+        }
 
         // All four premium lines are in gross AND in the withholding base (Slice 10) — the
         // caller folds them into `taxableMonthly` before calling.
@@ -538,6 +562,9 @@ class PayrollService
             'philhealth' => $philhealth,
             'pagibig' => $pagibig,
             'withholding_tax' => $wht,
+            // FIN-028 — how much of `withholding_tax` is the year-end correction. Signed:
+            // positive collected, negative refunded. Zero on every period but the last.
+            'tax_annualisation' => $taxAnnualisation,
             'taxable_pay' => $taxablePay,
             // Slice 11a — recurring benefit shares, with the breakdown so the payslip can
             // name them rather than show one opaque figure.
@@ -1707,6 +1734,36 @@ class PayrollService
             // Slice 13c — the salary each employee was actually on during this period.
             $salaryAsOf = $this->salariesAsOf($employees, $cycleEnd);
 
+            // FIN-028 — is this the cycle that closes the tax year?
+            //
+            // Tested by CONTAINMENT of 31 December rather than by `cycle_end === '{year}-12-31'`,
+            // because only monthly and semi-monthly land exactly on it. A weekly or bi-weekly
+            // group's final cutoff straddles the year boundary, and those employees need the
+            // true-up just as much.
+            $yearEnd = Carbon::parse($cycleEnd)->year . '-12-31';
+            $isFinalCycleOfYear = $cycleStart <= $yearEnd && $cycleEnd >= $yearEnd;
+
+            // What each employee has already been taxed on, and already had withheld, this year —
+            // from the REGULAR completed runs only, which is the same basis 13th month uses. One
+            // query for the whole run rather than two per employee.
+            $yearToDateTax = [];
+            if ($isFinalCycleOfYear) {
+                $yearToDateTax = $this->thirteenthMonthBasisFor((int) Carbon::parse($cycleEnd)->year)
+                    ->whereIn('hr_payslips.employee_id', $employees->pluck('id'))
+                    // This run's own prior compute must not count as "already withheld", or a
+                    // re-run would settle the year against itself and drift on every attempt.
+                    ->where('hr_payslips.payroll_run_id', '!=', $run->id)
+                    ->groupBy('hr_payslips.employee_id')
+                    ->selectRaw('hr_payslips.employee_id, SUM(hr_payslips.taxable_pay) AS taxable_prior, SUM(hr_payslips.withholding_tax) AS withheld_prior')
+                    ->get()
+                    ->keyBy('employee_id')
+                    ->map(fn ($r) => [
+                        'taxable_prior' => (float) $r->taxable_prior,
+                        'withheld_prior' => (float) $r->withheld_prior,
+                    ])
+                    ->all();
+            }
+
             // Slice 15 — who already has a payslip in an OVERLAPPING run, resolved in ONE query
             // instead of an exists() per employee. Same question, same answer, 1/N the round trips.
             //
@@ -1818,7 +1875,14 @@ class PayrollService
                 $overtime = $this->overtimePayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
                 $nightDiff = $this->nightDiffPayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $dist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
+                // FIN-028 — on the cycle that closes the tax year, hand this employee's prior
+                // totals down so computePayslip settles the year instead of projecting it again.
+                // Absent on every other cycle, which leaves the existing behaviour untouched.
+                $employeeDist = $isFinalCycleOfYear
+                    ? [...$dist, 'year_end_true_up' => $yearToDateTax[$employee->id] ?? ['taxable_prior' => 0.0, 'withheld_prior' => 0.0]]
+                    : $dist;
+
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
 
                 $payslip = Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],

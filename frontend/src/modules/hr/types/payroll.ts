@@ -227,3 +227,34 @@ export interface NextPayday {
   pay_date: string;
   frequency: string;
 }
+
+/**
+ * One line of an off-cycle adjustment run (FIN-010) — who is paid a correction, and how much.
+ */
+export interface AdjustmentLine {
+  employee_id: number;
+  amount: number;
+  note?: string | null;
+}
+
+/**
+ * An outstanding retroactive pay difference (FIN-009).
+ *
+ * Written when a leave/overtime/half-day/early-out decision lands on a period payroll has already
+ * settled. `owed` is paid with an adjustment run; `overpaid` has no automated path, because
+ * recovering paid wages is a deduction that needs the employee's consent (Art. 113).
+ */
+export interface RetroFlag {
+  id: number;
+  employee: { id: number | null; name: string | null };
+  direction: "owed" | "overpaid";
+  reason: string;
+  /** The settled cutoff the decision reached into, e.g. "2026-03-01 – 2026-03-15". */
+  period: string | null;
+  /** Which kind of request caused it — OvertimeRequest, LeaveRequest, … */
+  source: string;
+  source_id: number;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  created_at: string | null;
+}

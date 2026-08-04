@@ -68,6 +68,9 @@ class PayslipResource extends JsonResource
             'total_deductions' => (float) $this->total_deductions,
             // FIN-010 — an off-cycle correction's amount and what it is for, so the document can
             // explain a gross that came from a person rather than from the engine.
+            // FIN-028 — the year-end tax correction, so a December payslip can explain a figure
+            // that is not this period's ordinary projection. Negative means refunded.
+            'tax_annualisation' => (float) $this->tax_annualisation,
             'adjustment_pay' => (float) $this->adjustment_pay,
             'adjustment_note' => $this->adjustment_note,
             'deduction_carryover' => (float) $this->deduction_carryover,
