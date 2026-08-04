@@ -1118,7 +1118,31 @@ class PayrollService
             $deductions = 0.0;
             $count = 0;
 
+            // FIN-012 — this loop used to be a bare updateOrCreate, missing BOTH guards that
+            // run() has. Re-running after part of the 13th month had been paid rewrote amounts
+            // that were already declared disbursed (observed: a paid ₱27,500 silently became
+            // ₱30,000), and an employee who no longer qualified kept a stale payslip that still
+            // counted toward YTD, the remittance report and this run's own totals.
+            //
+            // Mirrors run(): skip disbursed slips but roll their existing figures into the
+            // summary, then force-delete the computed slips of anyone no longer in the set.
+            $priorSlips = Payslip::where('payroll_run_id', $run->id)->get()->keyBy('employee_id');
+            $paidEmployeeIds = [];
+
             foreach ($this->computeThirteenthMonth($year, $cap) as $row) {
+                $paidEmployeeIds[] = $row['employee_id'];
+
+                // Already paid out: its amounts are history. Its own totals still roll into the
+                // run summary, so the run continues to reconcile to the sum of its payslips.
+                $existing = $priorSlips->get($row['employee_id']);
+                if ($existing && $existing->status === 'disbursed') {
+                    $gross += (float) $existing->thirteenth_month;
+                    $deductions += (float) $existing->withholding_tax;
+                    $count++;
+
+                    continue;
+                }
+
                 Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $row['employee_id']],
                     [
@@ -1147,6 +1171,14 @@ class PayrollService
                 $deductions += $row['tax'];
                 $count++;
             }
+
+            // FIN-012 — drop the computed slips of anyone who fell out of the set on this re-run
+            // (their year was voided, they were separated, their basic went to zero). A disbursed
+            // slip is never touched: that money left the company and is not ours to erase.
+            $run->payslips()
+                ->whereNotIn('employee_id', $paidEmployeeIds)
+                ->where('status', 'computed')
+                ->forceDelete();
 
             $run->update([
                 'total_gross' => round($gross, 2),
@@ -1315,6 +1347,12 @@ class PayrollService
                 $claim->update(['status' => 'scheduled']);
             }
 
+            // FIN-003(a) — and put back the loan instalments this payslip collected. Without
+            // this, un-paying a payslip wrote off debt against money the company did not pay,
+            // and a loan the payslip had settled stayed settled. Same invariant as the claims
+            // above; loans simply never had it.
+            $reversedLoans = $this->loans->reverseForPayslip($payslip);
+
             $payslip->load(['employee.user', 'employee.department']);
             $name = $payslip->employee->user?->name ?? $payslip->employee->name;
             $this->audit->log(
@@ -1322,6 +1360,7 @@ class PayrollService
                 'Payroll',
                 "Reversed {$name}'s disbursed payslip — ₱" . number_format((float) $payslip->net_pay, 2)
                     . ($claims->isNotEmpty() ? ', ' . $claims->count() . ' reimbursement(s) back to scheduled' : '')
+                    . ($reversedLoans > 0 ? ", {$reversedLoans} loan payment(s) reversed" : '')
                     . ($reason ? " — {$reason}" : ''),
                 $payslip,
             );
@@ -1395,6 +1434,14 @@ class PayrollService
                         'cycle_start' => $cycleStart,
                         'cycle_end' => $cycleEnd,
                         'frequency' => $frequency,
+                        // FIN-001 — stated HERE as well as in the column default, deliberately,
+                        // for the reason PayrollSetting::current() documents: `create()` returns a
+                        // model built from the attributes it INSERTED, so a DB-side default lands
+                        // on the row while the in-memory instance still reads null. The overlap
+                        // guard below filters on `$run->type`, and a null there would match no run
+                        // at all — silently disabling the double-pay guard on every first run of a
+                        // cycle, which is worse than the bug it was added to fix.
+                        'type' => 'regular',
                         'status' => 'processing',
                     ]);
                 } catch (UniqueConstraintViolationException) {
@@ -1461,9 +1508,26 @@ class PayrollService
 
             // Slice 15 — who already has a payslip in an OVERLAPPING run, resolved in ONE query
             // instead of an exists() per employee. Same question, same answer, 1/N the round trips.
+            //
+            // FIN-001 — THE GUARD IS SCOPED TO RUNS OF THE SAME TYPE, and must stay that way.
+            //
+            // It used to match on dates alone. A 13th-month run is created at {year}-12-01 to
+            // {year}-12-31, which overlaps every December regular cycle exactly — so paying 13th
+            // month made every employee read as "already paid for December". Two outcomes, both
+            // observed in PayrollThirteenthMonthOverlapTest: December had not run yet and nobody
+            // was paid at all, or December had already run and the re-run force-deleted its
+            // payslips, because `$keep` emptied and an empty `whereNotIn` compiles to `1 = 1`.
+            //
+            // The question this guard is actually asking is "has this employee already been paid
+            // THIS KIND of pay for this period?" — the case it exists for is an employee whose
+            // pay_frequency changed after being run in another group, i.e. two REGULAR runs
+            // covering the same days. 13th month, and every future run type (adjustment,
+            // off-cycle, final pay — FIN-010), is different money for the same days and must not
+            // block the regular cycle, or be blocked by it.
             $paidInAnotherRun = Payslip::whereIn('employee_id', $employees->pluck('id'))
                 ->where('payroll_run_id', '!=', $run->id)
                 ->whereHas('payrollRun', fn ($q) => $q
+                    ->where('type', $run->type)
                     ->where('cycle_start', '<=', $cycleEnd)
                     ->where('cycle_end', '>=', $cycleStart))
                 ->pluck('employee_id')
@@ -1604,6 +1668,18 @@ class PayrollService
             // NEVER a disbursed one (Slice 4): money already paid out is history. Before this,
             // separating an employee and re-running an old cycle force-deleted the payslip
             // they had actually been paid from.
+            //
+            // FIN-001 — AN EMPTY `$keep` DELETES EVERY COMPUTED PAYSLIP IN THIS RUN, and that is
+            // correct: `whereNotIn` over an empty set compiles to `1 = 1`, and an empty `$keep`
+            // means every employee either left the pay group or is genuinely paid by an
+            // overlapping run of the SAME type. Both deserve the cleanup.
+            //
+            // It is called out because this is the blast radius of anything that wrongly inflates
+            // `$paidElsewhere`. That is exactly what happened when the guard above matched on
+            // dates alone: a 13th-month run marked everyone as paid, `$keep` emptied, and a
+            // December re-run destroyed the payslips December had already produced. The guard is
+            // the control; this line is what it protects. No extra filter is needed here — these
+            // three cleanups are scoped to `$run` and cannot reach another run's rows.
             $keep = $employees->pluck('id')->diff($paidElsewhere);
             $run->payslips()
                 ->whereNotIn('employee_id', $keep)
