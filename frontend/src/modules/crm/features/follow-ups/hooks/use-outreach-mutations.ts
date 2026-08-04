@@ -56,12 +56,15 @@ export function useSendEmail() {
       apiClient
         .post(`/leads/${leadId}/emails`, { subject, body, ...(to ? { to } : {}) })
         .then((r) => r.data.data as SentEmail),
-    onSuccess: (email) => {
+    onSuccess: (email, variables) => {
       // Refresh through invalidation only — the `email.sent` Activity flows to every
       // /activities consumer automatically.
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.recentActivity() }); // Dashboard Recent Activity
       queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all }); // generic /activities feed (Activity Logs page)
-      // A future Email History list would add its own invalidation here, following this same pattern.
+      // Lead Details Email Conversation: the send belongs to this lead's thread, so the newly sent
+      // message appears without a reload. Keyed from the request variables rather than the response
+      // so it holds even if the payload ever stops echoing the lead.
+      queryClient.invalidateQueries({ queryKey: queryKeys.leads.emails(variables.leadId) });
       toast.success(`Email sent to ${email.to}`);
     },
     onError: (err) => {

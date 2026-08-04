@@ -45,10 +45,11 @@ export type TimelineEvent = {
   type: ActivityType;
 };
 
-// One message in the Lead Details Email Thread (read-only), mapped from an Email record on the
-// per-lead endpoint (GET /leads/{lead}/emails). Both directions share this shape; the component
-// distinguishes inbound vs outbound and picks the sender/recipient label from it. RC2 is read-only —
-// reply composition, attachments, and AI summaries are future additions over the same shape.
+// One message in the Lead Details Email Thread, mapped from an Email record on the per-lead
+// endpoint (GET /leads/{lead}/emails). Both directions share this shape; the component
+// distinguishes inbound vs outbound and picks the sender/recipient labels from it. Replying is a
+// send through the existing Outreach pipeline and reads nothing extra from this shape —
+// attachments and AI summaries remain future additions over it.
 export type EmailThreadMessage = {
   id: string;
   direction: "inbound" | "outbound";
