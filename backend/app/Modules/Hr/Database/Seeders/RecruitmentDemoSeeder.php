@@ -10,8 +10,14 @@ use Illuminate\Database\Seeder;
 
 class RecruitmentDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (Requisition::query()->exists()) {
             return;
         }

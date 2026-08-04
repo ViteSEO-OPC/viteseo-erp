@@ -8,8 +8,14 @@ use Illuminate\Database\Seeder;
 
 class OfficeExpenseDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (OfficeExpense::query()->exists()) {
             return;
         }

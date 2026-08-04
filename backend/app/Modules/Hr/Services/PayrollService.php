@@ -1887,15 +1887,18 @@ class PayrollService
 
         $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'nd' => 0.0, 'rd' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'other' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
 
-        $out = fopen('php://temp', 'r+');
-        fputcsv($out, [
+        // FIN-019 — every row goes through CsvWriter, which neutralises leading =, +, -, @, tab
+        // and CR. Employee and department names are free text a person controls, and this file is
+        // opened in Excel on a finance workstation.
+        $rows = [];
+        $rows[] = [
             'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Night Diff', 'Rest Day', 'Reimbursements', 'Gross',
             'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Other Deductions', 'Total Deductions', 'Net Pay',
             // Slice B7 — this file doubles as the remittance summary, and a per-employee override
             // moves the employee half only. Without this column the mismatched pair reads as a
             // proper contribution and gets filed as one.
             'Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Overridden', 'Status',
-        ], ',', '"', '');
+        ];
 
         foreach ($run->payslips as $p) {
             $sum['base'] += (float) $p->base_salary;
@@ -1914,7 +1917,7 @@ class PayrollService
             $sum['er_ph'] += (float) $p->employer_philhealth;
             $sum['er_pg'] += (float) $p->employer_pagibig;
 
-            fputcsv($out, [
+            $rows[] = [
                 $p->employee->user?->name ?? $p->employee->name,
                 $p->employee->department?->name,
                 $p->base_salary, $p->allowances, $p->holiday_premium, $p->overtime_pay, $p->night_diff_pay, $p->rest_day_premium, $p->reimbursements, $p->gross,
@@ -1931,20 +1934,20 @@ class PayrollService
                     $p->contribution_overrides ?? [],
                 )),
                 $p->status,
-            ], ',', '"', '');
+            ];
         }
 
-        fputcsv($out, [
+        $rows[] = [
             'TOTAL', '',
             round($sum['base'], 2), round($sum['allow'], 2), round($sum['holiday'], 2), round($sum['ot'], 2), round($sum['nd'], 2), round($sum['rd'], 2), round($sum['reimb'], 2), (float) $run->total_gross,
             round($sum['sss'], 2), round($sum['ph'], 2), round($sum['pg'], 2), round($sum['wht'], 2), round($sum['other'], 2),
             (float) $run->total_deductions, (float) $run->total_net,
             round($sum['er_sss'], 2), round($sum['er_ph'], 2), round($sum['er_pg'], 2), '',
-        ], ',', '"', '');
+        ];
 
-        rewind($out);
-        $csv = stream_get_contents($out);
-        fclose($out);
+        // No BOM: this export is machine-read as often as it is opened by a person, and adding
+        // one now would change every existing consumer's first column header.
+        $csv = CsvWriter::render($rows, bom: false);
 
         $this->audit->log(
             'exported',

@@ -14,8 +14,14 @@ use Illuminate\Database\Seeder;
  */
 class HealthSafetyDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(ConcernService $service): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (Concern::where('category', 'safety')->count() > 1) {
             return;
         }

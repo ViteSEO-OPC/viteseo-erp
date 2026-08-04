@@ -13,8 +13,14 @@ use Illuminate\Database\Seeder;
  */
 class AuditDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         // Normalize any legacy login rows to the new verb/module format.
         AuditLog::where('action', 'auth.login')->update([
             'action' => 'login',

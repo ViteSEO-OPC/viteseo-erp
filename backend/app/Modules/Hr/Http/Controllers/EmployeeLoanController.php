@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\RequestLoanRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeeLoanRequest;
+use App\Modules\Hr\Http\Requests\UpdateEmployeeLoanRequest;
 use App\Modules\Hr\Http\Resources\EmployeeLoanResource;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeLoan;
@@ -34,7 +35,7 @@ class EmployeeLoanController extends Controller
     }
 
     // PUT/PATCH /api/v1/hr/loans/{loan}
-    public function update(StoreEmployeeLoanRequest $request, EmployeeLoan $loan): JsonResponse
+    public function update(UpdateEmployeeLoanRequest $request, EmployeeLoan $loan): JsonResponse
     {
         return EmployeeLoanResource::make(
             $this->service->update($loan, $request->validated(), $request->user()),

@@ -280,8 +280,16 @@ class LoanService
             ]);
         }
 
+        // FIN-002 — `status` IS NOT EDITABLE HERE, and must never be added back.
+        //
+        // Collection runs off `status = 'active'`, so writing that status is what authorises a
+        // wage deduction. Art. 113 wants the worker's own consent for that, which is why
+        // authorize() is the only writer of it and checks that the actor is the employee whose pay
+        // is being deducted. While `status` sat in this list, HR editing a loan could set `active`
+        // directly and start collecting with `authorized_at` still null — the consent record
+        // simply absent while the deduction proceeded.
         $loan->update(array_intersect_key($data, array_flip([
-            'type', 'reference', 'principal', 'per_period_amount', 'start_date', 'status', 'notes',
+            'type', 'reference', 'principal', 'per_period_amount', 'start_date', 'notes',
         ])));
 
         $this->audit->log('updated', 'Loans', "Updated loan #{$loan->id}", $loan);
@@ -315,11 +323,22 @@ class LoanService
             ]);
         }
 
-        $loan->update(['status' => 'active']);
+        // FIN-002 — consent that was never given cannot be resumed.
+        //
+        // This returned every cancelled loan straight to `active`, including one cancelled while
+        // it was still waiting on the employee. Reopening would then start collecting from wages
+        // the employee had never agreed to. A loan that WAS authorised keeps its `authorized_at`,
+        // so its consent still stands and collection genuinely does resume.
+        $restored = $loan->authorized_at ? 'active' : 'pending_authorization';
+
+        $loan->update(['status' => $restored]);
         $this->audit->log(
             'reopened',
             'Loans',
-            "Reopened loan #{$loan->id} — collection resumes" . ($reason ? " — {$reason}" : ''),
+            "Reopened loan #{$loan->id} — " . ($restored === 'active'
+                ? 'collection resumes'
+                : 'awaiting the employee’s authorization')
+                . ($reason ? " — {$reason}" : ''),
             $loan,
         );
 

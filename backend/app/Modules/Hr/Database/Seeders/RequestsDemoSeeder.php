@@ -17,8 +17,14 @@ use Illuminate\Database\Seeder;
  */
 class RequestsDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (DocumentRequest::query()->exists() || ChangeRequest::query()->exists()) {
             return;
         }

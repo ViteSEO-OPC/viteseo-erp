@@ -130,14 +130,9 @@ class ReportService
             }
         }
 
-        $out = fopen('php://temp', 'r+');
-        fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
-        foreach ($rows as $r) {
-            fputcsv($out, $r);
-        }
-        rewind($out);
-
-        return (string) stream_get_contents($out);
+        // FIN-019 — audit `details`, usernames and generic table rows are all user-controlled
+        // free text, so they go out through the shared neutralising writer.
+        return CsvWriter::render($rows);
     }
 
     private function reportTitle(string $key): string

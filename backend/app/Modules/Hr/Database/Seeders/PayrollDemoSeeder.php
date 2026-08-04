@@ -17,8 +17,14 @@ use Illuminate\Database\Seeder;
  */
 class PayrollDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(PayrollService $service, PayScheduleService $schedule): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (PayrollRun::query()->exists()) {
             return;
         }

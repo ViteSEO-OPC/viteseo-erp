@@ -22,8 +22,14 @@ use Illuminate\Database\Seeder;
  */
 class AttendanceDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (Attendance::query()->exists()) {
             return;
         }

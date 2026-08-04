@@ -14,9 +14,27 @@ class HrServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        // Every HR route is automatically prefixed with /api/v1/hr
+        // FIN-006 — a baseline rate limit on every HR route.
+        //
+        // The application had no throttling anywhere: `bootstrap/app.php` never calls
+        // `throttleApi()`, and Laravel's `api` group only adds `throttle:` when that limiter is
+        // registered (Foundation/Configuration/Middleware.php). So every endpoint accepted
+        // unlimited requests.
+        //
+        // SCOPE: this covers `/api/v1/hr/*` ONLY, and is applied here rather than in
+        // `bootstrap/app.php` deliberately — that file is shared with the CRM and Projects
+        // modules, and rate-limiting their endpoints is not this pod's call to make.
+        //
+        // NOT COVERED, and it is the more valuable half: `POST /api/v1/auth/login` is a shared
+        // route and still has no limit, so credential stuffing against it remains unbounded.
+        // That fix belongs in `bootstrap/app.php` and needs the platform owner. Tracked as the
+        // outstanding half of FIN-006 — do not read this limiter as closing it.
+        //
+        // 120/min is deliberately loose: an HR dashboard fans out a lot of reads on load, and a
+        // limiter that trips during normal use gets removed rather than tuned. The expensive
+        // write paths carry their own tighter limits in Routes/api.php.
         Route::prefix('api/v1/hr')
-            ->middleware('api')
+            ->middleware(['api', 'throttle:120,1'])
             ->group(__DIR__ . '/../Routes/api.php');
 
         // Auto-load HR migrations from inside the module.

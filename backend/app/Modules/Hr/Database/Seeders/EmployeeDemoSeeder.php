@@ -20,8 +20,14 @@ use Illuminate\Support\Str;
  */
 class EmployeeDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(EmployeeService $service): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         // Idempotency: skip if already seeded (service->create would hit the
         // users.email unique index on a re-run without a fresh migrate).
         if (Employee::query()->exists()) {

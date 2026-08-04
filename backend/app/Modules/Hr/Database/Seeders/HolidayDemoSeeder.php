@@ -15,8 +15,14 @@ use Illuminate\Database\Seeder;
  */
 class HolidayDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (HolidaySet::query()->exists()) {
             return;
         }

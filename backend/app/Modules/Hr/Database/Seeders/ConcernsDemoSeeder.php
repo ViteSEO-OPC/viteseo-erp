@@ -13,8 +13,14 @@ use Illuminate\Database\Seeder;
  */
 class ConcernsDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(ConcernService $service): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (Concern::query()->exists()) {
             return;
         }

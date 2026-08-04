@@ -129,7 +129,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
         Route::get('reports/{key}', [ReportController::class, 'show']);
-        Route::post('reports/{key}/export', [ReportController::class, 'export']);
+        Route::post('reports/{key}/export', [ReportController::class, 'export'])->middleware('throttle:10,1');
         Route::get('attendance', [AttendanceController::class, 'index']);
         Route::get('attendance/summary', [AttendanceController::class, 'summary']);
         // Field time-ins queue. Declared BEFORE attendance/adjust is irrelevant, but these
@@ -150,16 +150,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('violations/{violation}/reopen', [ViolationController::class, 'reopen']);
 
         // Payroll (HR only).
+        // FIN-006 — the payroll run holds the payroll tables inside ONE transaction for its whole
+        // duration (PayrollService::run), so repeated submits queue up long lock waits rather than
+        // simply wasting CPU. Exports are the other expensive path: each one reads every payslip in
+        // a run and builds a file. 5/min and 10/min are far above any human workflow and far below
+        // what it takes to hurt the database.
         Route::get('payroll/settings', [PayrollController::class, 'settings']);
         Route::put('payroll/settings', [PayrollController::class, 'updateSettings']);
         Route::get('payroll/runs', [PayrollController::class, 'runsIndex']);
         Route::get('payroll/thirteenth-month', [PayrollController::class, 'thirteenthMonth']);
         Route::get('payroll/thirteenth-month/preview', [PayrollController::class, 'previewThirteenthMonth']);
         // Slice B17 — pay it, and withhold on what it pushes past the ₱90,000 exemption.
-        Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth']);
-        Route::post('payroll/run', [PayrollController::class, 'run']);
+        Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth'])->middleware('throttle:5,1');
+        Route::post('payroll/run', [PayrollController::class, 'run'])->middleware('throttle:5,1');
         Route::get('payroll/runs/{payrollRun}', [PayrollController::class, 'show']);
-        Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun']);
+        Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun'])->middleware('throttle:10,1');
         Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
         Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);

@@ -1,0 +1,147 @@
+<?php
+
+namespace Tests\Feature\Hr;
+
+use App\Models\User;
+use App\Modules\Hr\Models\Department;
+use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Models\EmployeeLoan;
+use App\Modules\Hr\Services\LoanService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+/**
+ * FIN-002 (payroll audit, §3) — the wage-deduction consent gate could be walked around.
+ *
+ * WRITTEN TO FAIL. Article 113 of the Labor Code requires the worker's own written consent before
+ * an employer may deduct from their wages. The loan model was built around exactly that: a loan
+ * moves `requested → approved → pending_authorization → active`, and `collectForPeriod()` only
+ * ever collects from `active`. Writing that status IS the authorisation — which is why only the
+ * employee is allowed to write it, in `LoanService::authorize()`, which checks that the actor is
+ * the employee whose pay is being deducted.
+ *
+ * TWO WAYS AROUND IT, both closed here.
+ *
+ * (a) `LoanService::update()` accepted `status` among its writable keys, and the update route
+ *     reuses `StoreEmployeeLoanRequest`, which permits any value in `EmployeeLoan::STATUSES`. So
+ *     HR editing a loan could set `active` directly and start collecting, with `authorized_at`
+ *     still null — no consent record, deduction proceeding. A bare `PATCH {"status":"active"}`
+ *     422s because the create request marks principal/per_period_amount/start_date required, but
+ *     the edit form submits all of those, so the normal UI path reaches it.
+ *
+ * (b) `reopen()` returned any cancelled loan straight to `active`, including one cancelled before
+ *     the employee ever authorised it. Consent that was never given cannot be resumed.
+ *
+ * The test asserts the invariant rather than the mechanism: a loan may only be `active` if
+ * `authorized_at` is set. That way it still holds if the writable-key list is ever refactored.
+ */
+class LoanConsentGateTest extends HrTestCase
+{
+    use RefreshDatabase;
+
+    private Employee $employee;
+
+    private User $hr;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $dept = Department::create(['name' => 'Ops', 'code' => 'OPS']);
+        $this->employee = Employee::create([
+            'user_id' => User::factory()->create()->id, 'department_id' => $dept->id,
+            'employee_no' => 'E-001', 'job_title' => 'Staff', 'hire_date' => '2020-01-01',
+            'base_salary' => 30000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
+        ]);
+        $this->hr = $this->hrUser();
+    }
+
+    private function pendingLoan(): EmployeeLoan
+    {
+        return EmployeeLoan::create([
+            'employee_id' => $this->employee->id, 'type' => 'loan',
+            'principal' => 12000, 'per_period_amount' => 1000,
+            'start_date' => '2026-01-01', 'status' => 'pending_authorization',
+        ]);
+    }
+
+    /** The full payload the edit form submits — the realistic path, not a crafted request. */
+    private function editPayload(array $overrides = []): array
+    {
+        return array_merge([
+            'type' => 'loan',
+            'principal' => 12000,
+            'per_period_amount' => 1000,
+            'start_date' => '2026-01-01',
+        ], $overrides);
+    }
+
+    // --- (a) editing must not grant consent ---------------------------------------------
+
+    public function test_editing_a_loan_cannot_activate_it_without_the_employees_authorization(): void
+    {
+        $loan = $this->pendingLoan();
+
+        try {
+            app(LoanService::class)->update($loan, $this->editPayload(['status' => 'active']), $this->hr);
+        } catch (\Illuminate\Validation\ValidationException) {
+            // Refusing outright is an acceptable implementation of the same rule.
+        }
+
+        $fresh = $loan->fresh();
+        $this->assertNotSame('active', $fresh->status, 'HR activated a loan the employee never authorized');
+        $this->assertNull($fresh->authorized_at, 'a loan is active with no consent record');
+    }
+
+    /** Editing the amounts is legitimate and must keep working — this is not a lockdown. */
+    public function test_editing_a_loans_amounts_still_works(): void
+    {
+        $loan = $this->pendingLoan();
+
+        app(LoanService::class)->update($loan, $this->editPayload(['per_period_amount' => 750]), $this->hr);
+
+        $this->assertSame(750.0, (float) $loan->fresh()->per_period_amount);
+        $this->assertSame('pending_authorization', $loan->fresh()->status);
+    }
+
+    // --- (b) reopening must not resurrect consent that was never given -------------------
+
+    public function test_reopening_a_never_authorized_loan_returns_it_to_pending_not_active(): void
+    {
+        $loan = $this->pendingLoan();
+        app(LoanService::class)->cancel($loan, $this->hr, 'issued in error');
+
+        app(LoanService::class)->reopen($loan->fresh(), 'reinstated');
+
+        $fresh = $loan->fresh();
+        $this->assertSame(
+            'pending_authorization',
+            $fresh->status,
+            'a loan the employee never authorized was reopened straight into collection',
+        );
+        $this->assertNull($fresh->authorized_at);
+    }
+
+    /** A loan the employee HAD authorised keeps its consent, so reopening resumes collection. */
+    public function test_reopening_a_previously_authorized_loan_resumes_collection(): void
+    {
+        $loan = $this->pendingLoan();
+        app(LoanService::class)->authorize($loan, $this->employee->user);
+        app(LoanService::class)->cancel($loan->fresh(), $this->hr, 'paused');
+
+        app(LoanService::class)->reopen($loan->fresh(), 'resumed');
+
+        $this->assertSame('active', $loan->fresh()->status);
+        $this->assertNotNull($loan->fresh()->authorized_at);
+    }
+
+    // --- the invariant, stated once ------------------------------------------------------
+
+    /** Only the employee can grant consent — unchanged behaviour, asserted so it stays true. */
+    public function test_hr_cannot_authorize_on_the_employees_behalf(): void
+    {
+        $loan = $this->pendingLoan();
+
+        $this->expectException(\Illuminate\Validation\ValidationException::class);
+        app(LoanService::class)->authorize($loan, $this->hr);
+    }
+}
