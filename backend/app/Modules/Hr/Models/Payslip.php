@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Payslip extends Model
@@ -93,5 +94,17 @@ class Payslip extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    /**
+     * The transfers raised against this payslip (FIN-015).
+     *
+     * Normally one. More than one is legitimate after a failed transfer is re-issued, which is why
+     * this is a `hasMany` and why "has it been paid?" is a question about payment STATUS rather
+     * than about the existence of a row.
+     */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
     }
 }

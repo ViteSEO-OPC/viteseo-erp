@@ -276,3 +276,86 @@ export interface RetroFlag {
   resolution_note: string | null;
   created_at: string | null;
 }
+
+// --- Disbursement (FIN-015) ------------------------------------------------------------------
+
+/** How the money leaves the company. One method per batch — a bank file is per payment rail. */
+export type PaymentMethod = "bank_transfer" | "cash" | "check";
+
+/**
+ * pending   built, not yet sent to the bank
+ * exported  the bank file has been generated and downloaded — the point of no return
+ * settled   every payment in it confirmed
+ * partial   some settled, some failed or still outstanding
+ */
+export type PaymentBatchStatus = "pending" | "exported" | "settled" | "partial";
+
+/**
+ * pending   in a batch, not yet confirmed by the bank
+ * settled   confirmed — the ONLY state that means money actually moved
+ * failed    the bank rejected it
+ * returned  it left and came back
+ */
+export type PaymentStatus = "pending" | "settled" | "failed" | "returned";
+
+export interface Payment {
+  id: number;
+  payslip_id: number;
+  amount: number;
+  method: PaymentMethod;
+  status: PaymentStatus;
+  bank_name: string | null;
+  /** Masked to the last four digits. The full number is never served to a screen (FIN-022). */
+  bank_account_masked: string | null;
+  bank_account_type: string | null;
+  /** Both null until reconciliation — the gap between "we sent it" and "it arrived". */
+  reference: string | null;
+  settled_at: string | null;
+  failure_reason: string | null;
+  employee?: {
+    id: number;
+    employee_no: string | null;
+    name: string | null;
+    department: string | null;
+  };
+}
+
+export interface PaymentBatch {
+  id: number;
+  reference: string;
+  method: PaymentMethod;
+  status: PaymentBatchStatus;
+  total_amount: number;
+  payment_count: number;
+  notes: string | null;
+  /** Non-null means the bank file has been downloaded and the batch can no longer be rebuilt. */
+  exported_at: string | null;
+  exported_by?: string | null;
+  created_by?: string | null;
+  created_at: string | null;
+  payroll_run?: {
+    id: number;
+    cycle_start: string;
+    cycle_end: string;
+    frequency: string;
+    total_net: number;
+  };
+  payments?: Payment[];
+}
+
+/** Who was left out of the batch, and why. Shown rather than swallowed — see the API note. */
+export interface PaymentSkipped {
+  already_disbursed: number;
+  already_batched: number;
+  zero_net: number;
+  missing_bank_details: number;
+}
+
+/** Does this batch account for the whole run? The check finance makes before money moves. */
+export interface PaymentReconciliation {
+  balanced: boolean;
+  batch_total: number;
+  run_total: number;
+  difference: number;
+  unpaid_payslips: number;
+}

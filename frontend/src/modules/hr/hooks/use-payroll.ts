@@ -22,11 +22,15 @@ import {
   runAdjustment,
   getRetroFlags,
   resolveRetroFlag,
+  createPaymentBatch,
+  getPaymentBatches,
+  getPaymentBatch,
 } from "@/modules/hr/api/payroll";
 
 const RUNS_KEY = ["hr", "payroll", "runs"] as const;
 const SETTINGS_KEY = ["hr", "payroll", "settings"] as const;
 const RETRO_KEY = ["hr", "payroll", "retro-flags"] as const;
+const BATCHES_KEY = ["hr", "payroll", "payment-batches"] as const;
 
 export function usePayrollSettings() {
   return useQuery({ queryKey: SETTINGS_KEY, queryFn: getPayrollSettings });
@@ -190,5 +194,42 @@ export function useResolveRetroFlag() {
   return useMutation({
     mutationFn: ({ id, note }: { id: number; note: string }) => resolveRetroFlag(id, note),
     onSuccess: () => qc.invalidateQueries({ queryKey: RETRO_KEY }),
+  });
+}
+
+// --- Disbursement (FIN-015) ------------------------------------------------------------------
+
+/** Every payment batch, newest first. Pass a run id to narrow it to one payroll. */
+export function usePaymentBatches(payrollRunId?: number) {
+  return useQuery({
+    queryKey: [...BATCHES_KEY, payrollRunId ?? "all"],
+    queryFn: () => getPaymentBatches(payrollRunId),
+  });
+}
+
+/** One batch with its transfers, plus whether it accounts for the whole run. */
+export function usePaymentBatch(id: number | undefined) {
+  return useQuery({
+    queryKey: [...BATCHES_KEY, "detail", id],
+    queryFn: () => getPaymentBatch(id as number),
+    enabled: typeof id === "number",
+  });
+}
+
+/**
+ * Build the batch for a completed run.
+ *
+ * Invalidates the runs list as well as the batches: whether a run still has anything left to pay
+ * is derived from its payments, so a stale run row would offer to pay it a second time.
+ */
+export function useCreatePaymentBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: createPaymentBatch,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: BATCHES_KEY });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+    },
   });
 }

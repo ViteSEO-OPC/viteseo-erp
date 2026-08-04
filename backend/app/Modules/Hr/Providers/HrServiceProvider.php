@@ -33,8 +33,14 @@ class HrServiceProvider extends ServiceProvider
         // 120/min is deliberately loose: an HR dashboard fans out a lot of reads on load, and a
         // limiter that trips during normal use gets removed rather than tuned. The expensive
         // write paths carry their own tighter limits in Routes/api.php.
+        //
+        // `hr-api:` is the counter's own name, and it matters. An authenticated request is keyed on
+        // `sha1($user->id)` with no route in it, so an unprefixed limiter here shares one counter
+        // with every other unprefixed `throttle:` the user touches — which is precisely how this
+        // 120/min limiter came to be enforcing the payroll run's 5/min against ordinary page loads.
+        // See the note above the payroll routes.
         Route::prefix('api/v1/hr')
-            ->middleware(['api', 'throttle:120,1'])
+            ->middleware(['api', 'throttle:120,1,hr-api:'])
             ->group(__DIR__ . '/../Routes/api.php');
 
         // Auto-load HR migrations from inside the module.

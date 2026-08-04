@@ -10,6 +10,10 @@ import type {
   ThirteenthMonthPayRow,
   AdjustmentLine,
   RetroFlag,
+  PaymentBatch,
+  PaymentMethod,
+  PaymentReconciliation,
+  PaymentSkipped,
 } from "@/modules/hr/types/payroll";
 
 export async function getPayrollSettings(): Promise<PayrollSettings> {
@@ -196,4 +200,54 @@ export async function getRetroFlags(): Promise<RetroFlag[]> {
 export async function resolveRetroFlag(id: number, note: string): Promise<RetroFlag> {
   const res = await apiClient.post(`/hr/retro-flags/${id}/resolve`, { note });
   return res.data.data;
+}
+
+// --- Disbursement (FIN-015) ------------------------------------------------------------------
+
+/**
+ * Build the payment batch for a completed run.
+ *
+ * Nothing about WHO or HOW MUCH is sent: both are derived from the run, because typed amounts
+ * would be a second unreconciled source of truth for what payroll owes. `meta.skipped` says who
+ * was left out and why — a batch that quietly omits three people looks identical to one that
+ * does not, so the caller is expected to show it.
+ */
+export async function createPaymentBatch(input: {
+  payroll_run_id: number;
+  method: PaymentMethod;
+  notes?: string | null;
+}): Promise<{ batch: PaymentBatch; skipped: PaymentSkipped; reconciliation: PaymentReconciliation }> {
+  const res = await apiClient.post("/hr/payment-batches", input);
+  return {
+    batch: res.data.data,
+    skipped: res.data.meta.skipped,
+    reconciliation: res.data.meta.reconciliation,
+  };
+}
+
+/** Every batch, newest first. Optionally narrowed to one run. */
+export async function getPaymentBatches(payrollRunId?: number): Promise<PaymentBatch[]> {
+  const res = await apiClient.get("/hr/payment-batches", {
+    params: payrollRunId ? { payroll_run_id: payrollRunId } : undefined,
+  });
+  return res.data.data;
+}
+
+/** One batch with every transfer in it, plus whether it accounts for the whole run. */
+export async function getPaymentBatch(
+  id: number,
+): Promise<{ batch: PaymentBatch; reconciliation: PaymentReconciliation }> {
+  const res = await apiClient.get(`/hr/payment-batches/${id}`);
+  return { batch: res.data.data, reconciliation: res.data.meta.reconciliation };
+}
+
+/**
+ * Download the file finance uploads to the bank.
+ *
+ * This is the point of no return: the server stamps `exported_at` on first download, after which
+ * the batch can no longer be rebuilt. Once the file exists the company has to assume the bank has
+ * it, and regenerating from changed payslips is how someone gets paid twice.
+ */
+export function downloadBankFile(id: number, reference: string): Promise<void> {
+  return downloadFile(`/hr/payment-batches/${id}/bank-file`, `bank-file-${reference}.csv`);
 }

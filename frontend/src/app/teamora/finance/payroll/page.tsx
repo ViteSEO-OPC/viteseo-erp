@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle } from "lucide-react";
+import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -22,6 +22,7 @@ import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { AdjustmentRunDialog } from "@/modules/hr/components/adjustment-run-dialog";
 import { RetroFlagsDialog } from "@/modules/hr/components/retro-flags-dialog";
+import { PaymentBatchDialog } from "@/modules/hr/components/payment-batch-dialog";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -72,6 +73,7 @@ export default function PayrollPage() {
   // FIN-010 / FIN-009 — off-cycle corrections and the queue of differences awaiting one.
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
   const [retroOpen, setRetroOpen] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
   const [adjustmentPrefill, setAdjustmentPrefill] = useState<{ employeeId: number | null; reason: string | null }>({
     employeeId: null,
     reason: null,
@@ -317,6 +319,21 @@ export default function PayrollPage() {
             >
               <Wrench />
               Adjustment
+            </Button>
+            {/* FIN-015 — the disbursement layer. Only a completed run has anything to pay,
+                and the dialog is where the bank file comes from. */}
+            <Button
+              variant="outline"
+              onClick={() => setPayOpen(true)}
+              disabled={!currentRun || currentRun.status !== "completed"}
+              title={
+                currentRun?.status === "completed"
+                  ? "Build the payment batch and bank file for this run"
+                  : "Run this period first — only a completed run can be paid"
+              }
+            >
+              <Banknote />
+              Pay run
             </Button>
             <Button variant="outline" onClick={() => setThirteenthOpen(true)}>
               <Gift />
@@ -799,6 +816,16 @@ export default function PayrollPage() {
       />
 
       {/* FIN-010 — off-cycle correction. */}
+      <PaymentBatchDialog
+        open={payOpen}
+        onOpenChange={setPayOpen}
+        payrollRunId={currentRun?.id ?? null}
+        runTotalNet={currentRun?.total_net ?? 0}
+        runLabel={
+          currentRun ? `${currentRun.cycle_start} to ${currentRun.cycle_end}` : "This period"
+        }
+      />
+
       <AdjustmentRunDialog
         open={adjustmentOpen}
         onOpenChange={setAdjustmentOpen}
