@@ -2,9 +2,9 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * @mixin \App\Modules\Hr\Models\RemoteCheckin
@@ -23,7 +23,7 @@ class RemoteCheckinResource extends JsonResource
                 'name' => $this->employee?->user?->name ?? $this->employee?->name,
                 'department' => $this->employee?->department?->name,
             ],
-            'photo_url' => Storage::disk('public')->url($this->photo_path),
+            'photo_url' => PrivateFileService::url($this->photo_path),
             'lat' => $this->lat,
             'lng' => $this->lng,
             'has_location' => $this->hasLocation(),

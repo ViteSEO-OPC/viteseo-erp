@@ -13,6 +13,7 @@ use App\Modules\Hr\Services\RemoteCheckinService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Carbon;
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
@@ -44,7 +45,10 @@ class RemoteCheckinTest extends HrTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        Storage::fake('public');
+        // FIN-004 — check-in selfies live on the PRIVATE disk. They were on `public`, which the
+        // webserver serves with no authentication: a photo of an employee, at a location, at a
+        // time, readable by anyone who guessed or was forwarded the URL.
+        Storage::fake(PrivateFileService::DISK);
 
         WorkSchedule::create([
             'name' => 'Day', 'workdays' => [1, 2, 3, 4, 5, 6, 7],
@@ -157,7 +161,7 @@ class RemoteCheckinTest extends HrTestCase
 
         $this->assertSame(RemoteCheckin::STATUS_PENDING, $checkin->status);
         $this->assertTrue($checkin->hasLocation());
-        Storage::disk('public')->assertExists($checkin->photo_path);
+        Storage::disk(PrivateFileService::DISK)->assertExists($checkin->photo_path);
     }
 
     /** GPS is optional — a denied permission must not stop someone timing in. */

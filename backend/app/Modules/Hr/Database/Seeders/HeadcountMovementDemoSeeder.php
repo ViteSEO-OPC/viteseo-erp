@@ -15,8 +15,14 @@ use Illuminate\Database\Seeder;
  */
 class HeadcountMovementDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(EmployeeService $service): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         // Idempotent — skip if these demo records already exist.
         if (Employee::withTrashed()->whereHas('user', fn ($q) => $q->where('email', 'rafael@viteseo.ph'))->exists()) {
             return;

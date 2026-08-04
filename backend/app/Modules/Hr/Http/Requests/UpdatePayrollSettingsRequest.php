@@ -19,6 +19,10 @@ class UpdatePayrollSettingsRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // FIN-025 — the date these settings take effect. Optional: omitted means today,
+            // which is the behaviour that existed before versioning. Given, it lets HR record a
+            // change that was actually agreed earlier without repricing everything since.
+            'effective_from' => ['sometimes', 'nullable', 'date'],
             'frequency' => ['required', Rule::in(array_keys(PayScheduleService::PERIODS_PER_YEAR))],
             'deduction_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],
             'tax_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],

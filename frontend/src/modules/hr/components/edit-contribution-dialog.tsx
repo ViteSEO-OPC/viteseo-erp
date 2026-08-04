@@ -179,9 +179,22 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
     }
   }
 
-  async function submit() {
+  /**
+   * FIN-026 — HR's acknowledgement that this date reaches back over completed payroll runs.
+   *
+   * The backend refuses a backdated version unless it is told the risk is understood, and its
+   * message names the affected runs. Backdating itself is legitimate and common: an agency
+   * publishes a circular in March that took effect in January. What must not happen silently is
+   * that a completed-but-unlocked run's next recompute reprices its statutory deductions.
+   *
+   * Without this dialog the refusal is a dead end — the rate simply cannot be saved.
+   */
+  const [repricingWarning, setRepricingWarning] = useState<string | null>(null);
+
+  async function submit(acknowledgeRepricing = false) {
     try {
       await save.mutateAsync({
+        acknowledge_repricing: acknowledgeRepricing || undefined,
         type,
         effective_from: effectiveFrom,
         employee_rate: toDecimal(employeeRate),
@@ -209,9 +222,19 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
         brackets: bracketsApply ? bands : undefined,
       });
       toast.success(`${label} saved, effective ${formatDate(effectiveFrom)}`);
+      setRepricingWarning(null);
       onDone();
     } catch (err) {
       const errors = err instanceof AxiosError ? err.response?.data?.errors : null;
+
+      // FIN-026 — this one is a question, not a failure: show what it would reprice and let HR
+      // decide. Any other error stays an error.
+      const backdated = errors?.effective_from?.[0];
+      if (backdated) {
+        setRepricingWarning(String(backdated));
+        return;
+      }
+
       toast.error(errors ? String(Object.values(errors)[0]) : "Could not save.");
     }
   }
@@ -401,10 +424,31 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
         <DialogClose asChild>
           <Button variant="outline">Cancel</Button>
         </DialogClose>
-        <Button disabled={save.isPending || !bandsValid} onClick={submit}>
+        <Button disabled={save.isPending || !bandsValid} onClick={() => submit()}>
           {save.isPending ? "Saving…" : "Save"}
         </Button>
       </DialogFooter>
+      {/* FIN-026 — backdating is allowed, but never silently. */}
+      <Dialog open={repricingWarning !== null} onOpenChange={(o) => !o && setRepricingWarning(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>This date reaches into finished payroll</DialogTitle>
+            <DialogDescription>{repricingWarning}</DialogDescription>
+          </DialogHeader>
+          <p className="rounded-md bg-muted px-3 py-2 text-caption text-muted-foreground">
+            Those runs were priced at the old rates. Saving is fine — but if any of them is
+            re-run later, its statutory deductions will change to match this new rate.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRepricingWarning(null)}>
+              Pick another date
+            </Button>
+            <Button disabled={save.isPending} onClick={() => submit(true)}>
+              {save.isPending ? "Saving…" : "Save anyway"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

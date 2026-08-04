@@ -46,6 +46,11 @@ class StoreContributionVersionRequest extends FormRequest
 
             'note' => ['nullable', 'string', 'max:255'],
 
+            // FIN-026 — HR's explicit acknowledgement that this date reaches back over payroll
+            // runs already completed. The service refuses without it and names the runs, so this
+            // can only be sent by someone who has been told what it affects.
+            'acknowledge_repricing' => ['sometimes', 'boolean'],
+
             // Slice B3b — MSC bands, lowest first. Each runs up to the next band's `min_salary`,
             // so there is no `max` to keep in step.
             'brackets' => ['sometimes', 'array', 'max:200'],

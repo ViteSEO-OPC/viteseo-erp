@@ -9,8 +9,14 @@ use Illuminate\Database\Seeder;
 
 class ReimbursementDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (Reimbursement::query()->exists()) {
             return;
         }

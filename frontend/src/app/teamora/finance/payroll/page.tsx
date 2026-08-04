@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen } from "lucide-react";
+import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -20,6 +20,9 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { PayslipDocument } from "@/modules/hr/components/payslip-document";
 import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
+import { AdjustmentRunDialog } from "@/modules/hr/components/adjustment-run-dialog";
+import { RetroFlagsDialog } from "@/modules/hr/components/retro-flags-dialog";
+import { PaymentBatchDialog } from "@/modules/hr/components/payment-batch-dialog";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -34,6 +37,7 @@ import {
   useReopenPayslip,
   usePayrollSettings,
   useUpdatePayrollSettings,
+  useRetroFlags,
   useThirteenthMonth,
   useThirteenthMonthPreview,
   useRunThirteenthMonth,
@@ -66,6 +70,18 @@ export default function PayrollPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [thirteenthOpen, setThirteenthOpen] = useState(false);
+  // FIN-010 / FIN-009 — off-cycle corrections and the queue of differences awaiting one.
+  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
+  const [retroOpen, setRetroOpen] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
+  const [adjustmentPrefill, setAdjustmentPrefill] = useState<{ employeeId: number | null; reason: string | null }>({
+    employeeId: null,
+    reason: null,
+  });
+  const { data: retroFlags = [] } = useRetroFlags();
+  // FIN-025 — payroll settings are versioned, so a change needs a date. Blank means today, which
+  // is what every change used to be recorded as whether or not that was true.
+  const [settingsEffectiveFrom, setSettingsEffectiveFrom] = useState("");
   const [payThirteenthOpen, setPayThirteenthOpen] = useState(false);
   // Slice B17 — what the RUN would pay, which differs from the projection above whenever the year
   // is partial. Declared after `thirteenthOpen` because it reads it; fetched only while open.
@@ -100,9 +116,17 @@ export default function PayrollPage() {
         frequency: settings.frequency,
         deduction_timing: settings.deduction_timing,
         tax_timing: settings.tax_timing,
+        // FIN-025 — which cycles this change governs. Payroll resolves settings as of the cycle
+        // end, so without a date every change silently starts today and can never be recorded as
+        // having taken effect earlier.
+        effective_from: settingsEffectiveFrom || undefined,
         ...patch,
       });
-      toast.success("Payroll settings updated");
+      toast.success(
+        settingsEffectiveFrom
+          ? `Payroll settings updated, effective ${formatDate(settingsEffectiveFrom)}`
+          : "Payroll settings updated",
+      );
     } catch {
       toast.error("Could not update payroll settings.");
     }
@@ -274,6 +298,43 @@ export default function PayrollPage() {
               {masked ? <EyeOff /> : <Eye />}
               <span className="sr-only">{masked ? "Show amounts" : "Hide amounts"}</span>
             </Button>
+            {/* FIN-009 — corrections owed. Badged, because an empty queue and an unseen queue
+                look identical otherwise, and being unseen is what this replaced. */}
+            <Button variant="outline" onClick={() => setRetroOpen(true)}>
+              <AlertTriangle className={retroFlags.length > 0 ? "text-warning" : undefined} />
+              Corrections
+              {retroFlags.length > 0 && (
+                <span className="ml-0.5 rounded-full bg-warning px-1.5 text-caption font-semibold text-white">
+                  {retroFlags.length}
+                </span>
+              )}
+            </Button>
+            {/* FIN-010 — pay a correction without reopening a closed period. */}
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAdjustmentPrefill({ employeeId: null, reason: null });
+                setAdjustmentOpen(true);
+              }}
+            >
+              <Wrench />
+              Adjustment
+            </Button>
+            {/* FIN-015 — the disbursement layer. Only a completed run has anything to pay,
+                and the dialog is where the bank file comes from. */}
+            <Button
+              variant="outline"
+              onClick={() => setPayOpen(true)}
+              disabled={!currentRun || currentRun.status !== "completed"}
+              title={
+                currentRun?.status === "completed"
+                  ? "Build the payment batch and bank file for this run"
+                  : "Run this period first — only a completed run can be paid"
+              }
+            >
+              <Banknote />
+              Pay run
+            </Button>
             <Button variant="outline" onClick={() => setThirteenthOpen(true)}>
               <Gift />
               13th-month
@@ -369,6 +430,25 @@ export default function PayrollPage() {
             options={TIMING_OPTIONS.map((t) => ({ value: t.value, label: t.label }))}
           />
           <p className="text-caption text-muted-foreground">When income tax is withheld.</p>
+        </div>
+        {/* FIN-025 — settings are dated. Payroll prices each period with the settings in force
+            FOR that period, so a change made today does not reach back into cycles already run
+            unless HR says it should. */}
+        <div className="space-y-1.5 sm:col-span-3">
+          <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
+            These settings take effect from
+          </p>
+          <input
+            type="date"
+            aria-label="Settings effective from"
+            className="h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-2 text-body sm:w-auto"
+            value={settingsEffectiveFrom}
+            onChange={(e) => setSettingsEffectiveFrom(e.target.value)}
+          />
+          <p className="text-caption text-muted-foreground">
+            Leave blank for today. Set an earlier date only if the change genuinely applied then —
+            periods already run keep the settings they were priced with.
+          </p>
         </div>
       </div>
 
@@ -721,6 +801,37 @@ export default function PayrollPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* FIN-009 — the queue of pay differences awaiting settlement. */}
+      <RetroFlagsDialog
+        open={retroOpen}
+        onOpenChange={setRetroOpen}
+        onSettleWithAdjustment={(flag) => {
+          // Straight from the difference into the run that settles it, carrying the employee and
+          // the reason across so HR does not retype what the system already knows.
+          setAdjustmentPrefill({ employeeId: flag.employee.id, reason: flag.reason });
+          setRetroOpen(false);
+          setAdjustmentOpen(true);
+        }}
+      />
+
+      {/* FIN-010 — off-cycle correction. */}
+      <PaymentBatchDialog
+        open={payOpen}
+        onOpenChange={setPayOpen}
+        payrollRunId={currentRun?.id ?? null}
+        runTotalNet={currentRun?.total_net ?? 0}
+        runLabel={
+          currentRun ? `${currentRun.cycle_start} to ${currentRun.cycle_end}` : "This period"
+        }
+      />
+
+      <AdjustmentRunDialog
+        open={adjustmentOpen}
+        onOpenChange={setAdjustmentOpen}
+        prefillEmployeeId={adjustmentPrefill.employeeId}
+        prefillReason={adjustmentPrefill.reason}
+      />
     </div>
   );
 }

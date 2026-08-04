@@ -21,6 +21,7 @@ class EarlyOutRequestService
         private readonly AuditService $audit,
         private readonly ScheduleService $schedule,
         private readonly PayrollFreezeService $freeze,
+        private readonly RetroFlagService $retro,
     ) {}
 
     /** HR sees all; an employee sees only their own. */
@@ -77,6 +78,19 @@ class EarlyOutRequestService
             'Leave',
             "Approved {$employeeName}'s early-out request",
             $request,
+        );
+
+        // FIN-009 — a early-out shortens a paid day, so approving one for a cutoff payroll has
+        // already settled means the employee was paid for time the record now says they did not
+        // work. The approval stands; the difference is recorded rather than left to memory.
+        // OVERPAID, not OWED: recovering it is a wage deduction needing consent (Art. 113).
+        $this->retro->flagIfSettled(
+            $request,
+            $request->employee_id,
+            $request->work_date->format('Y-m-d'),
+            null,
+            \App\Modules\Hr\Models\RetroFlag::OVERPAID,
+            'Early-out approved after the period was paid',
         );
 
         return $request;

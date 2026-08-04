@@ -19,10 +19,20 @@ import {
   previewThirteenthMonth,
   runThirteenthMonth,
   updatePayrollSettings,
+  runAdjustment,
+  getRetroFlags,
+  resolveRetroFlag,
+  createPaymentBatch,
+  getPaymentBatches,
+  getPaymentBatch,
+  settlePayment,
+  reconcilePaymentBatch,
 } from "@/modules/hr/api/payroll";
 
 const RUNS_KEY = ["hr", "payroll", "runs"] as const;
 const SETTINGS_KEY = ["hr", "payroll", "settings"] as const;
+const RETRO_KEY = ["hr", "payroll", "retro-flags"] as const;
+const BATCHES_KEY = ["hr", "payroll", "payment-batches"] as const;
 
 export function usePayrollSettings() {
   return useQuery({ queryKey: SETTINGS_KEY, queryFn: getPayrollSettings });
@@ -156,5 +166,110 @@ export function useHrPayslip(id: number | undefined) {
     queryKey: ["hr", "payslip", id],
     queryFn: () => getHrPayslip(id!),
     enabled: !!id,
+  });
+}
+
+/**
+ * Pay an off-cycle correction (FIN-010).
+ *
+ * Invalidates the run list AND the retro-flag queue: an adjustment is usually how an `owed`
+ * difference gets settled, so the queue is stale the moment one succeeds.
+ */
+export function useRunAdjustment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runAdjustment,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: RETRO_KEY });
+    },
+  });
+}
+
+/** Retroactive pay differences still outstanding (FIN-009). */
+export function useRetroFlags() {
+  return useQuery({ queryKey: RETRO_KEY, queryFn: getRetroFlags });
+}
+
+export function useResolveRetroFlag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, note }: { id: number; note: string }) => resolveRetroFlag(id, note),
+    onSuccess: () => qc.invalidateQueries({ queryKey: RETRO_KEY }),
+  });
+}
+
+// --- Disbursement (FIN-015) ------------------------------------------------------------------
+
+/** Every payment batch, newest first. Pass a run id to narrow it to one payroll. */
+export function usePaymentBatches(payrollRunId?: number) {
+  return useQuery({
+    queryKey: [...BATCHES_KEY, payrollRunId ?? "all"],
+    queryFn: () => getPaymentBatches(payrollRunId),
+  });
+}
+
+/** One batch with its transfers, plus whether it accounts for the whole run. */
+export function usePaymentBatch(id: number | undefined) {
+  return useQuery({
+    queryKey: [...BATCHES_KEY, "detail", id],
+    queryFn: () => getPaymentBatch(id as number),
+    enabled: typeof id === "number",
+  });
+}
+
+/**
+ * Build the batch for a completed run.
+ *
+ * Invalidates the runs list as well as the batches: whether a run still has anything left to pay
+ * is derived from its payments, so a stale run row would offer to pay it a second time.
+ */
+export function useCreatePaymentBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: createPaymentBatch,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: BATCHES_KEY });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+    },
+  });
+}
+
+/**
+ * Record what the bank did with one transfer.
+ *
+ * Invalidates payslips and runs as well as batches: settling moves a payslip to `disbursed` and a
+ * failure moves it back, so every view of the run's status is stale afterwards.
+ */
+export function useSettlePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: Parameters<typeof settlePayment>[1] & { id: number }) =>
+      settlePayment(id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: BATCHES_KEY });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
+    },
+  });
+}
+
+/** Apply (or preview) the bank's return file. Only invalidates when it actually wrote. */
+export function useReconcilePaymentBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file, confirm }: { id: number; file: File; confirm: boolean }) =>
+      reconcilePaymentBatch(id, file, confirm),
+    onSuccess: (result) => {
+      if (!result.applied) return;
+      qc.invalidateQueries({ queryKey: BATCHES_KEY });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
+    },
   });
 }

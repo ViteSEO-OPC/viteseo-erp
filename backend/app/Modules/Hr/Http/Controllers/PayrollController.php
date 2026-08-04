@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
+use App\Modules\Hr\Http\Requests\RunAdjustmentRequest;
 use App\Modules\Hr\Http\Requests\RunPayrollRequest;
 use App\Modules\Hr\Http\Requests\UpdatePayrollSettingsRequest;
 use App\Modules\Hr\Http\Resources\PayrollRunResource;
@@ -39,6 +40,11 @@ class PayrollController extends Controller
         $setting = PayrollSetting::current();
         $validated = $request->validated();
 
+        // FIN-025 — the effective date governs the VERSION, it is not a settings field. Pulled
+        // out before the diff below so it never appears in the audit line as a changed setting.
+        $effectiveFrom = $validated['effective_from'] ?? null;
+        unset($validated['effective_from']);
+
         // Item 13b.12 — this endpoint wrote NO audit entry at all, despite setting the pay
         // frequency, the deduction/tax timing and the de-minimis ceiling: every one of them
         // changes what lands on a payslip.
@@ -52,6 +58,9 @@ class PayrollController extends Controller
             }
         }
 
+        // FIN-025 — declare the effective date, then save: the model's `updated` hook records the
+        // version, so there is exactly one writer and no way to update without versioning.
+        PayrollSetting::effectiveFrom($effectiveFrom);
         $setting->update($validated);
 
         if ($before !== []) {
@@ -100,6 +109,28 @@ class PayrollController extends Controller
             $request->validated('cycle_start'),
             $request->validated('cycle_end'),
             $request->validated('frequency'),
+            $request->user(),
+        );
+
+        return PayrollRunResource::make($run)
+            ->response()
+            ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * POST /api/v1/hr/payroll/adjustment — pay an off-cycle correction (FIN-010).
+     *
+     * The route every other correction in this module depends on: a back-dated raise, a fixed
+     * attendance record, a late-approved overtime request or reimbursement all produce a
+     * difference that used to have nowhere to go.
+     */
+    public function runAdjustment(RunAdjustmentRequest $request): JsonResponse
+    {
+        $run = $this->service->runAdjustment(
+            $request->validated('cycle_start'),
+            $request->validated('cycle_end'),
+            $request->validated('reason'),
+            $request->validated('lines'),
             $request->user(),
         );
 

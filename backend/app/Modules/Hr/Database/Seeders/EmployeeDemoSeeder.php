@@ -20,8 +20,14 @@ use Illuminate\Support\Str;
  */
 class EmployeeDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(EmployeeService $service): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         // Idempotency: skip if already seeded (service->create would hit the
         // users.email unique index on a re-run without a fresh migrate).
         if (Employee::query()->exists()) {
@@ -196,7 +202,7 @@ class EmployeeDemoSeeder extends Seeder
             foreach ($demoDocs as [$docName, $docLabel, $docDate]) {
                 $content = "%PDF-1.4\n% Demo placeholder for {$docName}\n";
                 $path = "hr/employee-documents/{$maya->id}/" . Str::random(24) . '.pdf';
-                Storage::disk('public')->put($path, $content);
+                Storage::disk('local')->put($path, $content);
                 $doc = EmployeeDocument::create([
                     'employee_id' => $maya->id, 'name' => $docName, 'file_path' => $path,
                     'size_bytes' => strlen($content), 'label' => $docLabel,

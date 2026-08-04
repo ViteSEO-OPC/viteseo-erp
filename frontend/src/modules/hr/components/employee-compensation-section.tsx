@@ -1,8 +1,18 @@
 "use client";
 
+import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { formatPeso } from "@/core/lib/format";
 import {
   FieldGrid,
@@ -53,6 +63,9 @@ const schema = z.object({
   // Only consulted when the base salary actually changes.
   salary_change_type: z.string(),
   salary_change_reason: optionalText(),
+  // FIN-007 — the date the new salary actually takes effect. Blank means today, which is what
+  // every salary change used to be stamped with whether or not that was true.
+  salary_effective_date: z.string(),
 });
 
 type Values = z.infer<typeof schema>;
@@ -76,6 +89,7 @@ function toValues(employee: Employee): Values {
     is_management: employee.is_management ?? false,
     salary_change_type: "",
     salary_change_reason: "",
+    salary_effective_date: "",
   };
 }
 
@@ -99,6 +113,7 @@ function toPayload(v: Values): EmployeeUpdateInput {
     is_management: v.is_management,
     salary_change_type: orNull(v.salary_change_type),
     salary_change_reason: orNull(v.salary_change_reason),
+    salary_effective_date: orNull(v.salary_effective_date),
   };
 }
 
@@ -112,11 +127,28 @@ export function EmployeeCompensationSection({
   /** Leave credits, history and loans — their own editors, below the fields. */
   children?: React.ReactNode;
 }) {
+  /**
+   * FIN-007 — backdating a salary over a completed payroll run is refused until HR confirms, and
+   * the message names the affected periods. That refusal is a QUESTION, so it becomes a dialog
+   * rather than a red field the user cannot get past.
+   */
+  const [backdateWarning, setBackdateWarning] = useState<{
+    message: string;
+    retry: (extra: Record<string, unknown>) => Promise<void>;
+  } | null>(null);
+
   const { form, editing, saving, startEdit, cancel, submit } = useRecordSection<Values>({
     employee,
     resolver: zodResolver(schema),
     toValues,
     toPayload,
+    interceptError: (errors, retry) => {
+      const backdated = errors.salary_effective_date?.[0];
+      if (!backdated) return false;
+
+      setBackdateWarning({ message: backdated, retry });
+      return true;
+    },
   });
 
   const salaryChanged =
@@ -258,6 +290,15 @@ export function EmployeeCompensationSection({
                   label: "Reason for change",
                   placeholder: "e.g. Annual increase",
                 },
+                {
+                  // FIN-007 — a raise agreed for 1 August but entered on 5 September used to
+                  // price August at the OLD salary, permanently. The date is now recorded as it
+                  // really is; leaving it blank keeps the previous behaviour (effective today).
+                  name: "salary_effective_date",
+                  label: "Effective from",
+                  kind: "date",
+                  hint: "Leave blank for today. A past date may affect payroll already run.",
+                },
               ]}
               editing={editing}
               form={form}
@@ -267,6 +308,35 @@ export function EmployeeCompensationSection({
 
         {children}
       </div>
+
+      {/* FIN-007 — backdating is allowed, but never silently. */}
+      <Dialog open={backdateWarning !== null} onOpenChange={(o) => !o && setBackdateWarning(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>This date falls inside finished payroll</DialogTitle>
+            <DialogDescription>{backdateWarning?.message}</DialogDescription>
+          </DialogHeader>
+          <p className="rounded-md bg-muted px-3 py-2 text-caption text-muted-foreground">
+            Those periods were paid at the old salary. Recording the raise is fine — but the
+            difference is not paid automatically. Settle it with an adjustment run in Payroll.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBackdateWarning(null)}>
+              Pick another date
+            </Button>
+            <Button
+              disabled={saving}
+              onClick={async () => {
+                const pending = backdateWarning;
+                setBackdateWarning(null);
+                await pending?.retry({ acknowledge_repricing: true });
+              }}
+            >
+              Record it anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </RecordSectionShell>
   );
 }

@@ -86,7 +86,7 @@ class ConcernService
                 'name' => $anonymous
                     ? 'Attachment ' . ($i + 1) . ($ext ? ".{$ext}" : '')
                     : $file->getClientOriginalName(),
-                'size' => Storage::disk('public')->size($path),
+                'size' => Storage::disk('local')->size($path),
                 'mime' => $file->getClientMimeType(),
             ];
         }
@@ -108,13 +108,13 @@ class ConcernService
                 imagedestroy($src);
 
                 $path = 'concern-attachments/' . Str::random(40) . ".{$ext}";
-                Storage::disk('public')->put($path, $bytes);
+                Storage::disk('local')->put($path, $bytes);
 
                 return $path;
             }
         }
 
-        return $file->store('concern-attachments', 'public');
+        return $file->store('concern-attachments', 'local');
     }
 
     public function setStatus(Concern $concern, string $status, User $actor): Concern

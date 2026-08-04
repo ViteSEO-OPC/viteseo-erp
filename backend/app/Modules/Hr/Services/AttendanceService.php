@@ -25,6 +25,7 @@ class AttendanceService
         private readonly DeductionService $deduction,
         private readonly HolidayService $holidays,
         private readonly GeofenceService $geofence,
+        private readonly PayrollFreezeService $freeze,
     ) {}
 
     /**
@@ -517,6 +518,20 @@ class AttendanceService
      */
     public function adjust(Employee $employee, string $workDate, array $data): Attendance
     {
+        // FIN-008 — attendance is the INPUT payroll priced this day from, so it is frozen once
+        // that day has been paid.
+        //
+        // PayrollFreezeService was already injected into the reimbursement, early-out, half-day,
+        // overtime and leave services — every path that can change what a period should have paid
+        // — but not into this one, which is the most direct of them all. HR could rewrite the
+        // attendance behind a disbursed payslip, leaving the record and the payment permanently
+        // disagreeing, with the payment being the one that actually happened and no way to pay the
+        // difference (FIN-010).
+        //
+        // Only a LOCKED run or a DISBURSED payslip freezes (see runCovering) — a merely computed
+        // period stays editable, because re-running it is the correct way to absorb the change.
+        $this->freeze->assertOpen($employee->id, $workDate, null, 'adjust this attendance record');
+
         $tz = config('app.timezone_local');
         $att = Attendance::firstOrNew([
             'employee_id' => $employee->id,

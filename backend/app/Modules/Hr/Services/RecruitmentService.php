@@ -164,7 +164,7 @@ class RecruitmentService
         $stage = $data['stage'] ?? null;
 
         $resumePath = $resume
-            ? $resume->store("hr/resumes/{$requisition->id}", 'public')
+            ? $resume->store("hr/resumes/{$requisition->id}", 'local')
             : null;
 
         $candidate = Candidate::create([

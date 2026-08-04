@@ -8,8 +8,14 @@ use Illuminate\Database\Seeder;
 
 class FaqDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (Faq::query()->exists()) {
             return;
         }

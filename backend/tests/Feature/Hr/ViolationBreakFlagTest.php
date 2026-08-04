@@ -29,7 +29,7 @@ class ViolationBreakFlagTest extends HrTestCase
 {
     use RefreshDatabase;
 
-    /** A Monday in the current month, so recompute()'s default scan covers it. */
+    /** Tuesday 16 June 2026 — a fixed weekday, mid-month, inside recompute()'s scan window. */
     private Carbon $day;
 
     private Employee $employee;
@@ -39,11 +39,23 @@ class ViolationBreakFlagTest extends HrTestCase
         parent::setUp();
 
         $tz = config('app.timezone_local');
-        // Yesterday (or the last past weekday) keeps the row inside the scanned window.
-        $this->day = Carbon::now($tz)->startOfDay()->subDay();
-        while ($this->day->isWeekend()) {
-            $this->day->subDay();
-        }
+
+        // THE CLOCK IS FROZEN ON PURPOSE (FIN-051, payroll audit 2026-08-04).
+        //
+        // This seeds one attendance row and asserts a violation flag on it, and
+        // ViolationService::recompute() scans the CURRENT month only, up to today
+        // (ViolationService:113-121). The day used to be derived from the real clock as
+        // "yesterday, or the last past weekday" — so the result depended on which weekday
+        // the suite happened to run on: on a Monday that resolves to the previous Friday,
+        // which in most months falls in the PREVIOUS month, outside the scan window, and
+        // every assertion in this file failed. The suite was red on Mon 2026-08-03 and green
+        // on Tue 2026-08-04 with no code change between them.
+        //
+        // A fixed mid-month Wednesday keeps the seeded day (Tuesday the 16th) and the scan
+        // window in the same month on every run. Laravel resets the test clock in
+        // InteractsWithTestCaseLifecycle::tearDown, so nothing leaks into other tests.
+        $this->travelTo(Carbon::parse('2026-06-17 12:00', $tz));
+        $this->day = Carbon::parse('2026-06-16', $tz)->startOfDay();
 
         $schedule = WorkSchedule::create([
             'name' => 'Office', 'workdays' => [1, 2, 3, 4, 5],

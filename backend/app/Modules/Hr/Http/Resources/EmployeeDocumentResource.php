@@ -2,9 +2,9 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class EmployeeDocumentResource extends JsonResource
 {
@@ -18,7 +18,7 @@ class EmployeeDocumentResource extends JsonResource
             'name' => $this->name,
             'size_bytes' => $this->size_bytes,
             'label' => $this->label,
-            'url' => $this->file_path ? Storage::disk('public')->url($this->file_path) : null,
+            'url' => PrivateFileService::url($this->file_path),
             'created_at' => $this->created_at?->format('Y-m-d'),
         ];
     }

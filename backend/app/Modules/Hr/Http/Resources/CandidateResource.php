@@ -2,9 +2,9 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class CandidateResource extends JsonResource
 {
@@ -41,7 +41,7 @@ class CandidateResource extends JsonResource
             'rejection_reason' => $this->rejection_reason,
             'hired_employee_id' => $this->hired_employee_id,
             'resume_path' => $this->resume_path,
-            'resume_url' => $this->resume_path ? Storage::disk('public')->url($this->resume_path) : null,
+            'resume_url' => PrivateFileService::url($this->resume_path),
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

@@ -15,8 +15,14 @@ use Illuminate\Support\Carbon;
  */
 class LeaveReportDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         if (LeaveRequest::where('reason', 'Report demo leave')->exists()) {
             return;
         }

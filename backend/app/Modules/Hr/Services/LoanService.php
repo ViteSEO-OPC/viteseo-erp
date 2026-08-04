@@ -280,8 +280,16 @@ class LoanService
             ]);
         }
 
+        // FIN-002 — `status` IS NOT EDITABLE HERE, and must never be added back.
+        //
+        // Collection runs off `status = 'active'`, so writing that status is what authorises a
+        // wage deduction. Art. 113 wants the worker's own consent for that, which is why
+        // authorize() is the only writer of it and checks that the actor is the employee whose pay
+        // is being deducted. While `status` sat in this list, HR editing a loan could set `active`
+        // directly and start collecting with `authorized_at` still null — the consent record
+        // simply absent while the deduction proceeded.
         $loan->update(array_intersect_key($data, array_flip([
-            'type', 'reference', 'principal', 'per_period_amount', 'start_date', 'status', 'notes',
+            'type', 'reference', 'principal', 'per_period_amount', 'start_date', 'notes',
         ])));
 
         $this->audit->log('updated', 'Loans', "Updated loan #{$loan->id}", $loan);
@@ -315,11 +323,22 @@ class LoanService
             ]);
         }
 
-        $loan->update(['status' => 'active']);
+        // FIN-002 — consent that was never given cannot be resumed.
+        //
+        // This returned every cancelled loan straight to `active`, including one cancelled while
+        // it was still waiting on the employee. Reopening would then start collecting from wages
+        // the employee had never agreed to. A loan that WAS authorised keeps its `authorized_at`,
+        // so its consent still stands and collection genuinely does resume.
+        $restored = $loan->authorized_at ? 'active' : 'pending_authorization';
+
+        $loan->update(['status' => $restored]);
         $this->audit->log(
             'reopened',
             'Loans',
-            "Reopened loan #{$loan->id} — collection resumes" . ($reason ? " — {$reason}" : ''),
+            "Reopened loan #{$loan->id} — " . ($restored === 'active'
+                ? 'collection resumes'
+                : 'awaiting the employee’s authorization')
+                . ($reason ? " — {$reason}" : ''),
             $loan,
         );
 
@@ -345,8 +364,19 @@ class LoanService
         float $availableNet,
         ?Payslip $payslip = null,
     ): array {
+        // FIN-003(b) — `settled` is included, not just `active`, and that is load-bearing.
+        //
+        // A loan that THIS run's previous compute settled is no longer `active`. Filtering to
+        // `active` alone excluded it from `$loans`, so the cleanup immediately below deleted the
+        // very payment that had settled it — while the loan stayed `settled`. The balance came
+        // back (`outstanding() > 0`) but `isCollectible()` was false, so payroll could never
+        // collect it again, and the re-run's payslip carried no loan deduction so net pay rose.
+        //
+        // Re-visiting a settled loan is safe: the loop below recomputes `$outstanding` from the
+        // payments made OUTSIDE this run, so one settled by an EARLIER run reads zero outstanding
+        // and is skipped, while one settled by this run is correctly re-collected and re-settled.
         $loans = EmployeeLoan::where('employee_id', $employee->id)
-            ->where('status', 'active')
+            ->whereIn('status', ['active', 'settled'])
             ->whereDate('start_date', '<=', $cycleEnd)
             ->with('payments')
             ->orderBy('start_date')
@@ -410,6 +440,49 @@ class LoanService
         }
 
         return ['total' => round($total, 2), 'lines' => $lines];
+    }
+
+    /**
+     * Undo the instalments a payslip collected, because that payslip is being un-paid.
+     *
+     * FIN-003(a) — WHY THIS EXISTS. `collectForPeriod()` writes the ledger at COMPUTE time, so an
+     * employee's balance drops as soon as payroll runs, before anyone asserts the money moved.
+     * That is the deliberate behaviour (HR sees the deduction the moment the period is priced),
+     * but it was only half a story: `reopenPayslip()` reversed the payslip and its reimbursements
+     * and left the loan alone. Reversing a payment therefore wrote off real debt against money the
+     * company had just decided not to pay, and a loan the payslip had settled stayed `settled`.
+     *
+     * Slice 12 established exactly this invariant for reimbursements. This is the loan half.
+     *
+     * Scoped by (run, employee) rather than by `payslip_id`, because rows written before the
+     * payslip existed carry a null `payslip_id` — the pair is what actually identifies "the
+     * instalments this payslip collected".
+     *
+     * @return int how many payment rows were reversed
+     */
+    public function reverseForPayslip(Payslip $payslip): int
+    {
+        $payments = LoanPayment::where('payroll_run_id', $payslip->payroll_run_id)
+            ->whereHas('loan', fn ($q) => $q->where('employee_id', $payslip->employee_id))
+            ->with('loan')
+            ->get();
+
+        if ($payments->isEmpty()) {
+            return 0;
+        }
+
+        $loans = $payments->pluck('loan')->filter()->unique('id');
+        LoanPayment::whereIn('id', $payments->pluck('id'))->delete();
+
+        // A loan this payslip had settled owes money again, so it must become collectible again.
+        // Anything settled by a DIFFERENT run still reads zero outstanding and is left alone.
+        foreach ($loans as $loan) {
+            if ($loan->status === 'settled' && $loan->fresh()->outstanding() > 0) {
+                $loan->update(['status' => 'active']);
+            }
+        }
+
+        return $payments->count();
     }
 
     private function typeLabel(string $type): string

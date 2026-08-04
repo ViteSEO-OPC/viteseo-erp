@@ -15,6 +15,7 @@ use App\Modules\Hr\Http\Controllers\HolidayController;
 use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
+use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
 use App\Modules\Hr\Http\Controllers\LeaveConfigController;
@@ -24,6 +25,7 @@ use App\Modules\Hr\Http\Controllers\LeaveController;
 use App\Modules\Hr\Http\Controllers\NotificationController;
 use App\Modules\Hr\Http\Controllers\OvertimeRequestController;
 use App\Modules\Hr\Http\Controllers\MeetingController;
+use App\Modules\Hr\Http\Controllers\PaymentBatchController;
 use App\Modules\Hr\Http\Controllers\PayrollController;
 use App\Modules\Hr\Http\Controllers\PayrollInquiryController;
 use App\Modules\Hr\Http\Controllers\PayslipRequestController;
@@ -129,7 +131,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
         Route::get('reports/{key}', [ReportController::class, 'show']);
-        Route::post('reports/{key}/export', [ReportController::class, 'export']);
+        Route::post('reports/{key}/export', [ReportController::class, 'export'])->middleware('throttle:10,1,report-export:');
         Route::get('attendance', [AttendanceController::class, 'index']);
         Route::get('attendance/summary', [AttendanceController::class, 'summary']);
         // Field time-ins queue. Declared BEFORE attendance/adjust is irrelevant, but these
@@ -140,6 +142,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).
+        // FIN-009 — retroactive pay differences waiting to be settled.
+        Route::get('retro-flags', [RetroFlagController::class, 'index']);
+        Route::post('retro-flags/{retroFlag}/resolve', [RetroFlagController::class, 'resolve']);
         Route::get('daily-overrides', [DailyOverrideController::class, 'show']);
         Route::match(['put', 'patch'], 'daily-overrides', [DailyOverrideController::class, 'upsert']);
 
@@ -150,22 +155,54 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('violations/{violation}/reopen', [ViolationController::class, 'reopen']);
 
         // Payroll (HR only).
+        // FIN-006 — the payroll run holds the payroll tables inside ONE transaction for its whole
+        // duration (PayrollService::run), so repeated submits queue up long lock waits rather than
+        // simply wasting CPU. Exports are the other expensive path: each one reads every payslip in
+        // a run and builds a file. 5/min and 10/min are far above any human workflow and far below
+        // what it takes to hurt the database.
+        //
+        // THE THIRD ARGUMENT IS NOT DECORATION — without it none of these limits work.
+        // `ThrottleRequests::resolveRequestSignature()` keys an authenticated request on
+        // `sha1($user->id)` ALONE; the route plays no part. So every unprefixed `throttle:` in this
+        // module shared ONE counter per user, which the group's own `throttle:120,1`
+        // (HrServiceProvider) incremented on every single HR request. `payroll/run` then compared
+        // that shared number against 5 — so five page views of anything at all, which one screen
+        // load exceeds by itself, left payroll permanently answering "Too Many Attempts".
+        //
+        // The prefix gives each action its own counter, which is what these numbers were always
+        // meant to mean. Any new limited route needs one too; `RateLimitIsolationTest` fails if it
+        // is forgotten.
         Route::get('payroll/settings', [PayrollController::class, 'settings']);
         Route::put('payroll/settings', [PayrollController::class, 'updateSettings']);
         Route::get('payroll/runs', [PayrollController::class, 'runsIndex']);
         Route::get('payroll/thirteenth-month', [PayrollController::class, 'thirteenthMonth']);
         Route::get('payroll/thirteenth-month/preview', [PayrollController::class, 'previewThirteenthMonth']);
         // Slice B17 — pay it, and withhold on what it pushes past the ₱90,000 exemption.
-        Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth']);
-        Route::post('payroll/run', [PayrollController::class, 'run']);
+        Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth'])->middleware('throttle:5,1,payroll-13th:');
+        Route::post('payroll/run', [PayrollController::class, 'run'])->middleware('throttle:5,1,payroll-run:');
+        // FIN-010 — off-cycle corrections. Same tight limit as a regular run: it writes
+        // payslips, and the amounts are typed by a person rather than computed.
+        Route::post('payroll/adjustment', [PayrollController::class, 'runAdjustment'])->middleware('throttle:5,1,payroll-adjustment:');
         Route::get('payroll/runs/{payrollRun}', [PayrollController::class, 'show']);
-        Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun']);
+        Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun'])->middleware('throttle:10,1,payroll-export:');
         Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
         Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
         Route::post('payslips/{payslip}/reopen', [PayrollController::class, 'reopenPayslip']);
         Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf']);
+
+        // Disbursement (FIN-015) — where the money actually went. Building a batch reads every
+        // payslip in a run and writes one row per employee, so it carries the same 5/min limit as
+        // the run that produced it; the bank file is an export and matches the export limit.
+        Route::get('payment-batches', [PaymentBatchController::class, 'index']);
+        Route::post('payment-batches', [PaymentBatchController::class, 'store'])->middleware('throttle:5,1,payment-batch:');
+        Route::get('payment-batches/{paymentBatch}', [PaymentBatchController::class, 'show']);
+        Route::get('payment-batches/{paymentBatch}/bank-file', [PaymentBatchController::class, 'bankFile'])->middleware('throttle:10,1,bank-file:');
+        // Reconciliation — what the bank says actually happened. The import moves payslips into
+        // `disbursed`, so it previews unless explicitly confirmed.
+        Route::post('payment-batches/{paymentBatch}/reconcile', [PaymentBatchController::class, 'reconcile'])->middleware('throttle:10,1,reconcile:');
+        Route::patch('payments/{payment}', [PaymentBatchController::class, 'settle']);
 
         // Recruitment (HR only).
         Route::get('requisitions', [RecruitmentController::class, 'requisitionsIndex']);

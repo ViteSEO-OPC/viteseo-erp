@@ -101,7 +101,12 @@ export interface PayslipLine {
 
 /**
  * The document's subtotals, derived by the API so the screen and the PDF can't disagree.
- * They satisfy `compensation - deductions - government + uncollected = net_pay`.
+ * They satisfy `compensation - deductions - government = net_pay`.
+ *
+ * `uncollected` was a term in that identity until FIN-053. The stored deduction components used
+ * to hold the full computed amount while the total was capped at gross, so the shortfall had to
+ * be credited back for the document to close. The components now hold what was actually
+ * collected — `uncollected` is a disclosure, and adding it back would overstate net pay.
  */
 export interface PayslipTotals {
   /** Full period basic + every earning line. */
@@ -114,9 +119,22 @@ export interface PayslipTotals {
   deductions: number;
   /** SSS + PhilHealth + Pag-IBIG + withholding tax. */
   government: number;
-  /** Deductions that pay couldn't cover, credited back so the document reconciles. */
+  /** Deductions pay couldn't cover. Disclosed, not summed into net — see the note above. */
   uncollected: number;
+  /**
+   * Which obligations that shortfall belongs to (FIN-053), keyed by column name. Empty when
+   * nothing went short, and on payslips issued before the split — the migration doesn't backfill.
+   */
+  uncollected_breakdown: Partial<Record<PayslipDeductionKey, number>>;
 }
+
+/** The deduction columns a shortfall can land on, in the order the cap is allocated. */
+export type PayslipDeductionKey =
+  | "sss"
+  | "philhealth"
+  | "pagibig"
+  | "withholding_tax"
+  | "other_deductions";
 
 export interface Payslip {
   id: number;
@@ -226,4 +244,128 @@ export interface ThirteenthMonthRow {
 export interface NextPayday {
   pay_date: string;
   frequency: string;
+}
+
+/**
+ * One line of an off-cycle adjustment run (FIN-010) — who is paid a correction, and how much.
+ */
+export interface AdjustmentLine {
+  employee_id: number;
+  amount: number;
+  note?: string | null;
+}
+
+/**
+ * An outstanding retroactive pay difference (FIN-009).
+ *
+ * Written when a leave/overtime/half-day/early-out decision lands on a period payroll has already
+ * settled. `owed` is paid with an adjustment run; `overpaid` has no automated path, because
+ * recovering paid wages is a deduction that needs the employee's consent (Art. 113).
+ */
+export interface RetroFlag {
+  id: number;
+  employee: { id: number | null; name: string | null };
+  direction: "owed" | "overpaid";
+  reason: string;
+  /** The settled cutoff the decision reached into, e.g. "2026-03-01 – 2026-03-15". */
+  period: string | null;
+  /** Which kind of request caused it — OvertimeRequest, LeaveRequest, … */
+  source: string;
+  source_id: number;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  created_at: string | null;
+}
+
+// --- Disbursement (FIN-015) ------------------------------------------------------------------
+
+/** How the money leaves the company. One method per batch — a bank file is per payment rail. */
+export type PaymentMethod = "bank_transfer" | "cash" | "check";
+
+/**
+ * pending   built, not yet sent to the bank
+ * exported  the bank file has been generated and downloaded — the point of no return
+ * settled   every payment in it confirmed
+ * partial   some settled, some failed or still outstanding
+ */
+export type PaymentBatchStatus = "pending" | "exported" | "settled" | "partial";
+
+/**
+ * pending   in a batch, not yet confirmed by the bank
+ * settled   confirmed — the ONLY state that means money actually moved
+ * failed    the bank rejected it
+ * returned  it left and came back
+ */
+export type PaymentStatus = "pending" | "settled" | "failed" | "returned";
+
+export interface Payment {
+  id: number;
+  payslip_id: number;
+  amount: number;
+  method: PaymentMethod;
+  status: PaymentStatus;
+  bank_name: string | null;
+  /** Masked to the last four digits. The full number is never served to a screen (FIN-022). */
+  bank_account_masked: string | null;
+  bank_account_type: string | null;
+  /** Both null until reconciliation — the gap between "we sent it" and "it arrived". */
+  reference: string | null;
+  settled_at: string | null;
+  failure_reason: string | null;
+  employee?: {
+    id: number;
+    employee_no: string | null;
+    name: string | null;
+    department: string | null;
+  };
+}
+
+export interface PaymentBatch {
+  id: number;
+  reference: string;
+  method: PaymentMethod;
+  status: PaymentBatchStatus;
+  total_amount: number;
+  payment_count: number;
+  notes: string | null;
+  /** Non-null means the bank file has been downloaded and the batch can no longer be rebuilt. */
+  exported_at: string | null;
+  exported_by?: string | null;
+  created_by?: string | null;
+  created_at: string | null;
+  payroll_run?: {
+    id: number;
+    cycle_start: string;
+    cycle_end: string;
+    frequency: string;
+    total_net: number;
+  };
+  payments?: Payment[];
+}
+
+/** Who was left out of the batch, and why. Shown rather than swallowed — see the API note. */
+export interface PaymentSkipped {
+  already_disbursed: number;
+  already_batched: number;
+  zero_net: number;
+  missing_bank_details: number;
+}
+
+/** Does this batch account for the whole run? The check finance makes before money moves. */
+export interface PaymentReconciliation {
+  balanced: boolean;
+  batch_total: number;
+  run_total: number;
+  difference: number;
+  unpaid_payslips: number;
+}
+
+/** What a reconciliation file would do (preview) or did (applied). */
+export interface PaymentReconcileResult {
+  applied: boolean;
+  settled: number;
+  failed: number;
+  /** Rows that matched no transfer, or carried a status we refuse to guess at. */
+  unmatched: string[];
+  rows: number;
 }

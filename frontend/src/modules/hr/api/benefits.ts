@@ -80,6 +80,12 @@ export type ContributionVersionInput = Omit<
 > & {
   basis?: string;
   brackets?: ContributionBand[];
+  /**
+   * FIN-026 — HR has been shown which completed payroll runs this date reaches into, and wants to
+   * save anyway. Omitted on a first attempt: the backend refuses and names the affected runs, and
+   * the UI turns that into a confirmation rather than a dead end.
+   */
+  acknowledge_repricing?: boolean;
 };
 
 export async function getContributionVersions(type?: string): Promise<ContributionVersion[]> {

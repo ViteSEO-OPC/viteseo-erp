@@ -66,6 +66,13 @@ class PayslipResource extends JsonResource
             'other_deductions' => (float) $this->other_deductions,
             'other_deductions_breakdown' => $this->other_deductions_breakdown ?? [],
             'total_deductions' => (float) $this->total_deductions,
+            // FIN-010 — an off-cycle correction's amount and what it is for, so the document can
+            // explain a gross that came from a person rather than from the engine.
+            // FIN-028 — the year-end tax correction, so a December payslip can explain a figure
+            // that is not this period's ordinary projection. Negative means refunded.
+            'tax_annualisation' => (float) $this->tax_annualisation,
+            'adjustment_pay' => (float) $this->adjustment_pay,
+            'adjustment_note' => $this->adjustment_note,
             'deduction_carryover' => (float) $this->deduction_carryover,
             'net_pay' => (float) $this->net_pay,
 
@@ -109,16 +116,22 @@ class PayslipResource extends JsonResource
      *
      * The identity they satisfy, for every payslip:
      *
-     *     compensation − deductions − government + uncollected = net_pay
+     *     compensation − deductions − government = net_pay
      *
      * `compensation` leads with the FULL period basic, so the absence charge has to reappear
      * on the deductions side for the two to cancel — that is why `deductions` is
      * `absence_deduction + other_deductions` rather than the stored `total_deductions`.
      *
-     * `uncollected` is a term and not a footnote. `total_deductions` is capped at gross, so on
-     * a payslip where pay couldn't cover the deductions, `deductions + government` overstate
-     * what was actually taken by exactly the carryover. Crediting it back is what stops the
-     * document resolving to a negative number against a net pay of zero.
+     * `uncollected` USED TO BE A TERM IN THIS IDENTITY and no longer is (FIN-053). It was here
+     * because the component columns stored the full computed deduction while `total_deductions`
+     * was capped at gross: `deductions + government` therefore overstated what was really taken
+     * by exactly the carryover, and crediting it back was what stopped the document resolving to
+     * a negative number against a net pay of zero.
+     *
+     * The components now store what was COLLECTED, so the overstatement is gone at the source and
+     * the identity closes without the correction. `uncollected` stays in this array — the employee
+     * is entitled to know a deduction went unpaid, and it is the figure the arrears work reads —
+     * but it is now a disclosure, not arithmetic. Adding it back would credit the shortfall twice.
      *
      * `late_undertime` is clamped to the absence charge because basic pay clamps at zero: past
      * that point the raw minute-level figures exceed the reduction that was really applied.
@@ -141,7 +154,12 @@ class PayslipResource extends JsonResource
                     + (float) $this->pagibig + (float) $this->withholding_tax,
                 2,
             ),
+            // Disclosure only — see the identity note above. Not summed into net.
             'uncollected' => (float) $this->deduction_carryover,
+            // FIN-053 — which obligations that shortfall belongs to, so the document can name
+            // them instead of showing one unexplained figure. Empty when nothing went short, and
+            // on payslips issued before the split (the migration does not backfill).
+            'uncollected_breakdown' => $this->deduction_carryover_breakdown ?? [],
         ];
     }
 
@@ -154,6 +172,15 @@ class PayslipResource extends JsonResource
      */
     private function payDate(): ?string
     {
+        // FIN-036 — the date the RUN recorded, not one re-derived at read time. Changing
+        // pay_delay_days used to move the stated pay date on payslips already issued.
+        if ($this->payrollRun?->scheduled_pay_date) {
+            return $this->payrollRun->scheduled_pay_date->format('Y-m-d');
+        }
+
+        // Fallback for runs written before the column existed. The migration backfills them, so
+        // this is unreachable in practice — kept because a payslip must always be able to state
+        // a pay date, and the old derivation is exactly what it used to show.
         $end = $this->payrollRun?->cycle_end;
         if (! $end) {
             return null;

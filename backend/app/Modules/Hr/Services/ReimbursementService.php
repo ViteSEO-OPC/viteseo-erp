@@ -7,7 +7,6 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Reimbursement;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class ReimbursementService
@@ -50,7 +49,7 @@ class ReimbursementService
     {
         // Store each receipt on the public disk so it's viewable via /storage.
         $paths = array_values(array_map(
-            static fn (UploadedFile $file): string => $file->store('receipts', 'public'),
+            static fn (UploadedFile $file): string => $file->store('receipts', 'local'),
             $receipts,
         ));
 

@@ -149,6 +149,13 @@ export interface EmployeeInput {
   // Audit inputs (only meaningful on update when the value actually changes).
   salary_change_reason?: string;
   salary_change_type?: string;
+  /** FIN-007 — when the new salary takes effect. Null/omitted means today. */
+  salary_effective_date?: string | null;
+  /**
+   * FIN-007 — HR has been shown which completed payroll runs this date reaches into and wants to
+   * record it anyway. The backend refuses without it and names the periods.
+   */
+  acknowledge_repricing?: boolean;
   role_change_type?: string;
   role_change_reason?: string;
 }

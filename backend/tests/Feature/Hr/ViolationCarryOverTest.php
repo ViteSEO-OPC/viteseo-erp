@@ -34,6 +34,20 @@ class ViolationCarryOverTest extends HrTestCase
         parent::setUp();
 
         $tz = config('app.timezone_local');
+
+        // THE CLOCK IS FROZEN ON PURPOSE (FIN-051, payroll audit 2026-08-04).
+        //
+        // setUp() seeds the first TWO weekdays of the current month as lates, and
+        // ViolationService::recompute() never scans past today (ViolationService:113-121).
+        // Run during the opening days of a month, the second seeded date was still in the
+        // FUTURE, so only one late was counted and every severity assertion below was one
+        // short. Anchoring to a fixed mid-month date puts both seeded days — and the three
+        // in the prior month — safely in the past on every run.
+        //
+        // Laravel resets the test clock in InteractsWithTestCaseLifecycle::tearDown, so the
+        // freeze does not leak into other tests.
+        $this->travelTo(Carbon::parse('2026-06-17 12:00', $tz));
+
         WorkSchedule::create([
             'name' => 'Office', 'workdays' => [1, 2, 3, 4, 5], 'start_time' => '08:00', 'end_time' => '17:00',
             'grace_minutes' => 0, 'unpaid_break_minutes' => 60, 'paid_break_minutes' => 0, 'is_default' => true,

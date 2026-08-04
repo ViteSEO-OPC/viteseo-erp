@@ -8,6 +8,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Models\User;
 use App\Modules\Hr\Models\EmployeeBenefit;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Government-contribution config (Company → Benefits): the editable SSS / PhilHealth
@@ -73,6 +74,36 @@ class ContributionService
     }
 
     /**
+     * Completed payroll runs whose cycle a new rate version would reach back into (FIN-026).
+     *
+     * WHY THIS IS NOT SIMPLY BLOCKED. Backdating is legitimate and common — an agency publishes a
+     * circular in March that takes effect in January, and the correct action is to record it with
+     * the January date. The danger is not the backdating, it is that it happens SILENTLY.
+     *
+     * `policySnapshot()` records the rates a run used but does not replay them: a re-run resolves
+     * the rates in force TODAY. So after a backdated version is saved, a completed-but-unlocked
+     * run's payslips and its own snapshot disagree with what a recompute would now produce, and
+     * the next re-run of that period — for any unrelated reason — silently reprices statutory
+     * deductions on payslips that have already been reviewed. A locked run is safe only because
+     * it refuses re-runs at all.
+     *
+     * So HR is shown exactly which runs are affected and has to confirm. Returned rather than
+     * thrown so the caller can decide whether this is a warning or a refusal.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, \App\Modules\Hr\Models\PayrollRun>
+     */
+    public function completedRunsAffectedBy(string $effectiveFrom): \Illuminate\Database\Eloquent\Collection
+    {
+        return \App\Modules\Hr\Models\PayrollRun::query()
+            ->where('status', 'completed')
+            ->whereNull('locked_at')            // a locked run cannot be repriced anyway
+            ->where('type', 'regular')          // 13th month does not price statutory contributions
+            ->whereDate('cycle_end', '>=', $effectiveFrom)
+            ->orderBy('cycle_start')
+            ->get();
+    }
+
+    /**
      * Record a new dated version. Saving the same type + date twice UPDATES that version rather
      * than failing on the unique index — HR correcting a figure they just entered is the common
      * case, and a duplicate-key error would be a poor way to say so.
@@ -81,6 +112,29 @@ class ContributionService
      */
     public function saveVersion(array $data, User $actor): ContributionVersion
     {
+        // FIN-026 — a date that reaches back over a completed run needs eyes on it first.
+        $acknowledged = (bool) ($data['acknowledge_repricing'] ?? false);
+        unset($data['acknowledge_repricing']);
+
+        if (! $acknowledged) {
+            $affected = $this->completedRunsAffectedBy($data['effective_from']);
+
+            if ($affected->isNotEmpty()) {
+                $periods = $affected
+                    ->map(fn ($r) => $r->cycle_start->format('M j') . '–' . $r->cycle_end->format('M j, Y'))
+                    ->implode(', ');
+
+                throw ValidationException::withMessages([
+                    'effective_from' => [
+                        'This date falls inside ' . $affected->count() . ' completed payroll run'
+                            . ($affected->count() === 1 ? '' : 's') . " ({$periods}). Those runs were "
+                            . 'priced at the old rates, and re-running any of them would now silently '
+                            . 'reprice their statutory deductions. Confirm to save anyway.',
+                    ],
+                ]);
+            }
+        }
+
         $existing = ContributionVersion::where('type', $data['type'])
             ->whereDate('effective_from', $data['effective_from'])
             ->first();
@@ -318,6 +372,56 @@ class ContributionService
      *
      * @return \\Illuminate\\Support\\Collection<string, ContributionVersion>
      */
+    /**
+     * Refuse to price a period for which an active contribution type has no rate in force
+     * (FIN-035).
+     *
+     * THE FAILURE THIS PREVENTS is silent, which is what makes it dangerous. `versionsAsOf()`
+     * returns only the types with an `effective_from` on or before the cycle, and `effectiveFor()`
+     * filters against that list — so a type with no version simply DROPS OUT. Payroll then
+     * deducts ₱0 for it, the run completes, the totals reconcile, and every payslip looks
+     * perfectly ordinary. Nothing anywhere says a statutory contribution was skipped.
+     *
+     * Two ways in. A newly added contribution type is active from the moment it is created but
+     * has no dated version until someone adds one — deleting a version is already guarded
+     * (`BenefitController::destroyVersion`), creating a type is not. And any cycle dated before
+     * the earliest version has the same hole: back-fill a 2024 period against a schedule that
+     * starts 2025-01-01 and it deducts nothing.
+     *
+     * Blocking the run is the right response rather than warning: an under-deducted payslip is
+     * one the company must chase the employee for later, and the agencies are owed the full
+     * contribution regardless of what was collected.
+     *
+     * @throws ValidationException naming every type that has no version in force
+     */
+    public function assertRatesInForce(string $asOf): void
+    {
+        $active = $this->settings()->where('is_active', true)->pluck('type');
+        $resolved = $this->versionsAsOf($asOf)->keys();
+
+        $missing = $active->diff($resolved)->values();
+
+        if ($missing->isEmpty()) {
+            return;
+        }
+
+        $names = $missing->map(fn (string $t) => match ($t) {
+            'sss' => 'SSS',
+            'philhealth' => 'PhilHealth',
+            'pagibig' => 'Pag-IBIG',
+            default => $t,
+        })->implode(', ');
+
+        throw ValidationException::withMessages([
+            'contributions' => [
+                "No {$names} rate is in force for " . $asOf . '. Payroll would deduct ₱0 for '
+                    . ($missing->count() === 1 ? 'it' : 'them')
+                    . ' without saying so. Add a rate version effective on or before this cycle, '
+                    . 'or deactivate the contribution type, then run again.',
+            ],
+        ]);
+    }
+
     public function versionsAsOf(string $asOf): \Illuminate\Support\Collection
     {
         return $this->versionMemo[$asOf] ??= ContributionVersion::with('brackets')

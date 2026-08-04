@@ -34,7 +34,7 @@ class PayrollInquiryService
             'topic' => $data['topic'],
             'message' => $data['message'],
             // Stored on the public disk so HR can open it from the inquiry.
-            'attachment_path' => $attachment?->store('payroll-inquiries', 'public'),
+            'attachment_path' => $attachment?->store('payroll-inquiries', 'local'),
             'priority' => 'high',
             'status' => 'pending',
         ])->load('employee.user');
@@ -69,7 +69,7 @@ class PayrollInquiryService
         $attachments = [];
         foreach ($files as $file) {
             $attachments[] = [
-                'path' => $file->store('payroll-inquiry-resolutions', 'public'),
+                'path' => $file->store('payroll-inquiry-resolutions', 'local'),
                 'name' => $file->getClientOriginalName(),
             ];
         }

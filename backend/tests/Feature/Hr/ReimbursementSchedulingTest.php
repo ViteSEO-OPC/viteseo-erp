@@ -53,13 +53,13 @@ class ReimbursementSchedulingTest extends HrTestCase
         ]);
     }
 
-    private function claim(string $status = 'approved'): Reimbursement
+    private function claim(string $status = 'approved', string $expenseDate = '2026-03-05'): Reimbursement
     {
         return Reimbursement::create([
             'employee_id' => $this->employee->id,
             'category' => 'transport',
             'amount' => 1500,
-            'expense_date' => '2026-03-05',
+            'expense_date' => $expenseDate,
             'description' => 'Client visit',
             'status' => $status,
         ]);
@@ -157,6 +157,50 @@ class ReimbursementSchedulingTest extends HrTestCase
         $this->runPayroll();
 
         $this->assertSame('pending', $claim->fresh()->status);
+        $this->assertSame(0.0, (float) $this->slip()->reimbursements);
+    }
+
+    // --- FIN-023: claims approved after their own cycle has closed ----------------------
+
+    /**
+     * THE BUG. A run folded in only claims dated INSIDE its own cycle, and no later run looked
+     * backwards. A January expense approved in March could therefore only be paid by re-running
+     * January — which is refused once that run is locked or its payslip disbursed. The claim sat
+     * `approved` for ever, and marking it paid by hand outside payroll records no payment at all.
+     */
+    public function test_a_claim_from_an_earlier_closed_cycle_is_folded_into_the_current_run(): void
+    {
+        $old = $this->claim('approved', '2026-01-20');
+
+        $this->runPayroll();
+
+        $this->assertSame('scheduled', $old->fresh()->status, 'the backlogged claim was never picked up');
+        $this->assertSame(1500.0, (float) $this->slip()->reimbursements);
+    }
+
+    /** A claim already scheduled onto ANOTHER run must never be stolen by this one. */
+    public function test_a_claim_scheduled_on_another_run_is_left_alone(): void
+    {
+        $other = app(PayrollService::class)->run(
+            '2026-02-01', '2026-02-15', 'semi_monthly', User::factory()->create(),
+        );
+        $claim = $this->claim('approved', '2026-01-20');
+        $claim->update(['status' => 'scheduled', 'payroll_run_id' => $other->id]);
+
+        $this->runPayroll();
+
+        $this->assertSame($other->id, $claim->fresh()->payroll_run_id, 'the claim was stolen from its run');
+        $this->assertSame(0.0, (float) $this->slip()->reimbursements);
+    }
+
+    /** A future-dated expense is not payable yet — the window is `<= cycleEnd`, not unbounded. */
+    public function test_a_claim_dated_after_the_cycle_is_not_folded_in(): void
+    {
+        $future = $this->claim('approved', '2026-04-10');
+
+        $this->runPayroll();
+
+        $this->assertSame('approved', $future->fresh()->status);
         $this->assertSame(0.0, (float) $this->slip()->reimbursements);
     }
 }

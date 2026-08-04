@@ -15,8 +15,14 @@ use Illuminate\Database\Seeder;
  */
 class AttritionDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(EmployeeService $service): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         // Tag the two existing movement leavers with a reason.
         Employee::withTrashed()->whereHas('user', fn ($q) => $q->where('email', 'isabel@viteseo.ph'))->update(['separation_type' => 'voluntary']);
         Employee::withTrashed()->whereHas('user', fn ($q) => $q->where('email', 'sofia@viteseo.ph'))->update(['separation_type' => 'involuntary']);

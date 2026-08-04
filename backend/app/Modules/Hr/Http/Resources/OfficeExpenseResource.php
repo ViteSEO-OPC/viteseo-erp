@@ -2,9 +2,9 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class OfficeExpenseResource extends JsonResource
 {
@@ -20,7 +20,7 @@ class OfficeExpenseResource extends JsonResource
             'expense_date' => $this->expense_date?->format('Y-m-d'),
             'description' => $this->description,
             'vendor' => $this->vendor,
-            'receipt_url' => $this->receipt_path ? Storage::disk('public')->url($this->receipt_path) : null,
+            'receipt_url' => PrivateFileService::url($this->receipt_path),
             'status' => $this->status,
             'review_note' => $this->review_note,
             'recorded_by' => $this->whenLoaded('recorder', fn () => $this->recorder?->name),

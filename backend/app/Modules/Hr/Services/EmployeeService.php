@@ -345,10 +345,22 @@ class EmployeeService
 
             // A salary change appends to the history (never rewrites it).
             if ($newSalary !== $oldSalary) {
+                // FIN-007 — the date the raise ACTUALLY takes effect, not the date it was typed.
+                //
+                // This was hardcoded to `now()`. A raise agreed for 1 August but entered on
+                // 5 September priced August at the old salary, permanently: payroll resolves the
+                // salary as of the cycle end, and with no retroactive run (FIN-010) the difference
+                // could never be paid. A promotion agreed for a future date could not be scheduled
+                // at all. Defaults to today, so omitting it behaves exactly as before.
+                $effectiveDate = $data['salary_effective_date']
+                    ?? now(config('app.timezone_local'))->toDateString();
+
+                $this->assertSalaryDateIsSafe($employee, $effectiveDate, $data);
+
                 SalaryHistory::create([
                     'employee_id' => $employee->id,
                     'base_salary' => $newSalary,
-                    'effective_date' => now(config('app.timezone_local'))->toDateString(),
+                    'effective_date' => $effectiveDate,
                     'reason' => $data['salary_change_reason'] ?? 'Salary adjustment',
                     'change_type' => $data['salary_change_type'] ?? 'adjustment',
                     'changed_by' => Auth::id(),
@@ -376,11 +388,11 @@ class EmployeeService
         $previous = $employee->photo_path;
 
         $employee->update([
-            'photo_path' => $photo->store("hr/employee-photos/{$employee->id}", 'public'),
+            'photo_path' => $photo->store("hr/employee-photos/{$employee->id}", 'local'),
         ]);
 
         if ($previous) {
-            Storage::disk('public')->delete($previous);
+            Storage::disk('local')->delete($previous);
         }
 
         $employee->load('user');
@@ -396,7 +408,7 @@ class EmployeeService
 
         if ($previous) {
             $employee->update(['photo_path' => null]);
-            Storage::disk('public')->delete($previous);
+            Storage::disk('local')->delete($previous);
 
             $employee->load('user');
             $this->audit->log('removed', 'People', "Removed {$employee->user?->name}'s profile photo", $employee);
@@ -482,7 +494,7 @@ class EmployeeService
         ?string $name = null,
         string $label = 'Uploaded',
     ): EmployeeDocument {
-        $path = $file->store("hr/employee-documents/{$employee->id}", 'public');
+        $path = $file->store("hr/employee-documents/{$employee->id}", 'local');
 
         $document = $employee->documents()->create([
             'name' => $name ?: $file->getClientOriginalName(),
@@ -505,5 +517,52 @@ class EmployeeService
         $document->loadMissing('employee.user');
         $name = $document->employee?->user?->name ?? $document->employee?->name;
         $this->audit->log('removed', 'People', "Removed document '{$document->name}' from {$name}", $document);
+    }
+
+    /**
+     * Refuse a back-dated salary change that reaches into finished payroll runs, unless HR says
+     * so explicitly (FIN-007).
+     *
+     * WHY NOT JUST ALLOW IT. Payroll resolves the salary in force at the cycle end, so recording a
+     * raise dated inside a completed period means the next recompute of that period pays a
+     * different amount than the payslip already issued. There is no retroactive run to pay the
+     * difference through (FIN-010), so the choice is between silently rewriting a finished period
+     * and telling someone. This tells them, and names the periods.
+     *
+     * WHAT THIS DOES NOT DO, stated plainly because the field would otherwise look more precise
+     * than the arithmetic behind it: pricing has NO INTRA-PERIOD SPLIT. `salariesAsOf($cycleEnd)`
+     * applies one salary to the whole period, so a raise dated mid-cutoff prices the entire cutoff
+     * at the new figure — including the days before it took effect. The history is now truthful
+     * and the resolution is documented; genuine split-period pricing (prorating each salary across
+     * the days it covered) is the remaining half and is a separate piece of work.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertSalaryDateIsSafe(Employee $employee, string $effectiveDate, array $data): void
+    {
+        if ((bool) ($data['acknowledge_repricing'] ?? false)) {
+            return;
+        }
+
+        $affected = app(PayrollFreezeService::class)
+            ->completedRunsRepricedBy($employee->id, $effectiveDate);
+
+        if ($affected->isEmpty()) {
+            return;
+        }
+
+        $periods = $affected
+            ->map(fn ($r) => $r->cycle_start->format('M j') . '–' . $r->cycle_end->format('M j, Y'))
+            ->implode(', ');
+
+        throw ValidationException::withMessages([
+            'salary_effective_date' => [
+                'This date falls inside ' . $affected->count() . ' completed payroll run'
+                    . ($affected->count() === 1 ? '' : 's') . " ({$periods}). Those periods were "
+                    . 'already paid at the old salary and there is no way to pay the difference '
+                    . 'yet, so re-running them would rewrite what they paid. Confirm to record it '
+                    . 'anyway.',
+            ],
+        ]);
     }
 }

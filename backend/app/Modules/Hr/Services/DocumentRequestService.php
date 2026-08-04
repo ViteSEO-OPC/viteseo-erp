@@ -97,7 +97,7 @@ class DocumentRequestService
                 'created_at' => $doc->created_at?->format('Y-m-d'),
                 'request_status' => $status,
                 'unlocked' => $unlocked,
-                'url' => $unlocked && $doc->file_path ? Storage::disk('public')->url($doc->file_path) : null,
+                'url' => $unlocked && PrivateFileService::url($doc->file_path),
             ];
         })->all();
     }
@@ -108,7 +108,7 @@ class DocumentRequestService
 
         $request->update([
             'status' => 'fulfilled',
-            'fulfilled_path' => $file ? $file->store('fulfilled-documents', 'public') : $request->fulfilled_path,
+            'fulfilled_path' => $file ? $file->store('fulfilled-documents', 'local') : $request->fulfilled_path,
             'review_note' => $note,
             'reviewed_by' => $reviewer->id,
             'reviewed_at' => now(),
@@ -169,7 +169,7 @@ class DocumentRequestService
         ]);
 
         if ($attached) {
-            Storage::disk('public')->delete($attached);
+            Storage::disk('local')->delete($attached);
         }
 
         $this->audit->log(

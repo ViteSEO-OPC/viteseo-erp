@@ -29,7 +29,7 @@ class OfficeExpenseService
             'expense_date' => $data['expense_date'],
             'description' => $data['description'],
             'vendor' => $data['vendor'] ?? null,
-            'receipt_path' => $receipt?->store('office-expenses', 'public'),
+            'receipt_path' => $receipt?->store('office-expenses', 'local'),
             'status' => 'recorded',
             'recorded_by' => Auth::id(),
         ]);
@@ -48,7 +48,7 @@ class OfficeExpenseService
             'expense_date' => $data['expense_date'],
             'description' => $data['description'],
             'vendor' => $data['vendor'] ?? null,
-            'receipt_path' => $receipt ? $receipt->store('office-expenses', 'public') : $expense->receipt_path,
+            'receipt_path' => $receipt ? $receipt->store('office-expenses', 'local') : $expense->receipt_path,
         ]);
 
         $this->audit->log('updated', 'Office Expenses', $this->describe($expense, 'Updated'), $expense);

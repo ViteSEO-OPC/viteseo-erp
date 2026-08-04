@@ -14,7 +14,7 @@ import {
 } from "@/modules/hr/api/rules";
 import type {
   WorkScheduleInput,
-  AttendancePolicy,
+  AttendancePolicyUpdate,
   EmployeeScheduleInput,
 } from "@/modules/hr/types/rules";
 
@@ -63,8 +63,7 @@ export function useAttendancePolicy() {
 export function useUpdateAttendancePolicy() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: Partial<Omit<AttendancePolicy, "id">>) =>
-      updateAttendancePolicy(input),
+    mutationFn: (input: AttendancePolicyUpdate) => updateAttendancePolicy(input),
     onSuccess: () => qc.invalidateQueries({ queryKey: POLICY_KEY }),
   });
 }

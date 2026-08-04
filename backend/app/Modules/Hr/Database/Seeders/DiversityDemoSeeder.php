@@ -12,8 +12,14 @@ use Illuminate\Database\Seeder;
  */
 class DiversityDemoSeeder extends Seeder
 {
+    use RefusesOutsideDemoEnvironments;
+
     public function run(): void
     {
+        if ($this->demoSeedingBlocked()) {
+            return;
+        }
+
         $genders = [
             'hr@viteseo.ph' => 'Female',
             'marco@viteseo.ph' => 'Male',

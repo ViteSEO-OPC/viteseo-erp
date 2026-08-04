@@ -42,6 +42,13 @@ class UpdateEmployeeRequest extends FormRequest
             'hire_date' => ['sometimes', 'required', 'date'],
             'base_salary' => ['sometimes', 'required', 'numeric', 'min:0', 'max:99999999.99'],
             // Optional note + type stored on the salary-history row when salary changes.
+            // FIN-007 — the date the new salary actually takes effect. Optional: omitted means
+            // today, which is the behaviour that existed before (every change was stamped `now`).
+            // Given, it lets HR record a raise that was agreed earlier without pretending it
+            // started the day it was typed in.
+            'salary_effective_date' => ['sometimes', 'nullable', 'date'],
+            // Explicit acknowledgement that the date reaches into finished payroll runs.
+            'acknowledge_repricing' => ['sometimes', 'boolean'],
             'salary_change_reason' => ['nullable', 'string', 'max:255'],
             'salary_change_type' => ['nullable', Rule::in(['promotion', 'merit', 'adjustment'])],
             // Employment-history logging when the job title changes.

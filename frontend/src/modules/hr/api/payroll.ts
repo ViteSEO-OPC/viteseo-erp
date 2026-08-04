@@ -8,6 +8,15 @@ import type {
   PayslipYtd,
   ThirteenthMonthRow,
   ThirteenthMonthPayRow,
+  AdjustmentLine,
+  RetroFlag,
+  PaymentBatch,
+  PaymentMethod,
+  PaymentReconciliation,
+  PaymentReconcileResult,
+  PaymentSkipped,
+  PaymentStatus,
+  Payment,
 } from "@/modules/hr/types/payroll";
 
 export async function getPayrollSettings(): Promise<PayrollSettings> {
@@ -21,6 +30,11 @@ export async function updatePayrollSettings(input: {
   tax_timing?: string;
   /** Slice 10 — null clears the ceiling (allowances fully tax-free). */
   other_benefits_annual_cap?: number | null;
+  /**
+   * FIN-025 — the date these settings take effect. Omitted means today. Payroll resolves settings
+   * as of the cycle end, so this is what stops a change reaching back into periods already run.
+   */
+  effective_from?: string;
 }): Promise<PayrollSettings> {
   const res = await apiClient.put("/hr/payroll/settings", input);
   return res.data.data;
@@ -160,5 +174,117 @@ export async function getPayslip(
  */
 export async function getHrPayslip(id: number): Promise<Payslip> {
   const res = await apiClient.get(`/hr/payslips/${id}`);
+  return res.data.data;
+}
+
+/**
+ * Pay an off-cycle correction (FIN-010).
+ *
+ * The window is when the correction is ISSUED, not a period it prices — what it corrects belongs
+ * in `reason`. It does not recompute anything: it pays the stated amounts and withholds tax.
+ */
+export async function runAdjustment(input: {
+  cycle_start: string;
+  cycle_end: string;
+  reason: string;
+  lines: AdjustmentLine[];
+}): Promise<PayrollRun> {
+  const res = await apiClient.post("/hr/payroll/adjustment", input);
+  return res.data.data;
+}
+
+/** Retroactive pay differences still waiting to be settled (FIN-009). */
+export async function getRetroFlags(): Promise<RetroFlag[]> {
+  const res = await apiClient.get("/hr/retro-flags");
+  return res.data.data;
+}
+
+/** Mark one settled — the note is required, and says how it was paid. */
+export async function resolveRetroFlag(id: number, note: string): Promise<RetroFlag> {
+  const res = await apiClient.post(`/hr/retro-flags/${id}/resolve`, { note });
+  return res.data.data;
+}
+
+// --- Disbursement (FIN-015) ------------------------------------------------------------------
+
+/**
+ * Build the payment batch for a completed run.
+ *
+ * Nothing about WHO or HOW MUCH is sent: both are derived from the run, because typed amounts
+ * would be a second unreconciled source of truth for what payroll owes. `meta.skipped` says who
+ * was left out and why — a batch that quietly omits three people looks identical to one that
+ * does not, so the caller is expected to show it.
+ */
+export async function createPaymentBatch(input: {
+  payroll_run_id: number;
+  method: PaymentMethod;
+  notes?: string | null;
+}): Promise<{ batch: PaymentBatch; skipped: PaymentSkipped; reconciliation: PaymentReconciliation }> {
+  const res = await apiClient.post("/hr/payment-batches", input);
+  return {
+    batch: res.data.data,
+    skipped: res.data.meta.skipped,
+    reconciliation: res.data.meta.reconciliation,
+  };
+}
+
+/** Every batch, newest first. Optionally narrowed to one run. */
+export async function getPaymentBatches(payrollRunId?: number): Promise<PaymentBatch[]> {
+  const res = await apiClient.get("/hr/payment-batches", {
+    params: payrollRunId ? { payroll_run_id: payrollRunId } : undefined,
+  });
+  return res.data.data;
+}
+
+/** One batch with every transfer in it, plus whether it accounts for the whole run. */
+export async function getPaymentBatch(
+  id: number,
+): Promise<{ batch: PaymentBatch; reconciliation: PaymentReconciliation }> {
+  const res = await apiClient.get(`/hr/payment-batches/${id}`);
+  return { batch: res.data.data, reconciliation: res.data.meta.reconciliation };
+}
+
+/**
+ * Download the file finance uploads to the bank.
+ *
+ * This is the point of no return: the server stamps `exported_at` on first download, after which
+ * the batch can no longer be rebuilt. Once the file exists the company has to assume the bank has
+ * it, and regenerating from changed payslips is how someone gets paid twice.
+ */
+export function downloadBankFile(id: number, reference: string): Promise<void> {
+  return downloadFile(`/hr/payment-batches/${id}/bank-file`, `bank-file-${reference}.csv`);
+}
+
+/** Record what the bank did with one transfer. `settled` is the only outcome that means paid. */
+export async function settlePayment(
+  id: number,
+  input: {
+    status: PaymentStatus;
+    reference?: string | null;
+    settled_at?: string | null;
+    failure_reason?: string | null;
+  },
+): Promise<Payment> {
+  const res = await apiClient.patch(`/hr/payments/${id}`, input);
+  return res.data.data;
+}
+
+/**
+ * Apply the bank's return file to a batch.
+ *
+ * Previews unless `confirm` is set. This import moves payslips into `disbursed` — the assertion
+ * the whole disbursement layer exists to make trustworthy — so it should not run on a file nobody
+ * has read back.
+ */
+export async function reconcilePaymentBatch(
+  id: number,
+  file: File,
+  confirm: boolean,
+): Promise<PaymentReconcileResult> {
+  const form = new FormData();
+  form.append("file", file);
+  if (confirm) form.append("confirm", "1");
+
+  const res = await apiClient.post(`/hr/payment-batches/${id}/reconcile`, form);
   return res.data.data;
 }
