@@ -10,10 +10,15 @@ import {
 } from "react";
 
 /**
- * Lets a page (e.g. Leads) drive the existing global header search input.
- * The header renders the input; a page "registers" to receive its value.
- * When no page is registered the header search behaves as an inert field
- * (unchanged from its default appearance on other routes).
+ * Shared state for the global header search input.
+ *
+ * The header always renders a live, controlled input. A page may "register" to take over the term
+ * — Leads filters its table from `value`; Dashboard sets an explicit `onSubmit`. Registering is an
+ * OPT-IN OVERRIDE, not a prerequisite: on any route where no page registers, PageHeader falls back
+ * to sending the query to the Leads list, so search works everywhere in the CRM.
+ *
+ * (It previously worked the other way round — the header only wired the input up when a page had
+ * registered, leaving it inert on every other route.)
  */
 type SubmitHandler = ((value: string) => void) | undefined;
 
