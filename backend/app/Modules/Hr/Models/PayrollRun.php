@@ -18,8 +18,10 @@ class PayrollRun extends Model
         'cycle_start', 'cycle_end', 'frequency', 'status',
         // FIN-036 — fixed when the run is created; never re-derived from live settings.
         'scheduled_pay_date',
-        // Slice B17 — 'regular' or 'thirteenth_month'.
+        // Slice B17 — 'regular' or 'thirteenth_month'; FIN-010 adds 'adjustment'.
         'type',
+        // FIN-010 — why an off-cycle adjustment exists. Mandatory for that type.
+        'reason',
         'total_gross', 'total_deductions', 'total_net',
         'employee_count', 'run_at', 'run_by',
         // Slice 5 — a locked run can never be recomputed.

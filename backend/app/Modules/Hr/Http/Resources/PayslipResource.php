@@ -66,6 +66,10 @@ class PayslipResource extends JsonResource
             'other_deductions' => (float) $this->other_deductions,
             'other_deductions_breakdown' => $this->other_deductions_breakdown ?? [],
             'total_deductions' => (float) $this->total_deductions,
+            // FIN-010 — an off-cycle correction's amount and what it is for, so the document can
+            // explain a gross that came from a person rather than from the engine.
+            'adjustment_pay' => (float) $this->adjustment_pay,
+            'adjustment_note' => $this->adjustment_note,
             'deduction_carryover' => (float) $this->deduction_carryover,
             'net_pay' => (float) $this->net_pay,
 

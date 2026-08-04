@@ -25,6 +25,8 @@ class Payslip extends Model
         // ₱90,000 bucket, and the taxable pay behind it. Stored so a year can be read back from
         // what was actually paid rather than recomputed from today's configuration.
         'thirteenth_month', 'other_benefits', 'taxable_pay',
+        // FIN-010 — an off-cycle corrective amount and what it is for.
+        'adjustment_pay', 'adjustment_note',
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
         // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
         'other_deductions', 'other_deductions_breakdown',
@@ -52,6 +54,7 @@ class Payslip extends Model
         'undertime_deduction' => 'decimal:2',
         'late_penalty_days' => 'decimal:2',
         'reimbursements' => 'decimal:2',
+        'adjustment_pay' => 'decimal:2',
         'allowances' => 'decimal:2',
         'holiday_premium' => 'decimal:2',
         'overtime_pay' => 'decimal:2',

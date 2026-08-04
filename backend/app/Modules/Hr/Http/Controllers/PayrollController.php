@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
+use App\Modules\Hr\Http\Requests\RunAdjustmentRequest;
 use App\Modules\Hr\Http\Requests\RunPayrollRequest;
 use App\Modules\Hr\Http\Requests\UpdatePayrollSettingsRequest;
 use App\Modules\Hr\Http\Resources\PayrollRunResource;
@@ -108,6 +109,28 @@ class PayrollController extends Controller
             $request->validated('cycle_start'),
             $request->validated('cycle_end'),
             $request->validated('frequency'),
+            $request->user(),
+        );
+
+        return PayrollRunResource::make($run)
+            ->response()
+            ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * POST /api/v1/hr/payroll/adjustment — pay an off-cycle correction (FIN-010).
+     *
+     * The route every other correction in this module depends on: a back-dated raise, a fixed
+     * attendance record, a late-approved overtime request or reimbursement all produce a
+     * difference that used to have nowhere to go.
+     */
+    public function runAdjustment(RunAdjustmentRequest $request): JsonResponse
+    {
+        $run = $this->service->runAdjustment(
+            $request->validated('cycle_start'),
+            $request->validated('cycle_end'),
+            $request->validated('reason'),
+            $request->validated('lines'),
             $request->user(),
         );
 

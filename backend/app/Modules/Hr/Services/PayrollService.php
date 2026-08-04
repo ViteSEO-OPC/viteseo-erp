@@ -1228,6 +1228,161 @@ class PayrollService
         });
     }
 
+    /**
+     * Pay an off-cycle correction (FIN-010).
+     *
+     * WHAT IT DOES NOT DO IS THE POINT. It does not read attendance, does not prorate, does not
+     * resolve a salary, and takes no statutory contributions — those are monthly and were already
+     * taken on the period being corrected. It pays amounts a person has stated, with a reason, and
+     * withholds tax on them. Anything more would make it a second pay engine, and two engines that
+     * both claim to compute pay is precisely the divergence this audit is about.
+     *
+     * TAX IS MARGINAL, not a fresh annualisation. The employee has already been withheld on this
+     * year's pay; a correction adds to that total, so the tax due is the difference between the
+     * annual tax on (what has been taxed so far + this amount) and the annual tax on what has been
+     * taxed so far. Exactly the method `computeThirteenthMonth()` uses for the excess over ₱90,000,
+     * and for the same reason: taxing the amount in isolation would apply the lowest bracket to
+     * money that actually sits on top of a year's earnings.
+     *
+     * RE-RUNNABLE, like every other run here: recomputing replaces this batch's lines. A disbursed
+     * payslip is never touched (FIN-012's rule, applied from the start rather than retrofitted).
+     *
+     * @param  array<int, array{employee_id: int, amount: float|int|string, note?: string|null}>  $lines
+     */
+    public function runAdjustment(
+        string $cycleStart,
+        string $cycleEnd,
+        string $reason,
+        array $lines,
+        User $runner,
+    ): PayrollRun {
+        return DB::transaction(function () use ($cycleStart, $cycleEnd, $reason, $lines, $runner) {
+            $run = PayrollRun::where('cycle_start', $cycleStart)
+                ->where('cycle_end', $cycleEnd)
+                ->where('frequency', 'adjustment')
+                ->lockForUpdate()
+                ->first();
+
+            if ($run && $run->isLocked()) {
+                throw ValidationException::withMessages([
+                    'cycle_start' => ['This adjustment run is locked and can no longer be changed.'],
+                ]);
+            }
+
+            $setting = PayrollSetting::asOf($cycleEnd);
+
+            $run ??= new PayrollRun;
+            $run->fill([
+                'cycle_start' => $cycleStart,
+                'cycle_end' => $cycleEnd,
+                // Its own frequency, so the period unique index can never collide with a regular
+                // run over the same dates — the same device runThirteenthMonth() uses.
+                'frequency' => 'adjustment',
+                'type' => 'adjustment',
+                'reason' => $reason,
+                'status' => 'completed',
+                'run_at' => now(),
+                'run_by' => $runner->id,
+                'scheduled_pay_date' => Carbon::parse($cycleEnd)
+                    ->addDays((int) ($setting->pay_delay_days ?? 0))
+                    ->toDateString(),
+                'policy_snapshot' => $this->policySnapshot($setting, $cycleEnd),
+            ]);
+            $run->save();
+
+            $priorSlips = Payslip::where('payroll_run_id', $run->id)->get()->keyBy('employee_id');
+            $year = (int) Carbon::parse($cycleEnd)->year;
+            $taxAsOf = $cycleEnd;
+
+            $gross = 0.0;
+            $deductions = 0.0;
+            $count = 0;
+            $paidEmployeeIds = [];
+
+            foreach ($lines as $line) {
+                $employeeId = (int) $line['employee_id'];
+                $amount = round((float) $line['amount'], 2);
+
+                if ($amount <= 0) {
+                    continue;
+                }
+
+                $paidEmployeeIds[] = $employeeId;
+
+                // Never rewrite money already paid out.
+                $existing = $priorSlips->get($employeeId);
+                if ($existing && $existing->status === 'disbursed') {
+                    $gross += (float) $existing->gross;
+                    $deductions += (float) $existing->total_deductions;
+                    $count++;
+
+                    continue;
+                }
+
+                // What this employee has already been taxed on this year, from the regular runs —
+                // the same basis the 13th-month calculation uses, so the two agree.
+                $alreadyTaxed = (float) $this->thirteenthMonthBasisFor($year)
+                    ->where('hr_payslips.employee_id', $employeeId)
+                    ->sum('hr_payslips.taxable_pay');
+
+                $tax = round(
+                    $this->annualWithholdingTax($alreadyTaxed + $amount, $taxAsOf)
+                        - $this->annualWithholdingTax($alreadyTaxed, $taxAsOf),
+                    2,
+                );
+
+                Payslip::updateOrCreate(
+                    ['payroll_run_id' => $run->id, 'employee_id' => $employeeId],
+                    [
+                        'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
+                        'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
+                        'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                        'rest_day_premium' => 0, 'thirteenth_month' => 0, 'other_benefits' => 0,
+                        'adjustment_pay' => $amount,
+                        'adjustment_note' => $line['note'] ?? null,
+                        // Recorded so a later correction in the same year taxes on top of it.
+                        'taxable_pay' => $amount,
+                        'gross' => $amount,
+                        'sss' => 0, 'philhealth' => 0, 'pagibig' => 0,
+                        'employer_sss' => 0, 'employer_philhealth' => 0, 'employer_pagibig' => 0,
+                        'withholding_tax' => $tax,
+                        'other_deductions' => 0, 'other_deductions_breakdown' => [],
+                        'total_deductions' => $tax,
+                        'deduction_carryover' => 0,
+                        'net_pay' => round($amount - $tax, 2),
+                        'status' => 'computed',
+                    ],
+                );
+
+                $gross += $amount;
+                $deductions += $tax;
+                $count++;
+            }
+
+            // Lines removed from the batch on a recompute leave no orphan behind.
+            $run->payslips()
+                ->whereNotIn('employee_id', $paidEmployeeIds)
+                ->where('status', 'computed')
+                ->forceDelete();
+
+            $run->update([
+                'total_gross' => round($gross, 2),
+                'total_deductions' => round($deductions, 2),
+                'total_net' => round($gross - $deductions, 2),
+                'employee_count' => $count,
+            ]);
+
+            $this->audit->log(
+                'ran', 'Payroll',
+                "Off-cycle adjustment for {$cycleStart} – {$cycleEnd} — {$count} employee(s), ₱"
+                    . number_format($gross, 2) . " gross — {$reason}",
+                $run,
+            );
+
+            return $run->fresh();
+        });
+    }
+
     public function listRuns(): Collection
     {
         return PayrollRun::withCount('payslips')->latest('cycle_start')->get();

@@ -22,6 +22,7 @@ class LeaveService
         private readonly AuditService $audit,
         private readonly ViolationService $violations,
         private readonly PayrollFreezeService $freeze,
+        private readonly RetroFlagService $retro,
     ) {}
 
     /**
@@ -307,7 +308,19 @@ class LeaveService
         // A newly-approved leave can retroactively clear an absence/AWOL flag on the
         // covered days (e.g. a backdated leave). Recompute so violation history stays
         // in sync immediately, not only on the next attendance-roster load.
+        // FIN-009 — approving a request for days payroll has already settled changes what that
+        // period SHOULD have paid. The approval stands (the leave was taken), and the difference
+        // is recorded so an adjustment run can settle it rather than relying on someone's memory.
         if ($wasPending) {
+            $this->retro->flagIfSettled(
+                $request,
+                $request->employee_id,
+                $request->start_date->format('Y-m-d'),
+                $request->end_date->format('Y-m-d'),
+                \App\Modules\Hr\Models\RetroFlag::OWED,
+                'Leave approved after the period was paid',
+            );
+
             $this->violations->recompute();
         }
 

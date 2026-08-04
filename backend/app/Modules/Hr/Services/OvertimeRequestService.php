@@ -24,6 +24,7 @@ class OvertimeRequestService
         private readonly HolidayService $holidays,
         private readonly AttendancePolicyService $policy,
         private readonly PayrollFreezeService $freeze,
+        private readonly RetroFlagService $retro,
     ) {}
 
     /**
@@ -206,6 +207,20 @@ class OvertimeRequestService
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log('approved', 'Overtime', "Approved {$employeeName}'s overtime request", $request);
 
+        // FIN-009 — approving overtime for a cutoff that has already been paid changes what that
+        // period SHOULD have paid. The approval stands (the overtime was worked), and the
+        // difference is recorded so an adjustment run can settle it instead of being remembered.
+        $this->retro->flagIfSettled(
+            $request,
+            $request->employee_id,
+            $request->work_date instanceof \DateTimeInterface
+                ? $request->work_date->format('Y-m-d')
+                : (string) $request->work_date,
+            null,
+            \App\Modules\Hr\Models\RetroFlag::OWED,
+            'Overtime approved after the period was paid',
+        );
+
         return $request;
     }
 
@@ -257,6 +272,22 @@ class OvertimeRequestService
             'cancelled_by' => $actor->id,
             'cancel_reason' => $reason,
         ]);
+
+        // FIN-009 — cancelling an APPROVED request whose period has already been paid means the
+        // company paid overtime its own records now say was never authorised. The docblock above
+        // says HR settles that manually; this is what makes "manually" a tracked queue instead of
+        // someone's memory. Recovering it is a wage deduction needing consent (Art. 113), so it is
+        // surfaced for a person rather than netted off a future payslip.
+        if ($wasApproved) {
+            $this->retro->flagIfSettled(
+                $request,
+                $request->employee_id,
+                $request->work_date->format('Y-m-d'),
+                null,
+                \App\Modules\Hr\Models\RetroFlag::OVERPAID,
+                'Approved overtime cancelled after it was paid',
+            );
+        }
 
         $request->load(['employee.user', 'reviewer', 'canceller']);
         $name = $request->employee->user?->name ?? $request->employee->name;

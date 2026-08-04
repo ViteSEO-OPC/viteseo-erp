@@ -15,6 +15,7 @@ use App\Modules\Hr\Http\Controllers\HolidayController;
 use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
+use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
 use App\Modules\Hr\Http\Controllers\LeaveConfigController;
@@ -140,6 +141,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).
+        // FIN-009 — retroactive pay differences waiting to be settled.
+        Route::get('retro-flags', [RetroFlagController::class, 'index']);
+        Route::post('retro-flags/{retroFlag}/resolve', [RetroFlagController::class, 'resolve']);
         Route::get('daily-overrides', [DailyOverrideController::class, 'show']);
         Route::match(['put', 'patch'], 'daily-overrides', [DailyOverrideController::class, 'upsert']);
 
@@ -163,6 +167,9 @@ Route::middleware('auth:sanctum')->group(function () {
         // Slice B17 — pay it, and withhold on what it pushes past the ₱90,000 exemption.
         Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth'])->middleware('throttle:5,1');
         Route::post('payroll/run', [PayrollController::class, 'run'])->middleware('throttle:5,1');
+        // FIN-010 — off-cycle corrections. Same tight limit as a regular run: it writes
+        // payslips, and the amounts are typed by a person rather than computed.
+        Route::post('payroll/adjustment', [PayrollController::class, 'runAdjustment'])->middleware('throttle:5,1');
         Route::get('payroll/runs/{payrollRun}', [PayrollController::class, 'show']);
         Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun'])->middleware('throttle:10,1');
         Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
