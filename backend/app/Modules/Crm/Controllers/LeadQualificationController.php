@@ -8,6 +8,7 @@ use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Models\Lead;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The qualification bridge between the two bounded contexts: Prospect Pool → Active CRM Lead.
@@ -26,30 +27,56 @@ class LeadQualificationController extends Controller
     {
         $this->authorize('qualify', $lead);
 
-        // Only discovered businesses are qualifiable — a manually-created / imported lead is already
-        // an active CRM lead, not a prospect.
-        if ($lead->source === null) {
+        // ATOMIC CLAIM. The prospect pool is shared and unassigned, so two BDs can click "Add to
+        // Leads" on the same row at the same moment. Reading the route-bound instance and checking
+        // `qualified_at` on it is a time-of-check/time-of-use gap: both requests could see NULL,
+        // both could pass the guard, and the second UPDATE would silently overwrite the first
+        // claimant's ownership — while BOTH callers received 201, and the observer fired twice
+        // (two `lead.qualified` Activities, two scoring runs).
+        //
+        // Re-reading the row INSIDE a transaction with `lockForUpdate` closes that window: the
+        // second request blocks on the row lock until the first commits, then re-reads the now-set
+        // `qualified_at` and takes the 409 branch. The guards below therefore run against `$locked`
+        // — the freshly locked row — never against the instance bound before the lock existed.
+        //
+        // Deliberately an Eloquent `update()` on a locked model rather than a conditional
+        // `UPDATE … WHERE qualified_at IS NULL` via the query builder: a query-builder write fires
+        // no model events, which would bypass LeadObserver entirely and silently drop the
+        // `lead.qualified` Activity, the one-time Lead Score, and the LeadQualified event.
+        return DB::transaction(function () use ($request, $lead): JsonResponse {
+            /** @var Lead|null $locked */
+            $locked = Lead::query()->whereKey($lead->getKey())->lockForUpdate()->first();
+
+            if ($locked === null) {
+                // Deleted between route binding and the lock.
+                return response()->json(['message' => 'Lead not found.'], 404);
+            }
+
+            // Only discovered businesses are qualifiable — a manually-created / imported lead is
+            // already an active CRM lead, not a prospect.
+            if ($locked->source === null) {
+                return response()->json([
+                    'message' => 'This lead is already an active CRM lead — only discovered prospects can be qualified.',
+                ], 422);
+            }
+
+            if ($locked->qualified_at !== null) {
+                return response()->json([
+                    'message' => 'This prospect has already been qualified into the CRM.',
+                ], 409);
+            }
+
+            // Cross the boundary: stamp the lifecycle + take ownership. The observer detects the
+            // qualified_at transition → logs `lead.qualified` and computes the Lead Score once.
+            $locked->update([
+                'qualified_at' => now(),
+                'qualified_by' => $request->user()->id,
+                'assigned_to' => $request->user()->id,
+            ]);
+
             return response()->json([
-                'message' => 'This lead is already an active CRM lead — only discovered prospects can be qualified.',
-            ], 422);
-        }
-
-        if ($lead->qualified_at !== null) {
-            return response()->json([
-                'message' => 'This prospect has already been qualified into the CRM.',
-            ], 409);
-        }
-
-        // Cross the boundary: stamp the lifecycle + take ownership. The observer detects the
-        // qualified_at transition → logs `lead.qualified` and computes the Lead Score once.
-        $lead->update([
-            'qualified_at' => now(),
-            'qualified_by' => $request->user()->id,
-            'assigned_to' => $request->user()->id,
-        ]);
-
-        return response()->json([
-            'data' => new LeadResource($lead->refresh()),
-        ], 201);
+                'data' => new LeadResource($locked->refresh()),
+            ], 201);
+        });
     }
 }
