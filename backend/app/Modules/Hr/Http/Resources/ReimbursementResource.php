@@ -2,9 +2,9 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class ReimbursementResource extends JsonResource
 {
@@ -15,7 +15,7 @@ class ReimbursementResource extends JsonResource
     {
         // Absolute URLs so the frontend can link/preview each receipt directly.
         $receiptUrls = array_map(
-            static fn (string $path): string => Storage::disk('public')->url($path),
+            static fn (string $path): ?string => PrivateFileService::url($path),
             $this->allReceiptPaths(),
         );
 

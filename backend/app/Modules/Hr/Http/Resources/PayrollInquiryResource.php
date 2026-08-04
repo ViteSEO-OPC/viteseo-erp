@@ -2,9 +2,9 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class PayrollInquiryResource extends JsonResource
 {
@@ -19,14 +19,14 @@ class PayrollInquiryResource extends JsonResource
             'topic' => $this->topic,
             'message' => $this->message,
             'attachment_url' => $this->attachment_path
-                ? Storage::disk('public')->url($this->attachment_path)
+                ? PrivateFileService::url($this->attachment_path)
                 : null,
             'priority' => $this->priority,
             'status' => $this->status,
             'resolution_note' => $this->resolution_note,
             'resolution_attachments' => collect($this->resolution_attachments ?? [])
                 ->map(fn (array $a) => [
-                    'url' => Storage::disk('public')->url($a['path']),
+                    'url' => PrivateFileService::url($a['path']),
                     'name' => $a['name'] ?? basename($a['path']),
                 ])
                 ->all(),

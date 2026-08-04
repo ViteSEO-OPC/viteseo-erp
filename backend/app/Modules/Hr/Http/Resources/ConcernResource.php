@@ -2,9 +2,9 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 /**
  * Anonymity policy (§14.3g) is enforced HERE, not in the UI. An anonymous concern
@@ -34,7 +34,7 @@ class ConcernResource extends JsonResource
             'attachments' => collect($this->attachments ?? [])
                 ->map(fn (array $a) => [
                     'name' => $a['name'] ?? 'Attachment',
-                    'url' => Storage::disk('public')->url($a['path']),
+                    'url' => PrivateFileService::url($a['path']),
                     'size' => $a['size'] ?? null,
                     'mime' => $a['mime'] ?? null,
                 ])

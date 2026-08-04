@@ -376,11 +376,11 @@ class EmployeeService
         $previous = $employee->photo_path;
 
         $employee->update([
-            'photo_path' => $photo->store("hr/employee-photos/{$employee->id}", 'public'),
+            'photo_path' => $photo->store("hr/employee-photos/{$employee->id}", 'local'),
         ]);
 
         if ($previous) {
-            Storage::disk('public')->delete($previous);
+            Storage::disk('local')->delete($previous);
         }
 
         $employee->load('user');
@@ -396,7 +396,7 @@ class EmployeeService
 
         if ($previous) {
             $employee->update(['photo_path' => null]);
-            Storage::disk('public')->delete($previous);
+            Storage::disk('local')->delete($previous);
 
             $employee->load('user');
             $this->audit->log('removed', 'People', "Removed {$employee->user?->name}'s profile photo", $employee);
@@ -482,7 +482,7 @@ class EmployeeService
         ?string $name = null,
         string $label = 'Uploaded',
     ): EmployeeDocument {
-        $path = $file->store("hr/employee-documents/{$employee->id}", 'public');
+        $path = $file->store("hr/employee-documents/{$employee->id}", 'local');
 
         $document = $employee->documents()->create([
             'name' => $name ?: $file->getClientOriginalName(),

@@ -8,7 +8,6 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\RemoteCheckin;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -75,7 +74,7 @@ class RemoteCheckinService
 
         $checkin = RemoteCheckin::create([
             'employee_id' => $employee->id,
-            'photo_path' => $photo->store(self::PHOTO_DIR, 'public'),
+            'photo_path' => $photo->store(self::PHOTO_DIR, 'local'),
             'lat' => $lat,
             'lng' => $lng,
             'status' => RemoteCheckin::STATUS_PENDING,

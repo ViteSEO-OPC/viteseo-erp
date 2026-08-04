@@ -2,9 +2,9 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class DocumentRequestResource extends JsonResource
 {
@@ -19,7 +19,7 @@ class DocumentRequestResource extends JsonResource
             'other_detail' => $this->other_detail,
             'reason' => $this->reason,
             'status' => $this->status,
-            'fulfilled_url' => $this->fulfilled_path ? Storage::disk('public')->url($this->fulfilled_path) : null,
+            'fulfilled_url' => PrivateFileService::url($this->fulfilled_path),
             'review_note' => $this->review_note,
             'reviewed_at' => $this->reviewed_at,
             'reviewed_by' => $this->whenLoaded('reviewer', fn () => $this->reviewer?->name),

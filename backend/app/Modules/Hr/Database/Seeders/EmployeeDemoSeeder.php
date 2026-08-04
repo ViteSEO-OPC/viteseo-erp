@@ -196,7 +196,7 @@ class EmployeeDemoSeeder extends Seeder
             foreach ($demoDocs as [$docName, $docLabel, $docDate]) {
                 $content = "%PDF-1.4\n% Demo placeholder for {$docName}\n";
                 $path = "hr/employee-documents/{$maya->id}/" . Str::random(24) . '.pdf';
-                Storage::disk('public')->put($path, $content);
+                Storage::disk('local')->put($path, $content);
                 $doc = EmployeeDocument::create([
                     'employee_id' => $maya->id, 'name' => $docName, 'file_path' => $path,
                     'size_bytes' => strlen($content), 'label' => $docLabel,
