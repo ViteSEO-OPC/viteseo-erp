@@ -25,12 +25,19 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * `display_order` is PRESENTATION ONLY — the additive model means order never changes any computed score.
  * No soft delete (§1.6); rules are removed only by cascade when a draft is discarded.
  *
+ * **Nullability (`category`, `point_value`).** Both are lead-scoring concepts and both are NULL for the
+ * `kpi` module, whose rows are catalog metadata for the code-defined M-01…M-06 formulas: a metric carries
+ * no arithmetic sign and is not worth points. NULL is stored rather than 0 because 0 would assert "worth
+ * zero points" and be indistinguishable from a scoring rule deliberately zeroed. Every lead_scoring row
+ * still carries both, and the sign invariant above is unchanged.
+ *
  * @property int $id
  * @property int $version_id
  * @property string $rule_key Immutable identity of the rule.
  * @property string $description Business-facing wording (editable).
- * @property BusinessRuleCategory $category Cast to enum; the sole carrier of the arithmetic sign.
- * @property int $point_value Absolute magnitude — never negated (§1.2 invariant).
+ * @property BusinessRuleCategory|null $category Cast to enum; the sole carrier of the arithmetic sign.
+ *                                               NULL only for modules with no scoring semantics (`kpi`) — see the nullability note below.
+ * @property int|null $point_value Absolute magnitude — never negated (§1.2 invariant). NULL for `kpi`.
  * @property bool $is_enabled Disabled → contributes 0.
  * @property int $display_order Presentation only — never affects the score.
  */

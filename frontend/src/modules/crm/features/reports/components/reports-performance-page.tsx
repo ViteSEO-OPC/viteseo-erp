@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Download } from "lucide-react";
-import { Button } from "@/modules/crm/components/ui/button";
+import Link from "next/link";
+import { Download, SlidersHorizontal } from "lucide-react";
+import { Button, buttonVariants } from "@/modules/crm/components/ui/button";
+import { cn } from "@/modules/crm/lib/utils";
 import { useExportPerformancePdf } from "@/modules/crm/features/performance/hooks/use-export-performance-pdf";
+import { usePermissions } from "@/modules/crm/providers/permissions-provider";
 import {
   ALL_SCOPE,
   PerformanceScopeProvider,
@@ -43,6 +46,10 @@ export function ReportsPerformancePage() {
   const [scope, setScope] = useState<PerformanceScope>(ALL_SCOPE);
   const isAllReports = scope.mode === "all";
   const { exportPerformancePdf, isExporting } = useExportPerformancePdf();
+  // Admin + Super Admin manage performance definitions and goals; a BD never sees the entry point.
+  // The server enforces the same permission on every mutation behind it.
+  const { can } = usePermissions();
+  const canManagePerformance = can("crm.performance.manage");
 
   return (
     <div className="flex flex-col gap-6">
@@ -51,15 +58,28 @@ export function ReportsPerformancePage() {
           resolves and authorizes the scope from the same `user_id` param the page's queries use. */}
       <div className="flex items-center justify-between gap-3">
         <ReportsScopeSelector scope={scope} onChange={setScope} />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void exportPerformancePdf(scope.mode === "bd" ? scope.userId : undefined)}
-          disabled={isExporting}
-        >
-          <Download className="h-4 w-4" />
-          {isExporting ? "Exporting…" : "Export PDF"}
-        </Button>
+        <div className="flex items-center gap-2">
+          {canManagePerformance ? (
+            // A real anchor styled as a button: this navigates, so it keeps link semantics (middle-click,
+            // open-in-new-tab) instead of rendering a Link inside Button and losing native button semantics.
+            <Link
+              href="/zerem/settings/performance"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Manage Performance
+            </Link>
+          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void exportPerformancePdf(scope.mode === "bd" ? scope.userId : undefined)}
+            disabled={isExporting}
+          >
+            <Download className="h-4 w-4" />
+            {isExporting ? "Exporting…" : "Export PDF"}
+          </Button>
+        </div>
       </div>
 
       <PerformanceScopeProvider scope={scope}>

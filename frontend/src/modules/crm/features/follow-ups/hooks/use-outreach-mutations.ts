@@ -12,6 +12,12 @@ export type SendEmailVars = {
   body: string;
   /** Optional recipient override; defaults server-side to the lead's email. */
   to?: string;
+  /**
+   * RC3 Send-Later. A UTC ISO instant (build it with `businessLocalToUtcIso`). When present the
+   * backend SCHEDULES the email (`status=scheduled`) instead of sending it now — same endpoint,
+   * same pipeline, no second send path. Omit it for the unchanged immediate send.
+   */
+  scheduledAt?: string;
 };
 
 export type SentEmail = {
@@ -52,17 +58,33 @@ const draftsKey = [...queryKeys.followUps.all, "drafts"] as const;
 export function useSendEmail() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ leadId, subject, body, to }: SendEmailVars) =>
+    mutationFn: ({ leadId, subject, body, to, scheduledAt }: SendEmailVars) =>
       apiClient
-        .post(`/leads/${leadId}/emails`, { subject, body, ...(to ? { to } : {}) })
+        .post(`/leads/${leadId}/emails`, {
+          subject,
+          body,
+          ...(to ? { to } : {}),
+          // Only sent when scheduling — its ABSENCE is what selects the immediate-send branch
+          // server-side (`isset($data['scheduled_at'])`), so a null/empty value must never be sent.
+          ...(scheduledAt ? { scheduled_at: scheduledAt } : {}),
+        })
         .then((r) => r.data.data as SentEmail),
-    onSuccess: (email) => {
+    onSuccess: (email, variables) => {
       // Refresh through invalidation only — the `email.sent` Activity flows to every
       // /activities consumer automatically.
       queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.recentActivity() }); // Dashboard Recent Activity
       queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all }); // generic /activities feed (Activity Logs page)
-      // A future Email History list would add its own invalidation here, following this same pattern.
-      toast.success(`Email sent to ${email.to}`);
+      // Lead Details Email Conversation: the send belongs to this lead's thread, so the newly sent
+      // message appears without a reload. Keyed from the request variables rather than the response
+      // so it holds even if the payload ever stops echoing the lead.
+      queryClient.invalidateQueries({ queryKey: queryKeys.leads.emails(variables.leadId) });
+      // A scheduled send returns status=scheduled and has NOT gone out yet — saying "sent" would
+      // be a lie the BD acts on.
+      toast.success(
+        email.status === "scheduled"
+          ? `Email scheduled for ${email.to}`
+          : `Email sent to ${email.to}`,
+      );
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, "Failed to send email"));

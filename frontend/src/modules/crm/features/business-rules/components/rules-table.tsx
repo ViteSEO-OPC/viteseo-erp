@@ -40,12 +40,24 @@ function categoryVariant(category: BusinessRule["category"]) {
   return "outline" as const;
 }
 
+/**
+ * Whether this rule set has scoring semantics — i.e. whether the Category and Points columns mean
+ * anything. Derived from the data rather than passed in, because the data is the authority: the
+ * backend sends both as null for the KPI catalog (a metric has no sign and is not worth points) and
+ * always sends both for lead_scoring. Rendering a "—" in those columns instead of omitting them
+ * would imply a KPI has an empty score; it has no score at all.
+ */
+function hasScoring(rules: BusinessRule[]): boolean {
+  return rules.some((rule) => rule.category !== null || rule.pointValue !== null);
+}
+
 /** One editable row — keeps local input state so typing does not fire a request per keystroke. */
 function EditableRow({
   rule,
   index,
   count,
   busy,
+  scoring,
   onUpdatePoints,
   onToggleEnabled,
   onMove,
@@ -54,23 +66,25 @@ function EditableRow({
   index: number;
   count: number;
   busy?: boolean;
+  /** False for the KPI catalog — the Category and Points columns are not rendered at all. */
+  scoring: boolean;
   onUpdatePoints?: (ruleKey: string, pointValue: number) => void;
   onToggleEnabled?: (ruleKey: string, enabled: boolean) => void;
   onMove?: (ruleKey: string, direction: "up" | "down") => void;
 }) {
   // Local input state; re-sync to the server value when it changes (e.g. after a save refetch) using the
   // React-recommended "adjust state during render" pattern rather than an effect.
-  const [value, setValue] = useState(String(rule.pointValue));
+  const [value, setValue] = useState(String(rule.pointValue ?? ""));
   const [syncedFrom, setSyncedFrom] = useState(rule.pointValue);
   if (rule.pointValue !== syncedFrom) {
     setSyncedFrom(rule.pointValue);
-    setValue(String(rule.pointValue));
+    setValue(String(rule.pointValue ?? ""));
   }
 
   const commit = () => {
     const next = Number(value);
     if (!Number.isInteger(next) || next < 0) {
-      setValue(String(rule.pointValue)); // structural guard; the server is the authority.
+      setValue(String(rule.pointValue ?? "")); // structural guard; the server is the authority.
       return;
     }
     if (next !== rule.pointValue) onUpdatePoints?.(rule.ruleKey, next);
@@ -104,24 +118,30 @@ function EditableRow({
         <p className="font-medium text-foreground">{rule.description}</p>
         <p className="font-mono text-[11px] text-muted-foreground">{rule.ruleKey}</p>
       </TableCell>
-      <TableCell>
-        <Badge variant={categoryVariant(rule.category)}>{CATEGORY_LABEL[rule.category]}</Badge>
-      </TableCell>
-      <TableCell className="w-32">
-        <div className="flex items-center gap-1">
-          <span className="text-muted-foreground">{rule.isSubtractive ? "−" : "+"}</span>
-          <Input
-            type="number"
-            min={0}
-            value={value}
-            disabled={busy}
-            onChange={(e) => setValue(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-            className="h-8 w-20"
-          />
-        </div>
-      </TableCell>
+      {scoring && (
+        <>
+          <TableCell>
+            {rule.category && (
+              <Badge variant={categoryVariant(rule.category)}>{CATEGORY_LABEL[rule.category]}</Badge>
+            )}
+          </TableCell>
+          <TableCell className="w-32">
+            <div className="flex items-center gap-1">
+              <span className="text-muted-foreground">{rule.isSubtractive ? "−" : "+"}</span>
+              <Input
+                type="number"
+                min={0}
+                value={value}
+                disabled={busy}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={commit}
+                onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                className="h-8 w-20"
+              />
+            </div>
+          </TableCell>
+        </>
+      )}
       <TableCell className="w-24 text-right">
         <Switch
           checked={rule.isEnabled}
@@ -142,6 +162,7 @@ export function RulesTable({
   onMove,
 }: Props) {
   const ordered = [...rules].sort((a, b) => a.displayOrder - b.displayOrder);
+  const scoring = hasScoring(rules);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
@@ -150,8 +171,12 @@ export function RulesTable({
           <TableRow>
             <TableHead className="w-16">Order</TableHead>
             <TableHead>Rule</TableHead>
-            <TableHead>Category</TableHead>
-            <TableHead className="w-32">Points</TableHead>
+            {scoring && (
+              <>
+                <TableHead>Category</TableHead>
+                <TableHead className="w-32">Points</TableHead>
+              </>
+            )}
             <TableHead className="w-24 text-right">Enabled</TableHead>
           </TableRow>
         </TableHeader>
@@ -164,6 +189,7 @@ export function RulesTable({
                 index={index}
                 count={ordered.length}
                 busy={busy}
+                scoring={scoring}
                 onUpdatePoints={onUpdatePoints}
                 onToggleEnabled={onToggleEnabled}
                 onMove={onMove}
@@ -175,10 +201,18 @@ export function RulesTable({
                   <p className="font-medium text-foreground">{rule.description}</p>
                   <p className="font-mono text-[11px] text-muted-foreground">{rule.ruleKey}</p>
                 </TableCell>
-                <TableCell>
-                  <Badge variant={categoryVariant(rule.category)}>{CATEGORY_LABEL[rule.category]}</Badge>
-                </TableCell>
-                <TableCell className="w-32 font-mono tabular-nums">{signed(rule)}</TableCell>
+                {scoring && (
+                  <>
+                    <TableCell>
+                      {rule.category && (
+                        <Badge variant={categoryVariant(rule.category)}>
+                          {CATEGORY_LABEL[rule.category]}
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="w-32 font-mono tabular-nums">{signed(rule)}</TableCell>
+                  </>
+                )}
                 <TableCell className="w-24 text-right">
                   {rule.isEnabled ? (
                     <Badge variant="secondary">Enabled</Badge>

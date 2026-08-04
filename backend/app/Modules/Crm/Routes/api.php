@@ -21,10 +21,12 @@ use App\Modules\Crm\Controllers\NearbyClientController;
 use App\Modules\Crm\Controllers\NicheController;
 use App\Modules\Crm\Controllers\NoteController;
 use App\Modules\Crm\Controllers\NotificationController;
+use App\Modules\Crm\Controllers\PerformanceTargetController;
 use App\Modules\Crm\Controllers\PlannerEventController;
 use App\Modules\Crm\Controllers\ServiceAreaController;
 use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
+use App\Modules\Crm\Http\Middleware\EnsurePerformanceManagement;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
 use Illuminate\Support\Facades\Route;
@@ -357,7 +359,29 @@ Route::prefix('v1/crm')->group(function (): void {
         // is constrained to the enabled modules (v1: lead_scoring); reserved modules (kpi/ranking) 404
         // until approved. Reads gate on crm.business_rules.view, writes on crm.business_rules.manage.
         // Publish/rollback endpoints arrive with the Publish/Rollback integration step.
-        Route::prefix('settings/business-rules')->whereIn('module', ['lead_scoring'])->group(function () {
+        // Settings → Manage Performance (Goal Management). Reached from Reports & Performance, not
+        // from the Settings nav — the entry point lives where managers already read performance.
+        //
+        // Gated on `crm.performance.manage`, held by Super Admin AND Admin (approved PO decision:
+        // performance management is a management capability). A BD holds neither and is refused.
+        // It stays a permission SEPARATE from `crm.business_rules.manage` even though both roles now
+        // hold both: they are different capabilities, so Lead Scoring administration and Performance
+        // management can be narrowed independently — in particular when the temporary Admin grant on
+        // business rules is revisited before production.
+        Route::middleware('permission:crm.performance.manage')
+            ->prefix('settings/performance-targets')
+            ->group(function () {
+                Route::get('/', [PerformanceTargetController::class, 'index']);
+                Route::post('/', [PerformanceTargetController::class, 'store']);
+                Route::patch('/{performanceTarget}', [PerformanceTargetController::class, 'update']);
+                Route::delete('/{performanceTarget}', [PerformanceTargetController::class, 'destroy']);
+            });
+
+        // `kpi` joins the enabled modules: the KPI definition catalog (M-01…M-06) is managed through
+        // the SAME Business Rules surface rather than a second CRUD implementation. Its WRITES also
+        // require `crm.performance.manage` (see below), while lead_scoring keeps its existing
+        // `crm.business_rules.manage` gate untouched.
+        Route::prefix('settings/business-rules')->whereIn('module', ['lead_scoring', 'kpi'])->group(function () {
             Route::middleware('permission:crm.business_rules.view')->group(function () {
                 Route::get('/{module}/active', [BusinessRuleController::class, 'active']);
                 Route::get('/{module}/draft', [BusinessRuleController::class, 'draft']);
@@ -366,7 +390,16 @@ Route::prefix('v1/crm')->group(function (): void {
                 Route::get('/{module}/audit', [BusinessRuleController::class, 'audit']);
             });
 
-            Route::middleware('permission:crm.business_rules.manage')->group(function () {
+            // Writes require crm.business_rules.manage AND — for the `kpi` module only — also
+            // crm.performance.manage. Stacking rather than duplicating the route list keeps one
+            // definition per endpoint: lead_scoring is gated exactly as before, and KPI definitions
+            // additionally demand the performance capability. Admin and Super Admin hold both and
+            // pass for either module; a role holding only business-rules management would keep Lead
+            // Scoring and be refused on KPI, which is what keeps the two capabilities separable.
+            Route::middleware([
+                'permission:crm.business_rules.manage',
+                EnsurePerformanceManagement::class,
+            ])->group(function () {
                 Route::post('/{module}/draft', [BusinessRuleController::class, 'ensureDraft']);
                 Route::delete('/{module}/draft', [BusinessRuleController::class, 'discardDraft']);
                 // `/rules/order` is declared BEFORE `/rules/{ruleKey}` so "order" is never captured as a key.

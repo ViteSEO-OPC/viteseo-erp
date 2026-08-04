@@ -9,6 +9,8 @@ import { DraftsList } from "@/modules/crm/features/follow-ups/components/drafts-
 import { SchedulerPanel } from "@/modules/crm/features/follow-ups/components/scheduler-panel";
 import { OutreachTabs, type OutreachTab } from "@/modules/crm/features/follow-ups/components/outreach-tabs";
 import { CopilotWidget } from "@/modules/crm/features/copilot/components/copilot-widget";
+import { notify as toast } from "@/core/lib/notify";
+import { businessLocalToUtcIso } from "@/modules/crm/lib/timezone";
 import { useFollowUpsData } from "@/modules/crm/features/follow-ups/hooks/use-follow-ups-data";
 import {
   useSendEmail,
@@ -77,10 +79,31 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
     }
     const item = selectedItem;
     if (!item?.leadId) return;
+
+    // RC3 Send-Later. The toggle now actually reaches the backend: with scheduling ON we convert the
+    // business-timezone wall-clock the BD picked into the UTC instant the API stores, and send it as
+    // `scheduled_at`. With scheduling OFF nothing is added and the immediate-send path is byte-for-byte
+    // what it was. Same endpoint and same pipeline either way — no second send path.
+    let scheduledAt: string | undefined;
+    if (scheduler.enabled) {
+      const local = scheduler.datetime.trim();
+      const utc = local ? businessLocalToUtcIso(local) : "";
+      // Re-validated here because the input's `min` is only a UI affordance (and the value can be
+      // typed). The backend enforces `date|after:now` too; refusing early gives a usable message
+      // instead of a 422.
+      if (!utc || Number.isNaN(new Date(utc).getTime()) || new Date(utc).getTime() <= Date.now()) {
+        toast.error("Pick a future date and time to schedule this email.");
+        return;
+      }
+      scheduledAt = utc;
+    }
+
     sendEmail.mutate(
-      { leadId: item.leadId, subject: draft.subject, body: draft.body, to: item.email || undefined },
+      { leadId: item.leadId, subject: draft.subject, body: draft.body, to: item.email || undefined, scheduledAt },
       {
         onSuccess: (email) => {
+          // Unchanged: a Planner Email Task completes only on an ACTUAL send. A scheduled email
+          // returns status=scheduled, so the task correctly stays open until it is delivered.
           if (!item.isVirtual && item.eventType === "email" && email.status === "sent") {
             markDone(item.id);
           }
