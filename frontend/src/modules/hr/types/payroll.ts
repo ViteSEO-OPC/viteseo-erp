@@ -101,7 +101,12 @@ export interface PayslipLine {
 
 /**
  * The document's subtotals, derived by the API so the screen and the PDF can't disagree.
- * They satisfy `compensation - deductions - government + uncollected = net_pay`.
+ * They satisfy `compensation - deductions - government = net_pay`.
+ *
+ * `uncollected` was a term in that identity until FIN-053. The stored deduction components used
+ * to hold the full computed amount while the total was capped at gross, so the shortfall had to
+ * be credited back for the document to close. The components now hold what was actually
+ * collected — `uncollected` is a disclosure, and adding it back would overstate net pay.
  */
 export interface PayslipTotals {
   /** Full period basic + every earning line. */
@@ -114,9 +119,22 @@ export interface PayslipTotals {
   deductions: number;
   /** SSS + PhilHealth + Pag-IBIG + withholding tax. */
   government: number;
-  /** Deductions that pay couldn't cover, credited back so the document reconciles. */
+  /** Deductions pay couldn't cover. Disclosed, not summed into net — see the note above. */
   uncollected: number;
+  /**
+   * Which obligations that shortfall belongs to (FIN-053), keyed by column name. Empty when
+   * nothing went short, and on payslips issued before the split — the migration doesn't backfill.
+   */
+  uncollected_breakdown: Partial<Record<PayslipDeductionKey, number>>;
 }
+
+/** The deduction columns a shortfall can land on, in the order the cap is allocated. */
+export type PayslipDeductionKey =
+  | "sss"
+  | "philhealth"
+  | "pagibig"
+  | "withholding_tax"
+  | "other_deductions";
 
 export interface Payslip {
   id: number;

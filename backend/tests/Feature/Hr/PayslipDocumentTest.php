@@ -24,12 +24,19 @@ use Laravel\Sanctum\Sanctum;
  * The engine is covered elsewhere and none of its figures changed here. What changed is how
  * the document derives itself from them, and that derivation has one property worth pinning:
  *
- *     compensation − deductions − government + uncollected = net_pay
+ *     compensation − deductions − government = net_pay
  *
  * It has to hold on EVERY payslip, because a payslip whose arithmetic doesn't close is a
  * payslip an employee is entitled to dispute. The two ways it can break are the interesting
  * cases and both are tested: basic pay clamping at zero (absences worth more than the period),
- * and deductions exceeding gross (the carryover credit).
+ * and deductions exceeding gross.
+ *
+ * `+ uncollected` USED TO BE PART OF THIS IDENTITY (removed with FIN-053). The component columns
+ * once stored the full computed deduction while the total was capped at gross, so the document
+ * had to credit the shortfall back to avoid resolving to a large negative against a net of zero.
+ * The columns now store what was collected, so the correction is gone at the source. `uncollected`
+ * is still asserted below — it must still be REPORTED — but it must no longer be ADDED, and the
+ * shortfall test guards exactly that: adding it back now would overstate net by the carryover.
  *
  * Also guarded: the employer's counterpart contributions are remittance data, not the
  * employee's, and must not reach them.
@@ -136,7 +143,7 @@ class PayslipDocumentTest extends HrTestCase
 
         $this->assertEqualsWithDelta(
             $doc['net_pay'],
-            $t['compensation'] - $t['deductions'] - $t['government'] + $t['uncollected'],
+            $t['compensation'] - $t['deductions'] - $t['government'],
             0.01,
             'The payslip does not add up to its own net pay.',
         );
@@ -203,9 +210,10 @@ class PayslipDocumentTest extends HrTestCase
     }
 
     /**
-     * Deductions bigger than pay. `total_deductions` is capped at gross, so without crediting
-     * the uncollected remainder back the document would resolve to a large negative number
-     * against a net pay of zero.
+     * Deductions bigger than pay. The cap is now allocated across the individual obligations
+     * (FIN-053), so every figure the document shows is what was actually collected and the
+     * identity closes on its own. The shortfall is still disclosed, and itemised by obligation
+     * so the employee can see WHICH deduction went unpaid rather than one opaque total.
      */
     public function test_a_payslip_whose_deductions_exceed_pay_still_reconciles(): void
     {
@@ -221,6 +229,16 @@ class PayslipDocumentTest extends HrTestCase
         $this->assertEqualsWithDelta(0.0, $doc['net_pay'], 0.01);
         $this->assertGreaterThan(0.0, $doc['totals']['uncollected']);
         $this->assertReconciles($doc);
+
+        // FIN-053 — the shortfall says which obligation it belongs to. The ₱50,000 benefit share
+        // is last in the priority order, so it is what goes unpaid.
+        $this->assertArrayHasKey('other_deductions', $doc['totals']['uncollected_breakdown']);
+        $this->assertEqualsWithDelta(
+            $doc['totals']['uncollected'],
+            array_sum($doc['totals']['uncollected_breakdown']),
+            0.01,
+            'the itemised shortfall must account for the whole carryover',
+        );
     }
 
     /** Enrol the employee in an allowance programme — the Slice B1 source of truth. */

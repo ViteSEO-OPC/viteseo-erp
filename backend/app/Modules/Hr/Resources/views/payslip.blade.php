@@ -266,18 +266,38 @@
     </tr>
 </table>
 
-{{-- Credited back so the document reconciles: this much was never taken. --}}
+{{--
+    Disclosure, NOT a term in the total (FIN-053). The government and deduction figures above are
+    now what was actually collected, so this is no longer credited back — it is shown because the
+    employee is entitled to know a deduction they owe went unpaid, and which one.
+--}}
 @if ($t['uncollected'] > 0)
     <div class="note">
         <table>
             <tr>
                 <td>
-                    <div style="font-weight: bold;">Uncollected this period</div>
+                    <div style="font-weight: bold;">Not collected this period</div>
                     <div class="muted" style="font-size: 10px; padding-top: 2px;">
                         Pay did not cover the full deductions, so this amount was not taken.
+                        The figures above show what was collected.
+                        @if (! empty($t['uncollected_breakdown']))
+                            @php
+                                $labels = [
+                                    'sss' => 'SSS',
+                                    'philhealth' => 'PhilHealth',
+                                    'pagibig' => 'Pag-IBIG',
+                                    'withholding_tax' => 'Withholding Tax',
+                                    'other_deductions' => 'Other Deductions',
+                                ];
+                            @endphp
+                            <br>
+                            @foreach ($t['uncollected_breakdown'] as $key => $amount)
+                                {{ $labels[$key] ?? $key }} {{ $amt($amount) }}@if (! $loop->last) · @endif
+                            @endforeach
+                        @endif
                     </div>
                 </td>
-                <td class="amt" style="font-weight: bold;">+ {{ $amt($t['uncollected']) }}</td>
+                <td class="amt" style="font-weight: bold;">{{ $amt($t['uncollected']) }}</td>
             </tr>
         </table>
     </div>

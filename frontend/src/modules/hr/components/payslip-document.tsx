@@ -5,7 +5,16 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
 import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
-import type { Payslip, PayslipLine } from "@/modules/hr/types/payroll";
+import type { Payslip, PayslipDeductionKey, PayslipLine } from "@/modules/hr/types/payroll";
+
+/** Column name → what the employee should see it called. */
+const DEDUCTION_LABELS: Record<PayslipDeductionKey, string> = {
+  sss: "SSS",
+  philhealth: "PhilHealth",
+  pagibig: "Pag-IBIG",
+  withholding_tax: "Withholding Tax",
+  other_deductions: "Other Deductions",
+};
 
 /**
  * The payslip, as a document. One component for all three audiences: the employee's own page,
@@ -204,16 +213,29 @@ export function PayslipDocument({
           </Table>
         </div>
 
+        {/*
+          Disclosure, not a term in the total (FIN-053). The figures above are what was actually
+          collected, so this is no longer credited back — it is shown because the employee is
+          entitled to know a deduction they owe went unpaid, and which one.
+        */}
         {t.uncollected > 0 && (
           <div className="flex items-center justify-between gap-4 rounded-lg border border-warning bg-warning-subtle px-4 py-3">
             <div>
-              <p className="text-sm font-semibold">Uncollected this period</p>
+              <p className="text-sm font-semibold">Not collected this period</p>
               <p className="text-caption text-muted-foreground">
-                Pay did not cover the full deductions, so this amount was not taken.
+                Pay did not cover the full deductions, so this amount was not taken. The figures
+                above show what was collected.
               </p>
+              {Object.keys(t.uncollected_breakdown ?? {}).length > 0 && (
+                <p className="text-caption text-muted-foreground pt-1">
+                  {Object.entries(t.uncollected_breakdown)
+                    .map(([key, value]) => `${DEDUCTION_LABELS[key as PayslipDeductionKey] ?? key} ${amount(value)}`)
+                    .join(" · ")}
+                </p>
+              )}
             </div>
             <p className="shrink-0 font-mono text-sm font-bold tabular-nums">
-              + {amount(t.uncollected)}
+              {amount(t.uncollected)}
             </p>
           </div>
         )}

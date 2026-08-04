@@ -49,8 +49,42 @@ class StatutoryOverrideTest extends HrTestCase
         ]);
     }
 
+    /**
+     * The employee has to actually be PAID for any of this to mean anything.
+     *
+     * Without attendance every workday is unpaid, base pay is ₱0, and gross cannot cover the
+     * contributions. Before FIN-053 that still left the component columns holding their full
+     * computed values, so `$slip->sss` read ₱675 on a payslip that withheld nothing — and these
+     * assertions passed against a figure no one was ever charged. Now the columns hold what was
+     * collected, so a zero-gross fixture would prove only that ₱0 == ₱0.
+     *
+     * Same reasoning as `PayrollRunLockTest::workedEveryDay()`, which documents the trap.
+     */
+    private function workedEveryDay(): void
+    {
+        $tz = config('app.timezone_local');
+        $end = \Carbon\Carbon::parse('2026-03-15', $tz);
+
+        for ($d = \Carbon\Carbon::parse('2026-03-01', $tz); $d->lte($end); $d->addDay()) {
+            if ($d->isWeekend()) {
+                continue;
+            }
+
+            \App\Modules\Hr\Models\Attendance::create([
+                'employee_id' => $this->employee->id,
+                'work_date' => $d->toDateString(),
+                'time_in' => \Carbon\Carbon::parse("{$d->toDateString()} 08:00", $tz)->utc(),
+                'time_out' => \Carbon\Carbon::parse("{$d->toDateString()} 17:00", $tz)->utc(),
+                'status' => 'present', 'lunch_minutes' => 60, 'break_minutes' => 0,
+                'source' => \App\Modules\Hr\Models\Attendance::SOURCE_MANUAL,
+            ]);
+        }
+    }
+
     private function payslip(): \App\Modules\Hr\Models\Payslip
     {
+        $this->workedEveryDay();
+
         return app(PayrollService::class)
             ->run('2026-03-01', '2026-03-15', 'semi_monthly', User::factory()->create())
             ->payslips()->firstOrFail();

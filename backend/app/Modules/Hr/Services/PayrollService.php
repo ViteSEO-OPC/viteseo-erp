@@ -549,6 +549,23 @@ class PayrollService
         $deductionCarryover = round(max(0, $totalDeductions - $gross), 2);
         $totalDeductions = round(min($totalDeductions, $gross), 2);
 
+        // FIN-053 — and now say WHICH obligation went short. Capping the total while leaving the
+        // components at their computed values made the payslip disagree with itself, and the
+        // remittance report sums those components straight out of the table: it reported more
+        // withheld than was ever taken. Allocate the cap across them so the parts sum to the total.
+        $allocation = $this->allocateDeductionCap(
+            ['sss' => $sss, 'philhealth' => $philhealth, 'pagibig' => $pagibig, 'withholding_tax' => $wht, 'other_deductions' => $otherTotal],
+            $gross,
+            $deductionCarryover,
+        );
+        ['collected' => $collected, 'uncollected' => $uncollected] = $allocation;
+
+        $sss = $collected['sss'];
+        $philhealth = $collected['philhealth'];
+        $pagibig = $collected['pagibig'];
+        $wht = $collected['withholding_tax'];
+        $otherTotal = $collected['other_deductions'];
+
         return [
             'base_salary' => round($basePay, 2),
             'reimbursements' => round($reimb, 2),
@@ -586,10 +603,87 @@ class PayrollService
             'total_deductions' => $totalDeductions,
             // What couldn't be taken because gross wasn't enough to cover it (item 1).
             'deduction_carryover' => $deductionCarryover,
+            // FIN-053 — the same figure split by obligation, so the arrears can be named. Null
+            // when nothing went short, which is the overwhelming majority of payslips.
+            'deduction_carryover_breakdown' => $uncollected ?: null,
             // round() last so this is always a float — max(0, …) returns int 0 on an
             // exact zero, which made net_pay the only money field with a shifting type.
             'net_pay' => round(max(0, $gross - $totalDeductions), 2),
         ];
+    }
+
+    /**
+     * Split a capped deduction total across the obligations it is made of (FIN-053).
+     *
+     * When gross cannot cover everything owed, something goes uncollected — the question is WHAT,
+     * and until now the payslip had no answer. It capped the total and left every component at its
+     * computed value, so the parts summed to more than the whole and the remittance report summed
+     * the parts.
+     *
+     * PRIORITY ORDER: statutory contributions → withholding tax → benefit shares. The statutory
+     * three come first because they are the employee's own entitlement record — a missed SSS month
+     * is a gap in their pension history, not just an unpaid bill — and benefit shares come last
+     * because they are the only voluntary item in the list. Within the statutory three the order is
+     * SSS, PhilHealth, Pag-IBIG, which is arbitrary but fixed: they are all mandatory and nothing
+     * distinguishes them, so what matters is that the answer is deterministic and stated, rather
+     * than falling out of whatever order the array happened to be built in.
+     *
+     * Loans are NOT here. They are collected after the payslip against remaining net
+     * (`LoanService::collectForPeriod()`), which already takes min(instalment, balance, net) and
+     * carries the rest on the loan ledger — a shortfall there is already tracked, and is the one
+     * case the original "leave it on the balance" convention actually handled.
+     *
+     * A NEGATIVE COMPONENT IS NOT A DEDUCTION. `withholding_tax` goes negative on the December
+     * true-up, where the year over-withheld and the payslip carries a refund (FIN-028). A refund
+     * ADDS to what is available, so negatives are honoured in full and folded into the pool rather
+     * than competing for it. Allocating them like deductions would zero the refund to "afford" a
+     * contribution — taking money the employee is owed to pay a bill they also owe, silently.
+     *
+     * @param  array<string, float>  $components  obligation => computed amount
+     * @param  float  $gross  the ceiling on what can be taken
+     * @param  float  $carryover  the aggregate shortfall already computed by the caller
+     * @return array{collected: array<string, float>, uncollected: array<string, float>}
+     */
+    private function allocateDeductionCap(array $components, float $gross, float $carryover): array
+    {
+        // Nothing went short: every component is collected in full. Returned before any arithmetic
+        // so the ordinary payslip — which is almost all of them — is bit-for-bit what it was
+        // before this method existed, rather than round-tripped through an allocation that can
+        // only reproduce the same numbers.
+        if ($carryover <= 0) {
+            return ['collected' => $components, 'uncollected' => []];
+        }
+
+        // Refunds and any other negative are honoured whole and increase what is available.
+        $pool = $gross;
+        foreach ($components as $amount) {
+            if ($amount < 0) {
+                $pool -= $amount; // subtracting a negative — the refund enlarges the pool
+            }
+        }
+
+        $collected = [];
+        $uncollected = [];
+
+        foreach ($components as $key => $amount) {
+            if ($amount <= 0) {
+                $collected[$key] = $amount;
+
+                continue;
+            }
+
+            $take = round(min($amount, max(0, $pool)), 2);
+            $short = round($amount - $take, 2);
+
+            $collected[$key] = $take;
+            if ($short > 0) {
+                $uncollected[$key] = $short;
+            }
+
+            $pool = round($pool - $take, 2);
+        }
+
+        return ['collected' => $collected, 'uncollected' => $uncollected];
     }
 
     /**
@@ -1219,6 +1313,7 @@ class PayrollService
                         'other_deductions' => 0, 'other_deductions_breakdown' => [],
                         'total_deductions' => $row['tax'],
                         'deduction_carryover' => 0,
+                        'deduction_carryover_breakdown' => null,
                         'net_pay' => $row['net'],
                         'status' => 'computed',
                     ],
@@ -1376,6 +1471,7 @@ class PayrollService
                         'other_deductions' => 0, 'other_deductions_breakdown' => [],
                         'total_deductions' => $tax,
                         'deduction_carryover' => 0,
+                        'deduction_carryover_breakdown' => null,
                         'net_pay' => round($amount - $tax, 2),
                         'status' => 'computed',
                     ],
