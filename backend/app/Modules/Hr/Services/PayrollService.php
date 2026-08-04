@@ -414,7 +414,10 @@ class PayrollService
         return [
             'version' => self::SNAPSHOT_VERSION,
             'captured_at' => now()->toIso8601String(),
-            'attendance_policy' => $this->attendancePolicy->get()
+            // asOf(), not get(): the snapshot must record the rules that PRICED this run, and
+            // since the policy became dated those are the ones in force at the cycle end — not
+            // whatever the singleton says at the moment the snapshot is written.
+            'attendance_policy' => $this->attendancePolicy->asOf($cycleEnd)
                 ->only(array_keys(AttendancePolicyService::DEFAULTS)),
             // Slice B3a — the dated rate versions actually in force for this cycle. The
             // `contributions` block below is the enrolment config; this is what priced it.
@@ -1446,7 +1449,12 @@ class PayrollService
             $holidayMap = $this->holidays->typedHolidaysBetween(Carbon::parse($cycleStart), Carbon::parse($cycleEnd));
 
             // The attendance policy drives the daily-rate basis (Slice A) — fetch once, reuse.
-            $policy = $this->attendancePolicy->get();
+            //
+            // asOf($cycleEnd), not get(): the rules as they stood at the END OF THIS CYCLE, the
+            // same resolution date salary (13c), the statutory rates (B3a) and allowances (B11)
+            // already use. Before this, re-running any cycle that was not locked or disbursed
+            // repriced it with today's divisor and today's deduction modes.
+            $policy = $this->attendancePolicy->asOf($cycleEnd);
 
             // Slice 13c — the salary each employee was actually on during this period.
             $salaryAsOf = $this->salariesAsOf($employees, $cycleEnd);
@@ -1512,7 +1520,13 @@ class PayrollService
                 $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $cycleStart, $cycleEnd);
                 // Management staff are on a FIXED salary — the unpaidDaysDetailFor()/holidayPremiumFor()
                 // helpers themselves return 0 for management, so pay is never prorated by attendance.
-                $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd);
+                // $policy is passed EXPLICITLY. It always accepted one (the preview/dry-run
+                // override, step 6b) and this call never supplied it, so the late and undertime
+                // deductions re-read the live singleton instead of the policy resolved above.
+                // That was invisible while the two were always the same object; now that the
+                // policy is dated, omitting it would price every deduction at today's rules and
+                // silently defeat asOf() for the one part of the payslip it matters most to.
+                $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd, $policy);
 
                 // Premium for working on a (non-working) holiday in this cycle.
                 $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);

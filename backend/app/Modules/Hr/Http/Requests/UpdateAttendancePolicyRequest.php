@@ -21,6 +21,12 @@ class UpdateAttendancePolicyRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // The date this save counts from. Not a policy field — it dates the VERSION payroll
+            // resolves against, so a cycle that ended before it keeps the old rules. Absent
+            // means today. Back-dated deliberately when correcting a cycle already run; no
+            // upper bound, because scheduling a rise ahead of time is legitimate too.
+            'effective_from' => ['sometimes', 'nullable', 'date'],
+
             'monthly_late_reset' => ['sometimes', 'boolean'],
             // Per-time charging only. The per-N-lates penalty is now its own independent
             // switch (`late_penalty_enabled`), so the two can be combined.

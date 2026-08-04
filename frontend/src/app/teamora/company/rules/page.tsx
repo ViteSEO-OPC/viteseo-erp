@@ -31,6 +31,8 @@ import {
   type WorkSchedule,
 } from "@/modules/hr/types/rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { manilaToday } from "@/modules/hr/lib/manila-date";
 
 export default function RulesPage() {
   const { data: schedules, isLoading, isError } = useWorkSchedules();
@@ -344,12 +346,20 @@ function AttendancePolicyEditor() {
   // Which card is currently saving (so only its button shows a spinner).
   const [saving, setSaving] = useState<string | null>(null);
 
+  // The date this save counts from. Payroll resolves the rules in force at a cycle's END, so
+  // today (the default) reaches the open cycle and every future one, but never a cycle that has
+  // already closed. Back-dating is how HR corrects a cycle that has already been run — without
+  // it, a fix typed after the cycle ended could never reach the payslips it was meant to fix.
+  const [effectiveFrom, setEffectiveFrom] = useState(manilaToday);
+
   // Save just ONE card's fields (partial update — the API only touches keys it's sent).
   async function saveCard(key: string, fields: Record<string, unknown>, guard?: () => boolean) {
     if (guard && !guard()) return;
     setSaving(key);
     try {
-      await update.mutateAsync(fields);
+      // Every card's save carries the date. The server versions the WHOLE policy row, so the
+      // date applies to all the rules as they stand after this save, not only this card's.
+      await update.mutateAsync({ ...fields, effective_from: effectiveFrom });
       toast.success("Saved");
     } catch {
       toast.error("Could not save.");
@@ -542,6 +552,43 @@ function AttendancePolicyEditor() {
 
   return (
     <div className="w-full overflow-hidden rounded-card border border-border bg-card">
+      {/* HOW FAR A SAVE ON THIS PAGE REACHES. Stated ONCE, at the top, rather than repeated on
+          each money-moving card: every rule here is read live by PayrollService at compute time
+          (there is no effective-date on the attendance policy, unlike allowances and salary), so
+          the caveat is identical for all of them — and a per-card notice would silently miss
+          whichever card is added next. The cards' own warnings say what a rule DOES; this says
+          which payslips it can still change. */}
+      <div className="space-y-4 border-b border-border p-6">
+        <div className="rounded-lg border border-warning bg-warning-subtle p-3">
+          <p className="text-xs text-foreground">
+            <strong>A change here reaches the whole of any cycle it applies to — it is not split
+            at the date you save it.</strong>{" "}
+            Payroll prices each cycle using the rules in force on its <strong>last day</strong>,
+            so saving today reaches the cycle that is still open and every cycle after it. Cycles
+            that have already ended keep the rules they were run under. A <strong>locked</strong>{" "}
+            run and an already-<strong>disbursed</strong> payslip can never be repriced at all.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex items-center">
+            <Label htmlFor="pol-effective-from" className="mr-4">
+              Effective from
+            </Label>
+            <DatePicker
+              id="pol-effective-from"
+              value={effectiveFrom}
+              onChange={setEffectiveFrom}
+              className="w-44"
+            />
+          </div>
+          <Hint className="max-w-xl">
+            Leave as today unless you are correcting a cycle that has already been run — then set
+            it to a date inside that cycle and re-run payroll. This dates <strong>every</strong>{" "}
+            rule on this page as it stands when you save, not only the card you save.
+          </Hint>
+        </div>
+      </div>
+
       {/* Violation flags — the colour ladder HR sets. Uses the same four alert levels as
           the Attendance modal legend (Low/Informational → Caution → Warning → Critical).
           Disciplinary only; never pay. */}
@@ -1164,8 +1211,8 @@ function PolicySection({
   );
 }
 
-function Hint({ children }: { children: ReactNode }) {
-  return <p className="text-xs text-muted-foreground">{children}</p>;
+function Hint({ children, className }: { children: ReactNode; className?: string }) {
+  return <p className={cn("text-xs text-muted-foreground", className)}>{children}</p>;
 }
 
 // Subsection heading inside a combined policy card.

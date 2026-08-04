@@ -64,12 +64,24 @@ class AllowanceHistoryTest extends HrTestCase
 
     private function allowanceOn(string $cycleEnd): float
     {
+        return $this->allowanceForCycle(substr($cycleEnd, 0, 8) . '01', $cycleEnd);
+    }
+
+    /**
+     * The allowance paid on an ARBITRARY cycle — needed for the semi-monthly case, where the
+     * cycle does not start on the 1st and `allowanceOn()`'s month assumption does not hold.
+     *
+     * @param  int  $periodsPerYear  24 = semi-monthly, 12 = monthly. Payroll divides the monthly
+     *                               allowance by this, so it decides what the expected peso figure is.
+     */
+    private function allowanceForCycle(string $cycleStart, string $cycleEnd, int $periodsPerYear = 12): float
+    {
         return app(PayrollService::class)->payslipFor(
             employee: $this->employee->fresh(),
-            reimb: 0.0, unpaidDays: 0.0, periodsPerYear: 12, workingDaysInPeriod: 21,
+            reimb: 0.0, unpaidDays: 0.0, periodsPerYear: $periodsPerYear, workingDaysInPeriod: 21,
             dist: [
                 'index' => 0, 'count' => 1, 'deduction_timing' => 'every', 'tax_timing' => 'every',
-                'cycle_start' => substr($cycleEnd, 0, 8) . '01', 'cycle_end' => $cycleEnd,
+                'cycle_start' => $cycleStart, 'cycle_end' => $cycleEnd,
                 'other_benefits_annual_cap' => 90000,
             ],
         )['allowances'];
@@ -109,6 +121,68 @@ class AllowanceHistoryTest extends HrTestCase
 
         $this->assertSame(2000.0, $this->allowanceOn('2026-09-30'));
         $this->assertSame(5000.0, $this->allowanceOn('2026-10-31'));
+    }
+
+    // --- a change dated INSIDE the open cycle -------------------------------------------
+
+    /**
+     * THE MID-CYCLE CASE, pinned deliberately rather than left emergent.
+     *
+     * The three tests above all move an allowance BETWEEN cycles, which is the easy half. The
+     * common real case is HR raising an allowance on the 29th while the 16–31 cutoff is still
+     * open, and nothing asserted what that does. It is not a gap in the code — it is a gap in
+     * what the code was ever asked to promise.
+     *
+     * The promise: pricing resolves at the CYCLE END and nowhere else, so a version dated any
+     * day on or before the 31st prices the ENTIRE 16–31 period. Deliberately NOT day-weighted:
+     * an allowance is a fixed monthly benefit, not something earned per day (the same reasoning
+     * that keeps absence proration off it — see PayrollService::payslipFor). Splitting it at the
+     * save date would also make the figure depend on the hour HR happened to click Save.
+     */
+    public function test_a_rise_dated_inside_the_open_cycle_prices_the_whole_cycle(): void
+    {
+        $program = $this->allowance(2000);
+
+        // HR raises it on the 29th — three days before the 16–31 cutoff ends.
+        app(BenefitProgramService::class)->update($program, [
+            'amount' => 3000, 'effective_from' => '2026-07-29',
+        ]);
+
+        // ₱3,000/month ÷ 24 semi-monthly periods = ₱1,500 — the FULL new rate for the period,
+        // including the 16th–28th, which fell before the rise.
+        $this->assertSame(
+            1500.0,
+            $this->allowanceForCycle('2026-07-16', '2026-07-31', 24),
+            'A rise dated inside the cycle applies to the whole cycle, not just from its date.',
+        );
+
+        // Guards the intent rather than restating the line above: 1093.75 is what a day-weighted
+        // split would pay (13 days at ₱2,000 + 3 days at ₱3,000, over 16 days). If proration by
+        // effective date is ever introduced, this is the assertion that should be rewritten
+        // consciously — not the one above, which would fail looking like an arithmetic slip.
+        $this->assertNotSame(
+            1093.75,
+            $this->allowanceForCycle('2026-07-16', '2026-07-31', 24),
+            'The allowance must not be day-weighted across its effective date.',
+        );
+    }
+
+    /** The mirror: the SAME rise must not reach the cutoff that closed before it. */
+    public function test_a_rise_dated_inside_one_cycle_does_not_reach_the_earlier_cutoff(): void
+    {
+        $program = $this->allowance(2000);
+
+        app(BenefitProgramService::class)->update($program, [
+            'amount' => 3000, 'effective_from' => '2026-07-29',
+        ]);
+
+        // 1–15 ended on the 15th, two weeks before the rise: still ₱2,000/month ÷ 24 = ₱1,000.
+        // This is what makes re-running the first cutoff safe after a mid-month raise.
+        $this->assertSame(
+            1000.0,
+            $this->allowanceForCycle('2026-07-01', '2026-07-15', 24),
+            'The earlier cutoff closed before the rise and must keep the old amount.',
+        );
     }
 
     // --- what is and is not a new price -----------------------------------------------

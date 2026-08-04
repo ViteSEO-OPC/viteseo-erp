@@ -143,6 +143,17 @@ export interface AttendancePolicy {
   task_format: { require_english?: boolean; uppercase?: boolean };
 }
 
+/**
+ * What a save to Company → Rules sends. WRITE-ONLY: `effective_from` is not part of the policy
+ * resource, it dates the version payroll resolves against, so it is deliberately absent from
+ * `AttendancePolicy` above — reading the policy back never returns it.
+ *
+ * Omitted means today. Set it to a date inside a cycle that has already been run to correct
+ * that cycle; payroll prices each cycle on the rules in force on its last day.
+ */
+export type AttendancePolicyUpdate = Partial<Omit<AttendancePolicy, "id">> & {
+  effective_from?: string;
+};
 
 export interface EffectiveSchedule {
   workdays: number[];

@@ -3,10 +3,21 @@
 namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\AttendancePolicy;
+use App\Modules\Hr\Models\AttendancePolicyVersion;
 
 /**
  * The single attendance-policy row (Company → Rules). Slice 16's violation engine
  * reads these thresholds; the task-format rule governs the time-in task checklist.
+ *
+ * TWO WAYS TO READ IT, and the distinction is what stops payroll drifting:
+ *
+ *   get()          the rules as they stand NOW. Everything live wants this — clock-in gating,
+ *                  the geofence, violation flags, the overtime approval rate.
+ *   asOf($date)    the rules as they stood on $date. PAYROLL ONLY, always the cycle end, so
+ *                  re-running an old cycle cannot reprice it with today's divisor.
+ *
+ * Anything that answers "what happens if I clock in right now?" must stay on get(). Anything
+ * that answers "what was this period worth?" must use asOf().
  */
 class AttendancePolicyService
 {
@@ -121,6 +132,60 @@ class AttendancePolicyService
     }
 
     /**
+     * The rules in force on $date — the latest version dated on or before it.
+     *
+     * Payroll passes the CYCLE END, matching salariesAsOf() (13c), the contribution versions
+     * (B3a) and allowance pricing (B11): one resolution date for the whole period, so a cycle
+     * is never priced under two different rulebooks. A change dated inside the open cycle
+     * therefore prices the WHOLE cycle, which is the same promise allowances make.
+     *
+     * Null $date means "now" and returns the live singleton, so a caller that has no cycle in
+     * hand (every screen, every clock-in) is unaffected by any of this.
+     *
+     * The returned model is READ-ONLY in practice: it is rehydrated from the stored payload and
+     * is not the singleton, so saving it would not write the policy back. Nothing does.
+     *
+     * @param  ?string  $date  Manila calendar date (Y-m-d)
+     */
+    public function asOf(?string $date = null): AttendancePolicy
+    {
+        if ($date === null) {
+            return $this->get();
+        }
+
+        if (isset($this->asOfMemo[$date])) {
+            return $this->asOfMemo[$date];
+        }
+
+        $version = AttendancePolicyVersion::query()
+            ->whereDate('effective_from', '<=', $date)
+            ->orderByDesc('effective_from')
+            ->orderByDesc('id')
+            ->first();
+
+        // No version on or before the date. The migration backfills an opening row at
+        // 2000-01-01 so this should be unreachable, but a run must never fail — and pricing at
+        // today's rules is exactly the behaviour that existed before this feature, so falling
+        // back here can only ever be as wrong as the old code was.
+        if ($version === null) {
+            return $this->asOfMemo[$date] = $this->get();
+        }
+
+        // newFromBuilder(), NOT new/forceFill(): the payload is in database shape, so the casts
+        // must apply on the way OUT only. Filling would re-encode every array column.
+        // It is an instance method, hence the throwaway model to call it on.
+        return $this->asOfMemo[$date] = (new AttendancePolicy)->newFromBuilder($version->payload);
+    }
+
+    /**
+     * Per-request memo, keyed by date. A payroll run resolves one date for every employee, so
+     * this is the same saving `get()`'s memo makes — see Slice 15.
+     *
+     * @var array<string, AttendancePolicy>
+     */
+    private array $asOfMemo = [];
+
+    /**
      * The violation colour ladder, with a null column meaning "today's behaviour".
      * ViolationService should read the ladder through HERE, never off the column, so a
      * policy row predating the feature can never yield an empty ladder (= no flags at all).
@@ -164,17 +229,59 @@ class AttendancePolicyService
         $policy->update($changes);
         $this->memo = $policy; // keep the memo in step with what was just written
 
+        $effectiveFrom = $this->recordVersion($policy, $data['effective_from'] ?? null);
+
         $this->audit->log(
             'updated',
             'Rules',
-            $before === []
+            ($before === []
                 ? 'Attendance rules saved (no changes)'
-                : 'Attendance rules updated: ' . implode(', ', array_keys($before)),
+                : 'Attendance rules updated: ' . implode(', ', array_keys($before)))
+                . " — effective {$effectiveFrom}",
             $policy,
             $before ?: null,
             $after ?: null,
         );
 
         return $policy;
+    }
+
+    /**
+     * Write the dated version an old payroll run will resolve against.
+     *
+     * DEFAULTS TO TODAY, not to the open cycle: rules HR types now are the rules from now, and
+     * back-dating silently would rewrite payslips that have already been computed. HR passes a
+     * date deliberately when correcting a cycle that has already been run — which is the one
+     * workflow versioning would otherwise break, since a fix saved after the cycle ended could
+     * never reach it.
+     *
+     * SAVING TWICE ON ONE DATE UPDATES that version rather than failing on the unique index.
+     * That is the common case twice over here: the Rules page saves one card at a time, so an
+     * HR officer working through three cards on a Tuesday writes Tuesday's version three times,
+     * each carrying the full policy as it stands after that save.
+     *
+     * THE WHOLE ROW IS DATED, so back-dating reaches every rule currently saved, not only the
+     * card being saved. That is inherent to versioning the row rather than the field, and the
+     * Rules page says so next to the date.
+     *
+     * @return string the date the version was written for, for the audit line
+     */
+    private function recordVersion(AttendancePolicy $policy, ?string $effectiveFrom): string
+    {
+        $date = $effectiveFrom ?: now(config('app.timezone_local'))->toDateString();
+
+        // getAttributes() is already in database shape — array columns encoded, booleans as
+        // 0/1 — which is exactly what asOf() expects to rehydrate through newFromBuilder().
+        $payload = $policy->getAttributes();
+        unset($payload['id'], $payload['created_at'], $payload['updated_at']);
+
+        AttendancePolicyVersion::updateOrCreate(
+            ['effective_from' => $date],
+            ['payload' => $payload, 'created_by' => auth()->id()],
+        );
+
+        $this->asOfMemo = [];
+
+        return $date;
     }
 }

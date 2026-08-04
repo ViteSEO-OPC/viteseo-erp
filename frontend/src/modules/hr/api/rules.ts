@@ -3,6 +3,7 @@ import type {
   WorkSchedule,
   WorkScheduleInput,
   AttendancePolicy,
+  AttendancePolicyUpdate,
   EmployeeSchedule,
   EmployeeScheduleInput,
 } from "@/modules/hr/types/rules";
@@ -39,7 +40,7 @@ export async function getAttendancePolicy(): Promise<AttendancePolicy> {
 }
 
 export async function updateAttendancePolicy(
-  input: Partial<Omit<AttendancePolicy, "id">>,
+  input: AttendancePolicyUpdate,
 ): Promise<AttendancePolicy> {
   const res = await apiClient.put("/hr/attendance-policy", input);
   return res.data.data;
