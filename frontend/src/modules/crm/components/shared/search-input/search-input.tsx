@@ -10,6 +10,8 @@ type SearchInputProps = {
   onSubmit?: (value: string) => void;
   placeholder?: string;
   "aria-label"?: string;
+  /** Focus on mount — for the mobile search panel, which opens in response to a deliberate tap. */
+  autoFocus?: boolean;
 };
 
 export function SearchInput({
@@ -19,12 +21,16 @@ export function SearchInput({
   onSubmit,
   placeholder = "Search leads, companies, or contacts…",
   "aria-label": ariaLabel,
+  autoFocus,
 }: SearchInputProps) {
   return (
     <div className={cn("relative", className)}>
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <input
         type="search"
+        // Opt-in only, and only used by the mobile search panel — which exists solely because the
+        // user tapped Search, so focus follows their intent rather than stealing it on load.
+        autoFocus={autoFocus}
         value={value}
         onChange={onChange ? (e) => onChange(e.target.value) : undefined}
         onKeyDown={
