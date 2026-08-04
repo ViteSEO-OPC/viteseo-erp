@@ -89,7 +89,9 @@ class FollowUpScheduler
     {
         $open = PlannerEvent::query()
             ->where('lead_id', $lead->id)
-            ->where('event_type', 'follow-up')
+            // Whole follow-up-work category: once the lead has replied / converted, an open Email or
+            // Call task is just as stale as a generic follow-up.
+            ->followUpWork()
             ->where('status', '!=', 'completed')
             ->get();
 
@@ -100,7 +102,15 @@ class FollowUpScheduler
         return $open->count();
     }
 
-    /** Whether the lead already has a follow-up that has not been completed (the dedupe guard). */
+    /**
+     * Whether the lead already has a follow-up that has not been completed (the dedupe guard).
+     *
+     * DELIBERATELY NARROW — matches `follow-up` exactly and must NOT adopt the shared follow-up-work
+     * category. This guard runs from LeadObserver the moment a cold call is logged, and a cold call
+     * leaves an OPEN `call` event behind (CallSessionService completes it only on a CONNECTED
+     * outcome). Widening the guard would therefore see that event and suppress the very follow-up it
+     * exists to create.
+     */
     private function hasOpenFollowUp(Lead $lead): bool
     {
         return PlannerEvent::query()

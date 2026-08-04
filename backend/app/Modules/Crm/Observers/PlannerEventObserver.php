@@ -45,10 +45,18 @@ class PlannerEventObserver
         if ($event->wasChanged('status') && $event->status === 'completed') {
             $this->log($event, 'planner-event.completed', 'Event completed');
 
-            // RC3 Outreach Automation Pack — a completed FOLLOW-UP is a domain event (FROZEN #6): it
+            // RC3 Outreach Automation Pack — completed FOLLOW-UP WORK is a domain event (FROZEN #6): it
             // feeds the `follow-up.completed` n8n webhook (observability) and the server-side
-            // No-Response Escalation. Only follow-ups escalate; other event types just log completion.
-            if ($event->event_type === 'follow-up') {
+            // No-Response Escalation. Now the whole category ({@see PlannerEvent::scopeFollowUpWork}),
+            // per the PO rule that completed Email/Call follow-up work stays escalation-eligible; `task`
+            // and `consultation` still just log completion.
+            //
+            // PLANNED != PERFORMED is preserved by the trigger, not by the type set: this fires only on
+            // a transition INTO `completed`, so merely scheduling an event can never escalate. What
+            // counts as performing the work stays each channel's own decision — CallSessionService
+            // completes a `call` event only on a CONNECTED outcome, and an `email` task is completed by
+            // an actual send or a deliberate manual Mark Done.
+            if (in_array($event->event_type, PlannerEvent::FOLLOW_UP_WORK_TYPES, true)) {
                 event(new FollowUpCompleted($event));
             }
 

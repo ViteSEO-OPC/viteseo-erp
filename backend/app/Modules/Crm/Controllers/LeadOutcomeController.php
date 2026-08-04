@@ -86,7 +86,10 @@ class LeadOutcomeController extends Controller
         // scheduling logic; this is the same completion path the Planner Board uses.
         PlannerEvent::query()
             ->where('lead_id', $lead->id)
-            ->where('event_type', 'follow-up')
+            // A lost lead is owed no further work through ANY channel, so this closes the whole
+            // follow-up-work category — otherwise an open Email or Call task would outlive the lead
+            // and keep counting as overdue forever.
+            ->followUpWork()
             ->where('status', '!=', 'completed')
             ->get()
             ->each(fn (PlannerEvent $event) => $event->update(['status' => 'completed']));

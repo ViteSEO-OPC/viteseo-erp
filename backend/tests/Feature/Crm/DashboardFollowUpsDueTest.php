@@ -162,12 +162,31 @@ class DashboardFollowUpsDueTest extends TestCase
         $this->assertSame(0, $this->followUpsDue());
     }
 
-    /** Only `follow-up` events count — a meeting or a call is not a follow-up. */
-    public function test_other_planner_event_types_are_excluded(): void
+    /**
+     * The card counts FOLLOW-UP WORK ({@see PlannerEvent::FOLLOW_UP_WORK_TYPES}), not the bare
+     * `follow-up` literal — an Email, Call or Meeting task that is due is work that is due.
+     *
+     * CHANGED DELIBERATELY (PO-approved Model B, Phase 1). This test previously asserted that a
+     * meeting and a call were excluded, which was only correct while Lead Details discarded the BD's
+     * channel choice and stored every follow-up as `follow-up`.
+     */
+    public function test_every_channel_of_follow_up_work_counts(): void
     {
         $bd = $this->user('crm_bd');
         $this->followUp($bd, '2026-08-03 09:00:00', 'todo', ['event_type' => 'meeting']);
         $this->followUp($bd, '2026-08-03 09:00:00', 'todo', ['event_type' => 'call']);
+        $this->followUp($bd, '2026-08-03 09:00:00', 'todo', ['event_type' => 'email']);
+        Sanctum::actingAs($bd);
+
+        $this->assertSame(3, $this->followUpsDue());
+    }
+
+    /** `task` and `consultation` carry their own meaning and stay out of the count. */
+    public function test_tasks_and_consultations_are_excluded(): void
+    {
+        $bd = $this->user('crm_bd');
+        $this->followUp($bd, '2026-08-03 09:00:00', 'todo', ['event_type' => 'task']);
+        $this->followUp($bd, '2026-08-03 09:00:00', 'todo', ['event_type' => 'consultation']);
         Sanctum::actingAs($bd);
 
         $this->assertSame(0, $this->followUpsDue());

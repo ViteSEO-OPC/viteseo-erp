@@ -63,6 +63,38 @@ class PlannerEvent extends Model
 {
     protected $table = 'crm_planner_events';
 
+    /**
+     * FOLLOW-UP WORK — the canonical business category (PO-approved, Model B).
+     *
+     * "Follow-up work" is work a BD owes a lead through some CHANNEL. `event_type` stores the channel;
+     * the category is this set. Both existed before, but every consumer used the bare string
+     * `'follow-up'` as a stand-in for the category — correct only while Lead Details discarded the
+     * BD's channel choice and wrote `follow-up` for all of them.
+     *
+     * `follow-up` stays in the set as the LEGACY/GENERIC member: historical rows whose channel was
+     * never captured, plus FollowUpScheduler's cold-call follow-ups. It is never rewritten and its
+     * channel is never inferred (a title prefix is not evidence).
+     *
+     * EXCLUDED, deliberately:
+     *  - `task` — EscalateUnansweredFollowUp creates these as the OUTPUT of completed follow-up work;
+     *    counting them would let one BD action score twice.
+     *  - `consultation` — a business milestone with its own KPI and its own `outcome` axis (PDR-002).
+     */
+    public const FOLLOW_UP_WORK_TYPES = ['follow-up', 'email', 'call', 'meeting'];
+
+    /**
+     * The "missed follow-ups" slice of {@see self::FOLLOW_UP_WORK_TYPES}.
+     *
+     * Reporting rule: the shared category is the full set, and a bucket narrows it ONLY where a
+     * sibling bucket already reports that channel. `missedCalls` and `missedMeetings` exist, so
+     * folding `call`/`meeting` into `missedFollowUps` would double-count the same overdue row in two
+     * KPIs. No sibling reports `email`, so an overdue Email task belongs here — previously it was
+     * counted nowhere at all.
+     *
+     * The three buckets therefore stay a PARTITION of overdue follow-up work.
+     */
+    public const MISSED_FOLLOW_UP_TYPES = ['follow-up', 'email'];
+
     protected static function newFactory(): PlannerEventFactory
     {
         return PlannerEventFactory::new();
@@ -175,6 +207,26 @@ class PlannerEvent extends Model
                     Lead::where('assigned_to', $user->id)->select('id'),
                 );
         });
+    }
+
+    /**
+     * The single expression of "this event is follow-up work" ({@see self::FOLLOW_UP_WORK_TYPES}).
+     *
+     * Every consumer that MEANS the category calls this instead of matching `event_type` by hand, so
+     * the definition cannot drift the way three hand-written copies of `where('event_type','follow-up')`
+     * could. Pass an explicit subset for a bucket that must stay disjoint from a sibling KPI — e.g.
+     * {@see self::MISSED_FOLLOW_UP_TYPES}.
+     *
+     * NOT used by creation-time logic: FollowUpScheduler's dedupe guard asks a narrower question
+     * ("does a generic follow-up already exist?"), and PlannerEventController routes on the literal
+     * type. Both are deliberately left matching `'follow-up'` exactly.
+     *
+     * @param  Builder<PlannerEvent>  $query
+     * @param  list<string>|null  $types
+     */
+    public function scopeFollowUpWork(Builder $query, ?array $types = null): void
+    {
+        $query->whereIn('event_type', $types ?? self::FOLLOW_UP_WORK_TYPES);
     }
 
     /** Whether the given user may see this event (Admin/SA: all; BD: own or on an owned lead). */
