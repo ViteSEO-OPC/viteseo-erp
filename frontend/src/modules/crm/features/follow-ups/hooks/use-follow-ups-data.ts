@@ -6,7 +6,7 @@ import { useUpdatePlannerEvent } from "@/modules/crm/features/calendar/hooks/use
 import { useLeadDetail } from "@/modules/crm/features/leads/hooks/use-lead-detail";
 import { useEmailTemplates } from "@/modules/crm/features/follow-ups/hooks/use-email-templates";
 import { isPendingOutreachEvent } from "@/modules/crm/features/follow-ups/lib/outreach-pending";
-import { formatBusiness } from "@/modules/crm/lib/timezone";
+import { businessDaysAheadLocalInput, formatBusiness } from "@/modules/crm/lib/timezone";
 import type { PlannerEvent } from "@/modules/crm/features/calendar/types/calendar-types";
 import type {
   FollowUpItem,
@@ -86,7 +86,12 @@ export function useFollowUpsData(leadId?: string) {
 
   const [selectedId, setSelectedId] = useState<string>("");
   const [draft, setDraft] = useState<EmailDraft>(INITIAL_DRAFT);
-  const [scheduler, setScheduler] = useState<SchedulerState>({ enabled: false, datetime: "07/03/2026 09:00 AM" });
+  // Default: tomorrow 09:00 business time. The previous hardcoded "07/03/2026 09:00 AM" was
+  // free text in the past — unparseable by the backend's `date|after:now` rule.
+  const [scheduler, setScheduler] = useState<SchedulerState>(() => ({
+    enabled: false,
+    datetime: businessDaysAheadLocalInput(1, 9),
+  }));
   // The id of the saved draft currently loaded in the composer, or null when composing fresh.
   // Drives whether Save updates-vs-creates and whether Send transitions an existing draft.
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
