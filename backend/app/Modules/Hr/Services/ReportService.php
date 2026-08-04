@@ -378,6 +378,23 @@ class ReportService
     {
         $runs = PayrollRun::where('status', 'completed')->orderByDesc('cycle_start')->get();
         $netYtd = (float) $runs->filter(fn ($r) => (int) $r->cycle_start->format('Y') === $this->year())->sum('total_net');
+
+        // FIN-052 — this figure used to be labelled "Net paid (YTD)" while summing COMPLETED RUNS.
+        // A run reaches `completed` the moment payroll finishes computing it; whether the money
+        // ever left is a separate fact entirely. So the headline number management reads first
+        // asserted cash movement that may not have happened, and a computed-but-unpaid cycle
+        // inflated it by a full period with nothing on the report to say so.
+        //
+        // Split into what was computed and what was actually disbursed. Both are shown, because
+        // each answers a real question — "what did this year's payroll cost" and "what has
+        // actually gone out" — and collapsing them is what caused the problem.
+        $disbursedYtd = (float) Payslip::query()
+            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+            ->where('hr_payslips.status', 'disbursed')
+            ->whereYear('hr_payroll_runs.cycle_start', $this->year())
+            ->sum('hr_payslips.net_pay');
+
+        $awaitingPayment = round($netYtd - $disbursedYtd, 2);
         $latest = $runs->first();
         $costPerHead = $latest && $latest->employee_count > 0
             ? (float) $latest->total_net / $latest->employee_count
@@ -406,7 +423,10 @@ class ReportService
             'description' => 'Run history, gross-to-net, cost per head and government remittance.',
             'mock' => false,
             'summary' => [
-                ['label' => 'Net paid (YTD)', 'value' => $this->peso($netYtd)],
+                // "Computed" and "disbursed" are different claims — see FIN-052 above.
+                ['label' => 'Net computed (YTD)', 'value' => $this->peso($netYtd)],
+                ['label' => 'Net disbursed (YTD)', 'value' => $this->peso($disbursedYtd)],
+                ['label' => 'Awaiting payment', 'value' => $this->peso($awaitingPayment)],
                 ['label' => 'Employer share (YTD)', 'value' => $this->peso($employerYtd)],
                 ['label' => 'Avg cost / head', 'value' => $this->peso($costPerHead)],
                 ['label' => 'Completed runs', 'value' => (string) $runs->count()],
@@ -638,8 +658,10 @@ class ReportService
             'description' => 'Gross-to-net breakdowns, cost per head, benefits coverage, payroll run history for audit.',
             'mock' => false,
             'summary' => [
-                ['label' => 'Gross paid (YTD)', 'value' => $this->peso((float) PayrollRun::where('status', 'completed')->whereYear('cycle_start', $this->year())->sum('total_gross'))],
-                ['label' => 'Net paid (YTD)', 'value' => $this->peso((float) PayrollRun::where('status', 'completed')->whereYear('cycle_start', $this->year())->sum('total_net'))],
+                // FIN-052 — "computed", not "paid". A completed run means payroll finished
+                // calculating; it says nothing about whether the money left. See payroll() above.
+                ['label' => 'Gross computed (YTD)', 'value' => $this->peso((float) PayrollRun::where('status', 'completed')->whereYear('cycle_start', $this->year())->sum('total_gross'))],
+                ['label' => 'Net computed (YTD)', 'value' => $this->peso((float) PayrollRun::where('status', 'completed')->whereYear('cycle_start', $this->year())->sum('total_net'))],
                 ['label' => 'Benefits coverage', 'value' => count($coverage) ? ($coverage[0]['display']) : '—'],
             ],
             'bars' => null,

@@ -25,6 +25,8 @@ import {
   createPaymentBatch,
   getPaymentBatches,
   getPaymentBatch,
+  settlePayment,
+  reconcilePaymentBatch,
 } from "@/modules/hr/api/payroll";
 
 const RUNS_KEY = ["hr", "payroll", "runs"] as const;
@@ -230,6 +232,44 @@ export function useCreatePaymentBatch() {
       qc.invalidateQueries({ queryKey: BATCHES_KEY });
       qc.invalidateQueries({ queryKey: RUNS_KEY });
       qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+    },
+  });
+}
+
+/**
+ * Record what the bank did with one transfer.
+ *
+ * Invalidates payslips and runs as well as batches: settling moves a payslip to `disbursed` and a
+ * failure moves it back, so every view of the run's status is stale afterwards.
+ */
+export function useSettlePayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: Parameters<typeof settlePayment>[1] & { id: number }) =>
+      settlePayment(id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: BATCHES_KEY });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
+    },
+  });
+}
+
+/** Apply (or preview) the bank's return file. Only invalidates when it actually wrote. */
+export function useReconcilePaymentBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file, confirm }: { id: number; file: File; confirm: boolean }) =>
+      reconcilePaymentBatch(id, file, confirm),
+    onSuccess: (result) => {
+      if (!result.applied) return;
+      qc.invalidateQueries({ queryKey: BATCHES_KEY });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
     },
   });
 }

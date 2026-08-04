@@ -199,6 +199,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payment-batches', [PaymentBatchController::class, 'store'])->middleware('throttle:5,1,payment-batch:');
         Route::get('payment-batches/{paymentBatch}', [PaymentBatchController::class, 'show']);
         Route::get('payment-batches/{paymentBatch}/bank-file', [PaymentBatchController::class, 'bankFile'])->middleware('throttle:10,1,bank-file:');
+        // Reconciliation — what the bank says actually happened. The import moves payslips into
+        // `disbursed`, so it previews unless explicitly confirmed.
+        Route::post('payment-batches/{paymentBatch}/reconcile', [PaymentBatchController::class, 'reconcile'])->middleware('throttle:10,1,reconcile:');
+        Route::patch('payments/{payment}', [PaymentBatchController::class, 'settle']);
 
         // Recruitment (HR only).
         Route::get('requisitions', [RecruitmentController::class, 'requisitionsIndex']);

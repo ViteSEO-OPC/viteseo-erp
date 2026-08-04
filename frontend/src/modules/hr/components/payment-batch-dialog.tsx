@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AxiosError } from "axios";
-import { AlertTriangle, Banknote, CheckCircle2, Download, FileWarning } from "lucide-react";
+import { AlertTriangle, Banknote, CheckCircle2, ChevronRight, Download, FileWarning, Upload, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,8 +20,28 @@ import { SimpleSelect } from "@/modules/hr/ui/select";
 import { notify as toast } from "@/core/lib/notify";
 import { formatPeso } from "@/core/lib/format";
 import { downloadBankFile } from "@/modules/hr/api/payroll";
-import { useCreatePaymentBatch, usePaymentBatches } from "@/modules/hr/hooks/use-payroll";
-import type { PaymentBatch, PaymentMethod, PaymentSkipped } from "@/modules/hr/types/payroll";
+import {
+  useCreatePaymentBatch,
+  usePaymentBatch,
+  usePaymentBatches,
+  useReconcilePaymentBatch,
+  useSettlePayment,
+} from "@/modules/hr/hooks/use-payroll";
+import type {
+  Payment,
+  PaymentBatch,
+  PaymentMethod,
+  PaymentSkipped,
+  PaymentStatus,
+} from "@/modules/hr/types/payroll";
+
+/** How each transfer outcome reads, and how loudly. */
+const PAYMENT_TONE: Record<PaymentStatus, "success" | "danger" | "warning" | "neutral"> = {
+  settled: "success",
+  failed: "danger",
+  returned: "warning",
+  pending: "neutral",
+};
 
 /** The exclusion reasons, in the order a person would want to read them. */
 const SKIP_LABELS: Record<keyof PaymentSkipped, string> = {
@@ -67,6 +87,7 @@ export function PaymentBatchDialog({
   const [method, setMethod] = useState<PaymentMethod>("bank_transfer");
   const [notes, setNotes] = useState("");
   const [downloading, setDownloading] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   const { data: batches = [], isLoading } = usePaymentBatches(payrollRunId ?? undefined);
   const create = useCreatePaymentBatch();
@@ -220,15 +241,33 @@ export function PaymentBatchDialog({
                   </p>
                 </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => download(batch)}
-                  disabled={downloading === batch.id}
-                >
-                  <Download className="size-4" />
-                  {downloading === batch.id ? "Preparing…" : "Bank file"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => download(batch)}
+                    disabled={downloading === batch.id}
+                  >
+                    <Download className="size-4" />
+                    {downloading === batch.id ? "Preparing…" : "Bank file"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setExpanded(expanded === batch.id ? null : batch.id)}
+                  >
+                    <ChevronRight
+                      className={`size-4 transition-transform ${expanded === batch.id ? "rotate-90" : ""}`}
+                    />
+                    Transfers
+                  </Button>
+                </div>
+
+                {expanded === batch.id && (
+                  <div className="w-full border-t pt-3">
+                    <BatchTransfers batchId={batch.id} />
+                  </div>
+                )}
               </div>
             ))}
 
@@ -252,5 +291,184 @@ export function PaymentBatchDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The transfers in one batch, and what the bank did with each (FIN-015).
+ *
+ * THIS IS WHERE "PAID" BECOMES A FACT. A batch on its own only says the company intended to pay.
+ * Marking a transfer settled is what moves the payslip to `disbursed`; marking one failed is the
+ * case that was previously invisible — a bounced transfer used to leave the payslip reading paid
+ * with nothing anywhere to contradict it.
+ *
+ * Two ways in, because companies differ: upload the bank's return file, or work down the list by
+ * hand against a statement. Small teams will do the latter and it must not feel like the fallback.
+ */
+function BatchTransfers({ batchId }: { batchId: number }) {
+  const { data, isLoading } = usePaymentBatch(batchId);
+  const settle = useSettlePayment();
+  const reconcile = useReconcilePaymentBatch();
+
+  const [failing, setFailing] = useState<number | null>(null);
+  const [reason, setReason] = useState("");
+
+  async function mark(payment: Payment, status: PaymentStatus, failureReason?: string) {
+    try {
+      await settle.mutateAsync({
+        id: payment.id,
+        status,
+        failure_reason: failureReason ?? null,
+      });
+      toast.success(
+        status === "settled"
+          ? `${payment.employee?.name ?? "Transfer"} confirmed as paid.`
+          : `Recorded as ${status}. The payslip is no longer marked paid.`,
+      );
+      setFailing(null);
+      setReason("");
+    } catch (error) {
+      const message =
+        (error as AxiosError<{ message?: string }>)?.response?.data?.message ??
+        "Could not record that.";
+      toast.error(message);
+    }
+  }
+
+  async function upload(file: File, confirm: boolean) {
+    try {
+      const result = await reconcile.mutateAsync({ id: batchId, file, confirm });
+      const summary = `${result.settled} settled, ${result.failed} failed, ${result.unmatched.length} unmatched`;
+
+      if (!confirm) {
+        toast.info(`Preview — ${summary}. Nothing has changed yet.`, result.unmatched.join(" · "));
+        return;
+      }
+
+      toast.success(`Applied — ${summary}.`);
+      if (result.unmatched.length) {
+        toast.warning(`${result.unmatched.length} row(s) were not applied.`, result.unmatched.join(" · "));
+      }
+    } catch (error) {
+      const message =
+        (error as AxiosError<{ message?: string }>)?.response?.data?.message ??
+        "Could not read that file.";
+      toast.error(message);
+    }
+  }
+
+  if (isLoading) return <p className="text-caption text-muted-foreground">Loading transfers…</p>;
+  if (!data) return null;
+
+  return (
+    <div className="space-y-3">
+      {/*
+        Preview first, apply second — deliberately two clicks. This import moves payslips into
+        `disbursed`, so it should not run on a file nobody has read back.
+      */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Label htmlFor={`recon-${batchId}`} className="text-caption text-muted-foreground">
+          Bank return file:
+        </Label>
+        <input
+          id={`recon-${batchId}`}
+          type="file"
+          accept=".csv,text/csv"
+          className="text-caption max-w-56"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void upload(file, false);
+            e.target.value = "";
+          }}
+        />
+        <span className="text-caption text-muted-foreground">preview, then</span>
+        <Button variant="outline" size="sm" asChild>
+          <label>
+            <Upload className="size-4" />
+            Apply
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void upload(file, true);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </Button>
+      </div>
+
+      <div className="space-y-1">
+        {data.batch.payments?.map((payment) => (
+          <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
+            <div className="min-w-0">
+              <p className="text-caption font-medium">
+                {payment.employee?.name ?? payment.employee?.employee_no ?? `Payment ${payment.id}`}{" "}
+                <Badge tone={PAYMENT_TONE[payment.status]}>{payment.status}</Badge>
+              </p>
+              <p className="text-caption text-muted-foreground">
+                {formatPeso(payment.amount)}
+                {payment.bank_account_masked ? ` · ${payment.bank_account_masked}` : ""}
+                {payment.reference ? ` · ref ${payment.reference}` : ""}
+                {payment.failure_reason ? ` · ${payment.failure_reason}` : ""}
+              </p>
+            </div>
+
+            {payment.status === "pending" && (
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void mark(payment, "settled")}
+                  disabled={settle.isPending}
+                >
+                  <CheckCircle2 className="size-4" />
+                  Paid
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setFailing(failing === payment.id ? null : payment.id)}
+                >
+                  <X className="size-4" />
+                  Failed
+                </Button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* A failure needs a reason — somebody has to chase it, and "failed" tells them nothing. */}
+      {failing !== null && (
+        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-warning bg-warning-subtle px-3 py-2">
+          <div className="min-w-48 flex-1 space-y-1.5">
+            <Label htmlFor="fail-reason">Why did it fail?</Label>
+            <Input
+              id="fail-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. account closed, name mismatch"
+              maxLength={500}
+            />
+          </div>
+          <Button
+            size="sm"
+            disabled={!reason.trim() || settle.isPending}
+            onClick={() => {
+              const payment = data.batch.payments?.find((p) => p.id === failing);
+              if (payment) void mark(payment, "failed", reason.trim());
+            }}
+          >
+            Record failure
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setFailing(null)}>
+            Cancel
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

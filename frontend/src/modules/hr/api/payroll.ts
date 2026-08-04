@@ -13,7 +13,10 @@ import type {
   PaymentBatch,
   PaymentMethod,
   PaymentReconciliation,
+  PaymentReconcileResult,
   PaymentSkipped,
+  PaymentStatus,
+  Payment,
 } from "@/modules/hr/types/payroll";
 
 export async function getPayrollSettings(): Promise<PayrollSettings> {
@@ -250,4 +253,38 @@ export async function getPaymentBatch(
  */
 export function downloadBankFile(id: number, reference: string): Promise<void> {
   return downloadFile(`/hr/payment-batches/${id}/bank-file`, `bank-file-${reference}.csv`);
+}
+
+/** Record what the bank did with one transfer. `settled` is the only outcome that means paid. */
+export async function settlePayment(
+  id: number,
+  input: {
+    status: PaymentStatus;
+    reference?: string | null;
+    settled_at?: string | null;
+    failure_reason?: string | null;
+  },
+): Promise<Payment> {
+  const res = await apiClient.patch(`/hr/payments/${id}`, input);
+  return res.data.data;
+}
+
+/**
+ * Apply the bank's return file to a batch.
+ *
+ * Previews unless `confirm` is set. This import moves payslips into `disbursed` — the assertion
+ * the whole disbursement layer exists to make trustworthy — so it should not run on a file nobody
+ * has read back.
+ */
+export async function reconcilePaymentBatch(
+  id: number,
+  file: File,
+  confirm: boolean,
+): Promise<PaymentReconcileResult> {
+  const form = new FormData();
+  form.append("file", file);
+  if (confirm) form.append("confirm", "1");
+
+  const res = await apiClient.post(`/hr/payment-batches/${id}/reconcile`, form);
+  return res.data.data;
 }

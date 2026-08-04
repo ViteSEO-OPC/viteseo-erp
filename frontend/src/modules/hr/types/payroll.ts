@@ -359,3 +359,13 @@ export interface PaymentReconciliation {
   difference: number;
   unpaid_payslips: number;
 }
+
+/** What a reconciliation file would do (preview) or did (applied). */
+export interface PaymentReconcileResult {
+  applied: boolean;
+  settled: number;
+  failed: number;
+  /** Rows that matched no transfer, or carried a status we refuse to guess at. */
+  unmatched: string[];
+  rows: number;
+}

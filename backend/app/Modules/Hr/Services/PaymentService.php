@@ -7,6 +7,7 @@ use App\Modules\Hr\Models\Payment;
 use App\Modules\Hr\Models\PaymentBatch;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\Payslip;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -27,7 +28,13 @@ use Illuminate\Validation\ValidationException;
  */
 class PaymentService
 {
-    public function __construct(private AuditService $audit) {}
+    public function __construct(
+        private AuditService $audit,
+        // Disbursing a payslip is not a column write — it also settles the reimbursements the
+        // payslip carried, and reversing one puts back the loan instalments it collected. Both
+        // live in PayrollService, and reconciliation has to go through them.
+        private PayrollService $payroll,
+    ) {}
 
     /**
      * Build the batch of payments for a completed run.
@@ -214,8 +221,11 @@ class PaymentService
         $batch->loadMissing(['payments.employee', 'payrollRun']);
 
         $rows = [[
-            'Employee No', 'Employee Name', 'Bank', 'Account Number', 'Account Name',
-            'Account Type', 'Amount', 'Currency', 'Reference', 'Pay Period',
+            // `Payment Ref` is first because it is the column reconciliation matches on. A bank
+            // that echoes a reference field back gives an exact match per transfer; without it the
+            // import has to fall back to guessing from employee number and amount.
+            'Payment Ref', 'Employee No', 'Employee Name', 'Bank', 'Account Number', 'Account Name',
+            'Account Type', 'Amount', 'Currency', 'Batch Reference', 'Pay Period',
         ]];
 
         // Formatted, not concatenated. `cycle_start`/`cycle_end` are date-cast, so string
@@ -228,6 +238,7 @@ class PaymentService
             $employee = $payment->employee;
 
             $rows[] = [
+                $this->paymentRef($payment),
                 $employee?->employee_no,
                 trim(($employee?->user?->name ?? '')) ?: ($employee?->employee_no ?? ''),
                 $payment->bank_name,
@@ -259,6 +270,310 @@ class PaymentService
         }
 
         return CsvWriter::render($rows);
+    }
+
+    /**
+     * Stable per-transfer identifier, e.g. `PB-7-0001-42`.
+     *
+     * Composed rather than stored: it is derived from two immutable values, and a stored copy
+     * would be one more thing that can disagree with them.
+     */
+    public function paymentRef(Payment $payment): string
+    {
+        return ($payment->batch?->reference ?? 'PB') . '-' . $payment->id;
+    }
+
+    /**
+     * Record that one transfer actually cleared — the moment "paid" stops being an assertion.
+     *
+     * This is the ONLY thing in the system entitled to say money moved. It marks the payment
+     * settled with the bank's own reference and date, and flips the payslip to `disbursed`
+     * through `PayrollService::markDone()` rather than writing the column directly, because
+     * disbursing a payslip also settles the reimbursements it carried. Bypassing it would pay
+     * someone's expenses on paper and leave the claims sitting `scheduled` forever.
+     */
+    public function settle(Payment $payment, ?string $reference, ?string $settledAt, User $actor): Payment
+    {
+        if ($payment->status === 'settled') {
+            throw ValidationException::withMessages([
+                'status' => 'This transfer is already settled.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($payment, $reference, $settledAt, $actor) {
+            $payment->update([
+                'status' => 'settled',
+                'reference' => $reference,
+                'settled_at' => $settledAt ? Carbon::parse($settledAt) : now(),
+                'failure_reason' => null,
+            ]);
+
+            $payslip = $payment->payslip;
+
+            // Already disbursed by the manual path, or by an earlier payment on the same payslip
+            // after a re-issue. Either way there is nothing left to flip.
+            if ($payslip && $payslip->status !== 'disbursed') {
+                $this->payroll->markDone($payslip);
+            }
+
+            $this->refreshBatchStatus($payment->batch);
+
+            $this->audit->log(
+                'updated', 'Payment',
+                'Settled ' . $this->paymentRef($payment) . ' — ₱'
+                    . number_format((float) $payment->amount, 2)
+                    . ($reference ? ' (bank ref ' . $reference . ')' : ''),
+                $payment,
+            );
+
+            return $payment->fresh();
+        });
+    }
+
+    /**
+     * Record that a transfer did NOT arrive.
+     *
+     * The half that was completely invisible before: a bounced transfer left the payslip reading
+     * `disbursed` and nothing anywhere said the employee had not been paid. If the payslip was
+     * disbursed on the strength of this payment, it is reopened — money that came back is money
+     * the company still owes, and the payslip has to say so.
+     *
+     * Reopening is best-effort by design. `reopenPayslip()` refuses on a locked run, and that
+     * refusal must not block recording what the bank actually did: the failure is the fact, the
+     * payslip status is bookkeeping that follows it. The reason is captured either way.
+     */
+    public function fail(Payment $payment, string $status, string $reason, User $actor): Payment
+    {
+        if (! in_array($status, Payment::UNSUCCESSFUL, true)) {
+            throw ValidationException::withMessages([
+                'status' => 'A failed transfer is either `failed` or `returned`.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($payment, $status, $reason, $actor) {
+            $payment->update([
+                'status' => $status,
+                'failure_reason' => $reason,
+                'settled_at' => null,
+            ]);
+
+            $payslip = $payment->payslip;
+            $reopened = false;
+
+            if ($payslip && $payslip->status === 'disbursed') {
+                try {
+                    $this->payroll->reopenPayslip($payslip, 'Bank transfer ' . $status . ': ' . $reason);
+                    $reopened = true;
+                } catch (ValidationException) {
+                    // Locked run — see the docblock. Recorded below so it is not silent.
+                }
+            }
+
+            $this->refreshBatchStatus($payment->batch);
+
+            $this->audit->log(
+                'updated', 'Payment',
+                ucfirst($status) . ' ' . $this->paymentRef($payment) . ' — ₱'
+                    . number_format((float) $payment->amount, 2) . ': ' . $reason
+                    . ($payslip && ! $reopened && $payslip->status === 'disbursed'
+                        ? ' — PAYSLIP STILL MARKED DISBURSED: its run is locked, unlock it and reverse the payslip by hand'
+                        : ''),
+                $payment,
+            );
+
+            return $payment->fresh();
+        });
+    }
+
+    /**
+     * Keep the batch's headline status honest about its payments.
+     *
+     * settled  every transfer confirmed
+     * partial  some confirmed, or some bounced — either way it needs a person
+     * exported sent, nothing back yet
+     */
+    public function refreshBatchStatus(?PaymentBatch $batch): void
+    {
+        if (! $batch) {
+            return;
+        }
+
+        $counts = $batch->payments()
+            ->selectRaw('status, COUNT(*) c')
+            ->groupBy('status')
+            ->pluck('c', 'status');
+
+        $total = (int) $counts->sum();
+        $settled = (int) ($counts['settled'] ?? 0);
+        $unsuccessful = (int) ($counts['failed'] ?? 0) + (int) ($counts['returned'] ?? 0);
+
+        $status = match (true) {
+            $total > 0 && $settled === $total => 'settled',
+            $settled > 0 || $unsuccessful > 0 => 'partial',
+            $batch->exported_at !== null => 'exported',
+            default => 'pending',
+        };
+
+        $batch->update(['status' => $status]);
+    }
+
+    /**
+     * Apply the bank's confirmation file to a batch (FIN-015).
+     *
+     * HEADER-MATCHED, NOT POSITIONAL, and parse-first — the same shape as
+     * `ContributionScheduleImporter`, for the same reason: the file comes from outside the system,
+     * a column order nobody promised will eventually change, and silently reading the wrong column
+     * here would mark the wrong people paid.
+     *
+     * `$apply = false` reports exactly what would happen and writes nothing. HR is expected to look
+     * at that first — this import moves payslips into `disbursed`, which is the assertion the whole
+     * slice exists to make trustworthy, so it should not happen on a file nobody has read back.
+     *
+     * MATCHING. `Payment Ref` is the reliable key and is emitted in the bank file for exactly this
+     * purpose. `Employee No` is accepted as a fallback for banks that will not echo an arbitrary
+     * column. A row matching neither is reported as unmatched rather than guessed at.
+     *
+     * @return array{applied: bool, settled: int, failed: int, unmatched: array<int, string>, rows: int}
+     */
+    public function importReconciliation(PaymentBatch $batch, string $csv, bool $apply, User $actor): array
+    {
+        $rows = $this->parseCsv($csv);
+
+        if ($rows === []) {
+            throw ValidationException::withMessages([
+                'file' => 'That file has no rows this import can read. It needs a header line with at least a status column and either `Payment Ref` or `Employee No`.',
+            ]);
+        }
+
+        $payments = $batch->payments()->with('employee')->get();
+        $byRef = $payments->keyBy(fn (Payment $p) => strtolower($this->paymentRef($p)));
+        $byEmployee = $payments->keyBy(fn (Payment $p) => strtolower((string) $p->employee?->employee_no));
+
+        $settled = 0;
+        $failed = 0;
+        $unmatched = [];
+
+        foreach ($rows as $i => $row) {
+            $ref = strtolower(trim((string) ($row['payment ref'] ?? '')));
+            $employeeNo = strtolower(trim((string) ($row['employee no'] ?? '')));
+
+            $payment = ($ref !== '' ? $byRef->get($ref) : null)
+                ?? ($employeeNo !== '' ? $byEmployee->get($employeeNo) : null);
+
+            if (! $payment) {
+                $unmatched[] = 'row ' . ($i + 2) . ': ' . ($ref ?: $employeeNo ?: '(no identifier)');
+
+                continue;
+            }
+
+            $outcome = $this->normaliseStatus((string) ($row['status'] ?? ''));
+
+            if ($outcome === null) {
+                $unmatched[] = 'row ' . ($i + 2) . ': unrecognised status "' . ($row['status'] ?? '') . '"';
+
+                continue;
+            }
+
+            if ($outcome === 'settled') {
+                $settled++;
+
+                if ($apply && $payment->status !== 'settled') {
+                    $this->settle(
+                        $payment,
+                        trim((string) ($row['bank reference'] ?? $row['reference'] ?? '')) ?: null,
+                        trim((string) ($row['settled date'] ?? $row['date'] ?? '')) ?: null,
+                        $actor,
+                    );
+                }
+
+                continue;
+            }
+
+            $failed++;
+
+            if ($apply && $payment->status !== $outcome) {
+                $this->fail(
+                    $payment,
+                    $outcome,
+                    trim((string) ($row['failure reason'] ?? $row['reason'] ?? '')) ?: 'Reported by the bank as ' . $outcome,
+                    $actor,
+                );
+            }
+        }
+
+        if ($apply) {
+            $this->audit->log(
+                'updated', 'PaymentBatch',
+                'Reconciled ' . $batch->reference . ' — ' . $settled . ' settled, ' . $failed
+                    . ' failed, ' . count($unmatched) . ' unmatched',
+                $batch,
+            );
+        }
+
+        return [
+            'applied' => $apply,
+            'settled' => $settled,
+            'failed' => $failed,
+            'unmatched' => $unmatched,
+            'rows' => count($rows),
+        ];
+    }
+
+    /**
+     * Read a CSV into rows keyed by lower-cased header.
+     *
+     * @return array<int, array<string, string>>
+     */
+    private function parseCsv(string $csv): array
+    {
+        $handle = fopen('php://temp', 'r+');
+        // Strip the UTF-8 BOM Excel writes back out, which would otherwise become part of the
+        // first header's name and stop `payment ref` ever matching.
+        fwrite($handle, preg_replace('/^\xEF\xBB\xBF/', '', $csv));
+        rewind($handle);
+
+        $header = fgetcsv($handle, escape: '');
+
+        if ($header === false) {
+            return [];
+        }
+
+        $header = array_map(fn ($h) => strtolower(trim((string) $h)), $header);
+        $rows = [];
+
+        while (($line = fgetcsv($handle, escape: '')) !== false) {
+            if ($line === [null] || $line === []) {
+                continue;
+            }
+
+            $rows[] = array_combine(
+                $header,
+                array_pad(array_slice($line, 0, count($header)), count($header), ''),
+            );
+        }
+
+        fclose($handle);
+
+        return $rows;
+    }
+
+    /**
+     * Map whatever the bank calls it onto our three outcomes.
+     *
+     * Deliberately conservative: anything unrecognised returns null and is reported as unmatched
+     * rather than assumed successful. Guessing "OK" from an unknown word is how a bounced transfer
+     * becomes a paid payslip.
+     */
+    private function normaliseStatus(string $raw): ?string
+    {
+        $value = strtolower(trim($raw));
+
+        return match (true) {
+            in_array($value, ['settled', 'paid', 'success', 'successful', 'completed', 'ok', 'posted'], true) => 'settled',
+            in_array($value, ['returned', 'reversed', 'refunded'], true) => 'returned',
+            in_array($value, ['failed', 'rejected', 'declined', 'error', 'unpaid'], true) => 'failed',
+            default => null,
+        };
     }
 
     /**

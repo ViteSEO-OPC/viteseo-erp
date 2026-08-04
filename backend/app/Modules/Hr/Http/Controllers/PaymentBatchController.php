@@ -3,8 +3,11 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\SettlePaymentRequest;
 use App\Modules\Hr\Http\Requests\StorePaymentBatchRequest;
 use App\Modules\Hr\Http\Resources\PaymentBatchResource;
+use App\Modules\Hr\Http\Resources\PaymentResource;
+use App\Modules\Hr\Models\Payment;
 use App\Modules\Hr\Models\PaymentBatch;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Services\PaymentService;
@@ -76,6 +79,57 @@ class PaymentBatchController extends Controller
             ]])
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * PATCH /api/v1/hr/payments/{payment} — record what the bank did with one transfer.
+     *
+     * The manual path, and the one that will carry most companies: a person reads the bank
+     * statement and marks each line. The file import below is the same operation in bulk.
+     */
+    public function settle(Payment $payment, SettlePaymentRequest $request): JsonResponse
+    {
+        $status = $request->string('status')->toString();
+
+        $updated = $status === 'settled'
+            ? $this->service->settle(
+                $payment,
+                $request->input('reference'),
+                $request->input('settled_at'),
+                $request->user(),
+            )
+            : $this->service->fail(
+                $payment,
+                $status,
+                $request->string('failure_reason')->toString(),
+                $request->user(),
+            );
+
+        return PaymentResource::make($updated->load('employee.user'))->response();
+    }
+
+    /**
+     * POST /api/v1/hr/payment-batches/{paymentBatch}/reconcile — apply the bank's return file.
+     *
+     * Previews by default. This import moves payslips into `disbursed`, which is the assertion the
+     * whole disbursement layer exists to make trustworthy, so it does not happen on a file nobody
+     * has read back: send `confirm=1` once the preview looks right.
+     */
+    public function reconcile(PaymentBatch $paymentBatch, Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => ['required', 'file', 'mimes:csv,txt', 'max:2048'],
+            'confirm' => ['nullable', 'boolean'],
+        ]);
+
+        $result = $this->service->importReconciliation(
+            $paymentBatch,
+            (string) file_get_contents($request->file('file')->getRealPath()),
+            $request->boolean('confirm'),
+            $request->user(),
+        );
+
+        return response()->json(['data' => $result]);
     }
 
     /**
