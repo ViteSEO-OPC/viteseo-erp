@@ -216,6 +216,58 @@ class PayrollThirteenthMonthOverlapTest extends HrTestCase
         $this->assertSame(1, Payslip::where('employee_id', $employee->id)->count());
     }
 
+    // --- FIN-013 -----------------------------------------------------------------------
+
+    /**
+     * ONE BASIS, THREE READERS. The preview dialog, the accrual report and the run itself each
+     * had their own query with a different combination of `type` and `status`, so the figure HR
+     * reviewed, the figure shown before confirming, and the figure actually paid could all differ.
+     *
+     * Both contaminants are present here: a `processing` run (half-written by definition) and a
+     * prior 13th-month run (not basic salary). A correct basis excludes both, so all three
+     * readers must land on 11 months × 30,000 ÷ 12 = 27,500.
+     */
+    public function test_preview_report_and_run_agree_on_the_same_basis(): void
+    {
+        $employee = $this->employee('E-001');
+        $this->payJanToNov($employee);
+
+        // Contaminant 1: a December run still mid-recompute.
+        $processing = PayrollRun::create([
+            'cycle_start' => self::DEC_START, 'cycle_end' => self::DEC_END,
+            'frequency' => 'monthly', 'type' => 'regular', 'status' => 'processing',
+        ]);
+        Payslip::create([
+            'payroll_run_id' => $processing->id, 'employee_id' => $employee->id,
+            'base_salary' => 30000, 'gross' => 30000,
+            'total_deductions' => 0, 'net_pay' => 30000, 'status' => 'computed',
+        ]);
+
+        // Contaminant 2: last year's 13th-month payment, which is not basic salary.
+        $thirteenth = PayrollRun::create([
+            'cycle_start' => self::DEC_START, 'cycle_end' => self::DEC_END,
+            'frequency' => 'thirteenth_month', 'type' => 'thirteenth_month', 'status' => 'completed',
+        ]);
+        Payslip::create([
+            'payroll_run_id' => $thirteenth->id, 'employee_id' => $employee->id,
+            'base_salary' => 0, 'thirteenth_month' => 27500, 'gross' => 27500,
+            'total_deductions' => 0, 'net_pay' => 27500, 'status' => 'disbursed',
+        ]);
+
+        $expected = 27500.0; // 11 × 30,000 ÷ 12
+
+        $payroll = app(PayrollService::class);
+        $preview = collect($payroll->thirteenthMonthPreview(self::YEAR)['rows'])
+            ->firstWhere('employee_id', $employee->id);
+        $report = collect($payroll->thirteenthMonth(self::YEAR))
+            ->firstWhere('employee_id', $employee->id);
+        $ytd = $payroll->ytd($employee, self::YEAR);
+
+        $this->assertSame($expected, (float) $preview['thirteenth_month'], 'preview disagrees');
+        $this->assertSame($expected, (float) $report['thirteenth_month'], 'accrual report disagrees');
+        $this->assertSame($expected, (float) $ytd['thirteenth_month'], 'YTD projection disagrees');
+    }
+
     // --- FIN-012 -----------------------------------------------------------------------
 
     /** A 13th-month payslip that has been paid out must not be rewritten by a re-run. */

@@ -39,6 +39,11 @@ class PayrollController extends Controller
         $setting = PayrollSetting::current();
         $validated = $request->validated();
 
+        // FIN-025 — the effective date governs the VERSION, it is not a settings field. Pulled
+        // out before the diff below so it never appears in the audit line as a changed setting.
+        $effectiveFrom = $validated['effective_from'] ?? null;
+        unset($validated['effective_from']);
+
         // Item 13b.12 — this endpoint wrote NO audit entry at all, despite setting the pay
         // frequency, the deduction/tax timing and the de-minimis ceiling: every one of them
         // changes what lands on a payslip.
@@ -52,6 +57,9 @@ class PayrollController extends Controller
             }
         }
 
+        // FIN-025 — declare the effective date, then save: the model's `updated` hook records the
+        // version, so there is exactly one writer and no way to update without versioning.
+        PayrollSetting::effectiveFrom($effectiveFrom);
         $setting->update($validated);
 
         if ($before !== []) {

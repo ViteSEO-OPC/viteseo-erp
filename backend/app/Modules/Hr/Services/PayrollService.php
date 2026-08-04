@@ -42,6 +42,7 @@ class PayrollService
         private readonly ScheduleService $workSchedule,
         private readonly BenefitDeductionService $benefitDeductions,
         private readonly LoanService $loans,
+        private readonly TaxService $tax,
         private readonly AllowanceService $allowances,
     ) {}
 
@@ -496,7 +497,7 @@ class PayrollService
         // caller put into `taxableMonthly` (Slice 10): base pay + all four premium lines, plus
         // any allowance above the de-minimis ceiling. Reimbursements are never in it.
         $annualTaxable = max(0, ($taxableMonthly - ($sssM + $phM + $pgM)) * 12);
-        $monthlyTax = $this->annualWithholdingTax($annualTaxable) / 12;
+        $monthlyTax = $this->annualWithholdingTax($annualTaxable, $dist['cycle_end'] ?? null) / 12;
         $tf = $this->timingFactor($dist['tax_timing'] ?? 'every', $dist['index'] ?? 0, $dist['count'] ?? 1);
         $wht = round($monthlyTax * $tf, 2);
 
@@ -959,18 +960,13 @@ class PayrollService
      * period pay and divide back down, so withholding is correct for ANY pay
      * frequency (weekly, semi-monthly, monthly…) from one table.
      */
-    private function annualWithholdingTax(float $t): float
+    private function annualWithholdingTax(float $t, ?string $asOf = null): float
     {
-        $tax = match (true) {
-            $t <= 250000 => 0,
-            $t <= 400000 => 0.15 * ($t - 250000),
-            $t <= 800000 => 22500 + 0.20 * ($t - 400000),
-            $t <= 2000000 => 102500 + 0.25 * ($t - 800000),
-            $t <= 8000000 => 402500 + 0.30 * ($t - 2000000),
-            default => 2202500 + 0.35 * ($t - 8000000),
-        };
-
-        return round(max(0, $tax), 2);
+        // FIN-027 — the table now comes from `hr_tax_versions`, resolved as of the cycle end, the
+        // same way salaries, statutory rates, allowances and the attendance policy already are.
+        // The brackets used to be a `match (true)` literal here: correct, but undateable, so a
+        // re-run of an old period priced it at today's table and a bracket change needed a deploy.
+        return $this->tax->annualTax($t, $asOf);
     }
 
     /**
@@ -1018,22 +1014,51 @@ class PayrollService
     }
 
     /**
+     * The ONE definition of what a year's 13th-month pay is measured from (FIN-013).
+     *
+     * There were three, and they disagreed. `computeThirteenthMonth()` filtered
+     * `type = 'regular'` but not status, so a run still mid-recompute (`processing`) could
+     * contribute half-written payslips to the figure actually PAID. `thirteenthMonth()` — the
+     * accrual report HR reviews — filtered `status = 'completed'` but not type, so a previous
+     * 13th-month run counted toward the next one. `ytd()` did the same. The number on the report,
+     * the number in the preview dialog and the number paid could all differ, and no two of them
+     * were wrong in the same direction.
+     *
+     * The rule, stated once: **regular runs only** (13th month is not itself basic salary, and
+     * including it compounds on every re-run), **completed runs only** (a `processing` run is
+     * half-written by definition). Philippine law measures the entitlement on total BASIC salary
+     * earned in the year, which is `hr_payslips.base_salary` — attendance-adjusted, and excluding
+     * allowances, premiums and reimbursements.
+     *
+     * Returns a query, not results, so each caller can select what it needs — a per-employee sum,
+     * a grouped report, or the full set — without a second opinion about which rows qualify.
+     */
+    private function thirteenthMonthBasisFor(int $year): \Illuminate\Database\Query\Builder
+    {
+        return DB::table('hr_payslips')
+            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+            ->whereNull('hr_payslips.deleted_at')
+            ->whereNull('hr_payroll_runs.deleted_at')
+            ->where('hr_payroll_runs.type', 'regular')
+            ->where('hr_payroll_runs.status', 'completed')
+            ->whereYear('hr_payroll_runs.cycle_start', $year);
+    }
+
+    /**
      * The arithmetic behind both the preview and the run, so they cannot disagree.
      *
      * @return array<int, array<string, mixed>>
      */
     private function computeThirteenthMonth(int $year, float $cap): array
     {
+        // FIN-027 — 13th month is paid at year end, so it is taxed on the table in force then.
+        $taxAsOf = "{$year}-12-31";
+
         // What the year actually paid, per employee, from the REGULAR runs only — including a
         // 13th-month run's own figures would compound it on a re-run.
-        $ytd = DB::table('hr_payslips')
-            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+        $ytd = $this->thirteenthMonthBasisFor($year)
             ->join('hr_employees', 'hr_payslips.employee_id', '=', 'hr_employees.id')
             ->leftJoin('users', 'hr_employees.user_id', '=', 'users.id')
-            ->whereNull('hr_payslips.deleted_at')
-            ->whereNull('hr_payroll_runs.deleted_at')
-            ->where('hr_payroll_runs.type', 'regular')
-            ->whereYear('hr_payroll_runs.cycle_start', $year)
             ->groupBy('hr_payslips.employee_id', 'users.name')
             ->select('hr_payslips.employee_id', 'users.name')
             ->selectRaw('SUM(hr_payslips.base_salary) AS basic')
@@ -1058,8 +1083,8 @@ class PayrollService
 
             $tax = $excess > 0
                 ? round(
-                    $this->annualWithholdingTax($alreadyTaxed + $excess)
-                        - $this->annualWithholdingTax($alreadyTaxed),
+                    $this->annualWithholdingTax($alreadyTaxed + $excess, $taxAsOf)
+                        - $this->annualWithholdingTax($alreadyTaxed, $taxAsOf),
                     2,
                 )
                 : 0.0;
@@ -1081,7 +1106,8 @@ class PayrollService
     public function runThirteenthMonth(int $year, User $runner): PayrollRun
     {
         return DB::transaction(function () use ($year, $runner) {
-            $setting = PayrollSetting::current();
+            // FIN-025 — the ₱90,000 other-benefits cap as it stood at that year end.
+            $setting = PayrollSetting::asOf("{$year}-12-31");
             $cap = (float) ($setting->other_benefits_annual_cap ?? 0);
 
             // December, but on its own frequency so the unique (start, end, frequency) index can
@@ -1108,6 +1134,10 @@ class PayrollService
                 'frequency' => 'thirteenth_month',
                 'type' => 'thirteenth_month',
                 'status' => 'completed',
+                // FIN-036 — a 13th-month run is paid on a date too, and its payslip says so.
+                'scheduled_pay_date' => Carbon::parse($cycleEnd)
+                    ->addDays((int) ($setting->pay_delay_days ?? 0))
+                    ->toDateString(),
                 'run_at' => now(),
                 'run_by' => $runner->id,
                 'policy_snapshot' => $this->policySnapshot($setting, $cycleEnd),
@@ -1383,8 +1413,18 @@ class PayrollService
     {
         $startedAt = microtime(true);
 
+        // FIN-035 — refuse before anything is written if an active statutory contribution has no
+        // rate version in force for this cycle. Outside the transaction on purpose: this is a
+        // precondition on the request, not a step in the run, and HR should see the reason rather
+        // than a rolled-back run that appears to have done nothing.
+        $this->contributions->assertRatesInForce($cycleEnd);
+
         $run = DB::transaction(function () use ($cycleStart, $cycleEnd, $frequency, $runner) {
-            $setting = PayrollSetting::current();
+            // FIN-025 — the settings IN FORCE for this period, not whatever they are today.
+            // `frequency` drives periodsPerYear (how annual pay is sliced and how the withholding
+            // base is annualised) and the timing settings decide which cutoff carries the monthly
+            // deductions, so reading them live let a re-run of an old cycle silently reprice it.
+            $setting = PayrollSetting::asOf($cycleEnd);
             // Frequency + period length drive per-period pay; month position + timing
             // settings decide which cutoff statutory deductions and tax land on.
             $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
@@ -1443,6 +1483,12 @@ class PayrollService
                         // cycle, which is worse than the bug it was added to fix.
                         'type' => 'regular',
                         'status' => 'processing',
+                        // FIN-036 — stamped once, here. Derived from the delay in force NOW, then
+                        // frozen: changing pay_delay_days later must not move the date on a
+                        // payslip an employee is already holding.
+                        'scheduled_pay_date' => Carbon::parse($cycleEnd)
+                            ->addDays((int) ($setting->pay_delay_days ?? 0))
+                            ->toDateString(),
                     ]);
                 } catch (UniqueConstraintViolationException) {
                     // Lost the race: another request just created this period's run — reuse it.
@@ -1568,12 +1614,27 @@ class PayrollService
                     continue;
                 }
 
-                // Reimbursements folded into this period's pay: still-approved claims
-                // dated in the cycle, PLUS any already paid by THIS run (so a re-run keeps
-                // them folded). They are auto-flipped to `paid` + linked to the run below.
+                // Reimbursements folded into this period's pay, PLUS any already scheduled by
+                // THIS run (so a re-run keeps them folded). Auto-flipped to `scheduled` + linked
+                // to the run below.
+                //
+                // FIN-023 — THE WINDOW IS `<= cycleEnd`, NOT `BETWEEN cycleStart AND cycleEnd`.
+                //
+                // A run used to fold in only claims whose expense_date fell inside its own cycle,
+                // and no later run ever looked backwards. So a July expense approved in September
+                // could only be paid by re-running July — which is refused once that run is locked
+                // or its payslip disbursed. The claim sat `approved` forever, and the only escape
+                // was marking it paid by hand outside payroll, which records no payment anywhere.
+                //
+                // An unattached approved claim is now picked up by the next run regardless of how
+                // old it is. `whereNull('payroll_run_id')` is what makes that safe: a claim
+                // already scheduled onto another run is never stolen from it.
                 $reimbursements = Reimbursement::where('employee_id', $employee->id)
-                    ->whereBetween('expense_date', [$cycleStart, $cycleEnd])
-                    ->where(fn ($q) => $q->whereIn('status', ['approved', 'scheduled'])
+                    ->whereDate('expense_date', '<=', $cycleEnd)
+                    ->where(fn ($q) => $q
+                        ->where(fn ($unclaimed) => $unclaimed
+                            ->whereIn('status', ['approved', 'scheduled'])
+                            ->whereNull('payroll_run_id'))
                         ->orWhere('payroll_run_id', $run->id))
                     ->get();
                 $reimbTotal = (float) $reimbursements->sum('amount');
@@ -1835,7 +1896,16 @@ class PayrollService
             // 13th-month accrual: PH law = total BASIC salary earned in the year ÷ 12.
             // `base_salary` is the attendance-adjusted basic pay (excludes allowances/
             // reimbursements), so this is the correct basis. Projected until year-end.
-            'thirteenth_month' => round((float) $slips->sum('base_salary') / 12, 2),
+            // FIN-013 — the TOTALS above intentionally span every completed run (13th-month pay
+            // is income and belongs in a year-to-date figure). The 13th-month PROJECTION must
+            // not: measured on regular runs only, or last year's payment inflates this year's
+            // entitlement. Same basis as the report and the run.
+            'thirteenth_month' => round(
+                (float) $this->thirteenthMonthBasisFor($year)
+                    ->where('hr_payslips.employee_id', $employee->id)
+                    ->sum('hr_payslips.base_salary') / 12,
+                2,
+            ),
         ];
     }
 
@@ -1968,11 +2038,10 @@ class PayrollService
      */
     public function thirteenthMonth(int $year): array
     {
-        $rows = Payslip::query()
-            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
-            ->whereYear('hr_payroll_runs.cycle_start', $year)
-            // Item 13b.14 — completed runs only; a mid-recompute run would skew the accrual.
-            ->where('hr_payroll_runs.status', 'completed')
+        // FIN-013 — the same basis the run itself uses, so the accrual report and the payment
+        // can never disagree. This used to filter status but not type, so last year's 13th-month
+        // run counted toward this year's accrual.
+        $rows = $this->thirteenthMonthBasisFor($year)
             ->groupBy('hr_payslips.employee_id')
             ->selectRaw('hr_payslips.employee_id, SUM(hr_payslips.base_salary) as ytd_basic, COUNT(*) as periods')
             ->get();

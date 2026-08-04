@@ -30,6 +30,15 @@ class PayrollFreezeService
         $to ??= $from;
 
         return PayrollRun::query()
+            // FIN-001, same family — a 13th-month run must not freeze anything.
+            //
+            // It is created across {year}-12-01 to {year}-12-31 so that it can be measured on the
+            // whole year, but it prices NOTHING from attendance, leave or overtime: its gross is
+            // Σ basic ÷ 12 and its only deduction is tax. Without this filter, disbursing 13th
+            // month would lock every December attendance correction, leave approval and OT
+            // decision for the rest of the month — for a run that cannot be affected by any of
+            // them. Freezing must follow the run that actually priced the day.
+            ->where('type', '!=', 'thirteenth_month')
             // Any overlap between the record's dates and the run's cycle.
             ->whereDate('cycle_start', '<=', $to)
             ->whereDate('cycle_end', '>=', $from)

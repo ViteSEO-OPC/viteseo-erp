@@ -154,6 +154,15 @@ class PayslipResource extends JsonResource
      */
     private function payDate(): ?string
     {
+        // FIN-036 — the date the RUN recorded, not one re-derived at read time. Changing
+        // pay_delay_days used to move the stated pay date on payslips already issued.
+        if ($this->payrollRun?->scheduled_pay_date) {
+            return $this->payrollRun->scheduled_pay_date->format('Y-m-d');
+        }
+
+        // Fallback for runs written before the column existed. The migration backfills them, so
+        // this is unreachable in practice — kept because a payslip must always be able to state
+        // a pay date, and the old derivation is exactly what it used to show.
         $end = $this->payrollRun?->cycle_end;
         if (! $end) {
             return null;
