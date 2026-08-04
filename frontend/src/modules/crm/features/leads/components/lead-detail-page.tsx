@@ -16,6 +16,7 @@ import { ScheduleFollowUpModal } from "@/modules/crm/features/leads/components/s
 import { WonConfirmDialog } from "@/modules/crm/features/leads/components/won-confirm-dialog";
 import { LostConfirmDialog } from "@/modules/crm/features/leads/components/lost-confirm-dialog";
 import { DiscussionNotes } from "@/modules/crm/features/leads/components/discussion-notes";
+import { EmailThread } from "@/modules/crm/features/leads/components/email-thread";
 import { LeadAttachmentsModal } from "@/modules/crm/features/leads/components/lead-attachments-modal";
 import { ActiveCallPanel } from "@/modules/crm/features/leads/components/active-call-panel";
 import { LeadTimelinePanel } from "@/modules/crm/features/leads/components/lead-timeline-panel";
@@ -114,6 +115,10 @@ export function LeadDetailPage() {
               <DiscussionNotes leadId={params.id} />
               <ActiveCallPanel leadId={params.id} />
             </div>
+            {/* Email Conversation (outbound + inbound) with its reply box, full width of the main
+                column and BELOW the Notes/Call row. Reads GET /leads/{id}/emails and sends through
+                the existing Outreach pipeline — the same one the Follow-ups workspace uses. */}
+            <EmailThread leadId={params.id} />
           </div>
           <div className="flex flex-col gap-6">
             <QuickActionsCard
