@@ -99,7 +99,9 @@
     <tr>
         <td style="width: 22%;">
             <div class="cap">Pay Type</div>
-            <div class="val">{{ ucwords(str_replace('_', '-', $p['frequency'] ?? '—')) }}</div>
+            {{-- FIN-011 — the resolved label, not the raw `frequency`: for a final-pay run that
+                 string is "final_pay:<employee id>". --}}
+            <div class="val">{{ $p['run_type_label'] }}</div>
         </td>
         <td>
             <div class="cap">Pay Period</div>
@@ -168,37 +170,22 @@
     </table>
 </div>
 
-{{-- Compensation: the FULL period basic, with the absence charged under Deductions. --}}
+{{-- Compensation. FIN-011 — one loop over `earnings_breakdown`, which the resource builds, instead
+     of a hardcoded ordinary-period list. The old list rendered "Basic Pay ₱0" for a 13th-month,
+     adjustment or final-pay slip and showed no line for what those runs actually paid. --}}
 <table class="sect">
     <tr class="thead"><td>Compensation</td><td class="amt">Amount</td></tr>
-    <tr class="line"><td>Basic Pay</td><td class="amt">{{ $amt($p['period_base']) }}</td></tr>
-    @foreach ($p['allowances_breakdown'] as $line)
-        <tr class="line"><td>{{ $line['name'] }}</td><td class="amt">{{ $amt($line['amount']) }}</td></tr>
+    @foreach ($p['earnings_breakdown'] as $line)
+        <tr class="line">
+            <td>
+                {{ $line['name'] }}
+                @if (! empty($line['note']))
+                    <span class="muted">({{ $line['note'] }})</span>
+                @endif
+            </td>
+            <td class="amt">{{ $amt($line['amount']) }}</td>
+        </tr>
     @endforeach
-    @if ($p['overtime_pay'] > 0)
-        <tr class="line">
-            <td>Overtime <span class="muted">({{ $hrs($p['overtime_minutes']) }} hrs)</span></td>
-            <td class="amt">{{ $amt($p['overtime_pay']) }}</td>
-        </tr>
-    @endif
-    @if ($p['night_diff_pay'] > 0)
-        <tr class="line">
-            <td>Night Differential <span class="muted">({{ $hrs($p['night_diff_minutes']) }} hrs)</span></td>
-            <td class="amt">{{ $amt($p['night_diff_pay']) }}</td>
-        </tr>
-    @endif
-    @if ($p['holiday_premium'] > 0)
-        <tr class="line"><td>Holiday</td><td class="amt">{{ $amt($p['holiday_premium']) }}</td></tr>
-    @endif
-    @if ($p['rest_day_premium'] > 0)
-        <tr class="line">
-            <td>Rest Day <span class="muted">({{ $hrs($p['rest_day_minutes']) }} hrs)</span></td>
-            <td class="amt">{{ $amt($p['rest_day_premium']) }}</td>
-        </tr>
-    @endif
-    @if ($p['reimbursements'] > 0)
-        <tr class="line"><td>Reimbursement</td><td class="amt">{{ $amt($p['reimbursements']) }}</td></tr>
-    @endif
     <tr class="sum"><td>Total Compensation</td><td class="amt">{{ $amt($t['compensation']) }}</td></tr>
 </table>
 

@@ -21,6 +21,7 @@ import {
 } from "@/modules/hr/hooks/use-employees";
 import type { EmployeeLoan } from "@/modules/hr/api/employees";
 import { SimpleSelect } from "@/modules/hr/ui/select";
+import { LoanScheduleDialog } from "@/modules/hr/components/loan-schedule-dialog";
 
 const TYPES = [
   { value: "loan", label: "Loan" },
@@ -50,6 +51,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
   const decideMut = useDecideLoan(employeeId);
 
   const [adding, setAdding] = useState(false);
+  const [scheduleId, setScheduleId] = useState<number | null>(null);
   const [cancelling, setCancelling] = useState<EmployeeLoan | null>(null);
   const [form, setForm] = useState({
     type: "loan",
@@ -57,6 +59,11 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
     principal: "",
     per_period_amount: "",
     start_date: new Date().toISOString().slice(0, 10),
+    // FIN-032 — the terms. Blank/0 = interest-free, which is a real product, not a gap.
+    interest_rate: "",
+    interest_period: "annual",
+    fees: "",
+    priority: "",
   });
 
   async function submit() {
@@ -67,10 +74,25 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
         principal: Number(form.principal),
         per_period_amount: Number(form.per_period_amount),
         start_date: form.start_date,
+        // Omitted rather than sent as 0 when blank, so the server default applies.
+        ...(form.interest_rate ? { interest_rate: Number(form.interest_rate) } : {}),
+        ...(form.interest_rate
+          ? { interest_period: form.interest_period as "annual" | "monthly" }
+          : {}),
+        ...(form.fees ? { fees: Number(form.fees) } : {}),
+        ...(form.priority ? { priority: Number(form.priority) } : {}),
       });
       toast.success("Loan recorded");
       setAdding(false);
-      setForm({ ...form, reference: "", principal: "", per_period_amount: "" });
+      setForm({
+        ...form,
+        reference: "",
+        principal: "",
+        per_period_amount: "",
+        interest_rate: "",
+        fees: "",
+        priority: "",
+      });
     } catch (err) {
       const msg =
         err instanceof AxiosError
@@ -169,6 +191,72 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
               onChange={(e) => setForm({ ...form, start_date: e.target.value })}
             />
           </div>
+
+          {/* FIN-032 — the terms. Diminishing balance: interest is charged each period on what is
+              STILL OWED, so the rate typed here is the rate the employee actually pays. Blank = 0%,
+              which is an interest-free advance. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="loan-rate">Interest rate (%)</Label>
+            <Input
+              id="loan-rate"
+              type="number"
+              min={0}
+              max={100}
+              step="0.01"
+              placeholder="0 = none"
+              value={form.interest_rate}
+              onChange={(e) => setForm({ ...form, interest_rate: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="loan-rate-period">Rate is per</Label>
+            <SimpleSelect
+              value={form.interest_period}
+              onValueChange={(v) => setForm({ ...form, interest_period: v })}
+              options={[
+                { value: "annual", label: "Year" },
+                { value: "monthly", label: "Month" },
+              ]}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="loan-fees">One-off fee</Label>
+            <Input
+              id="loan-fees"
+              type="number"
+              min={0}
+              step="0.01"
+              placeholder="0"
+              value={form.fees}
+              onChange={(e) => setForm({ ...form, fees: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="loan-priority">Collect first (1 = highest)</Label>
+            <Input
+              id="loan-priority"
+              type="number"
+              min={1}
+              max={9999}
+              step="1"
+              placeholder="100"
+              value={form.priority}
+              onChange={(e) => setForm({ ...form, priority: e.target.value })}
+            />
+          </div>
+
+          {Number(form.interest_rate) > 0 && (
+            <div className="rounded-lg border border-border bg-muted/30 p-3 sm:col-span-5">
+              <p className="text-xs text-foreground">
+                <strong>Interest is charged on the balance still owed</strong> and falls as the loan is
+                repaid — the same way SSS and Pag-IBIG salary loans work. The &ldquo;per period&rdquo;
+                figure above is the <strong>principal</strong> instalment; interest and any fee are
+                added on top, so the employee&apos;s actual deduction is higher. The full schedule is
+                shown on the loan once it is saved.
+              </p>
+            </div>
+          )}
+
           <div className="sm:col-span-5">
             <Button
               size="sm"
@@ -196,6 +284,9 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                 <th className="px-4 py-2.5 text-left">Started</th>
                 <th className="px-4 py-2.5 text-right">Total</th>
                 <th className="px-4 py-2.5 text-right">Per period</th>
+                {/* FIN-032 — the terms belong on the row: an instalment without its rate reads as
+                    the whole cost of the loan, which is what made the old field misleading. */}
+                <th className="px-4 py-2.5 text-right">Rate</th>
                 <th className="px-4 py-2.5 text-right">Repaid</th>
                 <th className="px-4 py-2.5 text-right">Outstanding</th>
                 <th className="px-4 py-2.5 text-left">Status</th>
@@ -214,7 +305,32 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                   <td className="px-4 py-2.5">{formatDate(l.start_date)}</td>
                   <td className="px-4 py-2.5 text-right">{formatPeso(l.principal)}</td>
                   <td className="px-4 py-2.5 text-right">{formatPeso(l.per_period_amount)}</td>
-                  <td className="px-4 py-2.5 text-right text-success">{formatPeso(l.paid)}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    {l.interest_rate > 0 ? (
+                      <>
+                        <span className="text-foreground">
+                          {l.interest_rate}%/{l.interest_period === "monthly" ? "mo" : "yr"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setScheduleId(l.id)}
+                          className="block text-xs font-medium text-brand underline"
+                        >
+                          Schedule
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">0%</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-success">
+                    {formatPeso(l.paid)}
+                    {l.paid_interest > 0 && (
+                      <span className="block text-xs text-muted-foreground">
+                        incl. {formatPeso(l.paid_interest)} interest
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5 text-right font-semibold">{formatPeso(l.outstanding)}</td>
                   <td className="px-4 py-2.5">
                     <StatusBadge status={l.status} />
@@ -300,6 +416,13 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
             : ""
         }
         onConfirm={onCancel}
+      />
+
+      {/* FIN-032 — what the employee is consenting to under Art. 113: the schedule, not just the rate. */}
+      <LoanScheduleDialog
+        loanId={scheduleId}
+        open={scheduleId !== null}
+        onOpenChange={(o) => !o && setScheduleId(null)}
       />
     </div>
   );

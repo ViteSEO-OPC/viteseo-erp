@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Hr\Http\Controllers\AccountingController;
 use App\Modules\Hr\Http\Controllers\AttendanceController;
 use App\Modules\Hr\Http\Controllers\AttendancePolicyController;
 use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
@@ -16,6 +17,7 @@ use App\Modules\Hr\Http\Controllers\HolidayController;
 use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
+use App\Modules\Hr\Http\Controllers\TaxTableController;
 use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
@@ -120,6 +122,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/loans', [EmployeeLoanController::class, 'mine']);
     Route::post('me/loans', [EmployeeLoanController::class, 'requestLoan']);
     Route::post('me/loans/{loan}/authorize', [EmployeeLoanController::class, 'authorizeDeduction']);
+    // FIN-032 — the projected amortisation. Open to the loan's owner as well as HR: this is what the
+    // employee consents to under Art. 113, and the controller checks ownership.
+    Route::get('loans/{loan}/schedule', [EmployeeLoanController::class, 'schedule']);
 
     // My Benefits — the caller's own enrolled benefit programs (identity from token).
     Route::get('me/benefit-programs', [BenefitProgramController::class, 'mine']);
@@ -132,6 +137,25 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
+        // FIN-043 / MF-05 — the chart of accounts and the journal a run posts to the ledger.
+        Route::get('gl-accounts', [AccountingController::class, 'accountsIndex']);
+        Route::post('gl-accounts', [AccountingController::class, 'storeAccount']);
+        Route::match(['put', 'patch'], 'gl-accounts/{glAccount}', [AccountingController::class, 'updateAccount']);
+        Route::delete('gl-accounts/{glAccount}', [AccountingController::class, 'destroyAccount']);
+        Route::get('payroll/runs/{run}/journal', [AccountingController::class, 'journalShow']);
+        Route::post('payroll/runs/{run}/journal', [AccountingController::class, 'journalBuild']);
+        Route::post('journal-entries/{journalEntry}/post', [AccountingController::class, 'journalPost']);
+        Route::post('journal-entries/{journalEntry}/reverse', [AccountingController::class, 'journalReverse']);
+        // Both exports carry exact money and full government numbers, so each gets its own limiter —
+        // an unprefixed `throttle:` shares one counter across every route that uses it.
+        Route::get('accounting/export', [AccountingController::class, 'exportJournal'])
+            ->middleware('throttle:10,1,journal-export:');
+        Route::get('accounting/remittance', [AccountingController::class, 'exportRemittance'])
+            ->middleware('throttle:10,1,remittance-export:');
+
+        // FIN-027 — the withholding-tax bands, readable. Read-only: tax rates come from statute, and
+        // an editable table would silently mis-withhold for everyone at once.
+        Route::get('tax-table', [TaxTableController::class, 'show']);
         Route::get('reports/{key}', [ReportController::class, 'show']);
         Route::post('reports/{key}/export', [ReportController::class, 'export'])->middleware('throttle:10,1,report-export:');
         Route::get('attendance', [AttendanceController::class, 'index']);

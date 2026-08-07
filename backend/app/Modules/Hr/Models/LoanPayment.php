@@ -10,9 +10,19 @@ class LoanPayment extends Model
 {
     protected $table = 'hr_loan_payments';
 
-    protected $fillable = ['loan_id', 'payroll_run_id', 'payslip_id', 'amount'];
+    protected $fillable = [
+        'loan_id', 'payroll_run_id', 'payslip_id', 'amount',
+        // FIN-032 — what `amount` was made of. `outstanding()` derives from `principal_amount`
+        // alone, so interest cannot reduce the balance it was charged on.
+        'principal_amount', 'interest_amount', 'fee_amount',
+    ];
 
-    protected $casts = ['amount' => 'decimal:2'];
+    protected $casts = [
+        'amount' => 'decimal:2',
+        'principal_amount' => 'decimal:2',
+        'interest_amount' => 'decimal:2',
+        'fee_amount' => 'decimal:2',
+    ];
 
     public function loan(): BelongsTo
     {

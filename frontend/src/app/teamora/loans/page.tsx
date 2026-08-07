@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/core/components/status-badge";
+import { LoanScheduleDialog } from "@/modules/hr/components/loan-schedule-dialog";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { notify as toast } from "@/core/lib/notify";
 import { PageHeader } from "@/modules/hr/components/page-header";
@@ -31,6 +32,7 @@ export default function MyLoansPage() {
   const { data: loans, isLoading } = useMyLoans();
   const { data: benefits } = useMyBenefits();
   const authorizeMut = useAuthorizeLoan();
+  const [scheduleId, setScheduleId] = useState<number | null>(null);
 
   const [asking, setAsking] = useState(false);
 
@@ -81,12 +83,41 @@ export default function MyLoansPage() {
               <p className="text-sm font-bold text-foreground">
                 {formatPeso(loan.principal)} is ready — your approval is needed
               </p>
+              {/* FIN-032 — this is the Art. 113 consent, so it must state the TERMS, not just the
+                  instalment. With interest the deduction is larger than `per_period_amount` and the
+                  total repaid exceeds the principal; saying "X per payslip until the principal is
+                  repaid" would be a material misstatement on the screen where consent is given. */}
               <p className="mt-1 text-sm text-foreground">
                 By authorizing, you agree that{" "}
-                <strong>{formatPeso(loan.per_period_amount)} will be deducted from each payslip</strong>{" "}
-                until the {formatPeso(loan.principal)} is repaid, starting{" "}
+                <strong>{formatPeso(loan.per_period_amount)} of the loan</strong> will be deducted from
+                each payslip until the {formatPeso(loan.principal)} is repaid, starting{" "}
                 {formatDate(loan.start_date)}.
               </p>
+              {loan.interest_rate > 0 && (
+                <p className="mt-1 text-sm text-foreground">
+                  <strong>
+                    Plus interest at {loan.interest_rate}% per{" "}
+                    {loan.interest_period === "monthly" ? "month" : "year"}
+                  </strong>
+                  , charged each payslip on what you still owe — so your actual deduction is a little
+                  more than {formatPeso(loan.per_period_amount)}, and it gets smaller as the balance
+                  falls.{" "}
+                  <button
+                    type="button"
+                    onClick={() => setScheduleId(loan.id)}
+                    className="font-medium text-brand underline"
+                  >
+                    See exactly what it costs
+                  </button>
+                  .
+                </p>
+              )}
+              {loan.fees > 0 && (
+                <p className="mt-1 text-sm text-foreground">
+                  A one-off fee of <strong>{formatPeso(loan.fees)}</strong> is collected with your
+                  first payslip.
+                </p>
+              )}
               <p className="mt-1 text-caption text-muted-foreground">
                 Nothing is taken from your pay until you do. You can talk to HR first.
               </p>
@@ -137,6 +168,13 @@ export default function MyLoansPage() {
           </div>
         )}
       </div>
+
+      {/* FIN-032 — the schedule the Art. 113 consent above links to. */}
+      <LoanScheduleDialog
+        loanId={scheduleId}
+        open={scheduleId !== null}
+        onOpenChange={(o) => !o && setScheduleId(null)}
+      />
     </div>
   );
 }

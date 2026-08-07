@@ -99,6 +99,11 @@ export interface PayslipSummary {
 export interface PayslipLine {
   name: string;
   amount: number;
+  /**
+   * FIN-011 — the small grey qualifier beside the label ("2.5 hrs", "Tax-exempt", "6 day(s)").
+   * Optional because `allowances_breakdown` predates it and carries none.
+   */
+  note?: string | null;
 }
 
 /**
@@ -169,6 +174,19 @@ export interface Payslip {
   allowances: number;
   /** Allowances split by component, snapshot at run time. */
   allowances_breakdown: PayslipLine[];
+  // FIN-011 — every earning as a named line, built by PayslipResource so the screen and the PDF
+  // render the same list. Sums to `totals.compensation` for every run type.
+  earnings_breakdown: PayslipLine[];
+  // FIN-032 — interest collected on loans this period, itemised in other_deductions_breakdown too.
+  loan_interest: number;
+  // Stored all along and never serialised until FIN-011 — a 13th-month payslip showed a gross with
+  // every earnings line at zero and a tax figure with no visible basis.
+  thirteenth_month: number;
+  other_benefits: number;
+  taxable_pay: number;
+  /** Which kind of run produced this slip, and the words the header prints for it. */
+  run_type: "regular" | "thirteenth_month" | "adjustment" | "final_pay";
+  run_type_label: string;
   holiday_premium: number;
   overtime_pay: number;
   overtime_minutes: number;
@@ -389,4 +407,28 @@ export interface DeductionArrear {
   };
   obligations: { obligation: string; label: string; outstanding: number }[];
   total_outstanding: number;
+}
+
+/**
+ * FIN-027 — the withholding-tax table, exposed so it can be checked against the BIR schedule.
+ *
+ * `max_annual` is derived server-side (the next band's floor − 0.01) because the table stores only
+ * floors, while the BIR prints ranges — and a range is what makes it checkable. Null on the top band.
+ */
+export interface TaxBand {
+  min_annual: number;
+  max_annual: number | null;
+  base_tax: number;
+  rate_on_excess: number;
+}
+
+export interface TaxTable {
+  as_of: string;
+  /** When the version answering for `as_of` took effect; null when no version covers the date. */
+  effective_from: string | null;
+  note: string | null;
+  /** True when `as_of` precedes every version and the earliest table was used instead. */
+  is_fallback: boolean;
+  bands: TaxBand[];
+  versions: { effective_from: string | null; note: string | null }[];
 }

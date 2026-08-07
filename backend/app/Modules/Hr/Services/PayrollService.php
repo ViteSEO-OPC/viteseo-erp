@@ -2578,6 +2578,8 @@ class PayrollService
                 // Always called (even at zero) so a cancelled loan's stale ledger row is cleared.
                 $loans = $this->loans->collectForPeriod(
                     $employee, $run, $cycleEnd, (float) $slip['net_pay'], $payslip,
+                    // FIN-032 — the diminishing-balance rate is per year; this splits it per payday.
+                    $periodsPerYear,
                 );
 
                 if ($loans['total'] > 0) {
@@ -2585,12 +2587,16 @@ class PayrollService
                     $slip['other_deductions_breakdown'] = [...$slip['other_deductions_breakdown'], ...$loans['lines']];
                     $slip['total_deductions'] = round((float) $slip['total_deductions'] + $loans['total'], 2);
                     $slip['net_pay'] = max(0, round((float) $slip['net_pay'] - $loans['total'], 2));
+                    // Stored on its own, because the ledger posts interest to INCOME while principal
+                    // repayment reduces a receivable — and the payslip shows them as separate lines.
+                    $slip['loan_interest'] = round((float) ($slip['loan_interest'] ?? 0) + $loans['interest'], 2);
 
                     $payslip->update([
                         'other_deductions' => $slip['other_deductions'],
                         'other_deductions_breakdown' => $slip['other_deductions_breakdown'],
                         'total_deductions' => $slip['total_deductions'],
                         'net_pay' => $slip['net_pay'],
+                        'loan_interest' => $slip['loan_interest'],
                     ]);
                 }
 

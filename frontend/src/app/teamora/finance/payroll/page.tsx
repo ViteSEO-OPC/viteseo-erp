@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
+
 import { useState } from "react";
-import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote } from "lucide-react";
+import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote, Percent, BookOpen } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -22,6 +24,8 @@ import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { AdjustmentRunDialog } from "@/modules/hr/components/adjustment-run-dialog";
 import { RetroFlagsDialog } from "@/modules/hr/components/retro-flags-dialog";
+import { TaxTableDialog } from "@/modules/hr/components/tax-table-dialog";
+import { JournalEntryDialog } from "@/modules/hr/components/journal-entry-dialog";
 import { PaymentBatchDialog } from "@/modules/hr/components/payment-batch-dialog";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
@@ -74,6 +78,8 @@ export default function PayrollPage() {
   // FIN-010 / FIN-009 — off-cycle corrections and the queue of differences awaiting one.
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
   const [retroOpen, setRetroOpen] = useState(false);
+  const [taxTableOpen, setTaxTableOpen] = useState(false);
+  const [journalRunId, setJournalRunId] = useState<number | null>(null);
   const [payOpen, setPayOpen] = useState(false);
   const [adjustmentPrefill, setAdjustmentPrefill] = useState<{ employeeId: number | null; reason: string | null }>({
     employeeId: null,
@@ -360,6 +366,20 @@ export default function PayrollPage() {
             <Button variant="outline" onClick={() => setThirteenthOpen(true)}>
               <Gift />
               13th-month
+            </Button>
+            {/* FIN-027 — the tax bands are data so they can be checked; this is where you check them. */}
+            <Button variant="outline" onClick={() => setTaxTableOpen(true)}>
+              <Percent />
+              Tax table
+            </Button>
+            {/* FIN-043 / FIN-017 — the chart of accounts and the two exports. Reached from here
+                because `src/core/nav.ts` is a shared file: adding a sidebar entry for Accounting
+                needs the CTO's sign-off, and the page must be reachable meanwhile. */}
+            <Button variant="outline" asChild>
+              <Link href="/teamora/finance/accounting">
+                <BookOpen />
+                Accounting
+              </Link>
             </Button>
             <Button variant="outline" onClick={() => setHistoryOpen(true)}>
               <History />
@@ -660,6 +680,14 @@ export default function PayrollPage() {
                 Export CSV
               </Button>
             )}
+            {/* FIN-043 — this run's general-ledger entry. Lives on the run breakdown because a
+                journal is a property of a run, not of the payroll page as a whole. */}
+            {viewRun && (
+              <Button variant="outline" onClick={() => setJournalRunId(viewRun.id)}>
+                <BookOpen />
+                Ledger entry
+              </Button>
+            )}
             <DialogClose asChild>
               <Button variant="outline">Close</Button>
             </DialogClose>
@@ -862,6 +890,19 @@ export default function PayrollPage() {
       </Dialog>
 
       {/* FIN-009 — the queue of pay differences awaiting settlement. */}
+      <TaxTableDialog open={taxTableOpen} onOpenChange={setTaxTableOpen} />
+
+      <JournalEntryDialog
+        runId={journalRunId}
+        runLabel={
+          viewRun
+            ? `${formatDate(viewRun.cycle_start)} – ${formatDate(viewRun.cycle_end)}`
+            : "this run"
+        }
+        open={journalRunId != null}
+        onOpenChange={(o) => !o && setJournalRunId(null)}
+      />
+
       <RetroFlagsDialog
         open={retroOpen}
         onOpenChange={setRetroOpen}

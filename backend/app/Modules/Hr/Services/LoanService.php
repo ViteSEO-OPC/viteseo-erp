@@ -62,6 +62,12 @@ class LoanService
             'principal' => $data['principal'],
             'per_period_amount' => $data['per_period_amount'],
             'start_date' => $data['start_date'],
+            // FIN-032 — the terms. Omitted means zero, which is an interest-free advance rather than
+            // a missing configuration.
+            'interest_rate' => $data['interest_rate'] ?? 0,
+            'interest_period' => $data['interest_period'] ?? 'annual',
+            'fees' => $data['fees'] ?? 0,
+            'priority' => $data['priority'] ?? 100,
             // Issued by HR, so the decision is already taken — what is missing is the employee's.
             'status' => 'pending_authorization',
             'approved_by' => $actor->id,
@@ -104,6 +110,12 @@ class LoanService
             'principal' => $data['principal'],
             'per_period_amount' => $data['per_period_amount'],
             'start_date' => $data['start_date'],
+            // FIN-032 — the terms. Omitted means zero, which is an interest-free advance rather than
+            // a missing configuration.
+            'interest_rate' => $data['interest_rate'] ?? 0,
+            'interest_period' => $data['interest_period'] ?? 'annual',
+            'fees' => $data['fees'] ?? 0,
+            'priority' => $data['priority'] ?? 100,
             'status' => 'requested',
             'requested_at' => now(),
             'notes' => $data['notes'] ?? null,
@@ -289,7 +301,13 @@ class LoanService
      */
     private function assertScheduleEditable(EmployeeLoan $loan, array $data): void
     {
-        $touchesSchedule = array_intersect_key($data, array_flip(['principal', 'per_period_amount', 'start_date']));
+        $touchesSchedule = array_intersect_key($data, array_flip([
+            'principal', 'per_period_amount', 'start_date',
+            // FIN-032 — the rate, its period and the fee are part of the schedule too. Changing the
+            // rate after a disbursed period would reprice interest that has already been collected
+            // and consented to, which is the same wrong as moving the instalment.
+            'interest_rate', 'interest_period', 'fees',
+        ]));
 
         if ($touchesSchedule === []) {
             return;
@@ -325,9 +343,12 @@ class LoanService
     {
         // The principal can't drop below what has already been collected — that would imply
         // the company owes the employee money back, which is not something payroll can express.
-        if (isset($data['principal']) && (float) $data['principal'] < $loan->paid()) {
+        // FIN-032 — compared against PRINCIPAL repaid, not the total collected. `paid()` now includes
+        // interest and fees, so using it here would refuse a legitimate correction on a loan whose
+        // interest happened to exceed the reduction being made.
+        if (isset($data['principal']) && (float) $data['principal'] < $loan->paidPrincipal()) {
             throw ValidationException::withMessages([
-                'principal' => ['The principal cannot be less than the ₱' . number_format($loan->paid(), 2) . ' already repaid.'],
+                'principal' => ['The principal cannot be less than the ₱' . number_format($loan->paidPrincipal(), 2) . ' already repaid.'],
             ]);
         }
 
@@ -367,6 +388,10 @@ class LoanService
         // simply absent while the deduction proceeded.
         $loan->update(array_intersect_key($data, array_flip([
             'type', 'reference', 'principal', 'per_period_amount', 'start_date', 'notes',
+            // FIN-032 — the terms of the loan. Editable like the principal and instalment are, and
+            // frozen by the same `assertScheduleEditable()` guard once payroll has collected against
+            // them: changing the rate after the fact would reprice instalments already paid.
+            'interest_rate', 'interest_period', 'fees', 'priority',
         ])));
 
         $this->audit->log('updated', 'Loans', "Updated loan #{$loan->id}", $loan);
@@ -440,6 +465,10 @@ class LoanService
         string $cycleEnd,
         float $availableNet,
         ?Payslip $payslip = null,
+        // FIN-032 — how many paydays a year, so a diminishing-balance rate can be split per period.
+        // Defaults to 0, which yields a zero rate: an omitted argument charges no interest rather
+        // than guessing a frequency and charging the wrong amount.
+        int $periodsPerYear = 0,
     ): array {
         // FIN-003(b) — `settled` is included, not just `active`, and that is load-bearing.
         //
@@ -456,6 +485,10 @@ class LoanService
             ->whereIn('status', ['active', 'settled'])
             ->whereDate('start_date', '<=', $cycleEnd)
             ->with('payments')
+            // FIN-032 — priority first (lower runs first), so when net pay cannot cover everything HR
+            // decides which obligation gets the money rather than the query order deciding for them.
+            // Then oldest-first within a priority, which is the fair tie-break.
+            ->orderBy('priority')
             ->orderBy('start_date')
             ->orderBy('id')
             ->get();
@@ -470,24 +503,58 @@ class LoanService
 
         $lines = [];
         $total = 0.0;
+        $interestTotal = 0.0;
         $remaining = max(0.0, $availableNet);
 
         foreach ($loans as $loan) {
             // A re-run must not read its OWN previous payment as already-paid, or the balance
             // would look smaller every time. Exclude this run's row before deciding the amount.
-            $paidElsewhere = round((float) $loan->payments()
+            // FIN-032 — PRINCIPAL only. Interest is charged on this balance, so counting it here
+            // would let a loan repay itself out of its own interest.
+            $principalPaidElsewhere = round((float) $loan->payments()
                 ->where('payroll_run_id', '!=', $run->id)
-                ->sum('amount'), 2);
-            $outstanding = round(max(0, (float) $loan->principal - $paidElsewhere), 2);
+                ->sum('principal_amount'), 2);
+            $feesPaidElsewhere = round((float) $loan->payments()
+                ->where('payroll_run_id', '!=', $run->id)
+                ->sum('fee_amount'), 2);
 
-            if ($outstanding <= 0) {
+            $outstanding = round(max(0, (float) $loan->principal - $principalPaidElsewhere), 2);
+            $feeDue = round(max(0, (float) $loan->fees - $feesPaidElsewhere), 2);
+
+            if ($outstanding <= 0 && $feeDue <= 0) {
                 $loan->payments()->where('payroll_run_id', $run->id)->delete();
                 $loan->update(['status' => 'settled']);
 
                 continue;
             }
 
-            $amount = round(min((float) $loan->per_period_amount, $outstanding, $remaining), 2);
+            // This period's interest, on the balance still owed — diminishing balance, so it falls as
+            // the loan is repaid. Zero rate (or an omitted `$periodsPerYear`) yields zero.
+            $interestDue = $loan->periodInterest($periodsPerYear, $outstanding);
+
+            /**
+             * ALLOCATION ORDER WHEN THE PAYSLIP CANNOT COVER EVERYTHING: interest, then fee, then
+             * principal.
+             *
+             * Interest first because it is the cost of the money for THIS period — leaving it unpaid
+             * while reducing principal would charge the employee for a balance they had already paid
+             * down. The consequence is worth stating plainly: a short payday means less principal comes
+             * off, so the loan runs slightly longer and costs slightly more in total interest. That is
+             * how every real amortising loan behaves.
+             *
+             * Whatever cannot be collected is simply not collected — it is not written off, and the
+             * next period charges interest on the balance that genuinely remains.
+             */
+            $interest = round(min($interestDue, $remaining), 2);
+            $remaining = round($remaining - $interest, 2);
+
+            $fee = round(min($feeDue, $remaining), 2);
+            $remaining = round($remaining - $fee, 2);
+
+            $principal = round(min((float) $loan->per_period_amount, $outstanding, $remaining), 2);
+            $remaining = round($remaining - $principal, 2);
+
+            $amount = round($interest + $fee + $principal, 2);
 
             if ($amount <= 0) {
                 // Nothing left in the payslip — drop any stale row from a previous compute so
@@ -499,24 +566,50 @@ class LoanService
 
             LoanPayment::updateOrCreate(
                 ['loan_id' => $loan->id, 'payroll_run_id' => $run->id],
-                ['payslip_id' => $payslip?->id, 'amount' => $amount],
+                [
+                    'payslip_id' => $payslip?->id,
+                    'amount' => $amount,
+                    'principal_amount' => $principal,
+                    'interest_amount' => $interest,
+                    'fee_amount' => $fee,
+                ],
             );
 
             $label = $loan->reference
                 ? "{$this->typeLabel($loan->type)} ({$loan->reference})"
                 : $this->typeLabel($loan->type);
 
-            $lines[] = ['name' => $label, 'amount' => $amount];
-            $total += $amount;
-            $remaining = round($remaining - $amount, 2);
+            // Separate payslip lines, so the employee can see what reduced their balance and what was
+            // the cost of borrowing. Folding them into one figure is what made the old interest field
+            // misleading in the first place.
+            if ($principal > 0) {
+                $lines[] = ['name' => $label, 'amount' => $principal];
+            }
+            if ($interest > 0) {
+                $lines[] = ['name' => $label . ' — interest', 'amount' => $interest];
+            }
+            if ($fee > 0) {
+                $lines[] = ['name' => $label . ' — fee', 'amount' => $fee];
+            }
 
-            // Fully repaid once this period's payment lands.
-            if (round($paidElsewhere + $amount, 2) >= (float) $loan->principal) {
+            $total += $amount;
+            $interestTotal += $interest;
+
+            // Settled once the principal is repaid AND the fee is collected — an outstanding fee is
+            // genuinely still owed, and the alternative is writing it off silently.
+            if (round($principalPaidElsewhere + $principal, 2) >= (float) $loan->principal
+                && round($feesPaidElsewhere + $fee, 2) >= (float) $loan->fees) {
                 $loan->update(['status' => 'settled']);
             }
         }
 
-        return ['total' => round($total, 2), 'lines' => $lines];
+        return [
+            'total' => round($total, 2),
+            // Reported separately so the payslip can store it and the ledger can post it to interest
+            // INCOME rather than to the payable that principal repayment reduces.
+            'interest' => round($interestTotal, 2),
+            'lines' => $lines,
+        ];
     }
 
     /**
@@ -587,6 +680,74 @@ class LoanService
      *
      * @return float total settled
      */
+    /**
+     * The projected repayment schedule — what the employee is agreeing to (FIN-032).
+     *
+     * DIMINISHING BALANCE MADE VISIBLE. Each row charges interest on the balance at the START of that
+     * period, so the interest column falls while the principal column stays flat. That shape is the
+     * whole argument for this method over flat interest, and an employee cannot check a rate they cannot
+     * see: this is what the Art. 113 authorisation should be showing them before they consent.
+     *
+     * A PROJECTION, NOT A LEDGER. It assumes every instalment is collected in full and on time; a short
+     * payday collects interest first and less principal, so the real schedule runs longer. The already-
+     * collected rows come from `payments`, which is the record of what actually happened.
+     *
+     * Capped at 600 periods — a runaway guard, not a business rule. Interest here never blocks
+     * amortisation (principal is `min(instalment, balance)`, so the balance always falls), but a tiny
+     * instalment against a large principal still runs for decades: ₱12,000 at ₱10 a period is 1,200
+     * paydays. `truncated` says the schedule was cut rather than presenting a partial one as complete.
+     *
+     * @return array{rows: list<array<string, float|int>>, total_interest: float, periods: int, truncated: bool}
+     */
+    public function amortisationSchedule(EmployeeLoan $loan, int $periodsPerYear): array
+    {
+        $rate = $loan->periodInterestRate($periodsPerYear);
+        $instalment = round((float) $loan->per_period_amount, 2);
+        $balance = round((float) $loan->principal, 2);
+        $feeDue = round((float) $loan->fees, 2);
+
+        $rows = [];
+        $totalInterest = 0.0;
+        $truncated = false;
+
+        if ($instalment <= 0) {
+            // No instalment means no schedule to project — and it is a data problem worth surfacing
+            // rather than dividing by zero over.
+            return ['rows' => [], 'total_interest' => 0.0, 'periods' => 0, 'truncated' => false];
+        }
+
+        for ($period = 1; $balance > 0; $period++) {
+            if ($period > 600) {
+                $truncated = true;
+                break;
+            }
+
+            $interest = round($balance * $rate, 2);
+            $principal = round(min($instalment, $balance), 2);
+            $fee = $period === 1 ? $feeDue : 0.0;
+
+            $rows[] = [
+                'period' => $period,
+                'opening_balance' => $balance,
+                'interest' => $interest,
+                'fee' => $fee,
+                'principal' => $principal,
+                'total' => round($interest + $fee + $principal, 2),
+                'closing_balance' => round($balance - $principal, 2),
+            ];
+
+            $totalInterest = round($totalInterest + $interest, 2);
+            $balance = round($balance - $principal, 2);
+        }
+
+        return [
+            'rows' => $rows,
+            'total_interest' => $totalInterest,
+            'periods' => count($rows),
+            'truncated' => $truncated,
+        ];
+    }
+
     public function settleOnSeparation(Employee $employee, PayrollRun $run, float $available): float
     {
         $loans = EmployeeLoan::where('employee_id', $employee->id)
@@ -606,12 +767,21 @@ class LoanService
         $settled = 0.0;
 
         foreach ($loans as $loan) {
-            $paidElsewhere = round((float) $loan->payments()
+            // FIN-032 — principal and fees tracked separately, because `outstanding()` derives from
+            // principal alone. Interest is NOT charged here: a final settlement pays off the balance
+            // on the separation date, and charging a full period's interest on money being repaid the
+            // same day would overcharge somebody who is leaving.
+            $principalPaidElsewhere = round((float) $loan->payments()
                 ->where('payroll_run_id', '!=', $run->id)
-                ->sum('amount'), 2);
-            $outstanding = round(max(0, (float) $loan->principal - $paidElsewhere), 2);
+                ->sum('principal_amount'), 2);
+            $feesPaidElsewhere = round((float) $loan->payments()
+                ->where('payroll_run_id', '!=', $run->id)
+                ->sum('fee_amount'), 2);
 
-            if ($outstanding <= 0) {
+            $outstanding = round(max(0, (float) $loan->principal - $principalPaidElsewhere), 2);
+            $feeDue = round(max(0, (float) $loan->fees - $feesPaidElsewhere), 2);
+
+            if ($outstanding <= 0 && $feeDue <= 0) {
                 $loan->update(['status' => 'settled']);
 
                 continue;
@@ -621,17 +791,34 @@ class LoanService
                 continue; // nothing left to take; the balance stays outstanding and visible
             }
 
-            $amount = round(min($outstanding, $remaining), 2);
+            // Fee before principal, matching collectForPeriod()'s order.
+            $fee = round(min($feeDue, $remaining), 2);
+            $remaining = round($remaining - $fee, 2);
+
+            $principal = round(min($outstanding, $remaining), 2);
+            $remaining = round($remaining - $principal, 2);
+
+            $amount = round($fee + $principal, 2);
+
+            if ($amount <= 0) {
+                continue;
+            }
 
             LoanPayment::updateOrCreate(
                 ['loan_id' => $loan->id, 'payroll_run_id' => $run->id],
-                ['payslip_id' => null, 'amount' => $amount],
+                [
+                    'payslip_id' => null,
+                    'amount' => $amount,
+                    'principal_amount' => $principal,
+                    'interest_amount' => 0,
+                    'fee_amount' => $fee,
+                ],
             );
 
             $settled = round($settled + $amount, 2);
-            $remaining = round($remaining - $amount, 2);
 
-            if (round($paidElsewhere + $amount, 2) >= (float) $loan->principal) {
+            if (round($principalPaidElsewhere + $principal, 2) >= (float) $loan->principal
+                && round($feesPaidElsewhere + $fee, 2) >= (float) $loan->fees) {
                 $loan->update(['status' => 'settled']);
             }
         }

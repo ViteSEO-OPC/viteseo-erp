@@ -10,6 +10,8 @@ use App\Modules\Hr\Http\Requests\UpdateEmployeeLoanRequest;
 use App\Modules\Hr\Http\Resources\EmployeeLoanResource;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeLoan;
+use App\Modules\Hr\Models\PayrollSetting;
+use App\Modules\Hr\Services\PayScheduleService;
 use App\Modules\Hr\Services\LoanService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -110,6 +112,41 @@ class EmployeeLoanController extends Controller
      */
     // Named `authorizeDeduction`: the base Controller already has an `authorize($ability, …)`,
     // and overriding it with a different signature is a fatal error, not a warning.
+    /**
+     * GET /api/v1/hr/loans/{loan}/schedule — the projected amortisation (FIN-032).
+     *
+     * Open to the loan's OWNER as well as HR, deliberately: this is what an employee is consenting to
+     * under Art. 113, and consent to a deduction they cannot see the shape of is not meaningful consent.
+     * The schedule is what shows that a diminishing-balance rate falls as the loan is repaid.
+     */
+    public function schedule(Request $request, EmployeeLoan $loan): JsonResponse
+    {
+        $isOwner = $request->user()?->employee?->id === $loan->employee_id;
+        $isHr = (bool) $request->user()?->hasAnyRole(['hr_officer', 'super_admin']);
+
+        if (! $isOwner && ! $isHr) {
+            return response()->json(['message' => 'This is not your loan.'], Response::HTTP_FORBIDDEN);
+        }
+
+        // The employee's own pay frequency decides how the rate is split per payday — a semi-monthly
+        // employee is charged half a month's interest per period, not a whole one.
+        $loan->loadMissing('employee');
+        $frequency = $loan->employee?->pay_frequency ?: PayrollSetting::current()->frequency;
+        $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
+
+        return response()->json([
+            'data' => $this->service->amortisationSchedule($loan, $periodsPerYear),
+            'meta' => [
+                'periods_per_year' => $periodsPerYear,
+                'pay_frequency' => $frequency,
+                'interest_rate' => (float) $loan->interest_rate,
+                'interest_period' => $loan->interest_period,
+                // The per-payday rate, so the UI can state it rather than making the reader derive it.
+                'period_rate' => round($loan->periodInterestRate($periodsPerYear) * 100, 6),
+            ],
+        ]);
+    }
+
     public function authorizeDeduction(Request $request, EmployeeLoan $loan): JsonResponse
     {
         return EmployeeLoanResource::make(

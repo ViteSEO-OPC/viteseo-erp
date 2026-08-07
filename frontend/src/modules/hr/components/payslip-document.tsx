@@ -127,7 +127,9 @@ export function PayslipDocument({
         </div>
         <div className="border-t border-border" />
         <div className="flex flex-wrap gap-8">
-          <Meta label="Pay Type">{payFrequencyLabel(p.frequency)}</Meta>
+          {/* FIN-011 — the server-resolved label. `frequency` on a final-pay run is
+              "final_pay:<employee id>", an internal key with an id in it. */}
+          <Meta label="Pay Type">{p.run_type_label || payFrequencyLabel(p.frequency)}</Meta>
           <Meta label="Pay Period">
             {longDate(p.cycle_start)} – {longDate(p.cycle_end)}
           </Meta>
@@ -157,35 +159,17 @@ export function PayslipDocument({
       {/* The money */}
       <div className="flex flex-col gap-6">
         <Table heading="Compensation">
-          <Row label="Basic Pay" value={amount(p.period_base)} />
-          {p.allowances_breakdown.map((line: PayslipLine) => (
-            <Row key={line.name} label={line.name} value={amount(line.amount)} />
+          {/* FIN-011 — one loop over `earnings_breakdown`, built by PayslipResource. The old
+              hardcoded list was an ordinary period's earnings, so a 13th-month, adjustment or
+              final-pay slip rendered "Basic Pay ₱0" and no line for what it actually paid. */}
+          {p.earnings_breakdown.map((line: PayslipLine) => (
+            <Row
+              key={line.name}
+              label={line.name}
+              note={line.note ?? undefined}
+              value={amount(line.amount)}
+            />
           ))}
-          {p.overtime_pay > 0 && (
-            <Row
-              label="Overtime"
-              note={`${hours(p.overtime_minutes)} hrs`}
-              value={amount(p.overtime_pay)}
-            />
-          )}
-          {p.night_diff_pay > 0 && (
-            <Row
-              label="Night Differential"
-              note={`${hours(p.night_diff_minutes)} hrs`}
-              value={amount(p.night_diff_pay)}
-            />
-          )}
-          {p.holiday_premium > 0 && <Row label="Holiday" value={amount(p.holiday_premium)} />}
-          {p.rest_day_premium > 0 && (
-            <Row
-              label="Rest Day"
-              note={`${hours(p.rest_day_minutes)} hrs`}
-              value={amount(p.rest_day_premium)}
-            />
-          )}
-          {p.reimbursements > 0 && (
-            <Row label="Reimbursement" value={amount(p.reimbursements)} />
-          )}
           <Row label="Total Compensation" value={amount(t.compensation)} total />
         </Table>
 
