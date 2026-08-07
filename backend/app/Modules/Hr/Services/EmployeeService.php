@@ -13,6 +13,7 @@ use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
+use App\Modules\Hr\Models\RetroFlag;
 use App\Modules\Hr\Models\SalaryHistory;
 use App\Modules\Hr\Models\SharedLeaveAllotment;
 use App\Modules\Hr\Models\SharedLeaveBalance;
@@ -367,7 +368,7 @@ class EmployeeService
 
                 $this->assertSalaryDateIsSafe($employee, $effectiveDate, $data);
 
-                SalaryHistory::create([
+                $history = SalaryHistory::create([
                     'employee_id' => $employee->id,
                     'base_salary' => $newSalary,
                     'effective_date' => $effectiveDate,
@@ -375,6 +376,33 @@ class EmployeeService
                     'change_type' => $data['salary_change_type'] ?? 'adjustment',
                     'changed_by' => Auth::id(),
                 ]);
+
+                /**
+                 * FIN-009 — A BACK-DATED RAISE INTO A SETTLED PERIOD IS AN OUTSTANDING DIFFERENCE.
+                 *
+                 * `assertSalaryDateIsSafe()` above already warns and demands acknowledgement, and the
+                 * salary history now records what was decided. Neither of those pays anybody. Until this,
+                 * "confirm to record it anyway" meant the raise was recorded and the back pay owed for the
+                 * already-paid days was tracked NOWHERE — HR was told about it once, in a dialog, and then
+                 * it was gone.
+                 *
+                 * The retro flag existed and was raised for overtime, leave, half-day and early-out
+                 * decisions, plus the bulk minimum-wage uplift — but not for an ordinary raise, which is
+                 * the most common retroactive event there is.
+                 *
+                 * `flagIfSettled()` returns null on its own when nothing is settled, so a normal forward-
+                 * dated raise is unaffected: no run covers a future date, so there is nothing to owe.
+                 */
+                app(RetroFlagService::class)->flagIfSettled(
+                    $history,
+                    $employee->id,
+                    $effectiveDate,
+                    null,
+                    RetroFlag::OWED,
+                    'Salary raised to ' . number_format((float) $newSalary, 2)
+                        . ' effective ' . $effectiveDate
+                        . ' — the days already paid were priced at the old figure',
+                );
             }
 
             // A job-title change moves the employment-history timeline forward.

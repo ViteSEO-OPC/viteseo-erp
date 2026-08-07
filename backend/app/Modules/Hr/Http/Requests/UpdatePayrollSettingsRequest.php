@@ -25,10 +25,6 @@ class UpdatePayrollSettingsRequest extends FormRequest
             'effective_from' => ['sometimes', 'nullable', 'date'],
             // FIN-030 — the regional minimum daily wage from the applicable DOLE wage order.
             'minimum_daily_wage' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999'],
-            // FIN-020 — separation of duties: the person who ran a cycle cannot mark it paid, and the
-            // person who locked a run cannot unlock it. Off by default, because forcing it on would
-            // leave a one-officer company unable to disburse until somebody found the setting.
-            'require_maker_checker' => ['sometimes', 'boolean'],
             'frequency' => ['required', Rule::in(array_keys(PayScheduleService::PERIODS_PER_YEAR))],
             'deduction_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],
             'tax_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],
