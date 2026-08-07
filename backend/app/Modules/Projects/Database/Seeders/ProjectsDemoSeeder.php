@@ -96,6 +96,7 @@ class ProjectsDemoSeeder extends Seeder
                 $this->seedWebsiteRevamp($workspace, $u, $now);
                 $this->seedMobileApp($workspace, $u, $now);
                 $this->seedMarketingCampaign($workspace, $u, $now);
+                $this->seedDesignSystem($workspace, $u, $now);
             });
         } finally {
             Model::setEventDispatcher($previousDispatcher);
@@ -204,6 +205,24 @@ class ProjectsDemoSeeder extends Seeder
             'deadline' => $now->copy()->addDays(12)->toDateString(),
         ]);
         $this->logCreated($perf, $marco);
+
+        // Broken down, so the group's workload comes from its sub-tasks (the
+        // parent contributes 0) and each piece also lands on its own assignee.
+        foreach ([
+            ['Ship responsive image pipeline', $leo, TaskPriority::HIGH, 8, 'in_progress'],
+            ['Code-split the marketing bundle', $grace, TaskPriority::HIGH, 7, 'todo'],
+            ['Preload brand fonts', $bea, TaskPriority::MEDIUM, 3, 'todo'],
+        ] as [$name, $assignee, $priority, $effort, $status]) {
+            Subtask::create([
+                'task_id' => $perf->id,
+                'name' => $name,
+                'assignee_id' => $assignee?->id,
+                'status_id' => $statuses[$status]->id,
+                'priority' => $priority,
+                'effort_score' => $effort,
+                'deadline' => $now->copy()->addDays(10)->toDateString(),
+            ]);
+        }
 
         // 4) A custom-status ("In Review") individual task.
         $copy = Task::create([
@@ -334,10 +353,41 @@ class ProjectsDemoSeeder extends Seeder
             'assigned_by_id' => $marco?->id,
             'status_id' => $statuses['todo']->id,
             'priority' => TaskPriority::HIGH,
-            'effort_score' => null,
+            // Sized but not broken down — the group carries this one directly.
+            'effort_score' => 9,
             'deadline' => $now->copy()->addDays(20)->toDateString(),
         ]);
         $this->logCreated($offline, $marco);
+
+        $release = Task::create([
+            'project_id' => $project->id,
+            'title' => 'Prepare the v2 release train',
+            'description' => 'Store listings, staged rollout, crash reporting and rollback plan.',
+            'assignment_type' => AssignmentType::GROUP,
+            'group_id' => $mobile->id,
+            'assignee_id' => null,
+            'assigned_by_id' => $marco?->id,
+            'status_id' => $statuses['in_progress']->id,
+            'priority' => TaskPriority::MEDIUM,
+            'effort_score' => null,
+            'deadline' => $now->copy()->addDays(25)->toDateString(),
+        ]);
+        $this->logCreated($release, $marco);
+
+        foreach ([
+            ['Draft store listings and screenshots', $leo, TaskPriority::LOW, 2, 'todo'],
+            ['Wire crash reporting to the dashboard', $carlo, TaskPriority::HIGH, 6, 'in_progress'],
+        ] as [$name, $assignee, $priority, $effort, $status]) {
+            Subtask::create([
+                'task_id' => $release->id,
+                'name' => $name,
+                'assignee_id' => $assignee?->id,
+                'status_id' => $statuses[$status]->id,
+                'priority' => $priority,
+                'effort_score' => $effort,
+                'deadline' => $now->copy()->addDays(22)->toDateString(),
+            ]);
+        }
 
         $push = Task::create([
             'project_id' => $project->id,
@@ -398,6 +448,138 @@ class ProjectsDemoSeeder extends Seeder
             ]);
             $this->logCreated($task, $maya);
         }
+    }
+
+    /**
+     * Fourth active project, seeded specifically so Workload Analysis has
+     * something to analyse.
+     *
+     * It spreads active work across every member and both groups, and covers all
+     * three task categories (Light 1-3, Moderate 4-7, Heavy 8-10) so the KPI
+     * cards, the stacked bars and the Category filter all have data. Effort is
+     * chosen so the six members land in visibly different bands against the
+     * default 20/40 thresholds — a flat team would make the chart pointless.
+     *
+     * Some work is Done on purpose: it must NOT appear in workload totals, and
+     * it gives the member page's completion percentage something to report.
+     *
+     * @param  callable(string):(?User)  $u
+     */
+    private function seedDesignSystem(Workspace $workspace, callable $u, Carbon $now): void
+    {
+        $maya = $u('employee@viteseo.ph');
+        $marco = $u('marco@viteseo.ph');
+        $leo = $u('leo@viteseo.ph');
+        $grace = $u('grace@viteseo.ph');
+        $bea = $u('bea@viteseo.ph');
+        $carlo = $u('carlo@viteseo.ph');
+        $nina = $u('nina@viteseo.ph');
+        $paolo = $u('paolo@viteseo.ph');
+
+        $project = Project::create([
+            'workspace_id' => $workspace->id,
+            'name' => 'Design System 2.0',
+            'description' => 'Tokens, primitives and documentation for the shared component library.',
+            'priority' => 'high',
+            'color' => '#0ea5e9',
+            'status' => ProjectState::ACTIVE,
+        ]);
+
+        $statuses = $this->seedStatuses($project);
+        $this->attachMembers($project, [$maya, $marco, $leo, $grace, $bea, $carlo, $nina, $paolo]);
+
+        $platform = $this->makeGroup($project, 'Platform Guild', '#6366f1', $grace, [$bea, $paolo]);
+
+        // Individually-owned work. [title, assignee, priority, effort, status]
+        foreach ([
+            ['Audit brand colour palette for WCAG 2.1', $grace, TaskPriority::HIGH, 9, 'in_progress'],
+            ['Design dark mode foundations', $bea, TaskPriority::HIGH, 8, 'todo'],
+            ['Rebuild the Button component with slots', $leo, TaskPriority::HIGH, 7, 'in_progress'],
+            ['Normalise spacing and radius tokens', $carlo, TaskPriority::MEDIUM, 6, 'todo'],
+            ['Document the Grid system', $nina, TaskPriority::MEDIUM, 5, 'todo'],
+            ['Write the icon contribution guide', $paolo, TaskPriority::LOW, 4, 'in_progress'],
+            ['Publish the initial accessibility report', $nina, TaskPriority::LOW, 3, 'todo'],
+            ['Rename legacy token aliases', $paolo, TaskPriority::LOW, 2, 'todo'],
+            ['Add Storybook smoke tests', $carlo, TaskPriority::MEDIUM, 7, 'in_progress'],
+            ['Migrate the Modal to the new tokens', $leo, TaskPriority::HIGH, 8, 'todo'],
+            ['Retire the old colour SCSS map', $bea, TaskPriority::LOW, 1, 'todo'],
+            // Two people deliberately pushed over the Heavy line (>40 by default):
+            // an analysis page where nobody is overloaded has nothing to show.
+            ['Rewrite the theming engine', $leo, TaskPriority::HIGH, 8, 'in_progress'],
+            ['Untangle the legacy CSS cascade', $leo, TaskPriority::MEDIUM, 5, 'todo'],
+            ['Rebuild the data-table primitive', $carlo, TaskPriority::HIGH, 10, 'todo'],
+            ['Backfill component unit tests', $carlo, TaskPriority::MEDIUM, 6, 'in_progress'],
+            // Finished work — deliberately excluded from every workload total.
+            ['Agree the token naming convention', $grace, TaskPriority::MEDIUM, 5, 'done'],
+            ['Set up the docs site skeleton', $leo, TaskPriority::LOW, 3, 'done'],
+            ['Inventory existing components', $nina, TaskPriority::LOW, 2, 'done'],
+        ] as [$title, $assignee, $priority, $effort, $status]) {
+            $task = Task::create([
+                'project_id' => $project->id,
+                'title' => $title,
+                'assignment_type' => AssignmentType::INDIVIDUAL,
+                'assignee_id' => $assignee?->id,
+                'assigned_by_id' => $maya?->id,
+                'status_id' => $statuses[$status]->id,
+                'priority' => $priority,
+                'effort_score' => $effort,
+                'start_date' => $now->copy()->subDays(3)->toDateString(),
+                'deadline' => $now->copy()->addDays(12)->toDateString(),
+            ]);
+            $this->logCreated($task, $maya);
+        }
+
+        // A group task carried whole — the Platform Guild owns it directly.
+        $tokens = Task::create([
+            'project_id' => $project->id,
+            'title' => 'Ship the token pipeline to npm',
+            'description' => 'Build, version and publish the design tokens package.',
+            'assignment_type' => AssignmentType::GROUP,
+            'group_id' => $platform->id,
+            'assignee_id' => null,
+            'assigned_by_id' => $maya?->id,
+            'status_id' => $statuses['in_progress']->id,
+            'priority' => TaskPriority::HIGH,
+            'effort_score' => 7,
+            'deadline' => $now->copy()->addDays(18)->toDateString(),
+        ]);
+        $this->logCreated($tokens, $maya);
+
+        // ...and one broken into sub-tasks, so the group's effort comes from the
+        // pieces while each piece also lands on its own assignee.
+        $docs = Task::create([
+            'project_id' => $project->id,
+            'title' => 'Launch the component documentation site',
+            'assignment_type' => AssignmentType::GROUP,
+            'group_id' => $platform->id,
+            'assignee_id' => null,
+            'assigned_by_id' => $maya?->id,
+            'status_id' => $statuses['in_progress']->id,
+            'priority' => TaskPriority::MEDIUM,
+            'effort_score' => null,
+            'deadline' => $now->copy()->addDays(21)->toDateString(),
+        ]);
+        $this->logCreated($docs, $maya);
+
+        foreach ([
+            ['Write usage guidelines for primitives', $bea, TaskPriority::MEDIUM, 6, 'todo'],
+            ['Build the live prop playground', $paolo, TaskPriority::HIGH, 8, 'in_progress'],
+            ['Wire search across the docs', $grace, TaskPriority::LOW, 3, 'todo'],
+            ['Port the changelog', $paolo, TaskPriority::LOW, 2, 'done'],
+        ] as [$name, $assignee, $priority, $effort, $status]) {
+            Subtask::create([
+                'task_id' => $docs->id,
+                'name' => $name,
+                'assignee_id' => $assignee?->id,
+                'status_id' => $statuses[$status]->id,
+                'priority' => $priority,
+                'effort_score' => $effort,
+                'deadline' => $now->copy()->addDays(19)->toDateString(),
+            ]);
+        }
+
+        $this->comment($tokens, $marco, 'Cut a release candidate first so we can smoke-test consumers.');
+        $this->link($tokens, $grace, 'https://www.figma.com/design/2sxepYV9HjaqX6zEb53P72/Pod---3-Project-Management-System');
     }
 
     // ---- helpers ---------------------------------------------------------
