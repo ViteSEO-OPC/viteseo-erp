@@ -40,6 +40,15 @@ export interface Employee {
   employee_role: string | null;
   onboarding_status: "pending" | "complete" | null;
   hire_date: string;
+  // MF-18 — the employment lifecycle. `separation_date` is the last WORKING day (what payroll
+  // prorates against and what final pay requires); `separated_at` is the archive stamp, kept in sync
+  // with it. `previous_hire_date` is set only by a rehire, so restarting tenure doesn't erase when
+  // this person first joined.
+  separation_type: "voluntary" | "involuntary" | null;
+  separation_date: string | null;
+  separated_at: string | null;
+  is_separated: boolean;
+  previous_hire_date: string | null;
   base_salary: string; // raw decimal from the API; format for display
   is_management: boolean; // fixed salary + exempt from attendance
   phone: string | null;

@@ -1970,6 +1970,53 @@ class PayrollService
      * Only PAID types count: converting unpaid leave to cash would pay for time that was never
      * going to be paid. Shared mode holds a single pool, per-type mode holds a row per type.
      */
+    /**
+     * What one employee's unused paid leave would cost if it were paid out today (MF-11).
+     *
+     * UNUSED PAID LEAVE IS A LIABILITY, and it was nowhere on the books. It becomes cash the moment
+     * somebody leaves — `runFinalPay()` converts it at the daily rate — and for the five-day Service
+     * Incentive Leave the Labour Code requires that conversion outright (Art. 95). So the company owes
+     * it whether or not anyone has left yet, and a balance sheet that omits it understates payroll
+     * obligations by the whole accrued balance.
+     *
+     * IT DELIBERATELY REUSES `unusedLeaveDaysFor()` AND `dailyRateFor()` — the exact functions final pay
+     * uses — rather than recomputing the same idea a second time. A liability report that disagreed with
+     * the payslip it is predicting would be worse than no report: accounting would accrue one figure
+     * and pay another, and nobody could tell which was wrong. Any change to how final pay values leave
+     * moves this report with it, by construction.
+     *
+     * Priced at TODAY's rate (or `$asOf`), not the rate at separation, because that is unknowable — a
+     * raise between now and someone's eventual last day changes what this costs. It is an accrual
+     * estimate, and the report says so.
+     *
+     * @return array{days: float, daily_rate: float, amount: float}
+     */
+    public function leaveLiabilityFor(Employee $employee, ?int $year = null, ?string $asOf = null): array
+    {
+        $tz = config('app.timezone_local');
+        $on = $asOf ?? now($tz)->toDateString();
+        $year ??= (int) Carbon::parse($on, $tz)->year;
+
+        $days = round($this->unusedLeaveDaysFor($employee, $year), 2);
+
+        $setting = PayrollSetting::asOf($on);
+        $policy = $this->attendancePolicy->asOf($on);
+        $frequency = $employee->pay_frequency ?: $setting->frequency;
+        $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
+        $period = $this->schedule->currentPeriodFor($frequency, $setting->anchor_date);
+        $workingDays = max(1, $this->attendance->scheduledWorkdaysFor($employee, $period['start'], $period['end']));
+
+        $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
+
+        return [
+            'days' => $days,
+            'daily_rate' => round($dailyRate, 2),
+            // Negative balances can't create a negative liability — an over-taken balance is an
+            // employee owing the company time, which is not an accrual and not this report's business.
+            'amount' => round(max(0, $days) * $dailyRate, 2),
+        ];
+    }
+
     private function unusedLeaveDaysFor(Employee $employee, int $year): float
     {
         if (LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED) {

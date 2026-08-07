@@ -34,12 +34,18 @@ class ReportService
     public const KEYS = [
         'headcount', 'attrition', 'leave', 'compensation', 'payroll',
         'recruitment', 'diversity', 'health_safety', 'audit',
+        // MF-11 — the export route gates on THIS list, not on `get()`'s match. A report added to one
+        // and not the other reads fine and refuses to export, which is how it would ship half-wired.
+        'leave_liability',
     ];
 
     public function __construct(
         private readonly AuditService $audit,
         // Slice B9 — the legend resolves the dated rate version payroll actually priced with.
         private readonly ContributionService $contributions,
+        // MF-11 — the leave-liability report values leave on exactly the basis final pay uses, so it
+        // borrows PayrollService rather than reimplementing `unusedLeaveDaysFor()` + `dailyRateFor()`.
+        private readonly PayrollService $payrollService,
     ) {}
 
     /** @param array<string, mixed> $filters */
@@ -49,6 +55,7 @@ class ReportService
             'headcount' => $this->headcount($filters),
             'attrition' => $this->attrition($filters),
             'leave' => $this->leave($filters),
+            'leave_liability' => $this->leaveLiability($filters),
             'compensation' => $this->compensation($filters),
             'payroll' => $this->payroll(),
             'recruitment' => $this->recruitment($filters),
@@ -77,7 +84,9 @@ class ReportService
     /** Table-style reports (Audit Trail) export as CSV; chart reports export as PDF. */
     public function exportFormat(string $key): string
     {
-        return $key === 'audit' ? 'csv' : 'pdf';
+        // MF-11 — the liability report exports CSV for the same reason the audit trail does: it is a
+        // row-per-employee table that accounting reconciles against, not a chart anyone reads.
+        return in_array($key, ['audit', 'leave_liability'], true) ? 'csv' : 'pdf';
     }
 
     /**
@@ -144,6 +153,7 @@ class ReportService
             'headcount' => 'Headcount & Movement',
             'recruitment' => 'Recruitment Funnel',
             'leave' => 'Absences & Leaves',
+            'leave_liability' => 'Leave Liability',
             'compensation' => 'Compensation & Benefits',
             'attrition' => 'Attrition & Tenure',
             'diversity' => 'Diversity',
@@ -374,6 +384,120 @@ class ReportService
             'stacked' => ['series' => $series->all(), 'points' => $points],
             'departments' => $departments,
             'note' => null,
+        ];
+    }
+
+    /**
+     * The peso value of unused paid leave — an obligation that was nowhere on the books (MF-11).
+     *
+     * WHY THIS IS A LIABILITY AND NOT A STATISTIC. Unused paid leave turns into cash the moment
+     * somebody leaves: `runFinalPay()` converts it at the daily rate, and for the five-day Service
+     * Incentive Leave the Labour Code requires that conversion whether or not the employee asks
+     * (Art. 95). The company therefore owes this money now, and a balance sheet without it understates
+     * payroll obligations by the entire accrued balance. The existing Absences report already promised
+     * "liability accrual" in its own description and never computed one.
+     *
+     * IT DOES NOT DO ITS OWN ARITHMETIC. Every row comes from `PayrollService::leaveLiabilityFor()`,
+     * which is built on the same two functions final pay uses to value leave. A report that computed
+     * this independently would eventually disagree with the payslip it is predicting, and accounting
+     * would accrue one number while payroll paid another.
+     *
+     * IT IS AN ESTIMATE AT TODAY'S RATES, stated as such in the note. A raise between now and someone's
+     * eventual last day changes what their balance costs, and no report can know that in advance.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function leaveLiability(array $filters = []): array
+    {
+        $deptId = $filters['department'] ?? null;
+        $tz = config('app.timezone_local');
+        $asOf = now($tz)->toDateString();
+        $year = $this->year();
+
+        // Active staff only. A former employee's balance is not an accrual — it has either been paid
+        // out by final pay or it lapsed with the employment, and carrying it here would double-count
+        // against the payslip that already settled it.
+        $employees = Employee::query()
+            ->with(['user', 'department'])
+            ->when($deptId, fn ($q) => $q->where('department_id', $deptId))
+            ->get();
+
+        $rows = [];
+        $totalAmount = 0.0;
+        $totalDays = 0.0;
+        $byDepartment = [];
+
+        foreach ($employees as $employee) {
+            $liability = $this->payrollService->leaveLiabilityFor($employee, $year, $asOf);
+
+            if ($liability['days'] <= 0) {
+                continue; // nothing accrued means nothing owed, and an all-zero table hides the signal
+            }
+
+            $totalDays += $liability['days'];
+            $totalAmount += $liability['amount'];
+
+            $deptName = $employee->department?->name ?? 'Unassigned';
+            $byDepartment[$deptName] = ($byDepartment[$deptName] ?? 0) + $liability['amount'];
+
+            $rows[] = [
+                'name' => $employee->user?->name ?? $employee->employee_no,
+                'department' => $deptName,
+                'days' => $liability['days'],
+                'daily_rate' => $liability['daily_rate'],
+                'amount' => $liability['amount'],
+            ];
+        }
+
+        // Largest exposure first — the point of the report is which balances are worth acting on.
+        usort($rows, fn (array $a, array $b) => $b['amount'] <=> $a['amount']);
+
+        arsort($byDepartment);
+
+        $departments = DB::table('hr_departments')
+            ->whereNull('deleted_at')
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
+            ->all();
+
+        return [
+            'title' => 'Leave Liability',
+            'description' => 'What unused paid leave would cost if it were paid out today — the accrued obligation behind every leave balance.',
+            'mock' => false,
+            'summary' => [
+                ['label' => 'Accrued liability', 'value' => $this->peso($totalAmount)],
+                ['label' => 'Unused paid days', 'value' => number_format($totalDays, 1)],
+                ['label' => 'Employees with a balance', 'value' => (string) count($rows)],
+            ],
+            // `bars` is {title, items:[{label,value,display}]} — the `{series, points}` shape belongs
+            // to `stacked` and would have rendered nothing here.
+            'bars' => $byDepartment === [] ? null : [
+                'title' => 'Liability by department',
+                'items' => array_map(
+                    fn (string $name, float $amount) => [
+                        'label' => $name,
+                        'value' => (int) round($amount),
+                        'display' => $this->peso($amount),
+                    ],
+                    array_keys($byDepartment),
+                    array_values($byDepartment),
+                ),
+            ],
+            'table' => [
+                'columns' => ['Employee', 'Department', 'Unused days', 'Daily rate', 'Liability'],
+                'rows' => array_map(fn (array $r) => [
+                    $r['name'],
+                    $r['department'],
+                    number_format($r['days'], 1),
+                    $this->peso($r['daily_rate']),
+                    $this->peso($r['amount']),
+                ], $rows),
+            ],
+            'departments' => $departments,
+            'note' => 'An estimate at today\'s salaries and today\'s balances. Only PAID leave types count '
+                . 'toward it, valued on the same basis final pay uses to convert unused leave to cash. '
+                . 'Former employees are excluded — their balances were settled by their final pay.',
         ];
     }
 

@@ -262,7 +262,12 @@ Route::middleware('auth:sanctum')->group(function () {
         // deliberate and traceable, not that it is refused.
         // FIN-014 — final pay. Its own limiter, and a low one: it writes a payslip and the amounts
         // are entered by a person.
+        // MF-18 — `withTrashed()` is REQUIRED here, not optional. Final pay is by definition for
+        // someone who has left, and a separation soft-deletes the record, so without it route model
+        // binding 404s for every employee this endpoint exists to pay. FIN-014 shipped unreachable
+        // twice over: nothing wrote `separation_date`, and this route could not resolve a leaver.
         Route::post('employees/{employee}/final-pay', [PayrollController::class, 'runFinalPay'])
+            ->withTrashed()
             ->middleware('throttle:5,1,final-pay:');
         Route::get('employees/{employee}/sensitive', [EmployeeSensitiveController::class, 'show'])
             ->middleware('throttle:20,1,employee-sensitive:');
@@ -278,6 +283,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('employees/{employee}/meetings', [MeetingController::class, 'store']);
         Route::post('employees/{employee}/activate', [EmployeeController::class, 'activate']);
         Route::post('employees/{employee}/reopen-onboarding', [EmployeeController::class, 'reopenOnboarding']);
+        // MF-18 — the employment lifecycle's exit and its two ways back in.
+        Route::post('employees/{employee}/separate', [EmployeeController::class, 'separate']);
+        // `withTrashed()` on both: a separated employee IS soft-deleted, so without it route model
+        // binding 404s and the reversal is unreachable — which is the gap MF-18 describes.
+        Route::post('employees/{employee}/reinstate', [EmployeeController::class, 'reinstate'])
+            ->withTrashed();
+        Route::post('employees/{employee}/rehire', [EmployeeController::class, 'rehire'])
+            ->withTrashed();
         // Grant/revoke HR-officer access for this employee's user account.
         Route::post('employees/{employee}/hr-role', [EmployeeController::class, 'setHrRole']);
         // Documents tab: list / upload / delete.

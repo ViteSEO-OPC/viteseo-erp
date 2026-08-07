@@ -9,10 +9,52 @@ import type {
   StatutoryPreviewRow,
 } from "@/modules/hr/types/employee";
 
-export async function getEmployees(search?: string): Promise<Employee[]> {
+/**
+ * The employee directory. `status` defaults to "active" server-side.
+ *
+ * MF-18 — "former" is what makes a rehire reachable: a separated employee is soft-deleted, so the
+ * default directory cannot show them and there was no way to find someone to take back.
+ */
+export async function getEmployees(
+  search?: string,
+  status?: "active" | "former" | "all",
+): Promise<Employee[]> {
   const res = await apiClient.get("/hr/employees", {
-    params: search ? { search } : undefined,
+    params: {
+      ...(search ? { search } : {}),
+      ...(status && status !== "active" ? { status } : {}),
+    },
   });
+  return res.data.data;
+}
+
+/** MF-18 — end employment. `separation_date` is the last WORKING day; payroll prorates against it. */
+export async function separateEmployee(
+  id: number,
+  input: { separation_type: "voluntary" | "involuntary"; separation_date: string; reason?: string },
+): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/separate`, input);
+  return res.data.data;
+}
+
+/**
+ * MF-18 — undo a separation. Service is CONTINUOUS: hire date, leave credits and loan
+ * authorisations all stand. For a genuinely new relationship use `rehireEmployee` instead.
+ */
+export async function reinstateEmployee(id: number, reason?: string): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/reinstate`, { reason });
+  return res.data.data;
+}
+
+/**
+ * MF-18 — take someone back as a NEW relationship. Tenure restarts from `hire_date`, leave is
+ * seeded fresh, and any outstanding loan drops back to needing the employee's consent (Art. 113).
+ */
+export async function rehireEmployee(
+  id: number,
+  input: { hire_date: string; reason?: string },
+): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/rehire`, input);
   return res.data.data;
 }
 

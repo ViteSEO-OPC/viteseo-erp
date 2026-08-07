@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   ScrollText,
   BarChart3,
+  Wallet,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,8 +37,16 @@ const REPORTS: {
   {
     key: "leave",
     title: "Absence & Leaves",
-    description: "Balances by employee and type, utilization, absence patterns, liability accrual from unused leave.",
+    description: "Balances by employee and type, utilization and absence patterns. The peso value of unused leave is its own report below.",
     icon: CalendarRange,
+  },
+  {
+    // MF-11 — its own card rather than a panel inside Absences: this is an accounting figure that
+    // finance reconciles, not an HR utilisation chart, and it exports as a CSV of rows.
+    key: "leave_liability",
+    title: "Leave Liability",
+    description: "What unused paid leave would cost if it were paid out today — the accrued obligation behind every leave balance, per employee and by department.",
+    icon: Wallet,
   },
   {
     key: "compensation",

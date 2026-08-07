@@ -33,6 +33,7 @@ class Employee extends Model
         'separation_type',
         // The employee's last working day — bounds their final payslip (Slice 4).
         'separation_date',
+        'previous_hire_date',
         'hire_date',
         'phone',
         'address',
@@ -87,6 +88,8 @@ class Employee extends Model
     protected $casts = [
         'hire_date' => 'date',
         'separation_date' => 'date',
+        'previous_hire_date' => 'date', // MF-18 — the prior stint's start, kept across a rehire
+
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
         'is_management' => 'boolean',

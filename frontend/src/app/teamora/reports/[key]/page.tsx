@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 import { ArrowLeft, Info, Download, Lock } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
@@ -10,6 +11,7 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { ReportBars } from "@/modules/hr/components/report-bars";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { HeadcountReport } from "@/modules/hr/components/headcount-report";
 import { RecruitmentReport } from "@/modules/hr/components/recruitment-report";
 import { LeaveReport } from "@/modules/hr/components/leave-report";
@@ -36,7 +38,16 @@ export default function ReportDetailPage() {
 }
 
 function GenericReport({ reportKey }: { reportKey: string }) {
-  const { data: report, isLoading, isError } = useReport(reportKey);
+  // MF-11 — the generic renderer now honours a department filter whenever the report's payload
+  // carries a `departments` list. Reports were already returning one and the fallback view ignored
+  // it, so any report without a bespoke component had a filter the server supported and the page
+  // never offered. The control only appears when there is something to filter by.
+  const [department, setDepartment] = useState("all");
+  const {
+    data: report,
+    isLoading,
+    isError,
+  } = useReport(reportKey, department !== "all" ? { department } : undefined);
   const exportMut = useExportReport(reportKey);
 
   async function onExport() {
@@ -83,6 +94,18 @@ function GenericReport({ reportKey }: { reportKey: string }) {
                 <Lock className="size-4" />
                 Access restricted to HR leadership / admin.
               </div>
+            )}
+
+            {(report.departments?.length ?? 0) > 0 && (
+              <SimpleSelect
+                className="w-56"
+                value={department}
+                onValueChange={setDepartment}
+                options={[
+                  { value: "all", label: "All departments" },
+                  ...report.departments!.map((d) => ({ value: String(d.id), label: d.name })),
+                ]}
+              />
             )}
 
             {report.mock && (

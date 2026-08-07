@@ -22,7 +22,16 @@ export function EmployeeCard({ employee }: { employee: Employee }) {
           {employee.department ? ` · ${employee.department.name}` : ""}
         </p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {employee.onboarding_status === "pending" ? (
+          {/* MF-18 — a former employee must not read as "Active". The lifecycle badge comes first
+              because it changes what the other one means: onboarding state is irrelevant once
+              somebody has left. */}
+          {employee.is_separated ? (
+            // `archived` (grey) rather than a new key — status-badge.tsx lives in shared core/.
+            <StatusBadge
+              status="archived"
+              label={employee.separation_date ? `Left ${employee.separation_date}` : "Former"}
+            />
+          ) : employee.onboarding_status === "pending" ? (
             <StatusBadge status="pending" label="Onboarding" />
           ) : (
             <StatusBadge status="active" label="Active" />

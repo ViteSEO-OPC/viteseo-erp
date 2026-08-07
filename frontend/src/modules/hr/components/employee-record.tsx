@@ -21,6 +21,7 @@ import { EmployeeLoans } from "@/modules/hr/components/employee-loans";
 import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
 import { EmployeePersonalSection } from "@/modules/hr/components/employee-personal-section";
 import { EmployeeJobSection } from "@/modules/hr/components/employee-job-section";
+import { EmploymentLifecycleSection } from "@/modules/hr/components/employment-lifecycle-section";
 import { EmployeeCompensationSection } from "@/modules/hr/components/employee-compensation-section";
 import { Button } from "@/components/ui/button";
 import { formatPeso, formatDate } from "@/core/lib/format";
@@ -155,6 +156,14 @@ export function EmployeeRecord({
             {isHr && <OnboardingPanel employee={employee} />}
 
             {isHr && <HrAccessSection employee={employee} />}
+
+            {/* MF-18 — separate / reinstate / rehire. On the Job tab because tenure and the last
+                working day are job facts, and next to Employment History for the same reason. */}
+            {isHr && (
+              <div className="border-t border-border pt-6">
+                <EmploymentLifecycleSection employee={employee} />
+              </div>
+            )}
           </EmployeeJobSection>
         )}
 

@@ -28,15 +28,58 @@ import {
   approveLoan,
   rejectLoan,
   type EmployeeLoanInput,
+  separateEmployee,
+  reinstateEmployee,
+  rehireEmployee,
 } from "@/modules/hr/api/employees";
 import type { EmployeeInput, EmployeeUpdateInput } from "@/modules/hr/types/employee";
 
 const EMPLOYEES_KEY = ["hr", "employees"] as const;
 
-export function useEmployees() {
+export function useEmployees(status: "active" | "former" | "all" = "active") {
   return useQuery({
-    queryKey: EMPLOYEES_KEY,
-    queryFn: () => getEmployees(),
+    queryKey: [...EMPLOYEES_KEY, { status }] as const,
+    queryFn: () => getEmployees(undefined, status),
+  });
+}
+
+/**
+ * MF-18 — the three lifecycle transitions. All invalidate the whole employee key, because each one
+ * moves the record between the "active" and "former" lists as well as changing the record itself.
+ */
+export function useSeparateEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: number;
+      input: { separation_type: "voluntary" | "involuntary"; separation_date: string; reason?: string };
+    }) => separateEmployee(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
+  });
+}
+
+export function useReinstateEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reinstateEmployee(id, reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
+  });
+}
+
+export function useRehireEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: { hire_date: string; reason?: string } }) =>
+      rehireEmployee(id, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: EMPLOYEES_KEY });
+      // A rehire seeds fresh leave credits and may park a loan for re-authorisation.
+      qc.invalidateQueries({ queryKey: ["hr", "leave-balances"] });
+      qc.invalidateQueries({ queryKey: ["hr", "loans"] });
+    },
   });
 }
 

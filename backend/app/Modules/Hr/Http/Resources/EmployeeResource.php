@@ -30,6 +30,16 @@ class EmployeeResource extends JsonResource
             'employee_role' => $this->employee_role,
             'onboarding_status' => $this->onboarding_status,
             'hire_date' => $this->hire_date?->format('Y-m-d'),
+            // MF-18 — the employment lifecycle, so the UI can tell an active employee from a former
+            // one and offer the right action. `separation_date` is the last WORKING day (what payroll
+            // prorates against); `deleted_at` is kept in sync with it by `EmployeeService::separate()`.
+            'separation_type' => $this->separation_type,
+            'separation_date' => $this->separation_date?->format('Y-m-d'),
+            'separated_at' => $this->deleted_at?->format('Y-m-d'),
+            'is_separated' => $this->separation_date !== null || $this->deleted_at !== null,
+            // Set only by a rehire — the previous stint's start, so overwriting `hire_date` does not
+            // erase when this person first joined.
+            'previous_hire_date' => $this->previous_hire_date?->format('Y-m-d'),
             'base_salary' => $this->base_salary,
             // Fixed-salary + attendance-exempt management flag.
             'is_management' => (bool) $this->is_management,
