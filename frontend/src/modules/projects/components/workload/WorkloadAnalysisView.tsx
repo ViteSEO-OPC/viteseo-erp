@@ -72,8 +72,8 @@ export function WorkloadAnalysisView() {
 
   return (
     <div className="px-4 py-4 sm:px-6 lg:px-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-ink sm:text-[32px]">Workload Analysis</h1>
           <p className="mt-2 text-[15px] text-ink-soft">
             {isManager
@@ -82,14 +82,19 @@ export function WorkloadAnalysisView() {
           </p>
         </div>
         {isManager && data?.can_adjust_capacity && (
-          <Button onClick={() => setCapacityOpen(true)}>Adjust Capacity</Button>
+          <Button
+            className="w-full shrink-0 sm:w-auto"
+            onClick={() => setCapacityOpen(true)}
+          >
+            Adjust Capacity
+          </Button>
         )}
       </div>
 
       {/* Toolbar */}
       <div className="mt-6 flex flex-wrap items-center gap-3">
         {isManager && (
-          <SegmentedControl>
+          <SegmentedControl className="flex-1 sm:flex-none">
             {(["all", "group"] as const).map((s) => (
               <SegmentedItem
                 key={s}
@@ -98,7 +103,7 @@ export function WorkloadAnalysisView() {
                   setScope(s);
                   resetPage();
                 }}
-                className="capitalize"
+                className="flex-1 capitalize sm:flex-none"
               >
                 {s === "all" ? "All" : "Group"}
               </SegmentedItem>
@@ -194,8 +199,8 @@ export function WorkloadAnalysisView() {
 
       {/* Chart — the team for a manager, a personal breakdown for a member. */}
       {isManager ? (
-        <Card className="mt-6 rounded-2xl p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <Card className="mt-6 rounded-2xl p-4 sm:p-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-bold text-ink">
               {scope === "group" ? "Group Workload" : "Employee Workload"}
             </h2>
@@ -203,7 +208,7 @@ export function WorkloadAnalysisView() {
           </div>
           <div className="mt-4">
             {analysis.isLoading ? (
-              <div className="flex h-[320px] items-center justify-center text-sm text-ink-soft">
+              <div className="flex h-[240px] items-center justify-center text-sm text-ink-soft sm:h-[300px] lg:h-[340px]">
                 Loading workload…
               </div>
             ) : (
@@ -264,19 +269,19 @@ function MemberWorkloadPanel({
   const completion = analysis?.completion;
 
   return (
-    <Card className="mt-6 grid grid-cols-1 gap-8 rounded-2xl p-6 lg:grid-cols-2">
+    <Card className="mt-6 grid grid-cols-1 gap-8 rounded-2xl p-4 sm:p-6 lg:grid-cols-2">
       <div>
         <h2 className="text-lg font-bold text-ink">My Workload</h2>
         {isLoading ? (
           <p className="mt-6 text-sm text-ink-soft">Loading…</p>
         ) : (
-          <div className="mt-4 flex flex-wrap items-center gap-8">
+          <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:gap-8">
             <EffortDonut
               light={me?.light ?? 0}
               moderate={me?.moderate ?? 0}
               heavy={me?.heavy ?? 0}
             />
-            <div className="space-y-2">
+            <div className="space-y-2 text-center sm:text-left">
               <CategoryLegend />
               <p className="text-sm text-ink-soft">
                 Total effort <span className="font-bold text-ink">{me?.total_effort ?? 0}</span>{" "}
@@ -308,7 +313,7 @@ function MemberWorkloadPanel({
         </p>
 
         <p className="mt-6 text-sm font-bold text-ink">Task Status Breakdown</p>
-        <div className="mt-3 flex gap-10">
+        <div className="mt-3 flex flex-wrap gap-x-10 gap-y-4">
           {[
             { label: "To Do", value: completion?.todo ?? 0, className: "text-ink" },
             {

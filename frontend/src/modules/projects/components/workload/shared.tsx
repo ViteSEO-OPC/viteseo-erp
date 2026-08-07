@@ -123,7 +123,7 @@ export function WorkloadKpiCards({
 /** Legend shared by the bar chart and the donut. */
 export function CategoryLegend() {
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       {(["light", "moderate", "heavy"] as const).map((c) => (
         <span key={c} className="flex items-center gap-1.5 text-xs text-ink-soft">
           <span
