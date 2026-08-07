@@ -35,6 +35,10 @@ export function AdjustCapacityModal({
   const [max, setMax] = useState(thresholds.max);
   const [light, setLight] = useState(thresholds.light);
   const [moderate, setModerate] = useState(thresholds.moderate);
+  // Applying is a two-step: edit, then confirm what it does to real people.
+  // An inline step rather than a nested dialog — a modal on top of a modal is
+  // worse to escape from, and the summary needs the room anyway.
+  const [stage, setStage] = useState<"edit" | "confirm">("edit");
 
   // Re-seed from the server whenever the modal is (re)opened, so a cancelled
   // edit never lingers. Done during render, React's recommended pattern.
@@ -45,6 +49,7 @@ export function AdjustCapacityModal({
       setMax(thresholds.max);
       setLight(thresholds.light);
       setModerate(thresholds.moderate);
+      setStage("edit");
     }
   }
 
@@ -68,6 +73,21 @@ export function AdjustCapacityModal({
 
   const pct = (n: number) => `${Math.max(0, Math.min(100, (n / max) * 100))}%`;
 
+  /** The band a total would fall in under the PROPOSED thresholds. */
+  const proposedLevel = (total: number): "light" | "moderate" | "heavy" =>
+    total <= light ? "light" : total <= moderate ? "moderate" : "heavy";
+
+  // Who actually changes band. This is the consequence worth confirming —
+  // "are you sure?" on its own tells a reviewer nothing.
+  const movers = bars
+    .map((b) => ({ name: b.name, from: b.level, to: proposedLevel(b.total_effort) }))
+    .filter((m) => m.from !== m.to);
+
+  const unchanged =
+    max === thresholds.max &&
+    light === thresholds.light &&
+    moderate === thresholds.moderate;
+
   const apply = () =>
     update.mutate(
       { max_capacity: max, light_max: light, moderate_max: moderate },
@@ -81,29 +101,63 @@ export function AdjustCapacityModal({
       title="Workload Capacity"
       width={640}
       footer={
-        <div className="flex w-full items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => {
-              setMax(DEFAULTS.max);
-              setLight(DEFAULTS.light);
-              setModerate(DEFAULTS.moderate);
-            }}
-            className="text-sm font-semibold text-ink-soft underline underline-offset-2 hover:text-ink"
-          >
-            Reset to Default
-          </button>
-          <div className="flex gap-3">
-            <Button variant="outline" onClick={onClose} disabled={update.isPending}>
-              Cancel
+        stage === "edit" ? (
+          <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <button
+              type="button"
+              onClick={() => {
+                setMax(DEFAULTS.max);
+                setLight(DEFAULTS.light);
+                setModerate(DEFAULTS.moderate);
+              }}
+              className="text-sm font-semibold text-ink-soft underline underline-offset-2 hover:text-ink"
+            >
+              Reset to Default
+            </button>
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1 sm:flex-none" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 sm:flex-none"
+                disabled={unchanged}
+                onClick={() => setStage("confirm")}
+              >
+                Apply Thresholds
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <Button
+              variant="outline"
+              className="flex-1 sm:flex-none"
+              onClick={() => setStage("edit")}
+              disabled={update.isPending}
+            >
+              Back
             </Button>
-            <Button onClick={apply} disabled={update.isPending}>
-              {update.isPending ? "Applying…" : "Apply Thresholds"}
+            <Button
+              className="flex-1 sm:flex-none"
+              onClick={apply}
+              disabled={update.isPending}
+            >
+              {update.isPending ? "Applying…" : "Yes, apply thresholds"}
             </Button>
           </div>
-        </div>
+        )
       }
     >
+      {stage === "confirm" ? (
+        <ConfirmStep
+          from={thresholds}
+          to={{ light, moderate, max }}
+          movers={movers}
+          memberCount={bars.length}
+          error={update.isError}
+        />
+      ) : (
+      <>
       <p className="-mt-1 mb-4 text-sm text-ink-soft">
         Sets when a member&apos;s total effort counts as Light, Moderate or Heavy —
         everywhere in Sprintly.
@@ -197,12 +251,113 @@ export function AdjustCapacityModal({
         </p>
       </div>
 
-      {update.isError && (
-        <p className="mt-3 text-sm text-danger">
-          Could not apply the thresholds. Check the values and try again.
-        </p>
+      </>
       )}
     </Modal>
+  );
+}
+
+/**
+ * The confirmation step: what is changing, and who it moves.
+ *
+ * These bands are platform-wide and take effect immediately — on this chart, on
+ * every board, and in the task modal's assignment indicator — so the step spells
+ * out the before/after and names the people whose workload label changes rather
+ * than asking a bare "are you sure?".
+ */
+function ConfirmStep({
+  from,
+  to,
+  movers,
+  memberCount,
+  error,
+}: {
+  from: WorkloadThresholds;
+  to: WorkloadThresholds;
+  movers: { name: string; from: string; to: string }[];
+  memberCount: number;
+  error: boolean;
+}) {
+  const rows: { label: string; before: number; after: number }[] = [
+    { label: "Maximum capacity", before: from.max, after: to.max },
+    { label: "Light ends at", before: from.light, after: to.light },
+    { label: "Moderate ends at", before: from.moderate, after: to.moderate },
+  ];
+
+  return (
+    <div>
+      <p className="-mt-1 text-sm text-ink-soft">
+        These bands apply to <span className="font-bold text-ink">everyone</span>,
+        immediately — here, on every board, and when assigning a task.
+      </p>
+
+      <div className="mt-4 overflow-hidden rounded-xl border border-line">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line bg-[#f9fafb]">
+              <th className="px-4 py-2 text-left text-xs font-bold uppercase tracking-wide text-ink-soft">
+                Setting
+              </th>
+              <th className="px-4 py-2 text-right text-xs font-bold uppercase tracking-wide text-ink-soft">
+                Now
+              </th>
+              <th className="px-4 py-2 text-right text-xs font-bold uppercase tracking-wide text-ink-soft">
+                After
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.label} className="border-b border-line last:border-b-0">
+                <td className="px-4 py-2 text-ink">{r.label}</td>
+                <td className="px-4 py-2 text-right text-ink-soft">{r.before}</td>
+                <td
+                  className={`px-4 py-2 text-right font-bold ${
+                    r.before === r.after ? "text-ink-soft" : "text-ink"
+                  }`}
+                >
+                  {r.after}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-5 text-sm font-bold text-ink">
+        {movers.length === 0
+          ? "No one changes workload band."
+          : `${movers.length} of ${memberCount} ${
+              memberCount === 1 ? "member" : "members"
+            } change workload band:`}
+      </p>
+
+      {movers.length > 0 && (
+        <ul className="mt-2 max-h-40 space-y-1.5 overflow-y-auto pr-1">
+          {movers.map((m) => (
+            <li key={m.name} className="flex items-center gap-2 text-sm">
+              <span className="min-w-0 flex-1 truncate text-ink">{m.name}</span>
+              <span className="shrink-0 capitalize text-ink-faint">{m.from}</span>
+              <span className="shrink-0 text-ink-faint" aria-hidden>
+                →
+              </span>
+              <span
+                className="shrink-0 font-bold capitalize"
+                style={{ color: CATEGORY_COLORS[m.to as keyof typeof CATEGORY_COLORS] }}
+              >
+                {m.to}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {error && (
+        <p className="mt-4 text-sm text-danger">
+          Could not apply the thresholds. Go back and check the values.
+        </p>
+      )}
+    </div>
   );
 }
 
