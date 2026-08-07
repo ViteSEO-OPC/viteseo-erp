@@ -114,6 +114,7 @@ export default function PayrollPage() {
     frequency?: string;
     deduction_timing?: string;
     tax_timing?: string;
+    minimum_daily_wage?: number | null;
   }) {
     if (!settings) return;
     try {
@@ -439,6 +440,33 @@ export default function PayrollPage() {
         {/* FIN-025 — settings are dated. Payroll prices each period with the settings in force
             FOR that period, so a change made today does not reach back into cycles already run
             unless HR says it should. */}
+        {/* FIN-030 — the regional minimum daily wage. Blank warns about nothing: the floor is
+            regional and seeding a figure would be guessing at a legal threshold. */}
+        <div className="space-y-1.5">
+          <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
+            Minimum daily wage
+          </p>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            aria-label="Regional minimum daily wage"
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-body"
+            placeholder="Not set"
+            defaultValue={settings?.minimum_daily_wage ?? ""}
+            disabled={!settings || updateSettingsMut.isPending}
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              const next = raw === "" ? null : Number(raw);
+              if (next !== (settings?.minimum_daily_wage ?? null)) {
+                saveSettings({ minimum_daily_wage: next });
+              }
+            }}
+          />
+          <p className="text-caption text-muted-foreground">
+            From your DOLE wage order. Leave blank to skip the check.
+          </p>
+        </div>
         <div className="space-y-1.5 sm:col-span-3">
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
             These settings take effect from

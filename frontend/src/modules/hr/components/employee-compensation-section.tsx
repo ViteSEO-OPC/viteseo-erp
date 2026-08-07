@@ -203,6 +203,24 @@ export function EmployeeCompensationSection({
       <div className="space-y-8">
         <FieldGrid specs={pay} editing={editing} form={form} />
 
+        {/* FIN-030 — the derived daily rate against the regional floor.
+            Advisory, never blocking: the floor varies by region, industry and establishment size,
+            and this system does not know which apply. It is shown at all because the daily rate is
+            DERIVED (salary ÷ the policy's basis), so nobody typing a monthly figure can see what it
+            implies per day — which is the actual gap, not that HR would knowingly underpay. */}
+        {employee.minimum_wage_check?.below && (
+          <div className="rounded-card border border-warning/40 bg-warning/10 p-3">
+            <p className="text-sm font-medium text-foreground">
+              This salary works out to {formatPeso(employee.minimum_wage_check.daily_rate)} a day
+            </p>
+            <p className="mt-0.5 text-caption text-muted-foreground">
+              Below the {formatPeso(employee.minimum_wage_check.minimum)} regional minimum daily wage
+              configured in Payroll settings. Saving is allowed — part-time and exempt arrangements
+              legitimately fall below it — but check the applicable wage order.
+            </p>
+          </div>
+        )}
+
         {/* Slice B14 — what replaces the three fixed allowance boxes B9 removed. Rendered from
             the catalogue, so it follows however many allowances the company has. */}
         <EmployeeAllowancesBlock employeeId={employee.id} />

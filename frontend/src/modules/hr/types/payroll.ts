@@ -20,6 +20,8 @@ export interface PayrollSettings {
   /** Slice 10 -- annual ceiling above which allowances become taxable. null = no ceiling. */
   /** ₱90,000 statutory: 13th month pay AND other benefits, NOT de minimis (B16). */
   other_benefits_annual_cap: number | null;
+  /** FIN-030 — regional minimum DAILY wage from the applicable DOLE wage order. Null = not set. */
+  minimum_daily_wage: number | null;
   periods_per_year: number;
   current_period: PayrollPeriod;
   pay_groups: PayGroup[];

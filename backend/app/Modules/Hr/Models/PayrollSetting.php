@@ -12,12 +12,16 @@ class PayrollSetting extends Model
         'frequency', 'deduction_timing', 'tax_timing', 'anchor_date', 'pay_delay_days',
         // Slice 10 — annual ceiling above which allowances become taxable (null = none).
         'other_benefits_annual_cap',
+        // FIN-030 — the regional minimum DAILY wage. Null = not configured, warns about nothing.
+        // Versioned with the rest of this row, so a wage order's date is respected.
+        'minimum_daily_wage',
     ];
 
     protected $casts = [
         'anchor_date' => 'date',
         'pay_delay_days' => 'integer',
         'other_benefits_annual_cap' => 'decimal:2',
+        'minimum_daily_wage' => 'decimal:2',
     ];
 
     /**

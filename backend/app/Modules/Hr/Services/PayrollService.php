@@ -55,6 +55,64 @@ class PayrollService
      * price a day through here, so absence, late/undertime, and holiday premium can never
      * disagree. Default basis reproduces the pre-Slice-A number.
      */
+    /**
+     * Is this employee's derived daily rate below the regional minimum wage? (FIN-030)
+     *
+     * WHY THIS IS A WARNING AND NOT VALIDATION. The floor varies by region, by industry and by
+     * establishment size, and it changes on DOLE wage orders with their own dates. A hard block
+     * would be wrong for the cases this system cannot see — a legitimately exempt arrangement, a
+     * part-time schedule, a probationary rate under a different order — and being wrong sometimes is
+     * how a block gets routed around. So it informs; HR decides.
+     *
+     * WHAT MAKES IT WORTH SURFACING AT ALL: the daily rate is DERIVED (salary ÷ the basis on the
+     * attendance policy), so nobody typing a monthly figure can see what it implies per day. That is
+     * the gap — not that HR would knowingly pay below the floor.
+     *
+     * Returns null when no floor is configured. Null means "nobody has entered the wage order that
+     * applies here", and inventing one would be guessing at a legal threshold — the same refusal the
+     * de-minimis migration made (FIN-024).
+     *
+     * @return array{daily_rate: float, minimum: float, below: bool}|null
+     */
+    public function minimumWageCheckFor(Employee $employee, ?string $asOf = null): ?array
+    {
+        $setting = PayrollSetting::asOf($asOf);
+        $minimum = $setting->minimum_daily_wage;
+
+        if ($minimum === null || (float) $minimum <= 0) {
+            return null;
+        }
+
+        $frequency = $employee->pay_frequency ?: $setting->frequency;
+        $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
+        $period = $this->schedule->currentPeriodFor($frequency, $setting->anchor_date);
+
+        try {
+            $workingDays = $this->attendance->scheduledWorkdaysFor(
+                $employee,
+                $period['start'],
+                $period['end'],
+            );
+
+            $daily = $this->dailyRateFor(
+                $employee,
+                $this->attendancePolicy->asOf($period['end']),
+                $periodsPerYear,
+                $workingDays,
+            );
+        } catch (ValidationException) {
+            // No scheduled workdays — a schedule problem, reported by payroll itself with a far
+            // better message than a wage warning could give. Not this check's business.
+            return null;
+        }
+
+        return [
+            'daily_rate' => $daily,
+            'minimum' => round((float) $minimum, 2),
+            'below' => $daily < (float) $minimum,
+        ];
+    }
+
     private function dailyRateFor(Employee $employee, AttendancePolicy $policy, int $periodsPerYear, int $workingDays): float
     {
         $monthly = (float) $employee->base_salary;

@@ -45,8 +45,51 @@ class ReimbursementService
      * @param  array<string, mixed>  $data
      * @param  array<int, UploadedFile>  $receipts
      */
+    /**
+     * A claim that looks like one already on file (FIN-032).
+     *
+     * WHAT IT CATCHES. Nothing stopped the same receipt being filed twice: no unique index, no
+     * check on (employee, date, amount, category). Both copies could be approved and both folded
+     * into the same payslip, paying the expense twice — and a duplicate is indistinguishable from a
+     * genuine second claim after the fact, so it is not recoverable by inspection later.
+     *
+     * WARNED, NOT BLOCKED, and that is the whole design. Two ₱180 taxi rides on the same day in the
+     * same category is an ordinary Tuesday. Refusing it outright would be wrong often enough that
+     * people would learn to work around it — by nudging the amount, which destroys the very signal
+     * this uses. So a match is surfaced and the submitter confirms.
+     *
+     * Cancelled and rejected claims are excluded: re-filing something that was turned down is the
+     * correct response to being turned down.
+     */
+    public function nearDuplicateOf(Employee $employee, array $data, ?int $ignoreId = null): ?Reimbursement
+    {
+        return Reimbursement::where('employee_id', $employee->id)
+            ->where('category', $data['category'])
+            ->whereDate('expense_date', $data['expense_date'])
+            ->whereRaw('ABS(amount - ?) < 0.01', [(float) $data['amount']])
+            ->whereNotIn('status', ['rejected', 'cancelled'])
+            ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->latest('id')
+            ->first();
+    }
+
     public function create(Employee $employee, array $data, array $receipts = []): Reimbursement
     {
+        // FIN-032 — refuse a look-alike unless the submitter says it is genuinely separate.
+        if (! ($data['acknowledge_duplicate'] ?? false)) {
+            $existing = $this->nearDuplicateOf($employee, $data);
+
+            if ($existing !== null) {
+                throw ValidationException::withMessages([
+                    'amount' => [
+                        'A ' . $existing->category . ' claim for ₱' . number_format((float) $existing->amount, 2)
+                            . ' on ' . $existing->expense_date->format('M j, Y') . ' is already on file ('
+                            . $existing->status . '). Confirm if this is a separate expense.',
+                    ],
+                ]);
+            }
+        }
+
         // Store each receipt on the public disk so it's viewable via /storage.
         $paths = array_values(array_map(
             static fn (UploadedFile $file): string => $file->store('receipts', 'local'),

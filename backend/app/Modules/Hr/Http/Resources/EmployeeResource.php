@@ -40,6 +40,14 @@ class EmployeeResource extends JsonResource
             'bank_name' => $this->bank_name,
             'bank_account' => $this->bank_account,
             'pay_frequency' => $this->pay_frequency ?? 'semi_monthly',
+            // FIN-030 — the DERIVED daily rate against the configured regional floor. Included
+            // because the daily rate is not something anyone can see from the monthly figure they
+            // typed: it is salary ÷ the basis on the attendance policy. Null when no floor has been
+            // configured, in which case there is nothing to warn about. A warning, not validation —
+            // the floor varies by region, industry and establishment size, and a block would be
+            // wrong often enough to get routed around.
+            'minimum_wage_check' => app(\App\Modules\Hr\Services\PayrollService::class)
+                ->minimumWageCheckFor($this->resource),
             'currency' => $this->currency ?? 'PHP',
             'bank_account_type' => $this->bank_account_type,
             'bank_account_name' => $this->bank_account_name,

@@ -315,6 +315,12 @@ class EmployeeService
                 'changed_by' => Auth::id(),
             ]);
 
+            // FIN-038 — the other moment an enrolment row can start being missing. Created here
+            // rather than by the next payroll run, which used to write these rows from inside its
+            // own pricing transaction. Not load-bearing for pay: a missing row still reads as
+            // enrolled, so this gives the enrolment checklist something to show, nothing more.
+            app(ContributionService::class)->backfillEnrolments($employee);
+
             $employee->load('user');
             $this->audit->log('created', 'People', "Added employee {$employee->user?->name}", $employee);
 

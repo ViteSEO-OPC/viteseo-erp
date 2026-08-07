@@ -50,6 +50,12 @@ export interface Employee {
   bank_name: string | null;
   bank_account: string | null; // account number
   pay_frequency: string | null;
+  /**
+   * FIN-030 — the DERIVED daily rate against the configured regional floor. Null when no floor is
+   * configured, in which case there is nothing to warn about. Advisory only: the floor varies by
+   * region, industry and establishment size, so this informs rather than blocks.
+   */
+  minimum_wage_check: { daily_rate: number; minimum: number; below: boolean } | null;
   currency: string | null;
   bank_account_type: string | null;
   bank_account_name: string | null;

@@ -9,6 +9,14 @@ import { notify as toast } from "@/core/lib/notify";
 import { UploadCloud, FileCheck2, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -105,13 +113,26 @@ export function ClaimForm() {
     setReceipts((prev) => prev.filter((_, i) => i !== index));
   }
 
-  async function onSubmit(v: FormValues) {
+  /**
+   * FIN-032 — the look-alike-claim confirmation.
+   *
+   * The backend refuses a claim matching one already on file (same employee, date, amount and
+   * category) unless told it is genuinely separate. Two ₱180 taxi rides on one day is an ordinary
+   * Tuesday, so this asks rather than blocks — but without this dialog the refusal is a dead end and
+   * the second legitimate claim cannot be filed at all.
+   */
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+
+  async function onSubmit(v: FormValues, acknowledgeDuplicate = false) {
     const form = new FormData();
     form.append("category", v.category);
     form.append("description", v.description);
     form.append("amount", v.amount);
     form.append("expense_date", v.expense_date);
     receipts.forEach((f) => form.append("receipts[]", f));
+    if (acknowledgeDuplicate) {
+      form.append("acknowledge_duplicate", "1");
+    }
 
     try {
       await createMut.mutateAsync(form);
@@ -119,6 +140,7 @@ export function ClaimForm() {
       reset();
       setReceipts([]);
       setReceiptError(null);
+      setDuplicateWarning(null);
     } catch (err) {
       if (err instanceof AxiosError) {
         // Payload too large — the file(s) exceeded a server/proxy limit before
@@ -131,6 +153,15 @@ export function ClaimForm() {
         }
         if (err.response?.status === 422) {
           const serverErrors: Record<string, string[]> = err.response.data?.errors ?? {};
+
+          // FIN-032 — a look-alike claim is a QUESTION, not a failure. Shown as a confirmation so
+          // the submitter can say "this is a separate expense" instead of being stuck.
+          const looksDuplicate = serverErrors.amount?.find((m) => m.includes("already on file"));
+          if (looksDuplicate) {
+            setDuplicateWarning(looksDuplicate);
+            return;
+          }
+
           for (const field of Object.keys(serverErrors)) {
             const message = serverErrors[field][0];
             if (field in schema.shape) {
@@ -153,7 +184,7 @@ export function ClaimForm() {
     <div className="rounded-card border border-border bg-card p-6">
       <h2 className="text-h3 font-bold text-foreground">Submit a Claim</h2>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mt-4 space-y-4" noValidate>
+      <form onSubmit={handleSubmit((v) => onSubmit(v))} className="mt-4 space-y-4" noValidate>
         <div className="space-y-1.5">
           <Label>Category</Label>
           <Controller
@@ -267,6 +298,34 @@ export function ClaimForm() {
           Approved claims appear in your next payslip.
         </p>
       </form>
+
+      {/* FIN-032 — a look-alike claim asks rather than refuses. */}
+      <Dialog open={duplicateWarning !== null} onOpenChange={(o) => !o && setDuplicateWarning(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>This looks like a claim you already filed</DialogTitle>
+            <DialogDescription>{duplicateWarning}</DialogDescription>
+          </DialogHeader>
+          <p className="rounded-md bg-muted px-3 py-2 text-caption text-muted-foreground">
+            If this is a second, separate expense, submit it. If you filed it already, cancel — a
+            duplicate that gets approved is paid twice.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDuplicateWarning(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={createMut.isPending}
+              onClick={() => {
+                setDuplicateWarning(null);
+                void handleSubmit((v) => onSubmit(v, true))();
+              }}
+            >
+              It&rsquo;s a separate expense
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

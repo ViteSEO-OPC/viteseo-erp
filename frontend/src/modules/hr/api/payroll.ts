@@ -36,6 +36,8 @@ export async function updatePayrollSettings(input: {
    * as of the cycle end, so this is what stops a change reaching back into periods already run.
    */
   effective_from?: string;
+  /** FIN-030 — the regional minimum daily wage. Null clears it (warns about nothing). */
+  minimum_daily_wage?: number | null;
 }): Promise<PayrollSettings> {
   const res = await apiClient.put("/hr/payroll/settings", input);
   return res.data.data;
