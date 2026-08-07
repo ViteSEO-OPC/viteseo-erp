@@ -10,6 +10,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { Textarea } from "@/core/ui/textarea";
 import {
   Dialog,
@@ -63,6 +64,18 @@ const schema = z.object({
       z.literal(""),
     ])
     .optional(),
+  // FIN-034 — accrual. "none" keeps this type hand-managed exactly as before, which is the default
+  // for every existing type: nothing starts moving entitlements on its own.
+  accrual_mode: z.enum(["none", "monthly", "annual"]),
+  prorate_first_year: z.boolean(),
+  // Both kept as raw text; "" means "no rule", which is NOT the same as 0 ("nothing carries").
+  // Neither has a default figure — the cap and its expiry are company policy, not law.
+  carry_over_cap_days: z
+    .union([z.coerce.number().min(0, "Cannot be negative").max(365), z.literal("")])
+    .optional(),
+  carry_over_expiry_months: z
+    .union([z.coerce.number().int().min(1, "At least 1 month").max(24), z.literal("")])
+    .optional(),
 });
 
 type FormValues = z.input<typeof schema>;
@@ -99,11 +112,16 @@ export function LeaveTypeFormDialog({
       description: "",
       allow_backdated: false,
       backdate_limit_days: "",
+      accrual_mode: "none",
+      prorate_first_year: true,
+      carry_over_cap_days: "",
+      carry_over_expiry_months: "",
     },
   });
 
   // Show the day-cap input only when backdated filing is allowed.
   const allowBackdated = watch("allow_backdated");
+  const accrualMode = watch("accrual_mode");
   const isPaid = watch("is_paid");
   const color = watch("color") || DEFAULT_COLOR;
 
@@ -130,6 +148,10 @@ export function LeaveTypeFormDialog({
               description: leaveType.description ?? "",
               allow_backdated: leaveType.allow_backdated,
               backdate_limit_days: leaveType.backdate_limit_days ?? "",
+              accrual_mode: leaveType.accrual_mode,
+              prorate_first_year: leaveType.prorate_first_year,
+              carry_over_cap_days: leaveType.carry_over_cap_days ?? "",
+              carry_over_expiry_months: leaveType.carry_over_expiry_months ?? "",
             }
           : {
               name: "",
@@ -139,6 +161,10 @@ export function LeaveTypeFormDialog({
               description: "",
               allow_backdated: false,
               backdate_limit_days: "",
+              accrual_mode: "none",
+              prorate_first_year: true,
+              carry_over_cap_days: "",
+              carry_over_expiry_months: "",
             },
       );
     }
@@ -156,6 +182,18 @@ export function LeaveTypeFormDialog({
       backdate_limit_days:
         values.allow_backdated && values.backdate_limit_days !== "" && values.backdate_limit_days != null
           ? Number(values.backdate_limit_days)
+          : null,
+      accrual_mode: values.accrual_mode,
+      prorate_first_year: values.prorate_first_year,
+      // "" → null, and null means "no rule" (everything carries / never expires). 0 is a real
+      // value meaning "nothing carries", so the empty check has to come before the Number().
+      carry_over_cap_days:
+        values.carry_over_cap_days !== "" && values.carry_over_cap_days != null
+          ? Number(values.carry_over_cap_days)
+          : null,
+      carry_over_expiry_months:
+        values.carry_over_expiry_months !== "" && values.carry_over_expiry_months != null
+          ? Number(values.carry_over_expiry_months)
           : null,
     };
     try {
@@ -307,6 +345,98 @@ export function LeaveTypeFormDialog({
                   </p>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* FIN-034 — accrual, carry-over and expiry. Off by default: an existing type keeps being
+              hand-managed until HR deliberately switches it over, because entitlements are what
+              employees plan holidays around and a migration must not move them. */}
+          <div className="rounded-lg border border-border p-3 space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="lt-accrual">Accrual</Label>
+              <SimpleSelect
+                value={accrualMode}
+                onValueChange={(v) => setValue("accrual_mode", v as "none" | "monthly" | "annual")}
+                options={[
+                  { value: "none", label: "Manual — HR sets balances by hand" },
+                  { value: "monthly", label: "Monthly — credits 1/12 of the yearly days each month" },
+                  { value: "annual", label: "Annual — credits the whole year in January" },
+                ]}
+              />
+              <p className="text-xs text-muted-foreground">
+                Runs on the 1st of each month. The yearly figure comes from this type&apos;s allotment
+                for the employee&apos;s employment status.
+              </p>
+            </div>
+
+            {accrualMode !== "none" && (
+              <>
+                <label className="flex items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 size-4 rounded border-input accent-brand"
+                    {...register("prorate_first_year")}
+                  />
+                  <span>
+                    Pro-rate the first year
+                    <span className="block text-xs text-muted-foreground">
+                      A mid-year hire accrues from their hire month, not the whole year.
+                    </span>
+                  </span>
+                </label>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lt-carry-cap">Carry-over cap (days)</Label>
+                    <Input
+                      id="lt-carry-cap"
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="365"
+                      placeholder="Blank = carry everything"
+                      aria-invalid={!!errors.carry_over_cap_days}
+                      {...register("carry_over_cap_days")}
+                    />
+                    {errors.carry_over_cap_days ? (
+                      <p className="text-xs text-destructive">{errors.carry_over_cap_days.message}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Blank = all unused days carry. <strong>0</strong> = none do.
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="lt-carry-expiry">Carried days expire after (months)</Label>
+                    <Input
+                      id="lt-carry-expiry"
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="24"
+                      placeholder="Blank = never expire"
+                      aria-invalid={!!errors.carry_over_expiry_months}
+                      {...register("carry_over_expiry_months")}
+                    />
+                    {errors.carry_over_expiry_months ? (
+                      <p className="text-xs text-destructive">
+                        {errors.carry_over_expiry_months.message}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Counted from 1 January.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-warning bg-warning-subtle p-3">
+                  <p className="text-xs text-foreground">
+                    The cap and expiry are <strong>your company&apos;s rules, not the law</strong> —
+                    they ship blank on purpose. Philippine law only covers the 5-day Service Incentive
+                    Leave (Art. 95), which must be paid out if unused and cannot simply be forfeited.
+                    Days already taken are never clawed back by a cap or an expiry.
+                  </p>
+                </div>
+              </>
             )}
           </div>
 

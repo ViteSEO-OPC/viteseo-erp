@@ -3,7 +3,9 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\RehireEmployeeRequest;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
+use App\Modules\Hr\Http\Requests\SeparateEmployeeRequest;
 use App\Modules\Hr\Http\Requests\SetHrRoleRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeeDocumentRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeePhotoRequest;
@@ -27,7 +29,12 @@ class EmployeeController extends Controller
     // GET /api/v1/hr/employees?search= — HR directory.
     public function index(Request $request): JsonResponse
     {
-        $employees = $this->service->list($request->query('search'));
+        // MF-18 — `?status=former` lists people who have left, so they can be found and rehired.
+        // Anything unrecognised falls back to 'active', which is the directory's existing behaviour.
+        $status = $request->query('status');
+        $status = in_array($status, ['active', 'former', 'all'], true) ? $status : 'active';
+
+        $employees = $this->service->list($request->query('search'), $status);
 
         return EmployeeResource::collection($employees)->response();
     }
@@ -47,7 +54,9 @@ class EmployeeController extends Controller
     {
         $employee->load(['user.roles', 'department', 'manager.user', 'employmentHistories']);
 
-        return EmployeeResource::make($employee)->response();
+        // FIN-030b — the Compensation screen needs the derived daily rate. Asked for explicitly
+        // here and on update(); the directory does not carry the cost.
+        return EmployeeResource::make($employee)->withPayrollChecks()->response();
     }
 
     // PUT/PATCH /api/v1/hr/employees/{employee} — HR edits a record.
@@ -55,7 +64,9 @@ class EmployeeController extends Controller
     {
         $employee = $this->service->update($employee, $request->validated());
 
-        return EmployeeResource::make($employee)->response();
+        // A salary edit changes the daily rate, so the response has to carry the new one — the
+        // screen that just saved is the screen showing the check.
+        return EmployeeResource::make($employee)->withPayrollChecks()->response();
     }
 
     // POST /api/v1/hr/employees/{employee}/photo — set/replace the profile picture.
@@ -136,6 +147,50 @@ class EmployeeController extends Controller
     }
 
     // POST /api/v1/hr/employees/{employee}/hr-role — grant/revoke HR-officer access.
+    /**
+     * POST /api/v1/hr/employees/{employee}/separate — end someone's employment (MF-18).
+     *
+     * Records the last working day and archives the record. This is the step that makes final pay
+     * reachable: `runFinalPay()` refuses to run without `separation_date`, and before this nothing
+     * outside the demo seeder ever wrote one.
+     */
+    public function separate(SeparateEmployeeRequest $request, Employee $employee): JsonResponse
+    {
+        return EmployeeResource::make(
+            $this->service->separate($employee, $request->validated()),
+        )->response();
+    }
+
+    /**
+     * POST /api/v1/hr/employees/{employee}/reinstate — undo a separation, service CONTINUOUS.
+     *
+     * The route resolves trashed employees (`->withTrashed()`), because the whole point is that the
+     * record has been archived. Hire date, leave credits and loan authorisations all stand.
+     */
+    public function reinstate(ReopenRequest $request, Employee $employee): JsonResponse
+    {
+        return EmployeeResource::make(
+            $this->service->reinstate($employee, $request->validated('reason')),
+        )->response();
+    }
+
+    /**
+     * POST /api/v1/hr/employees/{employee}/rehire — a NEW employment relationship (MF-18).
+     *
+     * Tenure restarts, leave is seeded fresh for the year, and any outstanding loan drops back to
+     * `pending_authorization` so it is not collected under the old relationship's consent (Art. 113).
+     */
+    public function rehire(RehireEmployeeRequest $request, Employee $employee): JsonResponse
+    {
+        return EmployeeResource::make(
+            $this->service->rehire(
+                $employee,
+                $request->validated('hire_date'),
+                $request->validated('reason'),
+            ),
+        )->response();
+    }
+
     public function setHrRole(SetHrRoleRequest $request, Employee $employee): JsonResponse
     {
         $employee = $this->service->setHrRole($employee, $request->boolean('is_hr_officer'));

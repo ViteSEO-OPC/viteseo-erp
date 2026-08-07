@@ -10,6 +10,7 @@ import type {
   ThirteenthMonthPayRow,
   AdjustmentLine,
   RetroFlag,
+  DeductionArrear,
   PaymentBatch,
   PaymentMethod,
   PaymentReconciliation,
@@ -17,6 +18,9 @@ import type {
   PaymentSkipped,
   PaymentStatus,
   Payment,
+  MinimumWageRow,
+  MinimumWageMeta,
+  MinimumWageApplyResult,
 } from "@/modules/hr/types/payroll";
 
 export async function getPayrollSettings(): Promise<PayrollSettings> {
@@ -35,6 +39,8 @@ export async function updatePayrollSettings(input: {
    * as of the cycle end, so this is what stops a change reaching back into periods already run.
    */
   effective_from?: string;
+  /** FIN-030 — the regional minimum daily wage. Null clears it (warns about nothing). */
+  minimum_daily_wage?: number | null;
 }): Promise<PayrollSettings> {
   const res = await apiClient.put("/hr/payroll/settings", input);
   return res.data.data;
@@ -54,8 +60,41 @@ export async function runPayroll(input: {
   frequency: string;
   cycle_start: string;
   cycle_end: string;
+  /**
+   * FIN-030b — proceed past a minimum-wage breach. The reason is required when this is set: it is
+   * the record that somebody decided to run anyway, rather than the button simply having been
+   * clicked. Omitted when there is nothing to acknowledge.
+   */
+  minimum_wage_ack?: boolean;
+  minimum_wage_ack_reason?: string;
 }): Promise<PayrollRun> {
   const res = await apiClient.post("/hr/payroll/run", input);
+  return res.data.data;
+}
+
+/**
+ * FIN-030b — who this run would pay below the regional floor. Read-only; prices nothing.
+ */
+export async function getMinimumWageCheck(input: {
+  frequency: string;
+  cycle_start?: string;
+  cycle_end?: string;
+}): Promise<{ rows: MinimumWageRow[]; meta: MinimumWageMeta }> {
+  const res = await apiClient.get("/hr/payroll/minimum-wage-check", { params: input });
+  return { rows: res.data.data, meta: res.data.meta };
+}
+
+/**
+ * FIN-030b — raise the named employees to the salary that clears the floor, as dated salary
+ * changes. The ids are explicit: a salary change is not something to apply to a list nobody read.
+ */
+export async function applyMinimumWageAdjustments(input: {
+  employee_ids: number[];
+  effective_date: string;
+  reason?: string;
+  acknowledge_repricing?: boolean;
+}): Promise<MinimumWageApplyResult> {
+  const res = await apiClient.post("/hr/payroll/minimum-wage-adjustments", input);
   return res.data.data;
 }
 
@@ -286,5 +325,11 @@ export async function reconcilePaymentBatch(
   if (confirm) form.append("confirm", "1");
 
   const res = await apiClient.post(`/hr/payment-batches/${id}/reconcile`, form);
+  return res.data.data;
+}
+
+/** Deductions a thin payslip could not collect, still outstanding (FIN-005). */
+export async function getDeductionArrears(): Promise<DeductionArrear[]> {
+  const res = await apiClient.get("/hr/deduction-arrears");
   return res.data.data;
 }

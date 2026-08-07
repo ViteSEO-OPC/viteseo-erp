@@ -38,8 +38,9 @@ use Laravel\Sanctum\Sanctum;
  * is still asserted below — it must still be REPORTED — but it must no longer be ADDED, and the
  * shortfall test guards exactly that: adding it back now would overstate net by the carryover.
  *
- * Also guarded: the employer's counterpart contributions are remittance data, not the
- * employee's, and must not reach them.
+ * Also guarded: the employer's counterpart contributions ARE disclosed to the employee
+ * (reversed 2026-08-07) but are never a term in any total — and the document is one page,
+ * whatever the configuration throws at it.
  */
 class PayslipDocumentTest extends HrTestCase
 {
@@ -305,17 +306,51 @@ class PayslipDocumentTest extends HrTestCase
     }
 
     /**
-     * The employer's counterpart contributions are remittance data. They are not deducted from
-     * the employee and are not theirs to see — this was previously served to everyone.
+     * The employee DOES see the employer's counterpart contributions (2026-08-07, Joshua's call).
+     *
+     * THIS TEST USED TO ASSERT THE OPPOSITE, and the reasoning it carried was that the employer
+     * share is remittance data and "not theirs to see". That was reconsidered: this money is paid
+     * into the employee's OWN SSS, PhilHealth and Pag-IBIG record, and it is the part of their
+     * compensation they are least likely to know exists. Withholding it protected nothing.
+     *
+     * What it must NOT do is change any figure — see the assertions below, which are the real
+     * subject of this test. Disclosure only.
      */
-    public function test_the_employer_share_is_withheld_from_the_employee(): void
+    public function test_the_employee_sees_the_employer_share_as_disclosure_only(): void
     {
         $this->attendance();
         $doc = $this->employeeDocument($this->runPayroll());
 
-        $this->assertArrayNotHasKey('employer_sss', $doc);
-        $this->assertArrayNotHasKey('employer_philhealth', $doc);
-        $this->assertArrayNotHasKey('employer_pagibig', $doc);
+        $this->assertArrayHasKey('employer_sss', $doc);
+        $this->assertArrayHasKey('employer_philhealth', $doc);
+        $this->assertArrayHasKey('employer_pagibig', $doc);
+        $this->assertGreaterThan(0, $doc['employer_sss'], 'a real figure, not a placeholder');
+
+        // NOT IN ANY TOTAL. The employer share is the company's cost; nothing was deducted for it,
+        // so net pay must still be exactly gross minus what was actually taken from the employee.
+        $this->assertSame(
+            round((float) $doc['gross'] - (float) $doc['total_deductions'], 2),
+            round((float) $doc['net_pay'], 2),
+            'net pay must not move when the employer share is disclosed',
+        );
+        $this->assertGreaterThan(
+            0,
+            (float) $doc['employer_sss'] + (float) $doc['employer_philhealth'] + (float) $doc['employer_pagibig'],
+        );
+    }
+
+    /**
+     * The two things that ARE still HR-only, and the reason they differ from the employer share:
+     * both are remittance workflow rather than disclosure. One says a filing cannot be made as it
+     * stands; the other is what a remittance query asks for. Neither is actionable by the employee.
+     */
+    public function test_remittance_workflow_fields_stay_hr_only(): void
+    {
+        $this->attendance();
+        $doc = $this->employeeDocument($this->runPayroll());
+
+        $this->assertArrayNotHasKey('contribution_overrides', $doc);
+        $this->assertArrayNotHasKey('contribution_bases', $doc);
     }
 
     public function test_hr_sees_the_employer_share_on_the_same_document(): void
@@ -357,13 +392,20 @@ class PayslipDocumentTest extends HrTestCase
     }
 
     /**
-     * The DOWNLOAD carries no employer share, even for HR, even though HR's payload has it.
+     * The DOWNLOAD now carries the employer share — as disclosure, below the net-pay bar.
      *
-     * A payslip file gets forwarded — to a bank, a landlord, an embassy — so HR's copy and the
-     * employee's have to be the same document. The employer share is remittance data and stays
-     * on HR's screen. Asserted against the rendered HTML because the PDF's text is compressed.
+     * REVERSED 2026-08-07 (Joshua's call). This asserted the opposite, on the grounds that a
+     * payslip file gets forwarded — to a bank, a landlord, an embassy — so it should not carry
+     * remittance data. The forwarding argument survives; the classification did not. The employer
+     * share is money paid into the employee's own SSS, PhilHealth and Pag-IBIG record, so it
+     * belongs on the document they receive.
+     *
+     * STILL ONE DOCUMENT FOR BOTH AUDIENCES, which is the property that actually mattered: HR's
+     * copy and the employee's remain identical, because this is now in both.
+     *
+     * Asserted against the rendered HTML because the PDF's text is compressed.
      */
-    public function test_the_downloaded_payslip_omits_the_employer_share(): void
+    public function test_the_downloaded_payslip_discloses_the_employer_share(): void
     {
         $this->attendance();
         $payslip = $this->runPayroll();
@@ -373,15 +415,108 @@ class PayslipDocumentTest extends HrTestCase
 
         $data = app(PayrollService::class)->payslipViewData($payslip, $request);
 
-        // The payload really does carry it — otherwise the assertion below proves nothing.
         $this->assertArrayHasKey('employer_sss', $data['p']);
         $this->assertGreaterThan(0.0, $data['p']['employer_sss']);
 
         $html = view('hr::payslip', $data)->render();
 
-        $this->assertStringNotContainsString('Employer Share', $html);
-        $this->assertStringNotContainsString('remittance', $html);
+        // It appears as a sub-line under each statutory row, not as a block of its own.
+        $this->assertSame(3, substr_count($html, '+ employer share'), 'one under each of the three');
+        $this->assertStringContainsString('Not deducted from your pay', $html);
         $this->assertStringContainsString('Total Net Pay', $html); // the render actually happened
+
+        // THE ASSERTION THAT MATTERS: `Total Gov` is the employee's own contributions and tax,
+        // and nothing else. Computed here from the payslip's columns rather than read off the
+        // document, so a mistake in `documentTotals()` cannot be mirrored by the test.
+        $employeeSide = round(
+            (float) $payslip->sss + (float) $payslip->philhealth
+                + (float) $payslip->pagibig + (float) $payslip->withholding_tax,
+            2,
+        );
+
+        $this->assertSame($employeeSide, round((float) $data['p']['totals']['government'], 2));
+        $this->assertStringContainsString(number_format($employeeSide, 2), $html);
+
+        // And the employer figures really are non-zero, or the assertion above proves nothing.
+        $this->assertGreaterThan(0.0, $data['p']['employer_sss']);
+
+        // The employee's own render must be the SAME document, not a reduced one.
+        $employeeRequest = Request::create('/');
+        $employeeRequest->setUserResolver(fn () => $this->employee->user);
+
+        $employeeHtml = view(
+            'hr::payslip',
+            app(PayrollService::class)->payslipViewData($payslip, $employeeRequest),
+        )->render();
+
+        $this->assertSame(3, substr_count($employeeHtml, '+ employer share'));
+    }
+
+    /**
+     * THE PAYSLIP IS ONE PAGE, whatever the configuration throws at it.
+     *
+     * WHY THIS IS A TEST AND NOT A STYLE PREFERENCE. When the document overflows it does not lose
+     * the top — it pushes the NET PAY and the signature block onto page two, which is the half the
+     * employee and any recipient actually read. Measured on 2026-08-07: six allowance programmes
+     * and six benefit deductions already did it, before anything was added.
+     *
+     * The height is BOUNDED rather than merely tuned: `$capped` rolls surplus breakdown lines into
+     * one labelled summed line and `$fit`/`$fitWide` trim names that would wrap, so the page cannot
+     * grow with data. This proves it at an absurd input — thirty of each, names long enough to wrap.
+     */
+    public function test_the_pdf_is_a_single_page_even_with_absurd_content(): void
+    {
+        $this->attendance();
+        $payslip = $this->runPayroll();
+
+        $long = str_repeat('Extremely Long Programme Name ', 4);
+        $payslip->allowances_breakdown = collect(range(1, 30))
+            ->map(fn ($i) => ['name' => $long . $i, 'amount' => 1500])->all();
+        $payslip->other_deductions_breakdown = collect(range(1, 30))
+            ->map(fn ($i) => ['name' => $long . 'D' . $i, 'amount' => 500])->all();
+        $payslip->holiday_premium = 1200;
+        $payslip->overtime_pay = 3400;
+        $payslip->night_diff_pay = 900;
+        $payslip->rest_day_premium = 1100;
+        $payslip->overtime_minutes = 740;
+        $payslip->night_diff_minutes = 420;
+        $payslip->rest_day_minutes = 480;
+        $payslip->unpaid_days = 2.5;
+        $payslip->late_minutes = 95;
+        $payslip->undertime_minutes = 60;
+        $payslip->late_penalty_days = 1;
+        $payslip->reimbursements = 2500;
+        $payslip->adjustment_pay = 1500;
+        $payslip->deduction_carryover = 1234.56;
+        $payslip->deduction_carryover_breakdown = [
+            'sss' => 500, 'philhealth' => 234.56, 'pagibig' => 200,
+            'withholding_tax' => 200, 'other_deductions' => 100,
+        ];
+
+        $pdf = app(PayrollService::class)->payslipPdf($payslip)->output();
+
+        // DomPDF writes one `/Type /Page` object per page; the catalogue's is `/Type /Pages`,
+        // which the trailing character class excludes.
+        $pages = preg_match_all('#/Type\s*/Page[^s]#', $pdf);
+
+        $this->assertSame(1, $pages, 'the payslip must never run to a second page');
+    }
+
+    /** The roll-up SUMMARISES, it does not drop — every peso is still on the document. */
+    public function test_the_one_page_roll_up_keeps_the_full_amount(): void
+    {
+        $this->attendance();
+        $payslip = $this->runPayroll();
+
+        $payslip->other_deductions_breakdown = collect(range(1, 20))
+            ->map(fn ($i) => ['name' => 'Deduction ' . $i, 'amount' => 100])->all();
+
+        $html = view('hr::payslip', app(PayrollService::class)->payslipViewData($payslip))->render();
+
+        // 20 lines capped at 4 ⇒ 3 shown, then one rolled line covering the remaining 17.
+        $this->assertStringContainsString('Other deductions (17 items)', $html);
+        // 17 × ₱100 — the rolled line carries the sum, so the column still totals the same.
+        $this->assertStringContainsString('1,700.00', $html);
     }
 
     /** A payslip with nothing recorded but the basics must not fall over on a null field. */

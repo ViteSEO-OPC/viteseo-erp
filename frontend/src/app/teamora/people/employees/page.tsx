@@ -22,7 +22,12 @@ import { SimpleSelect } from "@/modules/hr/ui/select";
 const PAGE_SIZE = 12;
 
 export default function EmployeesPage() {
-  const { data: employees, isLoading, isError } = useEmployees();
+  // MF-18 — which roster to fetch. This is a SERVER-side switch, not one of the client filters
+  // below: a former employee is soft-deleted, so the default query cannot return them at all and
+  // there was no way to find somebody to rehire. Separate from the `status` filter, which is
+  // employment_status (regular / probationary / …) and a different question entirely.
+  const [roster, setRoster] = useState<"active" | "former" | "all">("active");
+  const { data: employees, isLoading, isError } = useEmployees(roster);
   const { data: departments } = useDepartments();
 
   const [search, setSearch] = useState("");
@@ -103,6 +108,17 @@ export default function EmployeesPage() {
           options={[
             { value: "all", label: "All Statuses" },
             ...EMPLOYMENT_STATUSES.map((s) => ({ value: s, label: statusLabel(s) })),
+          ]}
+        />
+        {/* MF-18 — former staff are archived, so finding one to rehire needs its own switch. */}
+        <SimpleSelect
+          className="w-40"
+          value={roster}
+          onValueChange={(v) => { setRoster(v as "active" | "former" | "all"); setPage(1); }}
+          options={[
+            { value: "active", label: "Current staff" },
+            { value: "former", label: "Former staff" },
+            { value: "all", label: "Current + former" },
           ]}
         />
       </div>

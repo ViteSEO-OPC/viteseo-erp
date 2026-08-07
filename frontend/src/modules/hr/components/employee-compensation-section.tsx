@@ -30,6 +30,7 @@ import { useRecordSection } from "@/modules/hr/lib/use-record-section";
 import { StatutoryOverridesBlock } from "@/modules/hr/components/statutory-overrides-block";
 import { ContributionEnrolmentBlock } from "@/modules/hr/components/contribution-enrolment-block";
 import { EmployeeAllowancesBlock } from "@/modules/hr/components/employee-allowances-block";
+import { MinimumWageBlock } from "@/modules/hr/components/minimum-wage-block";
 import {
   BANK_ACCOUNT_TYPES,
   PAY_FREQUENCIES,
@@ -60,6 +61,10 @@ const schema = z.object({
   philhealth_number: optionalText(32),
   pagibig_number: optionalText(32),
   is_management: z.boolean(),
+  // FIN-030b — out of the minimum-wage check, with the reason on the record. The server requires
+  // the reason when the flag is set; asked for here so it is never a silent exemption.
+  minimum_wage_exempt: z.boolean(),
+  minimum_wage_exempt_reason: optionalText(),
   // Only consulted when the base salary actually changes.
   salary_change_type: z.string(),
   salary_change_reason: optionalText(),
@@ -87,6 +92,8 @@ function toValues(employee: Employee): Values {
     philhealth_number: employee.philhealth_number ?? "",
     pagibig_number: employee.pagibig_number ?? "",
     is_management: employee.is_management ?? false,
+    minimum_wage_exempt: employee.minimum_wage_exempt ?? false,
+    minimum_wage_exempt_reason: employee.minimum_wage_exempt_reason ?? "",
     salary_change_type: "",
     salary_change_reason: "",
     salary_effective_date: "",
@@ -111,6 +118,10 @@ function toPayload(v: Values): EmployeeUpdateInput {
     philhealth_number: orNull(v.philhealth_number),
     pagibig_number: orNull(v.pagibig_number),
     is_management: v.is_management,
+    minimum_wage_exempt: v.minimum_wage_exempt,
+    // Cleared server-side when the flag comes off, so a stale note can never sit on someone who is
+    // no longer exempt and read as a live justification.
+    minimum_wage_exempt_reason: orNull(v.minimum_wage_exempt_reason),
     salary_change_type: orNull(v.salary_change_type),
     salary_change_reason: orNull(v.salary_change_reason),
     salary_effective_date: orNull(v.salary_effective_date),
@@ -202,6 +213,14 @@ export function EmployeeCompensationSection({
     >
       <div className="space-y-8">
         <FieldGrid specs={pay} editing={editing} form={form} />
+
+        {/* FIN-030 / FIN-030b — the derived daily rate, always, with the floor beside it when one
+            is configured. Advisory and never blocking: the floor varies by region, industry and
+            establishment size, and this system does not know which apply. It is shown at all
+            because the daily rate is DERIVED (salary ÷ the policy's basis), so nobody typing a
+            monthly figure can see what it implies per day — which is the actual gap, not that HR
+            would knowingly underpay. */}
+        <MinimumWageBlock employee={employee} editing={editing} form={form} />
 
         {/* Slice B14 — what replaces the three fixed allowance boxes B9 removed. Rendered from
             the catalogue, so it follows however many allowances the company has. */}

@@ -3,8 +3,11 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ApplyMinimumWageRequest;
+use App\Modules\Hr\Http\Requests\MinimumWageReviewRequest;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\RunAdjustmentRequest;
+use App\Modules\Hr\Http\Requests\RunFinalPayRequest;
 use App\Modules\Hr\Http\Requests\RunPayrollRequest;
 use App\Modules\Hr\Http\Requests\UpdatePayrollSettingsRequest;
 use App\Modules\Hr\Http\Resources\PayrollRunResource;
@@ -89,6 +92,7 @@ class PayrollController extends Controller
             'anchor_date' => $setting->anchor_date?->toDateString(),
             'pay_delay_days' => $setting->pay_delay_days,
             'other_benefits_annual_cap' => $setting->other_benefits_annual_cap === null ? null : (float) $setting->other_benefits_annual_cap,
+            'minimum_daily_wage' => $setting->minimum_daily_wage === null ? null : (float) $setting->minimum_daily_wage,
             'periods_per_year' => PayScheduleService::periodsPerYear($setting->frequency),
             'current_period' => $this->schedule->currentPeriod($setting),
             // Active pay groups (per-employee frequencies) — each runs on its own period.
@@ -102,9 +106,72 @@ class PayrollController extends Controller
         return PayrollRunResource::collection($this->service->listRuns())->response();
     }
 
-    // POST /api/v1/hr/payroll/run — execute payroll for a cycle.
-    public function run(RunPayrollRequest $request): JsonResponse
+    /**
+     * GET /api/v1/hr/payroll/minimum-wage-check — who this run would pay below the floor (FIN-030b).
+     *
+     * Read-only and safe to poll: it prices nothing and writes nothing. The payroll screen asks it
+     * before offering the run button, which is the point — a compliance warning is only worth
+     * anything at the moment money is about to be committed.
+     */
+    public function minimumWageCheck(MinimumWageReviewRequest $request): JsonResponse
     {
+        $cycle = $request->cycle();
+
+        $review = $this->service->minimumWageReview(
+            $cycle['frequency'],
+            $cycle['cycle_start'],
+            $cycle['cycle_end'],
+        );
+
+        return response()->json([
+            'data' => $review['employees'],
+            'meta' => [
+                'minimum' => $review['minimum'],
+                'basis' => $review['basis'],
+                'divisor' => $review['divisor'],
+                'cycle' => $review['cycle'],
+                'checked' => $review['checked'],
+                'flagged_count' => $review['flagged_count'],
+                'exempt_count' => $review['exempt_count'],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /api/v1/hr/payroll/minimum-wage-adjustments — raise the named employees to the floor.
+     *
+     * Not a run: it writes dated salary changes through the same path as any other raise, and flags
+     * back pay where the effective date reaches a settled period. Rate-limited like the write
+     * endpoints it resembles — it can change many salaries in one call.
+     */
+    public function applyMinimumWage(ApplyMinimumWageRequest $request): JsonResponse
+    {
+        $result = $this->service->applyMinimumWageAdjustments(
+            $request->validated('employee_ids'),
+            $request->validated('effective_date'),
+            $request->validated('reason'),
+            (bool) $request->validated('acknowledge_repricing', false),
+        );
+
+        return response()->json(['data' => $result]);
+    }
+
+    // POST /api/v1/hr/payroll/run — execute payroll for a cycle.
+    public function run(RunPayrollRequest $request, AuditService $audit): JsonResponse
+    {
+        // FIN-030b — the run was allowed past a minimum-wage breach. The reason is the record that
+        // somebody decided this, rather than the run simply having been clicked; without it the
+        // override would be invisible the moment it is questioned.
+        if ($request->validated('minimum_wage_ack')) {
+            $audit->log(
+                'updated',
+                'Payroll',
+                'Ran payroll past a minimum-wage warning ('
+                    . $request->validated('cycle_start') . ' – ' . $request->validated('cycle_end')
+                    . '): ' . $request->validated('minimum_wage_ack_reason'),
+            );
+        }
+
         $run = $this->service->run(
             $request->validated('cycle_start'),
             $request->validated('cycle_end'),
@@ -133,6 +200,22 @@ class PayrollController extends Controller
             $request->validated('lines'),
             $request->user(),
         );
+
+        return PayrollRunResource::make($run)
+            ->response()
+            ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * POST /api/v1/hr/employees/{employee}/final-pay — the terminal payslip a leaver is owed.
+     *
+     * FIN-014 — deliberately separate from the regular run, which already prorates the leaver's last
+     * cycle. This pays what that run cannot: unused leave converted to cash, separation pay, the
+     * outstanding loan balance, and the year's tax trued up against what was actually earned.
+     */
+    public function runFinalPay(RunFinalPayRequest $request, \App\Modules\Hr\Models\Employee $employee): JsonResponse
+    {
+        $run = $this->service->runFinalPay($employee, $request->validated(), $request->user());
 
         return PayrollRunResource::make($run)
             ->response()
@@ -221,10 +304,19 @@ class PayrollController extends Controller
         )->response();
     }
 
-    // POST /api/v1/hr/payslips/{payslip}/mark-done — mark one payslip processed.
-    public function markDone(Payslip $payslip): JsonResponse
+    /**
+     * POST /api/v1/hr/payslips/{payslip}/mark-done — declare one payslip paid.
+     *
+     * FIN-033 — accepts an idempotency key, from the `Idempotency-Key` header or the body. A repeat
+     * carrying the same key is answered as success without disbursing twice; a repeat with a
+     * different key is refused as a genuine second attempt. The header is the conventional home for
+     * it, and the body is accepted so a client that cannot set headers is not locked out.
+     */
+    public function markDone(Request $request, Payslip $payslip): JsonResponse
     {
-        $this->service->markDone($payslip);
+        $key = $request->header('Idempotency-Key') ?? $request->input('idempotency_key');
+
+        $this->service->markDone($payslip, $request->user(), $key ? (string) $key : null);
 
         return PayrollRunResource::make(
             $this->service->runWithBreakdown($payslip->payrollRun),

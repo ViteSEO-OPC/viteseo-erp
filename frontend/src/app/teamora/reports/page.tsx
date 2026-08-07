@@ -10,6 +10,8 @@ import {
   ShieldAlert,
   ScrollText,
   BarChart3,
+  Wallet,
+  ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 
@@ -36,8 +38,24 @@ const REPORTS: {
   {
     key: "leave",
     title: "Absence & Leaves",
-    description: "Balances by employee and type, utilization, absence patterns, liability accrual from unused leave.",
+    description: "Balances by employee and type, utilization and absence patterns. The peso value of unused leave is its own report below.",
     icon: CalendarRange,
+  },
+  {
+    // MF-11 — its own card rather than a panel inside Absences: this is an accounting figure that
+    // finance reconciles, not an HR utilisation chart, and it exports as a CSV of rows.
+    key: "leave_liability",
+    title: "Leave Liability",
+    description: "What unused paid leave would cost if it were paid out today — the accrued obligation behind every leave balance, per employee and by department.",
+    icon: Wallet,
+  },
+  {
+    // FIN-042 — the pre-disbursement review screen. Sits next to Payroll & Cost because it is the
+    // per-employee detail behind that report's totals.
+    key: "payroll_register",
+    title: "Payroll Register",
+    description: "Per-employee gross-to-net for one run, with department subtotals and a comparison against the previous period. Its totals reconcile to the run exactly — review this before disbursing.",
+    icon: ClipboardList,
   },
   {
     key: "compensation",

@@ -23,6 +23,8 @@ class UpdatePayrollSettingsRequest extends FormRequest
             // which is the behaviour that existed before versioning. Given, it lets HR record a
             // change that was actually agreed earlier without repricing everything since.
             'effective_from' => ['sometimes', 'nullable', 'date'],
+            // FIN-030 — the regional minimum daily wage from the applicable DOLE wage order.
+            'minimum_daily_wage' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999'],
             'frequency' => ['required', Rule::in(array_keys(PayScheduleService::PERIODS_PER_YEAR))],
             'deduction_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],
             'tax_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],

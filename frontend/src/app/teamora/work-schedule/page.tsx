@@ -214,7 +214,10 @@ export default function TimeOffPage() {
       decision: { at: h.reviewed_at, by: h.reviewed_by, note: h.review_note },
       fields: [
         { label: "Date", value: formatDate(h.work_date) },
-        { label: "Half", value: h.period },
+        {
+          label: "Half off",
+          value: h.period === "AM" ? "Morning (AM) — afternoon worked" : "Afternoon (PM) — morning worked",
+        },
         { label: "Pay", value: <span className="text-danger">Unpaid · 0.5 day</span> },
       ],
       cancelled: null,

@@ -75,7 +75,7 @@ export function HalfDayRequestForm() {
             )}
           </div>
           <div className="space-y-1.5">
-            <Label>Which half</Label>
+            <Label>Which half are you taking off?</Label>
             <Controller
               control={control}
               name="period"
@@ -84,12 +84,16 @@ export function HalfDayRequestForm() {
                   value={field.value}
                   onValueChange={field.onChange}
                   options={[
-                    { value: "AM", label: "Morning (AM)" },
-                    { value: "PM", label: "Afternoon (PM)" },
+                    { value: "AM", label: "Morning (AM) off — I work the afternoon" },
+                    { value: "PM", label: "Afternoon (PM) off — I work the morning" },
                   ]}
                 />
               )}
             />
+            <p className="text-xs text-muted-foreground">
+              Pick the half you will be away. You are still expected to clock in for the
+              other half.
+            </p>
           </div>
         </div>
 

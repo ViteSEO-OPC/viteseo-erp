@@ -19,6 +19,13 @@ class EmployeeLoanResource extends JsonResource
             'reference' => $this->reference,
             'principal' => (float) $this->principal,
             'per_period_amount' => (float) $this->per_period_amount,
+            // FIN-032 — the terms. `per_period_amount` is the PRINCIPAL instalment; interest and any
+            // fee are charged on top, so the employee's actual deduction is larger than this figure
+            // and the UI has to say so rather than let them assume it is the total.
+            'interest_rate' => (float) $this->interest_rate,
+            'interest_period' => $this->interest_period,
+            'fees' => (float) $this->fees,
+            'priority' => (int) $this->priority,
             'start_date' => $this->start_date?->format('Y-m-d'),
             'status' => $this->status,
             'notes' => $this->notes,
@@ -35,7 +42,13 @@ class EmployeeLoanResource extends JsonResource
             'is_collectible' => $this->status === 'active',
             // Derived from the payment ledger — never a stored column (see EmployeeLoan).
             'paid' => $this->paid(),
+            // Outstanding PRINCIPAL — what interest is charged on. Interest already collected does
+            // not reduce it (see EmployeeLoan::outstanding()).
             'outstanding' => $this->outstanding(),
+            'outstanding_fees' => $this->outstandingFees(),
+            'paid_principal' => $this->paidPrincipal(),
+            'paid_interest' => $this->paidInterest(),
+            'paid_fees' => $this->paidFees(),
             'payments' => $this->whenLoaded('payments', fn () => $this->payments
                 ->sortByDesc('created_at')
                 ->map(fn ($p) => [

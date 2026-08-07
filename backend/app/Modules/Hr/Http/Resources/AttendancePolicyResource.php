@@ -43,6 +43,9 @@ class AttendancePolicyResource extends JsonResource
 
             'overtime_mode' => $this->overtime_mode,
             'overtime_threshold_minutes' => (int) $this->overtime_threshold_minutes,
+            // FIN-039 — 0 = uncapped. See the migration for why that is the default.
+            'auto_overtime_daily_cap_minutes' => (int) $this->auto_overtime_daily_cap_minutes,
+            'auto_overtime_period_cap_minutes' => (int) $this->auto_overtime_period_cap_minutes,
 
             'premium_rest_day_pct' => (int) $this->premium_rest_day_pct,
             'premium_special_day_pct' => (int) $this->premium_special_day_pct,

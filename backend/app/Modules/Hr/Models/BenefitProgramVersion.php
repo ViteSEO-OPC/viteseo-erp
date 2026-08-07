@@ -24,12 +24,15 @@ class BenefitProgramVersion extends Model
     protected $fillable = [
         'benefit_program_id', 'effective_from', 'amount', 'frequency',
         'tax_treatment', 'deminimis_ceiling', 'ceiling_period', 'created_by',
+        // Slice B19 — whether this allowance counted toward the statutory contribution base.
+        'contributable',
     ];
 
     protected $casts = [
         'effective_from' => 'date',
         'amount' => 'decimal:2',
         'deminimis_ceiling' => 'decimal:2',
+        'contributable' => 'boolean',
     ];
 
     public function program(): BelongsTo

@@ -172,10 +172,27 @@ function Calculated({ row, overriding }: { row: StatutoryPreviewRow | undefined;
 
   return (
     <p className="text-caption text-muted-foreground">
-      {overriding ? "Rates would charge" : "Charged"}{" "}
+      {/* Slice B19 — "Charged" is a promise this figure can no longer keep on the earnings basis:
+          it is computed from the profile salary alone, so it assumes a month with no absences, no
+          lates and no overtime. Labelling both cases identically is how a preview becomes a number
+          people quote back at you. */}
+      {row.is_estimate
+        ? overriding
+          ? "Rates would charge about"
+          : "Typically about"
+        : overriding
+          ? "Rates would charge"
+          : "Charged"}{" "}
       <strong>{formatPeso(row.calculated_employee)}</strong> · employer{" "}
       {formatPeso(row.calculated_employer)}
       {row.basis === "bracket" && " · bracket"}
+      {row.is_estimate && (
+        <>
+          <br />
+          Charged on actual earnings, so the real amount moves with absences, overtime and
+          allowances. This is a full month with neither.
+        </>
+      )}
     </p>
   );
 }

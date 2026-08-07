@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollSetting;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -33,16 +34,28 @@ class PayslipResource extends JsonResource
                 'job_title' => $this->employee->job_title,
                 'department' => $this->employee->department?->name,
                 'address' => $this->employee->address,
-                'tin' => $this->employee->tin,
-                'sss_number' => $this->employee->sss_number,
-                'philhealth_number' => $this->employee->philhealth_number,
-                'pagibig_number' => $this->employee->pagibig_number,
+                // FIN-022 — FULL for the employee reading their OWN payslip, masked for anyone
+                // else. A payslip has to be usable as evidence of employment and income, which
+                // means the person it belongs to must see their own government numbers on it.
+                //
+                // But HR opening someone else's payslip is a different act, and leaving these
+                // unmasked here would route straight around the audited reveal endpoint: every
+                // government number in the company, readable, with no record of who looked. HR that
+                // genuinely needs the full value uses `/employees/{id}/sensitive`, which logs it.
+                ...$this->identityNumbers($request),
             ],
 
             // — Earnings —
             // `period_base` is the full period basic; `base_salary` is what survived absences.
             // The payslip shows the former as "Basic Pay" and charges `absence_deduction`
             // against it, so the cost of an absence is visible instead of folded into basic.
+            // FIN-011 — WHICH KIND OF PAYSLIP THIS IS. Without it the document cannot label itself,
+            // and a 13th-month or final-pay slip reads as an ordinary period that paid no salary.
+            'run_type' => $this->payrollRun?->type ?? 'regular',
+            // What the header prints. The raw `frequency` was going straight onto the document, and
+            // for a final-pay run that string is "final_pay:<employee id>" — an internal key, with an
+            // id in it, on a document handed to the employee.
+            'run_type_label' => $this->runTypeLabel(),
             'period_base' => (float) $this->period_base,
             'base_salary' => (float) $this->base_salary,
             'absence_deduction' => (float) $this->absence_deduction,
@@ -56,7 +69,18 @@ class PayslipResource extends JsonResource
             'night_diff_minutes' => (int) $this->night_diff_minutes,
             'rest_day_premium' => (float) $this->rest_day_premium,
             'rest_day_minutes' => (int) $this->rest_day_minutes,
+            // FIN-011 — stored all along and never serialised, which is why a 13th-month payslip
+            // showed a gross with every earnings line at ₱0.
+            'thirteenth_month' => (float) $this->thirteenth_month,
+            'other_benefits' => (float) $this->other_benefits,
+            // What of the above became taxable (the part over the ₱90,000 bucket). The withholding
+            // figure on a 13th-month slip is otherwise a number with no visible basis.
+            'taxable_pay' => (float) $this->taxable_pay,
             'gross' => (float) $this->gross,
+            // FIN-011 — the earnings lines, built HERE rather than in each surface, for the same
+            // reason `totals` is: the React document and the PDF both render them, and two
+            // independent lists would drift the first time a run type gained a line.
+            'earnings_breakdown' => $this->earningsBreakdown(),
 
             // — Deductions —
             'sss' => (float) $this->sss,
@@ -65,12 +89,23 @@ class PayslipResource extends JsonResource
             'withholding_tax' => (float) $this->withholding_tax,
             'other_deductions' => (float) $this->other_deductions,
             'other_deductions_breakdown' => $this->other_deductions_breakdown ?? [],
+            // FIN-032 — interest collected on loans this period. Already itemised as its own line in
+            // the breakdown above; exposed separately so a consumer can total the cost of borrowing
+            // without re-parsing the breakdown's labels.
+            'loan_interest' => (float) $this->loan_interest,
             'total_deductions' => (float) $this->total_deductions,
             // FIN-010 — an off-cycle correction's amount and what it is for, so the document can
             // explain a gross that came from a person rather than from the engine.
             // FIN-028 — the year-end tax correction, so a December payslip can explain a figure
             // that is not this period's ordinary projection. Negative means refunded.
             'tax_annualisation' => (float) $this->tax_annualisation,
+            // FIN-014 — the terminal lines, so a final payslip can show its own derivation rather
+            // than one opaque gross.
+            'separation_pay' => $this->separation_pay === null ? null : (float) $this->separation_pay,
+            'separation_pay_taxable' => (bool) $this->separation_pay_taxable,
+            'leave_conversion' => $this->leave_conversion === null ? null : (float) $this->leave_conversion,
+            'leave_conversion_days' => $this->leave_conversion_days === null ? null : (float) $this->leave_conversion_days,
+            'loan_settlement' => $this->loan_settlement === null ? null : (float) $this->loan_settlement,
             'adjustment_pay' => (float) $this->adjustment_pay,
             'adjustment_note' => $this->adjustment_note,
             'deduction_carryover' => (float) $this->deduction_carryover,
@@ -81,18 +116,32 @@ class PayslipResource extends JsonResource
             // two independent implementations of it would eventually disagree.
             'totals' => $this->documentTotals(),
 
-            // The company's counterpart contributions. Not deducted from the employee and not
-            // their business — this is remittance data, so it goes to HR only. It was
-            // previously returned to everyone, which `PAYROLL-RULES-FIX-PLAN.md` flagged.
+            // The company's counterpart contributions.
+            //
+            // SHOWN TO THE EMPLOYEE TOO (2026-08-07, Joshua's call). These were HR-only on the
+            // grounds that remittance data is "not the employee's business". That reasoning holds
+            // for the two fields below it and not for this one: the employer share is money paid
+            // into the employee's OWN SSS, PhilHealth and Pag-IBIG record, and it is the part of
+            // their compensation they are least likely to know about. It is disclosure, not
+            // remittance workflow.
+            //
+            // It is never a term in any total — see `documentTotals()`, which does not reference
+            // it. Nothing deducts it, because nothing was deducted: it is the company's cost.
+            'employer_sss' => (float) $this->employer_sss,
+            'employer_philhealth' => (float) $this->employer_philhealth,
+            'employer_pagibig' => (float) $this->employer_pagibig,
+
+            // These two stay HR-only. Unlike the employer share, they are genuinely remittance
+            // workflow: one says a filing cannot be made as it stands, the other is what a
+            // remittance query asks for. Neither is something the employee can act on.
             $this->mergeWhen($this->isHrViewer($request), fn () => [
-                'employer_sss' => (float) $this->employer_sss,
-                'employer_philhealth' => (float) $this->employer_philhealth,
-                'employer_pagibig' => (float) $this->employer_pagibig,
                 // Slice B7 — which deductions came from a per-employee override rather than the
-                // rates. HR-only for the same reason as the employer shares: it is a remittance
-                // problem (the two halves can belong to different brackets), not something the
-                // employee can act on, and it must not appear on the document they receive.
+                // rates. The two halves can belong to different brackets, which is a problem for
+                // the person filing, not for the person paid.
                 'contribution_overrides' => $this->contribution_overrides ?? [],
+                // Slice B19 — the monthly salary figure each contribution was charged on. Null on
+                // payslips computed before B19 and on runs that take no statutory contributions.
+                'contribution_bases' => $this->contribution_bases,
             ]),
 
             'status' => $this->status,
@@ -109,6 +158,100 @@ class PayslipResource extends JsonResource
             'undertime_deduction' => (float) $this->undertime_deduction,
             'late_penalty_days' => (float) $this->late_penalty_days,
         ];
+    }
+
+    /** What kind of payslip this is, in words the recipient can read (FIN-011). */
+    private function runTypeLabel(): string
+    {
+        return match ($this->payrollRun?->type) {
+            'thirteenth_month' => '13th Month Pay',
+            'adjustment' => 'Adjustment',
+            'final_pay' => 'Final Pay',
+            // An ordinary run is identified by how often it pays, which is what the header always
+            // meant to show — for the other types `frequency` is an internal key, not a pay type.
+            default => ucwords(str_replace('_', '-', (string) ($this->payrollRun?->frequency ?: '—'))),
+        };
+    }
+
+    /**
+     * Every earning on this payslip as a named line (FIN-011).
+     *
+     * THE DEFECT THIS FIXES was wider than "13th month has no lines". Both documents hardcoded an
+     * ordinary period's earnings — Basic Pay, allowances, overtime, night differential, holiday, rest
+     * day, reimbursement — and rendered "Basic Pay ₱0" for anything else. That covered FOUR run types:
+     * 13th month, the off-cycle adjustment (FIN-010) and final pay (FIN-014) all store their amounts in
+     * their own columns, none of which either document knew about. An employee opened a legally
+     * consequential document stating a gross, a withholding-tax figure, and every earnings line at zero.
+     *
+     * Built here rather than in each surface for the same reason as `documentTotals()`: the React
+     * payslip and the PDF both render this, and two hand-maintained lists would disagree the first time
+     * a run type gained a line — which is exactly how the adjustment and final-pay types shipped
+     * invisible after their columns were added.
+     *
+     * A line appears only when it carries money, EXCEPT Basic Pay on an ordinary run: a regular period
+     * that genuinely paid no basic (a full month of unpaid leave) still has to say so rather than
+     * silently omit the row the whole document is built around.
+     *
+     * @return list<array{name: string, amount: float, note: string|null}>
+     */
+    private function earningsBreakdown(): array
+    {
+        $type = $this->payrollRun?->type ?? 'regular';
+        $lines = [];
+
+        $add = function (string $name, float $amount, ?string $note = null) use (&$lines) {
+            if (round($amount, 2) != 0.0) {
+                $lines[] = ['name' => $name, 'amount' => round($amount, 2), 'note' => $note];
+            }
+        };
+
+        // --- the ordinary period ---------------------------------------------------------------
+        if ($type === 'regular') {
+            $lines[] = [
+                'name' => 'Basic Pay',
+                'amount' => round((float) $this->period_base, 2),
+                'note' => null,
+            ];
+
+            foreach ($this->allowancesBreakdown() as $line) {
+                $lines[] = ['name' => $line['name'], 'amount' => $line['amount'], 'note' => null];
+            }
+
+            $add('Overtime', (float) $this->overtime_pay, $this->minutesNote($this->overtime_minutes));
+            $add('Night Differential', (float) $this->night_diff_pay, $this->minutesNote($this->night_diff_minutes));
+            $add('Holiday', (float) $this->holiday_premium);
+            $add('Rest Day', (float) $this->rest_day_premium, $this->minutesNote($this->rest_day_minutes));
+        }
+
+        // --- 13th month ------------------------------------------------------------------------
+        // The whole gross of a 13th-month run. `other_benefits` is the same money seen from the tax
+        // side (what went into the ₱90,000 bucket), so it is NOT a second earnings line — adding it
+        // would double the compensation total.
+        $add('13th Month Pay', (float) $this->thirteenth_month);
+
+        // --- the off-cycle correction (FIN-010) -------------------------------------------------
+        $add('Adjustment', (float) $this->adjustment_pay, $this->adjustment_note ?: null);
+
+        // --- final pay (FIN-014) ---------------------------------------------------------------
+        $add('Separation Pay', (float) $this->separation_pay,
+            $this->separation_pay_taxable ? 'Taxable' : 'Tax-exempt');
+        $add('Unused Leave Converted', (float) $this->leave_conversion,
+            $this->leave_conversion_days === null
+                ? null
+                : rtrim(rtrim(number_format((float) $this->leave_conversion_days, 1), '0'), '.') . ' day(s)');
+
+        // --- paid on any run type --------------------------------------------------------------
+        $add('Reimbursement', (float) $this->reimbursements);
+
+        return $lines;
+    }
+
+    /** "2.5 hrs" from a minute count, or null when there are none. */
+    private function minutesNote(mixed $minutes): ?string
+    {
+        $m = (int) $minutes;
+
+        return $m > 0 ? rtrim(rtrim(number_format($m / 60, 2), '0'), '.') . ' hrs' : null;
     }
 
     /**
@@ -220,5 +363,30 @@ class PayslipResource extends JsonResource
     private function isHrViewer(Request $request): bool
     {
         return (bool) $request->user()?->hasAnyRole(['hr_officer', 'super_admin']);
+    }
+
+    /**
+     * The government numbers on the identity block — full only for their owner (FIN-022).
+     *
+     * Ownership, not role, is the test. An HR officer viewing their own payslip is the owner and sees
+     * their own numbers; the same officer viewing a colleague's does not. Getting this the other way
+     * round — keying on role — would show HR every number in the company and show an employee
+     * nothing of their own.
+     *
+     * @return array<string, string|null>
+     */
+    private function identityNumbers(Request $request): array
+    {
+        $isOwner = $request->user()?->employee?->id === $this->employee->id;
+
+        $fields = ['tin', 'sss_number', 'philhealth_number', 'pagibig_number'];
+        $out = [];
+
+        foreach ($fields as $field) {
+            $value = $this->employee->{$field};
+            $out[$field] = $isOwner ? $value : Employee::maskSensitive($value);
+        }
+
+        return $out;
     }
 }

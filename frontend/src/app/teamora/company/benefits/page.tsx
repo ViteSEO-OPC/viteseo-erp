@@ -405,12 +405,14 @@ function LoanPolicyCard({ program, onEdit }: { program: BenefitProgram; onEdit: 
       <p className="mt-4 text-3xl font-bold text-foreground">
         {program.loan_max_principal ? formatPeso(program.loan_max_principal) : "No limit"}
       </p>
+      {/* FIN-031 — the interest clause is gone with the field. This card used to print
+          "6% a year" for a rate `LoanService` never read, which is the most misleading place it
+          appeared: HR read it as the terms of the product. Loans repay principal only; when
+          interest is genuinely implemented it returns here with an amortisation schedule behind
+          it, not as a percentage nothing charges. */}
       <p className="mt-1 text-xs text-muted-foreground">
         Most that can be borrowed
         {program.loan_term_periods ? ` · within ${program.loan_term_periods} payslips` : ""}
-        {Number(program.loan_interest_rate ?? 0) > 0
-          ? ` · ${program.loan_interest_rate}% a year`
-          : " · interest-free"}
       </p>
     </div>
   );

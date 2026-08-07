@@ -7,17 +7,20 @@ use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeBenefit;
 use App\Modules\Hr\Models\EmployeeDocument;
+use App\Modules\Hr\Models\EmployeeLoan;
 use App\Modules\Hr\Models\EmploymentHistory;
 use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
+use App\Modules\Hr\Models\RetroFlag;
 use App\Modules\Hr\Models\SalaryHistory;
 use App\Modules\Hr\Models\SharedLeaveAllotment;
 use App\Modules\Hr\Models\SharedLeaveBalance;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -112,6 +115,17 @@ class EmployeeService
             $out['is_management'] = ! empty($data['is_management']);
         }
 
+        // FIN-030b — same non-nullable-boolean treatment. Clearing the flag clears the reason with
+        // it: a stale "part-time" note sitting on someone who is no longer exempt reads as a live
+        // justification, which is worse than no note at all.
+        if (array_key_exists('minimum_wage_exempt', $data)) {
+            $exempt = ! empty($data['minimum_wage_exempt']);
+            $out['minimum_wage_exempt'] = $exempt;
+            $out['minimum_wage_exempt_reason'] = $exempt
+                ? ($data['minimum_wage_exempt_reason'] ?? null)
+                : null;
+        }
+
         return $out;
     }
 
@@ -202,9 +216,19 @@ class EmployeeService
         ]);
     }
 
-    public function list(?string $search = null): LengthAwarePaginator
+    /**
+     * The employee directory.
+     *
+     * `$status` — 'active' (default), 'former' or 'all'. MF-18 needs this: a separated employee is
+     * soft-deleted, so before this there was no way to LIST anyone who had left, which made rehiring
+     * unreachable from the UI even once the endpoint existed. Default stays 'active' so the directory
+     * looks exactly as it did.
+     */
+    public function list(?string $search = null, string $status = 'active'): LengthAwarePaginator
     {
         return Employee::query()
+            ->when($status === 'former', fn ($q) => $q->onlyTrashed())
+            ->when($status === 'all', fn ($q) => $q->withTrashed())
             ->with(['user.roles', 'department', 'manager.user'])
             ->when($search, function ($q) use ($search) {
                 $q->whereHas('user', function ($u) use ($search) {
@@ -251,34 +275,15 @@ class EmployeeService
                 ...$this->profileData($data),
             ]);
 
-            // 3) Seed this year's leave credits from the allotment defaults for
-            //    this employment status. These are only the STARTING credits — HR
-            //    can freely edit each person's balances afterwards (per-person
-            //    override). The shape depends on the company allotment mode:
-            //    shared = one pool; not-shared = one row per leave type.
-            $year = now(config('app.timezone_local'))->year;
-            if (LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED) {
-                $poolDays = SharedLeaveAllotment::where('employment_status', $employee->employment_status)
-                    ->value('days_per_year');
-                SharedLeaveBalance::create([
-                    'employee_id' => $employee->id,
-                    'year' => $year,
-                    'entitled_days' => (int) ($poolDays ?? 0),
-                    'used_days' => 0,
-                ]);
-            } else {
-                $allotments = LeaveTypeAllotment::where('employment_status', $employee->employment_status)
-                    ->pluck('days_per_year', 'leave_type_id');
-                foreach (LeaveType::all() as $type) {
-                    LeaveBalance::create([
-                        'employee_id' => $employee->id,
-                        'leave_type_id' => $type->id,
-                        'year' => $year,
-                        'entitled_days' => $allotments[$type->id] ?? $type->days_per_year,
-                        'used_days' => 0,
-                    ]);
-                }
-            }
+            // 3) Seed this year's leave credits from the allotment defaults for this employment
+            //    status. These are only the STARTING credits — HR can freely edit each person's
+            //    balances afterwards. The shape depends on the company allotment mode: shared =
+            //    one pool; not-shared = one row per leave type.
+            //
+            //    MF-18 — shared with `rehire()` rather than duplicated. A rehired employee has to
+            //    get exactly what a new hire gets, and two copies of this is how the two would
+            //    drift into giving different credits for the same employment status.
+            $this->seedLeaveBalances($employee);
 
             // 4) Seed the contribution checklist — enrolled in every active
             //    government contribution by default; HR can opt individuals out.
@@ -314,6 +319,12 @@ class EmployeeService
                 'status' => 'current',
                 'changed_by' => Auth::id(),
             ]);
+
+            // FIN-038 — the other moment an enrolment row can start being missing. Created here
+            // rather than by the next payroll run, which used to write these rows from inside its
+            // own pricing transaction. Not load-bearing for pay: a missing row still reads as
+            // enrolled, so this gives the enrolment checklist something to show, nothing more.
+            app(ContributionService::class)->backfillEnrolments($employee);
 
             $employee->load('user');
             $this->audit->log('created', 'People', "Added employee {$employee->user?->name}", $employee);
@@ -357,7 +368,7 @@ class EmployeeService
 
                 $this->assertSalaryDateIsSafe($employee, $effectiveDate, $data);
 
-                SalaryHistory::create([
+                $history = SalaryHistory::create([
                     'employee_id' => $employee->id,
                     'base_salary' => $newSalary,
                     'effective_date' => $effectiveDate,
@@ -365,6 +376,33 @@ class EmployeeService
                     'change_type' => $data['salary_change_type'] ?? 'adjustment',
                     'changed_by' => Auth::id(),
                 ]);
+
+                /**
+                 * FIN-009 — A BACK-DATED RAISE INTO A SETTLED PERIOD IS AN OUTSTANDING DIFFERENCE.
+                 *
+                 * `assertSalaryDateIsSafe()` above already warns and demands acknowledgement, and the
+                 * salary history now records what was decided. Neither of those pays anybody. Until this,
+                 * "confirm to record it anyway" meant the raise was recorded and the back pay owed for the
+                 * already-paid days was tracked NOWHERE — HR was told about it once, in a dialog, and then
+                 * it was gone.
+                 *
+                 * The retro flag existed and was raised for overtime, leave, half-day and early-out
+                 * decisions, plus the bulk minimum-wage uplift — but not for an ordinary raise, which is
+                 * the most common retroactive event there is.
+                 *
+                 * `flagIfSettled()` returns null on its own when nothing is settled, so a normal forward-
+                 * dated raise is unaffected: no run covers a future date, so there is nothing to owe.
+                 */
+                app(RetroFlagService::class)->flagIfSettled(
+                    $history,
+                    $employee->id,
+                    $effectiveDate,
+                    null,
+                    RetroFlag::OWED,
+                    'Salary raised to ' . number_format((float) $newSalary, 2)
+                        . ' effective ' . $effectiveDate
+                        . ' — the days already paid were priced at the old figure',
+                );
             }
 
             // A job-title change moves the employment-history timeline forward.
@@ -454,6 +492,223 @@ class EmployeeService
         );
 
         return $employee->load(['user', 'department', 'manager.user']);
+    }
+
+    /** The separation causes the attrition report already groups by. */
+    public const SEPARATION_TYPES = ['voluntary', 'involuntary'];
+
+    /**
+     * End someone's employment (MF-18).
+     *
+     * THIS DID NOT EXIST. A separation was only ever written by `AttritionDemoSeeder`, which meant
+     * `separation_date` — the column `runFinalPay()` refuses to run without, and the one attendance
+     * proration and leave accrual read as the employment end — was never set by any path a user could
+     * reach. Final pay was built and unreachable.
+     *
+     * `separation_date` AND `deleted_at` ARE KEPT IN SYNC ON PURPOSE. They answer different questions
+     * (last working day vs. when the record was archived) and could legitimately differ, but the
+     * attrition report buckets quarters on `deleted_at` while payroll prorates on `separation_date`.
+     * Letting them drift would mean the two disagree about when somebody left, so the separation date
+     * is written to both and there is one answer.
+     *
+     * @param  array{separation_type:string, separation_date:string, reason?:string|null}  $data
+     */
+    public function separate(Employee $employee, array $data): Employee
+    {
+        if ($employee->separation_date !== null || $employee->trashed()) {
+            throw ValidationException::withMessages([
+                'separation_date' => ['This employee has already been separated.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($employee, $data) {
+            $employee->update([
+                'separation_type' => $data['separation_type'],
+                'separation_date' => $data['separation_date'],
+            ]);
+
+            $employee->delete();
+
+            // Archive stamp = last working day, so the attrition report and payroll agree.
+            Employee::withTrashed()->whereKey($employee->id)->update([
+                'deleted_at' => Carbon::parse($data['separation_date'], config('app.timezone_local'))
+                    ->startOfDay(),
+            ]);
+
+            $employee->load('user');
+            $this->audit->log(
+                'updated',
+                'People',
+                "Separated {$employee->user?->name} ({$data['separation_type']}), last day "
+                    . $data['separation_date']
+                    . (($data['reason'] ?? null) ? " — {$data['reason']}" : ''),
+                $employee,
+            );
+
+            return $employee->fresh(['user', 'department', 'manager.user']);
+        });
+    }
+
+    /**
+     * Undo a separation that should not have happened — service is CONTINUOUS (MF-18).
+     *
+     * A withdrawn resignation or a reversed dismissal. The hire date stands, so tenure is unbroken;
+     * leave credits stand, because they were earned under an employment relationship that is now
+     * treated as never having ended; and an authorised salary deduction stays authorised, because the
+     * employee's Art. 113 consent was never withdrawn — only their employment appeared to end.
+     *
+     * Distinct from `rehire()`, which is a new relationship. Getting these the same way round matters:
+     * reinstating someone as a rehire would quietly reset their tenure and wipe leave they had earned.
+     */
+    public function reinstate(Employee $employee, ?string $reason = null): Employee
+    {
+        if (! $employee->trashed() && $employee->separation_date === null) {
+            throw ValidationException::withMessages([
+                'employee' => ['This employee is already active — there is no separation to undo.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($employee, $reason) {
+            $employee->restore();
+            $employee->update([
+                'separation_type' => null,
+                'separation_date' => null,
+            ]);
+
+            $employee->load('user');
+            $this->audit->log(
+                'reopened',
+                'People',
+                "Reinstated {$employee->user?->name} with continuous service"
+                    . ($reason ? " — {$reason}" : ''),
+                $employee,
+            );
+
+            return $employee->fresh(['user', 'department', 'manager.user']);
+        });
+    }
+
+    /**
+     * Take someone back as a NEW employment relationship (MF-18).
+     *
+     * Tenure restarts from `$hireDate`; the old date moves to `previous_hire_date` so the record can
+     * still say when they first joined. Three continuity decisions, each made deliberately:
+     *
+     * LEAVE STARTS FRESH. Balances for the new year are seeded from the allotment defaults exactly as
+     * they are for any new hire, and the previous stint's rows stay untouched as history. Carrying an
+     * old unused balance across a genuine break in service would be a gift nobody authorised — and if
+     * a final pay ran, those days were already converted to cash (FIN-014), so carrying them would pay
+     * for the same leave twice.
+     *
+     * OUTSTANDING LOANS ARE NOT AUTO-RESUMED. Anything still owed goes back to
+     * `pending_authorization`, which is exactly what stops `collectForPeriod()` reading it. Resuming
+     * collection on its own would deduct from the new relationship's wages under consent given for the
+     * old one, and Art. 113 requires the employee's written authorisation for the deduction actually
+     * being made. HR re-issues the authorisation request; the employee agrees again, or does not.
+     *
+     * THE SEPARATION IS CLEARED, NOT ERASED. `separation_type`/`separation_date` are reset because the
+     * person is employed again and every payroll filter keys on them, but the audit trail keeps the
+     * separation and the rehire as two events, so the break in service is still visible.
+     */
+    public function rehire(Employee $employee, string $hireDate, ?string $reason = null): Employee
+    {
+        if (! $employee->trashed() && $employee->separation_date === null) {
+            throw ValidationException::withMessages([
+                'employee' => ['This employee is already active — use the employee record to update them.'],
+            ]);
+        }
+
+        $tz = config('app.timezone_local');
+        $lastDay = $employee->separation_date ?? $employee->deleted_at;
+
+        // A rehire that starts before the previous last day is not a rehire, it is a correction —
+        // and reinstatement is the verb for that.
+        if ($lastDay && Carbon::parse($hireDate, $tz)->startOfDay()->lte(Carbon::parse($lastDay, $tz)->startOfDay())) {
+            throw ValidationException::withMessages([
+                'hire_date' => [
+                    'The rehire date must be after the previous last day ('
+                        . Carbon::parse($lastDay, $tz)->toDateString()
+                        . '). To undo a separation instead, reinstate them.',
+                ],
+            ]);
+        }
+
+        return DB::transaction(function () use ($employee, $hireDate, $reason) {
+            $previousHire = $employee->hire_date?->toDateString();
+
+            $employee->restore();
+            $employee->update([
+                'separation_type' => null,
+                'separation_date' => null,
+                'previous_hire_date' => $previousHire,
+                'hire_date' => $hireDate,
+            ]);
+
+            $this->seedLeaveBalances($employee);
+
+            // Fresh Art. 113 consent required — see the docblock.
+            $reauthorised = EmployeeLoan::where('employee_id', $employee->id)
+                ->where('status', 'active')
+                ->get()
+                ->filter(fn (EmployeeLoan $loan) => $loan->outstanding() > 0);
+
+            foreach ($reauthorised as $loan) {
+                $loan->update(['status' => 'pending_authorization', 'authorized_at' => null]);
+            }
+
+            $employee->load('user');
+            $this->audit->log(
+                'created',
+                'People',
+                "Rehired {$employee->user?->name} from {$hireDate}"
+                    . ($previousHire ? " (previously from {$previousHire})" : '')
+                    . ($reauthorised->isNotEmpty()
+                        ? ' — ' . $reauthorised->count() . ' outstanding loan(s) need fresh authorisation'
+                        : '')
+                    . ($reason ? " — {$reason}" : ''),
+                $employee,
+            );
+
+            return $employee->fresh(['user', 'department', 'manager.user']);
+        });
+    }
+
+    /**
+     * This year's starting leave credits from the allotment defaults, idempotently.
+     *
+     * Extracted from `create()` so a rehire seeds exactly what a new hire does — a second copy of this
+     * logic is how the two would drift, and a rehired employee would end up with the wrong credits for
+     * their employment status. `firstOrCreate` rather than `create` because a rehire in the same
+     * calendar year as the separation already has rows for it.
+     */
+    private function seedLeaveBalances(Employee $employee): void
+    {
+        $year = now(config('app.timezone_local'))->year;
+
+        if (LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED) {
+            $poolDays = SharedLeaveAllotment::where('employment_status', $employee->employment_status)
+                ->value('days_per_year');
+
+            SharedLeaveBalance::firstOrCreate(
+                ['employee_id' => $employee->id, 'year' => $year],
+                ['entitled_days' => (float) ($poolDays ?? 0), 'used_days' => 0],
+            );
+
+            return;
+        }
+
+        $allotments = LeaveTypeAllotment::where('employment_status', $employee->employment_status)
+            ->pluck('days_per_year', 'leave_type_id');
+
+        foreach (LeaveType::all() as $type) {
+            LeaveBalance::firstOrCreate(
+                ['employee_id' => $employee->id, 'leave_type_id' => $type->id, 'year' => $year],
+                [
+                    'entitled_days' => (float) ($allotments[$type->id] ?? $type->days_per_year),
+                    'used_days' => 0,
+                ],
+            );
+        }
     }
 
     /**

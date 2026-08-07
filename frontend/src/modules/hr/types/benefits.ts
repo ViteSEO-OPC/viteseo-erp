@@ -64,6 +64,31 @@ export const TAX_TREATMENTS = [
 ] as const;
 
 /**
+ * Slice B19 — whether an allowance is remuneration for SSS / Pag-IBIG purposes.
+ *
+ * A SEPARATE QUESTION FROM TAX, which is why it is not folded into TAX_TREATMENTS above: SSS
+ * expressly includes the mandated COLA, which is de-minimis for tax, and a taxable allowance can
+ * legitimately sit outside the contribution base. One combined switch would force a wrong answer
+ * on one of the two.
+ */
+/**
+ * Slice B19 — which salary figure a contribution's rate is applied to.
+ *
+ * Not the same axis as percentage-vs-bracket, which is how the charge is worked out once a figure
+ * is chosen. The two were both called "basis" in the schema and keeping them apart in the UI is
+ * the point of the separate labels here.
+ */
+export const SALARY_BASES = [
+  { value: "basic", label: "Basic monthly salary" },
+  { value: "earnings", label: "Actual earnings for the period" },
+] as const;
+
+export const CONTRIBUTION_TREATMENTS = [
+  { value: "yes", label: "Counts toward contributions" },
+  { value: "no", label: "Excluded · still paid in full" },
+] as const;
+
+/**
  * How an allowance decides who it covers. The first three are RULES, evaluated when payroll runs,
  * so a promotion or a new hire is followed automatically; `custom` is a stored list of names.
  */
@@ -107,10 +132,16 @@ export interface BenefitProgram {
   deminimis_ceiling: string | null;
   /** The period the ceiling is stated in: monthly | semester | annual. */
   ceiling_period: string | null;
+  /**
+   * Slice B19 — does this allowance count toward the SSS / Pag-IBIG contribution base? It is paid
+   * in full either way; this decides only whether it is remuneration for contribution purposes.
+   * Independent of `tax_treatment`, and inert until a contribution is moved onto the earnings
+   * basis in Company → Benefits.
+   */
+  contributable: boolean;
   // Loan-policy config (B15), only meaningful when kind is "loan_policy".
   loan_max_principal: string | null;
   loan_term_periods: number | null;
-  loan_interest_rate: string | null;
   eligibility: string; // all | status | management | custom
   /** Only meaningful when `eligibility` is "status". */
   eligibility_statuses: string[];

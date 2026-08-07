@@ -16,7 +16,16 @@ class ReportController extends Controller
     // GET /api/v1/hr/reports/{key} — one analytics report (HR only).
     public function show(Request $request, string $key): JsonResponse
     {
-        $report = $this->service->get($key, $request->only(['action', 'from', 'to', 'department', 'months']));
+        // FIN-041 — `page`/`per_page` let the audit report page instead of silently truncating.
+        $report = $this->service->get(
+            $key,
+            // FIN-041 paginates the audit report; FIN-042/FIN-017 add `run` (which register to show)
+            // and `frequency` (the pay group) to the payroll reports.
+            $request->only([
+                'action', 'from', 'to', 'department', 'months', 'page', 'per_page',
+                'run', 'frequency',
+            ]),
+        );
 
         if (! $report) {
             return response()->json(['message' => 'Unknown report.'], Response::HTTP_NOT_FOUND);

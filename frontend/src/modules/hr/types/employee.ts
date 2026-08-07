@@ -40,6 +40,15 @@ export interface Employee {
   employee_role: string | null;
   onboarding_status: "pending" | "complete" | null;
   hire_date: string;
+  // MF-18 — the employment lifecycle. `separation_date` is the last WORKING day (what payroll
+  // prorates against and what final pay requires); `separated_at` is the archive stamp, kept in sync
+  // with it. `previous_hire_date` is set only by a rehire, so restarting tenure doesn't erase when
+  // this person first joined.
+  separation_type: "voluntary" | "involuntary" | null;
+  separation_date: string | null;
+  separated_at: string | null;
+  is_separated: boolean;
+  previous_hire_date: string | null;
   base_salary: string; // raw decimal from the API; format for display
   is_management: boolean; // fixed salary + exempt from attendance
   phone: string | null;
@@ -50,6 +59,34 @@ export interface Employee {
   bank_name: string | null;
   bank_account: string | null; // account number
   pay_frequency: string | null;
+  /**
+   * FIN-030 — the DERIVED daily rate, and the configured regional floor when there is one.
+   *
+   * Present only on single-employee responses (FIN-030b made it opt-in server-side, so the
+   * directory does not derive a rate per row for a column it never shows). `minimum` is null when
+   * no wage order has been entered — nothing to warn about, and never a guessed threshold.
+   *
+   * `below` is the arithmetic truth; `flagged` is `below` minus anyone marked exempt, and it is
+   * what the warning and the pre-run gate read.
+   */
+  minimum_wage_check?: {
+    daily_rate: number;
+    /** How the rate was derived: salary ÷ the divisor, or ÷ this period's scheduled workdays. */
+    basis: "fixed_divisor" | "period_workdays";
+    divisor: number | null;
+    workdays: number;
+    minimum: number | null;
+    below: boolean;
+    flagged: boolean;
+    shortfall: number | null;
+    /** The monthly base salary that would clear the floor — null when already compliant. */
+    compliant_salary: number | null;
+    exempt: boolean;
+    exempt_reason: string | null;
+  } | null;
+  /** FIN-030b — excluded from the minimum-wage check, with the reason on the record. */
+  minimum_wage_exempt: boolean;
+  minimum_wage_exempt_reason: string | null;
   currency: string | null;
   bank_account_type: string | null;
   bank_account_name: string | null;
@@ -110,6 +147,9 @@ export interface EmployeeInput {
   hire_date: string;
   base_salary: number;
   is_management?: boolean; // fixed salary + exempt from attendance
+  /** FIN-030b — out of the minimum-wage check. The reason is required when this is true. */
+  minimum_wage_exempt?: boolean;
+  minimum_wage_exempt_reason?: string;
   phone?: string;
   address?: string;
   current_address?: string;
@@ -274,4 +314,12 @@ export interface StatutoryPreviewRow {
   calculated_employee: number;
   calculated_employer: number;
   basis: string | null;
+  /** Slice B19 — which salary figure this is charged on: `basic` or `earnings`. */
+  salary_basis: string | null;
+  /**
+   * True when `salary_basis` is `earnings`, in which case the two figures above are a PERFECT
+   * MONTH — no absences, no lates, no overtime — because this preview has only the profile salary
+   * to work from. The real payslip will rarely match, and the form has to say so.
+   */
+  is_estimate: boolean;
 }

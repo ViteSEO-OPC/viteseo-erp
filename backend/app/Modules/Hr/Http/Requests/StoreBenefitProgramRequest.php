@@ -40,8 +40,11 @@ class StoreBenefitProgramRequest extends FormRequest
             // shape: a loan policy and an HMO have nothing in common but a name.
             'loan_max_principal' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999'],
             'loan_term_periods' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:600'],
-            'loan_interest_rate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'ceiling_period' => ['sometimes', 'nullable', 'in:monthly,semester,annual'],
+            // Slice B19 — whether this allowance counts toward the statutory contribution base.
+            // Separate from `tax_treatment`: a taxable allowance can sit outside the SSS base and
+            // the mandated COLA is de-minimis for tax but inside it. Defaults to counting.
+            'contributable' => ['sometimes', 'boolean'],
             // Who the programme is for. `status` carries the list below; `custom` carries
             // `employee_ids`. The old `regular` value is gone — it was the only status the model
             // could express, and is now `status` with one entry.

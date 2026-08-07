@@ -45,6 +45,14 @@ class ContributionService
         $setting->update(['is_active' => $data['is_active'] ?? $setting->is_active]);
         $this->settingsMemo = null;
 
+        // FIN-038 — switching a contribution ON is one of the two moments an enrolment row can
+        // start being missing, so the back-fill happens HERE rather than inside the next payroll
+        // run. Before, the first run after an activation enrolled the whole company as a side
+        // effect of computing pay.
+        if (! $before['is_active'] && $setting->is_active) {
+            $this->backfillEnrolments();
+        }
+
         $after = ['is_active' => (bool) $setting->is_active];
 
         $this->audit->log(
@@ -142,6 +150,9 @@ class ContributionService
         $before = $existing?->only([
             'employee_rate', 'employer_rate', 'salary_floor', 'salary_cap',
             'employee_amount_cap', 'employer_amount_cap', 'fixed_employer_add_on', 'add_on_min_salary',
+            // Slice B19 — moving a contribution between the basic and earnings base changes what
+            // every payslip is charged on, which is a bigger change than any rate on this list.
+            'salary_basis',
         ]);
 
         $brackets = $data['brackets'] ?? null;
@@ -179,13 +190,20 @@ class ContributionService
                 . ($existing ? 'corrected' : 'set') . ' effective '
                 . $version->effective_from->format('M j, Y')
                 . ' — employee ' . round($version->employee_rate * 100, 3) . '%'
-                . ', employer ' . round($version->employer_rate * 100, 3) . '%',
+                . ', employer ' . round($version->employer_rate * 100, 3) . '%'
+                // Slice B19 — named in the sentence, not just the diff. "Charged on actual
+                // earnings" is the part of this change a reader needs to see without opening the
+                // before/after, because it moves what every payslip is measured against.
+                . ', charged on ' . ($version->salary_basis === 'earnings'
+                    ? 'actual earnings for the period'
+                    : 'basic monthly salary'),
             $version,
             $before,
             $version->only(array_keys($before ?? [
                 'employee_rate' => null, 'employer_rate' => null, 'salary_floor' => null,
                 'salary_cap' => null, 'employee_amount_cap' => null, 'employer_amount_cap' => null,
                 'fixed_employer_add_on' => null, 'add_on_min_salary' => null,
+                'salary_basis' => null,
             ])),
         );
 
@@ -220,6 +238,78 @@ class ContributionService
      * The employee's checklist, back-filling a row (enrolled) for any active
      * contribution they don't have one for yet.
      */
+    /**
+     * The active contributions this employee is enrolled in — reading only (FIN-038).
+     *
+     * A MISSING ROW MEANS ENROLLED, and that default is the whole reason this method can be
+     * read-only safely. `benefitsFor()` back-fills a missing row as `enrolled => true`, so the
+     * absence of a row has always meant "enrolled, nobody has said otherwise". Treating absence as
+     * NOT enrolled would have been the tidier-looking change and a serious bug: an employee whose
+     * row had not been created yet would silently stop having SSS deducted, with a run that looks
+     * perfectly successful — the same failure FIN-035 exists to prevent, arrived at from the other
+     * direction.
+     *
+     * @return array<int, string>
+     */
+    private function enrolledActiveTypesFor(Employee $employee): array
+    {
+        $rows = $employee->benefits()->get()->keyBy('contribution_type');
+
+        return $this->settings()
+            ->where('is_active', true)
+            ->filter(fn ($setting) => (bool) ($rows[$setting->type]->enrolled ?? true))
+            ->pluck('type')
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Create the enrolment rows an employee is missing, where the change actually happens (FIN-038).
+     *
+     * Called on employee creation and when a contribution type is switched on — the two moments a
+     * row can start being missing. Payroll no longer does it, so it no longer writes while pricing.
+     *
+     * IT IS NOT A CORRECTNESS DEPENDENCY, deliberately. `enrolledActiveTypesFor()` treats a missing
+     * row as enrolled, so pay is right whether or not this has run. Its job is to give the enrolment
+     * checklist real rows to show and toggle, which is a UI concern rather than a payroll one — if it
+     * were load-bearing for money, a missed call would silently change someone's deductions.
+     *
+     * @return int rows created
+     */
+    public function backfillEnrolments(?Employee $employee = null): int
+    {
+        $types = $this->settings()->where('is_active', true)->pluck('type');
+
+        if ($types->isEmpty()) {
+            return 0;
+        }
+
+        $employees = $employee
+            ? collect([$employee])
+            : Employee::withTrashed()->get(['id']);
+
+        $created = 0;
+
+        foreach ($employees as $target) {
+            $have = EmployeeBenefit::where('employee_id', $target->id)
+                ->pluck('contribution_type')
+                ->all();
+
+            foreach ($types->reject(fn ($t) => in_array($t, $have, true)) as $type) {
+                EmployeeBenefit::create([
+                    'employee_id' => $target->id,
+                    'contribution_type' => $type,
+                    // The same default the old back-fill used, and the same one the read path
+                    // assumes for a missing row. These three must not drift apart.
+                    'enrolled' => true,
+                ]);
+                $created++;
+            }
+        }
+
+        return $created;
+    }
+
     public function benefitsFor(Employee $employee): Collection
     {
         // Slice 15 — read the employee's existing rows ONCE and only back-fill what is genuinely
@@ -293,16 +383,13 @@ class ContributionService
      */
     public function effectiveFor(Employee $employee, ?string $asOf = null): array
     {
-        $enrolled = $this->benefitsFor($employee)
-            ->where('enrolled', true)
-            ->pluck('contribution_type')
-            ->all();
-
-        $active = $this->settings()
-            ->where('is_active', true)
-            ->whereIn('type', $enrolled)
-            ->pluck('type')
-            ->all();
+        // FIN-038 — READ ONLY. This used to call benefitsFor(), which back-fills missing enrolment
+        // rows with firstOrCreate — so pricing a payslip WROTE to hr_employee_benefits from inside
+        // run()'s transaction. Three consequences: a read path mutated enrolment data, a large run
+        // added N × types INSERTs and their locks to the critical path, and the first run after
+        // someone activated a contribution enrolled the whole company as a side effect of computing
+        // pay. The back-fill now happens where the change happens — see backfillEnrolments().
+        $active = $this->enrolledActiveTypesFor($employee);
 
         if ($active === []) {
             return [];
@@ -360,6 +447,17 @@ class ContributionService
                 // Shown because it does NOT move with the override — the mismatch is the point.
                 'calculated_employer' => $enrolled ? ContributionCalculator::employer($config[$type], $base) : 0.0,
                 'basis' => $enrolled ? ($config[$type]['basis'] ?? 'percentage') : null,
+                // Slice B19 — WHAT THE FIGURE ABOVE ASSUMES, and it has to be said out loud.
+                //
+                // This preview has only one salary to work with: the profile's `base_salary`. For
+                // a contribution on the `basic` basis that IS the base payroll uses, so the number
+                // is exact. For one on `earnings` it is a perfect month — no absences, no lates,
+                // no overtime, no premium and every contributable allowance included — which the
+                // employee's actual payslip will rarely match. Returning the same shape for both
+                // and letting the form present them identically is how a preview becomes a figure
+                // people quote back at you.
+                'salary_basis' => $enrolled ? ($config[$type]['salary_basis'] ?? 'basic') : null,
+                'is_estimate' => $enrolled && ($config[$type]['salary_basis'] ?? 'basic') === 'earnings',
             ];
         }
 

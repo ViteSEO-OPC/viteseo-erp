@@ -313,6 +313,10 @@ function AttendancePolicyEditor() {
   const [locating, setLocating] = useState(false);
   const [overtimeMode, setOvertimeMode] = useState<OvertimeMode>(policy?.overtime_mode ?? "approved_only");
   const [overtimeThreshold, setOvertimeThreshold] = useState(String(policy?.overtime_threshold_minutes ?? 0));
+  // FIN-039 — how much auto-mode overtime pays without an approval. 0 = uncapped (the default),
+  // so an existing company's pay does not move until HR deliberately sets a figure.
+  const [otDailyCap, setOtDailyCap] = useState(String(policy?.auto_overtime_daily_cap_minutes ?? 0));
+  const [otPeriodCap, setOtPeriodCap] = useState(String(policy?.auto_overtime_period_cap_minutes ?? 0));
 
   // Premium & overtime rates (Phase 0) — whole-percent, floored at the DOLE minimum (UI + server).
   const [premRestDay, setPremRestDay] = useState(String(policy?.premium_rest_day_pct ?? 130));
@@ -828,7 +832,27 @@ function AttendancePolicyEditor() {
             ]}
           />
           {overtimeMode === "auto_after_threshold" && (
-            <NumberField id="pol-ot-threshold" label="Minimum overtime (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
+            <>
+              <NumberField id="pol-ot-threshold" label="Minimum overtime (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
+              {/* FIN-039 — the ceiling on what pays with nobody looking. 0 = uncapped, which is
+                  what every existing company is on, so the labels have to say so. */}
+              <NumberField
+                id="pol-ot-daily-cap"
+                label="Auto-pay cap per day (minutes, 0 = no cap)"
+                value={otDailyCap}
+                onChange={setOtDailyCap}
+                min={0}
+                max={1440}
+              />
+              <NumberField
+                id="pol-ot-period-cap"
+                label="Auto-pay cap per pay period (minutes, 0 = no cap)"
+                value={otPeriodCap}
+                onChange={setOtPeriodCap}
+                min={0}
+                max={65535}
+              />
+            </>
           )}
         </div>
         {overtimeMode === "auto_after_threshold" && (
@@ -867,6 +891,8 @@ function AttendancePolicyEditor() {
               early_clock_in_mode: earlyClockIn,
               overtime_mode: overtimeMode,
               overtime_threshold_minutes: Number(overtimeThreshold),
+              auto_overtime_daily_cap_minutes: Number(otDailyCap),
+              auto_overtime_period_cap_minutes: Number(otPeriodCap),
             })
           }
         />

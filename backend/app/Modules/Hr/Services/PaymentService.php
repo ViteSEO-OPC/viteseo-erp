@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Services;
 
 use App\Models\User;
 use App\Modules\Hr\Models\Payment;
+use App\Modules\Hr\Models\RetroFlag;
 use App\Modules\Hr\Models\PaymentBatch;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\Payslip;
@@ -34,6 +35,10 @@ class PaymentService
         // payslip carried, and reversing one puts back the loan instalments it collected. Both
         // live in PayrollService, and reconciliation has to go through them.
         private PayrollService $payroll,
+        // FIN-015 / FIN-003 — when a bounced transfer's payslip CANNOT be reopened (locked run), the
+        // reversal has to surface somewhere a person actually looks. An audit-log line is a record,
+        // not a task.
+        private RetroFlagService $retro,
     ) {}
 
     /**
@@ -313,7 +318,10 @@ class PaymentService
             // Already disbursed by the manual path, or by an earlier payment on the same payslip
             // after a re-issue. Either way there is nothing left to flip.
             if ($payslip && $payslip->status !== 'disbursed') {
-                $this->payroll->markDone($payslip);
+                // FIN-033 — the actor is the person reconciling, and the key is the payment
+                // itself: re-importing the same bank file settles the same payment again, which
+                // must be a duplicate rather than a second disbursement.
+                $this->payroll->markDone($payslip, $actor, "payment:{$payment->id}");
             }
 
             $this->refreshBatchStatus($payment->batch);
@@ -340,7 +348,12 @@ class PaymentService
      *
      * Reopening is best-effort by design. `reopenPayslip()` refuses on a locked run, and that
      * refusal must not block recording what the bank actually did: the failure is the fact, the
-     * payslip status is bookkeeping that follows it. The reason is captured either way.
+     * payslip status is bookkeeping that follows it.
+     *
+     * When it does refuse, the shortfall becomes an OUTSTANDING RETRO FLAG rather than only an audit
+     * line — because reopening is also what returns the loan instalments the payslip collected, so a
+     * locked run leaves both the payslip and the employee's loan balance wrong with nothing in anyone's
+     * queue. See the catch block for why the reversal is not forced through instead.
      */
     public function fail(Payment $payment, string $status, string $reason, User $actor): Payment
     {
@@ -365,7 +378,29 @@ class PaymentService
                     $this->payroll->reopenPayslip($payslip, 'Bank transfer ' . $status . ': ' . $reason);
                     $reopened = true;
                 } catch (ValidationException) {
-                    // Locked run — see the docblock. Recorded below so it is not silent.
+                    // LOCKED RUN. `reopenPayslip()` is what puts back the loan instalments the payslip
+                    // collected (`LoanService::reverseForPayslip()`), so when it refuses, TWO things are
+                    // now wrong and neither is visible: the payslip still reads `disbursed`, and the
+                    // employee's loan balance is still reduced by an instalment that came back with the
+                    // transfer.
+                    //
+                    // The reversal is deliberately NOT forced through here. Reversing the loan ledger
+                    // while the payslip still shows the deduction would make the document and the ledger
+                    // disagree — the exact class of defect this module keeps closing — and unlocking a
+                    // sealed run is a decision for a person, not a side effect of a bank file import.
+                    //
+                    // So it becomes an OUTSTANDING ITEM instead, in the same queue HR already works
+                    // (FIN-009's retro flags). A line in the audit log is a record; this is a task.
+                    $this->retro->flagIfSettled(
+                        $payment,
+                        $payment->employee_id,
+                        $payslip->payrollRun?->cycle_start?->toDateString() ?? now()->toDateString(),
+                        $payslip->payrollRun?->cycle_end?->toDateString(),
+                        RetroFlag::OWED,
+                        'Bank transfer ' . $status . ' (' . $reason . ') but the run is locked, so the '
+                            . 'payslip could not be reversed — unlock it, reverse the payslip, and any '
+                            . 'loan instalment it collected will be put back',
+                    );
                 }
             }
 

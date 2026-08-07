@@ -8,6 +8,7 @@ use App\Modules\Hr\Http\Controllers\BenefitProgramController;
 use App\Modules\Hr\Http\Controllers\ChangeRequestController;
 use App\Modules\Hr\Http\Controllers\ConcernController;
 use App\Modules\Hr\Http\Controllers\DailyOverrideController;
+use App\Modules\Hr\Http\Controllers\DeductionArrearsController;
 use App\Modules\Hr\Http\Controllers\DashboardController;
 use App\Modules\Hr\Http\Controllers\DocumentRequestController;
 use App\Modules\Hr\Http\Controllers\FaqController;
@@ -15,9 +16,11 @@ use App\Modules\Hr\Http\Controllers\HolidayController;
 use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
+use App\Modules\Hr\Http\Controllers\TaxTableController;
 use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
+use App\Modules\Hr\Http\Controllers\EmployeeSensitiveController;
 use App\Modules\Hr\Http\Controllers\LeaveConfigController;
 use App\Modules\Hr\Http\Controllers\HalfDayRequestController;
 use App\Modules\Hr\Http\Controllers\EarlyOutRequestController;
@@ -118,6 +121,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/loans', [EmployeeLoanController::class, 'mine']);
     Route::post('me/loans', [EmployeeLoanController::class, 'requestLoan']);
     Route::post('me/loans/{loan}/authorize', [EmployeeLoanController::class, 'authorizeDeduction']);
+    // FIN-032 — the projected amortisation. Open to the loan's owner as well as HR: this is what the
+    // employee consents to under Art. 113, and the controller checks ownership.
+    Route::get('loans/{loan}/schedule', [EmployeeLoanController::class, 'schedule']);
 
     // My Benefits — the caller's own enrolled benefit programs (identity from token).
     Route::get('me/benefit-programs', [BenefitProgramController::class, 'mine']);
@@ -130,6 +136,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
+        // FIN-027 — the withholding-tax bands, readable. Read-only: tax rates come from statute, and
+        // an editable table would silently mis-withhold for everyone at once.
+        Route::get('tax-table', [TaxTableController::class, 'show']);
         Route::get('reports/{key}', [ReportController::class, 'show']);
         Route::post('reports/{key}/export', [ReportController::class, 'export'])->middleware('throttle:10,1,report-export:');
         Route::get('attendance', [AttendanceController::class, 'index']);
@@ -142,6 +151,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).
+        // FIN-005 — statutory/benefit deductions a thin payslip could not collect. Recovery is
+        // automatic on the next run with room; this is the visibility for the ones that cannot be.
+        Route::get('deduction-arrears', [DeductionArrearsController::class, 'index']);
         // FIN-009 — retroactive pay differences waiting to be settled.
         Route::get('retro-flags', [RetroFlagController::class, 'index']);
         Route::post('retro-flags/{retroFlag}/resolve', [RetroFlagController::class, 'resolve']);
@@ -179,6 +191,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('payroll/thirteenth-month/preview', [PayrollController::class, 'previewThirteenthMonth']);
         // Slice B17 — pay it, and withhold on what it pushes past the ₱90,000 exemption.
         Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth'])->middleware('throttle:5,1,payroll-13th:');
+        // FIN-030b — who this run would pay below the regional floor, and the one-click fix.
+        // The check is read-only; the adjustment writes salaries, so it carries a run-sized limit.
+        Route::get('payroll/minimum-wage-check', [PayrollController::class, 'minimumWageCheck']);
+        Route::post('payroll/minimum-wage-adjustments', [PayrollController::class, 'applyMinimumWage'])
+            ->middleware('throttle:5,1,payroll-minimum-wage:');
         Route::post('payroll/run', [PayrollController::class, 'run'])->middleware('throttle:5,1,payroll-run:');
         // FIN-010 — off-cycle corrections. Same tight limit as a regular run: it writes
         // payslips, and the amounts are typed by a person rather than computed.
@@ -235,6 +252,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
         Route::post('overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel']);
         Route::post('overtime-requests/{overtimeRequest}/reopen', [OvertimeRequestController::class, 'reopen']);
+        // FIN-039 — auto-mode overtime the caps held back, awaiting someone's yes. Derived on read:
+        // it writes nothing, and an approval on the ordinary queue above makes an item disappear.
+        Route::get('overtime-requests/auto-review', [OvertimeRequestController::class, 'autoReview']);
         Route::post('departments', [DepartmentController::class, 'store']);
         Route::match(['put', 'patch'], 'departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
@@ -249,6 +269,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'updatePhoto']);
         Route::delete('employees/{employee}/photo', [EmployeeController::class, 'destroyPhoto']);
         // Loans & cash advances repaid through payroll (Slice 11b).
+        // FIN-022 — the unmasked bank/government ID numbers. Audited per view: an HR officer must
+        // be able to see a bank account to pay someone, so the control is that looking is
+        // deliberate and traceable, not that it is refused.
+        // FIN-014 — final pay. Its own limiter, and a low one: it writes a payslip and the amounts
+        // are entered by a person.
+        // MF-18 — `withTrashed()` is REQUIRED here, not optional. Final pay is by definition for
+        // someone who has left, and a separation soft-deletes the record, so without it route model
+        // binding 404s for every employee this endpoint exists to pay. FIN-014 shipped unreachable
+        // twice over: nothing wrote `separation_date`, and this route could not resolve a leaver.
+        Route::post('employees/{employee}/final-pay', [PayrollController::class, 'runFinalPay'])
+            ->withTrashed()
+            ->middleware('throttle:5,1,final-pay:');
+        Route::get('employees/{employee}/sensitive', [EmployeeSensitiveController::class, 'show'])
+            ->middleware('throttle:20,1,employee-sensitive:');
         Route::get('employees/{employee}/loans', [EmployeeLoanController::class, 'index']);
         Route::post('employees/{employee}/loans', [EmployeeLoanController::class, 'store']);
         Route::match(['put', 'patch'], 'loans/{loan}', [EmployeeLoanController::class, 'update']);
@@ -261,6 +295,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('employees/{employee}/meetings', [MeetingController::class, 'store']);
         Route::post('employees/{employee}/activate', [EmployeeController::class, 'activate']);
         Route::post('employees/{employee}/reopen-onboarding', [EmployeeController::class, 'reopenOnboarding']);
+        // MF-18 — the employment lifecycle's exit and its two ways back in.
+        Route::post('employees/{employee}/separate', [EmployeeController::class, 'separate']);
+        // `withTrashed()` on both: a separated employee IS soft-deleted, so without it route model
+        // binding 404s and the reversal is unreachable — which is the gap MF-18 describes.
+        Route::post('employees/{employee}/reinstate', [EmployeeController::class, 'reinstate'])
+            ->withTrashed();
+        Route::post('employees/{employee}/rehire', [EmployeeController::class, 'rehire'])
+            ->withTrashed();
         // Grant/revoke HR-officer access for this employee's user account.
         Route::post('employees/{employee}/hr-role', [EmployeeController::class, 'setHrRole']);
         // Documents tab: list / upload / delete.

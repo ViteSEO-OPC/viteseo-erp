@@ -19,6 +19,7 @@ import {
   DataTable,
   type Column,
 } from "@/core/components/data-table";
+import { AutoOvertimeReview } from "@/modules/hr/components/auto-overtime-review";
 import {
   StatusFilter,
   filterByStatus,
@@ -722,7 +723,11 @@ function OvertimeSection() {
 
   return (
     <div className="mt-10">
-      <h2 className="text-h3 font-bold text-foreground">Overtime Requests</h2>
+      {/* FIN-039 — overtime the auto-pay cap held back, shown ABOVE the request table because the
+          table below is where it gets resolved: approving a request for that date releases it. */}
+      <AutoOvertimeReview />
+
+      <h2 className="mt-10 text-h3 font-bold text-foreground">Overtime Requests</h2>
       <p className="mt-1 text-caption text-muted-foreground">
         Hours worked beyond the schedule. Approving ADDS pay for that period, at the company&apos;s
         overtime rate for that day (regular / rest day / special day / regular holiday).

@@ -20,6 +20,8 @@ export interface PayrollSettings {
   /** Slice 10 -- annual ceiling above which allowances become taxable. null = no ceiling. */
   /** ₱90,000 statutory: 13th month pay AND other benefits, NOT de minimis (B16). */
   other_benefits_annual_cap: number | null;
+  /** FIN-030 — regional minimum DAILY wage from the applicable DOLE wage order. Null = not set. */
+  minimum_daily_wage: number | null;
   periods_per_year: number;
   current_period: PayrollPeriod;
   pay_groups: PayGroup[];
@@ -97,6 +99,11 @@ export interface PayslipSummary {
 export interface PayslipLine {
   name: string;
   amount: number;
+  /**
+   * FIN-011 — the small grey qualifier beside the label ("2.5 hrs", "Tax-exempt", "6 day(s)").
+   * Optional because `allowances_breakdown` predates it and carries none.
+   */
+  note?: string | null;
 }
 
 /**
@@ -167,6 +174,19 @@ export interface Payslip {
   allowances: number;
   /** Allowances split by component, snapshot at run time. */
   allowances_breakdown: PayslipLine[];
+  // FIN-011 — every earning as a named line, built by PayslipResource so the screen and the PDF
+  // render the same list. Sums to `totals.compensation` for every run type.
+  earnings_breakdown: PayslipLine[];
+  // FIN-032 — interest collected on loans this period, also itemised in other_deductions_breakdown.
+  loan_interest: number;
+  // Stored all along and never serialised until FIN-011 — a 13th-month payslip showed a gross with
+  // every earnings line at zero and a tax figure with no visible basis.
+  thirteenth_month: number;
+  other_benefits: number;
+  taxable_pay: number;
+  /** Which kind of run produced this slip, and the words the header prints for it. */
+  run_type: "regular" | "thirteenth_month" | "adjustment" | "final_pay";
+  run_type_label: string;
   holiday_premium: number;
   overtime_pay: number;
   overtime_minutes: number;
@@ -195,6 +215,14 @@ export interface Payslip {
    * An override moves the employee half only, so these lines do not pair with the employer ones.
    */
   contribution_overrides?: ("sss" | "philhealth" | "pagibig")[];
+  /**
+   * Slice B19 — the monthly salary figure each contribution was actually charged on. HR-only.
+   * Null on payslips run before the column existed, and on the 13th-month, final-pay and
+   * adjustment runs, which take no statutory contributions at all. Keyed by type because the
+   * three no longer share one number: PhilHealth is charged on basic salary by law while SSS
+   * can follow actual earnings.
+   */
+  contribution_bases?: Partial<Record<"sss" | "philhealth" | "pagibig", number>> | null;
   status: string;
   processed_by: string | null;
   // Attendance basis — how base_salary was derived (0 on older payslips).
@@ -368,4 +396,90 @@ export interface PaymentReconcileResult {
   /** Rows that matched no transfer, or carried a status we refuse to guess at. */
   unmatched: string[];
   rows: number;
+}
+
+/**
+ * A statutory or benefit deduction a thin payslip could not collect, still outstanding (FIN-005).
+ *
+ * Recovery is automatic — the next run with room takes it, statutory first. This type exists for
+ * the amounts that CANNOT be recovered: an employee on long unpaid leave, or one who has left, for
+ * whom there is no future payslip. The company still owes the agency the full contribution.
+ */
+export interface DeductionArrear {
+  employee: {
+    id: number;
+    name: string | null;
+    department: string | null;
+    /** No future payslip exists, so payroll can never recover this — a person must. */
+    separated: boolean;
+  };
+  obligations: { obligation: string; label: string; outstanding: number }[];
+  total_outstanding: number;
+}
+
+/**
+ * FIN-027 — the withholding-tax table, exposed so it can be checked against the BIR schedule.
+ *
+ * `max_annual` is derived server-side (the next band's floor − 0.01) because the table stores only
+ * floors, while the BIR prints ranges — and a range is what makes it checkable. Null on the top band.
+ */
+export interface TaxBand {
+  min_annual: number;
+  max_annual: number | null;
+  base_tax: number;
+  rate_on_excess: number;
+}
+
+export interface TaxTable {
+  as_of: string;
+  /** When the version answering for `as_of` took effect; null when no version covers the date. */
+  effective_from: string | null;
+  note: string | null;
+  /** True when `as_of` precedes every version and the earliest table was used instead. */
+  is_fallback: boolean;
+  bands: TaxBand[];
+  versions: { effective_from: string | null; note: string | null }[];
+}
+
+/**
+ * FIN-030b — one employee this run would pay below the regional minimum daily wage.
+ *
+ * The rate is DERIVED (salary ÷ the basis on the attendance policy), which is the whole reason the
+ * row exists: nobody typing a monthly figure can see what it implies per day, and the per-day
+ * figure is what a wage order governs.
+ */
+export interface MinimumWageRow {
+  employee: { id: number; name: string | null; employee_no: string | null; job_title: string | null };
+  base_salary: number;
+  daily_rate: number;
+  basis: "fixed_divisor" | "period_workdays";
+  divisor: number | null;
+  workdays: number;
+  minimum: number | null;
+  below: boolean;
+  /** `below` minus anyone marked exempt — what the warning and the run gate read. */
+  flagged: boolean;
+  shortfall: number | null;
+  /** The monthly base salary that would clear the floor. */
+  compliant_salary: number | null;
+  exempt: boolean;
+  exempt_reason: string | null;
+}
+
+export interface MinimumWageMeta {
+  /** Null when no wage order has been entered — nothing is flagged, and nothing is guessed. */
+  minimum: number | null;
+  basis: "fixed_divisor" | "period_workdays" | null;
+  divisor: number | null;
+  cycle: { start: string; end: string };
+  checked: number;
+  flagged_count: number;
+  exempt_count: number;
+}
+
+export interface MinimumWageApplyResult {
+  applied: { employee_id: number; name: string | null; from: number; to: number }[];
+  skipped: { employee_id: number; name: string | null; reason: string }[];
+  /** Periods already settled when the raise takes effect — recorded as back pay owed (FIN-009). */
+  back_pay_flagged: number;
 }

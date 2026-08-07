@@ -154,21 +154,6 @@ class PayScheduleService
     }
 
     /** Count Mon–Fri days in an inclusive date range (for the daily rate / proration). */
-    public function workingDays(string $start, string $end): int
-    {
-        $count = 0;
-        $day = Carbon::parse($start);
-        $last = Carbon::parse($end);
-        while ($day->lte($last)) {
-            if (! $day->isWeekend()) {
-                $count++;
-            }
-            $day->addDay();
-        }
-
-        return $count;
-    }
-
     /**
      * The active pay groups: one per distinct effective frequency among employees
      * (employee.pay_frequency, falling back to the company default), each with its

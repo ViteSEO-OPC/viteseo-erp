@@ -35,10 +35,34 @@ class AllowanceService
     }
 
     /**
+     * The slice of the monthly allowance that counts toward the statutory contribution base
+     * (Slice B19).
+     *
+     * NOT A DEDUCTION FROM PAY. Everything `monthlyFor()` returns is still paid in full and still
+     * lands in gross — this figure never touches what the employee receives. It answers only "how
+     * much of it is remuneration for SSS and Pag-IBIG purposes", which is a per-allowance decision
+     * HR records on the programme.
+     *
+     * A SEPARATE QUESTION FROM TAX, deliberately, which is why this is not another bucket on
+     * `monthlyTaxBucketsFor()`. A taxable allowance can sit outside the contribution base and a
+     * de-minimis one can sit inside it — SSS expressly includes the mandated COLA, which is
+     * de-minimis for tax. Folding the two into one flag would force a wrong answer on one of them.
+     */
+    public function monthlyContributableFor(Employee $employee, ?string $asOf = null): float
+    {
+        $lines = array_filter(
+            $this->linesFor($employee, $asOf),
+            fn (array $line) => $line['contributable'],
+        );
+
+        return round(array_sum(array_column($lines, 'amount')), 2);
+    }
+
+    /**
      * One line per enrolled allowance. Lets a payslip name what made it up rather than showing one
      * opaque figure.
      *
-     * @return array<int, array{program_id:int, name:string, amount:float, tax_treatment:string, deminimis_ceiling:mixed, ceiling_period:?string}>
+     * @return array<int, array{program_id:int, name:string, amount:float, tax_treatment:string, deminimis_ceiling:mixed, ceiling_period:?string, contributable:bool}>
      */
     public function linesFor(Employee $employee, ?string $asOf = null): array
     {
@@ -81,6 +105,18 @@ class AllowanceService
                 // in. Null means none recorded, which keeps the whole amount exempt.
                 'deminimis_ceiling' => $version->deminimis_ceiling ?? $programme->deminimis_ceiling,
                 'ceiling_period' => $version->ceiling_period ?? $programme->ceiling_period,
+                // Slice B19 — does this allowance count toward the statutory contribution base?
+                // Read from the dated version first for the same reason the amount is: a switch
+                // flipped in September must not change what August was charged on.
+                //
+                // `?? true` rather than `?? $programme->contributable` on a null: the column is
+                // NOT NULL with a default, so a version only reads null when it predates the
+                // column, and an allowance that existed before this slice counted. Falling back to
+                // the programme's CURRENT flag there would let today's setting rewrite history —
+                // the exact drift versioning exists to stop.
+                'contributable' => (bool) ($version
+                    ? ($version->contributable ?? true)
+                    : ($programme->contributable ?? true)),
             ];
         }
 

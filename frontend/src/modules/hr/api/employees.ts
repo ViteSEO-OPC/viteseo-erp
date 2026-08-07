@@ -9,10 +9,52 @@ import type {
   StatutoryPreviewRow,
 } from "@/modules/hr/types/employee";
 
-export async function getEmployees(search?: string): Promise<Employee[]> {
+/**
+ * The employee directory. `status` defaults to "active" server-side.
+ *
+ * MF-18 — "former" is what makes a rehire reachable: a separated employee is soft-deleted, so the
+ * default directory cannot show them and there was no way to find someone to take back.
+ */
+export async function getEmployees(
+  search?: string,
+  status?: "active" | "former" | "all",
+): Promise<Employee[]> {
   const res = await apiClient.get("/hr/employees", {
-    params: search ? { search } : undefined,
+    params: {
+      ...(search ? { search } : {}),
+      ...(status && status !== "active" ? { status } : {}),
+    },
   });
+  return res.data.data;
+}
+
+/** MF-18 — end employment. `separation_date` is the last WORKING day; payroll prorates against it. */
+export async function separateEmployee(
+  id: number,
+  input: { separation_type: "voluntary" | "involuntary"; separation_date: string; reason?: string },
+): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/separate`, input);
+  return res.data.data;
+}
+
+/**
+ * MF-18 — undo a separation. Service is CONTINUOUS: hire date, leave credits and loan
+ * authorisations all stand. For a genuinely new relationship use `rehireEmployee` instead.
+ */
+export async function reinstateEmployee(id: number, reason?: string): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/reinstate`, { reason });
+  return res.data.data;
+}
+
+/**
+ * MF-18 — take someone back as a NEW relationship. Tenure restarts from `hire_date`, leave is
+ * seeded fresh, and any outstanding loan drops back to needing the employee's consent (Art. 113).
+ */
+export async function rehireEmployee(
+  id: number,
+  input: { hire_date: string; reason?: string },
+): Promise<Employee> {
+  const res = await apiClient.post(`/hr/employees/${id}/rehire`, input);
   return res.data.data;
 }
 
@@ -130,8 +172,16 @@ export interface EmployeeLoan {
   type: "loan" | "cash_advance" | "other";
   reference: string | null;
   principal: number;
+  /** The PRINCIPAL instalment. Interest and any fee are charged on top, not folded into this. */
   per_period_amount: number;
   start_date: string;
+  // FIN-032 — the terms. Diminishing balance: interest is charged each period on the balance still
+  // owed, so the stated rate is the effective rate. 0 = interest-free.
+  interest_rate: number;
+  interest_period: "annual" | "monthly";
+  fees: number;
+  /** Collection order when net pay is short. Lower runs first. */
+  priority: number;
   /**
    * Slice B15 — a loan no longer starts collectible. `pending_authorization` is the state that
    * matters: the employee has not yet consented to the deduction, and payroll skips it.
@@ -146,8 +196,17 @@ export interface EmployeeLoan {
     | "on_hold";
   notes: string | null;
   /** Derived from the payment ledger — never a stored column. */
+  /** Everything collected — principal, interest and fees together. */
   paid: number;
+  /**
+   * Outstanding PRINCIPAL, which is what interest is charged on. Interest already collected does not
+   * reduce it — otherwise a loan would repay itself out of its own interest.
+   */
   outstanding: number;
+  outstanding_fees: number;
+  paid_principal: number;
+  paid_interest: number;
+  paid_fees: number;
   // Slice B15 — the policy behind it, and the consent that makes any deduction lawful.
   benefit_program_id: number | null;
   policy_name?: string | null;
@@ -167,6 +226,11 @@ export interface EmployeeLoanInput {
   per_period_amount: number;
   start_date: string;
   notes?: string | null;
+  // FIN-032 — all optional; omitted means an interest-free, fee-free loan at default priority.
+  interest_rate?: number;
+  interest_period?: "annual" | "monthly";
+  fees?: number;
+  priority?: number;
 }
 
 export async function getEmployeeLoans(id: number): Promise<EmployeeLoan[]> {

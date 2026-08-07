@@ -2,11 +2,29 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class EmployeeResource extends JsonResource
 {
+    /**
+     * FIN-030b — opt-in, because the minimum-wage check is not free: deriving one daily rate reads
+     * the employee's schedule for the current period. On a single record that is nothing; on a
+     * 200-row directory it is 200 schedule lookups for a field the directory does not show.
+     *
+     * Off by default so a new list endpoint cannot silently acquire the cost. The single-employee
+     * responses that feed the Compensation screen turn it on.
+     */
+    private bool $withPayrollChecks = false;
+
+    public function withPayrollChecks(): static
+    {
+        $this->withPayrollChecks = true;
+
+        return $this;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -29,6 +47,16 @@ class EmployeeResource extends JsonResource
             'employee_role' => $this->employee_role,
             'onboarding_status' => $this->onboarding_status,
             'hire_date' => $this->hire_date?->format('Y-m-d'),
+            // MF-18 — the employment lifecycle, so the UI can tell an active employee from a former
+            // one and offer the right action. `separation_date` is the last WORKING day (what payroll
+            // prorates against); `deleted_at` is kept in sync with it by `EmployeeService::separate()`.
+            'separation_type' => $this->separation_type,
+            'separation_date' => $this->separation_date?->format('Y-m-d'),
+            'separated_at' => $this->deleted_at?->format('Y-m-d'),
+            'is_separated' => $this->separation_date !== null || $this->deleted_at !== null,
+            // Set only by a rehire — the previous stint's start, so overwriting `hire_date` does not
+            // erase when this person first joined.
+            'previous_hire_date' => $this->previous_hire_date?->format('Y-m-d'),
             'base_salary' => $this->base_salary,
             // Fixed-salary + attendance-exempt management flag.
             'is_management' => (bool) $this->is_management,
@@ -38,19 +66,34 @@ class EmployeeResource extends JsonResource
             'emergency_contact_relationship' => $this->emergency_contact_relationship,
             'emergency_contact_phone' => $this->emergency_contact_phone,
             'bank_name' => $this->bank_name,
-            'bank_account' => $this->bank_account,
+            // FIN-022 — MASKED. `••••4471` is enough to confirm the right account and useless to
+            // anyone else. The full value is available only from the audited reveal endpoint, so a
+            // list of 200 employees no longer ships 200 bank accounts to the browser.
+            'bank_account' => Employee::maskSensitive($this->bank_account),
             'pay_frequency' => $this->pay_frequency ?? 'semi_monthly',
+            // FIN-030 — the DERIVED daily rate, and the configured regional floor when there is
+            // one. Included because the daily rate is not something anyone can see from the monthly
+            // figure they typed: it is salary ÷ the basis on the attendance policy. A warning, not
+            // validation — the floor varies by region, industry and establishment size, and a block
+            // would be wrong often enough to get routed around.
+            'minimum_wage_exempt' => (bool) $this->minimum_wage_exempt,
+            'minimum_wage_exempt_reason' => $this->minimum_wage_exempt_reason,
+            'minimum_wage_check' => $this->when(
+                $this->withPayrollChecks,
+                fn () => app(\App\Modules\Hr\Services\PayrollService::class)
+                    ->minimumWageCheckFor($this->resource),
+            ),
             'currency' => $this->currency ?? 'PHP',
             'bank_account_type' => $this->bank_account_type,
-            'bank_account_name' => $this->bank_account_name,
+            'bank_account_name' => Employee::maskSensitive($this->bank_account_name),
             'sss_contribution' => $this->sss_contribution,
             'pagibig_contribution' => $this->pagibig_contribution,
             'philhealth_contribution' => $this->philhealth_contribution,
             // Membership numbers (payslip header) — distinct from the *_contribution overrides.
-            'tin' => $this->tin,
-            'sss_number' => $this->sss_number,
-            'philhealth_number' => $this->philhealth_number,
-            'pagibig_number' => $this->pagibig_number,
+            'tin' => Employee::maskSensitive($this->tin),
+            'sss_number' => Employee::maskSensitive($this->sss_number),
+            'philhealth_number' => Employee::maskSensitive($this->philhealth_number),
+            'pagibig_number' => Employee::maskSensitive($this->pagibig_number),
             // Expanded personal record.
             'first_name' => $this->first_name,
             'middle_name' => $this->middle_name,

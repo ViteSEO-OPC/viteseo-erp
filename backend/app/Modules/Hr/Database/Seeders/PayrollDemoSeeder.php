@@ -9,6 +9,7 @@ use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Services\PayrollService;
 use App\Modules\Hr\Services\PayScheduleService;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Carbon;
 
 /**
  * Prior completed payroll runs so employees have payslip history. Computed with
@@ -40,7 +41,7 @@ class PayrollDemoSeeder extends Seeder
         ];
 
         foreach ($cycles as [$start, $end]) {
-            $workingDays = $schedule->workingDays($start, $end);
+            $workingDays = $this->weekdaysBetween($start, $end);
             [$index, $countInMonth] = $schedule->monthPosition($frequency, null, $start, $end);
             $dist = [
                 'index' => $index,
@@ -83,5 +84,35 @@ class PayrollDemoSeeder extends Seeder
                 'employee_count' => $count,
             ]);
         }
+    }
+
+    /**
+     * A naive Mon–Fri count, for demo payslips only (FIN-046).
+     *
+     * WHY IT LIVES HERE NOW. This was `PayScheduleService::workingDays()` — a weekend-only counter
+     * sitting on the payroll schedule service, directly beside the schedule-aware
+     * `AttendanceService::scheduledWorkdaysFor()` that real payroll actually uses. It was never
+     * dead code (this seeder was its only caller), which made it worse than dead: two methods that
+     * answer "how many workdays" differently, one of them on the service a future author would
+     * reach for first, and nothing at the call site to say which was correct.
+     *
+     * It stays naive on purpose. Demo payslips only need plausible figures, and pulling the real
+     * resolver in here would make seeding depend on each demo employee having a work schedule.
+     * The name says what it does, so nobody mistakes it for the pay-critical one.
+     */
+    private function weekdaysBetween(string $start, string $end): int
+    {
+        $count = 0;
+        $day = Carbon::parse($start);
+        $last = Carbon::parse($end);
+
+        while ($day->lte($last)) {
+            if (! $day->isWeekend()) {
+                $count++;
+            }
+            $day->addDay();
+        }
+
+        return $count;
     }
 }

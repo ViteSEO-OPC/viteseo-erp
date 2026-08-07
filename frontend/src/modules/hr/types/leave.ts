@@ -16,6 +16,13 @@ export interface LeaveType {
   allow_backdated: boolean;
   /** Max days a past-dated request may reach back; null = no limit (only when allow_backdated). */
   backdate_limit_days: number | null;
+  // FIN-034 — accrual. "none" = hand-managed (the default for every existing type).
+  accrual_mode: "none" | "monthly" | "annual";
+  prorate_first_year: boolean;
+  /** null = all unused days carry over; 0 = none do. Company policy, so no shipped default. */
+  carry_over_cap_days: number | null;
+  /** Months from 1 January until carried days lapse; null = never. */
+  carry_over_expiry_months: number | null;
 }
 
 // Half-day requests — separate from leave, always unpaid (deducted from pay).
@@ -70,6 +77,25 @@ export interface OvertimeSettings {
   mode: "none" | "approved_only" | "auto_after_threshold";
   requests_enabled: boolean;
   note: string;
+}
+
+/**
+ * One day of auto-mode overtime the policy caps held back (FIN-039).
+ *
+ * `paid_minutes` pays on the run regardless; `excess_minutes` pays only once an overtime request for
+ * that date is approved. So this is not a list of rejections — it is a list of overtime that is
+ * waiting for somebody to say yes, which is usually either a genuine long evening or a forgotten
+ * clock-out. `raw_minutes` is the whole overrun, so the two cases are easy to tell apart.
+ */
+export interface AutoOvertimeReviewItem {
+  employee_id: number;
+  employee_no: string | null;
+  name: string | null;
+  work_date: string;
+  paid_minutes: number;
+  excess_minutes: number;
+  raw_minutes: number;
+  approved_minutes: number;
 }
 
 /** How a date's overtime is priced: regular day / rest day / special day / regular holiday. */
@@ -132,4 +158,8 @@ export interface StoreLeaveInput {
   start_date: string;
   end_date: string;
   reason: string;
+  // FIN-034 — half a day of THIS leave type: 0.5 off the balance, paid when the type is paid.
+  // Omitted for a full-day request; the period is only sent alongside a true flag.
+  is_half_day?: boolean;
+  half_day_period?: "AM" | "PM";
 }

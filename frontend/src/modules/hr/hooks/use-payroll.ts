@@ -27,12 +27,17 @@ import {
   getPaymentBatch,
   settlePayment,
   reconcilePaymentBatch,
+  getDeductionArrears,
+  getMinimumWageCheck,
+  applyMinimumWageAdjustments,
 } from "@/modules/hr/api/payroll";
 
 const RUNS_KEY = ["hr", "payroll", "runs"] as const;
 const SETTINGS_KEY = ["hr", "payroll", "settings"] as const;
 const RETRO_KEY = ["hr", "payroll", "retro-flags"] as const;
+const ARREARS_KEY = ["hr", "payroll", "deduction-arrears"] as const;
 const BATCHES_KEY = ["hr", "payroll", "payment-batches"] as const;
+const MINIMUM_WAGE_KEY = ["hr", "payroll", "minimum-wage"] as const;
 
 export function usePayrollSettings() {
   return useQuery({ queryKey: SETTINGS_KEY, queryFn: getPayrollSettings });
@@ -50,6 +55,36 @@ export function usePayrollRuns() {
   return useQuery({ queryKey: RUNS_KEY, queryFn: getPayrollRuns });
 }
 
+/**
+ * FIN-030b — who the selected cycle would pay below the floor.
+ *
+ * Fetched with the pay group so the payroll screen can warn BEFORE the run rather than after, and
+ * disabled until there is a cycle to ask about.
+ */
+export function useMinimumWageCheck(
+  input: { frequency: string; cycle_start?: string; cycle_end?: string } | null,
+) {
+  return useQuery({
+    queryKey: [...MINIMUM_WAGE_KEY, input],
+    queryFn: () => getMinimumWageCheck(input!),
+    enabled: !!input?.frequency,
+  });
+}
+
+export function useApplyMinimumWage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: applyMinimumWageAdjustments,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: MINIMUM_WAGE_KEY });
+      // Salaries moved, so the directory, the open employee record and the outstanding
+      // back-pay queue are all stale.
+      qc.invalidateQueries({ queryKey: ["hr", "employees"] });
+      qc.invalidateQueries({ queryKey: RETRO_KEY });
+    },
+  });
+}
+
 export function usePayrollRun(id: number | undefined) {
   return useQuery({
     queryKey: ["hr", "payroll", "run", id],
@@ -63,6 +98,7 @@ export function useRunPayroll() {
   return useMutation({
     mutationFn: runPayroll,
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ARREARS_KEY });
       // Refresh the runs list, the open breakdown detail (a re-run recomputes it),
       // and settings/pay-groups.
       qc.invalidateQueries({ queryKey: RUNS_KEY });
@@ -272,4 +308,14 @@ export function useReconcilePaymentBatch() {
       qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
     },
   });
+}
+
+/**
+ * Uncollected deductions still outstanding (FIN-005).
+ *
+ * Invalidated by a payroll run, because a run with room recovers them automatically — leaving a
+ * stale queue on screen would show HR debts that were just settled.
+ */
+export function useDeductionArrears() {
+  return useQuery({ queryKey: ARREARS_KEY, queryFn: getDeductionArrears });
 }

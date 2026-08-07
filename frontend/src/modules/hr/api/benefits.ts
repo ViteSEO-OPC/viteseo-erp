@@ -49,7 +49,13 @@ export interface ContributionVersion {
   id: number;
   type: string;
   effective_from: string;
+  /** HOW the charge is worked out: `percentage` of the salary, or the `bracket` table's MSC. */
   basis: string;
+  /**
+   * Slice B19 — WHICH salary figure goes in, which is a different question from `basis` above:
+   * `basic` (the profile's monthly rate) or `earnings` (what the period actually paid).
+   */
+  salary_basis: string;
   employee_rate: number;
   employer_rate: number;
   salary_floor: number | null;

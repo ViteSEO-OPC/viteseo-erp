@@ -31,13 +31,28 @@ class Payslip extends Model
         'tax_annualisation',
         // FIN-010 — an off-cycle corrective amount and what it is for.
         'adjustment_pay', 'adjustment_note',
+        // FIN-014 — the terminal amounts on a final-pay payslip.
+        'separation_pay', 'separation_pay_taxable',
+        'leave_conversion', 'leave_conversion_days', 'loan_settlement',
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
         // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
         'other_deductions', 'other_deductions_breakdown',
+        // FIN-032 — interest collected on loans this period. Its own field so the payslip can show
+        // the cost of borrowing separately from the repayment, and it must be fillable or run()'s
+        // updateOrCreate silently drops it.
+        'loan_interest',
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
         // Slice B7 — which statutory deductions came from a per-employee override, not the rates.
         'contribution_overrides',
-        'total_deductions', 'deduction_carryover', 'deduction_carryover_breakdown', 'net_pay', 'status',
+        // Slice B19 — the salary figure each contribution was actually charged on. Not derivable
+        // after the fact once a contribution moves onto the earnings basis.
+        'contribution_bases',
+        'total_deductions', 'deduction_carryover', 'deduction_carryover_breakdown',
+        // FIN-005 — arrears from earlier periods recovered on this payslip.
+        'arrears_recovered', 'arrears_recovered_breakdown',
+        'net_pay', 'status',
+        // FIN-033 — who declared this paid, when, and the request key that did it.
+        'disbursed_at', 'disbursed_by', 'disbursement_key',
         // Step 4b — how base_salary was derived, so a payslip can explain itself.
         'working_days', 'daily_rate', 'unpaid_days',
         'late_minutes', 'undertime_minutes', 'late_deduction', 'undertime_deduction',
@@ -59,6 +74,11 @@ class Payslip extends Model
         'late_penalty_days' => 'decimal:2',
         'reimbursements' => 'decimal:2',
         'adjustment_pay' => 'decimal:2',
+        'separation_pay' => 'decimal:2',
+        'separation_pay_taxable' => 'boolean',
+        'leave_conversion' => 'decimal:2',
+        'leave_conversion_days' => 'decimal:2',
+        'loan_settlement' => 'decimal:2',
         'tax_annualisation' => 'decimal:2',
         'allowances' => 'decimal:2',
         'holiday_premium' => 'decimal:2',
@@ -74,16 +94,22 @@ class Payslip extends Model
         'pagibig' => 'decimal:2',
         'withholding_tax' => 'decimal:2',
         'other_deductions' => 'decimal:2',
+        'loan_interest' => 'decimal:2',
         'other_deductions_breakdown' => 'array',
         'employer_sss' => 'decimal:2',
         'employer_philhealth' => 'decimal:2',
         'employer_pagibig' => 'decimal:2',
         'contribution_overrides' => 'array',
+        // Slice B19 — contribution type => the monthly salary figure it was charged on.
+        'contribution_bases' => 'array',
         'total_deductions' => 'decimal:2',
         'deduction_carryover' => 'decimal:2',
         // FIN-053 — obligation => uncollected amount. Null when nothing went short.
         'deduction_carryover_breakdown' => 'array',
+        'arrears_recovered' => 'decimal:2',
+        'arrears_recovered_breakdown' => 'array',
         'net_pay' => 'decimal:2',
+        'disbursed_at' => 'datetime',
     ];
 
     public function payrollRun(): BelongsTo

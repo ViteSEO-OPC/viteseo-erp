@@ -24,8 +24,20 @@ import type {
 const schema = z.object({
   leave_type_id: z.string().min(1, "Select a leave type"),
   start_date: z.string().min(1, "Start date is required"),
-  end_date: z.string().min(1, "End date is required"),
+  // Not unconditionally required: a half day is a single day, so the form hides End Date and the
+  // refine below only demands it for a range. Without that, toggling half-day left the schema
+  // blocking submit on a field nobody could see.
+  end_date: z.string(),
   reason: z.string().min(1, "Reason is required"),
+  // FIN-034 — half a day OF THIS LEAVE TYPE: 0.5 off the balance, paid when the type is paid.
+  // Distinct from the separate Half-Day Request, which is always unpaid and touches no balance.
+  is_half_day: z.boolean(),
+  // UPPERCASE to match the backend — DeductionService compares 'AM'/'PM' with ===.
+  half_day_period: z.enum(["AM", "PM"]),
+}).superRefine((v, ctx) => {
+  if (!v.is_half_day && !v.end_date) {
+    ctx.addIssue({ code: "custom", path: ["end_date"], message: "End date is required" });
+  }
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -75,13 +87,20 @@ export function LeaveRequestForm({
       start_date: "",
       end_date: "",
       reason: "",
+      is_half_day: false,
+      half_day_period: "AM",
     },
   });
 
-  const [typeId, start, end] = watch(["leave_type_id", "start_date", "end_date"]);
+  const [typeId, start, end, isHalfDay] = watch([
+    "leave_type_id",
+    "start_date",
+    "end_date",
+    "is_half_day",
+  ]);
 
   // Live balance preview (mirrors the server; the 422 is still the real gate).
-  const requested = computeLeaveDays(start, end, false);
+  const requested = computeLeaveDays(start, isHalfDay ? start : end, isHalfDay);
   const selectedType = types.find((t) => t.id === Number(typeId));
   // Unpaid leave (LWOP) has no credit pool — it's deducted from pay, not a balance.
   const isPaidType = selectedType?.is_paid ?? true;
@@ -100,8 +119,12 @@ export function LeaveRequestForm({
       await createMut.mutateAsync({
         leave_type_id: Number(v.leave_type_id),
         start_date: v.start_date,
-        end_date: v.end_date,
+        // A half day is one day by definition, so the end date follows the start rather than
+        // relying on the user to match them — the server rejects a spanning half-day (422).
+        end_date: v.is_half_day ? v.start_date : v.end_date,
         reason: v.reason,
+        is_half_day: v.is_half_day,
+        ...(v.is_half_day ? { half_day_period: v.half_day_period } : {}),
       });
       toast.success("Request submitted");
       reset();
@@ -159,25 +182,65 @@ export function LeaveRequestForm({
               <p className="text-xs text-destructive">{errors.start_date.message}</p>
             )}
           </div>
-          <div className="space-y-1.5">
-            <Label>End Date</Label>
-            <Controller
-              control={control}
-              name="end_date"
-              render={({ field }) => (
-                <DatePicker
-                  value={field.value}
-                  onChange={field.onChange}
-                  min={start || minDate}
-                  aria-invalid={!!errors.end_date}
-                />
+          {/* FIN-034 — a half day is a single day, so End Date is replaced by "which half" rather
+              than left on screen for the user to keep in sync with the start. */}
+          {isHalfDay ? (
+            <div className="space-y-1.5">
+              <Label>Which half</Label>
+              <Controller
+                control={control}
+                name="half_day_period"
+                render={({ field }) => (
+                  <SimpleSelect
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    options={[
+                      { value: "AM", label: "Morning (AM)" },
+                      { value: "PM", label: "Afternoon (PM)" },
+                    ]}
+                  />
+                )}
+              />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>End Date</Label>
+              <Controller
+                control={control}
+                name="end_date"
+                render={({ field }) => (
+                  <DatePicker
+                    value={field.value}
+                    onChange={field.onChange}
+                    min={start || minDate}
+                    aria-invalid={!!errors.end_date}
+                  />
+                )}
+              />
+              {errors.end_date && (
+                <p className="text-xs text-destructive">{errors.end_date.message}</p>
               )}
-            />
-            {errors.end_date && (
-              <p className="text-xs text-destructive">{errors.end_date.message}</p>
-            )}
-          </div>
+            </div>
+          )}
         </div>
+
+        {/* The toggle the spec always asked for (POD 1 Employee View, "Half-day option"). It sits
+            in the leave form because it is a property of the leave, not a separate kind of request:
+            it spends 0.5 of THIS type's balance and is paid whenever the type is paid. */}
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 shrink-0 accent-brand"
+            {...register("is_half_day")}
+          />
+          <span className="text-sm text-foreground">
+            Take only half a day
+            <span className="block text-caption text-muted-foreground">
+              Uses 0.5 day of this leave type instead of a full day. You&apos;re expected to work the
+              other half.
+            </span>
+          </span>
+        </label>
 
         {/* Backdating rule for the selected type. */}
         {selectedType && (

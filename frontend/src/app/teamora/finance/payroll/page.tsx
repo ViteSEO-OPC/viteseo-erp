@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote } from "lucide-react";
+import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote, Percent, BookOpen, Scale } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -22,7 +22,9 @@ import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { AdjustmentRunDialog } from "@/modules/hr/components/adjustment-run-dialog";
 import { RetroFlagsDialog } from "@/modules/hr/components/retro-flags-dialog";
+import { TaxTableDialog } from "@/modules/hr/components/tax-table-dialog";
 import { PaymentBatchDialog } from "@/modules/hr/components/payment-batch-dialog";
+import { MinimumWageDialog } from "@/modules/hr/components/minimum-wage-dialog";
 import { StatCard } from "@/core/components/stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -38,10 +40,12 @@ import {
   usePayrollSettings,
   useUpdatePayrollSettings,
   useRetroFlags,
+  useDeductionArrears,
   useThirteenthMonth,
   useThirteenthMonthPreview,
   useRunThirteenthMonth,
   useHrPayslip,
+  useMinimumWageCheck,
 } from "@/modules/hr/hooks/use-payroll";
 import type {
   PayrollBreakdownRow,
@@ -73,12 +77,21 @@ export default function PayrollPage() {
   // FIN-010 / FIN-009 — off-cycle corrections and the queue of differences awaiting one.
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
   const [retroOpen, setRetroOpen] = useState(false);
+  const [taxTableOpen, setTaxTableOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  // FIN-030b — the minimum-wage review, and the one-off override that gets a flagged run through.
+  const [minWageOpen, setMinWageOpen] = useState(false);
+  const [minWageAck, setMinWageAck] = useState(false);
+  const [minWageReason, setMinWageReason] = useState("");
   const [adjustmentPrefill, setAdjustmentPrefill] = useState<{ employeeId: number | null; reason: string | null }>({
     employeeId: null,
     reason: null,
   });
   const { data: retroFlags = [] } = useRetroFlags();
+  const { data: deductionArrears = [] } = useDeductionArrears();
+  // FIN-009 + FIN-005 — one badge for everything payroll could not settle by itself. Two separate
+  // counters would have HR checking two places for the same class of problem.
+  const outstandingCount = retroFlags.length + deductionArrears.length;
   // FIN-025 — payroll settings are versioned, so a change needs a date. Blank means today, which
   // is what every change used to be recorded as whether or not that was true.
   const [settingsEffectiveFrom, setSettingsEffectiveFrom] = useState("");
@@ -89,6 +102,18 @@ export default function PayrollPage() {
   const [viewRunId, setViewRunId] = useState<number | null>(null);
   // The payslip opened from a breakdown row — the same document the employee sees.
   const [payslipId, setPayslipId] = useState<number | null>(null);
+  /**
+   * FIN-043 — SHOULDER-SURFING PROTECTION, and the UI says so.
+   *
+   * This hides amounts in the RENDER only. The figures are already in the fetched payload, so
+   * anyone with devtools sees them regardless — it is not an access control and must not be
+   * presented as one. The audit downgraded it to informational for the right reason: the role
+   * looking at this page is authorised to receive these amounts, so there is no boundary being
+   * crossed. What was wrong was the eye icon implying confidentiality it does not provide.
+   *
+   * Omitting amounts server-side would be the real control, and belongs with the restricted-role
+   * work in Slice 6 — not here, where it would only mean the same authorised person sees less.
+   */
   const [masked, setMasked] = useState(false);
   const [selectedFreq, setSelectedFreq] = useState<string>();
 
@@ -105,10 +130,21 @@ export default function PayrollPage() {
       ? { frequency: activeGroup.frequency, cycle_start: period.start, cycle_end: period.end }
       : null;
 
+  // FIN-030b — asked BEFORE the run, over exactly the population the run would pay. A band on a
+  // profile page is seen by whoever opens that profile, which for a compliant-looking employee is
+  // nobody; this is the moment the money is about to be committed for the period.
+  const { data: minWageCheck } = useMinimumWageCheck(cycle);
+  const minWageFlagged = minWageCheck?.meta.flagged_count ?? 0;
+  const minWageNames = (minWageCheck?.rows ?? [])
+    .filter((r) => !r.exempt)
+    .map((r) => r.employee.name)
+    .filter(Boolean);
+
   async function saveSettings(patch: {
     frequency?: string;
     deduction_timing?: string;
     tax_timing?: string;
+    minimum_daily_wage?: number | null;
   }) {
     if (!settings) return;
     try {
@@ -179,13 +215,22 @@ export default function PayrollPage() {
   async function onRun() {
     if (!cycle) return;
     try {
-      await runMut.mutateAsync(cycle);
+      await runMut.mutateAsync({
+        ...cycle,
+        // FIN-030b — only sent when there is something to acknowledge. The server refuses the run
+        // otherwise, which is the point: paying below the floor may well be correct, but doing it
+        // with nothing on the record is not.
+        ...(minWageAck ? { minimum_wage_ack: true, minimum_wage_ack_reason: minWageReason } : {}),
+      });
       toast.success("Payroll computed — payslips generated");
       setConfirmOpen(false);
+      setMinWageAck(false);
+      setMinWageReason("");
     } catch (err) {
       const msg =
         err instanceof AxiosError
-          ? (err.response?.data?.errors?.cycle_start?.[0] ??
+          ? (err.response?.data?.errors?.minimum_wage_ack?.[0] ??
+            err.response?.data?.errors?.cycle_start?.[0] ??
             err.response?.data?.message ??
             "Payroll run failed.")
           : "Payroll run failed.";
@@ -293,7 +338,11 @@ export default function PayrollPage() {
               variant="outline"
               size="icon-sm"
               onClick={() => setMasked((m) => !m)}
-              title={masked ? "Show amounts" : "Hide amounts"}
+              title={
+                masked
+                  ? "Show amounts"
+                  : "Hide amounts on screen — for privacy from onlookers, not an access control"
+              }
             >
               {masked ? <EyeOff /> : <Eye />}
               <span className="sr-only">{masked ? "Show amounts" : "Hide amounts"}</span>
@@ -301,11 +350,11 @@ export default function PayrollPage() {
             {/* FIN-009 — corrections owed. Badged, because an empty queue and an unseen queue
                 look identical otherwise, and being unseen is what this replaced. */}
             <Button variant="outline" onClick={() => setRetroOpen(true)}>
-              <AlertTriangle className={retroFlags.length > 0 ? "text-warning" : undefined} />
-              Corrections
-              {retroFlags.length > 0 && (
+              <AlertTriangle className={outstandingCount > 0 ? "text-warning" : undefined} />
+              Outstanding
+              {outstandingCount > 0 && (
                 <span className="ml-0.5 rounded-full bg-warning px-1.5 text-caption font-semibold text-white">
-                  {retroFlags.length}
+                  {outstandingCount}
                 </span>
               )}
             </Button>
@@ -335,9 +384,26 @@ export default function PayrollPage() {
               <Banknote />
               Pay run
             </Button>
+            {/* FIN-030b — who this run would pay below the regional floor. Badged for the same
+                reason the outstanding queue is: an empty check and an unrun check look identical
+                otherwise, and the second is the one that costs money. */}
+            <Button variant="outline" onClick={() => setMinWageOpen(true)}>
+              <Scale className={minWageFlagged > 0 ? "text-warning" : undefined} />
+              Minimum wage
+              {minWageFlagged > 0 && (
+                <span className="ml-0.5 rounded-full bg-warning px-1.5 text-caption font-semibold text-white">
+                  {minWageFlagged}
+                </span>
+              )}
+            </Button>
             <Button variant="outline" onClick={() => setThirteenthOpen(true)}>
               <Gift />
               13th-month
+            </Button>
+            {/* FIN-027 — the tax bands are data so they can be checked; this is where you check them. */}
+            <Button variant="outline" onClick={() => setTaxTableOpen(true)}>
+              <Percent />
+              Tax table
             </Button>
             <Button variant="outline" onClick={() => setHistoryOpen(true)}>
               <History />
@@ -390,6 +456,16 @@ export default function PayrollPage() {
         }
       />
 
+      {/* FIN-043 — visible while masking is on, because a tooltip nobody hovers is not a
+          correction. Someone hiding amounts under the impression it is a security control needs to
+          be told at the moment they are relying on it, not when they go looking. */}
+      {masked && (
+        <p className="mt-4 rounded-card border border-border bg-muted/40 px-4 py-2 text-caption text-muted-foreground">
+          Amounts are hidden on screen only — for privacy from people nearby. They are still in the
+          page data, so this is not an access control.
+        </p>
+      )}
+
       <div className="mt-6 flex items-start gap-3 rounded-card border border-warning/40 bg-warning-subtle px-4 py-3">
         <Zap className="mt-0.5 size-5 shrink-0 text-warning" fill="currentColor" />
         <p className="text-sm text-foreground">
@@ -434,6 +510,33 @@ export default function PayrollPage() {
         {/* FIN-025 — settings are dated. Payroll prices each period with the settings in force
             FOR that period, so a change made today does not reach back into cycles already run
             unless HR says it should. */}
+        {/* FIN-030 — the regional minimum daily wage. Blank warns about nothing: the floor is
+            regional and seeding a figure would be guessing at a legal threshold. */}
+        <div className="space-y-1.5">
+          <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
+            Minimum daily wage
+          </p>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            aria-label="Regional minimum daily wage"
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-body"
+            placeholder="Not set"
+            defaultValue={settings?.minimum_daily_wage ?? ""}
+            disabled={!settings || updateSettingsMut.isPending}
+            onBlur={(e) => {
+              const raw = e.target.value.trim();
+              const next = raw === "" ? null : Number(raw);
+              if (next !== (settings?.minimum_daily_wage ?? null)) {
+                saveSettings({ minimum_daily_wage: next });
+              }
+            }}
+          />
+          <p className="text-caption text-muted-foreground">
+            From your DOLE wage order. Leave blank to skip the check.
+          </p>
+        </div>
         <div className="space-y-1.5 sm:col-span-3">
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
             These settings take effect from
@@ -787,13 +890,63 @@ export default function PayrollPage() {
               will be skipped — money already paid out is never recomputed.
             </p>
           )}
+          {/* FIN-030b — the run stops ONCE on a minimum-wage breach, and any answer gets past it.
+              Not a wall: everything the check cannot see (a granted exemption, a part-time
+              schedule, an order that does not apply) is still a legitimate reason to proceed. What
+              it refuses is proceeding with nothing on the record — underpayment creates wage
+              differentials and, under RA 8188, double indemnity. */}
+          {minWageFlagged > 0 && (
+            <div className="space-y-2 rounded-card border border-warning/40 bg-warning/10 p-3">
+              <p className="text-sm font-medium text-foreground">
+                {minWageFlagged} employee{minWageFlagged === 1 ? " is" : "s are"} paid below the
+                regional minimum daily wage
+              </p>
+              <p className="text-caption text-muted-foreground">
+                {minWageNames.slice(0, 4).join(", ")}
+                {minWageNames.length > 4 ? ` and ${minWageNames.length - 4} more` : ""}. Raise them
+                to the floor, mark them exempt, or say why this run should go ahead.
+              </p>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  setConfirmOpen(false);
+                  setMinWageOpen(true);
+                }}
+              >
+                Review and fix
+              </Button>
+              <label className="flex items-start gap-2 pt-1 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-brand"
+                  checked={minWageAck}
+                  onChange={(e) => setMinWageAck(e.target.checked)}
+                />
+                Run anyway — I have a reason
+              </label>
+              {minWageAck && (
+                <input
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-body"
+                  placeholder="e.g. part-time staff, wage order does not cover this branch"
+                  aria-label="Reason for running past the minimum-wage warning"
+                  value={minWageReason}
+                  onChange={(e) => setMinWageReason(e.target.value)}
+                />
+              )}
+            </div>
+          )}
           <DialogFooter>
             <DialogClose asChild>
               <Button variant="outline">Cancel</Button>
             </DialogClose>
             <Button
               className="bg-warning text-white hover:bg-warning/90"
-              disabled={runMut.isPending}
+              disabled={
+                runMut.isPending ||
+                // The reason is what makes the override a record rather than a second click.
+                (minWageFlagged > 0 && (!minWageAck || minWageReason.trim() === ""))
+              }
               onClick={onRun}
             >
               {runMut.isPending ? "Running…" : "Run payroll"}
@@ -802,7 +955,12 @@ export default function PayrollPage() {
         </DialogContent>
       </Dialog>
 
+      {/* FIN-030b — the review, and the raise that clears the floor. */}
+      <MinimumWageDialog open={minWageOpen} onOpenChange={setMinWageOpen} cycle={cycle} />
+
       {/* FIN-009 — the queue of pay differences awaiting settlement. */}
+      <TaxTableDialog open={taxTableOpen} onOpenChange={setTaxTableOpen} />
+
       <RetroFlagsDialog
         open={retroOpen}
         onOpenChange={setRetroOpen}

@@ -7,6 +7,7 @@ use App\Modules\Hr\Http\Resources\ReimbursementResource;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\EmployeeService;
+use App\Modules\Hr\Services\PrivateFileService;
 use App\Modules\Hr\Services\ReimbursementService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
@@ -155,5 +156,27 @@ class PrivateFileStorageTest extends HrTestCase
         $tampered = Str::replaceLast(substr($url, -4), 'dead', $url);
 
         $this->get($tampered)->assertStatus(403);
+    }
+
+    /**
+     * Slice 4d — the TTL has to outlast a page that sits mounted and focused without refetching.
+     *
+     * Not an arbitrary number: `core/query-provider.tsx` overrides only `retry`, so TanStack's
+     * defaults apply (staleTime 0, refetchOnWindowFocus true) and a link is normally seconds old
+     * when clicked. This guards the margin left for the one case that escapes that — an idle
+     * focused page — and pins it well short of anything that stops counting as short-lived.
+     */
+    public function test_the_link_ttl_outlasts_an_idle_page_without_being_long_lived(): void
+    {
+        $this->assertGreaterThanOrEqual(
+            30,
+            PrivateFileService::LINK_TTL_MINUTES,
+            'shorter than this and a focused, idle page can expire its own links in place',
+        );
+        $this->assertLessThanOrEqual(
+            60,
+            PrivateFileService::LINK_TTL_MINUTES,
+            'past an hour these stop being short-lived links',
+        );
     }
 }

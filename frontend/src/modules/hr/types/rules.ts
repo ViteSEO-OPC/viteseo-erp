@@ -110,6 +110,10 @@ export interface AttendancePolicy {
   your_ip?: string | null;
   overtime_mode: OvertimeMode; // takes effect when OT requests ship
   overtime_threshold_minutes: number;
+  // FIN-039 — ceilings on auto-mode overtime that pays with no approval. 0 = uncapped.
+  // Minutes past a cap are not lost: they queue for review and pay once approved.
+  auto_overtime_daily_cap_minutes: number;
+  auto_overtime_period_cap_minutes: number;
 
   // Premium & overtime rates (whole-percent multipliers; HR-editable, hard-floored at the DOLE
   // minimum). night_diff_pct is the add-on percent (10 = +10%). Consumers land in later phases;
