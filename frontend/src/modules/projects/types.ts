@@ -5,6 +5,14 @@ export type AssignmentType = "group" | "individual";
 export type StatusKey = "todo" | "in_progress" | "done" | "custom";
 export type FlagReason = "assignee_left_group" | "group_reassigned";
 
+/**
+ * Review state of a task/sub-task. Anything a PM/Admin creates is "approved" on
+ * the spot; a member's proposal starts "pending" and stays off every board,
+ * workload total and search result until it is approved. Only its author (and
+ * the review queue) can see it in the meantime.
+ */
+export type ApprovalStatus = "approved" | "pending" | "rejected";
+
 // NOTE: project-management entities (workspace, project, task, subtask, status,
 // group, comment, link, activity log) use UUID string ids. User ids remain
 // numeric (assignee_id, leader_id, author, user), so those stay `number`.
@@ -118,7 +126,15 @@ export interface Task {
     priority: Priority;
     deadline: string | null;
     effort_score: number;
+    approval_status: ApprovalStatus;
+    rejection_reason: string | null;
   }[];
+  // Review state. "approved" for everything a PM/Admin created directly; a
+  // non-approved row is the viewer's own proposal (nobody else can see it).
+  approval_status: ApprovalStatus;
+  rejection_reason: string | null;
+  submitted_by_id?: number | null;
+  submitted_by?: User | null;
   // Full-detail fields — only present when a single task is fetched by UUID
   // (GET /tasks/{uuid}); the lightweight board list omits them.
   project?: { id: string; name: string } | null;
@@ -149,6 +165,10 @@ export interface Subtask {
   deadline: string | null;
   flag_reason: FlagReason | null;
   flagged_at: string | null;
+  approval_status: ApprovalStatus;
+  rejection_reason: string | null;
+  submitted_by_id?: number | null;
+  submitted_by?: User | null;
   created_at: string;
   updated_at: string;
 }
@@ -248,6 +268,55 @@ export interface ArchivedSubtask {
   status: { id: string; name: string; key: StatusKey; color: string | null } | null;
   deadline: string | null;
   deleted_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A member's task proposal as it appears in the PM/Admin review queue.
+ * `id` is the task's own UUID, so a row opens the ordinary task modal (?task=)
+ * where the reviewer edits it before deciding.
+ */
+export interface PendingTask {
+  id: string;
+  project_id: string | null;
+  project_name: string | null;
+  title: string;
+  description: string | null;
+  priority: Priority;
+  effort_score: number | null;
+  status: { id: string; name: string; key: StatusKey; color: string | null } | null;
+  deadline: string | null;
+  start_date: string | null;
+  subtasks_count?: number;
+  approval_status: ApprovalStatus;
+  rejection_reason: string | null;
+  submitted_by: User | null;
+  reviewed_by: User | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A stand-alone sub-task proposal in the review queue (one bundled with a task
+ *  proposal is reviewed through its parent and never appears here). */
+export interface PendingSubtask {
+  id: string;
+  task_id: string | null;
+  task_name: string | null;
+  project_id: string | null;
+  project_name: string | null;
+  name: string;
+  description: string | null;
+  priority: Priority;
+  effort_score: number;
+  status: { id: string; name: string; key: StatusKey; color: string | null } | null;
+  deadline: string | null;
+  approval_status: ApprovalStatus;
+  rejection_reason: string | null;
+  submitted_by: User | null;
+  reviewed_by: User | null;
+  reviewed_at: string | null;
   created_at: string;
   updated_at: string;
 }

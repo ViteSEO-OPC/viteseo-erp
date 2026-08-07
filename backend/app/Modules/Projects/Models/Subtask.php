@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Modules\Projects\Models;
 
 use App\Models\User;
+use App\Modules\Projects\Concerns\HasApprovalWorkflow;
 use App\Modules\Projects\Concerns\HasPublicUuid;
+use App\Modules\Projects\Enums\ApprovalStatus;
 use App\Modules\Projects\Enums\FlagReason;
 use App\Modules\Projects\Enums\TaskPriority;
 use Illuminate\Database\Eloquent\Model;
@@ -18,7 +20,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class Subtask extends Model
 {
-    use HasPublicUuid, SoftDeletes;
+    use HasApprovalWorkflow, HasPublicUuid, SoftDeletes;
 
     protected $table = 'pm_subtasks';
 
@@ -33,6 +35,13 @@ class Subtask extends Model
         'deadline',
         'flag_reason',
         'flagged_at',
+        // Approval workflow. NEVER accepted from a Form Request — these are set
+        // only by SubtaskService / ApprovalService (see HasApprovalWorkflow).
+        'approval_status',
+        'submitted_by_id',
+        'reviewed_by_id',
+        'reviewed_at',
+        'rejection_reason',
     ];
 
     protected $casts = [
@@ -41,6 +50,8 @@ class Subtask extends Model
         'deadline' => 'date',
         'flag_reason' => FlagReason::class,
         'flagged_at' => 'datetime',
+        'approval_status' => ApprovalStatus::class,
+        'reviewed_at' => 'datetime',
     ];
 
     public function task(): BelongsTo

@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import {
   Badge,
   Button,
-  Card,
   Input,
   PagePlaceholder,
   PriorityBadge,
@@ -31,7 +30,7 @@ import type {
   ArchivedTask,
   ArchivedSubtask,
 } from "../../types";
-import { Pagination } from "../team/TeamShared";
+import { AdminTable, type AdminColumn, type AdminQuery } from "../shared/AdminTable";
 
 type TabKey = "workspaces" | "projects" | "tasks" | "subtasks";
 
@@ -63,12 +62,7 @@ function StatusPill({ name }: { name?: string | null }) {
 }
 
 /** Query state passed from the page down into whichever tab is mounted. */
-type ArchiveQuery = {
-  params: Record<string, unknown>;
-  search: string;
-  page: number;
-  onPage: (page: number) => void;
-};
+type ArchiveQuery = AdminQuery;
 
 export function ArchivesView() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -171,18 +165,11 @@ export function ArchivesView() {
   );
 }
 
-type Column<T> = {
-  key: string;
-  label: string;
-  /** Width / alignment classes applied to both the header and body cells. */
-  className?: string;
-  render: (row: T) => ReactNode;
-};
+type Column<T> = AdminColumn<T>;
 
 /**
- * The archive table shell: striped rows, a Restore action per row and the
- * paginated footer. Each tab differs only in its columns and its data/restore
- * hooks, so they all render through here.
+ * The archive table: the shared management-surface shell with a Restore action
+ * per row. Each tab differs only in its columns and its data/restore hooks.
  */
 function ArchiveTable<T extends { id: string }>({
   label,
@@ -195,113 +182,31 @@ function ArchiveTable<T extends { id: string }>({
   /** Plural noun used in the empty state and the pagination summary. */
   label: string;
   columns: Column<T>[];
-  query: ArchiveQuery;
+  query: AdminQuery;
   result: { data?: Paginated<T>; isLoading: boolean; isError: boolean };
   onRestore: (id: string) => void;
   isRestoring: boolean;
 }) {
-  const { data, isLoading, isError } = result;
-  const rows = data?.data ?? [];
-  const total = data?.meta.total ?? 0;
-  const pageCount = Math.max(1, data?.meta.last_page ?? 1);
-
-  if (isError) {
-    return (
-      <Card className="p-8 text-center">
-        <p className="font-semibold text-danger">
-          Couldn&apos;t load archived {label}.
-        </p>
-        <p className="mt-1 text-sm text-ink-soft">
-          Make sure the API is running and you&apos;re signed in.
-        </p>
-      </Card>
-    );
-  }
-
   return (
-    <>
-      <Card className="overflow-hidden rounded-2xl p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse">
-            <thead>
-              <tr className="border-b border-line bg-[#f9fafb]">
-                {columns.map((c) => (
-                  <th
-                    key={c.key}
-                    className={`px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-ink ${c.className ?? ""}`}
-                  >
-                    {c.label}
-                  </th>
-                ))}
-                <th className="w-[120px] px-5 py-3 text-center text-xs font-bold uppercase tracking-wide text-ink">
-                  Action
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoading ? (
-                <tr>
-                  <td
-                    colSpan={columns.length + 1}
-                    className="py-10 text-center text-ink-soft"
-                  >
-                    Loading archives...
-                  </td>
-                </tr>
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={columns.length + 1}
-                    className="py-10 text-center text-ink-soft"
-                  >
-                    {query.search.trim()
-                      ? `No archived ${label} match your search.`
-                      : `No archived ${label}. Soft-deleted ${label} will appear here.`}
-                  </td>
-                </tr>
-              ) : (
-                rows.map((row, idx) => (
-                  <tr
-                    key={row.id}
-                    className={`border-b border-line last:border-b-0 ${
-                      idx % 2 === 1 ? "bg-[#f9fafb]" : "bg-white"
-                    }`}
-                  >
-                    {columns.map((c) => (
-                      <td
-                        key={c.key}
-                        className={`px-5 py-3.5 text-sm text-ink ${c.className ?? ""}`}
-                      >
-                        {c.render(row)}
-                      </td>
-                    ))}
-                    <td className="px-5 py-3.5 text-center">
-                      <Button
-                        size="xs"
-                        disabled={isRestoring}
-                        onClick={() => onRestore(row.id)}
-                        className="rounded-lg border border-line bg-brand px-3 py-1.5 text-xs font-bold text-ink hover:bg-brand-hover"
-                      >
-                        Restore
-                      </Button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-
-      {!isLoading && total > 0 && (
-        <Pagination
-          page={query.page - 1}
-          pageCount={pageCount}
-          onPage={(p) => query.onPage(p + 1)}
-          summary={`Showing ${rows.length} of ${total} archived ${label}`}
-        />
+    <AdminTable
+      label={`archived ${label}`}
+      columns={columns}
+      query={query}
+      result={result}
+      summaryVerb="archived"
+      emptyMessage={`No archived ${label}. Soft-deleted ${label} will appear here.`}
+      searchEmptyMessage={`No archived ${label} match your search.`}
+      actions={(row) => (
+        <Button
+          size="xs"
+          disabled={isRestoring}
+          onClick={() => onRestore(row.id)}
+          className="rounded-lg border border-line bg-brand px-3 py-1.5 text-xs font-bold text-ink hover:bg-brand-hover"
+        >
+          Restore
+        </Button>
       )}
-    </>
+    />
   );
 }
 

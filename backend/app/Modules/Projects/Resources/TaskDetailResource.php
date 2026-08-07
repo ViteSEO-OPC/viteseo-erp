@@ -60,6 +60,12 @@ class TaskDetailResource extends JsonResource
             'comments' => CommentResource::collection($this->whenLoaded('comments')),
             'links' => LinkResource::collection($this->whenLoaded('links')),
             'activity_logs' => ActivityLogResource::collection($this->whenLoaded('activityLogs')),
+            // Review state — drives the pending/rejected banner and the reviewer's
+            // approve/reject actions inside the task modal.
+            'approval_status' => $this->approval_status?->value,
+            'rejection_reason' => $this->rejection_reason,
+            'submitted_by_id' => $this->submitted_by_id,
+            'submitted_by' => new UserResource($this->whenLoaded('submittedBy')),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

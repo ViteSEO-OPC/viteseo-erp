@@ -10,6 +10,8 @@ import type {
   CreateTaskPayload,
   Group,
   Link,
+  PendingSubtask,
+  PendingTask,
   Project,
   ProjectStatus,
   GroupWorkload,
@@ -411,6 +413,67 @@ export const projectsApi = {
   },
   restoreSubtask: async (id: string): Promise<void> => {
     await apiClient.post(`${BASE}/admin/archives/subtasks/${id}/restore`);
+  },
+
+  // Approvals — the PM/Admin review queue for member-submitted work. Reviewers
+  // EDIT a proposal through updateTask / updateSubtask above; these endpoints
+  // only carry the decision.
+  listPendingTasks: async (
+    params?: Record<string, unknown>,
+  ): Promise<Paginated<PendingTask>> => {
+    const { data } = await apiClient.get<Paginated<PendingTask>>(
+      `${BASE}/admin/approvals/tasks`,
+      { params },
+    );
+    return data;
+  },
+  listPendingSubtasks: async (
+    params?: Record<string, unknown>,
+  ): Promise<Paginated<PendingSubtask>> => {
+    const { data } = await apiClient.get<Paginated<PendingSubtask>>(
+      `${BASE}/admin/approvals/subtasks`,
+      { params },
+    );
+    return data;
+  },
+  approveTask: async (id: string): Promise<Task> => {
+    const { data } = await apiClient.post<ApiResource<Task>>(
+      `${BASE}/admin/approvals/tasks/${id}/approve`,
+    );
+    return data.data;
+  },
+  rejectTask: async (id: string, reason: string): Promise<Task> => {
+    const { data } = await apiClient.post<ApiResource<Task>>(
+      `${BASE}/admin/approvals/tasks/${id}/reject`,
+      { reason },
+    );
+    return data.data;
+  },
+  approveSubtask: async (id: string): Promise<Subtask> => {
+    const { data } = await apiClient.post<ApiResource<Subtask>>(
+      `${BASE}/admin/approvals/subtasks/${id}/approve`,
+    );
+    return data.data;
+  },
+  rejectSubtask: async (id: string, reason: string): Promise<Subtask> => {
+    const { data } = await apiClient.post<ApiResource<Subtask>>(
+      `${BASE}/admin/approvals/subtasks/${id}/reject`,
+      { reason },
+    );
+    return data.data;
+  },
+  /** Author-side: send a revised (rejected) proposal back for review. */
+  resubmitTask: async (id: string): Promise<Task> => {
+    const { data } = await apiClient.post<ApiResource<Task>>(
+      `${BASE}/tasks/${id}/resubmit`,
+    );
+    return data.data;
+  },
+  resubmitSubtask: async (id: string): Promise<Subtask> => {
+    const { data } = await apiClient.post<ApiResource<Subtask>>(
+      `${BASE}/subtasks/${id}/resubmit`,
+    );
+    return data.data;
   },
 
   // Notifications

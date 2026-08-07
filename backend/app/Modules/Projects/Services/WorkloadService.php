@@ -49,15 +49,20 @@ class WorkloadService
         // Parent tasks assigned to the member, in an active status, that have no
         // subtasks — these contribute their own effort. Tasks that do have
         // subtasks contribute 0 (their effort is ignored in favour of subtasks).
+        // Unapproved proposals are not work yet, so they never count here.
         $taskEffort = (int) Task::query()
+            ->approved()
             ->where('assignee_id', $userId)
             ->whereHas('status', fn ($q) => $q->whereIn('key', $active))
-            ->whereDoesntHave('subtasks')
+            ->whereDoesntHave('subtasks', fn ($q) => $q->approved())
             ->sum('effort_score');
 
         // Subtasks assigned to the member, in an active status — each counts
         // only toward its own assignee, regardless of who owns the parent task.
         $subtaskEffort = (int) Subtask::query()
+            ->approved()
+            // A subtask under a task still awaiting review is not live work either.
+            ->whereHas('task', fn ($q) => $q->approved())
             ->where('assignee_id', $userId)
             ->whereHas('status', fn ($q) => $q->whereIn('key', $active))
             ->sum('effort_score');
@@ -95,13 +100,15 @@ class WorkloadService
         $active = [StatusKey::TODO->value, StatusKey::IN_PROGRESS->value];
 
         $taskEffort = (int) Task::query()
+            ->approved()
             ->where('group_id', $groupId)
             ->whereHas('status', fn ($q) => $q->whereIn('key', $active))
-            ->whereDoesntHave('subtasks')
+            ->whereDoesntHave('subtasks', fn ($q) => $q->approved())
             ->sum('effort_score');
 
         $subtaskEffort = (int) Subtask::query()
-            ->whereHas('task', fn ($q) => $q->where('group_id', $groupId))
+            ->approved()
+            ->whereHas('task', fn ($q) => $q->approved()->where('group_id', $groupId))
             ->whereHas('status', fn ($q) => $q->whereIn('key', $active))
             ->sum('effort_score');
 

@@ -30,7 +30,8 @@ class ProjectService
         // Eager-load the workspace so its public UUID can be exposed as `workspace_id`.
         $query = Project::query()
             ->with('workspace')
-            ->withCount(['tasks', 'members']);
+            // Proposals awaiting review don't count toward a project's task total.
+            ->withCount(['tasks' => fn ($q) => $q->approved(), 'members']);
 
         // Members only see projects they are assigned to.
         if ($scopeToMember !== null) {

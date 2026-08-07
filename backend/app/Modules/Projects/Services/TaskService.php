@@ -28,12 +28,16 @@ class TaskService
     {
         $query = Task::query()
             ->where('project_id', $project->id)
+            // Unapproved proposals stay off the board — except for their own author.
+            ->visibleTo($currentUserId)
             ->with(['project', 'status', 'assignee', 'group'])
             ->withCount([
-                'subtasks',
+                'subtasks' => fn (Builder $q) => $q->visibleTo($currentUserId),
                 // Whether the requesting user is assigned a subtask under this task —
                 // lets a member see the parent task of a subtask assigned to them.
-                'subtasks as my_subtasks_count' => fn (Builder $q) => $q->where('assignee_id', $currentUserId),
+                'subtasks as my_subtasks_count' => fn (Builder $q) => $q
+                    ->where('assignee_id', $currentUserId)
+                    ->visibleTo($currentUserId),
             ]);
 
         // Eager-load the requesting user's own subtasks (with status) so the
@@ -43,6 +47,7 @@ class TaskService
                 // Eager-load closure receives the relation query, not a Builder.
                 'subtasks' => fn ($q) => $q
                     ->where('assignee_id', $currentUserId)
+                    ->visibleTo($currentUserId)
                     ->with('status'),
             ]);
         }
@@ -78,16 +83,24 @@ class TaskService
 
     /**
      * Eager-load every relation needed to render a single task's detail view.
+     *
+     * $viewerId scopes the subtask list: unapproved subtask proposals are hidden
+     * from everyone except their own author — and from a reviewer, who needs to
+     * see the whole bundle to edit it before approving ($canReview).
      */
-    public function detail(Task $task): Task
+    public function detail(Task $task, ?int $viewerId = null, bool $canReview = false): Task
     {
         return $task->load([
             'project',
             'group',
             'assignee',
             'assignedBy',
+            'submittedBy',
             'status',
-            'subtasks' => fn ($query) => $query->with(['assignee', 'status'])->orderBy('created_at'),
+            'subtasks' => fn ($query) => $query
+                ->when(! $canReview, fn ($q) => $q->visibleTo($viewerId))
+                ->with(['assignee', 'status', 'submittedBy'])
+                ->orderBy('created_at'),
             'comments' => fn ($query) => $query->with('author')->orderBy('created_at', 'desc'),
             'links' => fn ($query) => $query->with('user')->orderBy('created_at', 'desc'),
             'activityLogs' => fn ($query) => $query->with('user')->orderBy('created_at', 'desc'),

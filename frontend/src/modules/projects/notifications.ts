@@ -25,7 +25,15 @@ export interface AppNotification {
 export interface NotificationDto {
   id: string;
   type: string;
-  data: { title?: string; snippet?: string; status?: string } | null;
+  data: {
+    title?: string;
+    snippet?: string;
+    status?: string;
+    /** Parent task's title on a sub-task review request. */
+    task_title?: string;
+    /** Reviewer's rejection reason on a task/sub-task rejection. */
+    reason?: string;
+  } | null;
   read: boolean;
   read_at: string | null;
   created_at: string;
@@ -78,6 +86,25 @@ function messageFor(dto: NotificationDto): string {
       return dto.data?.status
         ? `moved “${title}” to ${dto.data.status}`
         : `updated the status of “${title}”`;
+    // Member proposals — submitted for review, then decided on.
+    case "task.review_requested":
+      return `submitted the task “${title}” for your approval`;
+    case "subtask.review_requested":
+      return dto.data?.task_title
+        ? `submitted the sub-task “${title}” (in “${dto.data.task_title}”) for your approval`
+        : `submitted the sub-task “${title}” for your approval`;
+    case "task.approved":
+      return `approved your task “${title}”`;
+    case "subtask.approved":
+      return `approved your sub-task “${title}”`;
+    case "task.rejected":
+      return dto.data?.reason
+        ? `rejected your task “${title}”: ${dto.data.reason}`
+        : `rejected your task “${title}”`;
+    case "subtask.rejected":
+      return dto.data?.reason
+        ? `rejected your sub-task “${title}”: ${dto.data.reason}`
+        : `rejected your sub-task “${title}”`;
     default:
       return "sent you a notification";
   }

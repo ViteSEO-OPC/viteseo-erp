@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar, Badge, PriorityBadge } from "@/core/ui";
 import { ProjectPill } from "../../shared/Pills";
+import { ApprovalBadge } from "../../tasks/shared";
 import { isOverdue, OverdueBadge } from "../../../overdue";
 import {
   BATCH_SIZE,
@@ -128,6 +129,11 @@ function StatusSection({
               </span>
               <span className="min-w-0 truncate font-medium text-ink">
                 {i.title}
+                {i.approvalStatus && i.approvalStatus !== "approved" && (
+                  <span className="ml-2 align-middle">
+                    <ApprovalBadge status={i.approvalStatus} />
+                  </span>
+                )}
                 {i.kind === "subtask" && i.parentTitle && (
                   <span className="block truncate text-xs font-normal text-ink-faint">
                     ↳ subtask in {i.parentTitle}
@@ -224,7 +230,10 @@ function StatusSection({
                 <PriorityBadge priority={i.priority} />
               </span>
             </div>
-            <p className="mt-2 font-medium text-ink">{i.title}</p>
+            <p className="mt-2 flex flex-wrap items-center gap-2 font-medium text-ink">
+              {i.title}
+              <ApprovalBadge status={i.approvalStatus} />
+            </p>
             {i.kind === "subtask" && i.parentTitle && (
               <p className="text-xs text-ink-faint">↳ subtask in {i.parentTitle}</p>
             )}

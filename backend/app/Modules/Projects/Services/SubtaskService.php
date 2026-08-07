@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Projects\Services;
 
 use App\Models\User;
+use App\Modules\Projects\Enums\ApprovalStatus;
 use App\Modules\Projects\Enums\AssignmentType;
 use App\Modules\Projects\Enums\FlagReason;
 use App\Modules\Projects\Models\ActivityLog;
@@ -47,6 +48,15 @@ class SubtaskService
             $subtask->deadline = $data['deadline'] ?? null;
             $subtask->flag_reason = $flagReason;
             $subtask->flagged_at = $flaggedAt;
+
+            // Review state. A subtask can never be more approved than its parent:
+            // one added to a task still awaiting review inherits that review — so a
+            // reviewer's own additions to a proposal don't go live ahead of it.
+            $subtask->approval_status = $task->isProposal()
+                ? $task->approval_status
+                : ($data['approval_status'] ?? ApprovalStatus::APPROVED);
+            $subtask->submitted_by_id = $data['submitted_by_id']
+                ?? ($task->isProposal() ? $task->submitted_by_id : null);
             $subtask->save();
 
             ActivityLog::create([

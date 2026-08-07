@@ -5,7 +5,7 @@ import { Avatar, Badge, ChevronDownIcon, Field, Input, Select, UsersIcon, XIcon 
 import type { User } from '@/core/types';
 import { NamePill } from '../shared/Pills';
 import { useGroupWorkload, useUserWorkload } from '../../hooks';
-import type { ActivityLog, Group, Priority, ProjectStatus, StatusKey, WorkloadLevel } from '../../types';
+import type { ActivityLog, ApprovalStatus, Group, Priority, ProjectStatus, StatusKey, WorkloadLevel } from '../../types';
 
 export const PRIORITIES: Priority[] = ['Low', 'Medium', 'High'];
 
@@ -661,6 +661,58 @@ export function CoAssigneePanel({
       {others.length === 0 && <p className="text-xs text-ink-faint">No other members in this group.</p>}
       <p className="text-[11px] text-ink-faint">
         The leader automatically is the co-assignee.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Review-state chip for a proposal. Renders nothing for approved work, which is
+ * the overwhelming majority — an "Approved" pill on every row would be noise.
+ */
+export function ApprovalBadge({ status }: { status?: ApprovalStatus }) {
+  if (!status || status === 'approved') return null;
+  return status === 'rejected' ? (
+    <Badge tone="danger">Rejected</Badge>
+  ) : (
+    <Badge tone="warning">Pending</Badge>
+  );
+}
+
+/**
+ * The banner at the top of an unapproved task/sub-task, explaining why it is
+ * read-only and (when rejected) what the reviewer asked for.
+ */
+export function ApprovalBanner({
+  status,
+  reason,
+  noun = 'task',
+}: {
+  status?: ApprovalStatus;
+  reason?: string | null;
+  /** What is under review, for the copy ("task" / "sub-task"). */
+  noun?: string;
+}) {
+  if (!status || status === 'approved') return null;
+
+  if (status === 'rejected') {
+    return (
+      <div className="rounded-xl border border-danger/40 bg-danger-soft px-4 py-3">
+        <p className="text-sm font-bold text-danger">Rejected</p>
+        {reason && <p className="mt-1 text-sm text-ink">{reason}</p>}
+        <p className="mt-1 text-xs text-ink-soft">
+          Revise the {noun} and re-submit it for approval.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-warning/40 bg-warning-soft px-4 py-3">
+      <p className="text-sm font-bold text-warning">Pending approval</p>
+      <p className="mt-1 text-sm text-ink">
+        This {noun} is waiting on a PM. It stays off the board and out of
+        workload totals until it is approved.
       </p>
     </div>
   );

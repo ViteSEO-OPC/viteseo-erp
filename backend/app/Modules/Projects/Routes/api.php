@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Modules\Projects\Controllers\ActivityLogController;
+use App\Modules\Projects\Controllers\ApprovalController;
 use App\Modules\Projects\Controllers\ArchiveController;
 use App\Modules\Projects\Controllers\CommentController;
 use App\Modules\Projects\Controllers\GroupController;
@@ -111,4 +112,21 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
         Route::post('tasks/{uuid}/restore', [ArchiveController::class, 'restoreTask']);
         Route::post('subtasks/{uuid}/restore', [ArchiveController::class, 'restoreSubtask']);
     });
+
+    // Review queue for member-submitted work (Admin/PM only — enforced by the
+    // `approve` policy ability). Reviewers EDIT a proposal through the ordinary
+    // PATCH tasks/{task} and PATCH subtasks/{subtask} routes above.
+    Route::prefix('admin/approvals')->group(function (): void {
+        Route::get('tasks', [ApprovalController::class, 'tasks']);
+        Route::get('subtasks', [ApprovalController::class, 'subtasks']);
+
+        Route::post('tasks/{task}/approve', [ApprovalController::class, 'approveTask']);
+        Route::post('tasks/{task}/reject', [ApprovalController::class, 'rejectTask']);
+        Route::post('subtasks/{subtask}/approve', [ApprovalController::class, 'approveSubtask']);
+        Route::post('subtasks/{subtask}/reject', [ApprovalController::class, 'rejectSubtask']);
+    });
+
+    // Author-side: send a revised (rejected) proposal back for review.
+    Route::post('tasks/{task}/resubmit', [ApprovalController::class, 'resubmitTask']);
+    Route::post('subtasks/{subtask}/resubmit', [ApprovalController::class, 'resubmitSubtask']);
 });

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createTaskSchema, useValidatedForm } from '@/core/forms';
+import { useAuth, useIsManager } from '@/core/auth/AuthProvider';
 import { Button, Field, Input, PlusIcon, PriorityBadge, SegmentedControl, SegmentedItem, Select, Textarea, TrashIcon } from '@/core/ui';
 import type { CreateTaskPayload, Priority, ProjectStatus } from '../../types';
 import { projectsApi } from '../../api';
@@ -14,6 +15,7 @@ import {
   EffortSlider,
   groupRoster,
   PRIORITIES,
+  readonlyField,
   sectionLabel,
   GroupWorkloadIndicator,
   SubtaskFields,
@@ -35,12 +37,23 @@ export function CreateTaskBody({
   projectSelector?: React.ReactNode;
 }) {
   const create = useCreateTask(projectId);
+  // Members don't create work directly — they propose it. The backend forces the
+  // proposal to be individual + self-assigned, so the form matches that shape
+  // instead of offering choices the server would override.
+  const isManager = useIsManager();
+  const { user } = useAuth();
+  const isProposal = !isManager;
   // Assignees are restricted to this project's members — not the whole user
   // directory. (Group members come from the selected group, see below.)
   const projectQuery = useProject(projectId);
   const groupsQuery = useGroups(projectId);
   const users = useMemo(() => projectQuery.data?.members ?? [], [projectQuery.data]);
   const groups = groupsQuery.data?.data ?? [];
+  // The proposer's own roster entry, for the advisory workload indicator.
+  const selfMember = useMemo(
+    () => users.find((u) => u.id === user?.id) ?? null,
+    [users, user?.id],
+  );
 
   const [effort, setEffort] = useState(5);
 
@@ -63,7 +76,7 @@ export function CreateTaskBody({
     if (statuses[0]) setValue('status_id', String(statuses[0].id));
   }, [statuses, setValue]);
 
-  const assignmentType = watch('assignment_type');
+  const assignmentType = isProposal ? 'individual' : watch('assignment_type');
   const startValue = watch('start_date');
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -92,7 +105,14 @@ export function CreateTaskBody({
   // Subtask assignees mirror the view-mode rule: group members for a group task,
   // otherwise any user (unassigned is always allowed).
   const roster = useMemo(() => groupRoster(selectedGroup), [selectedGroup]);
-  const subtaskAssigneeOptions = assignmentType === 'group' && roster.length ? roster : users;
+  // On the proposal path every sub-task is yours too, so the picker offers only you.
+  const subtaskAssigneeOptions = isProposal
+    ? selfMember
+      ? [selfMember]
+      : []
+    : assignmentType === 'group' && roster.length
+      ? roster
+      : users;
 
   const resetSubtaskForm = () => {
     setStName('');
@@ -115,7 +135,7 @@ export function CreateTaskBody({
       {
         key: `d${draftKey.current++}`,
         name: stName.trim(),
-        assignee_id: stAssignee ? Number(stAssignee) : null,
+        assignee_id: isProposal ? (user?.id ?? null) : stAssignee ? Number(stAssignee) : null,
         status_id: statusId,
         priority: stPriority,
         effort_score: Number(stEffort),
@@ -166,7 +186,13 @@ export function CreateTaskBody({
       deadline: data.deadline || undefined,
       start_date: data.start_date || undefined,
     };
-    if (data.assignment_type === 'individual') {
+    if (isProposal) {
+      // The server overrides these anyway; send the honest values so the form
+      // and the stored proposal agree.
+      payload.assignment_type = 'individual';
+      payload.assignee_id = user?.id ?? null;
+      payload.effort_score = effort;
+    } else if (data.assignment_type === 'individual') {
       // Empty assignee → unassigned task.
       payload.assignee_id = data.assignee_id ? Number(data.assignee_id) : null;
       payload.effort_score = effort;
@@ -209,6 +235,14 @@ export function CreateTaskBody({
         {projectSelector}
 
         <AiBanner />
+
+        {isProposal && (
+          <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-ink">
+            This is a <span className="font-semibold">proposal</span>. It is
+            assigned to you and stays private until a PM approves it — only then
+            does it appear on the board and count toward your workload.
+          </div>
+        )}
 
         <div>
           <label className="mb-1.5 block text-sm font-bold text-ink">
@@ -425,7 +459,9 @@ export function CreateTaskBody({
         </CollapsiblePanel>
 
         {create.isError && (
-          <p className="text-sm text-danger">Could not create the task. Please try again.</p>
+          <p className="text-sm text-danger">
+            Could not {isProposal ? 'submit the proposal' : 'create the task'}. Please try again.
+          </p>
         )}
         {subtaskError && <p className="text-sm text-danger">{subtaskError}</p>}
 
@@ -433,16 +469,42 @@ export function CreateTaskBody({
         <div className="flex items-center justify-end gap-3 border-t border-line pt-4">
           <Button type="submit" className={TEAL} disabled={create.isPending}>
             {create.isPending
-              ? 'Creating…'
-              : subtasks.length > 0
-                ? `Create Task + ${subtasks.length} Subtask${subtasks.length > 1 ? 's' : ''}`
-                : 'Create Task'}
+              ? isProposal
+                ? 'Submitting…'
+                : 'Creating…'
+              : isProposal
+                ? subtasks.length > 0
+                  ? `Submit Task + ${subtasks.length} Subtask${subtasks.length > 1 ? 's' : ''} for Approval`
+                  : 'Submit for Approval'
+                : subtasks.length > 0
+                  ? `Create Task + ${subtasks.length} Subtask${subtasks.length > 1 ? 's' : ''}`
+                  : 'Create Task'}
           </Button>
         </div>
       </div>
 
       {/* RIGHT */}
       <div className="space-y-5">
+        {isProposal ? (
+          <>
+            <div>
+              <p className={sectionLabel}>Assignee</p>
+              {/* A proposal is always your own work — the server enforces this,
+                  so there is nothing to choose. */}
+              <p className={`mt-2 ${readonlyField}`}>{user?.name ?? 'You'}</p>
+              <div className="mt-3">
+                <WorkloadIndicator user={selfMember ?? null} />
+              </div>
+            </div>
+            <div>
+              <p className={sectionLabel}>Review</p>
+              <p className="mt-1 text-sm text-ink-soft">
+                Goes to a PM for approval before it reaches the board.
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
         {/* Assignment target */}
         <SegmentedControl>
           {(['individual', 'group'] as const).map((t) => (
@@ -506,6 +568,8 @@ export function CreateTaskBody({
           {/* PLACEHOLDER — the backend records the creator implicitly; no field yet. */}
           <p className="mt-1 text-sm text-ink-soft">You (recorded on create)</p>
         </div>
+          </>
+        )}
       </div>
     </form>
   );

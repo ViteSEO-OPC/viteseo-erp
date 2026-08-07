@@ -172,6 +172,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
       deadline: t.deadline,
       hasMySubtask: t.has_my_subtask ?? false,
       leadsMyGroup: t.leads_my_group ?? false,
+      approvalStatus: t.approval_status,
     });
 
     if (isManager) return all.map(taskRow);
@@ -201,6 +202,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
         deadline: s.deadline,
         hasMySubtask: true,
         leadsMyGroup: false,
+        approvalStatus: s.approval_status,
       }));
 
       // The parent task itself belongs to a member who owns it directly or
@@ -452,12 +454,12 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
                   {taskItems.length}
                 </span>
               </div>
-              {isManager && (
-                <Button onClick={() => setAddTaskOpen(true)}>
-                  <PlusIcon className="h-4 w-4" />
-                  Add Task
-                </Button>
-              )}
+              {/* Members may submit their own work; it goes to the PM review
+                  queue rather than straight onto the board. */}
+              <Button onClick={() => setAddTaskOpen(true)}>
+                <PlusIcon className="h-4 w-4" />
+                {isManager ? "Add Task" : "Propose Task"}
+              </Button>
             </div>
 
             {tasksQuery.isLoading ? (
@@ -481,7 +483,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
             )}
           </Card>
 
-          {isManager && addTaskOpen && (
+          {addTaskOpen && (
             <TaskModal
               open
               onClose={() => setAddTaskOpen(false)}

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Modules\Projects\Models;
 
 use App\Models\User;
+use App\Modules\Projects\Concerns\HasApprovalWorkflow;
 use App\Modules\Projects\Concerns\HasPublicUuid;
 use App\Modules\Projects\Database\Factories\TaskFactory;
+use App\Modules\Projects\Enums\ApprovalStatus;
 use App\Modules\Projects\Enums\AssignmentType;
 use App\Modules\Projects\Enums\TaskPriority;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,7 +23,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Task extends Model
 {
     /** @use HasFactory<TaskFactory> */
-    use HasFactory, HasPublicUuid, SoftDeletes;
+    use HasApprovalWorkflow, HasFactory, HasPublicUuid, SoftDeletes;
 
     protected static function newFactory(): TaskFactory
     {
@@ -43,6 +45,13 @@ class Task extends Model
         'effort_score',
         'deadline',
         'start_date',
+        // Approval workflow. NEVER accepted from a Form Request — these are set
+        // only by TaskService / ApprovalService (see HasApprovalWorkflow).
+        'approval_status',
+        'submitted_by_id',
+        'reviewed_by_id',
+        'reviewed_at',
+        'rejection_reason',
     ];
 
     protected $casts = [
@@ -51,6 +60,8 @@ class Task extends Model
         'effort_score' => 'integer',
         'deadline' => 'date',
         'start_date' => 'date',
+        'approval_status' => ApprovalStatus::class,
+        'reviewed_at' => 'datetime',
     ];
 
     public function project(): BelongsTo

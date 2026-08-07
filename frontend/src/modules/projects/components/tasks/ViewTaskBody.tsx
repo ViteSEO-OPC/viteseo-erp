@@ -9,17 +9,26 @@ import { isOverdue } from '../../overdue';
 import {
   useAddComment,
   useAddLink,
+  useApproveSubtask,
+  useApproveTask,
   useCreateSubtask,
   useDeleteSubtask,
   useDeleteTask,
   useGroup,
   useGroups,
   useProject,
+  useRejectSubtask,
+  useRejectTask,
+  useResubmitSubtask,
+  useResubmitTask,
   useUpdateSubtask,
   useUpdateTask,
 } from '../../hooks';
+import { RejectReasonDialog } from '../approvals/RejectReasonDialog';
 import {
   activityLine,
+  ApprovalBadge,
+  ApprovalBanner,
   CoAssigneePanel,
   CollapsiblePanel,
   DetailsPanel,
@@ -46,8 +55,12 @@ import {
 
 /**
  * A subtask in the view-mode list. Editing is RBAC-scoped:
- *  - `canFullEdit` (Admin/PM or the parent group's leader) → edit every field.
- *  - `canEditStatus` (the above, or the subtask's own assignee) → status only.
+ *  - `canFullEdit` (Admin/PM, the parent group's leader, or the author of an
+ *    unapproved proposal) → edit every field.
+ *  - `canEditStatus` (the above, or the subtask's own assignee) → status only,
+ *    and never on a proposal: it isn't on the board yet.
+ *  - `canReview` (Admin/PM on a proposal) → approve / reject it here.
+ *  - `canResubmit` (its author, once rejected) → send it back for review.
  *  - otherwise read-only.
  */
 function SubtaskRow({
@@ -56,6 +69,8 @@ function SubtaskRow({
   assigneeOptions,
   canFullEdit,
   canEditStatus,
+  canReview = false,
+  canResubmit = false,
   update,
   onDelete,
   parentDeadline,
@@ -65,10 +80,16 @@ function SubtaskRow({
   assigneeOptions: User[];
   canFullEdit: boolean;
   canEditStatus: boolean;
+  canReview?: boolean;
+  canResubmit?: boolean;
   update: ReturnType<typeof useUpdateSubtask>;
   onDelete?: (subtask: Subtask) => void;
   parentDeadline?: string | null;
 }) {
+  const approveSubtask = useApproveSubtask();
+  const rejectSubtask = useRejectSubtask();
+  const resubmitSubtask = useResubmitSubtask();
+  const [rejecting, setRejecting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(subtask.name);
   const [description, setDescription] = useState(subtask.description ?? '');
@@ -128,7 +149,11 @@ function SubtaskRow({
               </span>
             )}
             <span className="min-w-0 break-words sm:truncate">{subtask.name}</span>
+            <ApprovalBadge status={subtask.approval_status} />
           </p>
+          {subtask.approval_status === 'rejected' && subtask.rejection_reason && (
+            <p className="mt-1 text-xs text-danger">{subtask.rejection_reason}</p>
+          )}
           <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-faint">
             <span
               className={
@@ -176,6 +201,50 @@ function SubtaskRow({
               subtask.status && <Badge tone={statusTone(subtask.status.key)}>{subtask.status.name}</Badge>
             )}
             <PriorityBadge priority={subtask.priority} />
+
+            <RejectReasonDialog
+              open={rejecting}
+              subject={subtask.name}
+              isPending={rejectSubtask.isPending}
+              error={rejectSubtask.isError ? 'Could not reject. Please try again.' : null}
+              onCancel={() => setRejecting(false)}
+              onConfirm={(reason) => {
+                rejectSubtask.mutate({ id: subtask.id, reason });
+                setRejecting(false);
+              }}
+            />
+
+            {canReview && (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="xs"
+                  className={TEAL}
+                  disabled={approveSubtask.isPending}
+                  onClick={() => approveSubtask.mutate(subtask.id)}
+                >
+                  Approve
+                </Button>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="text-danger"
+                  disabled={rejectSubtask.isPending}
+                  onClick={() => setRejecting(true)}
+                >
+                  Reject
+                </Button>
+              </div>
+            )}
+            {canResubmit && (
+              <Button
+                size="xs"
+                className={TEAL}
+                disabled={resubmitSubtask.isPending}
+                onClick={() => resubmitSubtask.mutate(subtask.id)}
+              >
+                Re-submit for approval
+              </Button>
+            )}
 
             {/* Edit / delete — right-aligned within the meta row so the name and
                 due date above span the full card width (wrapping on small screens). */}
@@ -317,9 +386,16 @@ export function ViewTaskBody({
   const groupQuery = useGroup(isGroupTask ? task.group_id ?? '' : '');
   const roster = useMemo(() => groupRoster(groupQuery.data), [groupQuery.data]);
   // Subtasks may be created by Admin/PM (any task) or by the group's leader
-  // (group tasks). Regular members — including a task's individual assignee — cannot.
+  // (group tasks). A member may PROPOSE one on work that is already theirs —
+  // the parent is assigned to them, they're in its group, or it's their own
+  // proposal — which then goes through the same review as a task proposal.
   const isGroupLeader = isGroupTask && groupQuery.data?.leader?.id === user?.id;
-  const canAddSubtask = isManager || isGroupLeader;
+  const isGroupMember = isGroupTask && roster.some((m) => m.id === user?.id);
+  const ownsThisWork =
+    (task.assignee_id != null && task.assignee_id === user?.id) ||
+    (task.submitted_by_id != null && task.submitted_by_id === user?.id) ||
+    isGroupMember;
+  const canAddSubtask = isManager || isGroupLeader || ownsThisWork;
 
   // RBAC for editing the task itself:
   //  - Admin/PM  → edit every field.
@@ -329,13 +405,27 @@ export function ViewTaskBody({
   //    status of the subtask assigned to them (see SubtaskRow).
   //  - Full-detail editing stays Admin/PM only.
   const isAssignee = task.assignee_id != null && task.assignee_id === user?.id;
-  const canFullEdit = isManager;
-  const canEditStatus = isManager || isAssignee || isGroupLeader;
+  // Review state. An unapproved task isn't on a board yet, so nobody advances
+  // its status; its author keeps full editing rights so a rejection can be
+  // acted on, and a reviewer edits it before deciding.
+  const isProposal = task.approval_status !== 'approved';
+  const isProposalAuthor =
+    task.submitted_by_id != null && task.submitted_by_id === user?.id;
+  const canFullEdit = isManager || (isProposal && isProposalAuthor);
+  const canEditStatus =
+    !isProposal && (isManager || isAssignee || isGroupLeader);
+  const canReview = isManager && isProposal;
+  const canResubmit = isProposal && isProposalAuthor && task.approval_status === 'rejected';
   // Group members are the valid subtask assignees (ERD R5); fall back to all users otherwise.
   const assigneeOptions = isGroupTask && roster.length ? roster : users;
   // const [coAssignees, setCoAssignees] = useState<number[]>([]);
   // const toggleCoAssignee = (id: number) =>
   //   setCoAssignees((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const approveTask = useApproveTask();
+  const rejectTask = useRejectTask();
+  const resubmitTask = useResubmitTask();
+  const [rejectingTask, setRejectingTask] = useState(false);
 
   const addLink = useAddLink(task.id);
   const addComment = useAddComment(task.id);
@@ -551,6 +641,58 @@ export function ViewTaskBody({
     <div className="grid grid-cols-1 gap-6 p-4 sm:p-6 md:grid-cols-[1fr_320px] md:gap-8 max-h-[70vh] ">
       {/* LEFT */}
       <div className="min-w-0 space-y-5 pb-7">
+        <ApprovalBanner
+          status={task.approval_status}
+          reason={task.rejection_reason}
+        />
+
+        {/* A reviewer decides right here, so they can edit the proposal above
+            and approve it without going back to the queue. */}
+        {(canReview || canResubmit) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {canReview && (
+              <>
+                <Button
+                  className={TEAL}
+                  disabled={approveTask.isPending}
+                  onClick={() => approveTask.mutate(task.id)}
+                >
+                  Approve
+                </Button>
+                <Button
+                  variant="outline"
+                  className="text-danger"
+                  disabled={rejectTask.isPending}
+                  onClick={() => setRejectingTask(true)}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+            {canResubmit && (
+              <Button
+                className={TEAL}
+                disabled={resubmitTask.isPending}
+                onClick={() => resubmitTask.mutate(task.id)}
+              >
+                Re-submit for approval
+              </Button>
+            )}
+          </div>
+        )}
+
+        <RejectReasonDialog
+          open={rejectingTask}
+          subject={task.title}
+          isPending={rejectTask.isPending}
+          error={rejectTask.isError ? 'Could not reject. Please try again.' : null}
+          onCancel={() => setRejectingTask(false)}
+          onConfirm={(reason) => {
+            rejectTask.mutate({ id: task.id, reason });
+            setRejectingTask(false);
+          }}
+        />
+
         <div className="flex items-start justify-between gap-3">
           {editing ? (
             <Input
@@ -805,8 +947,18 @@ export function ViewTaskBody({
                   subtask={s}
                   statuses={statuses}
                   assigneeOptions={assigneeOptions}
-                  canFullEdit={canFullEditSubtask}
-                  canEditStatus={canFullEditSubtask || s.assignee_id === user?.id}
+                  canFullEdit={
+                    canFullEditSubtask ||
+                    (s.approval_status !== 'approved' && s.submitted_by_id === user?.id)
+                  }
+                  canEditStatus={
+                    s.approval_status === 'approved' &&
+                    (canFullEditSubtask || s.assignee_id === user?.id)
+                  }
+                  canReview={isManager && s.approval_status !== 'approved'}
+                  canResubmit={
+                    s.approval_status === 'rejected' && s.submitted_by_id === user?.id
+                  }
                   update={updateSubtask}
                   onDelete={setSubtaskToDelete}
                   parentDeadline={task.deadline}

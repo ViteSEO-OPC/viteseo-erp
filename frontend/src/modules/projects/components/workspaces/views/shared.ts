@@ -1,4 +1,4 @@
-import type { Priority } from "../../../types";
+import type { ApprovalStatus, Priority } from "../../../types";
 
 export type ViewKey = "list" | "kanban" | "calendar";
 
@@ -31,6 +31,9 @@ export interface WorkItem {
   // The item is a group task whose group the requesting user leads — the leader
   // owns the parent task, so it stays on their "My Tasks" board.
   leadsMyGroup: boolean;
+  // Review state. Anything not "approved" is the viewer's own proposal: only
+  // they can see it, and it can't be dragged or advanced until it's approved.
+  approvalStatus?: ApprovalStatus;
 }
 
 /** A Kanban/List column: the 3 defaults, one per distinct custom status, + No Status. */

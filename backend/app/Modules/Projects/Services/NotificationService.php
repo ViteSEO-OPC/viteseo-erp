@@ -10,6 +10,7 @@ use App\Modules\Projects\Enums\AssignmentType;
 use App\Modules\Projects\Enums\UserRole;
 use App\Modules\Projects\Models\Comment;
 use App\Modules\Projects\Models\Notification;
+use App\Modules\Projects\Models\Subtask;
 use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Resources\NotificationResource;
 use App\Support\SafeBroadcast;
@@ -120,6 +121,103 @@ class NotificationService
 
             $this->dispatch($notification);
         }
+    }
+
+    /**
+     * A member submitted a task proposal — tell the reviewers it is queued.
+     */
+    public function notifyTaskReviewRequested(Task $task, User $actor): void
+    {
+        foreach ($this->reviewersOf($task, $actor) as $recipientId) {
+            $this->dispatch(Notification::create([
+                'user_id' => $recipientId,
+                'actor_id' => $actor->id,
+                'type' => 'task.review_requested',
+                'project_id' => $task->project_id,
+                'task_id' => $task->id,
+                'data' => ['title' => $task->title],
+            ]));
+        }
+    }
+
+    /**
+     * A member submitted a stand-alone sub-task proposal.
+     */
+    public function notifySubtaskReviewRequested(Subtask $subtask, User $actor): void
+    {
+        $subtask->loadMissing('task');
+        $task = $subtask->task;
+
+        foreach ($this->reviewersOf($task, $actor) as $recipientId) {
+            $this->dispatch(Notification::create([
+                'user_id' => $recipientId,
+                'actor_id' => $actor->id,
+                'type' => 'subtask.review_requested',
+                'project_id' => $task->project_id,
+                'task_id' => $task->id,
+                'data' => ['title' => $subtask->name, 'task_title' => $task->title],
+            ]));
+        }
+    }
+
+    /**
+     * A reviewer approved or rejected a proposal — tell its author. $type is one
+     * of task.approved / task.rejected / subtask.approved / subtask.rejected.
+     */
+    public function notifyApprovalDecision(
+        Task $task,
+        int $recipientId,
+        User $actor,
+        string $type,
+        string $title,
+        ?string $reason = null,
+    ): void {
+        if ($recipientId === (int) $actor->id) {
+            return;
+        }
+
+        $this->dispatch(Notification::create([
+            'user_id' => $recipientId,
+            'actor_id' => $actor->id,
+            'type' => $type,
+            'project_id' => $task->project_id,
+            'task_id' => $task->id,
+            'data' => array_filter([
+                'title' => $title,
+                'reason' => $reason,
+            ], fn ($v): bool => $v !== null),
+        ]));
+    }
+
+    /**
+     * Who reviews this project's proposals: its manager-tier members, excluding
+     * the actor. Falls back to every manager-tier user when the project has no
+     * manager on its roster, so a proposal is never submitted into a void.
+     *
+     * @return list<int>
+     */
+    private function reviewersOf(Task $task, User $actor): array
+    {
+        $task->loadMissing('project');
+
+        $recipientIds = $task->project
+            ->members()
+            ->role(UserRole::managerRoles())
+            ->pluck('users.id')
+            ->map(fn ($id): int => (int) $id);
+
+        if ($recipientIds->isEmpty()) {
+            $recipientIds = User::query()
+                ->role(UserRole::managerRoles())
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id);
+        }
+
+        return $recipientIds
+            ->unique()
+            ->reject(fn (int $id): bool => $id === (int) $actor->id)
+            ->values()
+            ->all();
     }
 
     /**

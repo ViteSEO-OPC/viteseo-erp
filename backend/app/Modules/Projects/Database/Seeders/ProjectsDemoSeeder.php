@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Modules\Projects\Database\Seeders;
 
 use App\Models\User;
+use App\Modules\Projects\Enums\ApprovalStatus;
 use App\Modules\Projects\Enums\AssignmentType;
 use App\Modules\Projects\Enums\ProjectState;
 use App\Modules\Projects\Enums\StatusKey;
@@ -233,6 +234,68 @@ class ProjectsDemoSeeder extends Seeder
         ]);
         $this->logCreated($setup, $marco);
         $this->logStatusChange($setup, $leo, $statuses['in_progress']->id, $statuses['done']->id);
+
+        // 6) A member's task proposal awaiting PM review, with a bundled sub-task.
+        //    Nobody but Leo (and the review queue) can see either row.
+        $audit = Task::create([
+            'project_id' => $project->id,
+            'title' => 'Audit the site for broken internal links',
+            'description' => 'Crawl every published page and fix or redirect the 404s before launch.',
+            'assignment_type' => AssignmentType::INDIVIDUAL,
+            'assignee_id' => $leo?->id,
+            'assigned_by_id' => $leo?->id,
+            'status_id' => $statuses['todo']->id,
+            'priority' => TaskPriority::MEDIUM,
+            'effort_score' => 4,
+            'deadline' => $now->copy()->addDays(7)->toDateString(),
+            'approval_status' => ApprovalStatus::PENDING,
+            'submitted_by_id' => $leo?->id,
+        ]);
+        $this->logCreated($audit, $leo);
+        Subtask::create([
+            'task_id' => $audit->id,
+            'name' => 'Run the crawler across staging',
+            'assignee_id' => $leo?->id,
+            'status_id' => $statuses['todo']->id,
+            'priority' => TaskPriority::MEDIUM,
+            'effort_score' => 2,
+            'approval_status' => ApprovalStatus::PENDING,
+            'submitted_by_id' => $leo?->id,
+        ]);
+
+        // 7) A proposal a PM already sent back — Grace can revise and resubmit it.
+        $rejected = Task::create([
+            'project_id' => $project->id,
+            'title' => 'Rewrite the pricing page in a new tone of voice',
+            'description' => 'Lighter, benefit-led copy across all three tiers.',
+            'assignment_type' => AssignmentType::INDIVIDUAL,
+            'assignee_id' => $grace?->id,
+            'assigned_by_id' => $grace?->id,
+            'status_id' => $statuses['todo']->id,
+            'priority' => TaskPriority::LOW,
+            'effort_score' => 6,
+            'deadline' => $now->copy()->addDays(14)->toDateString(),
+            'approval_status' => ApprovalStatus::REJECTED,
+            'submitted_by_id' => $grace?->id,
+            'reviewed_by_id' => $marco?->id,
+            'reviewed_at' => $now->copy()->subDay(),
+            'rejection_reason' => 'Pricing copy is locked until the Q4 packaging review lands. Re-submit after 15 Nov with the new tiers.',
+        ]);
+        $this->logCreated($rejected, $grace);
+
+        // 8) A stand-alone sub-task proposal on an already-approved task — this one
+        //    queues on its own, not as part of a bundle.
+        Subtask::create([
+            'task_id' => $nav->id,
+            'name' => 'Add keyboard navigation to the mega-menu',
+            'description' => 'Arrow keys + Escape, focus trap while open.',
+            'assignee_id' => $bea?->id,
+            'status_id' => $statuses['todo']->id,
+            'priority' => TaskPriority::MEDIUM,
+            'effort_score' => 3,
+            'approval_status' => ApprovalStatus::PENDING,
+            'submitted_by_id' => $bea?->id,
+        ]);
     }
 
     /**

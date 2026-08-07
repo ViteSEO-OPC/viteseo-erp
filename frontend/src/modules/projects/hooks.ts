@@ -632,3 +632,90 @@ export function useRestoreSubtask() {
     },
   });
 }
+
+// Approvals — the PM/Admin review queue for member-submitted work.
+export const approvalKeys = {
+  tasks: ["admin", "approvals", "tasks"] as const,
+  subtasks: ["admin", "approvals", "subtasks"] as const,
+};
+
+/**
+ * A decision (or a resubmission) moves work between the queue and the board, so
+ * it invalidates both — plus workloads, which a newly approved item feeds into.
+ */
+function invalidateAfterReview(qc: ReturnType<typeof useQueryClient>): void {
+  qc.invalidateQueries({ queryKey: approvalKeys.tasks });
+  qc.invalidateQueries({ queryKey: approvalKeys.subtasks });
+  qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+  qc.invalidateQueries({ queryKey: ["projects", "projects"] });
+  qc.invalidateQueries({ queryKey: projectKeys.workloads });
+}
+
+/** `enabled` is false for non-managers — the endpoint 403s for them. */
+export function usePendingTasks(
+  params?: Record<string, unknown>,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [...approvalKeys.tasks, params ?? {}],
+    queryFn: () => projectsApi.listPendingTasks(params),
+    enabled,
+  });
+}
+
+export function usePendingSubtasks(params?: Record<string, unknown>) {
+  return useQuery({
+    queryKey: [...approvalKeys.subtasks, params ?? {}],
+    queryFn: () => projectsApi.listPendingSubtasks(params),
+  });
+}
+
+export function useApproveTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => projectsApi.approveTask(id),
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
+
+export function useRejectTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      projectsApi.rejectTask(id, reason),
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
+
+export function useApproveSubtask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => projectsApi.approveSubtask(id),
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
+
+export function useRejectSubtask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      projectsApi.rejectSubtask(id, reason),
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
+
+export function useResubmitTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => projectsApi.resubmitTask(id),
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
+
+export function useResubmitSubtask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => projectsApi.resubmitSubtask(id),
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
