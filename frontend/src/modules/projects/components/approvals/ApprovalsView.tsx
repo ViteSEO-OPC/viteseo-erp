@@ -305,7 +305,7 @@ function BulkBar({
         title={`Approve ${count} ${label}?`}
         description={
           <>
-            All {count} go onto their boards, start counting toward their
+            All {count}&nbsp;go onto their boards, start counting toward their
             assignees&apos; workloads, and become visible to their whole
             projects. Their authors are notified.
           </>
@@ -381,7 +381,7 @@ function ReviewActions({
         title="Approve this submission?"
         description={
           <>
-            <span className="font-semibold text-ink">{subject}</span> goes onto
+            <span className="font-semibold text-ink">{subject}</span>&nbsp;goes onto
             the board, starts counting toward its assignee&apos;s workload, and
             becomes visible to the whole project.
           </>
