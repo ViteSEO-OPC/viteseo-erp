@@ -678,6 +678,22 @@ export function useApproveTask() {
   });
 }
 
+export function useBulkApproveTasks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => projectsApi.bulkApproveTasks(ids),
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
+
+export function useBulkApproveSubtasks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => projectsApi.bulkApproveSubtasks(ids),
+    onSuccess: () => invalidateAfterReview(qc),
+  });
+}
+
 export function useRejectTask() {
   const qc = useQueryClient();
   return useMutation({

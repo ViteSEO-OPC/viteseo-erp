@@ -120,6 +120,10 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
         Route::get('tasks', [ApprovalController::class, 'tasks']);
         Route::get('subtasks', [ApprovalController::class, 'subtasks']);
 
+        // Bulk routes come first: `tasks/bulk-approve` must not bind {task}.
+        Route::post('tasks/bulk-approve', [ApprovalController::class, 'bulkApproveTasks']);
+        Route::post('subtasks/bulk-approve', [ApprovalController::class, 'bulkApproveSubtasks']);
+
         Route::post('tasks/{task}/approve', [ApprovalController::class, 'approveTask']);
         Route::post('tasks/{task}/reject', [ApprovalController::class, 'rejectTask']);
         Route::post('subtasks/{subtask}/approve', [ApprovalController::class, 'approveSubtask']);

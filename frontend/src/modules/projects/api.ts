@@ -9,6 +9,7 @@ import type {
   Comment,
   CreateTaskPayload,
   Group,
+  BulkApproveResult,
   Link,
   PendingSubtask,
   PendingTask,
@@ -439,6 +440,21 @@ export const projectsApi = {
   approveTask: async (id: string): Promise<Task> => {
     const { data } = await apiClient.post<ApiResource<Task>>(
       `${BASE}/admin/approvals/tasks/${id}/approve`,
+    );
+    return data.data;
+  },
+  /** Approve a whole selection at once; returns what went through vs was skipped. */
+  bulkApproveTasks: async (ids: string[]): Promise<BulkApproveResult> => {
+    const { data } = await apiClient.post<ApiResource<BulkApproveResult>>(
+      `${BASE}/admin/approvals/tasks/bulk-approve`,
+      { ids },
+    );
+    return data.data;
+  },
+  bulkApproveSubtasks: async (ids: string[]): Promise<BulkApproveResult> => {
+    const { data } = await apiClient.post<ApiResource<BulkApproveResult>>(
+      `${BASE}/admin/approvals/subtasks/bulk-approve`,
+      { ids },
     );
     return data.data;
   },

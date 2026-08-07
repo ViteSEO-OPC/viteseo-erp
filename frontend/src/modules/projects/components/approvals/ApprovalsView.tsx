@@ -17,14 +17,26 @@ import {
 import {
   useApproveSubtask,
   useApproveTask,
+  useBulkApproveSubtasks,
+  useBulkApproveTasks,
   usePendingSubtasks,
   usePendingTasks,
   useRejectSubtask,
   useRejectTask,
 } from "../../hooks";
-import type { ApprovalStatus, PendingSubtask, PendingTask } from "../../types";
+import type {
+  ApprovalStatus,
+  BulkApproveResult,
+  PendingSubtask,
+  PendingTask,
+} from "../../types";
 import { useOpenTask } from "../tasks/useTaskModal";
-import { AdminTable, type AdminColumn, type AdminQuery } from "../shared/AdminTable";
+import {
+  AdminTable,
+  type AdminColumn,
+  type AdminQuery,
+  type AdminSelection,
+} from "../shared/AdminTable";
 import { RejectReasonDialog } from "./RejectReasonDialog";
 
 type TabKey = "tasks" | "subtasks";
@@ -53,7 +65,11 @@ function fmtDate(iso: string | null | undefined): string {
   });
 }
 
-function ReviewStateBadge({ state }: { state: PendingTask["approval_status"] }) {
+function ReviewStateBadge({
+  state,
+}: {
+  state: PendingTask["approval_status"];
+}) {
   if (state === "rejected") return <Badge tone="danger">Rejected</Badge>;
   return <Badge tone="warning">Pending</Badge>;
 }
@@ -186,6 +202,123 @@ export function ApprovalsView() {
 }
 
 /**
+ * Row selection for a bulk approval, scoped to the rows currently on screen.
+ *
+ * `resetKey` changes whenever the tab, state filter, search or page changes:
+ * the selection is cleared then, because ids the reviewer can no longer see
+ * must not ride along into a bulk action they didn't mean to take.
+ */
+function useRowSelection(resetKey: string) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [lastKey, setLastKey] = useState(resetKey);
+
+  // Reset during render (React's recommended pattern) rather than in an effect,
+  // so a stale selection is never briefly live.
+  if (resetKey !== lastKey) {
+    setLastKey(resetKey);
+    if (selected.size > 0) setSelected(new Set());
+  }
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const toggleMany = (ids: string[], select: boolean) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (select) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+
+  const clear = () => setSelected(new Set());
+
+  return { selected, toggle, toggleMany, clear };
+}
+
+/**
+ * The bar above the table once something is ticked: what's selected, and the
+ * one bulk action. Rejecting stays per-row — it needs a reason written for that
+ * specific submission, and one blanket reason for a batch is not feedback.
+ */
+function BulkBar({
+  count,
+  noun,
+  isPending,
+  outcome,
+  onClear,
+  onApprove,
+}: {
+  count: number;
+  noun: string;
+  isPending: boolean;
+  /** Result of the last batch, so a partial run doesn't pass silently. */
+  outcome: BulkApproveResult | null;
+  onClear: () => void;
+  onApprove: () => void;
+}) {
+  const [confirm, setConfirm] = useState(false);
+
+  if (count === 0) {
+    return outcome ? (
+      <p className="mb-3 text-sm text-ink-soft">
+        Approved {outcome.approved} {outcome.approved === 1 ? noun : `${noun}s`}
+        {outcome.skipped > 0 &&
+          ` — ${outcome.skipped} skipped (already decided by someone else)`}
+        .
+      </p>
+    ) : null;
+  }
+
+  const label = count === 1 ? noun : `${noun}s`;
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-brand/40 bg-brand/10 px-4 py-3">
+      <span className="text-sm font-bold text-ink">
+        {count} {label} selected
+      </span>
+      <Button
+        size="sm"
+        disabled={isPending}
+        onClick={() => setConfirm(true)}
+        className="rounded-lg border border-line bg-brand px-3 py-1.5 text-xs font-bold text-ink hover:bg-brand-hover"
+      >
+        {isPending ? "Approving…" : `Approve ${count} selected`}
+      </Button>
+      <Button size="sm" variant="ghost" disabled={isPending} onClick={onClear}>
+        Clear
+      </Button>
+
+      <ConfirmDialog
+        open={confirm}
+        onClose={() => setConfirm(false)}
+        onConfirm={() => {
+          onApprove();
+          setConfirm(false);
+        }}
+        title={`Approve ${count} ${label}?`}
+        description={
+          <>
+            All {count} go onto their boards, start counting toward their
+            assignees&apos; workloads, and become visible to their whole
+            projects. Their authors are notified.
+          </>
+        }
+        confirmLabel={`Approve ${count}`}
+        destructive={false}
+        isPending={isPending}
+      />
+    </div>
+  );
+}
+
+/**
  * Approve / Reject buttons plus their dialogs, shared by both tabs.
  *
  * Reject is offered only while the row is still pending: one already sent back
@@ -277,7 +410,23 @@ function PendingTasksList({ query }: { query: AdminQuery }) {
   const result = usePendingTasks(query.params);
   const approve = useApproveTask();
   const reject = useRejectTask();
+  const bulkApprove = useBulkApproveTasks();
   const openTask = useOpenTask();
+
+  const rows = result.data?.data ?? [];
+  const { selected, toggle, toggleMany, clear } = useRowSelection(
+    JSON.stringify(query.params),
+  );
+  const selection: AdminSelection<PendingTask> = {
+    selected,
+    onToggle: toggle,
+    onToggleAll: (select) =>
+      toggleMany(
+        rows.map((r) => r.id),
+        select,
+      ),
+    itemLabel: "task",
+  };
 
   const columns: AdminColumn<PendingTask>[] = [
     {
@@ -339,28 +488,48 @@ function PendingTasksList({ query }: { query: AdminQuery }) {
   ];
 
   return (
-    <AdminTable
-      label="submissions"
-      columns={columns}
-      query={query}
-      result={result}
-      summaryVerb="submitted"
-      actionColumnClassName="w-[230px]"
-      actionLabel="Review"
-      emptyMessage="Nothing to review. Tasks members submit will appear here."
-      searchEmptyMessage="No submitted tasks match your search."
-      actions={(row) => (
-        <ReviewActions
-          subject={row.title}
-          state={row.approval_status}
-          isPending={approve.isPending || reject.isPending}
-          rejectError={reject.isError ? "Could not reject. Please try again." : null}
-          onEdit={() => openTask(row.id)}
-          onApprove={() => approve.mutate(row.id)}
-          onReject={(reason) => reject.mutate({ id: row.id, reason })}
-        />
+    <>
+      <BulkBar
+        count={selected.size}
+        noun="task"
+        isPending={bulkApprove.isPending}
+        outcome={bulkApprove.data ?? null}
+        onClear={clear}
+        onApprove={() =>
+          bulkApprove.mutate([...selected], { onSuccess: () => clear() })
+        }
+      />
+      {bulkApprove.isError && (
+        <p className="mb-3 text-sm text-danger">
+          Could not approve the selection. Please try again.
+        </p>
       )}
-    />
+      <AdminTable
+        label="submissions"
+        columns={columns}
+        query={query}
+        result={result}
+        selection={selection}
+        summaryVerb="submitted"
+        actionColumnClassName="w-[230px]"
+        actionLabel="Review"
+        emptyMessage="Nothing to review. Tasks members submit will appear here."
+        searchEmptyMessage="No submitted tasks match your search."
+        actions={(row) => (
+          <ReviewActions
+            subject={row.title}
+            state={row.approval_status}
+            isPending={approve.isPending || reject.isPending}
+            rejectError={
+              reject.isError ? "Could not reject. Please try again." : null
+            }
+            onEdit={() => openTask(row.id)}
+            onApprove={() => approve.mutate(row.id)}
+            onReject={(reason) => reject.mutate({ id: row.id, reason })}
+          />
+        )}
+      />
+    </>
   );
 }
 
@@ -368,7 +537,23 @@ function PendingSubtasksList({ query }: { query: AdminQuery }) {
   const result = usePendingSubtasks(query.params);
   const approve = useApproveSubtask();
   const reject = useRejectSubtask();
+  const bulkApprove = useBulkApproveSubtasks();
   const openTask = useOpenTask();
+
+  const rows = result.data?.data ?? [];
+  const { selected, toggle, toggleMany, clear } = useRowSelection(
+    JSON.stringify(query.params),
+  );
+  const selection: AdminSelection<PendingSubtask> = {
+    selected,
+    onToggle: toggle,
+    onToggleAll: (select) =>
+      toggleMany(
+        rows.map((r) => r.id),
+        select,
+      ),
+    itemLabel: "sub-task",
+  };
 
   const columns: AdminColumn<PendingSubtask>[] = [
     {
@@ -424,28 +609,48 @@ function PendingSubtasksList({ query }: { query: AdminQuery }) {
   ];
 
   return (
-    <AdminTable
-      label="submissions"
-      columns={columns}
-      query={query}
-      result={result}
-      summaryVerb="submitted"
-      actionColumnClassName="w-[230px]"
-      actionLabel="Review"
-      emptyMessage="Nothing to review. Sub-tasks members submit will appear here."
-      searchEmptyMessage="No submitted sub-tasks match your search."
-      actions={(row) => (
-        <ReviewActions
-          subject={row.name}
-          state={row.approval_status}
-          isPending={approve.isPending || reject.isPending}
-          rejectError={reject.isError ? "Could not reject. Please try again." : null}
-          // A sub-task is reviewed inside its parent task's modal.
-          onEdit={() => row.task_id && openTask(row.task_id)}
-          onApprove={() => approve.mutate(row.id)}
-          onReject={(reason) => reject.mutate({ id: row.id, reason })}
-        />
+    <>
+      <BulkBar
+        count={selected.size}
+        noun="sub-task"
+        isPending={bulkApprove.isPending}
+        outcome={bulkApprove.data ?? null}
+        onClear={clear}
+        onApprove={() =>
+          bulkApprove.mutate([...selected], { onSuccess: () => clear() })
+        }
+      />
+      {bulkApprove.isError && (
+        <p className="mb-3 text-sm text-danger">
+          Could not approve the selection. Please try again.
+        </p>
       )}
-    />
+      <AdminTable
+        label="submissions"
+        columns={columns}
+        query={query}
+        result={result}
+        selection={selection}
+        summaryVerb="submitted"
+        actionColumnClassName="w-[230px]"
+        actionLabel="Review"
+        emptyMessage="Nothing to review. Sub-tasks members submit will appear here."
+        searchEmptyMessage="No submitted sub-tasks match your search."
+        actions={(row) => (
+          <ReviewActions
+            subject={row.name}
+            state={row.approval_status}
+            isPending={approve.isPending || reject.isPending}
+            rejectError={
+              reject.isError ? "Could not reject. Please try again." : null
+            }
+            // A sub-task is reviewed inside its parent task's modal.
+            onEdit={() => row.task_id && openTask(row.task_id)}
+            onApprove={() => approve.mutate(row.id)}
+            onReject={(reason) => reject.mutate({ id: row.id, reason })}
+          />
+        )}
+      />
+    </>
   );
 }

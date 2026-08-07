@@ -321,6 +321,16 @@ export interface PendingSubtask {
   updated_at: string;
 }
 
+/**
+ * Outcome of a bulk approval. `skipped` counts rows that were no longer
+ * approvable when the batch ran — someone else decided them, or they were
+ * removed — so a stale selection reports honestly instead of failing whole.
+ */
+export interface BulkApproveResult {
+  approved: number;
+  skipped: number;
+}
+
 /** Aggregated live workload for a member (Member Workload Indicator). */
 export type WorkloadLevel = "light" | "moderate" | "heavy";
 

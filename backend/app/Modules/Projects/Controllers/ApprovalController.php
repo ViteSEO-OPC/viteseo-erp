@@ -9,6 +9,7 @@ use App\Modules\Projects\Events\SubtaskUpdated;
 use App\Modules\Projects\Events\TaskCreated;
 use App\Modules\Projects\Models\Subtask;
 use App\Modules\Projects\Models\Task;
+use App\Modules\Projects\Requests\BulkApproveRequest;
 use App\Modules\Projects\Requests\RejectApprovalRequest;
 use App\Modules\Projects\Resources\PendingSubtaskResource;
 use App\Modules\Projects\Resources\PendingTaskResource;
@@ -16,6 +17,7 @@ use App\Modules\Projects\Resources\SubtaskResource;
 use App\Modules\Projects\Resources\TaskResource;
 use App\Modules\Projects\Services\ApprovalService;
 use App\Support\SafeBroadcast;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -60,6 +62,53 @@ class ApprovalController extends Controller
         SafeBroadcast::toOthers(new TaskCreated($task));
 
         return new TaskResource($task);
+    }
+
+    /**
+     * Approve everything selected in the queue. Returns how many went through
+     * and how many were skipped (already approved by someone else, or gone), so
+     * the reviewer sees what actually happened rather than a silent partial.
+     */
+    public function bulkApproveTasks(BulkApproveRequest $request): JsonResponse
+    {
+        $this->authorize('approve', Task::class);
+
+        $result = $this->approvals->approveTasks($request->ids(), $request->user());
+
+        foreach ($result['approved'] as $task) {
+            $task->load('project', 'status', 'group', 'assignee', 'assignedBy', 'submittedBy');
+            SafeBroadcast::toOthers(new TaskCreated($task));
+        }
+
+        return response()->json([
+            'data' => [
+                'approved' => count($result['approved']),
+                'skipped' => $result['skipped'],
+            ],
+        ]);
+    }
+
+    public function bulkApproveSubtasks(BulkApproveRequest $request): JsonResponse
+    {
+        $this->authorize('approve', Subtask::class);
+
+        $result = $this->approvals->approveSubtasks($request->ids(), $request->user());
+
+        foreach ($result['approved'] as $subtask) {
+            $subtask->load('task.project');
+            SafeBroadcast::toOthers(new SubtaskUpdated(
+                $subtask,
+                (string) $subtask->task->project->uuid,
+                (string) $subtask->task->uuid,
+            ));
+        }
+
+        return response()->json([
+            'data' => [
+                'approved' => count($result['approved']),
+                'skipped' => $result['skipped'],
+            ],
+        ]);
     }
 
     public function rejectTask(RejectApprovalRequest $request, Task $task): TaskResource

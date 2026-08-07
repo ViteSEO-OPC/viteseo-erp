@@ -19,6 +19,23 @@ export type AdminColumn<T> = {
   render: (row: T) => ReactNode;
 };
 
+/**
+ * Row-selection wiring for tables that support a bulk action. Selection lives in
+ * the parent (it has to survive re-renders of this table and drive the bulk bar),
+ * so this is purely presentational.
+ */
+export type AdminSelection<T> = {
+  /** Selected row ids, as a Set for O(1) lookup while rendering. */
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  /** Select or clear every selectable row on the current page. */
+  onToggleAll: (select: boolean) => void;
+  /** Rows that may not be selected (e.g. nothing left to do on them). */
+  isSelectable?: (row: T) => boolean;
+  /** Accessible label prefix for the per-row checkbox, e.g. "task". */
+  itemLabel: string;
+};
+
 /** Query state passed from a page down into whichever tab is mounted. */
 export type AdminQuery = {
   params: Record<string, unknown>;
@@ -33,6 +50,7 @@ export function AdminTable<T extends { id: string }>({
   query,
   result,
   actions,
+  selection,
   actionLabel = "Action",
   actionColumnClassName = "w-[120px]",
   emptyMessage,
@@ -46,6 +64,8 @@ export function AdminTable<T extends { id: string }>({
   result: { data?: Paginated<T>; isLoading: boolean; isError: boolean };
   /** Contents of the trailing action cell for a row. */
   actions: (row: T) => ReactNode;
+  /** Omit for a table without bulk actions (the Archives queue). */
+  selection?: AdminSelection<T>;
   actionLabel?: string;
   actionColumnClassName?: string;
   emptyMessage: string;
@@ -57,6 +77,17 @@ export function AdminTable<T extends { id: string }>({
   const rows = data?.data ?? [];
   const total = data?.meta.total ?? 0;
   const pageCount = Math.max(1, data?.meta.last_page ?? 1);
+
+  // The header checkbox covers this page only — it can't speak for rows the
+  // server hasn't sent, and pretending otherwise would be a lie about scope.
+  const selectableRows = selection
+    ? rows.filter((r) => selection.isSelectable?.(r) ?? true)
+    : [];
+  const selectedOnPage = selectableRows.filter((r) => selection!.selected.has(r.id));
+  const allOnPageSelected =
+    selectableRows.length > 0 && selectedOnPage.length === selectableRows.length;
+  const someOnPageSelected =
+    selectedOnPage.length > 0 && !allOnPageSelected;
 
   if (isError) {
     return (
@@ -76,6 +107,22 @@ export function AdminTable<T extends { id: string }>({
           <table className="w-full min-w-[760px] border-collapse">
             <thead>
               <tr className="border-b border-line bg-[#f9fafb]">
+                {selection && (
+                  <th className="w-[44px] px-5 py-3 text-left">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-brand"
+                      aria-label={`Select all ${label} on this page`}
+                      checked={allOnPageSelected}
+                      ref={(el) => {
+                        // Partial page selection reads as indeterminate, not off.
+                        if (el) el.indeterminate = someOnPageSelected;
+                      }}
+                      disabled={selectableRows.length === 0}
+                      onChange={(e) => selection.onToggleAll(e.target.checked)}
+                    />
+                  </th>
+                )}
                 {columns.map((c) => (
                   <th
                     key={c.key}
@@ -95,7 +142,7 @@ export function AdminTable<T extends { id: string }>({
               {isLoading ? (
                 <tr>
                   <td
-                    colSpan={columns.length + 1}
+                    colSpan={columns.length + (selection ? 2 : 1)}
                     className="py-10 text-center text-ink-soft"
                   >
                     Loading {label}...
@@ -104,7 +151,7 @@ export function AdminTable<T extends { id: string }>({
               ) : rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={columns.length + 1}
+                    colSpan={columns.length + (selection ? 2 : 1)}
                     className="py-10 text-center text-ink-soft"
                   >
                     {query.search.trim() ? searchEmptyMessage : emptyMessage}
@@ -118,6 +165,18 @@ export function AdminTable<T extends { id: string }>({
                       idx % 2 === 1 ? "bg-[#f9fafb]" : "bg-white"
                     }`}
                   >
+                    {selection && (
+                      <td className="px-5 py-3.5">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-brand"
+                          aria-label={`Select ${selection.itemLabel}`}
+                          checked={selection.selected.has(row.id)}
+                          disabled={!(selection.isSelectable?.(row) ?? true)}
+                          onChange={() => selection.onToggle(row.id)}
+                        />
+                      </td>
+                    )}
                     {columns.map((c) => (
                       <td
                         key={c.key}

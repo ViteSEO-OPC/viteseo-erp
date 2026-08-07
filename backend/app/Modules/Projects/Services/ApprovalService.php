@@ -101,6 +101,62 @@ class ApprovalService
         });
     }
 
+    /**
+     * Approve a batch of task proposals selected in the review queue.
+     *
+     * One decision per row, all in a single transaction, so a mid-batch failure
+     * doesn't leave half the selection approved. Rows that are already approved
+     * (or that the caller can no longer see) are reported as skipped instead of
+     * failing the batch — the queue a reviewer selected from may be a moment
+     * stale, and that shouldn't cost them the other nine approvals.
+     *
+     * @param  list<string>  $uuids
+     * @return array{approved: list<Task>, skipped: int}
+     */
+    public function approveTasks(array $uuids, User $reviewer): array
+    {
+        return DB::transaction(function () use ($uuids, $reviewer): array {
+            $tasks = Task::query()
+                ->whereIn('uuid', $uuids)
+                ->where('approval_status', '!=', ApprovalStatus::APPROVED->value)
+                ->get();
+
+            $approved = [];
+            foreach ($tasks as $task) {
+                $approved[] = $this->approveTask($task, $reviewer);
+            }
+
+            return [
+                'approved' => $approved,
+                'skipped' => count($uuids) - count($approved),
+            ];
+        });
+    }
+
+    /**
+     * @param  list<string>  $uuids
+     * @return array{approved: list<Subtask>, skipped: int}
+     */
+    public function approveSubtasks(array $uuids, User $reviewer): array
+    {
+        return DB::transaction(function () use ($uuids, $reviewer): array {
+            $subtasks = Subtask::query()
+                ->whereIn('uuid', $uuids)
+                ->where('approval_status', '!=', ApprovalStatus::APPROVED->value)
+                ->get();
+
+            $approved = [];
+            foreach ($subtasks as $subtask) {
+                $approved[] = $this->approveSubtask($subtask, $reviewer);
+            }
+
+            return [
+                'approved' => $approved,
+                'skipped' => count($uuids) - count($approved),
+            ];
+        });
+    }
+
     public function rejectTask(Task $task, User $reviewer, string $reason): Task
     {
         $this->assertPending($task->approval_status, 'task');
