@@ -533,6 +533,19 @@ export function useAddComment(taskId: string) {
     },
   });
 }
+/** Edit a comment. Only its author may — the server enforces that too. */
+export function useUpdateComment(taskId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, content }: { id: string; content: string }) =>
+      projectsApi.updateComment(id, content),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.comments(taskId) });
+      qc.invalidateQueries({ queryKey: projectKeys.task(taskId) });
+    },
+  });
+}
+
 export function useTaskLinks(taskId: string) {
   return useQuery({
     queryKey: projectKeys.links(taskId),

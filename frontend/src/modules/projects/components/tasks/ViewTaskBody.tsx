@@ -9,6 +9,7 @@ import { isOverdue } from '../../overdue';
 import {
   useAddComment,
   useAddLink,
+  useUpdateComment,
   useApproveSubtask,
   useApproveTask,
   useCreateSubtask,
@@ -28,6 +29,7 @@ import { RejectReasonDialog } from '../approvals/RejectReasonDialog';
 import {
   activityLine,
   ApprovalBadge,
+  CommentRow,
   ApprovalBanner,
   CoAssigneePanel,
   CollapsiblePanel,
@@ -436,6 +438,7 @@ export function ViewTaskBody({
 
   const addLink = useAddLink(task.id);
   const addComment = useAddComment(task.id);
+  const updateComment = useUpdateComment(task.id);
   const createSubtask = useCreateSubtask(task.id);
   const updateSubtask = useUpdateSubtask(task.id);
 
@@ -1167,16 +1170,13 @@ export function ViewTaskBody({
               needs instead of reserving the full scroll height. */}
           <ul className="mt-4 max-h-64 space-y-4 overflow-y-auto pr-1">
             {comments.map((c) => (
-              <li key={c.id} className="flex gap-2">
-                {c.author && <Avatar name={c.author.name} src={c.author.avatar} size={28} />}
-                <div className="min-w-0">
-                  <p className="text-sm">
-                    <span className="font-bold text-brand">{c.author?.name ?? 'User'}</span>{' '}
-                    <span className="text-xs text-ink-faint">{formatDate(c.created_at)}</span>
-                  </p>
-                  <p className="text-sm text-ink-soft">{c.content}</p>
-                </div>
-              </li>
+              <CommentRow
+                key={c.id}
+                comment={c}
+                // Only the author may revise their own words (mirrors CommentPolicy).
+                canEdit={(c.author_id ?? c.author?.id) === user?.id}
+                update={updateComment}
+              />
             ))}
             {comments.length === 0 && (
               <li className="text-sm text-ink-faint">No comments yet.</li>

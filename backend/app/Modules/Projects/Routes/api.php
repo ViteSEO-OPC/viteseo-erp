@@ -72,6 +72,8 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     Route::post('tasks/{task}/comments', [CommentController::class, 'taskStore']);
     Route::get('subtasks/{subtask}/comments', [CommentController::class, 'subtaskIndex']);
     Route::post('subtasks/{subtask}/comments', [CommentController::class, 'subtaskStore']);
+    // Authors may revise their own comment; the original stays readable to all.
+    Route::match(['put', 'patch'], 'comments/{comment}', [CommentController::class, 'update']);
     Route::delete('comments/{comment}', [CommentController::class, 'destroy']);
 
     // Links (task XOR subtask parent)

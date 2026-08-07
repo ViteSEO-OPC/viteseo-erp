@@ -342,6 +342,14 @@ export const projectsApi = {
     );
     return data.data;
   },
+  /** Revise your own comment; the server preserves the original version. */
+  updateComment: async (id: string, content: string): Promise<Comment> => {
+    const { data } = await apiClient.patch<ApiResource<Comment>>(
+      `${BASE}/comments/${id}`,
+      { content },
+    );
+    return data.data;
+  },
 
   // Links
   listTaskLinks: async (taskId: string): Promise<Paginated<Link>> => {

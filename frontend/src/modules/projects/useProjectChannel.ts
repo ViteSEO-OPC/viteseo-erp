@@ -126,6 +126,8 @@ export function useProjectChannel(projectId?: string): void {
   };
   useRealtimeEvent(channel, ".CommentCreated", onComment);
   useRealtimeEvent(channel, ".CommentDeleted", onComment);
+  // An edit changes the text everyone is reading, so the thread refreshes too.
+  useRealtimeEvent(channel, ".CommentUpdated", onComment);
 
   // --- Subtasks ---
   useRealtimeEvent(channel, ".SubtaskUpdated", (ev: SubtaskUpdatedEvent) => {

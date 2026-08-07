@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Avatar, Badge, ChevronDownIcon, Field, Input, Select, UsersIcon, XIcon } from '@/core/ui';
+import { Avatar, Badge, Button, ChevronDownIcon, Field, Input, PencilIcon, Select, Textarea, UsersIcon, XIcon } from '@/core/ui';
 import type { User } from '@/core/types';
 import { NamePill } from '../shared/Pills';
-import { useGroupWorkload, useUserWorkload } from '../../hooks';
-import type { ActivityLog, ApprovalStatus, Group, Priority, ProjectStatus, StatusKey, WorkloadLevel } from '../../types';
+import { useGroupWorkload, useUpdateComment, useUserWorkload } from '../../hooks';
+import { relativeTime } from '../../notifications';
+import type { ActivityLog, ApprovalStatus, Comment, Group, Priority, ProjectStatus, StatusKey, WorkloadLevel } from '../../types';
 
 export const PRIORITIES: Priority[] = ['Low', 'Medium', 'High'];
 
@@ -715,5 +716,134 @@ export function ApprovalBanner({
         workload totals until it is approved.
       </p>
     </div>
+  );
+}
+
+/**
+ * One comment in a thread.
+ *
+ * An author may revise their own comment, but the thread stays honest about it:
+ * an edited comment carries an "Edited …" marker and a View Original toggle
+ * that EVERY reader gets, not just the author. Deleting is deliberately not
+ * offered — a comment others have replied to shouldn't vanish from under them.
+ */
+export function CommentRow({
+  comment,
+  canEdit,
+  update,
+}: {
+  comment: Comment;
+  canEdit: boolean;
+  update: ReturnType<typeof useUpdateComment>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(comment.content);
+  const [showOriginal, setShowOriginal] = useState(false);
+
+  const wasEdited = comment.edited_at !== null && comment.original_content !== null;
+  const body = showOriginal ? (comment.original_content ?? comment.content) : comment.content;
+
+  const cancel = () => {
+    setDraft(comment.content);
+    setEditing(false);
+  };
+
+  const save = () => {
+    const text = draft.trim();
+    // An unchanged (or emptied) comment isn't an edit — don't stamp it as one.
+    if (!text || text === comment.content) {
+      cancel();
+      return;
+    }
+    update.mutate(
+      { id: comment.id, content: text },
+      { onSuccess: () => setEditing(false) },
+    );
+  };
+
+  return (
+    <li className="flex gap-2">
+      {comment.author && (
+        <Avatar name={comment.author.name} src={comment.author.avatar} size={28} />
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1 text-sm">
+            <span className="font-bold text-brand">{comment.author?.name ?? 'User'}</span>{' '}
+            <span className="text-xs text-ink-faint">{relativeTime(comment.created_at)}</span>
+          </p>
+          {canEdit && !editing && (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(comment.content);
+                setShowOriginal(false);
+                setEditing(true);
+              }}
+              aria-label="Edit comment"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line text-ink-soft outline-none transition-colors hover:border-brand hover:text-ink focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <PencilIcon className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+
+        {editing ? (
+          <div className="mt-1 space-y-2">
+            <Textarea
+              autoFocus
+              rows={3}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') cancel();
+                // Enter saves; Shift+Enter keeps the newline.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  save();
+                }
+              }}
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" size="xs" variant="outline" onClick={cancel}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                className={TEAL}
+                disabled={update.isPending}
+                onClick={save}
+              >
+                {update.isPending ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+            {update.isError && (
+              <p className="text-sm text-danger">Could not save the edit. Please try again.</p>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm whitespace-pre-wrap text-ink-soft">{body}</p>
+        )}
+
+        {/* Edited marker + the original toggle — visible to every reader. */}
+        {wasEdited && !editing && (
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <span className="text-xs text-ink-faint">
+              {showOriginal
+                ? `Original ${relativeTime(comment.created_at)}`
+                : `Edited ${relativeTime(comment.edited_at!)}`}
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowOriginal((v) => !v)}
+              className="text-xs font-semibold text-brand underline underline-offset-2 outline-none hover:text-brand-hover focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              {showOriginal ? 'Hide Original' : 'View Original'}
+            </button>
+          </div>
+        )}
+      </div>
+    </li>
   );
 }
