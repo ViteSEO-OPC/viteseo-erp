@@ -15,6 +15,8 @@ class PayrollSetting extends Model
         // FIN-030 — the regional minimum DAILY wage. Null = not configured, warns about nothing.
         // Versioned with the rest of this row, so a wage order's date is respected.
         'minimum_daily_wage',
+        // FIN-020 — separation of duties on run → disburse and lock → unlock. Off by default.
+        'require_maker_checker',
     ];
 
     protected $casts = [
@@ -22,6 +24,7 @@ class PayrollSetting extends Model
         'pay_delay_days' => 'integer',
         'other_benefits_annual_cap' => 'decimal:2',
         'minimum_daily_wage' => 'decimal:2',
+        'require_maker_checker' => 'boolean',
     ];
 
     /**

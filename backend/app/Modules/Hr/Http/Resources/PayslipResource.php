@@ -90,8 +90,8 @@ class PayslipResource extends JsonResource
             'other_deductions' => (float) $this->other_deductions,
             'other_deductions_breakdown' => $this->other_deductions_breakdown ?? [],
             // FIN-032 — interest collected on loans this period. Already itemised as its own line in
-            // the breakdown above; exposed separately because the ledger posts it to income rather
-            // than to the payable that principal repayment reduces.
+            // the breakdown above; exposed separately so a consumer can total the cost of borrowing
+            // without re-parsing the breakdown's labels.
             'loan_interest' => (float) $this->loan_interest,
             'total_deductions' => (float) $this->total_deductions,
             // FIN-010 — an off-cycle correction's amount and what it is for, so the document can

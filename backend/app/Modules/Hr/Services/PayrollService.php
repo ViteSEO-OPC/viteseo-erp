@@ -2464,6 +2464,33 @@ class PayrollService
     }
 
     /** Re-open a locked cycle. Audited — this is the escape hatch, so it must be visible. */
+    /**
+     * Refuse when the same person is about to do both halves of a two-party action (FIN-020).
+     *
+     * Silent when the setting is off, when there is no recorded first actor (a run from before the
+     * provenance columns existed), or when either side is unknown — a control that guessed would block
+     * legitimate work on old data, and the point is separation of duties, not a puzzle about nulls.
+     *
+     * `super_admin` IS NOT EXEMPT, deliberately. An exemption for the most privileged account is an
+     * exemption for exactly the account whose compromise the control exists to contain.
+     */
+    private function assertDifferentActor(?int $firstActorId, ?int $secondActorId, string $message, string $field): void
+    {
+        if (! PayrollSetting::current()->require_maker_checker) {
+            return;
+        }
+
+        if ($firstActorId === null || $secondActorId === null) {
+            return;
+        }
+
+        if ($firstActorId !== $secondActorId) {
+            return;
+        }
+
+        throw ValidationException::withMessages([$field => [$message]]);
+    }
+
     public function unlock(PayrollRun $run, User $user): PayrollRun
     {
         if (! $run->isLocked()) {
@@ -2471,6 +2498,15 @@ class PayrollService
                 'locked_at' => ['This payroll run is not locked.'],
             ]);
         }
+
+        // FIN-020 — the person who sealed the period cannot be the one who reopens it. Unlocking is
+        // what makes a closed cycle recomputable, so it is the single most consequential undo here.
+        $this->assertDifferentActor(
+            $run->locked_by,
+            $user->id,
+            'You locked this run, so you cannot unlock it yourself. Someone else has to reopen it.',
+            'locked_at',
+        );
 
         $lockedAt = $run->locked_at->format('M j, Y');
         $run->update(['locked_at' => null, 'locked_by' => null]);
@@ -2528,6 +2564,20 @@ class PayrollService
                 'status' => ["The {$run->status} payroll run must finish before its payslips can be marked paid."],
             ]);
         }
+
+        // FIN-020 — MAKER–CHECKER. The person who ran the cycle cannot be the person who asserts the
+        // money left. That is the control finance auditors look for first, and without it one account
+        // could raise a salary, run payroll, pay it and seal the period unaided.
+        //
+        // Checked against `run_by`, which was already recorded — the provenance existed all along and
+        // nothing acted on it. Off by default; see the migration for why that trade was made.
+        $this->assertDifferentActor(
+            $run?->run_by,
+            $actor?->id ?? Auth::id(),
+            'This cycle was run by the same person. Someone else has to mark it paid — '
+                . 'that separation is what the maker–checker setting requires.',
+            'status',
+        );
 
         return DB::transaction(function () use ($payslip, $actor, $idempotencyKey) {
             $payslip->update([
@@ -2951,8 +3001,8 @@ class PayrollService
                     $slip['other_deductions_breakdown'] = [...$slip['other_deductions_breakdown'], ...$loans['lines']];
                     $slip['total_deductions'] = round((float) $slip['total_deductions'] + $loans['total'], 2);
                     $slip['net_pay'] = max(0, round((float) $slip['net_pay'] - $loans['total'], 2));
-                    // Stored on its own, because the ledger posts interest to INCOME while principal
-                    // repayment reduces a receivable — and the payslip shows them as separate lines.
+                    // Stored on its own, so the payslip can show the cost of borrowing separately
+                    // from the repayment — they are different things to the person paying them.
                     $slip['loan_interest'] = round((float) ($slip['loan_interest'] ?? 0) + $loans['interest'], 2);
 
                     $payslip->update([

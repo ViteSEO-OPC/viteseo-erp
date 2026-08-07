@@ -18,6 +18,7 @@ use App\Modules\Hr\Models\ReportExport;
 use App\Modules\Hr\Models\Requisition;
 use App\Modules\Hr\Services\RecruitmentService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
@@ -37,6 +38,8 @@ class ReportService
         // MF-11 — the export route gates on THIS list, not on `get()`'s match. A report added to one
         // and not the other reads fine and refuses to export, which is how it would ship half-wired.
         'leave_liability',
+        // FIN-042 — the pre-disbursement review screen: register → totals → variance.
+        'payroll_register',
     ];
 
     public function __construct(
@@ -56,8 +59,9 @@ class ReportService
             'attrition' => $this->attrition($filters),
             'leave' => $this->leave($filters),
             'leave_liability' => $this->leaveLiability($filters),
+            'payroll_register' => $this->payrollRegister($filters),
             'compensation' => $this->compensation($filters),
-            'payroll' => $this->payroll(),
+            'payroll' => $this->payroll($filters),
             'recruitment' => $this->recruitment($filters),
             'diversity' => $this->diversity($filters),
             'health_safety' => $this->healthSafety($filters),
@@ -86,7 +90,7 @@ class ReportService
     {
         // MF-11 — the liability report exports CSV for the same reason the audit trail does: it is a
         // row-per-employee table that accounting reconciles against, not a chart anyone reads.
-        return in_array($key, ['audit', 'leave_liability'], true) ? 'csv' : 'pdf';
+        return in_array($key, ['audit', 'leave_liability', 'payroll_register'], true) ? 'csv' : 'pdf';
     }
 
     /**
@@ -154,6 +158,7 @@ class ReportService
             'recruitment' => 'Recruitment Funnel',
             'leave' => 'Absences & Leaves',
             'leave_liability' => 'Leave Liability',
+            'payroll_register' => 'Payroll Register',
             'compensation' => 'Compensation & Benefits',
             'attrition' => 'Attrition & Tenure',
             'diversity' => 'Diversity',
@@ -179,6 +184,19 @@ class ReportService
     private function peso(float $n): string
     {
         return '₱' . number_format($n, 0);
+    }
+
+    /**
+     * Money to the centavo (FIN-042 / FIN-017).
+     *
+     * `peso()` above is `number_format($n, 0)` — fine for a headline stat, fatal for a register. The
+     * whole point of a register is that its totals reconcile to `hr_payroll_runs.total_*` exactly, and
+     * rounding every row to whole pesos guarantees they will not. Same reason the remittance export
+     * writes full precision.
+     */
+    private function pesoExact(float $n): string
+    {
+        return '₱' . number_format($n, 2);
     }
 
     /** @param array<string, mixed> $filters */
@@ -501,10 +519,377 @@ class ReportService
         ];
     }
 
-    private function payroll(): array
+    /**
+     * A gross/net total across the given runs, department-scoped and filter-aware (FIN-041).
+     *
+     * Unfiltered it is the calendar year from the run headers — exactly what it always was. Filtered it
+     * comes from the runs actually in scope, and from the payslips when a department is selected, because
+     * `hr_payroll_runs.total_*` is company-wide and cannot be split.
+     *
+     * @param  \Illuminate\Support\Collection<int, PayrollRun>  $runs
+     */
+    private function compensationTotal($runs, string $column, ?int $deptId, bool $scoped): float
     {
-        $runs = PayrollRun::where('status', 'completed')->orderByDesc('cycle_start')->get();
-        $netYtd = (float) $runs->filter(fn ($r) => (int) $r->cycle_start->format('Y') === $this->year())->sum('total_net');
+        if ($deptId !== null) {
+            $payslipColumn = $column === 'total_gross' ? 'gross' : 'net_pay';
+
+            return (float) Payslip::query()
+                ->join('hr_employees', 'hr_payslips.employee_id', '=', 'hr_employees.id')
+                ->whereIn('hr_payslips.payroll_run_id', $runs->pluck('id'))
+                ->where('hr_employees.department_id', $deptId)
+                ->sum('hr_payslips.' . $payslipColumn);
+        }
+
+        if ($scoped) {
+            return (float) $runs->sum($column);
+        }
+
+        return (float) PayrollRun::where('status', 'completed')
+            ->whereYear('cycle_start', $this->year())
+            ->sum($column);
+    }
+
+    /**
+     * One run's net, for the chart — from the run header normally, from the payslips when a department
+     * filter is on (FIN-041).
+     *
+     * `hr_payroll_runs.total_net` is company-wide by definition, so a departmental chart plotting it
+     * would show the same bars whatever department was selected — a filter that appears to work and
+     * does nothing.
+     */
+    private function runNet(PayrollRun $run, ?int $deptId): float
+    {
+        if ($deptId === null) {
+            return (float) $run->total_net;
+        }
+
+        return (float) $run->payslips()
+            ->whereHas('employee', fn ($e) => $e->where('department_id', $deptId))
+            ->sum('net_pay');
+    }
+
+    /**
+     * One run's gross / deductions / net as display strings, department-scoped when asked.
+     *
+     * @return list<string>
+     */
+    private function runTotals(PayrollRun $run, ?int $deptId): array
+    {
+        if ($deptId === null) {
+            return [
+                $this->peso((float) $run->total_gross),
+                $this->peso((float) $run->total_deductions),
+                $this->peso((float) $run->total_net),
+            ];
+        }
+
+        $slips = $run->payslips()
+            ->whereHas('employee', fn ($e) => $e->where('department_id', $deptId));
+
+        $gross = (float) $slips->clone()->sum('gross');
+        $net = (float) $slips->clone()->sum('net_pay');
+
+        return [
+            $this->peso($gross),
+            // Derived as gross − net rather than summing `total_deductions`: the payslip column is
+            // capped at gross (FIN-053), so summing it would not equal what actually came off.
+            $this->peso(round($gross - $net, 2)),
+            $this->peso($net),
+        ];
+    }
+
+    /**
+     * The payroll register — the screen payroll review actually needs before disbursement (FIN-042).
+     *
+     * The only per-employee financial listing was the run CSV export: a file you download, open in a
+     * spreadsheet and add up by hand. There was no on-screen register, no department subtotal, and no
+     * comparison against the previous period — so the standard pre-disbursement check (register →
+     * totals → variance) had no supporting screen at all.
+     *
+     * ITS TOTALS MUST EQUAL `hr_payroll_runs.total_*` EXACTLY, which is the finding's own validation and
+     * the reason `pesoExact()` exists. A register whose figures are rounded to whole pesos cannot
+     * reconcile to anything, and a reconciliation view that does not reconcile is worse than none — it
+     * looks authoritative while being off by the sum of everyone's centavos.
+     *
+     * THE VARIANCE IS AGAINST THE PREVIOUS RUN OF THE SAME PAY GROUP, not simply the previous run. A
+     * semi-monthly cycle compared against a 13th-month run would show a meaningless swing, and the
+     * question being asked is "did anything move since last payday for these people".
+     *
+     * DEFAULTS TO THE LATEST COMPLETED RUN, because that is the one about to be paid. `?run=` picks
+     * another; `?department=` narrows the rows, and when it does the subtotals and the reconciliation
+     * note both say so rather than appearing to disagree with the run.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function payrollRegister(array $filters = []): array
+    {
+        $deptId = $filters['department'] ?? null;
+
+        $run = isset($filters['run'])
+            ? PayrollRun::find($filters['run'])
+            : PayrollRun::where('status', 'completed')->orderByDesc('cycle_start')->orderByDesc('id')->first();
+
+        $departments = DB::table('hr_departments')
+            ->whereNull('deleted_at')
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
+            ->all();
+
+        if (! $run) {
+            return [
+                'title' => 'Payroll Register',
+                'description' => 'Per-employee gross-to-net for one run, with department subtotals and a comparison against the previous period.',
+                'mock' => false,
+                'summary' => [['label' => 'Completed runs', 'value' => '0']],
+                'bars' => null,
+                'table' => null,
+                'departments' => $departments,
+                'runs' => [],
+                'note' => 'No completed payroll run yet — there is nothing to review.',
+            ];
+        }
+
+        $slips = $run->payslips()
+            ->with(['employee.user', 'employee.department'])
+            ->when($deptId, fn ($q) => $q->whereHas('employee', fn ($e) => $e->where('department_id', $deptId)))
+            ->get()
+            ->sortBy(fn (Payslip $p) => [$p->employee?->department?->name ?? 'zzz', $p->employee?->user?->name ?? '']);
+
+        // --- the register rows, grouped by department with a subtotal after each ------------------
+        $rows = [];
+        $running = $this->blankTotals();
+
+        foreach ($slips->groupBy(fn (Payslip $p) => $p->employee?->department?->name ?? 'Unassigned') as $department => $group) {
+            $subtotal = $this->blankTotals();
+
+            foreach ($group as $slip) {
+                $line = $this->registerLine($slip);
+                $rows[] = array_merge([$slip->employee?->user?->name ?? '—', $department], $line['display']);
+
+                foreach ($line['figures'] as $key => $value) {
+                    $subtotal[$key] = round($subtotal[$key] + $value, 2);
+                    $running[$key] = round($running[$key] + $value, 2);
+                }
+            }
+
+            // A subtotal row rather than a separate table: it belongs where the eye already is, in
+            // the sequence it summarises. Marked with an em dash so it reads as a rule, not a person.
+            $rows[] = array_merge(["— {$department} subtotal —", (string) $group->count() . ' staff'], array_map(
+                fn (float $v) => $this->pesoExact($v),
+                array_values($subtotal),
+            ));
+        }
+
+        // --- variance against the previous run of the SAME pay group -----------------------------
+        $previous = PayrollRun::where('status', 'completed')
+            ->where('frequency', $run->frequency)
+            ->where('type', $run->type)
+            ->where('cycle_start', '<', $run->cycle_start)
+            ->orderByDesc('cycle_start')
+            ->orderByDesc('id')
+            ->first();
+
+        $variance = null;
+        if ($previous) {
+            $prior = $this->blankTotals();
+            foreach ($previous->payslips()->with('employee')->when(
+                $deptId,
+                fn ($q) => $q->whereHas('employee', fn ($e) => $e->where('department_id', $deptId)),
+            )->get() as $slip) {
+                foreach ($this->registerLine($slip)['figures'] as $key => $value) {
+                    $prior[$key] = round($prior[$key] + $value, 2);
+                }
+            }
+
+            $variance = [
+                'title' => 'Versus ' . $previous->cycle_start->format('M j') . '–' . $previous->cycle_end->format('M j, Y'),
+                'columns' => ['Line', 'This run', 'Previous', 'Change', '%'],
+                'rows' => array_map(function (string $label, string $key) use ($running, $prior) {
+                    $now = $running[$key];
+                    $was = $prior[$key];
+                    $delta = round($now - $was, 2);
+
+                    return [
+                        $label,
+                        $this->pesoExact($now),
+                        $this->pesoExact($was),
+                        ($delta > 0 ? '+' : '') . $this->pesoExact($delta),
+                        // No percentage against a zero base — "+∞%" is not information.
+                        $was == 0.0 ? '—' : ($delta >= 0 ? '+' : '') . number_format($delta / $was * 100, 1) . '%',
+                    ];
+                }, array_values($this->registerColumns()), array_keys($this->registerColumns())),
+            ];
+        }
+
+        // --- reconciliation ----------------------------------------------------------------------
+        // The finding's validation: these must match the run's own stored totals to the centavo. When a
+        // department filter is on they legitimately will not, so the note says which is being shown
+        // rather than letting the reader think the register disagrees with payroll.
+        $reconciles = $deptId === null
+            && abs($running['gross'] - (float) $run->total_gross) < 0.01
+            && abs($running['net'] - (float) $run->total_net) < 0.01;
+
+        return [
+            'title' => 'Payroll Register',
+            'description' => 'Per-employee gross-to-net for one run, with department subtotals and a comparison against the previous period.',
+            'mock' => false,
+            'summary' => [
+                ['label' => 'Gross', 'value' => $this->pesoExact($running['gross'])],
+                ['label' => 'Deductions', 'value' => $this->pesoExact(round($running['gross'] - $running['net'], 2))],
+                ['label' => 'Net pay', 'value' => $this->pesoExact($running['net'])],
+                ['label' => 'Employees', 'value' => (string) $slips->count()],
+            ],
+            'bars' => null,
+            'table' => [
+                'columns' => array_merge(['Employee', 'Department'], array_values($this->registerColumns())),
+                'rows' => $rows,
+            ],
+            'variance' => $variance,
+            'departments' => $departments,
+            // So the UI can offer a run picker rather than only ever showing the latest.
+            'runs' => PayrollRun::where('status', 'completed')
+                ->orderByDesc('cycle_start')
+                ->orderByDesc('id')
+                ->limit(24)
+                ->get()
+                ->map(fn (PayrollRun $r) => [
+                    'id' => $r->id,
+                    'label' => $r->cycle_start->format('M j') . '–' . $r->cycle_end->format('M j, Y')
+                        . ' · ' . ucwords(str_replace('_', '-', (string) $r->frequency)),
+                ])->all(),
+            'selected_run' => [
+                'id' => $run->id,
+                'cycle' => $run->cycle_start->format('M j') . '–' . $run->cycle_end->format('M j, Y'),
+                'status' => $run->status,
+                'is_locked' => $run->locked_at !== null,
+            ],
+            'note' => $deptId !== null
+                ? 'Showing one department only, so these totals are a subset of the run — they are not expected to match the run’s own figures.'
+                : ($reconciles
+                    ? 'Totals reconcile to the run’s recorded gross and net exactly.'
+                    : 'These totals DO NOT match the run’s recorded gross and net. The payslips and the run header disagree — do not disburse until that is explained.'),
+        ];
+    }
+
+    /**
+     * The register's money columns, in order. One list, so the header, each row, every subtotal and the
+     * variance table cannot drift out of alignment with one another.
+     *
+     * @return array<string, string>
+     */
+    private function registerColumns(): array
+    {
+        return [
+            'basic' => 'Basic',
+            'allowances' => 'Allowances',
+            'premiums' => 'OT & premiums',
+            'other_earnings' => 'Other earnings',
+            'gross' => 'Gross',
+            'statutory' => 'SSS/PH/PI',
+            'tax' => 'Tax',
+            'other_deductions' => 'Other',
+            'net' => 'Net pay',
+        ];
+    }
+
+    /** @return array<string, float> */
+    private function blankTotals(): array
+    {
+        return array_map(fn () => 0.0, $this->registerColumns());
+    }
+
+    /**
+     * One payslip as register figures plus their display strings.
+     *
+     * `other_earnings` catches the non-ordinary run types — 13th month, an adjustment, separation pay
+     * and leave conversion — so a register covering one of those runs still adds up to its gross
+     * instead of showing a gross explained by nothing. That was FIN-011's defect on the payslip; the
+     * register would have had the same hole.
+     *
+     * @return array{figures: array<string, float>, display: list<string>}
+     */
+    private function registerLine(Payslip $slip): array
+    {
+        $premiums = round(
+            (float) $slip->overtime_pay + (float) $slip->night_diff_pay
+                + (float) $slip->holiday_premium + (float) $slip->rest_day_premium,
+            2,
+        );
+
+        $otherEarnings = round(
+            (float) $slip->thirteenth_month + (float) $slip->adjustment_pay
+                + (float) ($slip->separation_pay ?? 0) + (float) ($slip->leave_conversion ?? 0)
+                + (float) $slip->reimbursements,
+            2,
+        );
+
+        $figures = [
+            'basic' => (float) $slip->base_salary,
+            'allowances' => (float) $slip->allowances,
+            'premiums' => $premiums,
+            'other_earnings' => $otherEarnings,
+            'gross' => (float) $slip->gross,
+            'statutory' => round((float) $slip->sss + (float) $slip->philhealth + (float) $slip->pagibig, 2),
+            'tax' => (float) $slip->withholding_tax,
+            'other_deductions' => (float) $slip->other_deductions,
+            'net' => (float) $slip->net_pay,
+        ];
+
+        return [
+            'figures' => $figures,
+            'display' => array_map(fn (float $v) => $this->pesoExact($v), array_values($figures)),
+        ];
+    }
+
+    /**
+     * Payroll & cost — now filterable by period, department and pay group (FIN-041 / FIN-017).
+     *
+     * IT LISTED EVERY COMPLETED RUN EVER, with no way to narrow it, so reconciling a single month or a
+     * single department was impossible on screen. The YTD figures were the only aggregates and they
+     * were fixed to the calendar year.
+     *
+     * `from`/`to` bound the CYCLE, `frequency` picks the pay group, `department` narrows the per-employee
+     * aggregates. THE LABELS CHANGE WITH THE FILTER — "Net computed (YTD)" becomes "(in range)" once a
+     * range is set, because a figure whose label lies about its own scope is how FIN-052 happened in the
+     * first place (a "Net paid" label over a computed-runs sum).
+     *
+     * A DEPARTMENT FILTER CANNOT NARROW A RUN'S OWN TOTALS — `hr_payroll_runs.total_*` is company-wide by
+     * definition. So when one is set, the run table and the per-run chart are computed from the payslips
+     * instead, and the note says so. Silently showing whole-company run totals under a department filter
+     * would be the more dangerous alternative.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function payroll(array $filters = []): array
+    {
+        $deptId = $filters['department'] ?? null;
+        $from = $filters['from'] ?? null;
+        $to = $filters['to'] ?? null;
+        $frequency = $filters['frequency'] ?? null;
+        $ranged = $from !== null || $to !== null;
+
+        $runs = PayrollRun::where('status', 'completed')
+            ->when($from, fn ($q) => $q->whereDate('cycle_end', '>=', $from))
+            ->when($to, fn ($q) => $q->whereDate('cycle_start', '<=', $to))
+            ->when($frequency, fn ($q) => $q->where('frequency', $frequency))
+            ->orderByDesc('cycle_start')
+            ->get();
+
+        // Payslip-level aggregation, so a department filter is expressible at all — and so the same
+        // query shape answers both the ranged and the YTD case.
+        $scopedSlips = fn () => Payslip::query()
+            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+            ->join('hr_employees', 'hr_payslips.employee_id', '=', 'hr_employees.id')
+            ->where('hr_payroll_runs.status', 'completed')
+            ->whereIn('hr_payroll_runs.id', $runs->pluck('id'))
+            ->when($deptId, fn ($q) => $q->where('hr_employees.department_id', $deptId));
+
+        // Unfiltered, this is the run headers summed exactly as before. Filtered, it has to come from
+        // the payslips — the run header cannot be split by department.
+        $netYtd = ($deptId === null && ! $ranged && ! $frequency)
+            ? (float) $runs->filter(fn ($r) => (int) $r->cycle_start->format('Y') === $this->year())->sum('total_net')
+            : (float) $scopedSlips()->sum('hr_payslips.net_pay');
 
         // FIN-052 — this figure used to be labelled "Net paid (YTD)" while summing COMPLETED RUNS.
         // A run reaches `completed` the moment payroll finishes computing it; whether the money
@@ -515,12 +900,15 @@ class ReportService
         // Split into what was computed and what was actually disbursed. Both are shown, because
         // each answers a real question — "what did this year's payroll cost" and "what has
         // actually gone out" — and collapsing them is what caused the problem.
-        $disbursedYtd = (float) Payslip::query()
-            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
-            ->where('hr_payslips.status', 'disbursed')
-            ->whereYear('hr_payroll_runs.cycle_start', $this->year())
-            ->sum('hr_payslips.net_pay');
+        $disbursedYtd = (float) ($deptId === null && ! $ranged && ! $frequency
+            ? Payslip::query()
+                ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+                ->where('hr_payslips.status', 'disbursed')
+                ->whereYear('hr_payroll_runs.cycle_start', $this->year())
+                ->sum('hr_payslips.net_pay')
+            : $scopedSlips()->where('hr_payslips.status', 'disbursed')->sum('hr_payslips.net_pay'));
 
+        $scopeLabel = $ranged || $frequency || $deptId !== null ? '(filtered)' : '(YTD)';
         $awaitingPayment = round($netYtd - $disbursedYtd, 2);
         $latest = $runs->first();
         $costPerHead = $latest && $latest->employee_count > 0
@@ -529,10 +917,12 @@ class ReportService
 
         // Government remittance (YTD): employee vs employer contribution per agency,
         // summed over this year's completed runs' payslips (P2-3).
-        $agg = Payslip::query()
-            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
-            ->where('hr_payroll_runs.status', 'completed')
-            ->whereYear('hr_payroll_runs.cycle_start', $this->year())
+        $agg = ($deptId === null && ! $ranged && ! $frequency
+            ? Payslip::query()
+                ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+                ->where('hr_payroll_runs.status', 'completed')
+                ->whereYear('hr_payroll_runs.cycle_start', $this->year())
+            : $scopedSlips())
             ->selectRaw('
                 COALESCE(SUM(sss),0) ee_sss, COALESCE(SUM(philhealth),0) ee_ph, COALESCE(SUM(pagibig),0) ee_pg,
                 COALESCE(SUM(withholding_tax),0) wht,
@@ -551,10 +941,12 @@ class ReportService
             'mock' => false,
             'summary' => [
                 // "Computed" and "disbursed" are different claims — see FIN-052 above.
-                ['label' => 'Net computed (YTD)', 'value' => $this->peso($netYtd)],
-                ['label' => 'Net disbursed (YTD)', 'value' => $this->peso($disbursedYtd)],
+                // FIN-041 — the label states its own scope. A figure whose label lies about what it
+                // covers is exactly how FIN-052 happened.
+                ['label' => 'Net computed ' . $scopeLabel, 'value' => $this->peso($netYtd)],
+                ['label' => 'Net disbursed ' . $scopeLabel, 'value' => $this->peso($disbursedYtd)],
                 ['label' => 'Awaiting payment', 'value' => $this->peso($awaitingPayment)],
-                ['label' => 'Employer share (YTD)', 'value' => $this->peso($employerYtd)],
+                ['label' => 'Employer share ' . $scopeLabel, 'value' => $this->peso($employerYtd)],
                 ['label' => 'Avg cost / head', 'value' => $this->peso($costPerHead)],
                 ['label' => 'Completed runs', 'value' => (string) $runs->count()],
             ],
@@ -572,20 +964,36 @@ class ReportService
                 'title' => 'Net payout per run',
                 'items' => $runs->take(9)->reverse()->values()->map(fn ($r) => [
                     'label' => $r->cycle_start->format('M j'),
-                    'value' => (int) $r->total_net,
-                    'display' => $this->peso((float) $r->total_net),
+                    'value' => (int) $this->runNet($r, $deptId),
+                    'display' => $this->peso($this->runNet($r, $deptId)),
                 ])->all(),
             ],
             'table' => [
-                'columns' => ['Cycle', 'Gross', 'Deductions', 'Net'],
+                'columns' => ['Cycle', 'Pay group', 'Gross', 'Deductions', 'Net'],
                 'rows' => $runs->map(fn ($r) => [
                     $r->cycle_start->format('M j') . ' – ' . $r->cycle_end->format('M j'),
-                    $this->peso((float) $r->total_gross),
-                    $this->peso((float) $r->total_deductions),
-                    $this->peso((float) $r->total_net),
+                    ucwords(str_replace('_', '-', (string) $r->frequency)),
+                    ...$this->runTotals($r, $deptId),
                 ])->all(),
             ],
-            'note' => null,
+            'departments' => DB::table('hr_departments')
+                ->whereNull('deleted_at')
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn ($d) => ['id' => (int) $d->id, 'name' => $d->name])
+                ->all(),
+            // The pay groups that actually have completed runs — offering one with no data is a
+            // filter that silently returns nothing.
+            'pay_groups' => PayrollRun::where('status', 'completed')
+                ->distinct()
+                ->orderBy('frequency')
+                ->pluck('frequency')
+                ->filter()
+                ->values()
+                ->all(),
+            'note' => $deptId !== null
+                ? 'Filtered to one department, so every figure is computed from payslips rather than the run headers — a run’s recorded total is company-wide and cannot be split.'
+                : null,
         ];
     }
 
@@ -699,7 +1107,15 @@ class ReportService
     {
         $deptId = $filters['department'] ?? null;
         $months = (int) ($filters['months'] ?? 9);
-        $since = now(config('app.timezone_local'))->startOfMonth()->subMonths(max(0, $months - 1));
+        // FIN-041 — an explicit range wins over the rolling `months` window. Both are kept: `months` is
+        // what the chart has always used, and a date range is what reconciling a specific period needs.
+        $from = $filters['from'] ?? null;
+        $to = $filters['to'] ?? null;
+        $frequency = $filters['frequency'] ?? null;
+        $ranged = $from !== null || $to !== null;
+        $since = $from
+            ? Carbon::parse($from, config('app.timezone_local'))->startOfDay()
+            : now(config('app.timezone_local'))->startOfMonth()->subMonths(max(0, $months - 1));
 
         // Contribution rates for the legend labels — from the DATED VERSION IN FORCE (Slice B9
         // item 2), not the legacy `hr_contribution_settings.config`.
@@ -735,8 +1151,12 @@ class ReportService
 
         $runs = PayrollRun::where('status', 'completed')
             ->where('cycle_start', '>=', $since->toDateString())
+            ->when($to, fn ($q) => $q->whereDate('cycle_start', '<=', $to))
+            ->when($frequency, fn ($q) => $q->where('frequency', $frequency))
             ->orderBy('cycle_start')
             ->get();
+
+        $scopeLabel = $ranged || $frequency || $deptId !== null ? '(filtered)' : '(YTD)';
 
         $points = [];
         foreach ($runs as $r) {
@@ -787,13 +1207,23 @@ class ReportService
             'summary' => [
                 // FIN-052 — "computed", not "paid". A completed run means payroll finished
                 // calculating; it says nothing about whether the money left. See payroll() above.
-                ['label' => 'Gross computed (YTD)', 'value' => $this->peso((float) PayrollRun::where('status', 'completed')->whereYear('cycle_start', $this->year())->sum('total_gross'))],
-                ['label' => 'Net computed (YTD)', 'value' => $this->peso((float) PayrollRun::where('status', 'completed')->whereYear('cycle_start', $this->year())->sum('total_net'))],
+                // FIN-041 — these follow the filter, and the LABEL says which scope it is showing.
+                // A figure labelled YTD while a range is applied is the FIN-052 mistake again.
+                ['label' => 'Gross computed ' . $scopeLabel, 'value' => $this->peso($this->compensationTotal($runs, 'total_gross', $deptId, $ranged || $frequency))],
+                ['label' => 'Net computed ' . $scopeLabel, 'value' => $this->peso($this->compensationTotal($runs, 'total_net', $deptId, $ranged || $frequency))],
                 ['label' => 'Benefits coverage', 'value' => count($coverage) ? ($coverage[0]['display']) : '—'],
             ],
             'bars' => null,
             'table' => null,
             'stacked' => ['series' => $series, 'points' => $points],
+            // FIN-041 — the pay groups with completed runs, so the filter only offers real options.
+            'pay_groups' => PayrollRun::where('status', 'completed')
+                ->distinct()
+                ->orderBy('frequency')
+                ->pluck('frequency')
+                ->filter()
+                ->values()
+                ->all(),
             'departments' => $departments,
             'note' => 'Bars stack net pay + the three government contributions (excludes withholding tax).',
         ];

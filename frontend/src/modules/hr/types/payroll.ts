@@ -177,7 +177,7 @@ export interface Payslip {
   // FIN-011 — every earning as a named line, built by PayslipResource so the screen and the PDF
   // render the same list. Sums to `totals.compensation` for every run type.
   earnings_breakdown: PayslipLine[];
-  // FIN-032 — interest collected on loans this period, itemised in other_deductions_breakdown too.
+  // FIN-032 — interest collected on loans this period, also itemised in other_deductions_breakdown.
   loan_interest: number;
   // Stored all along and never serialised until FIN-011 — a 13th-month payslip showed a gross with
   // every earnings line at zero and a tax figure with no visible basis.

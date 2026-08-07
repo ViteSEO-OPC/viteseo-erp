@@ -50,6 +50,21 @@ export interface Report {
   table: ReportTable | null;
   // Payroll & Cost specific — government remittance (employee vs employer).
   remittance?: TitledReportTable | null;
+  /**
+   * FIN-042 — the register's comparison against the previous period of the SAME pay group. Null when
+   * there is no earlier comparable run (a first run, or a 13th-month with no prior 13th-month).
+   */
+  variance?: TitledReportTable | null;
+  /** FIN-042 — completed runs, so the register can offer a picker instead of only the latest. */
+  runs?: { id: number; label: string }[];
+  selected_run?: {
+    id: number;
+    cycle: string;
+    status: string;
+    is_locked: boolean;
+  };
+  /** FIN-041 — the pay groups that actually have completed runs. */
+  pay_groups?: string[];
   note: string | null;
   exports: ReportExportEntry[];
   // Headcount & Movement specifics.

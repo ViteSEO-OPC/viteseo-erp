@@ -76,10 +76,9 @@ return new class extends Migration
         DB::table('hr_loan_payments')->update(['principal_amount' => DB::raw('amount')]);
 
         Schema::table('hr_payslips', function (Blueprint $table) {
-            // Its own column, not just a line inside `other_deductions_breakdown`, for two reasons:
-            // the ledger posts it to a different account (interest is INCOME to the company, while
-            // principal repayment reduces a receivable), and the payslip has to be able to show the
-            // employee what they paid for the money as distinct from what they paid back.
+            // Its own column, not just a line inside `other_deductions_breakdown`: the payslip has to
+            // show the employee what they paid FOR the money as distinct from what they paid BACK, and
+            // a total that has to be recovered by string-matching breakdown labels is not a total.
             $table->decimal('loan_interest', 12, 2)->default(0)->after('other_deductions');
         });
     }

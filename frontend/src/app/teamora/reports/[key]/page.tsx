@@ -12,6 +12,8 @@ import { StatCard } from "@/core/components/stat-card";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { ReportBars } from "@/modules/hr/components/report-bars";
 import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { Label } from "@/components/ui/label";
 import { HeadcountReport } from "@/modules/hr/components/headcount-report";
 import { RecruitmentReport } from "@/modules/hr/components/recruitment-report";
 import { LeaveReport } from "@/modules/hr/components/leave-report";
@@ -43,11 +45,24 @@ function GenericReport({ reportKey }: { reportKey: string }) {
   // it, so any report without a bespoke component had a filter the server supported and the page
   // never offered. The control only appears when there is something to filter by.
   const [department, setDepartment] = useState("all");
+  // FIN-041 / FIN-042 — a date range, a pay group and (for the register) which run to show. Each is
+  // sent only when set, so an untouched screen asks for exactly what it always did.
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [payGroup, setPayGroup] = useState("all");
+  const [run, setRun] = useState("");
+
   const {
     data: report,
     isLoading,
     isError,
-  } = useReport(reportKey, department !== "all" ? { department } : undefined);
+  } = useReport(reportKey, {
+    ...(department !== "all" ? { department } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(payGroup !== "all" ? { frequency: payGroup } : {}),
+    ...(run ? { run } : {}),
+  });
   const exportMut = useExportReport(reportKey);
 
   async function onExport() {
@@ -96,16 +111,78 @@ function GenericReport({ reportKey }: { reportKey: string }) {
               </div>
             )}
 
-            {(report.departments?.length ?? 0) > 0 && (
-              <SimpleSelect
-                className="w-56"
-                value={department}
-                onValueChange={setDepartment}
-                options={[
-                  { value: "all", label: "All departments" },
-                  ...report.departments!.map((d) => ({ value: String(d.id), label: d.name })),
-                ]}
-              />
+            {/* FIN-041 / FIN-042 — each control appears only when the report's own payload offers
+                something to filter by, so a report that doesn't support one never shows it. */}
+            {((report.departments?.length ?? 0) > 0 ||
+              (report.pay_groups?.length ?? 0) > 0 ||
+              (report.runs?.length ?? 0) > 0) && (
+              <div className="flex flex-wrap items-end gap-3 rounded-card border border-border bg-card p-4">
+                {(report.runs?.length ?? 0) > 0 && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="rep-run">Run</Label>
+                    <SimpleSelect
+                      className="w-64"
+                      value={run || String(report.selected_run?.id ?? "")}
+                      onValueChange={setRun}
+                      options={report.runs!.map((r) => ({ value: String(r.id), label: r.label }))}
+                    />
+                  </div>
+                )}
+                {(report.departments?.length ?? 0) > 0 && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="rep-dept">Department</Label>
+                    <SimpleSelect
+                      className="w-52"
+                      value={department}
+                      onValueChange={setDepartment}
+                      options={[
+                        { value: "all", label: "All departments" },
+                        ...report.departments!.map((d) => ({ value: String(d.id), label: d.name })),
+                      ]}
+                    />
+                  </div>
+                )}
+                {(report.pay_groups?.length ?? 0) > 0 && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="rep-group">Pay group</Label>
+                    <SimpleSelect
+                      className="w-44"
+                      value={payGroup}
+                      onValueChange={setPayGroup}
+                      options={[
+                        { value: "all", label: "All pay groups" },
+                        ...report.pay_groups!.map((g) => ({
+                          value: g,
+                          label: g.replace(/_/g, "-").replace(/\b\w/g, (c) => c.toUpperCase()),
+                        })),
+                      ]}
+                    />
+                  </div>
+                )}
+                {/* The range is offered on any report carrying a department list — every one of them
+                    aggregates over runs, so a period is always a meaningful thing to ask for. */}
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="rep-from">From</Label>
+                  <DatePicker id="rep-from" value={from} onChange={(v) => setFrom(v)} className="w-36" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="rep-to">To</Label>
+                  <DatePicker id="rep-to" value={to} onChange={(v) => setTo(v)} className="w-36" />
+                </div>
+                {(from || to || department !== "all" || payGroup !== "all") && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setFrom("");
+                      setTo("");
+                      setDepartment("all");
+                      setPayGroup("all");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                )}
+              </div>
             )}
 
             {report.mock && (
@@ -146,6 +223,26 @@ function GenericReport({ reportKey }: { reportKey: string }) {
                 rowKey={(_row, i) => i}
                 pageSize={10}
               />
+            )}
+
+            {/* FIN-042 — the variance against the previous period. Its own block below the register,
+                because it answers a different question: not "what does this run pay" but "what
+                changed since last time". */}
+            {report.variance && (
+              <div>
+                <h2 className="mb-3 text-h3 font-bold text-foreground">{report.variance.title}</h2>
+                <DataTable
+                  columns={report.variance.columns.map((c, i): Column<string[]> => ({
+                    header: c,
+                    align: i > 0 ? "right" : "left",
+                    className: i === 0 ? "font-medium text-foreground" : "text-muted-foreground",
+                    cell: (row) => row[i] ?? "—",
+                  }))}
+                  rows={report.variance.rows}
+                  rowKey={(_row, i) => i}
+                  pageSize={0}
+                />
+              </div>
             )}
 
             {/* Government remittance (Payroll & Cost) */}

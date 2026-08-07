@@ -93,6 +93,7 @@ class PayrollController extends Controller
             'pay_delay_days' => $setting->pay_delay_days,
             'other_benefits_annual_cap' => $setting->other_benefits_annual_cap === null ? null : (float) $setting->other_benefits_annual_cap,
             'minimum_daily_wage' => $setting->minimum_daily_wage === null ? null : (float) $setting->minimum_daily_wage,
+            'require_maker_checker' => (bool) $setting->require_maker_checker,
             'periods_per_year' => PayScheduleService::periodsPerYear($setting->frequency),
             'current_period' => $this->schedule->currentPeriod($setting),
             // Active pay groups (per-employee frequencies) — each runs on its own period.

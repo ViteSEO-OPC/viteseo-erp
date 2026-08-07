@@ -19,7 +19,12 @@ class ReportController extends Controller
         // FIN-041 — `page`/`per_page` let the audit report page instead of silently truncating.
         $report = $this->service->get(
             $key,
-            $request->only(['action', 'from', 'to', 'department', 'months', 'page', 'per_page']),
+            // FIN-041 paginates the audit report; FIN-042/FIN-017 add `run` (which register to show)
+            // and `frequency` (the pay group) to the payroll reports.
+            $request->only([
+                'action', 'from', 'to', 'department', 'months', 'page', 'per_page',
+                'run', 'frequency',
+            ]),
         );
 
         if (! $report) {

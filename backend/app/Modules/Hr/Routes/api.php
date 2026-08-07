@@ -1,6 +1,5 @@
 <?php
 
-use App\Modules\Hr\Http\Controllers\AccountingController;
 use App\Modules\Hr\Http\Controllers\AttendanceController;
 use App\Modules\Hr\Http\Controllers\AttendancePolicyController;
 use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
@@ -137,22 +136,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
-        // FIN-043 / MF-05 — the chart of accounts and the journal a run posts to the ledger.
-        Route::get('gl-accounts', [AccountingController::class, 'accountsIndex']);
-        Route::post('gl-accounts', [AccountingController::class, 'storeAccount']);
-        Route::match(['put', 'patch'], 'gl-accounts/{glAccount}', [AccountingController::class, 'updateAccount']);
-        Route::delete('gl-accounts/{glAccount}', [AccountingController::class, 'destroyAccount']);
-        Route::get('payroll/runs/{run}/journal', [AccountingController::class, 'journalShow']);
-        Route::post('payroll/runs/{run}/journal', [AccountingController::class, 'journalBuild']);
-        Route::post('journal-entries/{journalEntry}/post', [AccountingController::class, 'journalPost']);
-        Route::post('journal-entries/{journalEntry}/reverse', [AccountingController::class, 'journalReverse']);
-        // Both exports carry exact money and full government numbers, so each gets its own limiter —
-        // an unprefixed `throttle:` shares one counter across every route that uses it.
-        Route::get('accounting/export', [AccountingController::class, 'exportJournal'])
-            ->middleware('throttle:10,1,journal-export:');
-        Route::get('accounting/remittance', [AccountingController::class, 'exportRemittance'])
-            ->middleware('throttle:10,1,remittance-export:');
-
         // FIN-027 — the withholding-tax bands, readable. Read-only: tax rates come from statute, and
         // an editable table would silently mis-withhold for everyone at once.
         Route::get('tax-table', [TaxTableController::class, 'show']);

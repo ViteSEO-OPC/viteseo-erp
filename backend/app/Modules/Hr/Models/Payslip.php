@@ -37,9 +37,9 @@ class Payslip extends Model
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
         // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
         'other_deductions', 'other_deductions_breakdown',
-        // FIN-032 — interest collected on loans this period. Its own field because the ledger posts
-        // it to INCOME while principal repayment reduces a receivable, and it must be fillable or
-        // run()'s updateOrCreate silently drops it.
+        // FIN-032 — interest collected on loans this period. Its own field so the payslip can show
+        // the cost of borrowing separately from the repayment, and it must be fillable or run()'s
+        // updateOrCreate silently drops it.
         'loan_interest',
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
         // Slice B7 — which statutory deductions came from a per-employee override, not the rates.

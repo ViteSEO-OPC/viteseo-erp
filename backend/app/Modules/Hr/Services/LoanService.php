@@ -605,8 +605,8 @@ class LoanService
 
         return [
             'total' => round($total, 2),
-            // Reported separately so the payslip can store it and the ledger can post it to interest
-            // INCOME rather than to the payable that principal repayment reduces.
+            // Reported separately so the payslip can store it as its own figure — the cost of
+            // borrowing is a different thing from the repayment, and both belong on the document.
             'interest' => round($interestTotal, 2),
             'lines' => $lines,
         ];

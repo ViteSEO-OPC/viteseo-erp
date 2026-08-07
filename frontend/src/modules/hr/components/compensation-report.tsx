@@ -10,6 +10,8 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { StackedBarChart } from "@/modules/hr/components/stacked-bar-chart";
 import { useReport, useExportReport } from "@/modules/hr/hooks/use-report";
 import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { Label } from "@/components/ui/label";
 
 const RANGES = [
   { value: 3, label: "Last 3 Months" },
@@ -24,9 +26,18 @@ const COMP_COLORS = ["var(--info)", "var(--warning)", "var(--success)", "var(--v
 export function CompensationReport() {
   const [range, setRange] = useState(9);
   const [department, setDepartment] = useState("all");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [payGroup, setPayGroup] = useState("all");
 
+  // FIN-041 — an explicit date range and a pay group, alongside the rolling `months` window this
+  // report already had. The range WINS over `months` server-side: the rolling window is what the chart
+  // has always shown, and a range is what reconciling a specific period needs.
   const params: Record<string, string | number> = { months: range };
   if (department !== "all") params.department = department;
+  if (from) params.from = from;
+  if (to) params.to = to;
+  if (payGroup !== "all") params.frequency = payGroup;
 
   const { data: report, isLoading, isError } = useReport("compensation", params);
   const exportMut = useExportReport("compensation");
@@ -88,6 +99,35 @@ export function CompensationReport() {
             ...departments.map((d) => ({ value: String(d.id), label: d.name })),
           ]}
         />
+        {/* FIN-041 — pay group, offered only when there is more than one to choose between. */}
+        {(report?.pay_groups?.length ?? 0) > 1 && (
+          <SimpleSelect
+            aria-label="Pay group"
+            className="w-44"
+            value={payGroup}
+            onValueChange={setPayGroup}
+            options={[
+              { value: "all", label: "All pay groups" },
+              ...report!.pay_groups!.map((g) => ({
+                value: g,
+                label: g.replace(/_/g, "-").replace(/\b\w/g, (c) => c.toUpperCase()),
+              })),
+            ]}
+          />
+        )}
+        <div className="flex items-center gap-2">
+          <Label htmlFor="comp-from">From</Label>
+          <DatePicker id="comp-from" value={from} onChange={(v) => setFrom(v)} className="w-36" />
+        </div>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="comp-to">To</Label>
+          <DatePicker id="comp-to" value={to} onChange={(v) => setTo(v)} className="w-36" />
+        </div>
+        {(from || to) && (
+          <Button variant="ghost" onClick={() => { setFrom(""); setTo(""); }}>
+            Clear range
+          </Button>
+        )}
       </div>
 
       {/* Stacked chart */}
