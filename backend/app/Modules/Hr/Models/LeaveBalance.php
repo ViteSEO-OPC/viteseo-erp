@@ -18,13 +18,27 @@ class LeaveBalance extends Model
         'year',
         'entitled_days',
         'used_days',
+        // FIN-034 — written by LeaveAccrualService, not by HR's balance form.
+        'accrued_days',
+        'carried_days',
+        'carried_expires_on',
+        'accrued_through_month',
     ];
 
     protected $casts = [
         'year' => 'integer',
-        // Whole days only — paid leave can't be a half-day.
-        'entitled_days' => 'integer',
-        'used_days' => 'integer',
+        // FIN-034 — FLOAT, not integer. This used to read "Whole days only — paid leave can't be a
+        // half-day", which is the assumption half-day leave overturns. The columns have always been
+        // decimal(5,1); the CAST was what rounded 0.5 to 0, so a half day of leave was approved,
+        // deducted nothing, and left the employee's balance untouched.
+        'entitled_days' => 'float',
+        'used_days' => 'float',
+        // FIN-034 — the two halves `entitled_days` is the sum of. Stored so the accrual engine can
+        // recompute the total instead of incrementing it, which is what makes it re-run safe.
+        'accrued_days' => 'float',
+        'carried_days' => 'float',
+        'carried_expires_on' => 'date',
+        'accrued_through_month' => 'integer',
     ];
 
     public function employee(): BelongsTo

@@ -8,6 +8,7 @@ use App\Modules\Hr\Models\EarlyOutRequest;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\HalfDayRequest;
 use App\Modules\Hr\Models\LeaveRequest;
+use App\Modules\Hr\Models\OvertimeRequest;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -1072,8 +1073,13 @@ class AttendanceService
      *
      * @return array<string, array{minutes:int, night:int}> date 'Y-m-d' => overtime minutes
      */
-    public function autoOvertimeMinutesFor(Employee $employee, string $start, string $end, int $thresholdMinutes = 0): array
-    {
+    public function autoOvertimeMinutesFor(
+        Employee $employee,
+        string $start,
+        string $end,
+        int $thresholdMinutes = 0,
+        int $dailyCapMinutes = 0,
+    ): array {
         if ($employee->isManagement()) {
             return [];
         }
@@ -1102,14 +1108,175 @@ class AttendanceService
 
             $minutes = $outMin - $endMin;
             if ($minutes > 0 && $minutes >= max(0, $thresholdMinutes)) {
-                $out[$day->toDateString()] = [
-                    'minutes' => $minutes,
-                    'night' => self::nightOverlapMinutes($endMin, $outMin),
-                ];
+                // FIN-039 — the daily cap is applied HERE, not by the caller, because this is the only
+                // place that knows where the overtime window begins. Night differential is the reason
+                // it matters: capping 300 minutes to 240 has to mean "the first four hours after the
+                // shift", so the night portion is recomputed over the shortened window. Trimming the
+                // total afterwards and leaving `night` alone would pay night premium on minutes that
+                // were never paid as overtime.
+                $out[$day->toDateString()] = self::autoOvertimeEntry(
+                    $endMin,
+                    $minutes,
+                    $dailyCapMinutes > 0 ? $dailyCapMinutes : null,
+                );
             }
         }
 
         return $out;
+    }
+
+    /**
+     * One date's auto overtime, split into what pays automatically and what needs a human (FIN-039).
+     *
+     * `minutes` is what the run pays; `excess_minutes` is what the cap held back, which is not lost —
+     * it goes to the review queue and pays in full once an overtime request for that date is approved.
+     * `window_start` is carried so the period cap can recompute the night portion just as precisely.
+     *
+     * `$capMinutes` is NULLABLE, and null is not the same as 0: null means uncapped, 0 means nothing
+     * pays automatically. The policy column stores 0 for uncapped (its natural "unset" value), so the
+     * translation happens at the call site — a zero budget left over from the period cap must trim the
+     * day to nothing rather than waving it through.
+     *
+     * @return array{minutes:int, night:int, raw_minutes:int, excess_minutes:int, window_start:int}
+     */
+    private static function autoOvertimeEntry(int $windowStart, int $rawMinutes, ?int $capMinutes): array
+    {
+        $paid = $capMinutes === null ? $rawMinutes : max(0, min($rawMinutes, $capMinutes));
+
+        return [
+            'minutes' => $paid,
+            'night' => self::nightOverlapMinutes($windowStart, $windowStart + $paid),
+            'raw_minutes' => $rawMinutes,
+            'excess_minutes' => max(0, $rawMinutes - $paid),
+            'window_start' => $windowStart,
+        ];
+    }
+
+    /**
+     * The overtime the caps held back and nobody has approved yet (FIN-039).
+     *
+     * DERIVED ON READ, and writing nothing, which is the whole design. The obvious alternative — having
+     * the payroll run file a pending overtime request for each over-cap day — is the FIN-038 mistake:
+     * a run that mutates the records it reads stops being safe to re-run, and a preview would start
+     * creating requests. Here the queue is a question asked of attendance, so it answers the same way
+     * however many times HR opens it, and re-running payroll changes nothing.
+     *
+     * An APPROVAL REMOVES THE ITEM rather than resolving it, for the same reason. There is no state to
+     * clear: once a request covering the date is approved, the excess pays, so the derivation stops
+     * reporting it. HR's action is the existing approve button on the existing queue, not a new verb.
+     *
+     * Empty while `overtime_mode` is `approved_only` — nothing is auto-paid in that mode, so nothing is
+     * being held back. Empty too when both caps are 0, which is the shipped default.
+     *
+     * @return list<array{employee_id:int, employee_no:string|null, name:string|null, work_date:string,
+     *                    paid_minutes:int, excess_minutes:int, raw_minutes:int, approved_minutes:int}>
+     */
+    public function autoOvertimeReview(string $start, string $end): array
+    {
+        $policy = app(AttendancePolicyService::class)->get();
+
+        $dailyCap = (int) $policy->auto_overtime_daily_cap_minutes;
+        $periodCap = (int) $policy->auto_overtime_period_cap_minutes;
+
+        if ($policy->overtime_mode !== 'auto_after_threshold' || ($dailyCap <= 0 && $periodCap <= 0)) {
+            return [];
+        }
+
+        // Approved minutes per employee/date, so an item that has already been signed off drops out.
+        $approved = OvertimeRequest::where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get(['employee_id', 'work_date', 'hours'])
+            ->groupBy(fn (OvertimeRequest $r) => $r->employee_id.'|'.$r->work_date->toDateString())
+            ->map(fn (Collection $rows) => (int) round($rows->sum('hours') * 60));
+
+        $out = [];
+
+        // `withTrashed()` for the same reason the run itself uses it: someone who left mid-cycle still
+        // has days in it, and their overtime still has to be reviewable.
+        $employees = Employee::withTrashed()->with('user')->get();
+
+        foreach ($employees as $employee) {
+            $map = self::applyAutoOvertimePeriodCap(
+                $this->autoOvertimeMinutesFor(
+                    $employee,
+                    $start,
+                    $end,
+                    (int) $policy->overtime_threshold_minutes,
+                    $dailyCap,
+                ),
+                $periodCap,
+            );
+
+            foreach ($map as $date => $entry) {
+                $excess = (int) ($entry['excess_minutes'] ?? 0);
+                if ($excess <= 0) {
+                    continue;
+                }
+
+                $approvedMinutes = (int) ($approved[$employee->id.'|'.$date] ?? 0);
+                // Mirrors what the run releases: an approval covers the day's total, so only the part
+                // above what the cap already paid counts against the excess.
+                $stillHeld = $excess - min($excess, max(0, $approvedMinutes - (int) $entry['minutes']));
+
+                if ($stillHeld <= 0) {
+                    continue; // already approved — it will pay, so it is not a queue item
+                }
+
+                $out[] = [
+                    'employee_id' => $employee->id,
+                    'employee_no' => $employee->employee_no,
+                    'name' => $employee->user?->name,
+                    'work_date' => $date,
+                    'paid_minutes' => (int) $entry['minutes'],
+                    'excess_minutes' => $stillHeld,
+                    'raw_minutes' => (int) ($entry['raw_minutes'] ?? $entry['minutes']),
+                    'approved_minutes' => $approvedMinutes,
+                ];
+            }
+        }
+
+        // Largest overrun first — a five-hour excess is the forgotten clock-out worth looking at, a
+        // twenty-minute one usually is not.
+        usort($out, fn (array $a, array $b) => $b['excess_minutes'] <=> $a['excess_minutes']);
+
+        return $out;
+    }
+
+    /**
+     * The cycle-wide ceiling on auto overtime, applied after the daily one (FIN-039).
+     *
+     * Spent CHRONOLOGICALLY. The earliest dates in the cycle consume the budget and later ones fall to
+     * the review queue, because that is the only allocation an employee can predict while the month is
+     * still running: on the 3rd you either were inside the budget or you weren't, and nothing that
+     * happens on the 20th can retroactively take it away. Spending the budget on the largest days, or
+     * prorating it across the cycle, would make each day's pay a function of the whole month.
+     *
+     * @param  array<string, array<string, int>>  $map
+     * @return array<string, array<string, int>>
+     */
+    public static function applyAutoOvertimePeriodCap(array $map, int $periodCapMinutes): array
+    {
+        if ($periodCapMinutes <= 0 || $map === []) {
+            return $map; // 0 = uncapped
+        }
+
+        ksort($map); // date keys — chronological, see above
+        $budget = $periodCapMinutes;
+
+        foreach ($map as $date => $entry) {
+            $allowed = max(0, min((int) $entry['minutes'], $budget));
+            $budget -= $allowed;
+
+            // Re-derive from the RAW figure so the two caps compose instead of stacking: a day already
+            // trimmed 300→240 daily and then 240→60 here must report 240 held back, not 180.
+            $map[$date] = self::autoOvertimeEntry(
+                (int) ($entry['window_start'] ?? 0),
+                (int) ($entry['raw_minutes'] ?? $entry['minutes']),
+                $allowed, // a real budget, 0 included — see the null-vs-0 note on autoOvertimeEntry()
+            );
+        }
+
+        return $map;
     }
 
     /**
@@ -1436,9 +1603,13 @@ class AttendanceService
                             && $dateStr <= Carbon::parse($l->end_date)->toDateString());
                         $isUnpaidLeave = $covering && $covering->leaveType && ! $covering->leaveType->is_paid;
                         if ($isUnpaidLeave) {
-                            $unpaid += 1.0;
+                            // FIN-034 — a HALF day of LWOP costs half a day. HR stamping the row
+                            // `on_leave` must not turn it into a whole one; that would charge double
+                            // for the same absence and disagree with the half-day branch below.
+                            $unpaid += ($covering && $covering->is_half_day) ? 0.5 : 1.0;
                         }
-                        $prevWorkdayUnpaid = $isUnpaidLeave;
+                        // Half a day is never a full absence, so it can't forfeit a holiday either.
+                        $prevWorkdayUnpaid = $isUnpaidLeave && ! ($covering && $covering->is_half_day);
 
                         continue 2;
                     // 'present' / 'late' fall through to the normal worked-day path below, so
@@ -1455,6 +1626,60 @@ class AttendanceService
             // despite working it, and HR marking them present changed nothing.
             $leave = $leaves->first(fn ($l) => $dateStr >= Carbon::parse($l->start_date)->toDateString()
                 && $dateStr <= Carbon::parse($l->end_date)->toDateString());
+
+            // FIN-034 — HALF-DAY LEAVE, which cannot go through either branch below.
+            //
+            // The full-day branch is guarded on `! ($row && $row->time_in)`, because a clock-in is
+            // proof the leave wasn't taken. On a half day that reasoning inverts: the employee is
+            // SUPPOSED to clock in and work the other half, so reaching that guard would silently
+            // void the leave and dock nothing — while the balance had already been spent.
+            //
+            // Half of PAID leave costs nothing (the credit pays it); half of LWOP costs 0.5 of a
+            // day. Either way the remaining half is expected worked, so lateness and undertime are
+            // still priced against it — the same treatment an approved half-day request gets, which
+            // is the point: the two are now the same shape with different funding.
+            if ($leave && $leave->is_half_day) {
+                $halfUnpaid = ($leave->leaveType && ! $leave->leaveType->is_paid) ? 0.5 : 0.0;
+                $unpaid += $halfUnpaid;
+
+                if ($row && $row->status === 'late') {
+                    $lateCount++;
+                }
+
+                $eoFrac = 0.0;
+                foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
+                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                }
+                $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
+                $unpaid += $eoFrac;
+
+                if ($deductionsActive && $row && $row->time_in) {
+                    $ded = $this->deduction->forDay(
+                        $this->deductionCtx(
+                            $row,
+                            $eff,
+                            $policy,
+                            (string) $leave->half_day_period,
+                            1.0 - $halfUnpaid - $eoFrac,
+                            isset($earlyOuts[$dateStr]),
+                        ),
+                        $policy,
+                    );
+                    $unpaid += $ded->unpaidFraction;
+                    $lateMinutes += $ded->lateMinutes;
+                    $undertimeMinutes += $ded->undertimeMinutes;
+                    $lateDays += $ded->lateFraction;
+                    $undertimeDays += $ded->undertimeFraction;
+                    $flags = array_merge($flags, $ded->flags);
+                }
+
+                // Half a day worked is not an absence, so a following regular holiday stands.
+                // (Nor is half a day of PAID leave — only full LWOP forfeits it.)
+                $prevWorkdayUnpaid = false;
+
+                continue;
+            }
+
             if ($leave && ! ($row && $row->time_in)) {
                 $isUnpaidLeave = $leave->leaveType && ! $leave->leaveType->is_paid;
                 if ($isUnpaidLeave) {

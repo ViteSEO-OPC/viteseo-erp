@@ -240,6 +240,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
         Route::post('overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel']);
         Route::post('overtime-requests/{overtimeRequest}/reopen', [OvertimeRequestController::class, 'reopen']);
+        // FIN-039 — auto-mode overtime the caps held back, awaiting someone's yes. Derived on read:
+        // it writes nothing, and an approval on the ordinary queue above makes an item disappear.
+        Route::get('overtime-requests/auto-review', [OvertimeRequestController::class, 'autoReview']);
         Route::post('departments', [DepartmentController::class, 'store']);
         Route::match(['put', 'patch'], 'departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);

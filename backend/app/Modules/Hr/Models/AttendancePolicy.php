@@ -26,6 +26,9 @@ class AttendancePolicy extends Model
         'office_ips',
         'overtime_mode',
         'overtime_threshold_minutes',
+        // FIN-039 — how much auto-mode overtime pays without anyone approving it. 0 = uncapped.
+        'auto_overtime_daily_cap_minutes',
+        'auto_overtime_period_cap_minutes',
         'premium_rest_day_pct',
         'premium_special_day_pct',
         'premium_regular_holiday_pct',
@@ -59,6 +62,8 @@ class AttendancePolicy extends Model
         'office_radius_m' => 'integer',
         'office_ips' => 'array',
         'overtime_threshold_minutes' => 'integer',
+        'auto_overtime_daily_cap_minutes' => 'integer',
+        'auto_overtime_period_cap_minutes' => 'integer',
         'premium_rest_day_pct' => 'integer',
         'premium_special_day_pct' => 'integer',
         'premium_regular_holiday_pct' => 'integer',

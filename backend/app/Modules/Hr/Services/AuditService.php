@@ -45,6 +45,12 @@ class AuditService
         'authorized',   // the EMPLOYEE consented to a wage deduction (Art. 113)
         'cancelled',    // withdrawn before it took effect
         'rejected',     // refused by a reviewer
+        // FIN-034 — the leave accrual engine's two automated verbs. They have no human actor, which
+        // is exactly why they belong in the trail: an entitlement that moved on its own is the kind
+        // of change an employee will query, and "the scheduler did it on 1 January" has to be
+        // answerable from the log.
+        'rolled_over',  // last year's unused leave carried into this one
+        'expired',      // carried leave lapsed past its expiry date
     ];
 
     /**

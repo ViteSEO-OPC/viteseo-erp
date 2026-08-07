@@ -112,7 +112,7 @@ class LeaveService
      * shared mode, the single pool balance. The frontend renders whichever the
      * mode calls for.
      *
-     * @return array{mode: string, balances: Collection, pool: array<string, int>|null}
+     * @return array{mode: string, balances: Collection, pool: array<string, float>|null}
      */
     public function summaryForCurrentYear(Employee $employee): array
     {
@@ -127,12 +127,15 @@ class LeaveService
                 ->first();
 
             if ($poolModel) {
-                $entitled = (int) $poolModel->entitled_days;
-                $used = (int) $poolModel->used_days;
+                // FIN-034 — FLOAT, not int. The columns are decimal(5,1) and half-day leave puts
+                // real halves in them, so casting to int reported 2.5 days used as 2 and handed the
+                // employee back half a day of credit they had already spent.
+                $entitled = (float) $poolModel->entitled_days;
+                $used = (float) $poolModel->used_days;
                 $pool = [
                     'entitled_days' => $entitled,
                     'used_days' => $used,
-                    'remaining_days' => $entitled - $used,
+                    'remaining_days' => round($entitled - $used, 1),
                 ];
             }
         }
@@ -170,8 +173,12 @@ class LeaveService
      */
     public function create(Employee $employee, array $data): LeaveRequest
     {
-        // Leave is full-day only — half-days are a separate (always unpaid) request.
-        $days = $this->computeDays($data['start_date'], $data['end_date'], false);
+        // FIN-034 — leave can be taken half a day at a time, and `computeDays()` already knew how
+        // (0.5, same-day only). Only this call site was passing a hardcoded `false`, so the ability
+        // existed and was unreachable. A half day of PAID leave costs 0.5 credits and is paid; a
+        // half day of LWOP costs half a day's pay. Both leave the other half expected worked.
+        $isHalfDay = (bool) ($data['is_half_day'] ?? false);
+        $days = $this->computeDays($data['start_date'], $data['end_date'], $isHalfDay);
 
         // Unpaid leave (LWOP) has no credit pool — it's deducted from pay, not a
         // balance — so it skips the balance requirement entirely. Paid leave still
@@ -228,8 +235,8 @@ class LeaveService
             'leave_type_id' => $data['leave_type_id'],
             'start_date' => $data['start_date'],
             'end_date' => $data['end_date'],
-            'is_half_day' => false,
-            'half_day_period' => null,
+            'is_half_day' => $isHalfDay,
+            'half_day_period' => $isHalfDay ? ($data['half_day_period'] ?? null) : null,
             'days' => $days,
             'reason' => $data['reason'],
             'status' => 'pending',

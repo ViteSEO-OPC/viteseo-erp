@@ -16,7 +16,8 @@ class LeaveTypeAllotment extends Model
     ];
 
     protected $casts = [
-        'days_per_year' => 'integer',
+        // FLOAT, not integer — decimal(5,1) column, and monthly accrual divides it by 12 (FIN-034).
+        'days_per_year' => 'float',
     ];
 
     public function leaveType(): BelongsTo

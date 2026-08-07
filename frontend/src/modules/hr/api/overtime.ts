@@ -1,5 +1,6 @@
 import { apiClient } from "@/core/api-client";
 import type {
+  AutoOvertimeReviewItem,
   OvertimeClassification,
   OvertimeRequest,
   OvertimeSettings,
@@ -13,6 +14,23 @@ export async function getOvertimeSettings(): Promise<OvertimeSettings> {
 
 export async function getOvertimeRequests(): Promise<OvertimeRequest[]> {
   const res = await apiClient.get("/hr/overtime-requests");
+  return res.data.data;
+}
+
+/**
+ * FIN-039 — auto-mode overtime the policy caps held back, awaiting an approval. HR only.
+ *
+ * Derived from attendance on every read, so there is nothing to resolve here: an item disappears
+ * when an overtime request covering that date is APPROVED through the ordinary queue, which is also
+ * what releases the minutes for payment.
+ */
+export async function getAutoOvertimeReview(
+  start: string,
+  end: string,
+): Promise<AutoOvertimeReviewItem[]> {
+  const res = await apiClient.get("/hr/overtime-requests/auto-review", {
+    params: { start, end },
+  });
   return res.data.data;
 }
 

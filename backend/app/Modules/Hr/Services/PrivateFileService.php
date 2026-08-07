@@ -44,8 +44,28 @@ final class PrivateFileService
      * Long enough to open a PDF or load a page full of avatars on a slow connection; short enough
      * that a link copied out of a browser's history or an access log is dead by the time anyone
      * tries it. Stated once here so the whole module expires on the same clock.
+     *
+     * WHY 30 AND NOT 15 — checked against how the frontend actually caches these (Slice 4d).
+     *
+     * Every link is minted inside a list payload, and the UI caches those with TanStack Query under
+     * `core/query-provider.tsx`, which overrides nothing but `retry`. So `staleTime` is 0 and
+     * `refetchOnWindowFocus` is true: each mount refetches, and so does every return to the tab.
+     * In ordinary use a link is therefore seconds old when it is clicked, not minutes.
+     *
+     * The window that survives that is narrow but real: a page left MOUNTED AND FOCUSED, untouched
+     * past the TTL, whose links then expire in place. It is worth noting what the user sees, because
+     * the original concern was a broken image and that is not the failure — no HR surface renders a
+     * signed URL as an `<img>`. They are all anchors with `target="_blank"`, so an expired link is a
+     * new tab showing 403 rather than anything that looks like a bug in the page. Recoverable by a
+     * refresh, and it never touches the file's protection.
+     *
+     * 30 minutes puts the TTL past any plausible focused-idle stretch while staying firmly in
+     * "short-lived": a leaked link is still dead long before it reaches anyone. The alternative
+     * fixes were both worse — polling refetches on six surfaces to keep links warm, or swapping
+     * anchors for authenticated blob fetches, which is the real answer only if the threat model ever
+     * says the link itself must be useless without a session (see the class docblock).
      */
-    public const LINK_TTL_MINUTES = 15;
+    public const LINK_TTL_MINUTES = 30;
 
     /**
      * A short-lived signed URL for a stored file, or null when there is no file.

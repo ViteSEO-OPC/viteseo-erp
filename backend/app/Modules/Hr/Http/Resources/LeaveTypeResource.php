@@ -16,7 +16,16 @@ class LeaveTypeResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'code' => $this->code,
-            'days_per_year' => $this->days_per_year,
+            'days_per_year' => (float) $this->days_per_year,
+            // FIN-034 — accrual settings. 'none' means this type stays hand-managed.
+            'accrual_mode' => $this->accrual_mode,
+            'prorate_first_year' => (bool) $this->prorate_first_year,
+            'carry_over_cap_days' => $this->carry_over_cap_days === null
+                ? null
+                : (float) $this->carry_over_cap_days,
+            'carry_over_expiry_months' => $this->carry_over_expiry_months === null
+                ? null
+                : (int) $this->carry_over_expiry_months,
             'is_paid' => (bool) $this->is_paid,
             'color' => $this->color,
             'description' => $this->description,

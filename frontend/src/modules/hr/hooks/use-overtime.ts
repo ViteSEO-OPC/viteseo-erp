@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  getAutoOvertimeReview,
   getOvertimeRequests,
   getOvertimeSettings,
   classifyOvertime,
@@ -17,6 +18,20 @@ const KEY = ["hr", "overtime-requests"] as const;
 
 export function useOvertimeRequests() {
   return useQuery({ queryKey: KEY, queryFn: getOvertimeRequests });
+}
+
+/**
+ * Auto-mode overtime the caps held back, for the period shown (FIN-039).
+ *
+ * Read-only and derived, so it is safe to refetch freely. Keyed on the period so switching cycles
+ * doesn't show the previous one's rows.
+ */
+export function useAutoOvertimeReview(start: string, end: string) {
+  return useQuery({
+    queryKey: ["hr", "overtime-auto-review", start, end] as const,
+    queryFn: () => getAutoOvertimeReview(start, end),
+    enabled: !!start && !!end,
+  });
 }
 
 /** Whether overtime can be requested at all — drives the form vs. an explanatory note. */
@@ -50,7 +65,11 @@ export function useApproveOvertimeRequest() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => approveOvertimeRequest(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      // FIN-039 — an approval is what releases held overtime, so the review queue changes too.
+      qc.invalidateQueries({ queryKey: ["hr", "overtime-auto-review"] });
+    },
   });
 }
 

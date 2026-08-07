@@ -48,6 +48,12 @@ export interface LeaveTypeInput {
   description?: string | null;
   allow_backdated: boolean;
   backdate_limit_days?: number | null;
+  // FIN-034 — accrual settings. Declared here so the dialog's payload is type-checked rather than
+  // silently carrying fields the API contract doesn't mention.
+  accrual_mode?: "none" | "monthly" | "annual";
+  prorate_first_year?: boolean;
+  carry_over_cap_days?: number | null;
+  carry_over_expiry_months?: number | null;
 }
 
 // The employment statuses leave allotments are keyed on — derived from the one

@@ -1150,9 +1150,7 @@ class PayrollService
     {
         $map = match ($policy->overtime_mode) {
             'approved_only' => $this->approvedOvertimeMinutes($employee, $start, $end),
-            'auto_after_threshold' => $this->attendance->autoOvertimeMinutesFor(
-                $employee, $start, $end, (int) $policy->overtime_threshold_minutes,
-            ),
+            'auto_after_threshold' => $this->autoOvertimeMinutes($employee, $start, $end, $policy),
             default => [],
         };
 
@@ -1182,6 +1180,68 @@ class PayrollService
      *
      * @return array<string, array{minutes:int, night:int}>
      */
+    /**
+     * Auto-mode overtime, capped, with the over-cap minutes payable only on an approval (FIN-039).
+     *
+     * The two caps bound what pays with nobody looking; they are deliberately NOT a pay cut. A day
+     * trimmed by a cap keeps its full figure available, and an approved overtime request covering that
+     * date releases it. So the mode reads: up to the cap, being clocked in is enough; past the cap,
+     * somebody has to say yes. That is what makes a forgotten clock-out cost a review-queue item
+     * instead of five hours at 125%.
+     *
+     * The approval is treated as covering the DAY's total overtime, not just the excess, which is how
+     * HR actually files it — they see "7.5 hours worked past shift end" and approve that. Hence
+     * `$approved − $paid`: only the part the cap didn't already pay is added.
+     *
+     * @return array<string, array{minutes:int, night:int}>
+     */
+    private function autoOvertimeMinutes(Employee $employee, string $start, string $end, AttendancePolicy $policy): array
+    {
+        $map = $this->attendance->autoOvertimeMinutesFor(
+            $employee,
+            $start,
+            $end,
+            (int) $policy->overtime_threshold_minutes,
+            (int) $policy->auto_overtime_daily_cap_minutes,
+        );
+
+        $map = AttendanceService::applyAutoOvertimePeriodCap(
+            $map,
+            (int) $policy->auto_overtime_period_cap_minutes,
+        );
+
+        $withExcess = array_filter($map, fn (array $e) => ($e['excess_minutes'] ?? 0) > 0);
+        if ($withExcess === []) {
+            return $map; // nothing was held back, so nothing needs releasing
+        }
+
+        // Only now is the approved-request query worth running.
+        $approved = $this->approvedOvertimeMinutes($employee, $start, $end);
+
+        foreach (array_keys($withExcess) as $date) {
+            $entry = $map[$date];
+            $release = min(
+                (int) $entry['excess_minutes'],
+                max(0, (int) ($approved[$date]['minutes'] ?? 0) - (int) $entry['minutes']),
+            );
+
+            if ($release <= 0) {
+                continue;
+            }
+
+            // Extend the paid window rather than adding a bare total, so night differential covers
+            // exactly the minutes that are now being paid.
+            $map[$date]['minutes'] = (int) $entry['minutes'] + $release;
+            $map[$date]['night'] = AttendanceService::nightOverlapMinutes(
+                (int) $entry['window_start'],
+                (int) $entry['window_start'] + $map[$date]['minutes'],
+            );
+            $map[$date]['excess_minutes'] = (int) $entry['excess_minutes'] - $release;
+        }
+
+        return $map;
+    }
+
     private function approvedOvertimeMinutes(Employee $employee, string $start, string $end): array
     {
         $out = [];

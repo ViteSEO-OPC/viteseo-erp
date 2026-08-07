@@ -36,7 +36,10 @@ class LeaveRequest extends Model
         'start_date' => 'date',
         'end_date' => 'date',
         'is_half_day' => 'boolean',
-        'days' => 'integer',
+        // FIN-034 — FLOAT, not integer. The column is decimal(5,1) and half-day leave stores 0.5,
+        // which an integer cast truncated to 0 — so a half day consumed no balance at all and the
+        // whole feature silently did nothing. The cast, not the schema, was the blocker.
+        'days' => 'float',
         'reviewed_at' => 'datetime',
         'cancelled_at' => 'datetime',
     ];

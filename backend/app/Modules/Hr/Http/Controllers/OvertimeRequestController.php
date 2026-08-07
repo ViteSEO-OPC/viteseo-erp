@@ -7,6 +7,7 @@ use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreOvertimeRequestRequest;
 use App\Modules\Hr\Http\Resources\OvertimeRequestResource;
 use App\Modules\Hr\Models\OvertimeRequest;
+use App\Modules\Hr\Services\AttendanceService;
 use App\Modules\Hr\Services\OvertimeRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,6 +28,27 @@ class OvertimeRequestController extends Controller
     public function settings(): JsonResponse
     {
         return response()->json(['data' => $this->service->settings()]);
+    }
+
+    /**
+     * GET /api/v1/hr/overtime-requests/auto-review?start=&end= — auto-mode overtime the caps held
+     * back (FIN-039). HR only, and read-only: the list is derived from attendance every time, so it
+     * writes nothing and re-running payroll cannot change it.
+     *
+     * There is no resolve action. An item leaves the queue when an overtime request covering that
+     * date is APPROVED through the ordinary flow — which is also what releases the minutes for
+     * payment. Anything left here is overtime that will not be paid until somebody says yes.
+     */
+    public function autoReview(Request $request, AttendanceService $attendance): JsonResponse
+    {
+        $data = $request->validate([
+            'start' => ['required', 'date'],
+            'end' => ['required', 'date', 'after_or_equal:start'],
+        ]);
+
+        return response()->json([
+            'data' => $attendance->autoOvertimeReview($data['start'], $data['end']),
+        ]);
     }
 
     // GET /api/v1/hr/overtime-requests/classify?date=YYYY-MM-DD — how that date's overtime would be

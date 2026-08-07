@@ -52,6 +52,8 @@ class AttendancePolicyService
         'office_ips' => null,
         'overtime_mode' => 'approved_only',
         'overtime_threshold_minutes' => 0,
+        'auto_overtime_daily_cap_minutes' => 0, // uncapped — FIN-039
+        'auto_overtime_period_cap_minutes' => 0,
         // Premium & overtime rates (Phase 0) — seeded to the DOLE legal minimums (no-op).
         'premium_rest_day_pct' => 130,
         'premium_special_day_pct' => 130,

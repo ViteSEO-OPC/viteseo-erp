@@ -71,6 +71,11 @@ class UpdateAttendancePolicyRequest extends FormRequest
 
             'overtime_mode' => ['sometimes', 'in:none,approved_only,auto_after_threshold'],
             'overtime_threshold_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
+            // FIN-039 — ceilings on auto-mode overtime paid without an approval. 0 = uncapped, and
+            // that is the shipped default: there is no statutory maximum on overtime in the
+            // Philippines, so any figure here is the company's own control, not a legal one.
+            'auto_overtime_daily_cap_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
+            'auto_overtime_period_cap_minutes' => ['sometimes', 'integer', 'min:0', 'max:65535'],
 
             // Premium & overtime rates (Premium Pay epic, Phase 0). Whole-percent multipliers of the
             // hourly/daily rate; each HARD-FLOORED at its DOLE minimum (editable UP, never below).

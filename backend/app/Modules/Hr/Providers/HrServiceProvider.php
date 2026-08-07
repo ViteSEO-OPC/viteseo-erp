@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Providers;
 
 use App\Modules\Hr\Console\Commands\GenerateManagementAttendance;
+use App\Modules\Hr\Console\Commands\RunLeaveAccrual;
 use App\Modules\Hr\Services\AuditService;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Event;
@@ -52,7 +53,7 @@ class HrServiceProvider extends ServiceProvider
         // Module console commands + their schedule live here rather than in the shared
         // routes/console.php, so HR owns its own jobs.
         if ($this->app->runningInConsole()) {
-            $this->commands([GenerateManagementAttendance::class]);
+            $this->commands([GenerateManagementAttendance::class, RunLeaveAccrual::class]);
 
             // Management is exempt from the time clock, so the platform writes their
             // rows instead — late enough in the Manila day that the shift is over.
@@ -60,6 +61,16 @@ class HrServiceProvider extends ServiceProvider
             // NOTE: needs `php artisan schedule:run` on a system cron to fire.
             Schedule::command(GenerateManagementAttendance::class)
                 ->dailyAt('23:55')
+                ->timezone(config('app.timezone_local'))
+                ->withoutOverlapping()
+                ->onOneServer();
+
+            // FIN-034 — leave accrual, carry-over and expiry, on the 1st of each month. Early, so a
+            // balance is right before anyone files against it that day. The command is idempotent
+            // (it recomputes rather than increments), so a double fire or a manual catch-up after a
+            // missed month cannot over-credit — hence no "already ran" guard.
+            Schedule::command(RunLeaveAccrual::class)
+                ->monthlyOn(1, '00:30')
                 ->timezone(config('app.timezone_local'))
                 ->withoutOverlapping()
                 ->onOneServer();
