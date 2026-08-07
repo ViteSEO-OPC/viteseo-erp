@@ -837,7 +837,7 @@ export function CommentRow({
             <button
               type="button"
               onClick={() => setShowOriginal((v) => !v)}
-              className="text-xs font-semibold text-brand underline underline-offset-2 outline-none hover:text-brand-hover focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              className="text-xs font-semibold text-muted-foreground underline underline-offset-2 outline-none hover:text-brand-hover focus-visible:ring-[3px] focus-visible:ring-ring/50"
             >
               {showOriginal ? 'Hide Original' : 'View Original'}
             </button>
