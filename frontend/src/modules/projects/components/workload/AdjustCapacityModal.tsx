@@ -164,32 +164,37 @@ export function AdjustCapacityModal({
       </p>
 
       {/* Maximum capacity — the top of the range the bands are drawn against. */}
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-line px-4 py-3">
-        <div>
+      <div className="flex flex-col gap-3 rounded-xl border border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="min-w-0">
           <p className="text-sm font-bold text-ink">Maximum Capacity</p>
-          <p className="text-xs text-ink-soft">Top of the effort range — bands rescale with it</p>
+          <p className="text-xs text-ink-soft">
+            Top of the effort range — bands rescale with it
+          </p>
         </div>
+        {/* Stretches to the full row on a phone so the stepper stays thumb-sized
+            instead of being crushed against the label. */}
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
             aria-label="Decrease maximum capacity"
             onClick={() => setMaxClamped(max - 5)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-ink-soft hover:border-brand hover:text-ink"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line text-lg text-ink-soft hover:border-brand hover:text-ink sm:h-9 sm:w-9 sm:text-base"
           >
             −
           </button>
           <input
             type="number"
+            inputMode="numeric"
             value={max}
             aria-label="Maximum capacity"
             onChange={(e) => setMaxClamped(Number(e.target.value) || 0)}
-            className="h-9 w-20 rounded-lg border border-line text-center text-sm font-bold text-ink"
+            className="h-10 w-full min-w-16 rounded-lg border border-line text-center text-sm font-bold text-ink sm:h-9 sm:w-20"
           />
           <button
             type="button"
             aria-label="Increase maximum capacity"
             onClick={() => setMaxClamped(max + 5)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-line text-ink-soft hover:border-brand hover:text-ink"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line text-lg text-ink-soft hover:border-brand hover:text-ink sm:h-9 sm:w-9 sm:text-base"
           >
             +
           </button>
@@ -207,9 +212,10 @@ export function AdjustCapacityModal({
             style={{ width: pct(max - moderate), backgroundColor: CATEGORY_COLORS.heavy }}
           />
         </div>
-        <div className="mt-1 flex justify-between text-xs text-ink-faint">
+        <div className="mt-1 flex justify-between gap-2 text-xs text-ink-faint">
           <span>1</span>
-          <span>{Math.round(max / 2)}</span>
+          {/* The midpoint is a nicety; it goes first when the row gets tight. */}
+          <span className="hidden sm:inline">{Math.round(max / 2)}</span>
           <span>{max}</span>
         </div>
       </div>
@@ -233,7 +239,7 @@ export function AdjustCapacityModal({
         onChange={setModerateClamped}
       />
 
-      <div className="mt-5 flex items-start gap-3 rounded-xl border border-line bg-canvas px-4 py-3">
+      <div className="mt-5 flex items-start gap-3 rounded-xl border border-line bg-canvas px-3 py-3 sm:px-4">
         <span
           className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-ink text-[11px] font-bold text-white"
           aria-hidden
@@ -292,7 +298,8 @@ function ConfirmStep({
       </p>
 
       <div className="mt-4 overflow-hidden rounded-xl border border-line">
-        <table className="w-full border-collapse text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[300px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-line bg-[#f9fafb]">
               <th className="px-4 py-2 text-left text-xs font-bold uppercase tracking-wide text-ink-soft">
@@ -322,6 +329,7 @@ function ConfirmStep({
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <p className="mt-5 text-sm font-bold text-ink">
@@ -335,7 +343,7 @@ function ConfirmStep({
       {movers.length > 0 && (
         <ul className="mt-2 max-h-40 space-y-1.5 overflow-y-auto pr-1">
           {movers.map((m) => (
-            <li key={m.name} className="flex items-center gap-2 text-sm">
+            <li key={m.name} className="flex items-center gap-2 text-sm leading-6">
               <span className="min-w-0 flex-1 truncate text-ink">{m.name}</span>
               <span className="shrink-0 capitalize text-ink-faint">{m.from}</span>
               <span className="shrink-0 text-ink-faint" aria-hidden>
@@ -380,7 +388,7 @@ function BandSlider({
 }) {
   return (
     <div className="mt-5">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <p className="text-sm font-bold text-ink">{label}</p>
         <span
           className="rounded-full px-2.5 py-0.5 text-xs font-bold"
@@ -396,7 +404,7 @@ function BandSlider({
         min={min}
         max={max}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-2 w-full"
+        className="mt-2 h-6 w-full cursor-pointer touch-pan-y"
         style={{ accentColor: color }}
       />
     </div>
