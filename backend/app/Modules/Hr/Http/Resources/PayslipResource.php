@@ -116,18 +116,32 @@ class PayslipResource extends JsonResource
             // two independent implementations of it would eventually disagree.
             'totals' => $this->documentTotals(),
 
-            // The company's counterpart contributions. Not deducted from the employee and not
-            // their business — this is remittance data, so it goes to HR only. It was
-            // previously returned to everyone, which `PAYROLL-RULES-FIX-PLAN.md` flagged.
+            // The company's counterpart contributions.
+            //
+            // SHOWN TO THE EMPLOYEE TOO (2026-08-07, Joshua's call). These were HR-only on the
+            // grounds that remittance data is "not the employee's business". That reasoning holds
+            // for the two fields below it and not for this one: the employer share is money paid
+            // into the employee's OWN SSS, PhilHealth and Pag-IBIG record, and it is the part of
+            // their compensation they are least likely to know about. It is disclosure, not
+            // remittance workflow.
+            //
+            // It is never a term in any total — see `documentTotals()`, which does not reference
+            // it. Nothing deducts it, because nothing was deducted: it is the company's cost.
+            'employer_sss' => (float) $this->employer_sss,
+            'employer_philhealth' => (float) $this->employer_philhealth,
+            'employer_pagibig' => (float) $this->employer_pagibig,
+
+            // These two stay HR-only. Unlike the employer share, they are genuinely remittance
+            // workflow: one says a filing cannot be made as it stands, the other is what a
+            // remittance query asks for. Neither is something the employee can act on.
             $this->mergeWhen($this->isHrViewer($request), fn () => [
-                'employer_sss' => (float) $this->employer_sss,
-                'employer_philhealth' => (float) $this->employer_philhealth,
-                'employer_pagibig' => (float) $this->employer_pagibig,
                 // Slice B7 — which deductions came from a per-employee override rather than the
-                // rates. HR-only for the same reason as the employer shares: it is a remittance
-                // problem (the two halves can belong to different brackets), not something the
-                // employee can act on, and it must not appear on the document they receive.
+                // rates. The two halves can belong to different brackets, which is a problem for
+                // the person filing, not for the person paid.
                 'contribution_overrides' => $this->contribution_overrides ?? [],
+                // Slice B19 — the monthly salary figure each contribution was charged on. Null on
+                // payslips computed before B19 and on runs that take no statutory contributions.
+                'contribution_bases' => $this->contribution_bases,
             ]),
 
             'status' => $this->status,

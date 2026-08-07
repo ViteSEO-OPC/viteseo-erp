@@ -246,8 +246,7 @@ class PayrollService
         // Withholding tracks compensation ACTUALLY earned: the monthly-equivalent of the
         // (absence-prorated) base pay. Equals the full monthly salary when there are no
         // unpaid days, so a normal period is unchanged; it scales down only when pay is
-        // reduced, so we don't over-withhold a low-earning period. Contributions stay on
-        // the full monthly salary (PH bracket model), so `contribBase` is unchanged.
+        // reduced, so we don't over-withhold a low-earning period.
         //
         // Slice 10 — PREMIUM PAY IS TAXABLE. Holiday premium, overtime, the night differential
         // and rest-day premium are all taxable compensation in PH, and all four were excluded
@@ -273,6 +272,55 @@ class PayrollService
                 $allowanceSplit,
             );
         }
+
+        // Slice B19 — THE STATUTORY CONTRIBUTION BASE, which is no longer one number.
+        //
+        // WHAT WAS WRONG. Every contribution was charged on `$monthlyBase` — the profile salary,
+        // untouched by absences, lates, overtime, allowances or any premium line. An employee with
+        // a week of unpaid leave paid SSS on money they never received; one with heavy overtime
+        // paid nothing on it. Withholding tax has tracked actual earnings since Slice 10, so the
+        // two bases sat a dozen lines apart and disagreed.
+        //
+        // WHY BOTH FIGURES ARE COMPUTED AND THE VERSION PICKS. The three agencies do not measure
+        // the same thing: PhilHealth is the fixed BASIC monthly salary by law (Circular 2019-0009,
+        // which expressly excludes allowances, overtime and COLA), while SSS charges "compensation"
+        // (RA 11199 §8(f)) and Pag-IBIG monthly compensation. One rule for all three would be
+        // wrong for at least one of them, so each `hr_contribution_versions` row names its own
+        // `salary_basis` and `computePayslip()` reads the figure that version asks for.
+        //
+        // MONTHLY-EQUIVALENT, NOT THIS PERIOD'S CASH. Contributions are monthly amounts that
+        // `timingFactor()` then splits across the month's cutoffs, and the SSS bands are printed
+        // against a monthly salary — so a semi-monthly period's earnings have to be annualised
+        // back up before they can meet a bracket. Same conversion `$taxableMonthly` above does,
+        // and for the same reason.
+        //
+        // KNOWN LIMITATION, stated because it is a real one: with `deduction_timing = every`, two
+        // cutoffs of one month are annualised independently, so a period with overtime and a period
+        // with absences can land in different SSS bands and the month's total will not equal any
+        // single printed band. Setting the timing to `first` or `last` avoids it by charging the
+        // whole monthly contribution on one cutoff.
+        //
+        // NO CIRCULARITY, despite what "based on net pay" sounds like: this is gross EARNINGS,
+        // before any deduction. Nothing in it depends on the contributions computed from it.
+        $contributableAllowance = $this->allowances->monthlyContributableFor($employee, $pricedAsOf);
+
+        // The same part-period scaling the paid allowance gets above — an employee who was only
+        // employed for half the cycle received half the allowance and is charged on half of it.
+        if ($employmentFraction < 1.0) {
+            $contributableAllowance = round($contributableAllowance * $employmentFraction, 2);
+        }
+
+        // `$taxablePeriodPay` is exactly the right set of earnings lines: base pay net of absences
+        // and lates, plus the four premium lines. Reimbursements are excluded there because a
+        // reimbursement is not income, which makes it not remuneration here either.
+        $contributionBases = [
+            'basic' => round($monthlyBase, 2),
+            'earnings' => round(
+                ($periodsPerYear > 0 ? $taxablePeriodPay * $periodsPerYear / 12 : 0.0)
+                    + $contributableAllowance,
+                2,
+            ),
+        ];
 
         // A taxable allowance is compensation in full — no ceiling applies to it at all. Already a
         // MONTHLY figure, which is what the withholding base is measured in.
@@ -315,7 +363,7 @@ class PayrollService
             $dist['cycle_end'] ?? null,
         );
 
-        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $monthlyBase, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium, $otherDeductions);
+        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $contributionBases, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium, $otherDeductions);
 
         // The payslip shows the FULL period basic with the absence charged as its own deduction
         // line, rather than a basic figure quietly net of it. `absence_deduction` is the charge
@@ -536,24 +584,33 @@ class PayrollService
 
     /**
      * Compute a payslip breakdown. `basePay` is the attendance-adjusted pay and
-     * `allowances` the non-taxable de-minimis pay that go into gross; `contribBase` is
-     * the (unreduced) monthly salary statutory CONTRIBUTIONS are computed on (PH bracket
-     * model); `taxableMonthly` is the monthly-equivalent compensation WITHHOLDING TAX is
-     * computed on (scales with actual earnings); `contribConfig` is the enrolled
-     * contributions; `overrides` are per-employee statutory amounts that win over config.
+     * `allowances` the non-taxable de-minimis pay that go into gross; `contribBases` are the
+     * candidate monthly salary figures statutory CONTRIBUTIONS can be computed on, and each
+     * contribution's own version says which of them it wants (Slice B19); `taxableMonthly` is the
+     * monthly-equivalent compensation WITHHOLDING TAX is computed on (scales with actual
+     * earnings); `contribConfig` is the enrolled contributions; `overrides` are per-employee
+     * statutory amounts that win over config.
      *
+     * @param  array{basic: float, earnings: float}  $contribBases
      * @param  array<string, array<string, mixed>>  $contribConfig
      * @param  array{sss:?float, philhealth:?float, pagibig:?float}  $overrides
      * @param  array{index:int, count:int, deduction_timing:string, tax_timing:string}  $dist
-     * @return array<string, float>
+     * @return array<string, mixed>
      */
-    public function computePayslip(float $basePay, float $reimb, float $allowances, float $contribBase, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0, array $otherDeductions = ['total' => 0.0, 'lines' => []]): array
+    public function computePayslip(float $basePay, float $reimb, float $allowances, array $contribBases, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0, array $otherDeductions = ['total' => 0.0, 'lines' => []]): array
     {
-        // SSS/PhilHealth/Pag-IBIG are MONTHLY amounts (on the monthly base); the
+        // Slice B19 — each contribution is charged on the figure ITS OWN version asks for, which
+        // is why this is resolved per type rather than once. PhilHealth stays on basic salary by
+        // law while SSS follows earnings, and that is the recommended setup, not an edge case.
+        $sssBase = $this->contributionBaseFor('sss', $contribConfig, $contribBases);
+        $phBase = $this->contributionBaseFor('philhealth', $contribConfig, $contribBases);
+        $pgBase = $this->contributionBaseFor('pagibig', $contribConfig, $contribBases);
+
+        // SSS/PhilHealth/Pag-IBIG are MONTHLY amounts (on a monthly base); the
         // timing setting decides which cutoff(s) in the month they land on.
-        $sssM = $this->monthlyContribution('sss', $contribConfig, $overrides, $contribBase);
-        $phM = $this->monthlyContribution('philhealth', $contribConfig, $overrides, $contribBase);
-        $pgM = $this->monthlyContribution('pagibig', $contribConfig, $overrides, $contribBase);
+        $sssM = $this->monthlyContribution('sss', $contribConfig, $overrides, $sssBase);
+        $phM = $this->monthlyContribution('philhealth', $contribConfig, $overrides, $phBase);
+        $pgM = $this->monthlyContribution('pagibig', $contribConfig, $overrides, $pgBase);
 
         $cf = $this->timingFactor($dist['deduction_timing'] ?? 'every', $dist['index'] ?? 0, $dist['count'] ?? 1);
         $sss = round($sssM * $cf, 2);
@@ -561,11 +618,11 @@ class PayrollService
         $pagibig = round($pgM * $cf, 2);
 
         // Employer counterpart of each contribution (config `employer_rate`). Same
-        // enrolment + timing as the employee side, but NOT deducted from pay — tracked
+        // enrolment, base and timing as the employee side, but NOT deducted from pay — tracked
         // only for government remittance (see the Payroll report / run CSV).
-        $erSss = round($this->monthlyEmployerContribution('sss', $contribConfig, $contribBase) * $cf, 2);
-        $erPh = round($this->monthlyEmployerContribution('philhealth', $contribConfig, $contribBase) * $cf, 2);
-        $erPg = round($this->monthlyEmployerContribution('pagibig', $contribConfig, $contribBase) * $cf, 2);
+        $erSss = round($this->monthlyEmployerContribution('sss', $contribConfig, $sssBase) * $cf, 2);
+        $erPh = round($this->monthlyEmployerContribution('philhealth', $contribConfig, $phBase) * $cf, 2);
+        $erPg = round($this->monthlyEmployerContribution('pagibig', $contribConfig, $pgBase) * $cf, 2);
 
         // Withholding tax on the taxable monthly compensation actually earned (minus the
         // employee's mandatory contributions), distributed by the tax-timing setting. What the
@@ -715,6 +772,15 @@ class PayrollService
                 ['sss', 'philhealth', 'pagibig'],
                 fn ($t) => isset($contribConfig[$t]) && ($overrides[$t] ?? null) !== null,
             )) ?: null,
+            // Slice B19 — what each contribution was actually charged on, snapshot because it can
+            // no longer be re-derived: the earnings basis depends on this period's attendance and
+            // premium lines, and on a per-allowance `contributable` flag HR can change afterwards.
+            // Only the types the employee is enrolled in — the others were charged on nothing.
+            'contribution_bases' => array_filter([
+                'sss' => isset($contribConfig['sss']) ? $sssBase : null,
+                'philhealth' => isset($contribConfig['philhealth']) ? $phBase : null,
+                'pagibig' => isset($contribConfig['pagibig']) ? $pgBase : null,
+            ], fn ($v) => $v !== null) ?: null,
             'total_deductions' => $totalDeductions,
             // What couldn't be taken because gross wasn't enough to cover it (item 1).
             'deduction_carryover' => $deductionCarryover,
@@ -873,6 +939,25 @@ class PayrollService
         }
 
         return ['collected' => $collected, 'uncollected' => $uncollected];
+    }
+
+    /**
+     * The monthly salary figure one contribution is charged on (Slice B19).
+     *
+     * The version in force names the basis; `basic` is the answer for anything that does not,
+     * which is every version recorded before this slice and every type the employee is not
+     * enrolled in. An unrecognised value falls back to `basic` for the same reason
+     * `AllowanceService` defaults an unknown tax treatment to de-minimis: guessing the
+     * larger base for a value we do not understand would over-deduct from real people.
+     *
+     * @param  array<string, array<string, mixed>>  $config
+     * @param  array{basic: float, earnings: float}  $bases
+     */
+    private function contributionBaseFor(string $type, array $config, array $bases): float
+    {
+        $basis = $config[$type]['salary_basis'] ?? 'basic';
+
+        return round((float) ($bases[$basis] ?? $bases['basic'] ?? 0.0), 2);
     }
 
     /**

@@ -44,6 +44,9 @@ class Payslip extends Model
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
         // Slice B7 — which statutory deductions came from a per-employee override, not the rates.
         'contribution_overrides',
+        // Slice B19 — the salary figure each contribution was actually charged on. Not derivable
+        // after the fact once a contribution moves onto the earnings basis.
+        'contribution_bases',
         'total_deductions', 'deduction_carryover', 'deduction_carryover_breakdown',
         // FIN-005 — arrears from earlier periods recovered on this payslip.
         'arrears_recovered', 'arrears_recovered_breakdown',
@@ -97,6 +100,8 @@ class Payslip extends Model
         'employer_philhealth' => 'decimal:2',
         'employer_pagibig' => 'decimal:2',
         'contribution_overrides' => 'array',
+        // Slice B19 — contribution type => the monthly salary figure it was charged on.
+        'contribution_bases' => 'array',
         'total_deductions' => 'decimal:2',
         'deduction_carryover' => 'decimal:2',
         // FIN-053 — obligation => uncollected amount. Null when nothing went short.

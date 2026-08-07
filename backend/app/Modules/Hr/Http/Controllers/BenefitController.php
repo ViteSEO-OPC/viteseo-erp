@@ -59,6 +59,10 @@ class BenefitController extends Controller
                 'type' => $v->type,
                 'effective_from' => $v->effective_from?->format('Y-m-d'),
                 'basis' => $v->basis,
+                // Slice B19 — WITHOUT THIS the edit dialog seeds its selector from the version in
+                // force, finds nothing, defaults to `basic`, and the next rate change silently
+                // moves the contribution back off the earnings basis.
+                'salary_basis' => $v->salary_basis ?: 'basic',
                 'employee_rate' => (float) $v->employee_rate,
                 'employer_rate' => (float) $v->employer_rate,
                 'salary_floor' => $v->salary_floor !== null ? (float) $v->salary_floor : null,

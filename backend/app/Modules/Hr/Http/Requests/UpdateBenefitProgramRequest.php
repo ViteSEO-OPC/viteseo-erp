@@ -41,6 +41,9 @@ class UpdateBenefitProgramRequest extends FormRequest
             'loan_max_principal' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999'],
             'loan_term_periods' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:600'],
             'ceiling_period' => ['sometimes', 'nullable', 'in:monthly,semester,annual'],
+            // Slice B19 — whether this allowance counts toward the statutory contribution base.
+            // Independent of `tax_treatment`; the allowance is paid in full either way.
+            'contributable' => ['sometimes', 'boolean'],
             // Who the programme is for. `status` carries the list below; `custom` carries
             // `employee_ids`. The old `regular` value is gone — it was the only status the model
             // could express, and is now `status` with one entry.

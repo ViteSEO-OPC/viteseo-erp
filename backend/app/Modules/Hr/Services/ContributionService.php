@@ -150,6 +150,9 @@ class ContributionService
         $before = $existing?->only([
             'employee_rate', 'employer_rate', 'salary_floor', 'salary_cap',
             'employee_amount_cap', 'employer_amount_cap', 'fixed_employer_add_on', 'add_on_min_salary',
+            // Slice B19 — moving a contribution between the basic and earnings base changes what
+            // every payslip is charged on, which is a bigger change than any rate on this list.
+            'salary_basis',
         ]);
 
         $brackets = $data['brackets'] ?? null;
@@ -187,13 +190,20 @@ class ContributionService
                 . ($existing ? 'corrected' : 'set') . ' effective '
                 . $version->effective_from->format('M j, Y')
                 . ' — employee ' . round($version->employee_rate * 100, 3) . '%'
-                . ', employer ' . round($version->employer_rate * 100, 3) . '%',
+                . ', employer ' . round($version->employer_rate * 100, 3) . '%'
+                // Slice B19 — named in the sentence, not just the diff. "Charged on actual
+                // earnings" is the part of this change a reader needs to see without opening the
+                // before/after, because it moves what every payslip is measured against.
+                . ', charged on ' . ($version->salary_basis === 'earnings'
+                    ? 'actual earnings for the period'
+                    : 'basic monthly salary'),
             $version,
             $before,
             $version->only(array_keys($before ?? [
                 'employee_rate' => null, 'employer_rate' => null, 'salary_floor' => null,
                 'salary_cap' => null, 'employee_amount_cap' => null, 'employer_amount_cap' => null,
                 'fixed_employer_add_on' => null, 'add_on_min_salary' => null,
+                'salary_basis' => null,
             ])),
         );
 
@@ -437,6 +447,17 @@ class ContributionService
                 // Shown because it does NOT move with the override — the mismatch is the point.
                 'calculated_employer' => $enrolled ? ContributionCalculator::employer($config[$type], $base) : 0.0,
                 'basis' => $enrolled ? ($config[$type]['basis'] ?? 'percentage') : null,
+                // Slice B19 — WHAT THE FIGURE ABOVE ASSUMES, and it has to be said out loud.
+                //
+                // This preview has only one salary to work with: the profile's `base_salary`. For
+                // a contribution on the `basic` basis that IS the base payroll uses, so the number
+                // is exact. For one on `earnings` it is a perfect month — no absences, no lates,
+                // no overtime, no premium and every contributable allowance included — which the
+                // employee's actual payslip will rarely match. Returning the same shape for both
+                // and letting the form present them identically is how a preview becomes a figure
+                // people quote back at you.
+                'salary_basis' => $enrolled ? ($config[$type]['salary_basis'] ?? 'basic') : null,
+                'is_estimate' => $enrolled && ($config[$type]['salary_basis'] ?? 'basic') === 'earnings',
             ];
         }
 

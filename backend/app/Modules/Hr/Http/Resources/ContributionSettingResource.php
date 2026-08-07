@@ -29,6 +29,9 @@ class ContributionSettingResource extends JsonResource
             'current' => $version ? [
                 'effective_from' => $version->effective_from?->format('Y-m-d'),
                 'basis' => $version->basis,
+                // Slice B19 — which salary figure this is charged on: `basic` (the profile rate)
+                // or `earnings` (what the period actually paid).
+                'salary_basis' => $version->salary_basis ?: 'basic',
                 'employee_rate' => (float) $version->employee_rate,
                 'employer_rate' => (float) $version->employer_rate,
                 'salary_floor' => $version->salary_floor !== null ? (float) $version->salary_floor : null,

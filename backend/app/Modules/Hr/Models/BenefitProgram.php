@@ -56,6 +56,9 @@ class BenefitProgram extends Model
         'tax_treatment',
         'deminimis_ceiling',
         'ceiling_period',
+        // Slice B19 — does this allowance count toward the SSS / Pag-IBIG contribution base?
+        // Paid in full either way; this decides only whether it is remuneration for contributions.
+        'contributable',
         // Slice B15 — loan-policy config (kind = loan_policy).
         'loan_max_principal',
         'loan_term_periods',
@@ -74,6 +77,7 @@ class BenefitProgram extends Model
         'tiers' => 'array',
         'eligibility_statuses' => 'array',
         'amount' => 'decimal:2',
+        'contributable' => 'boolean',
     ];
 
     public function employees(): BelongsToMany

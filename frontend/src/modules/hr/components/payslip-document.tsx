@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
@@ -103,6 +103,14 @@ export function PayslipDocument({
   // Slice B7 — snapshotted on the payslip at run time, not read from the profile now: the
   // override may since have been cleared, and this payslip still charged what it charged.
   const overridden = p.contribution_overrides ?? [];
+  // Slice B19 — the monthly salary each contribution was charged on, snapshot at run time. Shown
+  // only when the three do NOT agree: with every contribution on the basic basis they are all the
+  // same figure and printing it three times would be noise. They diverge once one is moved onto
+  // actual earnings, and that is exactly when a remittance query needs to see it.
+  const bases = p.contribution_bases ?? null;
+  const baseValues = bases ? Object.values(bases) : [];
+  const basesDiffer =
+    baseValues.length > 0 && new Set(baseValues.map((v) => Number(v).toFixed(2))).size > 1;
 
   return (
     <div
@@ -189,9 +197,24 @@ export function PayslipDocument({
           </Table>
 
           <Table heading="Gov Contributions & Tax" className="flex-1">
-            <Row label="SSS Contribution" value={amount(p.sss)} />
-            <Row label="PhilHealth" value={amount(p.philhealth)} />
-            <Row label="Pag-IBIG" value={amount(p.pagibig)} />
+            {/* Each statutory line carries the employer's counterpart directly beneath it.
+                Beside the employee's own figure it means something — ₱875 of their pay went to
+                SSS and the company put ₱1,765 in alongside it — which is why it lives here
+                rather than in a detached block of its own. Never in Total Gov. */}
+            {(
+              [
+                ["SSS Contribution", p.sss, p.employer_sss],
+                ["PhilHealth", p.philhealth, p.employer_philhealth],
+                ["Pag-IBIG", p.pagibig, p.employer_pagibig],
+              ] as const
+            ).map(([label, employee, employer]) => (
+              <Fragment key={label}>
+                <Row label={label} value={amount(employee)} pair={(employer ?? 0) > 0} />
+                {(employer ?? 0) > 0 && (
+                  <SubRow label="+ employer share" value={amount(employer ?? 0)} />
+                )}
+              </Fragment>
+            ))}
             <Row label="Withholding Tax" value={amount(p.withholding_tax)} />
             <Row label="Total Gov" value={amount(t.government)} total />
           </Table>
@@ -231,12 +254,33 @@ export function PayslipDocument({
           </p>
         </div>
 
+        {/* HR keeps ONE extra thing the employee has no use for: the employer TOTAL, which is
+            what gets filed. The three components are already inline above for both audiences,
+            so the old standalone "Employer Share (for remittance)" table was repeating them. */}
         {showEmployer && (
-          <Table heading="Employer Share (for remittance)">
-            <Row label="SSS — employer" value={amount(p.employer_sss ?? 0)} />
-            <Row label="PhilHealth — employer" value={amount(p.employer_philhealth ?? 0)} />
-            <Row label="Pag-IBIG — employer" value={amount(p.employer_pagibig ?? 0)} />
-            <Row label="Total Employer Share" value={amount(employerTotal)} total />
+          <p className="px-1 text-caption text-muted-foreground">
+            Total employer share for remittance:{" "}
+            <span className="font-mono font-semibold text-foreground tabular-nums">
+              {amount(employerTotal)}
+            </span>
+          </p>
+        )}
+
+        {/* Slice B19 — WHAT each contribution was charged on. Not derivable after the fact once a
+            contribution follows actual earnings: the figure depends on this period's attendance and
+            premium lines, and on a per-allowance switch HR can change later. HR-only: it is
+            remittance workflow, not something the employee can act on. */}
+        {variant === "hr" && basesDiffer && bases && (
+          <Table heading="Charged on (monthly salary)">
+            {(["sss", "philhealth", "pagibig"] as const).map((type) =>
+              bases[type] === undefined ? null : (
+                <Row
+                  key={type}
+                  label={CONTRIBUTION_LABELS[type] ?? type}
+                  value={amount(bases[type] as number)}
+                />
+              ),
+            )}
           </Table>
         )}
 
@@ -320,7 +364,10 @@ function Table({
 }) {
   return (
     <div className={cn("flex flex-col", className)}>
-      <div className="flex items-center justify-between bg-muted px-4 py-2.5 font-mono text-xs font-bold uppercase">
+      {/* Section titles carry the document's structure, so they sit a shade larger and heavier
+          than the rows beneath them — enough to scan by, not enough to compete with the net-pay
+          bar. Matched to the PDF's headings so the two surfaces read the same. */}
+      <div className="flex items-center justify-between border-b border-border bg-muted px-4 py-2.5 font-mono text-sm font-extrabold uppercase tracking-wide">
         <span>{heading}</span>
         <span>Amount</span>
       </div>
@@ -334,18 +381,22 @@ function Row({
   note,
   value,
   total = false,
+  pair = false,
 }: {
   label: string;
   /** Qualifier shown beside the label, e.g. the hours behind an overtime figure. */
   note?: string;
   value: string;
   total?: boolean;
+  /** A `SubRow` follows: drop this row's rule so the two read as one unit. */
+  pair?: boolean;
 }) {
   return (
     <div
       className={cn(
         "flex items-center justify-between gap-4 px-4 py-3 text-sm",
-        !total && "border-b border-border",
+        !total && !pair && "border-b border-border",
+        pair && "pb-0",
         total && "font-bold",
       )}
     >
@@ -356,6 +407,23 @@ function Row({
       <span className={cn("shrink-0 font-mono tabular-nums", total ? "font-bold" : "font-medium")}>
         {value}
       </span>
+    </div>
+  );
+}
+
+/**
+ * A note ON the row above, not a row of its own — the employer's counterpart contribution.
+ *
+ * Indented, smaller, italic and muted: four signals at once that this belongs to the line above
+ * and is not another deduction. It is never in `Total Gov` — that figure is `totals.government`,
+ * computed by the API from the employee's own deductions, so there is no path by which this
+ * reaches it. The styling says so; the arithmetic enforces it.
+ */
+function SubRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-border px-4 pb-2.5 pl-9 text-caption italic text-muted-foreground">
+      <span>{label}</span>
+      <span className="shrink-0 font-mono tabular-nums">{value}</span>
     </div>
   );
 }

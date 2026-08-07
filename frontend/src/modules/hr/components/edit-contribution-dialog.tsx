@@ -28,7 +28,8 @@ import type {
   ScheduleImportResult,
 } from "@/modules/hr/api/benefits";
 import { ScheduleUpload } from "@/modules/hr/components/schedule-upload";
-import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
+import { CONTRIBUTION_LABELS, SALARY_BASES } from "@/modules/hr/types/benefits";
+import { cn } from "@/lib/utils";
 
 /**
  * Record a dated change to a government contribution's rates (Slices B3a / B3b).
@@ -99,6 +100,11 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
   const [addOn, setAddOn] = useState(String(latest?.fixed_employer_add_on ?? 0));
   const [addOnMin, setAddOnMin] = useState(String(latest?.add_on_min_salary ?? ""));
   const [note, setNote] = useState("");
+  // Slice B19 — WHICH salary figure the rate applies to, as opposed to the bracket/percentage
+  // choice above, which is how the charge is worked out once a figure is chosen. Defaults to
+  // whatever the version in force already does, so opening this dialog and saving without
+  // touching it never moves a contribution onto a different base by accident.
+  const [salaryBasis, setSalaryBasis] = useState(latest?.salary_basis ?? "basic");
   // Slice B8 — the bands in play: whatever an upload produced, else whatever this version
   // already has. Sixty rows of government figures are never retyped.
   const [imported, setImported] = useState<ScheduleImportResult | null>(null);
@@ -219,6 +225,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
         add_on_min_salary: ecFromTable ? null : numOrNull(addOnMin),
         note: note.trim() || null,
         basis: bracketsApply ? "bracket" : "percentage",
+        salary_basis: salaryBasis,
         brackets: bracketsApply ? bands : undefined,
       });
       toast.success(`${label} saved, effective ${formatDate(effectiveFrom)}`);
@@ -258,6 +265,44 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
             onChange={(e) => setEffectiveFrom(e.target.value)}
           />
         </Field>
+
+        {/* Slice B19 — the salary the rate is applied to. Placed above the rate because it is the
+            larger of the two decisions: changing it moves what every payslip is measured against,
+            while a rate change only moves the multiplier. */}
+        <Section title="The salary it is charged on">
+          <div className="flex flex-wrap gap-2">
+            {SALARY_BASES.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setSalaryBasis(option.value)}
+                className={cn(
+                  "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+                  salaryBasis === option.value
+                    ? "border-brand bg-brand-subtle text-dark-teal"
+                    : "border-input text-muted-foreground hover:bg-muted",
+                )}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-caption text-muted-foreground">
+            {salaryBasis === "earnings"
+              ? "Charged on what the period actually paid: basic pay after absences and lates, plus overtime, night differential, holiday and rest-day premium, and the allowances marked as counting toward contributions."
+              : "Charged on the employee's basic monthly salary from their profile, whatever they actually earned in the period."}
+          </p>
+          {/* Not blocked — a company may have a reason — but PhilHealth's basis is set by
+              regulation rather than by preference, and saying so is cheaper than a correction
+              after a quarter of remittances. */}
+          {type === "philhealth" && salaryBasis === "earnings" && (
+            <p className="mt-2 text-caption text-warning">
+              PhilHealth premiums are set on the fixed <strong>basic</strong> monthly salary
+              (Circular 2019-0009), which expressly excludes allowances, overtime and COLA. Charging
+              them on actual earnings will not match what PhilHealth expects to receive.
+            </p>
+          )}
+        </Section>
 
         <Section title="The rate">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

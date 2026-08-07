@@ -289,4 +289,12 @@ export interface StatutoryPreviewRow {
   calculated_employee: number;
   calculated_employer: number;
   basis: string | null;
+  /** Slice B19 — which salary figure this is charged on: `basic` or `earnings`. */
+  salary_basis: string | null;
+  /**
+   * True when `salary_basis` is `earnings`, in which case the two figures above are a PERFECT
+   * MONTH — no absences, no lates, no overtime — because this preview has only the profile salary
+   * to work from. The real payslip will rarely match, and the form has to say so.
+   */
+  is_estimate: boolean;
 }

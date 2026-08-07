@@ -113,6 +113,10 @@ class BenefitProgramService
             'tax_treatment' => $program->tax_treatment,
             'deminimis_ceiling' => $program->deminimis_ceiling === null ? null : (string) $program->deminimis_ceiling,
             'ceiling_period' => $program->ceiling_period,
+            // Slice B19 — whether the allowance counts toward the statutory contribution base.
+            // Versioned with the amount for the same reason: it decides what a payslip was
+            // charged on, so an old cycle must reprice to the flag that was in force then.
+            'contributable' => (bool) $program->contributable,
         ];
     }
 
@@ -621,6 +625,13 @@ class BenefitProgramService
             'ceiling_period' => ($data['tax_treatment'] ?? $existing?->tax_treatment) === 'taxable'
                 ? null
                 : (array_key_exists('ceiling_period', $data) ? $data['ceiling_period'] : $existing?->ceiling_period),
+            // Slice B19 — NOT cleared when the tax treatment changes, unlike the ceiling above.
+            // Tax treatment and contributability are independent questions (a taxable allowance can
+            // sit outside the SSS base; the mandated COLA is de-minimis for tax and inside it), so
+            // touching one must not silently reset the other. Defaults to counting.
+            'contributable' => array_key_exists('contributable', $data)
+                ? (bool) $data['contributable']
+                : ($existing?->contributable ?? true),
             'eligibility' => $data['eligibility'] ?? $existing?->eligibility ?? 'all',
             // Only meaningful in the `status` mode; cleared otherwise so a mode change can't leave
             // a stale list behind that silently comes back if the mode is switched again.

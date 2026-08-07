@@ -20,8 +20,21 @@ class ContributionVersion extends Model
 
     public const BASES = ['percentage', 'bracket'];
 
+    /**
+     * WHICH salary figure the rate is applied to (Slice B19) — not to be confused with `BASES`
+     * above, which is how the charge is worked out once a figure is chosen.
+     *
+     *   basic     the employee's profile monthly rate, whatever they actually earned
+     *   earnings  what the period actually paid: basic net of absences and lates, plus overtime,
+     *             the night differential, holiday and rest-day premium, plus the allowances
+     *             marked contributable — expressed as a monthly equivalent
+     *
+     * PhilHealth is `basic` by law (Circular 2019-0009); SSS and Pag-IBIG measure compensation.
+     */
+    public const SALARY_BASES = ['basic', 'earnings'];
+
     protected $fillable = [
-        'type', 'effective_from', 'basis',
+        'type', 'effective_from', 'basis', 'salary_basis',
         'employee_rate', 'employer_rate',
         'salary_floor', 'salary_cap',
         'employee_amount_cap', 'employer_amount_cap',
@@ -105,6 +118,9 @@ class ContributionVersion extends Model
             'fixed_employer_add_on' => (float) $this->fixed_employer_add_on,
             'add_on_min_salary' => $this->add_on_min_salary !== null ? (float) $this->add_on_min_salary : null,
             'basis' => $this->basis,
+            // Slice B19 — which salary figure goes in. Defaulted rather than left absent so a
+            // version written before this column existed reads as `basic`, which is what it was.
+            'salary_basis' => $this->salary_basis ?: 'basic',
             // Slice B3b — the MSC bands, when this version prices by bracket.
             'brackets' => $this->basis === 'bracket'
                 ? $this->brackets->map(fn ($b) => [

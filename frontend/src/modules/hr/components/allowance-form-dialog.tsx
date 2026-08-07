@@ -29,6 +29,7 @@ import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dial
 import { EligibilityPicker } from "@/modules/hr/components/eligibility-picker";
 import {
   ALLOWANCE_FREQUENCIES,
+  CONTRIBUTION_TREATMENTS,
   TAX_TREATMENTS,
   type BenefitProgram,
   type EligibilityMode,
@@ -91,6 +92,12 @@ function AllowanceForm({
   // the whole amount tax-free; ceilings are per item and are never pooled with another benefit's.
   const [ceiling, setCeiling] = useState(program?.deminimis_ceiling ?? "");
   const [ceilingPeriod, setCeilingPeriod] = useState(program?.ceiling_period ?? "monthly");
+  // Slice B19 — whether this allowance counts toward the SSS / Pag-IBIG contribution base. A new
+  // allowance counts, matching the column default: excluding one has to be a decision somebody
+  // made, not something that happens by leaving a field alone.
+  const [contributable, setContributable] = useState(
+    (program?.contributable ?? true) ? "yes" : "no",
+  );
   // Slice B11 — the date this amount applies FROM. An old cycle re-run before it keeps the
   // figure that applied then, so this is the field that decides whose payslip moves.
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
@@ -117,6 +124,10 @@ function AllowanceForm({
       tax_treatment: tax,
       deminimis_ceiling: tax === "taxable" || ceiling === "" ? null : Number(ceiling),
       ceiling_period: tax === "taxable" || ceiling === "" ? null : ceilingPeriod,
+      // Sent unconditionally, unlike the ceiling above: the flag is meaningful whatever the tax
+      // treatment is, and clearing it alongside a treatment change would silently put an excluded
+      // allowance back into the contribution base.
+      contributable: contributable === "yes",
       eligibility: mode,
       // Sent only for the mode that uses them, so switching mode cannot leave a stale rule behind.
       eligibility_statuses: mode === "status" ? statuses : [],
@@ -254,6 +265,24 @@ function AllowanceForm({
             </p>
           </div>
         )}
+
+        {/* Slice B19 — a company can pay an allowance in full while keeping it out of the base
+            SSS and Pag-IBIG are charged on. Deliberately its own control rather than a line in
+            the tax block: the two are independent, and reading "non-taxable" as "not
+            contributable" is the mistake this switch exists to make impossible. */}
+        <Segmented
+          label="Government contributions"
+          options={CONTRIBUTION_TREATMENTS}
+          value={contributable}
+          onChange={setContributable}
+        />
+        <p className="text-caption text-muted-foreground">
+          {contributable === "yes"
+            ? "This allowance is part of the salary SSS and Pag-IBIG are charged on, so it raises both the employee's and the company's share."
+            : "The employee still receives this allowance in full — it is only left out of the salary SSS and Pag-IBIG are charged on."}{" "}
+          PhilHealth is charged on basic salary by law and is unaffected either way. This setting
+          does nothing until a contribution is switched to the earnings basis in Company → Benefits.
+        </p>
 
         <EligibilityPicker
           mode={mode}

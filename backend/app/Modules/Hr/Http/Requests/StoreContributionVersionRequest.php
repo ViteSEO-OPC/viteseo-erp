@@ -30,6 +30,10 @@ class StoreContributionVersionRequest extends FormRequest
             'type' => ['required', Rule::in(ContributionVersion::TYPES)],
             'effective_from' => ['required', 'date'],
             'basis' => ['sometimes', Rule::in(ContributionVersion::BASES)],
+            // Slice B19 — WHICH salary figure the rate applies to, as opposed to `basis` above,
+            // which is how the charge is worked out once a figure is chosen. Omitted means
+            // `basic`, the column default and what every version recorded before B19 did.
+            'salary_basis' => ['sometimes', Rule::in(ContributionVersion::SALARY_BASES)],
 
             // Rates as decimals (0.05 = 5%). Capped at 100% — a rate above that is a data-entry
             // slip, not a policy, and would wipe out net pay.

@@ -215,6 +215,14 @@ export interface Payslip {
    * An override moves the employee half only, so these lines do not pair with the employer ones.
    */
   contribution_overrides?: ("sss" | "philhealth" | "pagibig")[];
+  /**
+   * Slice B19 — the monthly salary figure each contribution was actually charged on. HR-only.
+   * Null on payslips run before the column existed, and on the 13th-month, final-pay and
+   * adjustment runs, which take no statutory contributions at all. Keyed by type because the
+   * three no longer share one number: PhilHealth is charged on basic salary by law while SSS
+   * can follow actual earnings.
+   */
+  contribution_bases?: Partial<Record<"sss" | "philhealth" | "pagibig", number>> | null;
   status: string;
   processed_by: string | null;
   // Attendance basis — how base_salary was derived (0 on older payslips).

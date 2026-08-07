@@ -27,6 +27,10 @@ class BenefitProgramResource extends JsonResource
             // Slice B16 — this benefit's own de-minimis ceiling and the period it is stated in.
             'deminimis_ceiling' => $this->deminimis_ceiling,
             'ceiling_period' => $this->ceiling_period,
+            // Slice B19 — does this allowance count toward the SSS / Pag-IBIG contribution base?
+            // It is paid in full either way; this decides only whether it is remuneration for
+            // contribution purposes. Independent of `tax_treatment` above.
+            'contributable' => (bool) ($this->contributable ?? true),
             // Slice B15 — loan-policy config.
             'loan_max_principal' => $this->loan_max_principal,
             'loan_term_periods' => $this->loan_term_periods,
