@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -566,6 +567,46 @@ class PayrollService
         $wht = $collected['withholding_tax'];
         $otherTotal = $collected['other_deductions'];
 
+        // FIN-005 — recover what earlier periods could not collect, from whatever room is left.
+        //
+        // ROOM IS WHAT REMAINS AFTER THIS PERIOD'S OWN OBLIGATIONS, and that order is deliberate.
+        // Giving arrears priority would push the current period's statutory dues into shortfall,
+        // creating fresh arrears to chase next period — the debt would rotate rather than clear.
+        // The current period's contributions are due now; an arrear is already late, and recovering
+        // it must not manufacture another one.
+        $recovered = [];
+        $arrearsRecovered = 0.0;
+        $room = round($gross - $totalDeductions, 2);
+
+        if ($room > 0 && ! empty($dist['arrears'])) {
+            // Statutory first, then tax, then benefit shares — the priority the audit specifies.
+            // Loans are not here: they are collected after the payslip by LoanService, which has
+            // its own ledger and its own shortfall rule.
+            foreach (['sss', 'philhealth', 'pagibig', 'withholding_tax', 'other_deductions'] as $key) {
+                $owed = round((float) ($dist['arrears'][$key] ?? 0), 2);
+                if ($owed <= 0 || $room <= 0) {
+                    continue;
+                }
+
+                $take = round(min($owed, $room), 2);
+                $recovered[$key] = $take;
+                $arrearsRecovered = round($arrearsRecovered + $take, 2);
+                $room = round($room - $take, 2);
+            }
+        }
+
+        if ($recovered !== []) {
+            // Added to the components themselves: the remittance report sums those columns, and
+            // money recovered this period is genuinely remitted this period. The breakdown below
+            // preserves which part was an arrear for anyone who needs the distinction.
+            $sss = round($sss + ($recovered['sss'] ?? 0), 2);
+            $philhealth = round($philhealth + ($recovered['philhealth'] ?? 0), 2);
+            $pagibig = round($pagibig + ($recovered['pagibig'] ?? 0), 2);
+            $wht = round($wht + ($recovered['withholding_tax'] ?? 0), 2);
+            $otherTotal = round($otherTotal + ($recovered['other_deductions'] ?? 0), 2);
+            $totalDeductions = round($totalDeductions + $arrearsRecovered, 2);
+        }
+
         return [
             'base_salary' => round($basePay, 2),
             'reimbursements' => round($reimb, 2),
@@ -606,10 +647,84 @@ class PayrollService
             // FIN-053 — the same figure split by obligation, so the arrears can be named. Null
             // when nothing went short, which is the overwhelming majority of payslips.
             'deduction_carryover_breakdown' => $uncollected ?: null,
+            // FIN-005 — what this payslip recovered from EARLIER periods' shortfalls. Subtracted
+            // from the outstanding balance by `deductionArrearsFor()`, which derives it rather
+            // than keeping a running total that a re-run could double-count.
+            'arrears_recovered' => $arrearsRecovered,
+            'arrears_recovered_breakdown' => $recovered ?: null,
             // round() last so this is always a float — max(0, …) returns int 0 on an
             // exact zero, which made net_pay the only money field with a shifting type.
             'net_pay' => round(max(0, $gross - $totalDeductions), 2),
         ];
+    }
+
+    /**
+     * Outstanding deduction arrears per employee, per obligation (FIN-005).
+     *
+     * DERIVED, NOT STORED: owed minus recovered, both read back off the payslips. A running balance
+     * column decremented per run is the failure mode Slices 5, 12 and 11b each had to unpick, and
+     * `EmployeeLoan` already demonstrates the alternative — the ledger IS the balance.
+     *
+     * `$excludeRunId` keeps a re-run from settling against its own previous attempt: without it, a
+     * recompute would read the arrears its own prior pass had already recovered, find them gone,
+     * and quietly stop recovering them.
+     *
+     * Only `regular` runs contribute. 13th-month and adjustment runs both write a zero carryover by
+     * construction, so including them would add nothing but a wider query.
+     *
+     * @param  \Illuminate\Support\Collection<int, Employee>|array<int, int>  $employees
+     * @return array<int, array<string, float>>  employee_id => [obligation => outstanding]
+     */
+    public function deductionArrearsFor($employees, ?int $excludeRunId = null): array
+    {
+        $ids = is_array($employees) ? $employees : $employees->pluck('id')->all();
+        if ($ids === []) {
+            return [];
+        }
+
+        $rows = DB::table('hr_payslips')
+            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+            ->whereNull('hr_payslips.deleted_at')
+            ->whereNull('hr_payroll_runs.deleted_at')
+            ->where('hr_payroll_runs.type', 'regular')
+            ->whereIn('hr_payslips.employee_id', $ids)
+            ->when($excludeRunId !== null, fn ($q) => $q->where('hr_payslips.payroll_run_id', '!=', $excludeRunId))
+            // Only the payslips that moved a balance either way.
+            ->where(fn ($q) => $q->where('hr_payslips.deduction_carryover', '>', 0)
+                ->orWhere('hr_payslips.arrears_recovered', '>', 0))
+            ->get(['hr_payslips.employee_id', 'hr_payslips.deduction_carryover_breakdown', 'hr_payslips.arrears_recovered_breakdown']);
+
+        $out = [];
+
+        foreach ($rows as $row) {
+            $id = (int) $row->employee_id;
+
+            foreach ((array) json_decode($row->deduction_carryover_breakdown ?? '[]', true) as $key => $amount) {
+                $out[$id][$key] = round(($out[$id][$key] ?? 0) + (float) $amount, 2);
+            }
+
+            foreach ((array) json_decode($row->arrears_recovered_breakdown ?? '[]', true) as $key => $amount) {
+                $out[$id][$key] = round(($out[$id][$key] ?? 0) - (float) $amount, 2);
+            }
+        }
+
+        // Drop anything fully settled, so callers can treat a present key as a live debt. Rounding
+        // can leave a stray centavo either way; below one is nothing to chase.
+        //
+        // Cast to float explicitly: the amounts arrive from `json_decode`, which yields an INT for
+        // a whole-peso value, and callers comparing against a money figure should not have to care
+        // which. The return type says float, so it returns float.
+        foreach ($out as $id => $obligations) {
+            $live = [];
+            foreach ($obligations as $key => $amount) {
+                if ($amount >= 0.01) {
+                    $live[$key] = (float) round($amount, 2);
+                }
+            }
+            $out[$id] = $live;
+        }
+
+        return array_filter($out, fn ($o) => $o !== []);
     }
 
     /**
@@ -1589,10 +1704,51 @@ class PayrollService
      * SCHEDULES them onto a payslip; the money leaves the company here, so this is the honest
      * moment to record it.
      */
-    public function markDone(Payslip $payslip): Payslip
+    public function markDone(Payslip $payslip, ?User $actor = null, ?string $idempotencyKey = null): Payslip
     {
-        return DB::transaction(function () use ($payslip) {
-            $payslip->update(['status' => 'disbursed']);
+        // FIN-033 — the one act that asserts money left the company, now with preconditions.
+        //
+        // IDEMPOTENCY FIRST, before the refusals. A repeat carrying the same key is a duplicate
+        // request — a double-click, a retried POST, a re-imported reconciliation file — and is
+        // answered as success without acting twice. Erroring on a double-click trains people to
+        // ignore the error, which is how the genuine refusal below stops being read.
+        if ($payslip->status === 'disbursed') {
+            if ($idempotencyKey !== null && $payslip->disbursement_key === $idempotencyKey) {
+                return $payslip->load(['employee.user', 'employee.department']);
+            }
+
+            throw ValidationException::withMessages([
+                'status' => ['This payslip has already been marked paid. Reverse it first if that was wrong.'],
+            ]);
+        }
+
+        // Any other state is not disbursable: `processing` means the run is mid-write, and a
+        // payslip that does not exist yet as `computed` has no settled amount to pay.
+        if ($payslip->status !== 'computed') {
+            throw ValidationException::withMessages([
+                'status' => ["A payslip must be computed before it can be marked paid; this one is {$payslip->status}."],
+            ]);
+        }
+
+        // The run must have finished. Disbursing out of a `processing` run pays an amount the run
+        // is still in the middle of deciding — and re-running would then skip that payslip as
+        // already-disbursed (run():1480), freezing a half-computed figure permanently.
+        $run = $payslip->payrollRun;
+        if ($run && $run->status !== 'completed') {
+            throw ValidationException::withMessages([
+                'status' => ["The {$run->status} payroll run must finish before its payslips can be marked paid."],
+            ]);
+        }
+
+        return DB::transaction(function () use ($payslip, $actor, $idempotencyKey) {
+            $payslip->update([
+                'status' => 'disbursed',
+                // Provenance for the one operation an auditor asks about first. `updated_at` was
+                // the only record of "when", and any later write overwrote it.
+                'disbursed_at' => now(),
+                'disbursed_by' => $actor?->id ?? Auth::id(),
+                'disbursement_key' => $idempotencyKey,
+            ]);
 
             $claims = Reimbursement::where('employee_id', $payslip->employee_id)
                 ->where('payroll_run_id', $payslip->payroll_run_id)
@@ -1642,7 +1798,16 @@ class PayrollService
         }
 
         return DB::transaction(function () use ($payslip, $reason) {
-            $payslip->update(['status' => 'computed']);
+            $payslip->update([
+                'status' => 'computed',
+                // FIN-033 — clear the provenance. Leaving `disbursement_key` set would make the
+                // idempotency check treat the NEXT genuine disbursement from the same client as a
+                // duplicate and silently no-op it, and a stale `disbursed_by` would credit someone
+                // with a payment that was reversed.
+                'disbursed_at' => null,
+                'disbursed_by' => null,
+                'disbursement_key' => null,
+            ]);
 
             // Put back only what this payslip paid; a claim HR settled by hand outside
             // payroll has no run link and must stay paid.
@@ -1830,6 +1995,11 @@ class PayrollService
             // Slice 13c — the salary each employee was actually on during this period.
             $salaryAsOf = $this->salariesAsOf($employees, $cycleEnd);
 
+            // FIN-005 — what earlier periods failed to collect from each employee, so this period
+            // can recover it from whatever room is left after its own obligations. Excludes this
+            // run so a re-run does not settle against its own previous attempt.
+            $arrears = $this->deductionArrearsFor($employees, $run->id);
+
             // FIN-028 — is this the cycle that closes the tax year?
             //
             // Tested by CONTAINMENT of 31 December rather than by `cycle_end === '{year}-12-31'`,
@@ -1977,6 +2147,12 @@ class PayrollService
                 $employeeDist = $isFinalCycleOfYear
                     ? [...$dist, 'year_end_true_up' => $yearToDateTax[$employee->id] ?? ['taxable_prior' => 0.0, 'withheld_prior' => 0.0]]
                     : $dist;
+
+                // FIN-005 — this employee's outstanding shortfall, if any. Absent for almost
+                // everyone, which keeps the ordinary payslip untouched.
+                if (isset($arrears[$employee->id])) {
+                    $employeeDist['arrears'] = $arrears[$employee->id];
+                }
 
                 $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
 

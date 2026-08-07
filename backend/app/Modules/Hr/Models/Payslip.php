@@ -37,7 +37,12 @@ class Payslip extends Model
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
         // Slice B7 — which statutory deductions came from a per-employee override, not the rates.
         'contribution_overrides',
-        'total_deductions', 'deduction_carryover', 'deduction_carryover_breakdown', 'net_pay', 'status',
+        'total_deductions', 'deduction_carryover', 'deduction_carryover_breakdown',
+        // FIN-005 — arrears from earlier periods recovered on this payslip.
+        'arrears_recovered', 'arrears_recovered_breakdown',
+        'net_pay', 'status',
+        // FIN-033 — who declared this paid, when, and the request key that did it.
+        'disbursed_at', 'disbursed_by', 'disbursement_key',
         // Step 4b — how base_salary was derived, so a payslip can explain itself.
         'working_days', 'daily_rate', 'unpaid_days',
         'late_minutes', 'undertime_minutes', 'late_deduction', 'undertime_deduction',
@@ -83,7 +88,10 @@ class Payslip extends Model
         'deduction_carryover' => 'decimal:2',
         // FIN-053 — obligation => uncollected amount. Null when nothing went short.
         'deduction_carryover_breakdown' => 'array',
+        'arrears_recovered' => 'decimal:2',
+        'arrears_recovered_breakdown' => 'array',
         'net_pay' => 'decimal:2',
+        'disbursed_at' => 'datetime',
     ];
 
     public function payrollRun(): BelongsTo

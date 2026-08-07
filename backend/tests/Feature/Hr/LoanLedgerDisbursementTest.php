@@ -190,4 +190,57 @@ class LoanLedgerDisbursementTest extends HrTestCase
             'the loan owes money that payroll can never collect again',
         );
     }
+
+    // --- FIN-031: the schedule is frozen once payroll has paid against it ---------------------
+
+    /**
+     * Editing the amount after a payslip has been PAID would leave the employee holding a document
+     * showing an instalment the loan record no longer agrees with — and there is no way to pay or
+     * recover the difference.
+     */
+    public function test_the_repayment_schedule_cannot_be_edited_after_a_payslip_is_disbursed(): void
+    {
+        $loan = $this->loan(12000, 1000);
+        $this->runPayroll();
+        app(PayrollService::class)->markDone($this->slip(), $this->hrUser());
+
+        try {
+            app(\App\Modules\Hr\Services\LoanService::class)->update(
+                $loan, ['per_period_amount' => 4000], $this->hrUser(),
+            );
+            $this->fail('the schedule was rewritten after the payslip had been paid out');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertStringContainsString('paid out', implode(' ', $e->validator->errors()->all()));
+        }
+
+        $this->assertSame(1000.0, (float) $loan->fresh()->per_period_amount);
+    }
+
+    /** A COMPUTED payslip is still open — re-running it absorbs the change, so editing is allowed. */
+    public function test_the_schedule_can_still_be_edited_while_the_payslip_is_only_computed(): void
+    {
+        $loan = $this->loan(12000, 1000);
+        $this->runPayroll();
+
+        app(\App\Modules\Hr\Services\LoanService::class)->update(
+            $loan, ['per_period_amount' => 1500], $this->hrUser(),
+        );
+
+        $this->assertSame(1500.0, (float) $loan->fresh()->per_period_amount);
+    }
+
+    /** Labels are not the schedule — refusing a reference fix would push HR to cancel and re-issue,
+     *  which throws away the consent record. */
+    public function test_labels_stay_editable_after_disbursement(): void
+    {
+        $loan = $this->loan(12000, 1000);
+        $this->runPayroll();
+        app(PayrollService::class)->markDone($this->slip(), $this->hrUser());
+
+        app(\App\Modules\Hr\Services\LoanService::class)->update(
+            $loan, ['reference' => 'SSS-SL-2026-0042'], $this->hrUser(),
+        );
+
+        $this->assertSame('SSS-SL-2026-0042', $loan->fresh()->reference);
+    }
 }

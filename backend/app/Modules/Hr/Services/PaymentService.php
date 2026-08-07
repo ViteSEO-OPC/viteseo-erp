@@ -313,7 +313,10 @@ class PaymentService
             // Already disbursed by the manual path, or by an earlier payment on the same payslip
             // after a re-issue. Either way there is nothing left to flip.
             if ($payslip && $payslip->status !== 'disbursed') {
-                $this->payroll->markDone($payslip);
+                // FIN-033 — the actor is the person reconciling, and the key is the payment
+                // itself: re-importing the same bank file settles the same payment again, which
+                // must be a duplicate rather than a second disbursement.
+                $this->payroll->markDone($payslip, $actor, "payment:{$payment->id}");
             }
 
             $this->refreshBatchStatus($payment->batch);

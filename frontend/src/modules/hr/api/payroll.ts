@@ -10,6 +10,7 @@ import type {
   ThirteenthMonthPayRow,
   AdjustmentLine,
   RetroFlag,
+  DeductionArrear,
   PaymentBatch,
   PaymentMethod,
   PaymentReconciliation,
@@ -286,5 +287,11 @@ export async function reconcilePaymentBatch(
   if (confirm) form.append("confirm", "1");
 
   const res = await apiClient.post(`/hr/payment-batches/${id}/reconcile`, form);
+  return res.data.data;
+}
+
+/** Deductions a thin payslip could not collect, still outstanding (FIN-005). */
+export async function getDeductionArrears(): Promise<DeductionArrear[]> {
+  const res = await apiClient.get("/hr/deduction-arrears");
   return res.data.data;
 }

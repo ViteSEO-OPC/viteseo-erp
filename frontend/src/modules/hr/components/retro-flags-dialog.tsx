@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AxiosError } from "axios";
-import { ArrowDownRight, ArrowUpRight, Check } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Check, CircleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -18,8 +18,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { notify as toast } from "@/core/lib/notify";
 import { formatDate } from "@/core/lib/format";
-import { useRetroFlags, useResolveRetroFlag } from "@/modules/hr/hooks/use-payroll";
+import { useRetroFlags, useResolveRetroFlag, useDeductionArrears } from "@/modules/hr/hooks/use-payroll";
 import type { RetroFlag } from "@/modules/hr/types/payroll";
+import { formatPeso } from "@/core/lib/format";
 
 /**
  * Retroactive pay differences waiting to be settled (FIN-009).
@@ -49,6 +50,7 @@ export function RetroFlagsDialog({
   onSettleWithAdjustment?: (flag: RetroFlag) => void;
 }) {
   const { data: flags = [], isLoading } = useRetroFlags();
+  const { data: arrears = [] } = useDeductionArrears();
   const resolveMut = useResolveRetroFlag();
   const [resolving, setResolving] = useState<RetroFlag | null>(null);
   const [note, setNote] = useState("");
@@ -102,19 +104,20 @@ export function RetroFlagsDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Pay corrections outstanding</DialogTitle>
+            <DialogTitle>Outstanding payroll items</DialogTitle>
             <DialogDescription>
-              Decisions approved or cancelled after the pay period had already been settled. Each one
-              means the period paid a different amount than it should have.
+              Everything payroll could not settle on its own. Pay corrections come from decisions made
+              after a period was paid; uncollected deductions come from payslips too thin to cover
+              what was owed.
             </DialogDescription>
           </DialogHeader>
 
           {isLoading ? (
             <p className="py-6 text-center text-caption text-muted-foreground">Loading…</p>
-          ) : flags.length === 0 ? (
+          ) : flags.length === 0 && arrears.length === 0 ? (
             <p className="py-6 text-center text-caption text-muted-foreground">
-              Nothing outstanding. Corrections appear here when a decision lands on a period that has
-              already been paid.
+              Nothing outstanding. Items appear here when a decision lands on a period already paid,
+              or when a payslip could not cover everything owed.
             </p>
           ) : (
             <div className="max-h-[60vh] space-y-5 overflow-y-auto">
@@ -126,6 +129,47 @@ export function RetroFlagsDialog({
                   </h3>
                   <ul className="space-y-2">
                     {owed.map((f) => <Row key={f.id} flag={f} />)}
+                  </ul>
+                </section>
+              )}
+
+              {arrears.length > 0 && (
+                <section>
+                  <h3 className="mb-2 flex items-center gap-1.5 text-caption font-semibold uppercase tracking-wide text-muted-foreground">
+                    <CircleAlert className="size-3.5" />
+                    Uncollected deductions ({arrears.length})
+                  </h3>
+                  {/* Recovery is automatic, so say so — otherwise this reads as a to-do list and HR
+                      chases amounts the next run will take by itself. */}
+                  <p className="mb-2 rounded-md bg-muted px-3 py-2 text-caption text-muted-foreground">
+                    The next payroll run with enough room recovers these automatically, statutory
+                    contributions first. Only the ones marked <strong>separated</strong> need chasing
+                    by hand — there is no future payslip to take them from.
+                  </p>
+                  <ul className="space-y-2">
+                    {arrears.map((a) => (
+                      <li
+                        key={a.employee.id}
+                        className="flex flex-col gap-1 rounded-lg border border-border p-3 sm:flex-row sm:items-start sm:justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-body font-medium">
+                            {a.employee.name ?? "Unknown employee"}
+                            {a.employee.separated && (
+                              <span className="ml-2 rounded-full bg-warning px-1.5 text-caption font-semibold text-white">
+                                separated
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-caption text-muted-foreground">
+                            {a.obligations.map((o) => `${o.label} ${formatPeso(o.outstanding)}`).join(" · ")}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-body font-semibold">
+                          {formatPeso(a.total_outstanding)}
+                        </span>
+                      </li>
+                    ))}
                   </ul>
                 </section>
               )}

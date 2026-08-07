@@ -269,6 +269,57 @@ class LoanService
         }
     }
 
+    /**
+     * Refuse to rewrite a repayment schedule payroll has already paid against (FIN-031).
+     *
+     * WHICH FIELDS, AND WHY ONLY THOSE. `principal`, `per_period_amount` and `start_date` decide
+     * what `collectForPeriod()` takes and when it starts. Change any of them after a payslip has
+     * been paid out and the payslip's loan deduction no longer follows from the loan — the employee
+     * holds a document showing an instalment the record now disagrees with, and there is no way to
+     * pay or recover the difference. `type`, `reference` and `notes` are labels; they stay editable
+     * on purpose, because refusing a typo fix in a reference would just push HR to cancel and
+     * re-issue, which loses the consent record.
+     *
+     * FROZEN BY THE PAYSLIP, NOT THE DATE. `PayrollFreezeService` asks "has this employee's DAY been
+     * paid?", which is the right question for attendance and leave. A loan is not tied to days: an
+     * instalment is attached to a run. So the question here is whether any payment this loan has
+     * received sits on a payslip that has been disbursed, or in a run that has been locked.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertScheduleEditable(EmployeeLoan $loan, array $data): void
+    {
+        $touchesSchedule = array_intersect_key($data, array_flip(['principal', 'per_period_amount', 'start_date']));
+
+        if ($touchesSchedule === []) {
+            return;
+        }
+
+        $settled = LoanPayment::where('loan_id', $loan->id)
+            ->where(fn ($q) => $q
+                ->whereHas('payslip', fn ($p) => $p->where('status', 'disbursed'))
+                ->orWhereHas('payrollRun', fn ($r) => $r->whereNotNull('locked_at')))
+            ->with('payrollRun')
+            ->first();
+
+        if ($settled === null) {
+            return;
+        }
+
+        $period = $settled->payrollRun
+            ? $settled->payrollRun->cycle_start->format('M j') . '–' . $settled->payrollRun->cycle_end->format('M j, Y')
+            : 'a settled period';
+
+        throw ValidationException::withMessages([
+            'principal' => [
+                "This loan has already been collected from on the {$period} payroll, which has been "
+                    . 'paid out. Changing the amount or start date now would leave that payslip '
+                    . 'disagreeing with the loan. Reverse the payslip first, or cancel this loan and '
+                    . 'issue a corrected one.',
+            ],
+        ]);
+    }
+
     /** @param array<string, mixed> $data */
     public function update(EmployeeLoan $loan, array $data, User $actor): EmployeeLoan
     {
@@ -279,6 +330,32 @@ class LoanService
                 'principal' => ['The principal cannot be less than the ₱' . number_format($loan->paid(), 2) . ' already repaid.'],
             ]);
         }
+
+        // FIN-031 — the product ceiling holds for the LIFE of the loan, not just at issue.
+        //
+        // `create()` and `request()` both check the policy; `update()` did not. So a loan issued
+        // validly under a ₱50,000 product could be edited to ₱200,000 the next day, or its
+        // instalment lowered until it repaid over three times the allowed term. The ceiling was
+        // enforced once and never again, which is the same shape of hole as FIN-002's status: a
+        // rule applied on one path and skipped on the path that edits the result.
+        //
+        // Checked against the loan's CURRENT policy, with the incoming values merged over the
+        // existing ones — a partial edit that only changes `per_period_amount` still has to fit
+        // the term, and the term needs the principal to be judged.
+        $loan->loadMissing('employee');
+        if ($loan->employee !== null) {
+            $this->assertWithinPolicy(
+                $this->policyFor($loan->benefit_program_id),
+                $loan->employee,
+                [
+                    'principal' => $data['principal'] ?? $loan->principal,
+                    'per_period_amount' => $data['per_period_amount'] ?? $loan->per_period_amount,
+                ],
+            );
+        }
+
+        // FIN-031 — the repayment schedule is frozen once payroll has paid against it.
+        $this->assertScheduleEditable($loan, $data);
 
         // FIN-002 — `status` IS NOT EDITABLE HERE, and must never be added back.
         //

@@ -8,6 +8,7 @@ use App\Modules\Hr\Http\Controllers\BenefitProgramController;
 use App\Modules\Hr\Http\Controllers\ChangeRequestController;
 use App\Modules\Hr\Http\Controllers\ConcernController;
 use App\Modules\Hr\Http\Controllers\DailyOverrideController;
+use App\Modules\Hr\Http\Controllers\DeductionArrearsController;
 use App\Modules\Hr\Http\Controllers\DashboardController;
 use App\Modules\Hr\Http\Controllers\DocumentRequestController;
 use App\Modules\Hr\Http\Controllers\FaqController;
@@ -142,6 +143,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).
+        // FIN-005 — statutory/benefit deductions a thin payslip could not collect. Recovery is
+        // automatic on the next run with room; this is the visibility for the ones that cannot be.
+        Route::get('deduction-arrears', [DeductionArrearsController::class, 'index']);
         // FIN-009 — retroactive pay differences waiting to be settled.
         Route::get('retro-flags', [RetroFlagController::class, 'index']);
         Route::post('retro-flags/{retroFlag}/resolve', [RetroFlagController::class, 'resolve']);

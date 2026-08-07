@@ -27,11 +27,13 @@ import {
   getPaymentBatch,
   settlePayment,
   reconcilePaymentBatch,
+  getDeductionArrears,
 } from "@/modules/hr/api/payroll";
 
 const RUNS_KEY = ["hr", "payroll", "runs"] as const;
 const SETTINGS_KEY = ["hr", "payroll", "settings"] as const;
 const RETRO_KEY = ["hr", "payroll", "retro-flags"] as const;
+const ARREARS_KEY = ["hr", "payroll", "deduction-arrears"] as const;
 const BATCHES_KEY = ["hr", "payroll", "payment-batches"] as const;
 
 export function usePayrollSettings() {
@@ -63,6 +65,7 @@ export function useRunPayroll() {
   return useMutation({
     mutationFn: runPayroll,
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ARREARS_KEY });
       // Refresh the runs list, the open breakdown detail (a re-run recomputes it),
       // and settings/pay-groups.
       qc.invalidateQueries({ queryKey: RUNS_KEY });
@@ -272,4 +275,14 @@ export function useReconcilePaymentBatch() {
       qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
     },
   });
+}
+
+/**
+ * Uncollected deductions still outstanding (FIN-005).
+ *
+ * Invalidated by a payroll run, because a run with room recovers them automatically — leaving a
+ * stale queue on screen would show HR debts that were just settled.
+ */
+export function useDeductionArrears() {
+  return useQuery({ queryKey: ARREARS_KEY, queryFn: getDeductionArrears });
 }

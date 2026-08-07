@@ -38,6 +38,7 @@ import {
   usePayrollSettings,
   useUpdatePayrollSettings,
   useRetroFlags,
+  useDeductionArrears,
   useThirteenthMonth,
   useThirteenthMonthPreview,
   useRunThirteenthMonth,
@@ -79,6 +80,10 @@ export default function PayrollPage() {
     reason: null,
   });
   const { data: retroFlags = [] } = useRetroFlags();
+  const { data: deductionArrears = [] } = useDeductionArrears();
+  // FIN-009 + FIN-005 — one badge for everything payroll could not settle by itself. Two separate
+  // counters would have HR checking two places for the same class of problem.
+  const outstandingCount = retroFlags.length + deductionArrears.length;
   // FIN-025 — payroll settings are versioned, so a change needs a date. Blank means today, which
   // is what every change used to be recorded as whether or not that was true.
   const [settingsEffectiveFrom, setSettingsEffectiveFrom] = useState("");
@@ -301,11 +306,11 @@ export default function PayrollPage() {
             {/* FIN-009 — corrections owed. Badged, because an empty queue and an unseen queue
                 look identical otherwise, and being unseen is what this replaced. */}
             <Button variant="outline" onClick={() => setRetroOpen(true)}>
-              <AlertTriangle className={retroFlags.length > 0 ? "text-warning" : undefined} />
-              Corrections
-              {retroFlags.length > 0 && (
+              <AlertTriangle className={outstandingCount > 0 ? "text-warning" : undefined} />
+              Outstanding
+              {outstandingCount > 0 && (
                 <span className="ml-0.5 rounded-full bg-warning px-1.5 text-caption font-semibold text-white">
-                  {retroFlags.length}
+                  {outstandingCount}
                 </span>
               )}
             </Button>

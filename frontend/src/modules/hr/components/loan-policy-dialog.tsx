@@ -77,7 +77,6 @@ function PolicyForm({ policy, onDone }: { policy: BenefitProgram | null; onDone:
   const [termPeriods, setTermPeriods] = useState(
     policy?.loan_term_periods != null ? String(policy.loan_term_periods) : "",
   );
-  const [interest, setInterest] = useState(policy?.loan_interest_rate ?? "");
   const [mode, setMode] = useState<EligibilityMode>(
     (policy?.eligibility as EligibilityMode) ?? "all",
   );
@@ -95,7 +94,6 @@ function PolicyForm({ policy, onDone }: { policy: BenefitProgram | null; onDone:
       category: "general",
       loan_max_principal: maxPrincipal === "" ? null : Number(maxPrincipal),
       loan_term_periods: termPeriods === "" ? null : Number(termPeriods),
-      loan_interest_rate: interest === "" ? null : Number(interest),
       eligibility: mode,
       eligibility_statuses: mode === "status" ? statuses : [],
       employee_ids: mode === "custom" ? employeeIds : [],
@@ -159,18 +157,6 @@ function PolicyForm({ policy, onDone }: { policy: BenefitProgram | null; onDone:
               placeholder="No limit"
               value={termPeriods}
               onChange={(e) => setTermPeriods(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="lpol-int">Interest % a year</Label>
-            <Input
-              id="lpol-int"
-              type="number"
-              min="0"
-              step="0.001"
-              placeholder="0 — interest-free"
-              value={interest}
-              onChange={(e) => setInterest(e.target.value)}
             />
           </div>
         </div>

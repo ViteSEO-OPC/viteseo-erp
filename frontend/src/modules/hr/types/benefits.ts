@@ -110,7 +110,6 @@ export interface BenefitProgram {
   // Loan-policy config (B15), only meaningful when kind is "loan_policy".
   loan_max_principal: string | null;
   loan_term_periods: number | null;
-  loan_interest_rate: string | null;
   eligibility: string; // all | status | management | custom
   /** Only meaningful when `eligibility` is "status". */
   eligibility_statuses: string[];

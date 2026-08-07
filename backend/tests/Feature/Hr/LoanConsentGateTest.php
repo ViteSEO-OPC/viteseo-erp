@@ -144,4 +144,59 @@ class LoanConsentGateTest extends HrTestCase
         $this->expectException(\Illuminate\Validation\ValidationException::class);
         app(LoanService::class)->authorize($loan, $this->hr);
     }
+
+    // --- FIN-031: the product ceiling holds for the life of the loan --------------------------
+
+    /**
+     * `create()` and `request()` both checked the policy; `update()` did not. So a loan issued
+     * validly under a ₱50,000 product could be edited past it the next day — the ceiling enforced
+     * once and never again, the same shape of hole as the status bypass above.
+     */
+    public function test_editing_a_loan_cannot_exceed_its_products_maximum(): void
+    {
+        $policy = \App\Modules\Hr\Models\BenefitProgram::create([
+            'name' => 'Staff loan', 'category' => 'loan', 'kind' => 'loan_policy',
+            'status' => 'active', 'amount' => 0,
+            'loan_max_principal' => 50000, 'loan_term_periods' => 24,
+        ]);
+
+        $loan = EmployeeLoan::create([
+            'employee_id' => $this->employee->id, 'benefit_program_id' => $policy->id,
+            'type' => 'loan', 'principal' => 50000, 'per_period_amount' => 5000,
+            'start_date' => '2026-01-01', 'status' => 'pending_authorization',
+        ]);
+
+        try {
+            app(LoanService::class)->update($loan, [
+                'principal' => 200000, 'per_period_amount' => 5000, 'start_date' => '2026-01-01',
+            ], $this->hr);
+            $this->fail('a loan was edited past its product maximum');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            $this->assertStringContainsString('maximum', implode(' ', $e->validator->errors()->all()));
+        }
+
+        $this->assertSame(50000.0, (float) $loan->fresh()->principal);
+    }
+
+    /** An edit that still fits the product must go through — this is a ceiling, not a lock. */
+    public function test_editing_within_the_products_maximum_still_works(): void
+    {
+        $policy = \App\Modules\Hr\Models\BenefitProgram::create([
+            'name' => 'Staff loan', 'category' => 'loan', 'kind' => 'loan_policy',
+            'status' => 'active', 'amount' => 0,
+            'loan_max_principal' => 50000, 'loan_term_periods' => 24,
+        ]);
+
+        $loan = EmployeeLoan::create([
+            'employee_id' => $this->employee->id, 'benefit_program_id' => $policy->id,
+            'type' => 'loan', 'principal' => 20000, 'per_period_amount' => 2000,
+            'start_date' => '2026-01-01', 'status' => 'pending_authorization',
+        ]);
+
+        app(LoanService::class)->update($loan, [
+            'principal' => 30000, 'per_period_amount' => 2000, 'start_date' => '2026-01-01',
+        ], $this->hr);
+
+        $this->assertSame(30000.0, (float) $loan->fresh()->principal);
+    }
 }

@@ -23,4 +23,17 @@ class LoanPayment extends Model
     {
         return $this->belongsTo(PayrollRun::class);
     }
+
+    /**
+     * The payslip this instalment was taken on.
+     *
+     * Nullable: `collectForPeriod()` writes `payslip_id` from `$payslip?->id`, and the payslip is
+     * created after the collection is priced in some paths. FIN-031's schedule guard asks whether
+     * that payslip has been disbursed, which is the difference between "payroll calculated this"
+     * and "the employee has been paid it".
+     */
+    public function payslip(): BelongsTo
+    {
+        return $this->belongsTo(Payslip::class);
+    }
 }

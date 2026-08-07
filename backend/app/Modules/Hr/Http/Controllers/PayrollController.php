@@ -221,10 +221,19 @@ class PayrollController extends Controller
         )->response();
     }
 
-    // POST /api/v1/hr/payslips/{payslip}/mark-done — mark one payslip processed.
-    public function markDone(Payslip $payslip): JsonResponse
+    /**
+     * POST /api/v1/hr/payslips/{payslip}/mark-done — declare one payslip paid.
+     *
+     * FIN-033 — accepts an idempotency key, from the `Idempotency-Key` header or the body. A repeat
+     * carrying the same key is answered as success without disbursing twice; a repeat with a
+     * different key is refused as a genuine second attempt. The header is the conventional home for
+     * it, and the body is accepted so a client that cannot set headers is not locked out.
+     */
+    public function markDone(Request $request, Payslip $payslip): JsonResponse
     {
-        $this->service->markDone($payslip);
+        $key = $request->header('Idempotency-Key') ?? $request->input('idempotency_key');
+
+        $this->service->markDone($payslip, $request->user(), $key ? (string) $key : null);
 
         return PayrollRunResource::make(
             $this->service->runWithBreakdown($payslip->payrollRun),

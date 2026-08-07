@@ -30,7 +30,6 @@ class BenefitProgramResource extends JsonResource
             // Slice B15 — loan-policy config.
             'loan_max_principal' => $this->loan_max_principal,
             'loan_term_periods' => $this->loan_term_periods,
-            'loan_interest_rate' => $this->loan_interest_rate,
             'eligibility' => $this->eligibility,
             'eligibility_statuses' => $this->eligibility_statuses ?? [],
             // How many people the rule covers right now — the honest version of "who is on this".

@@ -369,3 +369,22 @@ export interface PaymentReconcileResult {
   unmatched: string[];
   rows: number;
 }
+
+/**
+ * A statutory or benefit deduction a thin payslip could not collect, still outstanding (FIN-005).
+ *
+ * Recovery is automatic — the next run with room takes it, statutory first. This type exists for
+ * the amounts that CANNOT be recovered: an employee on long unpaid leave, or one who has left, for
+ * whom there is no future payslip. The company still owes the agency the full contribution.
+ */
+export interface DeductionArrear {
+  employee: {
+    id: number;
+    name: string | null;
+    department: string | null;
+    /** No future payslip exists, so payroll can never recover this — a person must. */
+    separated: boolean;
+  };
+  obligations: { obligation: string; label: string; outstanding: number }[];
+  total_outstanding: number;
+}

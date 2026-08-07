@@ -635,9 +635,6 @@ class BenefitProgramService
             'loan_term_periods' => ($data['kind'] ?? $existing?->kind) === 'loan_policy'
                 ? ($data['loan_term_periods'] ?? $existing?->loan_term_periods)
                 : null,
-            'loan_interest_rate' => ($data['kind'] ?? $existing?->kind) === 'loan_policy'
-                ? ($data['loan_interest_rate'] ?? $existing?->loan_interest_rate)
-                : null,
             // HMO / company-plan config.
             'deduction_cadence' => $data['deduction_cadence'] ?? $existing?->deduction_cadence,
             'tiers' => array_key_exists('tiers', $data) ? $data['tiers'] : $existing?->tiers,
