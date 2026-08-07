@@ -43,6 +43,9 @@ class Employee extends Model
         'bank_account',
         'base_salary',
         'is_management',
+        // FIN-030b — excluded from the minimum-wage check, with the reason on the record.
+        'minimum_wage_exempt',
+        'minimum_wage_exempt_reason',
         'pay_frequency',
         'currency',
         'bank_account_type',
@@ -93,6 +96,7 @@ class Employee extends Model
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
         'is_management' => 'boolean',
+        'minimum_wage_exempt' => 'boolean',
         // One entry per named sibling: [{ name, gender }].
         'siblings' => 'array',
         'number_of_siblings' => 'integer',

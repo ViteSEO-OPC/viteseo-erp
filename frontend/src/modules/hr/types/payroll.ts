@@ -440,3 +440,46 @@ export interface TaxTable {
   bands: TaxBand[];
   versions: { effective_from: string | null; note: string | null }[];
 }
+
+/**
+ * FIN-030b — one employee this run would pay below the regional minimum daily wage.
+ *
+ * The rate is DERIVED (salary ÷ the basis on the attendance policy), which is the whole reason the
+ * row exists: nobody typing a monthly figure can see what it implies per day, and the per-day
+ * figure is what a wage order governs.
+ */
+export interface MinimumWageRow {
+  employee: { id: number; name: string | null; employee_no: string | null; job_title: string | null };
+  base_salary: number;
+  daily_rate: number;
+  basis: "fixed_divisor" | "period_workdays";
+  divisor: number | null;
+  workdays: number;
+  minimum: number | null;
+  below: boolean;
+  /** `below` minus anyone marked exempt — what the warning and the run gate read. */
+  flagged: boolean;
+  shortfall: number | null;
+  /** The monthly base salary that would clear the floor. */
+  compliant_salary: number | null;
+  exempt: boolean;
+  exempt_reason: string | null;
+}
+
+export interface MinimumWageMeta {
+  /** Null when no wage order has been entered — nothing is flagged, and nothing is guessed. */
+  minimum: number | null;
+  basis: "fixed_divisor" | "period_workdays" | null;
+  divisor: number | null;
+  cycle: { start: string; end: string };
+  checked: number;
+  flagged_count: number;
+  exempt_count: number;
+}
+
+export interface MinimumWageApplyResult {
+  applied: { employee_id: number; name: string | null; from: number; to: number }[];
+  skipped: { employee_id: number; name: string | null; reason: string }[];
+  /** Periods already settled when the raise takes effect — recorded as back pay owed (FIN-009). */
+  back_pay_flagged: number;
+}

@@ -3,6 +3,8 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\ApplyMinimumWageRequest;
+use App\Modules\Hr\Http\Requests\MinimumWageReviewRequest;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\RunAdjustmentRequest;
 use App\Modules\Hr\Http\Requests\RunFinalPayRequest;
@@ -104,9 +106,72 @@ class PayrollController extends Controller
         return PayrollRunResource::collection($this->service->listRuns())->response();
     }
 
-    // POST /api/v1/hr/payroll/run — execute payroll for a cycle.
-    public function run(RunPayrollRequest $request): JsonResponse
+    /**
+     * GET /api/v1/hr/payroll/minimum-wage-check — who this run would pay below the floor (FIN-030b).
+     *
+     * Read-only and safe to poll: it prices nothing and writes nothing. The payroll screen asks it
+     * before offering the run button, which is the point — a compliance warning is only worth
+     * anything at the moment money is about to be committed.
+     */
+    public function minimumWageCheck(MinimumWageReviewRequest $request): JsonResponse
     {
+        $cycle = $request->cycle();
+
+        $review = $this->service->minimumWageReview(
+            $cycle['frequency'],
+            $cycle['cycle_start'],
+            $cycle['cycle_end'],
+        );
+
+        return response()->json([
+            'data' => $review['employees'],
+            'meta' => [
+                'minimum' => $review['minimum'],
+                'basis' => $review['basis'],
+                'divisor' => $review['divisor'],
+                'cycle' => $review['cycle'],
+                'checked' => $review['checked'],
+                'flagged_count' => $review['flagged_count'],
+                'exempt_count' => $review['exempt_count'],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /api/v1/hr/payroll/minimum-wage-adjustments — raise the named employees to the floor.
+     *
+     * Not a run: it writes dated salary changes through the same path as any other raise, and flags
+     * back pay where the effective date reaches a settled period. Rate-limited like the write
+     * endpoints it resembles — it can change many salaries in one call.
+     */
+    public function applyMinimumWage(ApplyMinimumWageRequest $request): JsonResponse
+    {
+        $result = $this->service->applyMinimumWageAdjustments(
+            $request->validated('employee_ids'),
+            $request->validated('effective_date'),
+            $request->validated('reason'),
+            (bool) $request->validated('acknowledge_repricing', false),
+        );
+
+        return response()->json(['data' => $result]);
+    }
+
+    // POST /api/v1/hr/payroll/run — execute payroll for a cycle.
+    public function run(RunPayrollRequest $request, AuditService $audit): JsonResponse
+    {
+        // FIN-030b — the run was allowed past a minimum-wage breach. The reason is the record that
+        // somebody decided this, rather than the run simply having been clicked; without it the
+        // override would be invisible the moment it is questioned.
+        if ($request->validated('minimum_wage_ack')) {
+            $audit->log(
+                'updated',
+                'Payroll',
+                'Ran payroll past a minimum-wage warning ('
+                    . $request->validated('cycle_start') . ' – ' . $request->validated('cycle_end')
+                    . '): ' . $request->validated('minimum_wage_ack_reason'),
+            );
+        }
+
         $run = $this->service->run(
             $request->validated('cycle_start'),
             $request->validated('cycle_end'),

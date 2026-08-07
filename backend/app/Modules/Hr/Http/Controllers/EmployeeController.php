@@ -54,7 +54,9 @@ class EmployeeController extends Controller
     {
         $employee->load(['user.roles', 'department', 'manager.user', 'employmentHistories']);
 
-        return EmployeeResource::make($employee)->response();
+        // FIN-030b — the Compensation screen needs the derived daily rate. Asked for explicitly
+        // here and on update(); the directory does not carry the cost.
+        return EmployeeResource::make($employee)->withPayrollChecks()->response();
     }
 
     // PUT/PATCH /api/v1/hr/employees/{employee} — HR edits a record.
@@ -62,7 +64,9 @@ class EmployeeController extends Controller
     {
         $employee = $this->service->update($employee, $request->validated());
 
-        return EmployeeResource::make($employee)->response();
+        // A salary edit changes the daily rate, so the response has to carry the new one — the
+        // screen that just saved is the screen showing the check.
+        return EmployeeResource::make($employee)->withPayrollChecks()->response();
     }
 
     // POST /api/v1/hr/employees/{employee}/photo — set/replace the profile picture.

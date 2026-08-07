@@ -51,6 +51,16 @@ class UpdateEmployeeRequest extends FormRequest
             'acknowledge_repricing' => ['sometimes', 'boolean'],
             'salary_change_reason' => ['nullable', 'string', 'max:255'],
             'salary_change_type' => ['nullable', Rule::in(['promotion', 'merit', 'adjustment'])],
+            // FIN-030b — excluded from the minimum-wage check. The reason is REQUIRED when the flag
+            // is set: an unexplained exemption is not auditable, and this is the field somebody
+            // will be asked to justify.
+            'minimum_wage_exempt' => ['sometimes', 'boolean'],
+            'minimum_wage_exempt_reason' => [
+                'nullable',
+                'required_if_accepted:minimum_wage_exempt',
+                'string',
+                'max:255',
+            ],
             // Employment-history logging when the job title changes.
             'role_change_type' => ['nullable', Rule::in(['promotion', 'transfer', 'lateral', 'correction'])],
             'role_change_reason' => ['nullable', 'string', 'max:255'],

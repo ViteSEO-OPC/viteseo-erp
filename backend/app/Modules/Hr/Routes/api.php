@@ -208,6 +208,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('payroll/thirteenth-month/preview', [PayrollController::class, 'previewThirteenthMonth']);
         // Slice B17 — pay it, and withhold on what it pushes past the ₱90,000 exemption.
         Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth'])->middleware('throttle:5,1,payroll-13th:');
+        // FIN-030b — who this run would pay below the regional floor, and the one-click fix.
+        // The check is read-only; the adjustment writes salaries, so it carries a run-sized limit.
+        Route::get('payroll/minimum-wage-check', [PayrollController::class, 'minimumWageCheck']);
+        Route::post('payroll/minimum-wage-adjustments', [PayrollController::class, 'applyMinimumWage'])
+            ->middleware('throttle:5,1,payroll-minimum-wage:');
         Route::post('payroll/run', [PayrollController::class, 'run'])->middleware('throttle:5,1,payroll-run:');
         // FIN-010 — off-cycle corrections. Same tight limit as a regular run: it writes
         // payslips, and the amounts are typed by a person rather than computed.

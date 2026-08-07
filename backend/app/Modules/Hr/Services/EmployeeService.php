@@ -114,6 +114,17 @@ class EmployeeService
             $out['is_management'] = ! empty($data['is_management']);
         }
 
+        // FIN-030b — same non-nullable-boolean treatment. Clearing the flag clears the reason with
+        // it: a stale "part-time" note sitting on someone who is no longer exempt reads as a live
+        // justification, which is worse than no note at all.
+        if (array_key_exists('minimum_wage_exempt', $data)) {
+            $exempt = ! empty($data['minimum_wage_exempt']);
+            $out['minimum_wage_exempt'] = $exempt;
+            $out['minimum_wage_exempt_reason'] = $exempt
+                ? ($data['minimum_wage_exempt_reason'] ?? null)
+                : null;
+        }
+
         return $out;
     }
 

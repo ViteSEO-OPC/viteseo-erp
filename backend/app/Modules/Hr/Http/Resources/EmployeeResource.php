@@ -9,6 +9,23 @@ use Illuminate\Http\Resources\Json\JsonResource;
 class EmployeeResource extends JsonResource
 {
     /**
+     * FIN-030b — opt-in, because the minimum-wage check is not free: deriving one daily rate reads
+     * the employee's schedule for the current period. On a single record that is nothing; on a
+     * 200-row directory it is 200 schedule lookups for a field the directory does not show.
+     *
+     * Off by default so a new list endpoint cannot silently acquire the cost. The single-employee
+     * responses that feed the Compensation screen turn it on.
+     */
+    private bool $withPayrollChecks = false;
+
+    public function withPayrollChecks(): static
+    {
+        $this->withPayrollChecks = true;
+
+        return $this;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array
@@ -54,14 +71,18 @@ class EmployeeResource extends JsonResource
             // list of 200 employees no longer ships 200 bank accounts to the browser.
             'bank_account' => Employee::maskSensitive($this->bank_account),
             'pay_frequency' => $this->pay_frequency ?? 'semi_monthly',
-            // FIN-030 — the DERIVED daily rate against the configured regional floor. Included
-            // because the daily rate is not something anyone can see from the monthly figure they
-            // typed: it is salary ÷ the basis on the attendance policy. Null when no floor has been
-            // configured, in which case there is nothing to warn about. A warning, not validation —
-            // the floor varies by region, industry and establishment size, and a block would be
-            // wrong often enough to get routed around.
-            'minimum_wage_check' => app(\App\Modules\Hr\Services\PayrollService::class)
-                ->minimumWageCheckFor($this->resource),
+            // FIN-030 — the DERIVED daily rate, and the configured regional floor when there is
+            // one. Included because the daily rate is not something anyone can see from the monthly
+            // figure they typed: it is salary ÷ the basis on the attendance policy. A warning, not
+            // validation — the floor varies by region, industry and establishment size, and a block
+            // would be wrong often enough to get routed around.
+            'minimum_wage_exempt' => (bool) $this->minimum_wage_exempt,
+            'minimum_wage_exempt_reason' => $this->minimum_wage_exempt_reason,
+            'minimum_wage_check' => $this->when(
+                $this->withPayrollChecks,
+                fn () => app(\App\Modules\Hr\Services\PayrollService::class)
+                    ->minimumWageCheckFor($this->resource),
+            ),
             'currency' => $this->currency ?? 'PHP',
             'bank_account_type' => $this->bank_account_type,
             'bank_account_name' => Employee::maskSensitive($this->bank_account_name),

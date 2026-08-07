@@ -131,12 +131,31 @@ class DuplicateClaimAndMinimumWageTest extends HrTestCase
 
     // --- FIN-030: minimum wage ---------------------------------------------------------------
 
-    /** No floor configured means nothing to warn about — never a guessed legal threshold. */
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function checkFor(Employee $employee): ?array
+    {
+        // withPayrollChecks() — FIN-030b made the check opt-in so the 200-row directory does not
+        // derive 200 daily rates for a field it never shows.
+        return (new EmployeeResource($employee))
+            ->withPayrollChecks()
+            ->toArray(Request::create('/'))['minimum_wage_check'];
+    }
+
+    /**
+     * No floor configured warns about nothing — never a guessed legal threshold. FIN-030b: the
+     * DAILY RATE is still reported, because that is the number nobody can work out from the
+     * monthly figure they typed, and it is most needed before anyone has entered a wage order.
+     */
     public function test_no_warning_when_no_minimum_is_configured(): void
     {
-        $this->assertNull(
-            (new EmployeeResource($this->employee))->toArray(Request::create('/'))['minimum_wage_check'],
-        );
+        $check = $this->checkFor($this->employee);
+
+        $this->assertNotNull($check);
+        $this->assertNull($check['minimum']);
+        $this->assertFalse($check['below']);
+        $this->assertGreaterThan(0, $check['daily_rate']);
     }
 
     public function test_a_sub_minimum_daily_rate_is_flagged(): void
@@ -148,11 +167,11 @@ class DuplicateClaimAndMinimumWageTest extends HrTestCase
         // salary far enough that the DERIVED daily rate must fall under it.
         $this->employee->update(['base_salary' => 5000]);
 
-        $check = (new EmployeeResource($this->employee->fresh()))
-            ->toArray(Request::create('/'))['minimum_wage_check'];
+        $check = $this->checkFor($this->employee->fresh());
 
         $this->assertNotNull($check);
         $this->assertTrue($check['below'], 'a sub-minimum daily rate was not flagged');
+        $this->assertTrue($check['flagged']);
         $this->assertSame(645.0, $check['minimum']);
         $this->assertLessThan(645.0, $check['daily_rate']);
     }
@@ -162,8 +181,7 @@ class DuplicateClaimAndMinimumWageTest extends HrTestCase
         PayrollSetting::effectiveFrom('2026-01-01');
         PayrollSetting::current()->update(['minimum_daily_wage' => 645]);
 
-        $check = (new EmployeeResource($this->employee->fresh()))
-            ->toArray(Request::create('/'))['minimum_wage_check'];
+        $check = $this->checkFor($this->employee->fresh());
 
         $this->assertNotNull($check);
         $this->assertFalse($check['below']);

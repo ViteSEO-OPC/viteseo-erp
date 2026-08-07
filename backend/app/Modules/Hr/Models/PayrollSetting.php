@@ -56,6 +56,11 @@ class PayrollSetting extends Model
 
             static::recordVersion($date);
         });
+
+        // FIN-030b — any write invalidates the resolved-settings memo, including the `created` that
+        // `current()` performs on a fresh install. `recordVersion()` covers the versioned path; this
+        // covers the rest.
+        static::saved(fn () => static::flushAsOfMemo());
     }
 
     /** The singleton company payroll settings row (created with defaults if absent). */
@@ -120,6 +125,17 @@ class PayrollSetting extends Model
      * @var array<string, self>
      */
     protected static array $asOfMemo = [];
+
+    /**
+     * Drop the memo. "Per-request" is only true in a request: anything with a longer life — a
+     * queue worker, an artisan command, a test process — outlives it, and there the memo is a
+     * cache that nothing was invalidating on a plain `->update()`. `recordVersion()` already
+     * cleared it; this covers the writes that do not go through versioning (FIN-030b).
+     */
+    public static function flushAsOfMemo(): void
+    {
+        static::$asOfMemo = [];
+    }
 
     /**
      * Write the current row as the version in force from `$effectiveFrom` (today if omitted).

@@ -16,6 +16,7 @@ use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\SalaryHistory;
 use App\Modules\Hr\Models\PayslipRequest;
 use App\Modules\Hr\Models\Reimbursement;
+use App\Modules\Hr\Models\RetroFlag;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
@@ -82,24 +83,86 @@ class PayrollService
      * attendance policy), so nobody typing a monthly figure can see what it implies per day. That is
      * the gap — not that HR would knowingly pay below the floor.
      *
-     * Returns null when no floor is configured. Null means "nobody has entered the wage order that
-     * applies here", and inventing one would be guessing at a legal threshold — the same refusal the
+     * WHY THE RATE IS RETURNED EVEN WITH NO FLOOR CONFIGURED (FIN-030b). The first version returned
+     * null unless a floor was set, so the screen showed nothing at all — and the one number nobody
+     * can work out for themselves stayed invisible in exactly the case where it matters most,
+     * before anyone has thought about the wage order. The rate is the answer to "what is one of
+     * this person's days worth", which the basis alone decides; the floor only decides whether that
+     * answer is a problem. `minimum` stays null when none is configured, and null warns about
+     * nothing — inventing a figure would be guessing at a legal threshold, the same refusal the
      * de-minimis migration made (FIN-024).
      *
-     * @return array{daily_rate: float, minimum: float, below: bool}|null
+     * `below` is the arithmetic truth. `flagged` is `below` minus the people someone has explicitly
+     * excused (FIN-030b), and it is the one every list and gate should read: a warning that is
+     * permanently wrong for the same five part-timers is a warning everyone learns to scroll past.
+     *
+     * Returns null only when the rate itself cannot be derived.
+     *
+     * @return array{
+     *     daily_rate: float, basis: string, divisor: int|null, workdays: int,
+     *     minimum: float|null, below: bool, flagged: bool, shortfall: float|null,
+     *     compliant_salary: float|null, exempt: bool, exempt_reason: string|null
+     * }|null
      */
     public function minimumWageCheckFor(Employee $employee, ?string $asOf = null): ?array
     {
-        $setting = PayrollSetting::asOf($asOf);
-        $minimum = $setting->minimum_daily_wage;
+        return $this->buildMinimumWageCheck($employee, PayrollSetting::asOf($asOf));
+    }
 
-        if ($minimum === null || (float) $minimum <= 0) {
+    /**
+     * The check itself, against a resolved setting and an optional explicit period. Shared so the
+     * profile screen and the pre-run review can never disagree about who is below the floor.
+     *
+     * @param  array{start: string, end: string}|null  $period
+     * @return array<string, mixed>|null
+     */
+    private function buildMinimumWageCheck(Employee $employee, PayrollSetting $setting, ?array $period = null): ?array
+    {
+        $derived = $this->derivedDailyRateFor($employee, $setting, $period);
+
+        if ($derived === null) {
             return null;
         }
 
+        $minimum = $setting->minimum_daily_wage !== null && (float) $setting->minimum_daily_wage > 0
+            ? round((float) $setting->minimum_daily_wage, 2)
+            : null;
+
+        $below = $minimum !== null && $derived['daily_rate'] < $minimum;
+        $exempt = (bool) $employee->minimum_wage_exempt;
+
+        return [
+            'daily_rate' => $derived['daily_rate'],
+            'basis' => $derived['basis'],
+            'divisor' => $derived['divisor'],
+            'workdays' => $derived['workdays'],
+            'minimum' => $minimum,
+            'below' => $below,
+            'flagged' => $below && ! $exempt,
+            'shortfall' => $below ? round($minimum - $derived['daily_rate'], 2) : null,
+            'compliant_salary' => $below ? $this->salaryClearing($minimum, $derived) : null,
+            'exempt' => $exempt,
+            'exempt_reason' => $employee->minimum_wage_exempt_reason,
+        ];
+    }
+
+    /**
+     * The derived daily rate plus the inputs that produced it, so a caller can explain the number
+     * rather than just assert it. Defaults to the employee's CURRENT period; the pre-run review
+     * passes the cycle it is about to pay.
+     *
+     * Null when the rate cannot be derived at all (no scheduled workdays) — a schedule problem,
+     * which payroll itself reports with a far better message than a wage warning could give.
+     *
+     * @param  array{start: string, end: string}|null  $period
+     * @return array{daily_rate: float, basis: string, divisor: int|null, workdays: int, periods_per_year: int}|null
+     */
+    private function derivedDailyRateFor(Employee $employee, PayrollSetting $setting, ?array $period = null): ?array
+    {
         $frequency = $employee->pay_frequency ?: $setting->frequency;
         $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
-        $period = $this->schedule->currentPeriodFor($frequency, $setting->anchor_date);
+        $period ??= $this->schedule->currentPeriodFor($frequency, $setting->anchor_date);
+        $policy = $this->attendancePolicy->asOf($period['end']);
 
         try {
             $workingDays = $this->attendance->scheduledWorkdaysFor(
@@ -108,23 +171,253 @@ class PayrollService
                 $period['end'],
             );
 
-            $daily = $this->dailyRateFor(
-                $employee,
-                $this->attendancePolicy->asOf($period['end']),
-                $periodsPerYear,
-                $workingDays,
-            );
+            $daily = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
         } catch (ValidationException) {
-            // No scheduled workdays — a schedule problem, reported by payroll itself with a far
-            // better message than a wage warning could give. Not this check's business.
             return null;
         }
 
         return [
             'daily_rate' => $daily,
-            'minimum' => round((float) $minimum, 2),
-            'below' => $daily < (float) $minimum,
+            'basis' => $policy->daily_rate_basis,
+            // Only meaningful under fixed_divisor — under period_workdays the column is still
+            // populated but plays no part, and reporting it would suggest otherwise.
+            'divisor' => $policy->daily_rate_basis === 'fixed_divisor' ? (int) $policy->annual_divisor : null,
+            'workdays' => $workingDays,
+            'periods_per_year' => $periodsPerYear,
         ];
+    }
+
+    /**
+     * The monthly base salary whose derived daily rate clears $floor — dailyRateFor() inverted, so
+     * the proposal is produced by the same arithmetic that produced the breach (FIN-030b).
+     *
+     * Rounded UP to the centavo. Rounding to nearest would let a proposal land a hair under the
+     * floor after dailyRateFor()'s own rounding, which is the one outcome an adjustment must never
+     * have: a raise that leaves the person still non-compliant.
+     *
+     * Under `period_workdays` the answer depends on the period's workday count, so it clears the
+     * floor for THIS period and is a close approximation elsewhere. Under `fixed_divisor` it is
+     * exact all year, which is what a fixed divisor is for.
+     *
+     * @param  array{basis: string, divisor: int|null, workdays: int, periods_per_year: int}  $derived
+     */
+    private function salaryClearing(float $floor, array $derived): float
+    {
+        $monthly = $derived['basis'] === 'fixed_divisor'
+            ? $floor * max(1, (int) $derived['divisor']) / 12
+            : $floor * $derived['workdays'] * $derived['periods_per_year'] / 12;
+
+        return ceil($monthly * 100) / 100;
+    }
+
+    /**
+     * The employees a run for $frequency pays in this cycle.
+     *
+     * Extracted (FIN-030b) so the pre-run minimum-wage review asks EXACTLY the question the run
+     * asks. A review over a nearly-identical population is worse than none: it clears people the
+     * run then pays, and the difference would only ever show up as a compliance gap nobody
+     * could account for.
+     *
+     * @return Collection<int, Employee>
+     */
+    public function payGroupEmployees(
+        string $frequency,
+        string $cycleStart,
+        string $cycleEnd,
+        string $defaultFrequency,
+    ): Collection {
+        return Employee::withTrashed()
+            ->with('user')
+            ->whereRaw('COALESCE(NULLIF(pay_frequency, ""), ?) = ?', [$defaultFrequency, $frequency])
+            ->where(fn ($q) => $q->whereNull('hire_date')->orWhere('hire_date', '<=', $cycleEnd))
+            ->where(function ($q) use ($cycleStart) {
+                // Currently employed: never separated and not soft-deleted for any reason.
+                $q->where(fn ($active) => $active
+                    ->whereNull('separation_type')
+                    ->whereNull('separation_date')
+                    ->whereNull('deleted_at'))
+                    // …or this is their final cycle. A separation with no recorded date
+                    // stays excluded — we won't guess someone's last working day.
+                    ->orWhere('separation_date', '>=', $cycleStart);
+            })
+            ->get();
+    }
+
+    /**
+     * Everyone this run would pay whose derived daily rate falls under the floor (FIN-030b).
+     *
+     * WHY IT IS ASKED AT THE RUN AND NOT ONLY ON THE PROFILE. A band on a profile page is seen by
+     * whoever happens to open that profile, which for a compliant-looking employee is nobody. The
+     * moment the answer actually matters is the moment money is about to be committed for a period,
+     * so the same question is asked there, over exactly the population the run will pay.
+     *
+     * Evaluated against THIS cycle — the settings in force for it, the policy as it stood at its
+     * end, and its own workday count — so a review of an old period judges it by the floor that
+     * applied then rather than today's.
+     *
+     * @return array{
+     *     minimum: float|null, basis: string|null, divisor: int|null,
+     *     cycle: array{start: string, end: string}, employees: list<array<string, mixed>>,
+     *     checked: int, flagged_count: int, exempt_count: int
+     * }
+     */
+    public function minimumWageReview(string $frequency, string $cycleStart, string $cycleEnd): array
+    {
+        $setting = PayrollSetting::asOf($cycleEnd);
+        $period = ['start' => $cycleStart, 'end' => $cycleEnd];
+        $employees = $this->payGroupEmployees($frequency, $cycleStart, $cycleEnd, $setting->frequency);
+
+        $rows = [];
+        $flagged = 0;
+        $exempt = 0;
+        $basis = null;
+        $divisor = null;
+
+        foreach ($employees as $employee) {
+            $check = $this->buildMinimumWageCheck($employee, $setting, $period);
+
+            if ($check === null) {
+                continue;
+            }
+
+            $basis ??= $check['basis'];
+            $divisor ??= $check['divisor'];
+
+            if (! $check['below']) {
+                continue;
+            }
+
+            $check['exempt'] ? $exempt++ : $flagged++;
+
+            $rows[] = [
+                'employee' => [
+                    'id' => $employee->id,
+                    'name' => $employee->user?->name,
+                    'employee_no' => $employee->employee_no,
+                    'job_title' => $employee->job_title,
+                ],
+                'base_salary' => (float) $employee->base_salary,
+                ...$check,
+            ];
+        }
+
+        // Worst shortfall first — the order HR would work the list in anyway.
+        usort($rows, fn ($a, $b) => $b['shortfall'] <=> $a['shortfall']);
+
+        return [
+            'minimum' => $setting->minimum_daily_wage !== null ? round((float) $setting->minimum_daily_wage, 2) : null,
+            'basis' => $basis,
+            'divisor' => $divisor,
+            'cycle' => $period,
+            'employees' => $rows,
+            'checked' => $employees->count(),
+            'flagged_count' => $flagged,
+            'exempt_count' => $exempt,
+        ];
+    }
+
+    /**
+     * Raise the flagged employees to the salary that clears the floor (FIN-030b).
+     *
+     * WHY THIS IS A BUTTON AND NOT A BACKGROUND JOB. A wage order raises what the company MUST pay;
+     * it does not raise anybody's salary by itself. Salary is a contractual term, so the change
+     * needs an approver, a date it takes effect from, and a record — which is precisely what
+     * routing it through EmployeeService::update() buys: the same SalaryHistory row, the same
+     * audit entry and the same repricing guard as any other raise. A job that rewrote pay on its
+     * own would leave nobody able to answer who decided it.
+     *
+     * The system's job is to make the correct number obvious and one click away. Committing it
+     * stays a person's decision, and the ids are passed in explicitly so it is never "everyone the
+     * screen happened to be showing".
+     *
+     * Back pay is NOT computed here. When the effective date reaches into a period that was
+     * already settled, the difference is recorded as a retro flag (FIN-009) — the queue HR already
+     * works from, settled by an adjustment run (FIN-010). Paying it silently from inside a salary
+     * edit would be money moving with no run behind it.
+     *
+     * @param  list<int>  $employeeIds
+     * @return array{applied: list<array<string, mixed>>, skipped: list<array<string, mixed>>, back_pay_flagged: int}
+     */
+    public function applyMinimumWageAdjustments(
+        array $employeeIds,
+        string $effectiveDate,
+        ?string $reason,
+        bool $acknowledgeRepricing,
+    ): array {
+        $setting = PayrollSetting::asOf($effectiveDate);
+        $note = $reason ?: 'Minimum wage compliance';
+
+        return DB::transaction(function () use ($employeeIds, $effectiveDate, $note, $acknowledgeRepricing, $setting) {
+            $applied = [];
+            $skipped = [];
+            $flagged = 0;
+
+            $employees = Employee::with('user')->whereIn('id', $employeeIds)->get();
+
+            foreach ($employees as $employee) {
+                $check = $this->buildMinimumWageCheck($employee, $setting);
+
+                // Re-checked here rather than trusted from the screen: the list may have been open
+                // for a while, and raising someone who is already compliant is a raise nobody
+                // decided to give.
+                if ($check === null || ! $check['below'] || $check['compliant_salary'] === null) {
+                    $skipped[] = [
+                        'employee_id' => $employee->id,
+                        'name' => $employee->user?->name,
+                        'reason' => $check === null
+                            ? 'No daily rate could be derived — check their work schedule.'
+                            : 'Already at or above the floor.',
+                    ];
+
+                    continue;
+                }
+
+                $from = (float) $employee->base_salary;
+
+                app(EmployeeService::class)->update($employee, [
+                    'base_salary' => $check['compliant_salary'],
+                    'salary_effective_date' => $effectiveDate,
+                    'salary_change_reason' => $note,
+                    'salary_change_type' => 'adjustment',
+                    'acknowledge_repricing' => $acknowledgeRepricing,
+                ]);
+
+                // The row EmployeeService just appended — the thing the back-pay flag hangs off, so
+                // resolving the difference points at the change that caused it.
+                $history = SalaryHistory::where('employee_id', $employee->id)
+                    ->latest('id')
+                    ->first();
+
+                if ($history !== null) {
+                    $flag = app(RetroFlagService::class)->flagIfSettled(
+                        $history,
+                        $employee->id,
+                        $effectiveDate,
+                        null,
+                        RetroFlag::OWED,
+                        "Minimum wage adjustment to " . number_format($check['compliant_salary'], 2),
+                    );
+
+                    $flag !== null && $flagged++;
+                }
+
+                $applied[] = [
+                    'employee_id' => $employee->id,
+                    'name' => $employee->user?->name,
+                    'from' => $from,
+                    'to' => $check['compliant_salary'],
+                ];
+            }
+
+            $this->audit->log(
+                'updated',
+                'Payroll',
+                'Applied minimum-wage adjustments to ' . count($applied) . ' employee'
+                    . (count($applied) === 1 ? '' : 's') . ", effective {$effectiveDate}",
+            );
+
+            return ['applied' => $applied, 'skipped' => $skipped, 'back_pay_flagged' => $flagged];
+        });
     }
 
     private function dailyRateFor(Employee $employee, AttendancePolicy $policy, int $periodsPerYear, int $workingDays): float
@@ -2461,21 +2754,7 @@ class PayrollService
             // mid-cycle therefore got no payslip at all for the days they had worked. We now
             // pull them back in with withTrashed() when their last day falls on/after the
             // cycle start; unpaidDaysDetailFor() prorates the days after they left.
-            $employees = Employee::withTrashed()
-                ->with('user')
-                ->whereRaw('COALESCE(NULLIF(pay_frequency, ""), ?) = ?', [$setting->frequency, $frequency])
-                ->where(fn ($q) => $q->whereNull('hire_date')->orWhere('hire_date', '<=', $cycleEnd))
-                ->where(function ($q) use ($cycleStart) {
-                    // Currently employed: never separated and not soft-deleted for any reason.
-                    $q->where(fn ($active) => $active
-                        ->whereNull('separation_type')
-                        ->whereNull('separation_date')
-                        ->whereNull('deleted_at'))
-                        // …or this is their final cycle. A separation with no recorded date
-                        // stays excluded — we won't guess someone's last working day.
-                        ->orWhere('separation_date', '>=', $cycleStart);
-                })
-                ->get();
+            $employees = $this->payGroupEmployees($frequency, $cycleStart, $cycleEnd, $setting->frequency);
 
             // Holidays in this cycle (date => type), fetched once for the whole run.
             $holidayMap = $this->holidays->typedHolidaysBetween(Carbon::parse($cycleStart), Carbon::parse($cycleEnd));
