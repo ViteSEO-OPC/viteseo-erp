@@ -12,6 +12,7 @@ use App\Modules\Projects\Models\Task;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The PM/Admin review queue for member-submitted work.
@@ -66,6 +67,8 @@ class ApprovalService
 
     public function approveTask(Task $task, User $reviewer): Task
     {
+        $this->assertNotApproved($task->approval_status, 'task');
+
         return DB::transaction(function () use ($task, $reviewer): Task {
             $task->update([
                 'approval_status' => ApprovalStatus::APPROVED,
@@ -100,6 +103,8 @@ class ApprovalService
 
     public function rejectTask(Task $task, User $reviewer, string $reason): Task
     {
+        $this->assertPending($task->approval_status, 'task');
+
         return DB::transaction(function () use ($task, $reviewer, $reason): Task {
             $task->update([
                 'approval_status' => ApprovalStatus::REJECTED,
@@ -135,6 +140,8 @@ class ApprovalService
 
     public function approveSubtask(Subtask $subtask, User $reviewer): Subtask
     {
+        $this->assertNotApproved($subtask->approval_status, 'sub-task');
+
         return DB::transaction(function () use ($subtask, $reviewer): Subtask {
             $subtask->update([
                 'approval_status' => ApprovalStatus::APPROVED,
@@ -158,6 +165,8 @@ class ApprovalService
 
     public function rejectSubtask(Subtask $subtask, User $reviewer, string $reason): Subtask
     {
+        $this->assertPending($subtask->approval_status, 'sub-task');
+
         return DB::transaction(function () use ($subtask, $reviewer, $reason): Subtask {
             $subtask->update([
                 'approval_status' => ApprovalStatus::REJECTED,
@@ -273,6 +282,39 @@ class ApprovalService
             $subtask->name,
             $reason,
         );
+    }
+
+    /**
+     * Rejecting is a one-way door out of the queue: an already-rejected proposal
+     * is back with its author, and approved work is no longer under review. The
+     * UI hides the button in both cases; this is the same rule on the wire.
+     */
+    private function assertPending(?ApprovalStatus $status, string $noun): void
+    {
+        if ($status === ApprovalStatus::PENDING) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'approval_status' => $status === ApprovalStatus::REJECTED
+                ? "This {$noun} has already been rejected — its author has to revise and re-submit it."
+                : "This {$noun} is already approved, so it is no longer under review.",
+        ]);
+    }
+
+    /**
+     * Approving stays open to a rejected proposal (a reviewer may edit it and let
+     * it through), but approving twice is not a real action.
+     */
+    private function assertNotApproved(?ApprovalStatus $status, string $noun): void
+    {
+        if ($status !== ApprovalStatus::APPROVED) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'approval_status' => "This {$noun} is already approved.",
+        ]);
     }
 
     /**

@@ -59,7 +59,9 @@ import {
  *    unapproved proposal) → edit every field.
  *  - `canEditStatus` (the above, or the subtask's own assignee) → status only,
  *    and never on a proposal: it isn't on the board yet.
- *  - `canReview` (Admin/PM on a proposal) → approve / reject it here.
+ *  - `canReview` (Admin/PM on a proposal) → decide it here. Rejecting is only
+ *    offered while it is still pending — one already sent back cannot be
+ *    rejected again; it is the author's move now.
  *  - `canResubmit` (its author, once rejected) → send it back for review.
  *  - otherwise read-only.
  */
@@ -224,15 +226,17 @@ function SubtaskRow({
                 >
                   Approve
                 </Button>
-                <Button
-                  size="xs"
-                  variant="outline"
-                  className="text-danger"
-                  disabled={rejectSubtask.isPending}
-                  onClick={() => setRejecting(true)}
-                >
-                  Reject
-                </Button>
+                {subtask.approval_status === 'pending' && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    className="text-danger"
+                    disabled={rejectSubtask.isPending}
+                    onClick={() => setRejecting(true)}
+                  >
+                    Reject
+                  </Button>
+                )}
               </div>
             )}
             {canResubmit && (
@@ -415,6 +419,9 @@ export function ViewTaskBody({
   const canEditStatus =
     !isProposal && (isManager || isAssignee || isGroupLeader);
   const canReview = isManager && isProposal;
+  // A rejected proposal is already sent back — the next move is the author's,
+  // so only a still-pending one can be rejected.
+  const canRejectTask = canReview && task.approval_status === 'pending';
   const canResubmit = isProposal && isProposalAuthor && task.approval_status === 'rejected';
   // Group members are the valid subtask assignees (ERD R5); fall back to all users otherwise.
   const assigneeOptions = isGroupTask && roster.length ? roster : users;
@@ -659,14 +666,16 @@ export function ViewTaskBody({
                 >
                   Approve
                 </Button>
-                <Button
-                  variant="outline"
-                  className="text-danger"
-                  disabled={rejectTask.isPending}
-                  onClick={() => setRejectingTask(true)}
-                >
-                  Reject
-                </Button>
+                {canRejectTask && (
+                  <Button
+                    variant="outline"
+                    className="text-danger"
+                    disabled={rejectTask.isPending}
+                    onClick={() => setRejectingTask(true)}
+                  >
+                    Reject
+                  </Button>
+                )}
               </>
             )}
             {canResubmit && (

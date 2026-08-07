@@ -22,7 +22,7 @@ import {
   useRejectSubtask,
   useRejectTask,
 } from "../../hooks";
-import type { PendingSubtask, PendingTask } from "../../types";
+import type { ApprovalStatus, PendingSubtask, PendingTask } from "../../types";
 import { useOpenTask } from "../tasks/useTaskModal";
 import { AdminTable, type AdminColumn, type AdminQuery } from "../shared/AdminTable";
 import { RejectReasonDialog } from "./RejectReasonDialog";
@@ -185,9 +185,17 @@ export function ApprovalsView() {
   );
 }
 
-/** Approve / Reject buttons plus their dialogs, shared by both tabs. */
+/**
+ * Approve / Reject buttons plus their dialogs, shared by both tabs.
+ *
+ * Reject is offered only while the row is still pending: one already sent back
+ * cannot be rejected again — the next move is the author's, who revises and
+ * re-submits. Approve stays available so a reviewer can let a rejected item
+ * through after editing it themselves.
+ */
 function ReviewActions({
   subject,
+  state,
   isPending,
   onApprove,
   onReject,
@@ -195,6 +203,7 @@ function ReviewActions({
   onEdit,
 }: {
   subject: string;
+  state: ApprovalStatus;
   isPending: boolean;
   onApprove: () => void;
   onReject: (reason: string) => void;
@@ -217,15 +226,17 @@ function ReviewActions({
       >
         Approve
       </Button>
-      <Button
-        size="xs"
-        variant="outline"
-        disabled={isPending}
-        onClick={() => setConfirmReject(true)}
-        className="text-danger"
-      >
-        Reject
-      </Button>
+      {state === "pending" && (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={isPending}
+          onClick={() => setConfirmReject(true)}
+          className="text-danger"
+        >
+          Reject
+        </Button>
+      )}
 
       <ConfirmDialog
         open={confirmApprove}
@@ -341,6 +352,7 @@ function PendingTasksList({ query }: { query: AdminQuery }) {
       actions={(row) => (
         <ReviewActions
           subject={row.title}
+          state={row.approval_status}
           isPending={approve.isPending || reject.isPending}
           rejectError={reject.isError ? "Could not reject. Please try again." : null}
           onEdit={() => openTask(row.id)}
@@ -425,6 +437,7 @@ function PendingSubtasksList({ query }: { query: AdminQuery }) {
       actions={(row) => (
         <ReviewActions
           subject={row.name}
+          state={row.approval_status}
           isPending={approve.isPending || reject.isPending}
           rejectError={reject.isError ? "Could not reject. Please try again." : null}
           // A sub-task is reviewed inside its parent task's modal.
