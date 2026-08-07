@@ -16,6 +16,7 @@ use App\Modules\Projects\Controllers\SearchController;
 use App\Modules\Projects\Controllers\SubtaskController;
 use App\Modules\Projects\Controllers\TaskController;
 use App\Modules\Projects\Controllers\UserDirectoryController;
+use App\Modules\Projects\Controllers\WorkloadAnalysisController;
 use App\Modules\Projects\Controllers\WorkloadController;
 use App\Modules\Projects\Controllers\WorkspaceController;
 use Illuminate\Support\Facades\Route;
@@ -50,6 +51,13 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     // Workload indicators — live active effort aggregation, loaded on demand
     // when selecting an assignee (member or group) in the task modal, and for
     // the Groups page. Advisory only.
+    // Workload Analysis. Open to everyone — the payload is scoped by role
+    // (managers see the platform, members see their own work). Retuning the
+    // capacity bands is manager-only, enforced in the controller.
+    Route::get('workload/analysis', [WorkloadAnalysisController::class, 'index']);
+    Route::get('workload/analysis/tasks', [WorkloadAnalysisController::class, 'tasks']);
+    Route::match(['put', 'patch'], 'workload/capacity', [WorkloadAnalysisController::class, 'updateCapacity']);
+
     Route::get('members/{user}/workload', [WorkloadController::class, 'show']);
     Route::get('groups/{group}/workload', [WorkloadController::class, 'showGroup']);
 

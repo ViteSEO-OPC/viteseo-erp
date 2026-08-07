@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { ClipboardCheck, LayoutGrid, X } from "lucide-react";
+import { BarChart3, ClipboardCheck, LayoutGrid, X } from "lucide-react";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import { useSidebar } from "@/core/layout/SidebarContext";
 import { cn } from "@/core/lib/utils";
@@ -396,6 +396,17 @@ export function Sidebar() {
             icon={<SidebarTeamIcon className="h-6 w-6" />}
           >
             Team
+          </NavLink>
+
+          {/* Workload Analysis is open to everyone — the payload is scoped by
+              role, so a member sees only their own work. */}
+          <NavLink
+            href="/sprintly/workload"
+            active={pathname.startsWith("/sprintly/workload")}
+            collapsed={collapsed}
+            icon={<BarChart3 className="h-6 w-6" />}
+          >
+            Workload Analysis
           </NavLink>
 
           {/* Approvals is a management surface — Admin/PM only. The badge is the

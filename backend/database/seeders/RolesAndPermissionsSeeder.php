@@ -83,6 +83,10 @@ class RolesAndPermissionsSeeder extends Seeder
         $projectsPermissions[] = 'projects.subtasks.propose';
         $projectsPermissions[] = 'projects.tasks.approve';
         $projectsPermissions[] = 'projects.subtasks.approve';
+        // Workload Analysis: everyone may read it (scoped by role in the service);
+        // retuning the platform-wide capacity bands is a management action.
+        $projectsPermissions[] = 'projects.workload.view';
+        $projectsPermissions[] = 'projects.workload.manage_capacity';
 
         foreach ($projectsPermissions as $name) {
             Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
@@ -104,6 +108,8 @@ class RolesAndPermissionsSeeder extends Seeder
             // work once a PM/Admin approves it.
             'projects.tasks.propose',
             'projects.subtasks.propose',
+            // Members see the analysis page too, scoped to their own work.
+            'projects.workload.view',
         ];
 
         // HRIS self-service subset (view own payslip, file leave, clock in, etc.) — the

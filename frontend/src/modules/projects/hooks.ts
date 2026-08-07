@@ -646,6 +646,45 @@ export function useRestoreSubtask() {
   });
 }
 
+// Workload Analysis
+export const workloadKeys = {
+  analysis: ["projects", "workload", "analysis"] as const,
+  tasks: ["projects", "workload", "tasks"] as const,
+};
+
+export function useWorkloadAnalysis(params?: Record<string, unknown>) {
+  return useQuery({
+    queryKey: [...workloadKeys.analysis, params ?? {}],
+    queryFn: () => projectsApi.getWorkloadAnalysis(params),
+  });
+}
+
+export function useWorkloadTasks(params?: Record<string, unknown>) {
+  return useQuery({
+    queryKey: [...workloadKeys.tasks, params ?? {}],
+    queryFn: () => projectsApi.listWorkloadTasks(params),
+  });
+}
+
+/**
+ * Retuning capacity re-derives every workload level, so it invalidates the
+ * analysis AND the per-member/group indicators shown in the task modal.
+ */
+export function useUpdateWorkloadCapacity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: {
+      max_capacity: number;
+      light_max: number;
+      moderate_max: number;
+    }) => projectsApi.updateWorkloadCapacity(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects", "workload"] });
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
+    },
+  });
+}
+
 // Approvals — the PM/Admin review queue for member-submitted work.
 export const approvalKeys = {
   tasks: ["admin", "approvals", "tasks"] as const,

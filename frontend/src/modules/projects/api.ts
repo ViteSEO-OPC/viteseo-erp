@@ -20,6 +20,9 @@ import type {
   Subtask,
   Task,
   Workload,
+  WorkloadAnalysis,
+  WorkloadRow,
+  WorkloadThresholds,
   Workspace,
 } from "./types";
 import type { NotificationDto } from "./notifications";
@@ -496,6 +499,38 @@ export const projectsApi = {
   resubmitSubtask: async (id: string): Promise<Subtask> => {
     const { data } = await apiClient.post<ApiResource<Subtask>>(
       `${BASE}/subtasks/${id}/resubmit`,
+    );
+    return data.data;
+  },
+
+  // Workload Analysis. The payload is role-scoped server-side: a manager gets
+  // the whole platform, a member only their own work.
+  getWorkloadAnalysis: async (
+    params?: Record<string, unknown>,
+  ): Promise<WorkloadAnalysis> => {
+    const { data } = await apiClient.get<ApiResource<WorkloadAnalysis>>(
+      `${BASE}/workload/analysis`,
+      { params },
+    );
+    return data.data;
+  },
+  listWorkloadTasks: async (
+    params?: Record<string, unknown>,
+  ): Promise<Paginated<WorkloadRow>> => {
+    const { data } = await apiClient.get<Paginated<WorkloadRow>>(
+      `${BASE}/workload/analysis/tasks`,
+      { params },
+    );
+    return data;
+  },
+  updateWorkloadCapacity: async (payload: {
+    max_capacity: number;
+    light_max: number;
+    moderate_max: number;
+  }): Promise<WorkloadThresholds> => {
+    const { data } = await apiClient.put<ApiResource<WorkloadThresholds>>(
+      `${BASE}/workload/capacity`,
+      payload,
     );
     return data.data;
   },
