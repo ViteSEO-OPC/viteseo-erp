@@ -86,7 +86,10 @@ class ReportService
      */
     public function download(string $key): HttpResponse
     {
-        $report = $this->get($key);
+        // FIN-041 — an export carries EVERY row in range, not the first page. A file named after the
+        // whole period that contains page 1 of 4 is the same silent truncation the old 300-row cap
+        // was, moved into a filename.
+        $report = $this->get($key, ['all' => true]);
         $slug = Str::slug($report['title']);
         $date = now(config('app.timezone_local'))->format('Y-m-d');
 
@@ -735,11 +738,26 @@ class ReportService
         $months = (int) ($filters['months'] ?? 9);
         $since = now(config('app.timezone_local'))->startOfMonth()->subMonths(max(0, $months - 1));
 
-        $entries = AuditLog::with('user')
-            ->where('created_at', '>=', $since)
-            ->latest()
-            ->take(300)
-            ->get();
+        // FIN-041 — PAGINATED, and it states the total.
+        //
+        // This used to `take(300)` with nothing saying so. An audit export presented as complete was
+        // not: with 500 entries in range, 200 were silently absent and the file looked finished. For
+        // the report whose entire purpose is "who did what", a silent truncation is the one failure
+        // mode that matters, because the missing rows are invisible by construction.
+        //
+        // `all` is for the export. A CSV is read by a person reconciling something, and handing them
+        // page 1 of 4 in a file named after the whole range would recreate the same lie in a new
+        // place. The page cap exists for the SCREEN, which cannot usefully render 20,000 rows.
+        $query = AuditLog::with('user')->where('created_at', '>=', $since)->latest();
+
+        $total = $query->clone()->count();
+        $exportAll = (bool) ($filters['all'] ?? false);
+        $perPage = $exportAll ? $total : min(500, max(1, (int) ($filters['per_page'] ?? 100)));
+        $page = $exportAll ? 1 : max(1, (int) ($filters['page'] ?? 1));
+
+        $entries = $perPage > 0
+            ? $query->forPage($page, $perPage)->get()
+            : collect();
 
         return [
             'title' => 'Audit Trail',
@@ -756,6 +774,15 @@ class ReportService
                 'action' => $a->action,
                 'details' => $a->description ?? '—',
             ])->all(),
+            // FIN-041 — so the screen can page, and so "showing 100 of 4,312" is sayable. The
+            // absence of this is what made the old cap silent.
+            'pagination' => [
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage,
+                'pages' => $perPage > 0 ? (int) ceil($total / $perPage) : 1,
+                'returned' => $entries->count(),
+            ],
             'note' => null,
         ];
     }

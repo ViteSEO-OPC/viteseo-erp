@@ -570,4 +570,72 @@ class LoanService
             default => 'Loan',
         };
     }
+
+    /**
+     * Settle every outstanding loan on separation, from whatever the final pay can afford (FIN-014).
+     *
+     * WHY THIS EXISTS SEPARATELY FROM `collectForPeriod()`. That method collects a per-period
+     * INSTALMENT, and it only ever runs for the pay group the employee belongs to. Once someone
+     * leaves they are in no pay group, so their loan simply stopped being collected — the audit's
+     * words: "Outstanding loans simply stop being collected when the employee leaves." The balance
+     * sat on the books with nothing left to recover it from.
+     *
+     * So this takes the WHOLE remaining balance rather than an instalment, in the same order
+     * `collectForPeriod()` uses, and stops when the money runs out. What it cannot recover stays
+     * outstanding and visible — the alternative would be writing off real debt because the final
+     * payslip happened to be thin, which is the FIN-003 mistake in a different place.
+     *
+     * @return float total settled
+     */
+    public function settleOnSeparation(Employee $employee, PayrollRun $run, float $available): float
+    {
+        $loans = EmployeeLoan::where('employee_id', $employee->id)
+            ->whereIn('status', ['active', 'settled'])
+            ->with('payments')
+            ->orderBy('start_date')
+            ->orderBy('id')
+            ->get();
+
+        // A re-run must replace this run's rows rather than add to them — the same invariant
+        // collectForPeriod() keeps, and the reason no loan has a stored balance.
+        LoanPayment::where('payroll_run_id', $run->id)
+            ->whereHas('loan', fn ($q) => $q->where('employee_id', $employee->id))
+            ->delete();
+
+        $remaining = round(max(0.0, $available), 2);
+        $settled = 0.0;
+
+        foreach ($loans as $loan) {
+            $paidElsewhere = round((float) $loan->payments()
+                ->where('payroll_run_id', '!=', $run->id)
+                ->sum('amount'), 2);
+            $outstanding = round(max(0, (float) $loan->principal - $paidElsewhere), 2);
+
+            if ($outstanding <= 0) {
+                $loan->update(['status' => 'settled']);
+
+                continue;
+            }
+
+            if ($remaining <= 0) {
+                continue; // nothing left to take; the balance stays outstanding and visible
+            }
+
+            $amount = round(min($outstanding, $remaining), 2);
+
+            LoanPayment::updateOrCreate(
+                ['loan_id' => $loan->id, 'payroll_run_id' => $run->id],
+                ['payslip_id' => null, 'amount' => $amount],
+            );
+
+            $settled = round($settled + $amount, 2);
+            $remaining = round($remaining - $amount, 2);
+
+            if (round($paidElsewhere + $amount, 2) >= (float) $loan->principal) {
+                $loan->update(['status' => 'settled']);
+            }
+        }
+
+        return $settled;
+    }
 }

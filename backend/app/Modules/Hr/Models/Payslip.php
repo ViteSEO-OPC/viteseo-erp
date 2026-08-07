@@ -31,6 +31,9 @@ class Payslip extends Model
         'tax_annualisation',
         // FIN-010 — an off-cycle corrective amount and what it is for.
         'adjustment_pay', 'adjustment_note',
+        // FIN-014 — the terminal amounts on a final-pay payslip.
+        'separation_pay', 'separation_pay_taxable',
+        'leave_conversion', 'leave_conversion_days', 'loan_settlement',
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
         // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
         'other_deductions', 'other_deductions_breakdown',
@@ -64,6 +67,11 @@ class Payslip extends Model
         'late_penalty_days' => 'decimal:2',
         'reimbursements' => 'decimal:2',
         'adjustment_pay' => 'decimal:2',
+        'separation_pay' => 'decimal:2',
+        'separation_pay_taxable' => 'boolean',
+        'leave_conversion' => 'decimal:2',
+        'leave_conversion_days' => 'decimal:2',
+        'loan_settlement' => 'decimal:2',
         'tax_annualisation' => 'decimal:2',
         'allowances' => 'decimal:2',
         'holiday_premium' => 'decimal:2',

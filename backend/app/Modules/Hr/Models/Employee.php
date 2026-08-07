@@ -97,7 +97,69 @@ class Employee extends Model
         'custom_grace_minutes' => 'integer',
         'custom_unpaid_break_minutes' => 'integer',
         'custom_paid_break_minutes' => 'integer',
+        // FIN-022 — sensitive personal information under the Data Privacy Act, encrypted at rest.
+        // These columns are TEXT, not varchar(255): the envelope is ~228 chars for a 17-char
+        // account number, so varchar would fit today and silently truncate — destroying the value,
+        // because a truncated ciphertext cannot be decrypted.
+        //
+        // Nothing may `where` or `orderBy` these. Encrypted values are opaque to SQL; a lookup by
+        // account number needs a separate blind index, not a query against this column.
+        'bank_account' => 'encrypted',
+        'bank_account_name' => 'encrypted',
+        'tin' => 'encrypted',
+        'sss_number' => 'encrypted',
+        'philhealth_number' => 'encrypted',
+        'pagibig_number' => 'encrypted',
     ];
+
+    /**
+     * The sensitive fields, named once (FIN-022).
+     *
+     * Used by the casts above, the masking below and the reveal endpoint, so the three cannot drift
+     * apart — a field added to the casts but not to the masking would be returned in full.
+     */
+    public const SENSITIVE_FIELDS = [
+        'bank_account', 'bank_account_name', 'tin',
+        'sss_number', 'philhealth_number', 'pagibig_number',
+    ];
+
+    /**
+     * A sensitive value reduced to its last four characters (FIN-022).
+     *
+     * `••••4471` is enough for a human to confirm they are looking at the right account and useless
+     * to anyone who is not. Short values are masked ENTIRELY rather than partially: revealing the
+     * last four of a five-character value discloses most of it.
+     */
+    public static function maskSensitive(?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return $value;
+        }
+
+        // Already masked — demo data stores placeholder values in this shape, and re-masking a mask
+        // would quietly change it.
+        if (str_starts_with($value, '••••')) {
+            return $value;
+        }
+
+        return mb_strlen($value) <= 4 ? '••••' : '••••' . mb_substr($value, -4);
+    }
+
+    /**
+     * This employee's sensitive fields, masked — what every ordinary payload carries.
+     *
+     * @return array<string, string|null>
+     */
+    public function maskedSensitive(): array
+    {
+        $out = [];
+
+        foreach (self::SENSITIVE_FIELDS as $field) {
+            $out[$field] = self::maskSensitive($this->{$field});
+        }
+
+        return $out;
+    }
 
     /** Management staff: fixed salary + exempt from attendance. */
     public function isManagement(): bool

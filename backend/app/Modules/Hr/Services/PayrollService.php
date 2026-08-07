@@ -10,6 +10,8 @@ use App\Modules\Hr\Models\LoanPayment;
 use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
+use App\Modules\Hr\Models\LeaveSetting;
+use App\Modules\Hr\Models\SharedLeaveBalance;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\SalaryHistory;
 use App\Modules\Hr\Models\PayslipRequest;
@@ -28,8 +30,20 @@ use Illuminate\Validation\ValidationException;
  * Payroll engine (v2). Pay is attendance-connected — absences are deducted at the
  * daily rate from actual hr_attendance records. Statutory deductions are driven by
  * the editable Company → Benefits config + each employee's enrolment checklist
- * (ContributionService), NOT hardcoded formulas. Values remain SIMPLIFIED (the SSS
- * config is a placeholder rate until the official bracket table is supplied).
+ * (ContributionService), NOT hardcoded formulas.
+ *
+ * THE RATES ARE NO LONGER PLACEHOLDERS. This docblock claimed the SSS config was "a placeholder
+ * rate until the official bracket table is supplied" long after B3b/B8 supplied it: the published
+ * 61-band schedule is seeded from Circular 2024-006 and machine-imported rather than typed. The
+ * withholding table stopped being hardcoded too (FIN-027) — it is dated data in `hr_tax_versions`.
+ * The comment was left saying the opposite, which is worse than no comment: it invites the next
+ * reader to distrust figures that are in fact correct, or to "fix" them.
+ *
+ * EVERY PRICING INPUT IS EFFECTIVE-DATED, resolved as of the cycle end: salary
+ * (`hr_salary_histories`), statutory rates (`hr_contribution_versions`), allowances
+ * (`hr_benefit_program_versions`), the attendance policy (`hr_attendance_policy_versions`), payroll
+ * settings (`hr_payroll_setting_versions`) and the tax table (`hr_tax_versions`). Re-running an old
+ * period therefore reprices it at what it actually charged, not at today's configuration.
  */
 class PayrollService
 {
@@ -272,9 +286,11 @@ class PayrollService
         // for everybody whose benefits sit under ₱90,000 — the normal case — and applied a rule
         // (one aggregate de-minimis cap) that does not exist.
         //
-        // 13th-month pay is NOT added here: this system reports it but never pays it, and
-        // withholding on money no payslip disbursed would be worse than the gap it closes. The
-        // bucket is built to take it the moment a 13th-month run exists (B17).
+        // 13th-month pay is NOT added here, and the reason CHANGED. This used to say the system
+        // "reports it but never pays it" — true when written, false since B17 added
+        // `runThirteenthMonth()`. It is excluded now because the 13th-month run computes its own
+        // share of the ₱90,000 bucket and withholds on its own excess, reading back the
+        // `other_benefits` this line records. Adding it here as well would count it twice.
         $taxableMonthly += $this->otherBenefitsTaxableMonthly(
             $allowanceSplit['other_benefits'] * 12,
             $dist['other_benefits_annual_cap'] ?? null,
@@ -1677,6 +1693,236 @@ class PayrollService
 
             return $run->fresh();
         });
+    }
+
+    /**
+     * Pay a leaver everything terminal they are owed (FIN-014).
+     *
+     * FOUR THINGS, and the regular run does none of them. It already prorates the leaver's final
+     * cycle (Slice 4, `withTrashed()`), so this deliberately does NOT touch basic salary — it pays:
+     *
+     *   1. unused leave converted to cash at the daily rate,
+     *   2. separation pay as HR entered it (see the migration for why it is entered, not computed),
+     *   3. the outstanding loan balance, settled against net — loans otherwise simply stopped being
+     *      collected when someone left, because `collectForPeriod()` only runs for a pay group they
+     *      are no longer in,
+     *   4. tax annualised across the year actually worked, not projected as if the year continued.
+     *
+     * THE TAX TREATMENT IS THE PART WORTH READING.
+     *
+     * Monetised unused vacation leave is exempt up to **12 days** — raised from 10 by BIR RR 29-2025,
+     * the same regulation that moved the rice and uniform ceilings. Anything above 12 days joins the
+     * ₱90,000 "13th month and other benefits" bucket rather than becoming taxable compensation
+     * directly, which is the chain B16 built and FIN-024 documented.
+     *
+     * Separation pay is exempt when the cause is beyond the employee's control (NIRC §32(B)(6)(b));
+     * HR marks the exception with `separation_pay_taxable`, because the system holds no fact that
+     * distinguishes a retrenchment from a negotiated exit.
+     *
+     * Then the whole year is trued up exactly as December does (FIN-028): annual tax due on what was
+     * actually earned, minus what was actually withheld. For a mid-year leaver that is almost always a
+     * REFUND — they were withheld all year against a projected full-year income they never reached.
+     * Getting this wrong in the other direction is the common real-world payroll complaint.
+     *
+     * @param  array{separation_pay?: float|null, separation_pay_taxable?: bool, unused_leave_days?: float|null, reason: string}  $data
+     */
+    public function runFinalPay(Employee $employee, array $data, User $runner): PayrollRun
+    {
+        if ($employee->separation_date === null) {
+            throw ValidationException::withMessages([
+                'employee' => ['This employee has no separation date, so there is no final pay to compute. Record their last working day first.'],
+            ]);
+        }
+
+        $separationDate = $employee->separation_date->toDateString();
+
+        return DB::transaction(function () use ($employee, $data, $runner, $separationDate) {
+            $setting = PayrollSetting::asOf($separationDate);
+            $year = (int) Carbon::parse($separationDate)->year;
+
+            // One final-pay run per employee per separation date. Its own frequency keeps it clear of
+            // the (cycle_start, cycle_end, frequency) unique index, the same device the 13th-month
+            // and adjustment runs use.
+            $run = PayrollRun::where('cycle_start', $separationDate)
+                ->where('cycle_end', $separationDate)
+                ->where('frequency', 'final_pay:' . $employee->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($run && $run->isLocked()) {
+                throw ValidationException::withMessages([
+                    'employee' => ['This final pay is locked and can no longer be recomputed.'],
+                ]);
+            }
+
+            $existing = $run
+                ? Payslip::where('payroll_run_id', $run->id)->where('employee_id', $employee->id)->first()
+                : null;
+
+            if ($existing && $existing->status === 'disbursed') {
+                throw ValidationException::withMessages([
+                    'employee' => ['This final pay has already been paid out. Reverse the payslip before recomputing it.'],
+                ]);
+            }
+
+            $run ??= new PayrollRun;
+            $run->fill([
+                'cycle_start' => $separationDate,
+                'cycle_end' => $separationDate,
+                'frequency' => 'final_pay:' . $employee->id,
+                'type' => 'final_pay',
+                'reason' => $data['reason'],
+                'status' => 'completed',
+                'run_at' => now(),
+                'run_by' => $runner->id,
+                'scheduled_pay_date' => Carbon::parse($separationDate)
+                    ->addDays((int) ($setting->pay_delay_days ?? 0))
+                    ->toDateString(),
+                'policy_snapshot' => $this->policySnapshot($setting, $separationDate),
+            ]);
+            $run->save();
+
+            // --- 1. unused leave, converted at the daily rate ---------------------------------
+            $unusedDays = round((float) ($data['unused_leave_days'] ?? $this->unusedLeaveDaysFor($employee, $year)), 2);
+
+            $policy = $this->attendancePolicy->asOf($separationDate);
+            $frequency = $employee->pay_frequency ?: $setting->frequency;
+            $periodsPerYear = PayScheduleService::periodsPerYear($frequency);
+            $period = $this->schedule->currentPeriodFor($frequency, $setting->anchor_date);
+            $workingDays = max(1, $this->attendance->scheduledWorkdaysFor($employee, $period['start'], $period['end']));
+
+            $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
+            $leaveConversion = round($unusedDays * $dailyRate, 2);
+
+            // --- 2. separation pay, as entered ------------------------------------------------
+            $separationPay = round((float) ($data['separation_pay'] ?? 0), 2);
+            $separationTaxable = (bool) ($data['separation_pay_taxable'] ?? false);
+
+            // --- 3. what is taxable of the above ----------------------------------------------
+            // Up to 12 days of monetised VL is exempt (RR 29-2025). The excess joins the ₱90,000
+            // other-benefits bucket rather than becoming taxable compensation directly.
+            $exemptLeaveDays = min($unusedDays, self::EXEMPT_LEAVE_CONVERSION_DAYS);
+            $excessLeave = round(max(0, $unusedDays - $exemptLeaveDays) * $dailyRate, 2);
+
+            $otherBenefits = $excessLeave;
+            $cap = (float) ($setting->other_benefits_annual_cap ?? 0);
+
+            // What the year already put into the bucket, so the cap is shared rather than reset.
+            $bucketSoFar = (float) $this->thirteenthMonthBasisFor($year)
+                ->where('hr_payslips.employee_id', $employee->id)
+                ->sum('hr_payslips.other_benefits');
+
+            $taxableFromBucket = round(max(0, ($bucketSoFar + $otherBenefits) - $cap) - max(0, $bucketSoFar - $cap), 2);
+            $taxableTerminal = round($taxableFromBucket + ($separationTaxable ? $separationPay : 0), 2);
+
+            // --- 4. annualise the year actually worked ---------------------------------------
+            $priorTaxable = (float) $this->thirteenthMonthBasisFor($year)
+                ->where('hr_payslips.employee_id', $employee->id)
+                ->sum('hr_payslips.taxable_pay');
+            $priorWithheld = (float) $this->thirteenthMonthBasisFor($year)
+                ->where('hr_payslips.employee_id', $employee->id)
+                ->sum('hr_payslips.withholding_tax');
+
+            $annualDue = $this->annualWithholdingTax($priorTaxable + $taxableTerminal, $separationDate);
+            $tax = round($annualDue - $priorWithheld, 2);
+
+            $gross = round($leaveConversion + $separationPay, 2);
+
+            // --- 5. settle outstanding loans against what is left ----------------------------
+            // The tax is SIGNED and must stay signed through both lines below. An earlier draft
+            // wrapped it in max(0, …) — which silently discarded the refund a mid-year leaver is
+            // owed, leaving net pay at zero on a payslip that should have paid them back several
+            // thousand pesos. Caught by the refund test, which is why that test asserts on net_pay
+            // rather than only on withholding_tax.
+            //
+            // A refund is cash, so it also ENLARGES what a loan can be settled from.
+            $availableNet = round(max(0, $gross - $tax), 2);
+            $loanSettlement = $this->loans->settleOnSeparation($employee, $run, $availableNet);
+
+            $totalDeductions = round($tax + $loanSettlement, 2);
+
+            $payslip = Payslip::updateOrCreate(
+                ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],
+                [
+                    'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
+                    'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
+                    'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                    'rest_day_premium' => 0, 'thirteenth_month' => 0, 'adjustment_pay' => 0,
+                    'separation_pay' => $separationPay,
+                    'separation_pay_taxable' => $separationTaxable,
+                    'leave_conversion' => $leaveConversion,
+                    'leave_conversion_days' => $unusedDays,
+                    'loan_settlement' => $loanSettlement,
+                    'other_benefits' => $otherBenefits,
+                    'taxable_pay' => $taxableTerminal,
+                    'gross' => $gross,
+                    'sss' => 0, 'philhealth' => 0, 'pagibig' => 0,
+                    'employer_sss' => 0, 'employer_philhealth' => 0, 'employer_pagibig' => 0,
+                    // Signed: a mid-year leaver is usually owed a refund, and clamping it at zero
+                    // would keep tax they never owed.
+                    'withholding_tax' => $tax,
+                    'tax_annualisation' => $tax,
+                    'other_deductions' => $loanSettlement,
+                    'other_deductions_breakdown' => $loanSettlement > 0
+                        ? [['name' => 'Outstanding loan balance', 'amount' => $loanSettlement]]
+                        : [],
+                    'total_deductions' => $totalDeductions,
+                    'deduction_carryover' => 0,
+                    'net_pay' => round($gross - $totalDeductions, 2),
+                    'status' => 'computed',
+                ],
+            );
+
+            $run->update([
+                'total_gross' => $gross,
+                'total_deductions' => $totalDeductions,
+                'total_net' => (float) $payslip->net_pay,
+                'employee_count' => 1,
+            ]);
+
+            $employee->loadMissing('user');
+            $this->audit->log(
+                'ran', 'Payroll',
+                'Final pay for ' . ($employee->user?->name ?? $employee->name)
+                    . ' — ₱' . number_format($gross, 2) . ' gross ('
+                    . $unusedDays . ' leave day(s) converted, ₱' . number_format($separationPay, 2)
+                    . ' separation pay), ₱' . number_format($loanSettlement, 2) . ' loan settled'
+                    . ' — ' . $data['reason'],
+                $run,
+            );
+
+            return $run->fresh();
+        });
+    }
+
+    /**
+     * Monetised unused vacation leave is exempt up to this many days.
+     *
+     * **12, not 10** — raised by BIR RR 29-2025 (issued 22 Dec 2025, effective 6 Jan 2026), the same
+     * regulation that moved rice to ₱2,500/month and uniform to ₱8,000/year. The older figure is
+     * still what most references say, which is exactly why it is a named constant with its source.
+     */
+    private const EXEMPT_LEAVE_CONVERSION_DAYS = 12;
+
+    /**
+     * Unused leave days this employee has left, in whichever mode the company runs.
+     *
+     * Only PAID types count: converting unpaid leave to cash would pay for time that was never
+     * going to be paid. Shared mode holds a single pool, per-type mode holds a row per type.
+     */
+    private function unusedLeaveDaysFor(Employee $employee, int $year): float
+    {
+        if (LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED) {
+            $pool = SharedLeaveBalance::where('employee_id', $employee->id)->where('year', $year)->first();
+
+            return $pool ? max(0, (float) $pool->entitled_days - (float) $pool->used_days) : 0.0;
+        }
+
+        return (float) $employee->leaveBalances()
+            ->where('year', $year)
+            ->whereHas('leaveType', fn ($q) => $q->where('is_paid', true))
+            ->get()
+            ->sum(fn ($b) => max(0, (float) $b->entitled_days - (float) $b->used_days));
     }
 
     public function listRuns(): Collection

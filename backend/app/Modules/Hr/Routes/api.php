@@ -19,6 +19,7 @@ use App\Modules\Hr\Http\Controllers\ReportController;
 use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
+use App\Modules\Hr\Http\Controllers\EmployeeSensitiveController;
 use App\Modules\Hr\Http\Controllers\LeaveConfigController;
 use App\Modules\Hr\Http\Controllers\HalfDayRequestController;
 use App\Modules\Hr\Http\Controllers\EarlyOutRequestController;
@@ -253,6 +254,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'updatePhoto']);
         Route::delete('employees/{employee}/photo', [EmployeeController::class, 'destroyPhoto']);
         // Loans & cash advances repaid through payroll (Slice 11b).
+        // FIN-022 — the unmasked bank/government ID numbers. Audited per view: an HR officer must
+        // be able to see a bank account to pay someone, so the control is that looking is
+        // deliberate and traceable, not that it is refused.
+        // FIN-014 — final pay. Its own limiter, and a low one: it writes a payslip and the amounts
+        // are entered by a person.
+        Route::post('employees/{employee}/final-pay', [PayrollController::class, 'runFinalPay'])
+            ->middleware('throttle:5,1,final-pay:');
+        Route::get('employees/{employee}/sensitive', [EmployeeSensitiveController::class, 'show'])
+            ->middleware('throttle:20,1,employee-sensitive:');
         Route::get('employees/{employee}/loans', [EmployeeLoanController::class, 'index']);
         Route::post('employees/{employee}/loans', [EmployeeLoanController::class, 'store']);
         Route::match(['put', 'patch'], 'loans/{loan}', [EmployeeLoanController::class, 'update']);

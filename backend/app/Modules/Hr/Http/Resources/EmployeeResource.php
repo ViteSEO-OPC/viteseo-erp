@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Models\Employee;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -38,7 +39,10 @@ class EmployeeResource extends JsonResource
             'emergency_contact_relationship' => $this->emergency_contact_relationship,
             'emergency_contact_phone' => $this->emergency_contact_phone,
             'bank_name' => $this->bank_name,
-            'bank_account' => $this->bank_account,
+            // FIN-022 — MASKED. `••••4471` is enough to confirm the right account and useless to
+            // anyone else. The full value is available only from the audited reveal endpoint, so a
+            // list of 200 employees no longer ships 200 bank accounts to the browser.
+            'bank_account' => Employee::maskSensitive($this->bank_account),
             'pay_frequency' => $this->pay_frequency ?? 'semi_monthly',
             // FIN-030 — the DERIVED daily rate against the configured regional floor. Included
             // because the daily rate is not something anyone can see from the monthly figure they
@@ -50,15 +54,15 @@ class EmployeeResource extends JsonResource
                 ->minimumWageCheckFor($this->resource),
             'currency' => $this->currency ?? 'PHP',
             'bank_account_type' => $this->bank_account_type,
-            'bank_account_name' => $this->bank_account_name,
+            'bank_account_name' => Employee::maskSensitive($this->bank_account_name),
             'sss_contribution' => $this->sss_contribution,
             'pagibig_contribution' => $this->pagibig_contribution,
             'philhealth_contribution' => $this->philhealth_contribution,
             // Membership numbers (payslip header) — distinct from the *_contribution overrides.
-            'tin' => $this->tin,
-            'sss_number' => $this->sss_number,
-            'philhealth_number' => $this->philhealth_number,
-            'pagibig_number' => $this->pagibig_number,
+            'tin' => Employee::maskSensitive($this->tin),
+            'sss_number' => Employee::maskSensitive($this->sss_number),
+            'philhealth_number' => Employee::maskSensitive($this->philhealth_number),
+            'pagibig_number' => Employee::maskSensitive($this->pagibig_number),
             // Expanded personal record.
             'first_name' => $this->first_name,
             'middle_name' => $this->middle_name,

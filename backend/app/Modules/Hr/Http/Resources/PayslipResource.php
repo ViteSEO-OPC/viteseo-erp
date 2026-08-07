@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollSetting;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -33,10 +34,15 @@ class PayslipResource extends JsonResource
                 'job_title' => $this->employee->job_title,
                 'department' => $this->employee->department?->name,
                 'address' => $this->employee->address,
-                'tin' => $this->employee->tin,
-                'sss_number' => $this->employee->sss_number,
-                'philhealth_number' => $this->employee->philhealth_number,
-                'pagibig_number' => $this->employee->pagibig_number,
+                // FIN-022 — FULL for the employee reading their OWN payslip, masked for anyone
+                // else. A payslip has to be usable as evidence of employment and income, which
+                // means the person it belongs to must see their own government numbers on it.
+                //
+                // But HR opening someone else's payslip is a different act, and leaving these
+                // unmasked here would route straight around the audited reveal endpoint: every
+                // government number in the company, readable, with no record of who looked. HR that
+                // genuinely needs the full value uses `/employees/{id}/sensitive`, which logs it.
+                ...$this->identityNumbers($request),
             ],
 
             // — Earnings —
@@ -71,6 +77,13 @@ class PayslipResource extends JsonResource
             // FIN-028 — the year-end tax correction, so a December payslip can explain a figure
             // that is not this period's ordinary projection. Negative means refunded.
             'tax_annualisation' => (float) $this->tax_annualisation,
+            // FIN-014 — the terminal lines, so a final payslip can show its own derivation rather
+            // than one opaque gross.
+            'separation_pay' => $this->separation_pay === null ? null : (float) $this->separation_pay,
+            'separation_pay_taxable' => (bool) $this->separation_pay_taxable,
+            'leave_conversion' => $this->leave_conversion === null ? null : (float) $this->leave_conversion,
+            'leave_conversion_days' => $this->leave_conversion_days === null ? null : (float) $this->leave_conversion_days,
+            'loan_settlement' => $this->loan_settlement === null ? null : (float) $this->loan_settlement,
             'adjustment_pay' => (float) $this->adjustment_pay,
             'adjustment_note' => $this->adjustment_note,
             'deduction_carryover' => (float) $this->deduction_carryover,
@@ -220,5 +233,30 @@ class PayslipResource extends JsonResource
     private function isHrViewer(Request $request): bool
     {
         return (bool) $request->user()?->hasAnyRole(['hr_officer', 'super_admin']);
+    }
+
+    /**
+     * The government numbers on the identity block — full only for their owner (FIN-022).
+     *
+     * Ownership, not role, is the test. An HR officer viewing their own payslip is the owner and sees
+     * their own numbers; the same officer viewing a colleague's does not. Getting this the other way
+     * round — keying on role — would show HR every number in the company and show an employee
+     * nothing of their own.
+     *
+     * @return array<string, string|null>
+     */
+    private function identityNumbers(Request $request): array
+    {
+        $isOwner = $request->user()?->employee?->id === $this->employee->id;
+
+        $fields = ['tin', 'sss_number', 'philhealth_number', 'pagibig_number'];
+        $out = [];
+
+        foreach ($fields as $field) {
+            $value = $this->employee->{$field};
+            $out[$field] = $isOwner ? $value : Employee::maskSensitive($value);
+        }
+
+        return $out;
     }
 }

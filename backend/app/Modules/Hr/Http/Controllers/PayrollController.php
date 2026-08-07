@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\RunAdjustmentRequest;
+use App\Modules\Hr\Http\Requests\RunFinalPayRequest;
 use App\Modules\Hr\Http\Requests\RunPayrollRequest;
 use App\Modules\Hr\Http\Requests\UpdatePayrollSettingsRequest;
 use App\Modules\Hr\Http\Resources\PayrollRunResource;
@@ -134,6 +135,22 @@ class PayrollController extends Controller
             $request->validated('lines'),
             $request->user(),
         );
+
+        return PayrollRunResource::make($run)
+            ->response()
+            ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * POST /api/v1/hr/employees/{employee}/final-pay — the terminal payslip a leaver is owed.
+     *
+     * FIN-014 — deliberately separate from the regular run, which already prorates the leaver's last
+     * cycle. This pays what that run cannot: unused leave converted to cash, separation pay, the
+     * outstanding loan balance, and the year's tax trued up against what was actually earned.
+     */
+    public function runFinalPay(RunFinalPayRequest $request, \App\Modules\Hr\Models\Employee $employee): JsonResponse
+    {
+        $run = $this->service->runFinalPay($employee, $request->validated(), $request->user());
 
         return PayrollRunResource::make($run)
             ->response()

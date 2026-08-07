@@ -94,6 +94,18 @@ export default function PayrollPage() {
   const [viewRunId, setViewRunId] = useState<number | null>(null);
   // The payslip opened from a breakdown row — the same document the employee sees.
   const [payslipId, setPayslipId] = useState<number | null>(null);
+  /**
+   * FIN-043 — SHOULDER-SURFING PROTECTION, and the UI says so.
+   *
+   * This hides amounts in the RENDER only. The figures are already in the fetched payload, so
+   * anyone with devtools sees them regardless — it is not an access control and must not be
+   * presented as one. The audit downgraded it to informational for the right reason: the role
+   * looking at this page is authorised to receive these amounts, so there is no boundary being
+   * crossed. What was wrong was the eye icon implying confidentiality it does not provide.
+   *
+   * Omitting amounts server-side would be the real control, and belongs with the restricted-role
+   * work in Slice 6 — not here, where it would only mean the same authorised person sees less.
+   */
   const [masked, setMasked] = useState(false);
   const [selectedFreq, setSelectedFreq] = useState<string>();
 
@@ -299,7 +311,11 @@ export default function PayrollPage() {
               variant="outline"
               size="icon-sm"
               onClick={() => setMasked((m) => !m)}
-              title={masked ? "Show amounts" : "Hide amounts"}
+              title={
+                masked
+                  ? "Show amounts"
+                  : "Hide amounts on screen — for privacy from onlookers, not an access control"
+              }
             >
               {masked ? <EyeOff /> : <Eye />}
               <span className="sr-only">{masked ? "Show amounts" : "Hide amounts"}</span>
@@ -395,6 +411,16 @@ export default function PayrollPage() {
           </div>
         }
       />
+
+      {/* FIN-043 — visible while masking is on, because a tooltip nobody hovers is not a
+          correction. Someone hiding amounts under the impression it is a security control needs to
+          be told at the moment they are relying on it, not when they go looking. */}
+      {masked && (
+        <p className="mt-4 rounded-card border border-border bg-muted/40 px-4 py-2 text-caption text-muted-foreground">
+          Amounts are hidden on screen only — for privacy from people nearby. They are still in the
+          page data, so this is not an access control.
+        </p>
+      )}
 
       <div className="mt-6 flex items-start gap-3 rounded-card border border-warning/40 bg-warning-subtle px-4 py-3">
         <Zap className="mt-0.5 size-5 shrink-0 text-warning" fill="currentColor" />
