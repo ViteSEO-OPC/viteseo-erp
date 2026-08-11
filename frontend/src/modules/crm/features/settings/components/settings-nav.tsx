@@ -9,6 +9,7 @@ import {
   Lock,
   Plug,
   SlidersHorizontal,
+  Gauge,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
@@ -42,6 +43,16 @@ const GROUPS: NavGroup[] = [
         href: "/zerem/settings/business-rules",
         icon: SlidersHorizontal,
         permission: "crm.business_rules.view",
+      },
+      // Performance Management — the KPI definition catalog and the performance targets. Sits next
+      // to Business Rules because its KPI tab IS the Business Rules surface with `module="kpi"`.
+      // Gated by the same permission the page itself checks; the mutations behind both of its tabs
+      // are authorized server-side, so this only decides whether the entry point is shown.
+      {
+        label: "Performance Management",
+        href: "/zerem/settings/performance",
+        icon: Gauge,
+        permission: "crm.performance.manage",
       },
     ],
   },
