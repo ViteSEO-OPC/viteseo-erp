@@ -8,6 +8,7 @@ use App\Modules\Hr\Http\Requests\StorePayrollInquiryRequest;
 use App\Modules\Hr\Http\Resources\PayrollInquiryResource;
 use App\Modules\Hr\Models\PayrollInquiry;
 use App\Modules\Hr\Services\PayrollInquiryService;
+use App\Modules\Hr\Http\Requests\CancelOwnRequestRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -67,6 +68,14 @@ class PayrollInquiryController extends Controller
     {
         return PayrollInquiryResource::make(
             $this->service->reopen($payrollInquiry, $request->validated('reason')),
+        )->response();
+    }
+
+    // POST /hr/.../{payrollInquiry}/cancel — the employee withdraws their own pending inquiry.
+    public function cancel(CancelOwnRequestRequest $request, PayrollInquiry $payrollInquiry): JsonResponse
+    {
+        return PayrollInquiryResource::make(
+            $this->service->cancel($payrollInquiry, $request->user(), $request->validated()['reason']),
         )->response();
     }
 }

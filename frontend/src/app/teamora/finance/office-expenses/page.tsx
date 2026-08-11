@@ -6,8 +6,6 @@ import {
   Pencil,
   Trash2,
   Paperclip,
-  Eye,
-  EyeOff,
   Calendar,
 } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
@@ -17,6 +15,8 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
 import { formatDate } from "@/core/lib/format";
 import { OfficeExpenseFormDialog } from "@/modules/hr/components/office-expense-form-dialog";
+import { MoneyStatCard } from "@/modules/hr/components/money-stat-card";
+import { StatusBadge } from "@/core/components/status-badge";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
   useOfficeExpenses,
@@ -139,6 +139,21 @@ export default function OfficeExpensesPage() {
     { header: "Description", cell: (e) => <PrimaryCell title={e.description} /> },
     { header: "Category", cell: (e) => <span className="text-muted-foreground">{expenseCategoryLabel(e.category)}</span> },
     { header: "Amount", cell: (e) => <span className="font-semibold text-foreground">{peso(e.amount)}</span> },
+    {
+      header: "Status",
+      cell: (e) => (
+        <div className="flex flex-col gap-0.5">
+          <StatusBadge status={e.status} className="w-fit" />
+          {/* Who decided, so an approved row is attributable without opening it. */}
+          {e.reviewed_by && (
+            <span className="text-caption text-muted-foreground">
+              by {e.reviewed_by}
+            </span>
+          )}
+        </div>
+      ),
+      className: "whitespace-nowrap",
+    },
     {
       header: "",
       align: "right",
@@ -269,31 +284,3 @@ export default function OfficeExpensesPage() {
 }
 
 /** Summary card with a privacy show/hide (eye) toggle beside the amount. */
-function MoneyStatCard({
-  label,
-  value,
-  hidden,
-  onToggle,
-}: {
-  label: string;
-  value: string;
-  hidden: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-card border border-border bg-card p-5">
-      <div className="min-w-0">
-        <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
-        <p className="mt-2 text-h2 font-bold text-foreground">{hidden ? "₱ ••••••" : value}</p>
-      </div>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-label={hidden ? "Show amount" : "Hide amount"}
-        className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        {hidden ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
-      </button>
-    </div>
-  );
-}

@@ -27,6 +27,7 @@ import {
   progressPayrollInquiry,
   resolvePayrollInquiry,
   reopenPayrollInquiry,
+  cancelPayrollInquiry,
 } from "@/modules/hr/api/requests";
 
 const DOCS_KEY = ["hr", "document-requests"] as const;
@@ -223,6 +224,19 @@ export function useResolvePayrollInquiry() {
     mutationFn: ({ id, note, files }: { id: number; note: string; files?: File[] }) =>
       resolvePayrollInquiry(id, note, files),
     onSuccess: () => qc.invalidateQueries({ queryKey: INQUIRIES_KEY }),
+  });
+}
+
+// The employee withdrawing their own pending inquiry. Reason required.
+export function useCancelPayrollInquiry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      cancelPayrollInquiry(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: INQUIRIES_KEY });
+      qc.invalidateQueries({ queryKey: MY_INQUIRIES_KEY });
+    },
   });
 }
 

@@ -9,6 +9,7 @@ import {
   rejectReimbursement,
   markReimbursementPaid,
   reopenReimbursement,
+  cancelReimbursement,
 } from "@/modules/hr/api/reimbursements";
 
 const KEY = ["hr", "reimbursements"] as const;
@@ -54,6 +55,19 @@ export function useRejectReimbursement() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: string }) =>
       rejectReimbursement(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      qc.invalidateQueries({ queryKey: NOTIF_KEY });
+    },
+  });
+}
+
+// The employee withdrawing their own pending claim. Reason required.
+export function useCancelReimbursement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      cancelReimbursement(id, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
       qc.invalidateQueries({ queryKey: NOTIF_KEY });

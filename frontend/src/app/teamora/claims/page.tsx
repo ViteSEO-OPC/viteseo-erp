@@ -8,19 +8,31 @@ import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dial
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { ClaimForm } from "@/modules/hr/components/claim-form";
-import { useReimbursements } from "@/modules/hr/hooks/use-reimbursements";
+import { Button } from "@/components/ui/button";
+import { notify as toast } from "@/core/lib/notify";
+import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
+import {
+  useReimbursements,
+  useCancelReimbursement,
+} from "@/modules/hr/hooks/use-reimbursements";
 import {
   categoryLabel,
   type Reimbursement,
 } from "@/modules/hr/types/reimbursement";
 
 // A short line under the description reflecting where the claim is in its lifecycle.
+// Rejected claims get nothing here: the status pill already says so, and the reason is one
+// tap away in the detail modal.
 function statusNote(status: string): string | null {
   switch (status) {
     case "approved":
       return "Queued for payroll";
+    case "scheduled":
+      return "In your next payslip";
     case "paid":
       return "Paid in your payslip";
+    case "cancelled":
+      return "You withdrew this claim";
     default:
       return null;
   }
@@ -31,6 +43,9 @@ export default function ClaimsPage() {
   // By id, then read back from the live list, so the modal follows an HR decision
   // that lands while it is open.
   const [detailId, setDetailId] = useState<number | null>(null);
+  // The claim being withdrawn. Separate from `detailId` so the confirm sits above the detail.
+  const [cancelTarget, setCancelTarget] = useState<Reimbursement | null>(null);
+  const cancelMut = useCancelReimbursement();
 
   const all = claims ?? [];
   const detail = all.find((c) => c.id === detailId) ?? null;
@@ -40,16 +55,6 @@ export default function ClaimsPage() {
     {
       header: "Description",
       cell: (c) => {
-        if (c.status === "rejected") {
-          return (
-            <div>
-              <p className="font-medium text-foreground">{c.description}</p>
-              <p className="text-caption text-danger">
-                {formatDate(c.created_at)} · Tap to see why
-              </p>
-            </div>
-          );
-        }
         const note = statusNote(c.status);
         return (
           <div>
@@ -123,11 +128,28 @@ export default function ClaimsPage() {
             },
           ]}
           note={{ label: "What it was for", text: detail.description }}
+          actions={
+            // Only while HR has yet to decide it — after that the way out is their decision.
+            detail.status === "pending" ? (
+              <Button
+                variant="outline"
+                className="text-danger hover:text-danger"
+                onClick={() => setCancelTarget(detail)}
+              >
+                Cancel this claim
+              </Button>
+            ) : undefined
+          }
           decision={{
             label: detail.status === "rejected" ? "Why it was declined" : "HR's decision",
             by: detail.reviewed_by,
             at: detail.reviewed_at,
             note: detail.review_note,
+          }}
+          cancellation={{
+            at: detail.cancelled_at,
+            by: detail.cancelled_by,
+            reason: detail.cancel_reason,
           }}
         >
           {detail.receipt_urls.length > 0 && (
@@ -154,6 +176,25 @@ export default function ClaimsPage() {
           )}
         </RequestDetailDialog>
       )}
+
+      <CancelLeaveDialog
+        open={!!cancelTarget}
+        onOpenChange={(o) => !o && setCancelTarget(null)}
+        title="Cancel Claim"
+        subject={cancelTarget ? `your ${categoryLabel(cancelTarget.category)} claim` : undefined}
+        onConfirm={async (reason) => {
+          if (!cancelTarget) return;
+          try {
+            await cancelMut.mutateAsync({ id: cancelTarget.id, reason });
+            toast.success("Claim cancelled");
+            setCancelTarget(null);
+            setDetailId(null);
+          } catch {
+            toast.error("Could not cancel this claim.");
+            throw new Error("cancel failed");
+          }
+        }}
+      />
     </div>
   );
 }

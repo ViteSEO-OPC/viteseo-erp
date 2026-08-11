@@ -66,6 +66,21 @@ export function DetailNote({ label, text }: { label: string; text: string | null
   );
 }
 
+/**
+ * A withdrawal by the person who filed the request.
+ *
+ * Kept apart from `RequestDecision` on purpose: being declined is HR's verdict, withdrawing is
+ * the requester changing their mind, and collapsing them into one "decision" block is what made
+ * the two indistinguishable in the record.
+ */
+export interface RequestCancellation {
+  /** When — the block is hidden entirely while this is null. */
+  at: string | null;
+  /** Who withdrew it. Null on an anonymous concern, where the name is withheld by policy. */
+  by?: string | null;
+  reason?: string | null;
+}
+
 export interface RequestDecision {
   /** Who decided. Absent on older records reviewed before this was tracked. */
   by?: string | null;
@@ -100,6 +115,7 @@ export function RequestDetailDialog({
   fields,
   note,
   decision,
+  cancellation,
   children,
   actions,
 }: {
@@ -119,6 +135,8 @@ export function RequestDetailDialog({
   fields: DetailField[];
   note?: { label: string; text: string | null };
   decision?: RequestDecision;
+  /** Shown instead of nothing when the requester withdrew it rather than HR deciding. */
+  cancellation?: RequestCancellation;
   /** Extra sections: receipts, attachments, a resolution, scheduled meetings. */
   children?: React.ReactNode;
   /** The same decisions the row offers, so HR can act without closing this. */
@@ -172,6 +190,23 @@ export function RequestDetailDialog({
             {decision.note?.trim() && (
               <p className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3.5 py-3 text-sm text-foreground">
                 {decision.note}
+              </p>
+            )}
+          </div>
+        )}
+
+        {cancellation?.at && (
+          <div className="space-y-1.5">
+            <p className="text-label font-semibold uppercase tracking-wide text-danger">
+              Withdrawn
+            </p>
+            <p className="text-caption text-muted-foreground">
+              {cancellation.by ? `${cancellation.by} · ` : ""}
+              {formatDateTime(cancellation.at)}
+            </p>
+            {cancellation.reason?.trim() && (
+              <p className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3.5 py-3 text-sm text-foreground">
+                {cancellation.reason}
               </p>
             )}
           </div>

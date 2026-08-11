@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Services;
 
 use App\Models\User;
 use App\Modules\Hr\Models\EarlyOutRequest;
+use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
 use App\Modules\Hr\Models\Employee;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
@@ -17,6 +18,8 @@ use Illuminate\Validation\ValidationException;
  */
 class EarlyOutRequestService
 {
+    use CancelsOwnRequest;
+
     public function __construct(
         private readonly AuditService $audit,
         private readonly ScheduleService $schedule,
@@ -27,7 +30,7 @@ class EarlyOutRequestService
     /** HR sees all; an employee sees only their own. */
     public function list(User $user): Collection
     {
-        $query = EarlyOutRequest::with(['employee.user', 'reviewer'])
+        $query = EarlyOutRequest::with(['employee.user', 'reviewer', 'canceller'])
             ->orderByDesc('work_date')
             ->latest();
 
@@ -209,5 +212,28 @@ class EarlyOutRequestService
                 'status' => ["Cannot {$action} a request that is {$request->status}."],
             ]);
         }
+    }
+
+    /**
+     * The employee withdraws their own request while HR has yet to decide it.
+     *
+     * Pending only, so nothing downstream has to be unwound: an APPROVED early-out request has already
+     * changed what the day is worth, and reversing that is an HR act with a paper trail.
+     */
+    public function cancel(EarlyOutRequest $request, User $actor, string $reason): EarlyOutRequest
+    {
+        $this->applyCancellation($request, $actor, $reason, 'early-out request');
+
+        $request->load(['employee.user', 'reviewer', 'canceller']);
+        $name = $request->employee?->user?->name ?? 'an employee';
+
+        $this->audit->log(
+            'cancelled',
+            'Attendance',
+            "Cancelled {$name}'s early-out request for " . $request->work_date->format('M j') . " — {$reason}",
+            $request,
+        );
+
+        return $request;
     }
 }

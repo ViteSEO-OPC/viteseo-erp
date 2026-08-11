@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { ArrowLeft, Info, Download, Lock } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
@@ -22,12 +22,25 @@ import { AttritionReport } from "@/modules/hr/components/attrition-report";
 import { DiversityReport } from "@/modules/hr/components/diversity-report";
 import { HealthSafetyReport } from "@/modules/hr/components/health-safety-report";
 import { AuditReport } from "@/modules/hr/components/audit-report";
+import { AttendanceReport } from "@/modules/hr/components/attendance-report";
 import { useReport, useExportReport } from "@/modules/hr/hooks/use-report";
+
+/** The three tabs of the Attendance Summary screen, all rendered by the same component. */
+const ATTENDANCE_KEYS = ["attendance_summary", "attendance_dtr", "attendance_leave"];
 
 export default function ReportDetailPage() {
   const params = useParams<{ key: string }>();
   // Reports with a bespoke chart layout render their own view; the rest use the
   // generic summary + bars + table renderer below.
+  if (ATTENDANCE_KEYS.includes(params.key)) {
+    // AttendanceReport drives its filters off the query string, and useSearchParams needs a
+    // Suspense boundary during static rendering.
+    return (
+      <Suspense fallback={null}>
+        <AttendanceReport reportKey={params.key} />
+      </Suspense>
+    );
+  }
   if (params.key === "headcount") return <HeadcountReport />;
   if (params.key === "recruitment") return <RecruitmentReport />;
   if (params.key === "leave") return <LeaveReport />;

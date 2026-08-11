@@ -8,6 +8,7 @@ import {
   createConcern,
   setConcernStatus,
   reopenConcern,
+  cancelConcern,
   scheduleMeeting,
   scheduleEmployeeMeeting,
   getMyMeetings,
@@ -31,6 +32,18 @@ export function useCreateConcern() {
   return useMutation({
     mutationFn: createConcern,
     onSuccess: () => qc.invalidateQueries({ queryKey: MY_CONCERNS_KEY }),
+  });
+}
+
+// The employee withdrawing their own pending concern. Reason required.
+export function useCancelConcern() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) => cancelConcern(id, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: MY_CONCERNS_KEY });
+      qc.invalidateQueries({ queryKey: CONCERNS_KEY });
+    },
   });
 }
 

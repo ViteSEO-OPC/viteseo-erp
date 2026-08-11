@@ -170,7 +170,7 @@ class PayCorrectnessTest extends HrTestCase
 
     public function test_unpaid_leave_stays_unpaid_after_its_type_is_deleted(): void
     {
-        $type = LeaveType::create(['name' => 'LWOP', 'code' => 'LWOP', 'is_paid' => false, 'default_days' => 0]);
+        $type = LeaveType::create(['name' => 'LWOP', 'code' => 'LWOP', 'is_paid' => false, 'is_unlimited' => true, 'default_days' => 0]);
         LeaveRequest::create([
             'employee_id' => $this->employee->id, 'leave_type_id' => $type->id,
             'start_date' => self::WORKDAY, 'end_date' => self::WORKDAY,

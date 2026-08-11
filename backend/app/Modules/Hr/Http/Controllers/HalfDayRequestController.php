@@ -8,6 +8,7 @@ use App\Modules\Hr\Http\Requests\StoreHalfDayRequestRequest;
 use App\Modules\Hr\Http\Resources\HalfDayRequestResource;
 use App\Modules\Hr\Models\HalfDayRequest;
 use App\Modules\Hr\Services\HalfDayRequestService;
+use App\Modules\Hr\Http\Requests\CancelOwnRequestRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -60,6 +61,14 @@ class HalfDayRequestController extends Controller
     {
         return HalfDayRequestResource::make(
             $this->service->reopen($halfDayRequest, $request->validated('reason')),
+        )->response();
+    }
+
+    // POST /hr/half-day-requests/{halfDayRequest}/cancel — the employee withdraws their own pending request.
+    public function cancel(CancelOwnRequestRequest $request, HalfDayRequest $halfDayRequest): JsonResponse
+    {
+        return HalfDayRequestResource::make(
+            $this->service->cancel($halfDayRequest, $request->user(), $request->validated()['reason']),
         )->response();
     }
 }

@@ -215,8 +215,11 @@ class LeaveConfigService
     {
         $year = now(config('app.timezone_local'))->year;
 
+        // Same guard as LeaveService::balancesForCurrentYear() — a balance whose type was deleted
+        // has a NULL `leaveType`, and the resource reads through it.
         return $employee->leaveBalances()
             ->with('leaveType')
+            ->whereHas('leaveType')
             ->where('year', $year)
             ->get();
     }

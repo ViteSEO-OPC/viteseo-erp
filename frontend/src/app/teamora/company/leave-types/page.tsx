@@ -224,7 +224,7 @@ function AllotmentDefaults({ types }: { types: LeaveType[] }) {
       {mode === "not_shared" ? (
         <NotSharedGrid types={types} />
       ) : (
-        <SharedGrid types={types} />
+        <SharedGrid />
       )}
 
       <SwitchModeConfirmDialog
@@ -277,7 +277,7 @@ function SwitchModeConfirmDialog({
 
         <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
           <li>
-            This changes how the whole company's leave is counted for the year — best
+            This changes how the whole company&apos;s leave is counted for the year — best
             done at the start of a leave year.
           </li>
           <li>
@@ -387,7 +387,18 @@ function NotSharedGrid({ types }: { types: LeaveType[] }) {
                   <span className="font-medium text-foreground">{t.name}</span>
                 </div>
               </td>
-              {EMPLOYMENT_STATUSES.map((s) => (
+              {EMPLOYMENT_STATUSES.map((s) =>
+                // An unlimited type has no allowance to allot, so there is no number to edit.
+                // Keyed on `is_unlimited`, not `is_paid`: HR can now cap an unpaid type, and a
+                // capped type needs its allotment cell whether or not payroll pays the day.
+                t.is_unlimited ? (
+                  <td
+                    key={s.value}
+                    className="px-4 py-3 text-center text-caption text-muted-foreground"
+                  >
+                    Unlimited
+                  </td>
+                ) : (
                 <td key={s.value} className="px-4 py-3 text-center">
                   <AllotmentCell
                     leaveTypeId={t.id}
@@ -395,7 +406,8 @@ function NotSharedGrid({ types }: { types: LeaveType[] }) {
                     value={lookup.get(`${t.id}:${s.value}`) ?? 0}
                   />
                 </td>
-              ))}
+                ),
+              )}
             </tr>
           ))}
           {types.length === 0 && (
@@ -419,7 +431,24 @@ function NotSharedGrid({ types }: { types: LeaveType[] }) {
  * first leave type row hosts the editable pool sizes; every other type is
  * disabled ("—") to signal it shares that single pool.
  */
-function SharedGrid({ types }: { types: LeaveType[] }) {
+/**
+ * Shared mode: ONE pool, so one row.
+ *
+ * The pool is NOT a leave type and never was — `hr_shared_leave_allotments` is keyed by
+ * employment status alone, with no `leave_type_id`, and `hr_shared_leave_balances` likewise. So
+ * this row is a label for a pot of credits, not a row of the leave-types table.
+ *
+ * That matters, because the two earlier attempts at this both went wrong by assuming otherwise.
+ * Listing every leave type and disabling all but one put a grid of dead inputs in front of HR and
+ * implied the other types had their own blank numbers. Looking up a real "SIL" type to name the
+ * row then made the screen fail when none existed — and creating one to fix that would have put
+ * SIL into every employee's leave-type dropdown, where it does not belong: in shared mode SIL is
+ * the credits, and the leave types are the REASONS that spend them.
+ *
+ * Naming it Service Incentive Leave is a label decision, not a data one. The PH statutory pool is
+ * SIL, so that is what HR should read, whatever leave types the company happens to have defined.
+ */
+function SharedGrid() {
   const { data: shared } = useSharedAllotments();
 
   const lookup = useMemo(() => {
@@ -428,92 +457,54 @@ function SharedGrid({ types }: { types: LeaveType[] }) {
     return m;
   }, [shared]);
 
-  // In the PH, Service Incentive Leave (SIL) is the statutory pool employees can
-  // spend on any purpose — so SIL hosts the editable shared numbers. Fall back to
-  // the first type if SIL isn't configured.
-  const poolTypeId = useMemo(() => {
-    const sil = types.find((t) => t.code === "SIL");
-    return sil?.id ?? types[0]?.id ?? null;
-  }, [types]);
-
   return (
-    <div className="overflow-x-auto rounded-card border border-border bg-card">
-      <table className="w-full min-w-[640px] border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-border bg-muted/50">
-            <th className="px-4 py-3 text-left text-label font-bold uppercase tracking-wide text-muted-foreground">
-              Leave type
-            </th>
-            {EMPLOYMENT_STATUSES.map((s) => (
-              <th
-                key={s.value}
-                className="px-4 py-3 text-center text-label font-bold uppercase tracking-wide text-muted-foreground"
-              >
-                {s.label}
+    <>
+      <div className="overflow-x-auto rounded-card border border-border bg-card">
+        <table className="w-full min-w-[640px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/50">
+              <th className="px-4 py-3 text-left text-label font-bold uppercase tracking-wide text-muted-foreground">
+                Shared pool
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {types.map((t) => {
-            const isPoolRow = t.id === poolTypeId;
-            return (
-              <tr key={t.id} className="border-b border-border last:border-0">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "size-2.5 shrink-0 rounded-full",
-                        !isPoolRow && "opacity-40",
-                      )}
-                      style={{ backgroundColor: t.color ?? "#94a3b8" }}
-                    />
-                    <span
-                      className={cn(
-                        "font-medium",
-                        isPoolRow ? "text-foreground" : "text-muted-foreground",
-                      )}
-                    >
-                      {t.name}
-                    </span>
-                  </div>
-                </td>
-                {EMPLOYMENT_STATUSES.map((s) => (
-                  <td key={s.value} className="px-4 py-3 text-center">
-                    {isPoolRow ? (
-                      <SharedAllotmentCell
-                        key={`${s.value}:${lookup.get(s.value) ?? 0}`}
-                        status={s.value}
-                        value={lookup.get(s.value) ?? 0}
-                      />
-                    ) : (
-                      <Input
-                        disabled
-                        aria-hidden
-                        tabIndex={-1}
-                        className="mx-auto h-8 w-16 text-center"
-                        value=""
-                        readOnly
-                      />
-                    )}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-          {types.length === 0 && (
-            <tr>
-              <td
-                colSpan={EMPLOYMENT_STATUSES.length + 1}
-                className="px-4 py-10 text-center text-sm text-muted-foreground"
-              >
-                Add a leave type to set the shared pool.
-              </td>
+              {EMPLOYMENT_STATUSES.map((s) => (
+                <th
+                  key={s.value}
+                  className="px-4 py-3 text-center text-label font-bold uppercase tracking-wide text-muted-foreground"
+                >
+                  {s.label}
+                </th>
+              ))}
             </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="size-2.5 shrink-0 rounded-full bg-brand" />
+                  <span className="font-medium text-foreground">Service Incentive Leave</span>
+                  <span className="text-caption text-muted-foreground">(SIL)</span>
+                </div>
+              </td>
+              {EMPLOYMENT_STATUSES.map((s) => (
+                <td key={s.value} className="px-4 py-3 text-center">
+                  <SharedAllotmentCell
+                    key={`${s.value}:${lookup.get(s.value) ?? 0}`}
+                    status={s.value}
+                    value={lookup.get(s.value) ?? 0}
+                  />
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-3 text-caption text-muted-foreground">
+        These are the SIL credits each band gets for the year. Every paid leave type above spends
+        them — the types stay as the reason for the absence. Unpaid types (LWOP) are unlimited and
+        take nothing from the pool.
+      </p>
+    </>
   );
 }
 

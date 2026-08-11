@@ -48,6 +48,9 @@ export interface Concern {
   status: string;
   submitted_at: string;
   resolved_at: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
   // null for anonymous concerns — the backend never emits identity for them.
   employee: { id: number; name: string | null } | null;
   meetings: Meeting[];

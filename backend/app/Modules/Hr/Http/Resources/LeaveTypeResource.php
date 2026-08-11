@@ -27,6 +27,7 @@ class LeaveTypeResource extends JsonResource
                 ? null
                 : (int) $this->carry_over_expiry_months,
             'is_paid' => (bool) $this->is_paid,
+            'is_unlimited' => (bool) $this->is_unlimited,
             'color' => $this->color,
             'description' => $this->description,
             'allow_backdated' => (bool) $this->allow_backdated,

@@ -32,3 +32,9 @@ export async function reopenEarlyOutRequest(id: number, reason?: string): Promis
   const res = await apiClient.post(`/hr/early-out-requests/${id}/reopen`, { reason });
   return res.data.data;
 }
+
+/** The employee withdraws their own pending request. Reason required. */
+export async function cancelEarlyOutRequest(id: number, reason: string): Promise<EarlyOutRequest> {
+  const res = await apiClient.post(`/hr/early-out-requests/${id}/cancel`, { reason });
+  return res.data.data;
+}

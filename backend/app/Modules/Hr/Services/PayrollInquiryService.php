@@ -5,17 +5,20 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollInquiry;
+use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 
 class PayrollInquiryService
 {
+    use CancelsOwnRequest;
+
     public function __construct(private readonly AuditService $audit) {}
 
     public function list(User $user): Collection
     {
-        $query = PayrollInquiry::with(['employee.user', 'resolver', 'payslip.payrollRun'])->latest();
+        $query = PayrollInquiry::with(['employee.user', 'resolver', 'payslip.payrollRun', 'canceller'])->latest();
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $query->where('employee_id', $user->employee?->id);
@@ -117,6 +120,21 @@ class PayrollInquiryService
     }
 
     /** @param array<int, string> $allowed */
+    /** The employee withdraws an inquiry, while HR has yet to pick it up. */
+    public function cancel(PayrollInquiry $inquiry, User $actor, string $reason): PayrollInquiry
+    {
+        $this->applyCancellation($inquiry, $actor, $reason, 'inquiry');
+
+        $this->audit->log(
+            'cancelled',
+            'Payroll',
+            "Cancelled a payroll inquiry — {$reason}",
+            $inquiry,
+        );
+
+        return $inquiry->load(['employee.user', 'resolver', 'canceller']);
+    }
+
     private function assertStatus(PayrollInquiry $inquiry, array $allowed, string $action): void
     {
         if (! in_array($inquiry->status, $allowed, true)) {

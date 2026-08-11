@@ -16,10 +16,12 @@ class PayrollInquiry extends Model
     protected $fillable = [
         'employee_id', 'payslip_id', 'subject', 'topic', 'message', 'attachment_path',
         'priority', 'status', 'resolution_note', 'resolution_attachments', 'resolved_by', 'resolved_at',
+        'cancelled_at', 'cancelled_by', 'cancel_reason',
     ];
 
     protected $casts = [
         'resolved_at' => 'datetime',
+        'cancelled_at' => 'datetime',
         'resolution_attachments' => 'array',
     ];
 
@@ -36,5 +38,11 @@ class PayrollInquiry extends Model
     public function resolver(): BelongsTo
     {
         return $this->belongsTo(User::class, 'resolved_by');
+    }
+
+    /** Who withdrew this request, when it was cancelled rather than decided. */
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 }

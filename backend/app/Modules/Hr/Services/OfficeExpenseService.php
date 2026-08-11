@@ -13,6 +13,9 @@ class OfficeExpenseService
 {
     public const CATEGORIES = ['utilities', 'supplies', 'equipment', 'maintenance', 'events', 'rent', 'other'];
 
+    /** The review states an expense can be in. `recorded` is where every expense starts. */
+    public const STATUSES = ['recorded', 'approved', 'rejected'];
+
     public function __construct(private readonly AuditService $audit) {}
 
     public function list(): Collection
@@ -36,7 +39,13 @@ class OfficeExpenseService
 
         $this->audit->log('created', 'Office Expenses', $this->describe($expense, 'Recorded'), $expense);
 
-        return $expense->load('recorder');
+        // An expense can be filed already-decided (HR entering a past expense that was approved
+        // at the time). It is still WRITTEN as `recorded` first, then transitioned, so the
+        // approval gets its own reviewer, timestamp and audit line rather than appearing from
+        // nowhere as a column default.
+        $this->applyRequestedStatus($expense, $data);
+
+        return $expense->load(['recorder', 'reviewer']);
     }
 
     /** @param array<string, mixed> $data */
@@ -53,7 +62,49 @@ class OfficeExpenseService
 
         $this->audit->log('updated', 'Office Expenses', $this->describe($expense, 'Updated'), $expense);
 
+        $this->applyRequestedStatus($expense, $data);
+
         return $expense->load(['recorder', 'reviewer']);
+    }
+
+    /**
+     * Move an expense to the status the form asked for, if it asked for one.
+     *
+     * Everything goes through the existing transition methods rather than writing the column,
+     * so a status set from a form is indistinguishable from one set by the action buttons:
+     * same reviewer, same timestamp, same audit verb, same "already reviewed" guard.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function applyRequestedStatus(OfficeExpense $expense, array $data): void
+    {
+        $wanted = $data['status'] ?? null;
+
+        if ($wanted === null || $wanted === $expense->status) {
+            return;
+        }
+
+        $note = $data['review_note'] ?? null;
+
+        // Reviewing requires a clean slate, so a decided expense is reopened first. That is the
+        // same two steps HR would take by hand, and each one records its own audit line.
+        if ($expense->status !== 'recorded') {
+            $this->reopen($expense, 'Changed while editing the expense');
+        }
+
+        if ($wanted === 'recorded') {
+            return;
+        }
+
+        $reviewer = Auth::user();
+
+        if (! $reviewer instanceof User) {
+            return;
+        }
+
+        $wanted === 'approved'
+            ? $this->approve($expense, $reviewer)
+            : $this->reject($expense, $reviewer, $note);
     }
 
     public function approve(OfficeExpense $expense, User $reviewer): OfficeExpense

@@ -44,6 +44,15 @@ class ConcernResource extends JsonResource
             'status' => $this->status,
             'submitted_at' => $this->submitted_at,
             'resolved_at' => $this->resolved_at,
+            // Withdrawn by the requester — kept apart from the review fields so a cancellation
+            // is never read back as HR having declined it.
+            //
+            // The canceller IS the reporter, so the name rides the same anonymity gate as
+            // `employee` below. Emitting it unconditionally would hand back, in a different
+            // field, exactly the identity this resource withholds two lines further down.
+            'cancelled_at' => $this->cancelled_at,
+            'cancelled_by' => $revealIdentity ? $this->canceller?->name : null,
+            'cancel_reason' => $this->cancel_reason,
             // Named concerns: always. Anonymous: HR only (must keep it private).
             'employee' => $revealIdentity ? [
                 'id' => $this->employee_id,

@@ -37,6 +37,11 @@ class ReimbursementResource extends JsonResource
             'reviewed_at' => $this->reviewed_at,
             'reviewed_by' => $this->reviewer?->name,
             'review_note' => $this->review_note,
+            // Withdrawn by the requester — kept apart from the review fields so a cancellation
+            // is never read back as HR having declined it.
+            'cancelled_at' => $this->cancelled_at,
+            'cancelled_by' => $this->canceller?->name,
+            'cancel_reason' => $this->cancel_reason,
             'created_at' => $this->created_at,
         ];
     }

@@ -187,3 +187,9 @@ export async function reopenPayrollInquiry(id: number, reason?: string): Promise
   const res = await apiClient.post(`/hr/payroll-inquiries/${id}/reopen`, { reason });
   return res.data.data;
 }
+
+/** The employee withdraws their own pending payroll inquiry. Reason required. */
+export async function cancelPayrollInquiry(id: number, reason: string): Promise<PayrollInquiry> {
+  const res = await apiClient.post(`/hr/me/payroll-inquiries/${id}/cancel`, { reason });
+  return res.data.data;
+}

@@ -8,6 +8,7 @@ use App\Modules\Hr\Http\Requests\StoreEarlyOutRequestRequest;
 use App\Modules\Hr\Http\Resources\EarlyOutRequestResource;
 use App\Modules\Hr\Models\EarlyOutRequest;
 use App\Modules\Hr\Services\EarlyOutRequestService;
+use App\Modules\Hr\Http\Requests\CancelOwnRequestRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -60,6 +61,14 @@ class EarlyOutRequestController extends Controller
     {
         return EarlyOutRequestResource::make(
             $this->service->reopen($earlyOutRequest, $request->validated('reason')),
+        )->response();
+    }
+
+    // POST /hr/early-out-requests/{earlyOutRequest}/cancel — the employee withdraws their own pending request.
+    public function cancel(CancelOwnRequestRequest $request, EarlyOutRequest $earlyOutRequest): JsonResponse
+    {
+        return EarlyOutRequestResource::make(
+            $this->service->cancel($earlyOutRequest, $request->user(), $request->validated()['reason']),
         )->response();
     }
 }

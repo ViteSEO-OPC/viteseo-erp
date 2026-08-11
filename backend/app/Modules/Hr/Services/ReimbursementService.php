@@ -5,12 +5,15 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Reimbursement;
+use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 
 class ReimbursementService
 {
+    use CancelsOwnRequest;
+
     /** Allowed expense categories (also enforced in the Form Request). */
     public const CATEGORIES = [
         'travel',
@@ -31,7 +34,7 @@ class ReimbursementService
     public function list(User $user): Collection
     {
         $query = Reimbursement::query()
-            ->with(['employee.user', 'reviewer'])
+            ->with(['employee.user', 'reviewer', 'canceller'])
             ->latest();
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
@@ -213,6 +216,21 @@ class ReimbursementService
         );
 
         return $claim;
+    }
+
+    /** The employee withdraws a claim they filed by mistake, while HR has yet to decide it. */
+    public function cancel(Reimbursement $claim, User $actor, string $reason): Reimbursement
+    {
+        $this->applyCancellation($claim, $actor, $reason, 'claim');
+
+        $this->audit->log(
+            'cancelled',
+            'Reimbursements',
+            "Cancelled a {$claim->category} claim — {$reason}",
+            $claim,
+        );
+
+        return $claim->load(['employee.user', 'reviewer', 'canceller']);
     }
 
     private function transition(Reimbursement $claim, string $status, User $reviewer, ?string $reason = null): Reimbursement

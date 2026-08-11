@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\HalfDayRequest;
+use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Validation\ValidationException;
 
@@ -15,6 +16,8 @@ use Illuminate\Validation\ValidationException;
  */
 class HalfDayRequestService
 {
+    use CancelsOwnRequest;
+
     public function __construct(
         private readonly AuditService $audit,
         private readonly PayrollFreezeService $freeze,
@@ -24,7 +27,7 @@ class HalfDayRequestService
     /** HR sees all; an employee sees only their own. */
     public function list(User $user): Collection
     {
-        $query = HalfDayRequest::with(['employee.user', 'reviewer'])
+        $query = HalfDayRequest::with(['employee.user', 'reviewer', 'canceller'])
             ->orderByDesc('work_date')
             ->latest();
 
@@ -161,5 +164,28 @@ class HalfDayRequestService
                 'status' => ["Cannot {$action} a request that is {$request->status}."],
             ]);
         }
+    }
+
+    /**
+     * The employee withdraws their own request while HR has yet to decide it.
+     *
+     * Pending only, so nothing downstream has to be unwound: an APPROVED half-day request has already
+     * changed what the day is worth, and reversing that is an HR act with a paper trail.
+     */
+    public function cancel(HalfDayRequest $request, User $actor, string $reason): HalfDayRequest
+    {
+        $this->applyCancellation($request, $actor, $reason, 'half-day request');
+
+        $request->load(['employee.user', 'reviewer', 'canceller']);
+        $name = $request->employee?->user?->name ?? 'an employee';
+
+        $this->audit->log(
+            'cancelled',
+            'Leave',
+            "Cancelled {$name}'s half-day request for " . $request->work_date->format('M j') . " — {$reason}",
+            $request,
+        );
+
+        return $request;
     }
 }

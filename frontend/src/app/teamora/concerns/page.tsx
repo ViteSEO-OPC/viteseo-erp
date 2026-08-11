@@ -22,8 +22,13 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
+import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
 import { formatDate, formatDateTime } from "@/core/lib/format";
-import { useMyConcerns, useCreateConcern } from "@/modules/hr/hooks/use-concerns";
+import {
+  useMyConcerns,
+  useCreateConcern,
+  useCancelConcern,
+} from "@/modules/hr/hooks/use-concerns";
 import {
   CONCERN_CATEGORIES,
   concernCategoryLabel,
@@ -281,6 +286,10 @@ function MyConcernsCard() {
   // scheduled meeting shows up without reopening.
   const [detailId, setDetailId] = useState<number | null>(null);
   const detail = all.find((c) => c.id === detailId) ?? null;
+  // The concern being withdrawn — separate state so the confirm sits above the detail.
+  const [cancelId, setCancelId] = useState<number | null>(null);
+  const cancelTarget = all.find((c) => c.id === cancelId) ?? null;
+  const cancelConcernMut = useCancelConcern();
 
   const columns: Column<Concern>[] = [
     {
@@ -359,6 +368,24 @@ function MyConcernsCard() {
             },
           ]}
           note={{ label: "What you reported", text: detail.description }}
+          cancellation={{
+            at: detail.cancelled_at,
+            by: detail.cancelled_by,
+            reason: detail.cancel_reason,
+          }}
+          actions={
+            // Only before HR opens it — once it is under review, withdrawing it silently would
+            // strand whatever they have already started.
+            detail.status === "pending" ? (
+              <Button
+                variant="outline"
+                className="text-danger hover:text-danger"
+                onClick={() => setCancelId(detail.id)}
+              >
+                Cancel this concern
+              </Button>
+            ) : undefined
+          }
         >
           {detail.attachments.length > 0 && (
             <div className="space-y-1.5">
@@ -415,6 +442,25 @@ function MyConcernsCard() {
           )}
         </RequestDetailDialog>
       )}
+
+      <CancelLeaveDialog
+        open={cancelId !== null}
+        onOpenChange={(o) => !o && setCancelId(null)}
+        title="Cancel Concern"
+        subject={cancelTarget ? `concern ${cancelTarget.reference_no}` : undefined}
+        onConfirm={async (reason) => {
+          if (cancelId === null) return;
+          try {
+            await cancelConcernMut.mutateAsync({ id: cancelId, reason });
+            toast.success("Concern withdrawn");
+            setCancelId(null);
+            setDetailId(null);
+          } catch {
+            toast.error("Could not cancel this concern.");
+            throw new Error("cancel failed");
+          }
+        }}
+      />
     </>
   );
 }

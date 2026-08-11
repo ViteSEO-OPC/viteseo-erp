@@ -141,7 +141,7 @@ class OvertimeRequestService
     /** HR sees all; an employee sees only their own. */
     public function list(User $user): Collection
     {
-        $query = OvertimeRequest::with(['employee.user', 'reviewer'])
+        $query = OvertimeRequest::with(['employee.user', 'reviewer', 'canceller'])
             ->orderByDesc('work_date')
             ->latest();
 
@@ -243,10 +243,17 @@ class OvertimeRequestService
     }
 
     /**
-     * Cancel an overtime request (Slice 6). HR only — an approval is a commitment of company
-     * money, so undoing one is an HR act, and it keeps a single clear audit trail. Before
-     * this, `approve()`/`reject()` both guarded on `pending`, which left an approved request
-     * frozen: if the work never happened the overtime was paid anyway.
+     * Cancel an overtime request (Slice 6).
+     *
+     * WHO MAY DO IT, AND WHY THE SPLIT. Undoing an APPROVED request is still HR-only: the
+     * approval is a commitment of company money, and cancelling one whose period has already
+     * been paid raises an overpayment (see the retro flag below). That has to stay with the
+     * people who can settle it.
+     *
+     * A PENDING request is a different thing entirely — nobody has committed anything, and the
+     * employee who filed it is the right person to withdraw it. Holding them to "ask HR to
+     * decline it" recorded a refusal against them for what was only a change of mind, which is
+     * the same gap leave closed in Slice 21.
      *
      * Payroll ignores a cancelled request from the next recompute onward. An already-DISBURSED
      * payslip is deliberately left alone (Slice 5 protects it) — HR settles the difference
@@ -254,13 +261,25 @@ class OvertimeRequestService
      */
     public function cancel(OvertimeRequest $request, User $actor, string $reason): OvertimeRequest
     {
-        if (! $actor->hasAnyRole(['hr_officer', 'super_admin'])) {
-            throw new AuthorizationException('Only HR can cancel an overtime request.');
+        $isHr = $actor->hasAnyRole(['hr_officer', 'super_admin']);
+        $isOwner = $actor->employee !== null
+            && (int) $actor->employee->id === (int) $request->employee_id;
+
+        if (! $isHr && ! $isOwner) {
+            throw new AuthorizationException('You cannot cancel this overtime request.');
         }
 
         if (! in_array($request->status, ['pending', 'approved'], true)) {
             throw ValidationException::withMessages([
                 'status' => ["Cannot cancel a request that is {$request->status}."],
+            ]);
+        }
+
+        // The employee's reach stops at `pending`. Once it is approved the money is committed and
+        // withdrawing it is HR's call, for the reason in the docblock.
+        if (! $isHr && $request->status !== 'pending') {
+            throw ValidationException::withMessages([
+                'status' => ['You can only withdraw a request while it is pending. Ask HR to cancel an approved one.'],
             ]);
         }
 

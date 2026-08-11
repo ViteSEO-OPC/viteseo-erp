@@ -8,6 +8,7 @@ use App\Modules\Hr\Http\Requests\StoreReimbursementRequest;
 use App\Modules\Hr\Http\Resources\ReimbursementResource;
 use App\Modules\Hr\Models\Reimbursement;
 use App\Modules\Hr\Services\ReimbursementService;
+use App\Modules\Hr\Http\Requests\CancelOwnRequestRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -81,6 +82,14 @@ class ReimbursementController extends Controller
     {
         return ReimbursementResource::make(
             $this->service->reopen($reimbursement, $request->validated('reason')),
+        )->response();
+    }
+
+    // POST /hr/.../{reimbursement}/cancel — the employee withdraws their own pending claim.
+    public function cancel(CancelOwnRequestRequest $request, Reimbursement $reimbursement): JsonResponse
+    {
+        return ReimbursementResource::make(
+            $this->service->cancel($reimbursement, $request->user(), $request->validated()['reason']),
         )->response();
     }
 }

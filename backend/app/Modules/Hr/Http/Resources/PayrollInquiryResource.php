@@ -31,6 +31,11 @@ class PayrollInquiryResource extends JsonResource
                 ])
                 ->all(),
             'resolved_at' => $this->resolved_at,
+            // Withdrawn by the requester — kept apart from the review fields so a cancellation
+            // is never read back as HR having declined it.
+            'cancelled_at' => $this->cancelled_at,
+            'cancelled_by' => $this->canceller?->name,
+            'cancel_reason' => $this->cancel_reason,
             'resolved_by' => $this->whenLoaded('resolver', fn () => $this->resolver?->name),
             'payslip_id' => $this->payslip_id,
             'payslip_cycle' => $this->payslipCycle(),

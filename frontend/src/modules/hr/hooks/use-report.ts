@@ -11,12 +11,12 @@ export function useReport(key: string, params?: Record<string, string | number>)
   });
 }
 
-export function useExportReport(key: string) {
+export function useExportReport(key: string, params?: Record<string, string | number>) {
   const qc = useQueryClient();
   return useMutation({
     // Fetch the file, then trigger a browser download (CSV or PDF).
     mutationFn: async () => {
-      const { blob, filename } = await exportReport(key);
+      const { blob, filename } = await exportReport(key, params);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

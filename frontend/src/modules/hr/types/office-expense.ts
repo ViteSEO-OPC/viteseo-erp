@@ -24,12 +24,25 @@ export interface OfficeExpense {
   created_at: string;
 }
 
+/** Review states, mirroring `OfficeExpenseService::STATUSES`. */
+export const EXPENSE_STATUSES = [
+  { value: "recorded", label: "Recorded — awaiting review" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Declined" },
+] as const;
+
 export interface OfficeExpenseInput {
   category: string;
   amount: number;
   expense_date: string;
   description: string;
   vendor: string;
+  status: string;
+  review_note: string;
+}
+
+export function expenseStatusLabel(s: string): string {
+  return EXPENSE_STATUSES.find((x) => x.value === s)?.label ?? s;
 }
 
 export function expenseCategoryLabel(c: string): string {

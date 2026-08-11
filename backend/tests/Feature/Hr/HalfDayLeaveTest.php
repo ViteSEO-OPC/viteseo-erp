@@ -65,7 +65,7 @@ class HalfDayLeaveTest extends HrTestCase
         ]);
 
         $this->paid = LeaveType::create(['name' => 'Vacation', 'code' => 'VL', 'is_paid' => true]);
-        $this->unpaid = LeaveType::create(['name' => 'Leave without pay', 'code' => 'LWOP', 'is_paid' => false]);
+        $this->unpaid = LeaveType::create(['name' => 'Leave without pay', 'code' => 'LWOP', 'is_paid' => false, 'is_unlimited' => true]);
 
         LeaveBalance::create([
             'employee_id' => $this->employee->id, 'leave_type_id' => $this->paid->id,

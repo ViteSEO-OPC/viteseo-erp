@@ -14,8 +14,14 @@ export async function getReport(
  * for chart reports); we return the bytes + the server-provided filename so the
  * caller can save it.
  */
-export async function exportReport(key: string): Promise<{ blob: Blob; filename: string }> {
+export async function exportReport(
+  key: string,
+  params?: Record<string, string | number>,
+): Promise<{ blob: Blob; filename: string }> {
   const res = await apiClient.post(`/hr/reports/${key}/export`, null, {
+    // The same filters the screen is showing, so the file matches the table it came from
+    // rather than silently reverting to the report's defaults.
+    params,
     responseType: "blob",
   });
   const disposition = (res.headers["content-disposition"] as string | undefined) ?? "";

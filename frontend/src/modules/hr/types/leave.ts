@@ -9,6 +9,8 @@ export interface LeaveType {
   code: string;
   days_per_year: number;
   is_paid: boolean;
+  /** No allowance and no balance check — independent of is_paid. */
+  is_unlimited: boolean;
   color: string | null;
   /** Optional HR-facing blurb describing the leave type. */
   description: string | null;
@@ -35,6 +37,9 @@ export interface HalfDayRequest {
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
   employee: EmployeeRef;
   created_at: string;
 }
@@ -50,6 +55,9 @@ export interface EarlyOutRequest {
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
   employee: EmployeeRef;
   created_at: string;
 }
@@ -68,6 +76,9 @@ export interface OvertimeRequest {
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
   employee: EmployeeRef;
   created_at: string;
 }

@@ -20,10 +20,27 @@ class LeaveController extends Controller
 {
     public function __construct(private readonly LeaveService $service) {}
 
-    // GET /api/v1/hr/leave-types — any authenticated user (needed by the form).
-    public function leaveTypes(): JsonResponse
+    /**
+     * GET /api/v1/hr/leave-types — any authenticated user (the filing form needs it).
+     *
+     * HR sees every type, because this is also what the Company → Leave Type screen configures.
+     * An EMPLOYEE sees only the types they can actually file: a paid type they hold no credits
+     * for was previously offered in the picker and then refused by the 422 on submit, which read
+     * as a bug rather than as "you are not entitled to this".
+     *
+     * @see LeaveService::selectableTypesFor() for the rule, including why unpaid leave always shows.
+     */
+    public function leaveTypes(Request $request): JsonResponse
     {
-        return LeaveTypeResource::collection(LeaveType::orderBy('name')->get())->response();
+        $user = $request->user();
+
+        if ($user->hasAnyRole(['hr_officer', 'super_admin']) || $user->employee === null) {
+            return LeaveTypeResource::collection(LeaveType::orderBy('name')->get())->response();
+        }
+
+        return LeaveTypeResource::collection(
+            $this->service->selectableTypesFor($user->employee),
+        )->response();
     }
 
     // GET /api/v1/hr/me/leave-balances — the caller's balances for this year.

@@ -32,3 +32,9 @@ export async function reopenHalfDayRequest(id: number, reason?: string): Promise
   const res = await apiClient.post(`/hr/half-day-requests/${id}/reopen`, { reason });
   return res.data.data;
 }
+
+/** The employee withdraws their own pending request. Reason required. */
+export async function cancelHalfDayRequest(id: number, reason: string): Promise<HalfDayRequest> {
+  const res = await apiClient.post(`/hr/half-day-requests/${id}/cancel`, { reason });
+  return res.data.data;
+}

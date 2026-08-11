@@ -20,11 +20,15 @@ class EarlyOutRequest extends Model
         'reason',
         'status',
         'review_note',
+        'cancelled_at',
+        'cancelled_by',
+        'cancel_reason',
         'reviewed_by',
         'reviewed_at',
     ];
 
     protected $casts = [
+        'cancelled_at' => 'datetime',
         'work_date' => 'date',
         'reviewed_at' => 'datetime',
     ];
@@ -37,5 +41,11 @@ class EarlyOutRequest extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    /** Who withdrew this request, when it was cancelled rather than decided. */
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 }

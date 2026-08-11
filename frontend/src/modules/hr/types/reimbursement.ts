@@ -20,7 +20,9 @@ export type ReimbursementStatus =
   | "approved"
   | "scheduled"
   | "rejected"
-  | "paid";
+  | "paid"
+  // Withdrawn by the employee before HR decided it — not a rejection.
+  | "cancelled";
 
 export interface Reimbursement {
   id: number;
@@ -35,6 +37,9 @@ export interface Reimbursement {
   review_note: string | null;
   reviewed_at: string | null;
   reviewed_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
   created_at: string;
 }
 

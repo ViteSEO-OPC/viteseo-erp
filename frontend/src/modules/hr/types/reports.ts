@@ -81,6 +81,117 @@ export interface Report {
   representation?: StackedSeries;
   // Audit Trail specifics.
   entries?: AuditEntry[];
+  // Attendance specifics — the three month-scoped views share one envelope, so a single
+  // component renders all of them and only the row payload below differs per tab.
+  tabs?: ReportTab[];
+  active_tab?: string;
+  months?: ReportMonthOption[];
+  selected_month?: ReportMonthOption;
+  selected_department?: string;
+  working_days?: number;
+  elapsed_working_days?: number;
+  month_in_progress?: boolean;
+  generated_at?: string;
+  attendance?: AttendanceSummaryRow[];
+  dtr?: AttendanceDtrRow[];
+  leave?: AttendanceLeaveRow[];
+}
+
+export interface ReportTab {
+  key: string;
+  title: string;
+  description: string;
+}
+
+export interface ReportMonthOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * How one day of an employee's month reads. `upcoming` is a workday that hasn't happened yet and
+ * `not_employed` a day outside their employment window — neither is an absence, and neither
+ * counts toward the attendance rate.
+ */
+export type AttendanceDayStatus =
+  | "present"
+  | "late"
+  | "absent"
+  | "on_leave"
+  | "half_day"
+  | "rest_day"
+  | "holiday"
+  | "not_employed"
+  | "upcoming";
+
+export interface AttendanceReportDay {
+  day: number;
+  date: string;
+  weekday: string;
+  status: AttendanceDayStatus;
+  leave_type: string | null;
+  holiday: string | null;
+  time_in: string | null;
+  time_out: string | null;
+  in_minutes: number | null;
+  out_minutes: number | null;
+  hours: number;
+  note: string | null;
+}
+
+interface AttendanceRowBase {
+  employee_id: number;
+  name: string;
+  department: string | null;
+  days: AttendanceReportDay[];
+}
+
+export interface AttendanceSummaryRow extends AttendanceRowBase {
+  present: number;
+  late: number;
+  absent: number;
+  on_leave: number;
+  /** Days the employee could have shown up for — the attendance rate's denominator. */
+  expected_days: number;
+  rate: number | null;
+}
+
+export interface AttendanceDtrRow extends AttendanceRowBase {
+  days_logged: number;
+  total_hours: number;
+  average_hours: number | null;
+  average_in: string | null;
+  average_out: string | null;
+}
+
+export interface AttendanceLeaveBalance {
+  name: string;
+  entitled: number;
+  used: number;
+  remaining: number;
+}
+
+export interface AttendanceLeaveRequestRow {
+  id: number;
+  type: string;
+  start_date: string | null;
+  end_date: string | null;
+  days: number;
+  status: string;
+}
+
+export interface AttendanceLeaveRow {
+  employee_id: number;
+  name: string;
+  department: string | null;
+  taken: number;
+  approved: number;
+  pending: number;
+  entitled: number;
+  used: number;
+  remaining: number;
+  balances: AttendanceLeaveBalance[];
+  requests: AttendanceLeaveRequestRow[];
 }
 
 export interface AuditEntry {

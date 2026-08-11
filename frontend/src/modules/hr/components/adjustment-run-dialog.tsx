@@ -16,6 +16,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { notify as toast } from "@/core/lib/notify";
 import { formatPeso } from "@/core/lib/format";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { SimpleSelect } from "@/modules/hr/ui/select";
 import { useEmployees } from "@/modules/hr/hooks/use-employees";
 import { useRunAdjustment } from "@/modules/hr/hooks/use-payroll";
 
@@ -135,11 +137,11 @@ export function AdjustmentRunDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label htmlFor="adj-start" className="text-caption font-medium">Issued from</label>
-              <Input id="adj-start" type="date" value={cycleStart} onChange={(e) => setCycleStart(e.target.value)} />
+              <DatePicker id="adj-start" value={cycleStart} onChange={setCycleStart} />
             </div>
             <div className="space-y-1.5">
               <label htmlFor="adj-end" className="text-caption font-medium">Issued to</label>
-              <Input id="adj-end" type="date" value={cycleEnd} onChange={(e) => setCycleEnd(e.target.value)} />
+              <DatePicker id="adj-end" value={cycleEnd} onChange={setCycleEnd} />
             </div>
           </div>
           <p className="-mt-2 text-caption text-muted-foreground">
@@ -150,19 +152,17 @@ export function AdjustmentRunDialog({
             <p className="text-caption font-medium">Who is being paid</p>
             {lines.map((line, i) => (
               <div key={i} className="flex items-start gap-2">
-                <select
+                <SimpleSelect
                   aria-label="Employee"
-                  className="h-9 min-w-0 flex-1 rounded-md border border-input bg-transparent px-2 text-body"
-                  value={line.employee_id}
-                  onChange={(e) => update(i, { employee_id: e.target.value ? Number(e.target.value) : "" })}
-                >
-                  <option value="">Select an employee…</option>
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.name ?? emp.employee_no}
-                    </option>
-                  ))}
-                </select>
+                  className="min-w-0 flex-1"
+                  placeholder="Select an employee…"
+                  value={line.employee_id === "" ? undefined : String(line.employee_id)}
+                  onValueChange={(v) => update(i, { employee_id: v ? Number(v) : "" })}
+                  options={employees.map((emp) => ({
+                    value: String(emp.id),
+                    label: emp.name ?? emp.employee_no,
+                  }))}
+                />
                 <Input
                   aria-label="Amount"
                   type="number"

@@ -12,6 +12,7 @@ import {
   BarChart3,
   Wallet,
   ClipboardList,
+  CalendarCheck,
   type LucideIcon,
 } from "lucide-react";
 
@@ -34,6 +35,14 @@ const REPORTS: {
     title: "Recruitment Funnel",
     description: "Time-to-hire, source effectiveness, offer acceptance rate; funnel matches the pipeline stages.",
     icon: Filter,
+  },
+  {
+    // Three month-scoped views behind one screen (summary / daily time record / leave), so the
+    // library carries one card rather than three near-identical ones.
+    key: "attendance_summary",
+    title: "Attendance Summary",
+    description: "Per-employee attendance for a month — present days, tardiness, absences and leave, each expandable to the day-by-day record. Includes the daily time record and a leave view.",
+    icon: CalendarCheck,
   },
   {
     key: "leave",
