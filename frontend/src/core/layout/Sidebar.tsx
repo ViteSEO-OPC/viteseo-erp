@@ -8,7 +8,9 @@ import { BarChart3, ClipboardCheck, LayoutGrid, X } from "lucide-react";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import { useSidebar } from "@/core/layout/SidebarContext";
 import { cn } from "@/core/lib/utils";
-import { usePendingTasks, useProjects, useWorkspaces } from "@/modules/projects/hooks";
+import { usePendingTasks } from "@/modules/projects/hooks/use-approvals";
+import { useProjects } from "@/modules/projects/hooks/use-projects";
+import { useWorkspaces } from "@/modules/projects/hooks/use-workspaces";
 import {
   Avatar,
   ChevronLeftIcon,

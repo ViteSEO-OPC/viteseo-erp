@@ -7,7 +7,7 @@ import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
 import { LeadRealtimeListener } from "@/modules/crm/features/leads/components/lead-realtime-listener";
 import { NotificationRealtimeListener } from "@/modules/crm/features/notifications/components/notification-realtime-listener";
-import { ProjectNotificationListener } from "@/modules/projects/use-project-notifications";
+import { ProjectNotificationListener } from "@/modules/projects/components/project-notification-listener";
 import { PermissionsProvider } from "@/modules/crm/providers/permissions-provider";
 import { ThemeProvider } from "@/modules/crm/providers/theme-provider";
 import { canAccessPath } from "@/modules/crm/lib/rbac";

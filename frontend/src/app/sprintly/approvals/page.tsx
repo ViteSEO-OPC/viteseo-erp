@@ -1,5 +1,5 @@
 import { RequireManager } from "@/core/auth/RequireRole";
-import { ApprovalsView } from "@/modules/projects/components/approvals/ApprovalsView";
+import { ApprovalsView } from "@/modules/projects/components/approvals-view";
 
 export default function ApprovalsPage() {
   return (

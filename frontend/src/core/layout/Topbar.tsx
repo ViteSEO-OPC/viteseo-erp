@@ -8,15 +8,15 @@ import { BellIcon } from "@/core/ui";
 import { useAuth } from "@/core/auth-context";
 import { getAccessibleModules } from "@/core/access";
 import { useSidebar } from "@/core/layout/SidebarContext";
-import { NotificationDropdown } from "@/modules/projects/components/notifications/NotificationDropdown";
-import { GlobalSearch } from "@/modules/projects/components/search/GlobalSearch";
-import { useOpenTask } from "@/modules/projects/components/tasks/useTaskModal";
-import type { AppNotification } from "@/modules/projects/notifications";
+import { NotificationDropdown } from "@/modules/projects/components/notification-dropdown";
+import { GlobalSearch } from "@/modules/projects/components/global-search";
+import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
+import type { AppNotification } from "@/modules/projects/types/notification";
 import {
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
   useNotifications,
-} from "@/modules/projects/useNotifications";
+} from "@/modules/projects/hooks/use-notifications";
 
 /**
  * App topbar — thin sticky bar across the top of the main content area with a

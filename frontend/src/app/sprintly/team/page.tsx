@@ -1,4 +1,4 @@
-import { TeamView } from '@/modules/projects/components/team/TeamView';
+import { TeamView } from '@/modules/projects/components/team-view';
 
 export default function TeamPage() {
   return <TeamView />;
