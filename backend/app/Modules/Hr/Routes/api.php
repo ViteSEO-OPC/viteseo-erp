@@ -94,12 +94,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('attendance/clock-out', [AttendanceController::class, 'clockOut']);
     Route::post('attendance/break', [AttendanceController::class, 'break']);
     // Off-site time-in: submit a selfie for HR to approve, and read back its status.
-    Route::post('attendance/remote-checkin', [RemoteCheckinController::class, 'store']);
+    Route::post('attendance/remote-checkin', [RemoteCheckinController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
     Route::get('me/remote-checkin', [RemoteCheckinController::class, 'me']);
 
     // Reimbursement — caller files + views own; HR sees all + decides.
     Route::get('reimbursements', [ReimbursementController::class, 'index']);
-    Route::post('reimbursements', [ReimbursementController::class, 'store']);
+    Route::post('reimbursements', [ReimbursementController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
     // Withdraw one you filed by mistake. Ownership + 'pending only' enforced in the service.
     Route::post('reimbursements/{reimbursement}/cancel', [ReimbursementController::class, 'cancel']);
 
@@ -112,7 +112,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/payslip-requests', [PayslipRequestController::class, 'index']);
     Route::post('me/payslip-requests', [PayslipRequestController::class, 'store']);
     Route::get('me/payroll-inquiries', [PayrollInquiryController::class, 'index']);
-    Route::post('me/payroll-inquiries', [PayrollInquiryController::class, 'store']);
+    Route::post('me/payroll-inquiries', [PayrollInquiryController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
     Route::post('me/payroll-inquiries/{payrollInquiry}/cancel', [PayrollInquiryController::class, 'cancel']);
 
     // FAQ / knowledge base — read (role-scoped: employees see published only) + view count.
@@ -121,7 +121,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Concerns + meeting invites — the caller's own (anonymity preserved server-side).
     Route::get('me/concerns', [ConcernController::class, 'meIndex']);
-    Route::post('me/concerns', [ConcernController::class, 'store']);
+    Route::post('me/concerns', [ConcernController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
     Route::post('me/concerns/{concern}/cancel', [ConcernController::class, 'cancel']);
     Route::get('me/meetings', [MeetingController::class, 'meIndex']);
     Route::post('me/meetings/{meeting}/respond', [MeetingController::class, 'respond']);
@@ -138,11 +138,24 @@ Route::middleware('auth:sanctum')->group(function () {
     // My Benefits — the caller's own enrolled benefit programs (identity from token).
     Route::get('me/benefit-programs', [BenefitProgramController::class, 'mine']);
 
+    /*
+      Statutory contribution rates, readable by ANY signed-in user rather than HR only.
+
+      These are SSS / PhilHealth / Pag-IBIG rates set by legislation, and every one of them is
+      already itemised on the employee's own payslip — so withholding the rate that produced the
+      deduction protects nothing and just leaves them unable to check the arithmetic. The resource
+      carries rates, caps and bracket counts; nothing employee-specific and nothing private.
+
+      Writing them stays HR-only (see `contribution-settings/{id}` in the HR group below), as does
+      the dated version history.
+    */
+    Route::get('contribution-settings', [BenefitController::class, 'settingsIndex']);
+
     // Payslips — the caller's own (identity from token).
     Route::get('me/next-payday', [PayrollController::class, 'myNextPayday']);
     Route::get('me/payslips', [PayrollController::class, 'myPayslips']);
     Route::get('me/payslips/{payslip}', [PayrollController::class, 'showPayslip']);
-    Route::get('me/payslips/{payslip}/pdf', [PayrollController::class, 'myPayslipPdf']);
+    Route::get('me/payslips/{payslip}/pdf', [PayrollController::class, 'myPayslipPdf'])->middleware('throttle:20,1,hr-pdf:');
 
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
@@ -172,7 +185,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Attendance → violation flags (Slice 16).
         Route::get('violations', [ViolationController::class, 'index']);
-        Route::post('violations/recompute', [ViolationController::class, 'recompute']);
+        Route::post('violations/recompute', [ViolationController::class, 'recompute'])->middleware('throttle:5,1,hr-bulk:');
         Route::post('violations/{violation}/resolve', [ViolationController::class, 'resolve']);
         Route::post('violations/{violation}/reopen', [ViolationController::class, 'reopen']);
 
@@ -217,7 +230,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
         Route::post('payslips/{payslip}/reopen', [PayrollController::class, 'reopenPayslip']);
         Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
-        Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf']);
+        Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf'])->middleware('throttle:20,1,hr-pdf:');
 
         // Disbursement (FIN-015) — where the money actually went. Building a batch reads every
         // payslip in a run and writes one row per employee, so it carries the same 5/min limit as
@@ -237,10 +250,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'requisitions/{requisition}', [RecruitmentController::class, 'updateRequisition']);
         Route::delete('requisitions/{requisition}', [RecruitmentController::class, 'destroyRequisition']);
         Route::get('candidates', [RecruitmentController::class, 'candidatesIndex']);
-        Route::post('candidates', [RecruitmentController::class, 'storeCandidate']);
+        Route::post('candidates', [RecruitmentController::class, 'storeCandidate'])->middleware('throttle:20,1,hr-upload:');
         Route::post('candidates/{candidate}/move', [RecruitmentController::class, 'moveCandidate']);
         Route::post('candidates/{candidate}/hire', [RecruitmentController::class, 'hireCandidate']);
-        Route::post('candidates/{candidate}/email', [RecruitmentController::class, 'sendEmail']);
+        Route::post('candidates/{candidate}/email', [RecruitmentController::class, 'sendEmail'])->middleware('throttle:10,1,hr-email:');
         Route::post('candidates/{candidate}/reject', [RecruitmentController::class, 'reject']);
         Route::post('reimbursements/{reimbursement}/approve', [ReimbursementController::class, 'approve']);
         Route::post('reimbursements/{reimbursement}/reject', [ReimbursementController::class, 'reject']);
@@ -275,7 +288,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'employees/{employee}', [EmployeeController::class, 'update']);
         Route::get('employees/{employee}/salary-history', [EmployeeController::class, 'salaryHistory']);
         // Profile picture: set/replace or clear (falls back to initials).
-        Route::post('employees/{employee}/photo', [EmployeeController::class, 'updatePhoto']);
+        Route::post('employees/{employee}/photo', [EmployeeController::class, 'updatePhoto'])->middleware('throttle:20,1,hr-upload:');
         Route::delete('employees/{employee}/photo', [EmployeeController::class, 'destroyPhoto']);
         // Loans & cash advances repaid through payroll (Slice 11b).
         // FIN-022 — the unmasked bank/government ID numbers. Audited per view: an HR officer must
@@ -316,7 +329,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('employees/{employee}/hr-role', [EmployeeController::class, 'setHrRole']);
         // Documents tab: list / upload / delete.
         Route::get('employees/{employee}/documents', [EmployeeController::class, 'documentsIndex']);
-        Route::post('employees/{employee}/documents', [EmployeeController::class, 'storeDocument']);
+        Route::post('employees/{employee}/documents', [EmployeeController::class, 'storeDocument'])->middleware('throttle:20,1,hr-upload:');
         Route::delete('employees/{employee}/documents/{document}', [EmployeeController::class, 'destroyDocument']);
 
         // Company → Departments: archive/restore (HR only). CRUD is above.
@@ -358,14 +371,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('employees/{employee}/allowances', [BenefitProgramController::class, 'employeeAllowances']);
         Route::match(['put', 'patch'], 'employees/{employee}/allowances/{benefitProgram}', [BenefitProgramController::class, 'setEmployeeAllowance']);
 
-        // Company → Benefits: contribution settings + per-employee checklist.
-        Route::get('contribution-settings', [BenefitController::class, 'settingsIndex']);
+        // Company → Benefits: per-employee checklist. (The rates themselves are readable by
+        // any signed-in user — see the employee group above.)
         // Slice B3a — dated statutory rate versions.
         Route::get('contribution-versions', [BenefitController::class, 'versionsIndex']);
         Route::post('contribution-versions', [BenefitController::class, 'storeVersion']);
         // Slice B8 — read the agency's published spreadsheet (a dry run; it saves nothing), and
         // remove a version saved with the wrong date.
-        Route::post('contribution-versions/import-schedule', [BenefitController::class, 'importSchedule']);
+        Route::post('contribution-versions/import-schedule', [BenefitController::class, 'importSchedule'])->middleware('throttle:5,1,hr-bulk:');
         Route::delete('contribution-versions/{contributionVersion}', [BenefitController::class, 'destroyVersion']);
         Route::match(['put', 'patch'], 'contribution-settings/{contributionSetting}', [BenefitController::class, 'updateSetting']);
         Route::get('employees/{employee}/benefits', [BenefitController::class, 'employeeBenefitsIndex']);
@@ -411,7 +424,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Finance → Office Expenses (HR only).
         Route::get('office-expenses', [OfficeExpenseController::class, 'index']);
-        Route::post('office-expenses', [OfficeExpenseController::class, 'store']);
+        Route::post('office-expenses', [OfficeExpenseController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
         Route::match(['put', 'patch'], 'office-expenses/{officeExpense}', [OfficeExpenseController::class, 'update']);
         Route::post('office-expenses/{officeExpense}/approve', [OfficeExpenseController::class, 'approve']);
         Route::post('office-expenses/{officeExpense}/reject', [OfficeExpenseController::class, 'reject']);

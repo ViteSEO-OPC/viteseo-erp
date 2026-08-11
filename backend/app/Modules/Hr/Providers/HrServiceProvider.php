@@ -40,8 +40,16 @@ class HrServiceProvider extends ServiceProvider
         // with every other unprefixed `throttle:` the user touches — which is precisely how this
         // 120/min limiter came to be enforcing the payroll run's 5/min against ordinary page loads.
         // See the note above the payroll routes.
+        // TWO WINDOWS, not one. The 120/min alone bounds a burst but not a grind: sitting at 119
+        // requests a minute is inside policy forever, which is ~171k requests a day against the
+        // employee directory. The hourly ceiling is what makes patient scraping cost something.
+        //
+        // 2000/hour is ~33/min sustained — far above real use (a heavy HR session is a few hundred
+        // requests an hour) and far below what a scraper needs. Separate counter name, for the same
+        // reason as `hr-api:` below: an unprefixed limiter shares one bucket with every other
+        // unprefixed `throttle:` the user touches.
         Route::prefix('api/v1/hr')
-            ->middleware(['api', 'throttle:120,1,hr-api:'])
+            ->middleware(['api', 'throttle:120,1,hr-api:', 'throttle:2000,60,hr-api-hourly:'])
             ->group(__DIR__ . '/../Routes/api.php');
 
         // Auto-load HR migrations from inside the module.

@@ -83,7 +83,7 @@ class RateLimitIsolationTest extends HrTestCase
 
                 $args = explode(',', substr($middleware, strlen('throttle:')));
 
-                if (count($args) >= 3 && trim($args[2]) !== '' && trim($args[2]) !== 'hr-api:') {
+                if (count($args) >= 3 && trim($args[2]) !== '' && ! in_array(trim($args[2]), ['hr-api:', 'hr-api-hourly:'], true)) {
                     $prefixes[] = trim($args[2]) . '|' . $route->uri();
                 }
             }
@@ -118,5 +118,100 @@ class RateLimitIsolationTest extends HrTestCase
             $response->status(),
             'reading pages used up the payroll run\'s rate limit',
         );
+    }
+
+    /**
+     * The HR group carries TWO windows, and every route must be under both.
+     *
+     * The per-minute limit alone bounds a burst but not a grind — 119 requests a minute is inside
+     * policy indefinitely. The hourly ceiling is what makes patient scraping cost something, so a
+     * route escaping it is the same class of hole as one escaping the minute limit.
+     */
+    public function test_every_hr_route_is_under_both_group_windows(): void
+    {
+        $missing = [];
+
+        foreach (Route::getRoutes() as $route) {
+            if (! str_starts_with($route->uri(), 'api/v1/hr')) {
+                continue;
+            }
+
+            $middleware = array_filter($route->gatherMiddleware(), 'is_string');
+            $has = fn (string $needle) => (bool) array_filter(
+                $middleware,
+                fn ($m) => str_starts_with($m, 'throttle:') && str_contains($m, $needle),
+            );
+
+            if (! $has('hr-api:') || ! $has('hr-api-hourly:')) {
+                $missing[] = $route->methods()[0] . ' ' . $route->uri();
+            }
+        }
+
+        $this->assertSame([], $missing, "these HR routes escape a group rate-limit window:\n" . implode("\n", $missing));
+    }
+
+    /**
+     * The expensive endpoints carry a limit tighter than the 120/min the group gives everything.
+     *
+     * 120/min is tuned for dashboard reads and is far too loose for these: the upload routes
+     * accept up to 5 files of 5-10MB each, so at the group limit one account could write several
+     * GB a minute; the email route spends sender reputation that cannot be reclaimed; the PDF and
+     * bulk routes are synchronous CPU that competes with a payroll run.
+     *
+     * Asserted as a MINIMUM per family — a route may be added to one of these later, and the point
+     * is that none of them silently loses its limit.
+     */
+    public function test_the_expensive_endpoints_carry_a_tighter_limit(): void
+    {
+        $expected = [
+            'hr-upload:' => [
+                'api/v1/hr/reimbursements',
+                'api/v1/hr/me/concerns',
+                'api/v1/hr/me/payroll-inquiries',
+                'api/v1/hr/attendance/remote-checkin',
+                'api/v1/hr/candidates',
+                'api/v1/hr/employees/{employee}/photo',
+                'api/v1/hr/employees/{employee}/documents',
+                'api/v1/hr/office-expenses',
+            ],
+            'hr-email:' => ['api/v1/hr/candidates/{candidate}/email'],
+            'hr-pdf:' => [
+                'api/v1/hr/me/payslips/{payslip}/pdf',
+                'api/v1/hr/payslips/{payslip}/pdf',
+            ],
+            'hr-bulk:' => [
+                'api/v1/hr/violations/recompute',
+                'api/v1/hr/contribution-versions/import-schedule',
+            ],
+        ];
+
+        $limited = [];
+        foreach (Route::getRoutes() as $route) {
+            foreach (array_filter($route->gatherMiddleware(), 'is_string') as $middleware) {
+                if (! str_starts_with($middleware, 'throttle:')) {
+                    continue;
+                }
+                $args = explode(',', substr($middleware, strlen('throttle:')));
+                if (count($args) >= 3) {
+                    $limited[trim($args[2])][] = $route->uri();
+                }
+            }
+        }
+
+        foreach ($expected as $prefix => $uris) {
+            $this->assertArrayHasKey(
+                $prefix,
+                $limited,
+                "the '{$prefix}' rate limiter has disappeared entirely",
+            );
+
+            foreach ($uris as $uri) {
+                $this->assertContains(
+                    $uri,
+                    $limited[$prefix],
+                    "{$uri} lost its '{$prefix}' limit and is back on the loose 120/min group limit",
+                );
+            }
+        }
     }
 }
