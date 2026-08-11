@@ -36,8 +36,12 @@ export function CalendarLayout() {
   }, []);
 
   return (
-    <div className="flex flex-1 overflow-hidden -mx-4 lg:-mx-6 -mt-8">
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 md:p-6">
+    // Below md the rail cannot stay a fixed side column — it would squeeze the grid into a few
+    // dozen pixels — so the shell stacks and the PAGE scrolls; from md up it is the unchanged
+    // two-column shell whose calendar column scrolls on its own. `min-w-0` lets the calendar
+    // column shrink below the intrinsic width of the grid table instead of overflowing sideways.
+    <div className="flex flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden -mx-4 lg:-mx-6 -mt-8">
+      <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 md:overflow-y-auto md:p-6">
         <PlannerModeBar mode={mode} onModeChange={setMode} onNewTask={() => openCreate()} />
         {mode === "calendar" ? (
           <CalendarView onEditEvent={openEdit} />
