@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
-import { StatCard } from "@/core/components/stat-card";
+import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { notify as toast } from "@/core/lib/notify";
@@ -13,8 +12,7 @@ import {
   RequestDetailDialog,
   type DetailField,
 } from "@/modules/hr/components/request-detail-dialog";
-import { LeaveBalanceCard } from "@/modules/hr/components/leave-balance-card";
-import { LeaveTypesListCard } from "@/modules/hr/components/leave-types-list-card";
+import { LeaveSummaryCard } from "@/modules/hr/components/leave-summary-card";
 import { LeaveRequestForm } from "@/modules/hr/components/leave-request-form";
 import { HalfDayRequestForm } from "@/modules/hr/components/half-day-request-form";
 import { EarlyOutRequestForm } from "@/modules/hr/components/early-out-request-form";
@@ -43,6 +41,26 @@ const REQUEST_TITLES: Record<RequestTab, string> = {
   overtime: "Request overtime",
 };
 
+/** Days without a pointless ".0": 5, 0.5. */
+function formatDays(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+/**
+ * "Apr 1 – Apr 5, 2026" for a range inside one year, so the history table doesn't
+ * carry the year twice; the full date on both sides when it straddles a new year.
+ */
+function formatDateRange(start: string, end: string): string {
+  if (start === end) return formatDate(start);
+  const from = new Date(start);
+  const to = new Date(end);
+  if (from.getFullYear() !== to.getFullYear()) {
+    return `${formatDate(start)} – ${formatDate(end)}`;
+  }
+  const fromShort = from.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+  return `${fromShort} – ${formatDate(end)}`;
+}
+
 /**
  * One row of the combined history, carrying everything its detail modal needs. The four
  * request kinds have different shapes, so each maps its own `fields` and `decision`
@@ -53,7 +71,9 @@ interface HistItem {
   id: number;
   kind: "leave" | "half" | "early" | "overtime";
   title: string;
-  date: string;
+  dates: string;
+  /** null where a day count is meaningless — an early-out or an overtime window. */
+  days: number | null;
   status: string;
   at: string;
   /** The employee's own words when filing. */
@@ -69,9 +89,9 @@ interface HistItem {
 }
 
 /**
- * Figma "segmented-toggle": a light-gray track holding three equal pills; the
- * active one is a white, subtly-shadowed pill with bold ink text. Picks which
- * kind of time-off request the single card shows.
+ * Figma "segmented-toggle": a light-gray track holding equal pills; the active
+ * one is a white, subtly-shadowed pill with bold ink text. Picks which kind of
+ * time-off request the single card shows.
  */
 function RequestTabs({
   value,
@@ -127,14 +147,13 @@ export default function TimeOffPage() {
   const [tab, setTab] = useState<RequestTab>("leave");
   const [detail, setDetail] = useState<HistItem | null>(null);
   const [cancelTarget, setCancelTarget] = useState<HistItem | null>(null);
-  const [page, setPage] = useState(1);
 
   const mode = summary?.mode ?? "not_shared";
   const balances = useMemo(() => summary?.balances ?? [], [summary]);
   const pool = summary?.pool ?? null;
 
-  // Shared: one pool card + the type names. Not-shared: a single Leave Types
-  // card listing every paid type with its own credits (no featured card).
+  // Shared: the pool is the headline and the types are names only. Not-shared:
+  // each paid type carries its own credits and the headline is their total.
   const paidCodes = useMemo(
     () => new Set((types ?? []).filter((t) => t.is_paid).map((t) => t.code)),
     [types],
@@ -144,7 +163,13 @@ export default function TimeOffPage() {
     mode === "shared"
       ? (types ?? [])
           .filter((t) => t.is_paid)
-          .map((t) => ({ key: `t${t.id}`, name: t.name, remaining: 0, entitled: 0 }))
+          .map((t) => ({
+            key: `t${t.id}`,
+            name: t.name,
+            remaining: 0,
+            entitled: 0,
+            used: 0,
+          }))
       : balances
           .filter((b) => paidCodes.has(b.leave_type.code))
           .map((b) => ({
@@ -152,7 +177,30 @@ export default function TimeOffPage() {
             name: b.leave_type.name,
             remaining: b.remaining_days,
             entitled: b.entitled_days,
+            used: b.used_days,
           }));
+
+  // The headline balance. Not-shared has no single pool, so the card totals every
+  // paid type instead — the per-type breakdown is right below it either way.
+  const featured =
+    mode === "shared"
+      ? pool
+        ? {
+            entitled: pool.entitled_days,
+            remaining: pool.remaining_days,
+            used: pool.used_days,
+          }
+        : null
+      : listItems.length > 0
+        ? listItems.reduce(
+            (acc, it) => ({
+              entitled: acc.entitled + it.entitled,
+              remaining: acc.remaining + it.remaining,
+              used: acc.used + it.used,
+            }),
+            { entitled: 0, remaining: 0, used: 0 },
+          )
+        : null;
 
   const pendingCount =
     (requests ?? []).filter((r) => r.status === "pending").length +
@@ -160,19 +208,17 @@ export default function TimeOffPage() {
     (earlyOuts ?? []).filter((e) => e.status === "pending").length +
     (overtimes ?? []).filter((o) => o.status === "pending").length;
 
-  // Combined leave + half-day history, newest first.
+  // Combined leave / half-day / early-out / overtime history, newest first.
   const history: HistItem[] = [
     ...(requests ?? []).map((l) => {
-      const dates =
-        l.start_date === l.end_date
-          ? formatDate(l.start_date)
-          : `${formatDate(l.start_date)} – ${formatDate(l.end_date)}`;
+      const dates = formatDateRange(l.start_date, l.end_date);
       return {
         key: `l${l.id}`,
         id: l.id,
         kind: "leave" as const,
         title: l.leave_type.name,
-        date: dates,
+        dates,
+        days: l.days,
         status: l.status,
         at: l.created_at,
         reason: l.reason,
@@ -207,7 +253,8 @@ export default function TimeOffPage() {
       id: h.id,
       kind: "half" as const,
       title: `Half-day (${h.period})`,
-      date: `${formatDate(h.work_date)} · Unpaid`,
+      dates: formatDate(h.work_date),
+      days: 0.5,
       status: h.status,
       at: h.created_at,
       reason: h.reason,
@@ -228,7 +275,8 @@ export default function TimeOffPage() {
       id: e.id,
       kind: "early" as const,
       title: `Early-out (${e.early_out_time})`,
-      date: `${formatDate(e.work_date)} · Unpaid`,
+      dates: formatDate(e.work_date),
+      days: null,
       status: e.status,
       at: e.created_at,
       reason: e.reason,
@@ -246,7 +294,8 @@ export default function TimeOffPage() {
       id: o.id,
       kind: "overtime" as const,
       title: `Overtime (${o.hours.toFixed(1)} hrs)`,
-      date: `${formatDate(o.work_date)} · Paid`,
+      dates: formatDate(o.work_date),
+      days: null,
       status: o.status,
       at: o.created_at,
       reason: o.reason,
@@ -265,12 +314,59 @@ export default function TimeOffPage() {
     })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
-  const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const pageHistory = useMemo(
-    () => history.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
-    [history, safePage],
-  );
+  // A day count is only meaningful for leave and half-days; an early-out or an
+  // overtime window states its extent in the Type column instead.
+  const columns: Column<HistItem>[] = [
+    {
+      header: "Type",
+      cell: (r) => <span className="font-semibold text-foreground">{r.title}</span>,
+    },
+    {
+      header: "Dates",
+      cell: (r) => <span className="whitespace-nowrap">{r.dates}</span>,
+    },
+    {
+      header: "Days",
+      cell: (r) => (r.days === null ? "—" : formatDays(r.days)),
+    },
+    {
+      header: "Reason",
+      cell: (r) => (
+        <span className="block max-w-[18rem] truncate" title={r.reason}>
+          {r.reason}
+        </span>
+      ),
+    },
+    {
+      header: "Status",
+      cell: (r) => (
+        <>
+          <StatusBadge status={r.status} />
+          {r.status === "rejected" && (
+            <span className="mt-1 block text-caption text-danger">Tap to see why</span>
+          )}
+        </>
+      ),
+    },
+    {
+      header: "",
+      align: "right",
+      cell: (r) =>
+        r.cancellable ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-danger hover:bg-danger/10 hover:text-danger"
+            onClick={(e) => {
+              e.stopPropagation();
+              setCancelTarget(r);
+            }}
+          >
+            Cancel
+          </Button>
+        ) : null,
+    },
+  ];
 
   async function handleCancel(reason: string) {
     if (!cancelTarget) return;
@@ -291,52 +387,23 @@ export default function TimeOffPage() {
         subtitle="Request leave, half-days, early-outs and overtime — and track your balance."
       />
 
-      {/* Balance summary: (pool in shared) · leave-types list · pending */}
-      <div
-        className={cn(
-          "mt-6 grid grid-cols-1",
-          // Not-shared: mirror the request row below (lg:grid-cols-2 + gap-6) so the
-          // Leave Types card is exactly the request-form card's width; Pending sits
-          // content-sized in the second cell. Shared: three left-packed cards.
-          mode === "shared"
-            ? "gap-4 sm:grid-cols-[18rem_20rem_auto] sm:justify-start"
-            : "gap-6 lg:grid-cols-2",
-        )}
-      >
-        {mode === "shared" &&
-          (pool ? (
-            <LeaveBalanceCard
-              label="Leave Pool"
-              entitled={pool.entitled_days}
-              remaining={pool.remaining_days}
-              used={pool.used_days}
-              centered
-            />
-          ) : (
-            <StatCard label="Leave Pool" value="—" subNote="No pool for this year" />
-          ))}
-
-        <LeaveTypesListCard
-          items={listItems}
+      {/* Balance summary beside the one tabbed request card. */}
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <LeaveSummaryCard
+          featuredLabel={mode === "shared" ? "Leave Pool" : "Total Leave Credits"}
+          featured={featured}
+          emptyNote={
+            mode === "shared" ? "No pool for this year" : "No credits for this year"
+          }
+          pending={pendingCount}
+          types={listItems}
           showCredits={mode !== "shared"}
           note={
-            mode === "shared"
-              ? "All leave types draw from your shared pool."
-              : undefined
+            mode === "shared" ? "All leave types draw from your shared pool." : undefined
           }
         />
 
-        <StatCard
-          label="Pending Requests"
-          value={pendingCount}
-          subNote="Awaiting HR decision"
-          className="justify-self-start min-w-[18rem]"
-        />
-      </div>
-
-      {/* Left: one tabbed request card · Right: calendar + history */}
-      <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
-        <div className="self-start rounded-card border border-border bg-card p-6">
+        <div className="rounded-card border border-border bg-card p-6 lg:col-span-2">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-h3 font-bold text-foreground">{REQUEST_TITLES[tab]}</h2>
             <RequestTabs value={tab} onChange={setTab} />
@@ -359,107 +426,29 @@ export default function TimeOffPage() {
             )}
           </div>
         </div>
-
-        <div className="space-y-6">
-          <TimeOffCalendar
-            leaves={requests ?? []}
-            halfDays={halfDays ?? []}
-            earlyOuts={earlyOuts ?? []}
-          />
-
-          <div className="rounded-card border border-border bg-card p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-h3 font-bold text-foreground">My Request History</h2>
-            </div>
-            <div className="divide-y divide-border">
-              {history.length === 0 ? (
-                <p className="py-6 text-sm text-muted-foreground">No requests yet.</p>
-              ) : (
-                // Every row opens the full detail, so a decline reason is one tap away
-                // and so is everything else the employee filed.
-                pageHistory.map((r) => (
-                  // A div, not a button: the Cancel action lives inside the row and
-                  // nesting one button in another is invalid markup.
-                  <div
-                    key={r.key}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDetail(r)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setDetail(r);
-                      }
-                    }}
-                    className="flex w-full cursor-pointer items-center justify-between gap-3 py-3 text-left transition-colors hover:bg-muted/40"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground">{r.title}</p>
-                      <p
-                        className={cn(
-                          "text-caption",
-                          r.status === "rejected" ? "text-danger" : "text-muted-foreground",
-                        )}
-                      >
-                        {r.date}
-                        {r.status === "rejected" ? " · Tap to see why" : ""}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <StatusBadge status={r.status} />
-                      {r.cancellable && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-danger hover:bg-danger/10 hover:text-danger"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCancelTarget(r);
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-            {history.length > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-                <div className="text-caption text-muted-foreground">
-                  Showing {(safePage - 1) * PAGE_SIZE + 1}–
-                  {Math.min(safePage * PAGE_SIZE, history.length)} of {history.length}
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    disabled={safePage <= 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                    aria-label="Previous page"
-                  >
-                    <ChevronLeft className="size-4" />
-                  </button>
-                  <span className="px-2 text-caption text-foreground">
-                    Page {safePage} of {totalPages}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={safePage >= totalPages}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
-                    aria-label="Next page"
-                  >
-                    <ChevronRight className="size-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
       </div>
+
+      <div className="mt-6">
+        <TimeOffCalendar
+          leaves={requests ?? []}
+          halfDays={halfDays ?? []}
+          earlyOuts={earlyOuts ?? []}
+        />
+      </div>
+
+      {/* Every row opens the full detail, so a decline reason is one tap away. */}
+      <DataTable
+        className="mt-6"
+        title="My Request History"
+        columns={columns}
+        rows={history}
+        rowKey={(r) => r.key}
+        onRowClick={setDetail}
+        pageSize={PAGE_SIZE}
+        searchable={false}
+        filterable={false}
+        empty="No requests yet."
+      />
 
       {detail && (
         <RequestDetailDialog
@@ -513,7 +502,7 @@ export default function TimeOffPage() {
       <CancelLeaveDialog
         open={!!cancelTarget}
         onOpenChange={(o) => !o && setCancelTarget(null)}
-        subject={cancelTarget ? `${cancelTarget.title} · ${cancelTarget.date}` : undefined}
+        subject={cancelTarget ? `${cancelTarget.title} · ${cancelTarget.dates}` : undefined}
         onConfirm={handleCancel}
       />
     </div>

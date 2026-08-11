@@ -14,10 +14,26 @@ const WEEKDAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 const HALF_DAY_COLOR = "#F0A608";
 const EARLY_OUT_COLOR = "#8B5CF6";
 
+type MarkState = "cancelled" | "pending" | "approved";
+
+/**
+ * Which request wins a day when several land on it: a live request always beats a
+ * cancelled one, so re-filing on a date you'd cancelled restores a normal mark.
+ */
+const STATE_RANK: Record<MarkState, number> = { cancelled: 1, pending: 2, approved: 3 };
+
+/** A rejected request never reaches the calendar; everything else marks its day. */
+function markState(status: string): MarkState | null {
+  if (status === "rejected") return null;
+  if (status === "approved") return "approved";
+  if (status === "cancelled") return "cancelled";
+  return "pending";
+}
+
 interface DayMark {
   color: string;
   label: string;
-  approved: boolean;
+  state: MarkState;
 }
 
 function ymd(y: number, m: number, d: number): string {
@@ -26,8 +42,8 @@ function ymd(y: number, m: number, d: number): string {
 
 /**
  * Month calendar of the employee's time off — leave ranges and half-days shown as
- * coloured day pills (approved = solid, pending = outlined), with month navigation
- * and a legend by leave type.
+ * coloured day pills (approved = solid, pending = outlined, cancelled = struck
+ * through), with month navigation and a legend by leave type.
  */
 export function TimeOffCalendar({
   leaves,
@@ -41,53 +57,73 @@ export function TimeOffCalendar({
   const now = new Date();
   const [view, setView] = useState({ year: now.getFullYear(), month: now.getMonth() });
 
-  // date (YYYY-MM-DD) → mark. Approved wins over pending on the same day.
+  // date (YYYY-MM-DD) → mark, strongest state winning the day.
   const marks = useMemo(() => {
     const map = new Map<string, DayMark>();
     const set = (key: string, mark: DayMark) => {
       const cur = map.get(key);
-      if (!cur || (mark.approved && !cur.approved)) map.set(key, mark);
+      if (!cur || STATE_RANK[mark.state] > STATE_RANK[cur.state]) map.set(key, mark);
     };
+    const label = (text: string, state: MarkState) =>
+      state === "cancelled" ? `${text} · Cancelled` : text;
+
     for (const l of leaves) {
-      if (l.status === "rejected") continue;
+      const state = markState(l.status);
+      if (!state) continue;
       const s = new Date(l.start_date + "T00:00:00");
       const e = new Date(l.end_date + "T00:00:00");
       for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
         set(ymd(d.getFullYear(), d.getMonth(), d.getDate()), {
           color: l.leave_type.color ?? "#4FDBD7",
-          label: l.leave_type.name,
-          approved: l.status === "approved",
+          label: label(l.leave_type.name, state),
+          state,
         });
       }
     }
     for (const h of halfDays) {
-      if (h.status === "rejected") continue;
+      const state = markState(h.status);
+      if (!state) continue;
       set(h.work_date, {
         color: HALF_DAY_COLOR,
-        label: `Half-day (${h.period})`,
-        approved: h.status === "approved",
+        label: label(`Half-day (${h.period})`, state),
+        state,
       });
     }
     for (const e of earlyOuts) {
-      if (e.status === "rejected") continue;
+      const state = markState(e.status);
+      if (!state) continue;
       set(e.work_date, {
         color: EARLY_OUT_COLOR,
-        label: `Early-out (${e.early_out_time})`,
-        approved: e.status === "approved",
+        label: label(`Early-out (${e.early_out_time})`, state),
+        state,
       });
     }
     return map;
   }, [leaves, halfDays, earlyOuts]);
 
-  // Legend — unique {label→color} across all requests.
+  // Legend — unique {label→color} across all requests. Cancelled ones get one
+  // shared grey entry instead of a colour, matching how their days now render.
   const legend = useMemo(() => {
     const m = new Map<string, string>();
+    const isLive = (status: string) => {
+      const state = markState(status);
+      return state === "approved" || state === "pending";
+    };
+    const isCancelled = (r: { status: string }) => markState(r.status) === "cancelled";
+
     for (const l of leaves) {
-      if (l.status !== "rejected") m.set(l.leave_type.name, l.leave_type.color ?? "#4FDBD7");
+      if (isLive(l.status)) m.set(l.leave_type.name, l.leave_type.color ?? "#4FDBD7");
     }
-    if (halfDays.some((h) => h.status !== "rejected")) m.set("Half-day", HALF_DAY_COLOR);
-    if (earlyOuts.some((e) => e.status !== "rejected")) m.set("Early-out", EARLY_OUT_COLOR);
-    return [...m.entries()];
+    for (const h of halfDays) if (isLive(h.status)) m.set("Half-day", HALF_DAY_COLOR);
+    for (const e of earlyOuts) if (isLive(e.status)) m.set("Early-out", EARLY_OUT_COLOR);
+
+    return {
+      entries: [...m.entries()],
+      hasCancelled:
+        leaves.some(isCancelled) ||
+        halfDays.some(isCancelled) ||
+        earlyOuts.some(isCancelled),
+    };
   }, [leaves, halfDays, earlyOuts]);
 
   // Build the 6×7 grid (Sunday-first), including adjacent-month spill days.
@@ -139,22 +175,31 @@ export function TimeOffCalendar({
         ))}
         {cells.map((c) => {
           const mark = marks.get(c.key);
+          // A cancelled day drops the leave-type colour for a struck-through grey
+          // ring, so it can't be read as time off that still stands.
+          const cancelled = mark?.state === "cancelled";
+          const markStyle = !mark
+            ? undefined
+            : cancelled
+              ? { boxShadow: "inset 0 0 0 1.5px currentColor" }
+              : mark.state === "approved"
+                ? { backgroundColor: mark.color, color: "#0f172a" }
+                : { boxShadow: `inset 0 0 0 1.5px ${mark.color}`, color: mark.color };
+
           return (
             <div key={c.key} className="flex items-center justify-center py-0.5">
               <span
                 className={cn(
                   "inline-flex size-8 items-center justify-center rounded-full text-sm",
-                  !c.inMonth && "text-muted-foreground/50",
-                  c.inMonth && !mark && "text-foreground",
+                  // Spill days from the neighbouring months recede whether or not
+                  // they carry a mark — a mark's inline colours would otherwise
+                  // make one shout louder than the month being viewed.
+                  !c.inMonth && "opacity-40",
+                  !mark && (c.inMonth ? "text-foreground" : "text-muted-foreground"),
                   mark && "font-semibold",
+                  cancelled && "text-muted-foreground line-through",
                 )}
-                style={
-                  mark
-                    ? mark.approved
-                      ? { backgroundColor: mark.color, color: "#0f172a" }
-                      : { boxShadow: `inset 0 0 0 1.5px ${mark.color}`, color: mark.color }
-                    : undefined
-                }
+                style={markStyle}
                 title={mark?.label}
               >
                 {c.day}
@@ -164,14 +209,23 @@ export function TimeOffCalendar({
         })}
       </div>
 
-      {legend.length > 0 && (
+      {(legend.entries.length > 0 || legend.hasCancelled) && (
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border pt-3">
-          {legend.map(([label, color]) => (
+          {legend.entries.map(([label, color]) => (
             <span key={label} className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
               <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />
               {label}
             </span>
           ))}
+          {legend.hasCancelled && (
+            <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
+              <span
+                className="size-2.5 rounded-full"
+                style={{ boxShadow: "inset 0 0 0 1.5px currentColor" }}
+              />
+              <span className="line-through">Cancelled</span>
+            </span>
+          )}
         </div>
       )}
     </div>
