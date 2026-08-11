@@ -67,7 +67,15 @@ export function NoteEditor({
         link: { openOnClick: false, autolink: true },
       }),
       TaskList,
-      TaskItem.configure({ nested: true }),
+      // `data-type` is hardcoded in TaskItem's renderHTML, but renderHTML is
+      // bypassed whenever an extension supplies a node view — and TaskItem does.
+      // Its node view copies only `options.HTMLAttributes` plus the node's own
+      // declared attributes (just `checked`), so without this the live <li>
+      // carries no data-type and every task-item style silently misses.
+      TaskItem.configure({
+        nested: true,
+        HTMLAttributes: { "data-type": "taskItem" },
+      }),
       Highlight,
       Placeholder.configure({ placeholder: PLACEHOLDERS[scope] }),
       CharacterCount.configure({ limit: CHARACTER_LIMIT }),

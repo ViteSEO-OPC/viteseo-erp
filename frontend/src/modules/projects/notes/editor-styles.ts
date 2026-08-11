@@ -30,14 +30,33 @@ export const EDITOR_PROSE_CLASSES = [
   "[&_.tiptap_li]:my-0.5",
   "[&_.tiptap_li>p]:my-0",
 
-  // Task list — checkbox aligned with the first line of its label
+  // Task list — checkbox on the same line as its text, aligned to the first line.
+  //
+  // Anchored on the LIST, not the item: TaskList is rendered from renderHTML so
+  // its data-type is always present, whereas TaskItem builds its <li> in a node
+  // view that copies only its declared attributes. Keying the item styles off
+  // `li[data-type="taskItem"]` made every rule below a no-op, which left the
+  // block-level <label> and <div> stacking — the checkbox on its own line with
+  // the text beneath it. (NoteEditor now also restores that attribute; this
+  // selector means the layout no longer depends on it.)
   '[&_.tiptap_ul[data-type="taskList"]]:list-none [&_.tiptap_ul[data-type="taskList"]]:pl-0.5',
-  '[&_.tiptap_li[data-type="taskItem"]]:flex [&_.tiptap_li[data-type="taskItem"]]:items-start',
-  '[&_.tiptap_li[data-type="taskItem"]]:gap-2',
-  '[&_.tiptap_li[data-type="taskItem"]>label]:mt-0.5 [&_.tiptap_li[data-type="taskItem"]>label]:shrink-0',
-  '[&_.tiptap_li[data-type="taskItem"]>div]:min-w-0 [&_.tiptap_li[data-type="taskItem"]>div]:flex-1',
-  '[&_.tiptap_li[data-type="taskItem"][data-checked="true"]>div]:text-ink-faint',
-  '[&_.tiptap_li[data-type="taskItem"][data-checked="true"]>div]:line-through',
+  '[&_.tiptap_ul[data-type="taskList"]>li]:flex [&_.tiptap_ul[data-type="taskList"]>li]:items-start',
+  '[&_.tiptap_ul[data-type="taskList"]>li]:gap-2',
+  // The label is given the height of one line box (font-size x leading-relaxed)
+  // so the checkbox centres against the first line of its label rather than
+  // hanging off the top of it — a fixed top margin drifts as the type scales.
+  '[&_.tiptap_ul[data-type="taskList"]>li>label]:h-[1.625em]',
+  '[&_.tiptap_ul[data-type="taskList"]>li>label]:shrink-0',
+  '[&_.tiptap_ul[data-type="taskList"]>li>label]:flex',
+  '[&_.tiptap_ul[data-type="taskList"]>li>label]:items-center',
+  '[&_.tiptap_ul[data-type="taskList"]>li>div]:min-w-0',
+  '[&_.tiptap_ul[data-type="taskList"]>li>div]:flex-1',
+  // The item's text is a <p> inside the content <div>, one level deeper than the
+  // `li>p` reset above reaches. Left with its own margin it pushes the first line
+  // below the checkbox and pads every row.
+  '[&_.tiptap_ul[data-type="taskList"]>li>div>p]:my-0',
+  '[&_.tiptap_ul[data-type="taskList"]>li[data-checked="true"]>div]:text-ink-faint',
+  '[&_.tiptap_ul[data-type="taskList"]>li[data-checked="true"]>div]:line-through',
   '[&_.tiptap_input[type="checkbox"]]:accent-brand [&_.tiptap_input[type="checkbox"]]:cursor-pointer',
 
   // Inline

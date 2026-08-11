@@ -458,7 +458,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
                   queue rather than straight onto the board. */}
               <Button onClick={() => setAddTaskOpen(true)}>
                 <PlusIcon className="h-4 w-4" />
-                {isManager ? "Add Task" : "Propose Task"}
+                {"Add Task"}
               </Button>
             </div>
 
