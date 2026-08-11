@@ -11,6 +11,19 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class ReportController extends Controller
 {
+    /**
+     * Every filter a report may read. One list, because `show()` and `export()` must accept the
+     * same set — a filter honoured on screen and dropped on export produces a file that quietly
+     * disagrees with the table it was downloaded from.
+     *
+     * FIN-041 paginates the audit report; FIN-042/FIN-017 add `run` (which register to show) and
+     * `frequency` (the pay group); `month` scopes the attendance reports.
+     */
+    private const FILTERS = [
+        'action', 'from', 'to', 'department', 'months', 'page', 'per_page',
+        'run', 'frequency', 'month',
+    ];
+
     public function __construct(private readonly ReportService $service) {}
 
     // GET /api/v1/hr/reports/{key} — one analytics report (HR only).
@@ -19,12 +32,7 @@ class ReportController extends Controller
         // FIN-041 — `page`/`per_page` let the audit report page instead of silently truncating.
         $report = $this->service->get(
             $key,
-            // FIN-041 paginates the audit report; FIN-042/FIN-017 add `run` (which register to show)
-            // and `frequency` (the pay group) to the payroll reports.
-            $request->only([
-                'action', 'from', 'to', 'department', 'months', 'page', 'per_page',
-                'run', 'frequency',
-            ]),
+            $request->only(self::FILTERS),
         );
 
         if (! $report) {
@@ -44,6 +52,6 @@ class ReportController extends Controller
 
         $this->service->logExport($key, $request->user());
 
-        return $this->service->download($key);
+        return $this->service->download($key, $request->only(self::FILTERS));
     }
 }

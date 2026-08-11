@@ -40,6 +40,8 @@ class ReportService
         'leave_liability',
         // FIN-042 — the pre-disbursement review screen: register → totals → variance.
         'payroll_register',
+        // The three month-scoped attendance views, built by AttendanceReportService.
+        ...AttendanceReportService::KEYS,
     ];
 
     public function __construct(
@@ -49,6 +51,9 @@ class ReportService
         // MF-11 — the leave-liability report values leave on exactly the basis final pay uses, so it
         // borrows PayrollService rather than reimplementing `unusedLeaveDaysFor()` + `dailyRateFor()`.
         private readonly PayrollService $payrollService,
+        // The attendance reports share one month-long day grid; they live in their own service so
+        // the three of them can read the same calendar instead of rebuilding it each.
+        private readonly AttendanceReportService $attendanceReports,
     ) {}
 
     /** @param array<string, mixed> $filters */
@@ -66,6 +71,9 @@ class ReportService
             'diversity' => $this->diversity($filters),
             'health_safety' => $this->healthSafety($filters),
             'audit' => $this->audit($filters),
+            'attendance_summary' => $this->attendanceReports->summary($filters),
+            'attendance_dtr' => $this->attendanceReports->dailyTimeRecord($filters),
+            'attendance_leave' => $this->attendanceReports->leaveReport($filters),
             default => null,
         };
 
@@ -89,22 +97,33 @@ class ReportService
     public function exportFormat(string $key): string
     {
         // MF-11 — the liability report exports CSV for the same reason the audit trail does: it is a
-        // row-per-employee table that accounting reconciles against, not a chart anyone reads.
-        return in_array($key, ['audit', 'leave_liability', 'payroll_register'], true) ? 'csv' : 'pdf';
+        // row-per-employee table that accounting reconciles against, not a chart anyone reads. The
+        // attendance reports are the same shape: a register HR reconciles, not a chart.
+        return in_array($key, ['audit', 'leave_liability', 'payroll_register', ...AttendanceReportService::KEYS], true)
+            ? 'csv'
+            : 'pdf';
     }
 
     /**
      * Build the downloadable file for a report: a CSV of the rows for table reports,
      * or a rendered PDF (dompdf) of the summary + chart data for chart reports.
      */
-    public function download(string $key): HttpResponse
+    /**
+     * @param  array<string, mixed>  $filters  the same filters the screen was showing, so the file
+     *                                         matches what the reader was looking at when they
+     *                                         clicked export rather than silently reverting to the
+     *                                         report's defaults.
+     */
+    public function download(string $key, array $filters = []): HttpResponse
     {
         // FIN-041 — an export carries EVERY row in range, not the first page. A file named after the
         // whole period that contains page 1 of 4 is the same silent truncation the old 300-row cap
         // was, moved into a filename.
-        $report = $this->get($key, ['all' => true]);
+        $report = $this->get($key, $filters + ['all' => true]);
         $slug = Str::slug($report['title']);
-        $date = now(config('app.timezone_local'))->format('Y-m-d');
+        // A month-scoped report is named for its month; everything else for the day it was pulled.
+        $date = $report['selected_month']['value']
+            ?? now(config('app.timezone_local'))->format('Y-m-d');
 
         if ($this->exportFormat($key) === 'csv') {
             return response($this->buildCsv($report), 200, [
@@ -164,6 +183,7 @@ class ReportService
             'diversity' => 'Diversity',
             'health_safety' => 'Health & Safety',
             'audit' => 'Audit Trail',
+            'attendance_summary', 'attendance_dtr', 'attendance_leave' => AttendanceReportService::titleFor($key),
             default => ucwords(str_replace('_', ' ', $key)),
         };
     }
