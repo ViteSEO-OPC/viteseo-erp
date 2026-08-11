@@ -9,10 +9,13 @@ import {
 import type { Paginated } from "@/core/types";
 import { celebrateTask } from "@/core/lib/confetti";
 import {
+  claimTask,
   createTask,
   deleteTask,
+  getClaimableTasks,
   getTask,
   getTasks,
+  releaseTask,
   updateTask,
 } from "@/modules/projects/api/tasks";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
@@ -61,6 +64,7 @@ export function useCreateTask(projectId: string) {
       qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
       qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
+      qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
     },
   });
 }
@@ -107,6 +111,8 @@ export function useUpdateTask(projectId: string) {
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
       // A status change is logged, so the Recent Activity feed has news.
       qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
+      // An edit can clear the assignee, which puts the task back on the pool.
+      qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
     },
   });
 }
@@ -120,6 +126,65 @@ export function useDeleteTask(projectId: string) {
       qc.removeQueries({ queryKey: projectKeys.task(id) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
       // The task's log rows go with it, so the feed changes on a delete too.
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
+      qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
+    },
+  });
+}
+
+/**
+ * The open-task pool. Not scoped to your projects — that is the point.
+ *
+ * `staleTime` is short and deliberate: the pool is contested, so a row that has
+ * already been taken should not sit there long enough to be clicked. A lost race
+ * still resolves correctly (the server 409s), this just makes it rarer.
+ */
+export function useClaimableTasks(
+  scope: { projectId?: string; limit?: number } = {},
+) {
+  const { projectId, limit = 10 } = scope;
+
+  const params: Record<string, unknown> = { per_page: limit };
+  if (projectId) params["filter[project_id]"] = projectId;
+
+  return useQuery({
+    queryKey: projectKeys.claimable(params),
+    queryFn: () => getClaimableTasks(params),
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Take an open task.
+ *
+ * Claiming puts you on the project, so this invalidates the project list too —
+ * boards, pickers and "my projects" counts all read from it.
+ */
+export function useClaimTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => claimTask(id),
+    onSuccess: (task) => {
+      qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
+      qc.invalidateQueries({ queryKey: ["projects", "projects"] });
+      qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+      qc.invalidateQueries({ queryKey: projectKeys.task(task.id) });
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
+    },
+  });
+}
+
+/** Hand a task back to the pool. */
+export function useReleaseTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => releaseTask(id),
+    onSuccess: (task) => {
+      qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
+      qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+      qc.invalidateQueries({ queryKey: projectKeys.task(task.id) });
+      qc.invalidateQueries({ queryKey: projectKeys.workloads });
       qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
     },
   });

@@ -323,6 +323,30 @@ class ProjectsDemoSeeder extends Seeder
             'submitted_by_id' => $bea?->id,
         ]);
         $this->logSubtaskCreated($keyboardNav, $bea);
+
+        // 9) Open tasks — posted by a member with no assignee, so anyone may
+        //    claim them. Approved on the spot: an unowned task commits nobody, so
+        //    there is nothing for a PM to review until someone takes it.
+        $this->openTask(
+            $project,
+            $statuses['todo'],
+            $leo,
+            'Audit the checkout flow for dead ends',
+            'Walk the full purchase path and note every screen with no way forward.',
+            TaskPriority::HIGH,
+            5,
+            $now->copy()->addDays(6)->toDateString(),
+        );
+        $this->openTask(
+            $project,
+            $statuses['todo'],
+            $grace,
+            'Write alt text for the new marketing imagery',
+            null,
+            TaskPriority::LOW,
+            2,
+            $now->copy()->addDays(11)->toDateString(),
+        );
     }
 
     /**
@@ -686,6 +710,44 @@ class ProjectsDemoSeeder extends Seeder
             'old_value' => (string) $oldStatusId,
             'new_value' => (string) $newStatusId,
         ]);
+    }
+
+    /**
+     * A task on the open pool: individual, unassigned, approved, and stamped with
+     * the member who put it up (that is who a claim notifies).
+     */
+    private function openTask(
+        Project $project,
+        ProjectStatus $status,
+        ?User $poster,
+        string $title,
+        ?string $description,
+        TaskPriority $priority,
+        int $effort,
+        string $deadline,
+    ): ?Task {
+        if ($poster === null) {
+            return null;
+        }
+
+        $task = Task::create([
+            'project_id' => $project->id,
+            'title' => $title,
+            'description' => $description,
+            'assignment_type' => AssignmentType::INDIVIDUAL,
+            'assignee_id' => null,
+            'assigned_by_id' => null,
+            'status_id' => $status->id,
+            'priority' => $priority,
+            'effort_score' => $effort,
+            'deadline' => $deadline,
+            'approval_status' => ApprovalStatus::APPROVED,
+            'submitted_by_id' => $poster->id,
+        ]);
+
+        $this->logCreated($task, $poster);
+
+        return $task;
     }
 
     private function logSubtaskCreated(Subtask $subtask, ?User $actor): void

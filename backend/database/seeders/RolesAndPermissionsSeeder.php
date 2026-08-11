@@ -83,6 +83,9 @@ class RolesAndPermissionsSeeder extends Seeder
         $projectsPermissions[] = 'projects.subtasks.propose';
         $projectsPermissions[] = 'projects.tasks.approve';
         $projectsPermissions[] = 'projects.subtasks.approve';
+        // Taking an unassigned task off the open pool. Separate from `.update` so
+        // a member can own work without being able to edit anyone else's.
+        $projectsPermissions[] = 'projects.tasks.claim';
         // Workload Analysis: everyone may read it (scoped by role in the service);
         // retuning the platform-wide capacity bands is a management action.
         $projectsPermissions[] = 'projects.workload.view';
@@ -108,6 +111,9 @@ class RolesAndPermissionsSeeder extends Seeder
             // work once a PM/Admin approves it.
             'projects.tasks.propose',
             'projects.subtasks.propose',
+            // ...and they may take an open task off the pool. An unassigned task
+            // commits nobody, so posting and claiming one needs no review.
+            'projects.tasks.claim',
             // Members see the analysis page too, scoped to their own work.
             'projects.workload.view',
         ];

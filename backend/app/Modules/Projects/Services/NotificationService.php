@@ -124,6 +124,42 @@ class NotificationService
     }
 
     /**
+     * Someone took an open task off the pool.
+     *
+     * Goes to whoever posted it (they asked for a taker and now have one) plus
+     * the project's managers, who need to know a person from another pod is now
+     * carrying work on their client. The claimer is never notified of their own
+     * claim — reviewersOf() already drops the actor, and the poster check does
+     * the same for a member claiming back their own posting.
+     */
+    public function notifyTaskClaimed(Task $task, User $claimer): void
+    {
+        $recipientIds = collect($this->reviewersOf($task, $claimer));
+
+        if ($task->submitted_by_id !== null) {
+            $recipientIds->push((int) $task->submitted_by_id);
+        }
+
+        $recipientIds = $recipientIds
+            ->unique()
+            ->reject(fn (int $id): bool => $id === (int) $claimer->id)
+            ->values();
+
+        foreach ($recipientIds as $recipientId) {
+            $notification = Notification::create([
+                'user_id' => $recipientId,
+                'actor_id' => $claimer->id,
+                'type' => 'task.claimed',
+                'project_id' => $task->project_id,
+                'task_id' => $task->id,
+                'data' => ['title' => $task->title],
+            ]);
+
+            $this->dispatch($notification);
+        }
+    }
+
+    /**
      * A member submitted a task proposal — tell the reviewers it is queued.
      */
     public function notifyTaskReviewRequested(Task $task, User $actor): void

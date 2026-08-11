@@ -36,6 +36,8 @@ class ActivityFeedService
     public const FEED_ACTIONS = [
         'task.created',
         'task.status_changed',
+        'task.claimed',
+        'task.released',
         'task.approved',
         'task.rejected',
         'task.resubmitted',

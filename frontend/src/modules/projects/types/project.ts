@@ -34,3 +34,22 @@ export interface Project {
   created_at: string;
   updated_at: string;
 }
+
+/**
+ * What a project member is still holding, when removing them is refused.
+ *
+ * The server returns this in the 409 body so the PM can reassign from the same
+ * dialog instead of hunting for the work — a sub-task carries its parent's id
+ * because that is what a task modal opens.
+ */
+export interface BlockingWork {
+  member: { id: number; name: string };
+  tasks: { id: string; title: string; status: string | null }[];
+  subtasks: {
+    id: string;
+    name: string;
+    status: string | null;
+    task_id: string | null;
+    task_title: string | null;
+  }[];
+}

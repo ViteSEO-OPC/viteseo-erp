@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { isAxiosError } from "axios";
+import { notify } from "@/core/lib/notify";
 import {
   Avatar,
   Button,
@@ -13,6 +15,7 @@ import {
 } from "@/core/ui";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import type { StatusKey } from "@/modules/projects/types/common";
+import type { BlockingWork } from "@/modules/projects/types/project";
 import type { Task } from "@/modules/projects/types/task";
 import {
   useProjectChannel,
@@ -47,6 +50,7 @@ import {
   type StatusColumn,
   type WorkItem,
 } from "@/modules/projects/components/workspace-view-shared";
+import { BlockingWorkDialog } from "@/modules/projects/components/blocking-work-dialog";
 import { TaskModal } from "@/modules/projects/components/task-modal";
 import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
 import {
@@ -89,6 +93,32 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const workspace = workspaceQuery.data;
   const usersQuery = useUsers();
   const projectMembers = useProjectMembers(projectId);
+  // Removal is refused while someone still owns unfinished work here; the 409
+  // carries what is in the way so the PM can reassign it from the dialog.
+  const [blockingWork, setBlockingWork] = useState<BlockingWork | null>(null);
+
+  const removeMember = async (userId: number) => {
+    try {
+      await projectMembers.remove.mutateAsync(userId);
+      // Went through — close the blocked dialog if this was a retry from it.
+      setBlockingWork(null);
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.status === 409) {
+        const body = error.response.data as {
+          error?: string;
+          data?: BlockingWork;
+        };
+        if (body.error === "member_has_assigned_work" && body.data) {
+          setBlockingWork(body.data);
+          return;
+        }
+      }
+      notify.error(
+        "Couldn't remove that member",
+        "Please try again in a moment.",
+      );
+    }
+  };
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -626,12 +656,18 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           candidates={users}
           selectedIds={memberIds}
           onAdd={(id) => projectMembers.add.mutate(id)}
-          onRemove={(id) => projectMembers.remove.mutate(id)}
+          onRemove={removeMember}
           busy={memberBusy}
           memberTags={groupsByUser}
           groups={pickerGroups}
         />
       )}
+
+      <BlockingWorkDialog
+        work={blockingWork}
+        onClose={() => setBlockingWork(null)}
+        onRetry={removeMember}
+      />
 
       {editOpen && project && (
         <EditProjectModal project={project} onClose={() => setEditOpen(false)} />

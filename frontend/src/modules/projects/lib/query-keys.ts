@@ -43,6 +43,11 @@ export const projectKeys = {
   links: (taskId: string) => ["projects", "tasks", taskId, "links"] as const,
   search: (q: string, limit: number) =>
     ["projects", "search", q, limit] as const,
+  // The open-task pool. Anything that can put a task in it or take one out
+  // (create, claim, release, delete, a decision) invalidates the shared prefix.
+  claimableRoot: ["projects", "claimable"] as const,
+  claimable: (params?: Record<string, unknown>) =>
+    ["projects", "claimable", params ?? {}] as const,
 };
 
 /** Archives (admin only). */

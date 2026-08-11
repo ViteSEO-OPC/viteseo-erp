@@ -89,3 +89,28 @@ export interface CreateTaskPayload {
   deadline?: string | null;
   start_date?: string | null;
 }
+
+/**
+ * One row of the open-task pool.
+ *
+ * Carries its project's NAME, unlike the board's {@link Task}: the pool spans
+ * projects the viewer may not be a member of, so `useProjects()` has nothing to
+ * resolve a bare id against.
+ */
+export interface ClaimableTask {
+  id: string;
+  title: string;
+  project: { id: string; name: string } | null;
+  status: {
+    id: string;
+    name: string;
+    key: StatusKey;
+    color: string | null;
+  } | null;
+  priority: Priority;
+  effort_score: number | null;
+  deadline: string | null;
+  /** Who put it up for grabs. */
+  posted_by: User | null;
+  created_at: string;
+}

@@ -64,6 +64,11 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     // Tasks (nested index/store, shallow member routes)
     Route::get('projects/{project}/tasks', [TaskController::class, 'index']);
     Route::post('projects/{project}/tasks', [TaskController::class, 'store']);
+    // The open-task pool and its two verbs. `tasks/claimable` MUST come before
+    // `tasks/{task}` or the UUID binding swallows the literal segment.
+    Route::get('tasks/claimable', [TaskController::class, 'claimable']);
+    Route::post('tasks/{task}/claim', [TaskController::class, 'claim']);
+    Route::post('tasks/{task}/release', [TaskController::class, 'release']);
     Route::get('tasks/{task}', [TaskController::class, 'show']);
     Route::match(['put', 'patch'], 'tasks/{task}', [TaskController::class, 'update']);
     Route::delete('tasks/{task}', [TaskController::class, 'destroy']);

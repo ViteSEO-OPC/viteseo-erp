@@ -42,12 +42,17 @@ export function CreateTaskBody({
   projectSelector?: React.ReactNode;
 }) {
   const create = useCreateTask(projectId);
-  // Members don't create work directly — they propose it. The backend forces the
-  // proposal to be individual + self-assigned, so the form matches that shape
-  // instead of offering choices the server would override.
+  // Members don't create work directly. What they submit is one of two things,
+  // and the difference is whether they put their own name on it: self-assigned
+  // work is a PROPOSAL a PM reviews, unassigned work is an OPEN task that goes
+  // straight to the pool for whoever has room for it. The server decides the
+  // same way — off assignee_id — and forces individual either way, so the form
+  // offers exactly that choice and no more.
   const isManager = useIsManager();
   const { user } = useAuth();
-  const isProposal = !isManager;
+  const isMember = !isManager;
+  const [memberTarget, setMemberTarget] = useState<'self' | 'open'>('self');
+  const isProposal = isMember && memberTarget === 'self';
   // Assignees are restricted to this project's members — not the whole user
   // directory. (Group members come from the selected group, see below.)
   const projectQuery = useProject(projectId);
@@ -81,7 +86,7 @@ export function CreateTaskBody({
     if (statuses[0]) setValue('status_id', String(statuses[0].id));
   }, [statuses, setValue]);
 
-  const assignmentType = isProposal ? 'individual' : watch('assignment_type');
+  const assignmentType = isMember ? 'individual' : watch('assignment_type');
   const startValue = watch('start_date');
   const now = new Date();
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -111,8 +116,8 @@ export function CreateTaskBody({
   // otherwise any user (unassigned is always allowed).
   const roster = useMemo(() => groupRoster(selectedGroup), [selectedGroup]);
   // On the proposal path every sub-task is yours too, so the picker offers only you.
-  const subtaskAssigneeOptions = isProposal
-    ? selfMember
+  const subtaskAssigneeOptions = isMember
+    ? isProposal && selfMember
       ? [selfMember]
       : []
     : assignmentType === 'group' && roster.length
@@ -140,7 +145,13 @@ export function CreateTaskBody({
       {
         key: `d${draftKey.current++}`,
         name: stName.trim(),
-        assignee_id: isProposal ? (user?.id ?? null) : stAssignee ? Number(stAssignee) : null,
+        assignee_id: isMember
+          ? isProposal
+            ? (user?.id ?? null)
+            : null
+          : stAssignee
+            ? Number(stAssignee)
+            : null,
         status_id: statusId,
         priority: stPriority,
         effort_score: Number(stEffort),
@@ -191,11 +202,12 @@ export function CreateTaskBody({
       deadline: data.deadline || undefined,
       start_date: data.start_date || undefined,
     };
-    if (isProposal) {
+    if (isMember) {
       // The server overrides these anyway; send the honest values so the form
-      // and the stored proposal agree.
+      // and what gets stored agree. A null assignee is what makes it an open
+      // task rather than a proposal — on both sides.
       payload.assignment_type = 'individual';
-      payload.assignee_id = user?.id ?? null;
+      payload.assignee_id = isProposal ? (user?.id ?? null) : null;
       payload.effort_score = effort;
     } else if (data.assignment_type === 'individual') {
       // Empty assignee → unassigned task.
@@ -246,6 +258,14 @@ export function CreateTaskBody({
             This is a <span className="font-semibold">proposal</span>. It is
             assigned to you and stays private until a PM approves it — only then
             does it appear on the board and count toward your workload.
+          </div>
+        )}
+
+        {isMember && !isProposal && (
+          <div className="rounded-xl border border-brand/40 bg-brand/10 px-4 py-3 text-sm text-ink">
+            This goes on the <span className="font-semibold">open tasks</span>{' '}
+            list right away. It belongs to nobody until someone claims it, so it
+            needs no approval — and it counts toward whoever takes it, not you.
           </div>
         )}
 
@@ -476,35 +496,69 @@ export function CreateTaskBody({
             {create.isPending
               ? isProposal
                 ? 'Submitting…'
-                : 'Creating…'
+                : isMember
+                  ? 'Posting…'
+                  : 'Creating…'
               : isProposal
                 ? subtasks.length > 0
                   ? `Submit Task + ${subtasks.length} Subtask${subtasks.length > 1 ? 's' : ''} for Approval`
                   : 'Submit for Approval'
-                : subtasks.length > 0
-                  ? `Create Task + ${subtasks.length} Subtask${subtasks.length > 1 ? 's' : ''}`
-                  : 'Create Task'}
+                : isMember
+                  ? subtasks.length > 0
+                    ? `Post to Open Tasks + ${subtasks.length} Subtask${subtasks.length > 1 ? 's' : ''}`
+                    : 'Post to Open Tasks'
+                  : subtasks.length > 0
+                    ? `Create Task + ${subtasks.length} Subtask${subtasks.length > 1 ? 's' : ''}`
+                    : 'Create Task'}
           </Button>
         </div>
       </div>
 
       {/* RIGHT */}
       <div className="space-y-5">
-        {isProposal ? (
+        {isMember ? (
           <>
             <div>
               <p className={sectionLabel}>Assignee</p>
-              {/* A proposal is always your own work — the server enforces this,
-                  so there is nothing to choose. */}
-              <p className={`mt-2 ${readonlyField}`}>{user?.name ?? 'You'}</p>
-              <div className="mt-3">
-                <WorkloadIndicator user={selfMember ?? null} />
-              </div>
+              {/* The one assignment choice a member has: themselves, or nobody.
+                  Posting work for someone else stays a PM's call. */}
+              <SegmentedControl className="mt-2">
+                {(
+                  [
+                    ['self', 'Assign to me'],
+                    ['open', 'Leave open'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <SegmentedItem
+                    key={value}
+                    active={memberTarget === value}
+                    onClick={() => setMemberTarget(value)}
+                  >
+                    {label}
+                  </SegmentedItem>
+                ))}
+              </SegmentedControl>
+
+              {isProposal ? (
+                <>
+                  <p className={`mt-3 ${readonlyField}`}>{user?.name ?? 'You'}</p>
+                  <div className="mt-3">
+                    <WorkloadIndicator user={selfMember ?? null} />
+                  </div>
+                </>
+              ) : (
+                <p className="mt-3 text-sm text-ink-soft">
+                  Anyone can claim this — including people outside this
+                  project&apos;s pod.
+                </p>
+              )}
             </div>
             <div>
               <p className={sectionLabel}>Review</p>
               <p className="mt-1 text-sm text-ink-soft">
-                Goes to a PM for approval before it reaches the board.
+                {isProposal
+                  ? 'Goes to a PM for approval before it reaches the board.'
+                  : 'None needed — an unclaimed task commits nobody.'}
               </p>
             </div>
           </>

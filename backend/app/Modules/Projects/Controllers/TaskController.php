@@ -17,6 +17,7 @@ use App\Modules\Projects\Models\Project;
 use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Requests\StoreTaskRequest;
 use App\Modules\Projects\Requests\UpdateTaskRequest;
+use App\Modules\Projects\Resources\ClaimableTaskResource;
 use App\Modules\Projects\Resources\TaskDetailResource;
 use App\Modules\Projects\Resources\TaskResource;
 use App\Modules\Projects\Resources\TaskSummaryResource;
@@ -74,16 +75,38 @@ class TaskController extends Controller
         $user = $request->user();
         $data = $request->validated();
 
-        // Members hold `projects.tasks.propose`, not `.create`: their submission
-        // is a proposal for a PM/Admin to review, always self-assigned. Everything
-        // the client sent about the assignment target is overridden here.
-        $isProposal = ! $user->can('projects.tasks.create');
-        if ($isProposal) {
+        // Members hold `projects.tasks.propose`, not `.create`. What they submit
+        // is one of two things, and the difference is whether they put their own
+        // name on it:
+        //
+        //   self-assigned -> a PROPOSAL. They are committing their own capacity,
+        //                    so a PM reviews it before it reaches the board.
+        //   unassigned    -> an OPEN task. It commits nobody, so there is nothing
+        //                    to review: it goes straight to the claim pool for
+        //                    whoever has room for it.
+        //
+        // Either way the client's assignment target is not trusted — a member can
+        // only post work for themselves or for nobody, never for someone else.
+        $isMemberSubmission = ! $user->can('projects.tasks.create');
+        $isProposal = false;
+
+        if ($isMemberSubmission) {
             $data['assignment_type'] = AssignmentType::INDIVIDUAL->value;
-            $data['assignee_id'] = $user->id;
             $data['group_id'] = null;
-            $data['approval_status'] = ApprovalStatus::PENDING;
             $data['submitted_by_id'] = $user->id;
+            $isProposal = ! empty($data['assignee_id']);
+
+            if ($isProposal) {
+                $data['assignee_id'] = $user->id;
+                $data['approval_status'] = ApprovalStatus::PENDING;
+            } else {
+                $data['assignee_id'] = null;
+                // Stated outright rather than left to the column default: the
+                // model returned by create() would otherwise carry a null review
+                // state, which reads as "proposal" everywhere (Task::isProposal,
+                // and the banner the client renders off approval_status).
+                $data['approval_status'] = ApprovalStatus::APPROVED;
+            }
         }
 
         $task = $this->taskService->create($project, $data, $user);
@@ -97,6 +120,52 @@ class TaskController extends Controller
         } else {
             SafeBroadcast::toOthers(new TaskCreated($task));
         }
+
+        return new TaskResource($task);
+    }
+
+    /**
+     * The open-task pool: approved work nobody owns yet, across every project.
+     *
+     * Not roster-scoped on purpose — see TaskService::claimable().
+     */
+    public function claimable(Request $request): AnonymousResourceCollection
+    {
+        $this->authorize('viewAny', Task::class);
+
+        $tasks = $this->taskService->claimable(
+            (array) $request->input('filter', []),
+            (int) $request->input('per_page', 15),
+        );
+
+        return ClaimableTaskResource::collection($tasks);
+    }
+
+    /**
+     * Take an open task. Whoever claims it joins the project, so the work shows
+     * on their board and counts toward their workload from here on.
+     */
+    public function claim(Request $request, Task $task): TaskResource
+    {
+        $this->authorize('claim', $task);
+
+        $task = $this->taskService->claim($task, $request->user());
+        $task->load('project', 'status', 'group', 'assignee', 'assignedBy', 'submittedBy');
+
+        SafeBroadcast::toOthers(new TaskUpdated($task));
+
+        return new TaskResource($task);
+    }
+
+    /** Hand a task back to the pool. */
+    public function release(Request $request, Task $task): TaskResource
+    {
+        $this->authorize('release', $task);
+
+        $task = $this->taskService->release($task, $request->user());
+        $task->load('project', 'status', 'group', 'assignee', 'assignedBy', 'submittedBy');
+
+        SafeBroadcast::toOthers(new TaskUpdated($task));
 
         return new TaskResource($task);
     }
@@ -127,13 +196,15 @@ class TaskController extends Controller
         $data = $request->validated();
 
         // RBAC: Admin/PM may edit the full task, and so may a member still
-        // revising their own unapproved proposal. Everyone else who reaches this
-        // point (e.g. the assignee) may change the status only.
+        // revising their own unapproved proposal — or still holding an open task
+        // nobody has claimed. Everyone else who reaches this point (e.g. the
+        // assignee) may change the status only.
         $user = $request->user();
         $isManager = $user->hasAnyRole(UserRole::managerRoles());
-        $isOwnProposal = $task->isEditableProposalFor($user->id);
+        $isOwnUnclaimedWork = $task->isEditableProposalFor($user->id)
+            || $task->isEditableOpenPostFor($user->id);
 
-        if (! $isManager && ! $isOwnProposal) {
+        if (! $isManager && ! $isOwnUnclaimedWork) {
             $data = array_intersect_key($data, array_flip(['status_id']));
         }
 

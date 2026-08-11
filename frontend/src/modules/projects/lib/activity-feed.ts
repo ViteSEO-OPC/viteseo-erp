@@ -19,6 +19,8 @@ export interface ActivityFeedLine {
 const VERBS: Record<string, string> = {
   "task.created": "created",
   "task.status_changed": "moved",
+  "task.claimed": "claimed",
+  "task.released": "put back on the pool",
   "task.approved": "approved",
   "task.rejected": "sent back",
   "task.resubmitted": "resubmitted",

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/core/auth/AuthProvider";
 import { Card, StatCard, Tabs } from "@/core/ui";
 import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
+import { ClaimableTasksPanel } from "@/modules/projects/components/claimable-tasks-panel";
 import { NotesCard } from "@/modules/projects/components/notes-card";
 import type { NoteTarget } from "@/modules/projects/types/note";
 import {
@@ -197,6 +198,18 @@ export function MemberDashboardView(): React.ReactElement {
                 onOpen={openTask}
               />
             )}
+          </section>
+
+          {/* Open tasks — unassigned work anyone may take, across every project
+              (not just this member's). Claiming one puts them on that project. */}
+          <section className="mt-10">
+            <h2 className="text-lg font-bold text-ink">Open Tasks</h2>
+            <p className="mt-1 text-sm text-ink-soft">
+              Unassigned work up for grabs. Claim one and it lands on your board.
+            </p>
+            <Card className="mt-4 overflow-hidden py-0">
+              <ClaimableTasksPanel />
+            </Card>
           </section>
             </div>
 

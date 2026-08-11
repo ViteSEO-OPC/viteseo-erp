@@ -108,4 +108,34 @@ class Task extends Model
     {
         return $this->hasMany(ActivityLog::class, 'task_id');
     }
+
+    /**
+     * An OPEN task: real work (approved) that nobody owns yet — no individual
+     * assignee and no group.
+     *
+     * This is the claim pool's definition, kept on the model so the policy, the
+     * pool query and the claim write can't drift apart on what "open" means.
+     */
+    public function isOpen(): bool
+    {
+        return ! $this->isProposal()
+            && $this->assignee_id === null
+            && $this->group_id === null;
+    }
+
+    /**
+     * Whether $userId posted this open task and nobody has claimed it yet.
+     *
+     * An open post skips review precisely because it commits no one, which would
+     * otherwise leave its author unable to fix a typo in it — they are neither
+     * the assignee nor a proposal author. So they keep the same latitude a
+     * proposal's author has, and lose it the moment someone claims the work.
+     */
+    public function isEditableOpenPostFor(?int $userId): bool
+    {
+        return $userId !== null
+            && $this->submitted_by_id !== null
+            && (int) $this->submitted_by_id === $userId
+            && $this->isOpen();
+    }
 }

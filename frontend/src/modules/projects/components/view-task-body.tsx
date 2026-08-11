@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isAxiosError } from "axios";
+import { notify } from "@/core/lib/notify";
 import { ArrowUpIcon, Avatar, Badge, Button, CalendarIcon, ConfirmDialog, Field, Input, LinkIcon, PencilIcon, PlusIcon, PriorityBadge, SegmentedControl, SegmentedItem, Select, Textarea, TrashIcon } from "@/core/ui";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import type { User } from "@/core/types";
@@ -31,6 +33,8 @@ import {
 } from "@/modules/projects/hooks/use-subtasks";
 import {
   useDeleteTask,
+  useClaimTask,
+  useReleaseTask,
   useUpdateTask,
 } from "@/modules/projects/hooks/use-tasks";
 import { RejectReasonDialog } from "@/modules/projects/components/reject-reason-dialog";
@@ -362,6 +366,27 @@ export function ViewTaskBody({
   onClose: () => void;
 }) {
   const update = useUpdateTask(projectId);
+  const claim = useClaimTask();
+  const release = useReleaseTask();
+
+  // The pool is contested: a task can be taken between opening the modal and
+  // pressing Claim. The server settles it with a 409 and names the winner.
+  const onClaim = async () => {
+    try {
+      await claim.mutateAsync(task.id);
+      notify.success('Task claimed', 'It\u2019s on your board now.');
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.status === 409) {
+        notify.warning(
+          'Already taken',
+          (error.response.data as { message?: string })?.message ??
+            'Someone claimed this a moment ago.',
+        );
+      } else {
+        notify.error("Couldn't claim that", 'Please try again.');
+      }
+    }
+  };
   const deleteTask = useDeleteTask(projectId);
   const deleteSubtask = useDeleteSubtask(task.id);
   // Assignees are restricted to this project's members — not the whole user
@@ -433,6 +458,16 @@ export function ViewTaskBody({
   // so only a still-pending one can be rejected.
   const canRejectTask = canReview && task.approval_status === 'pending';
   const canResubmit = isProposal && isProposalAuthor && task.approval_status === 'rejected';
+  // An OPEN task: approved work nobody owns. Anyone may take it — including
+  // people outside this project's pod, which is the whole point of the pool.
+  // Claiming adds them to the project, so nothing else here needs to change.
+  const isOpen = !isProposal && task.assignee_id == null && task.group_id == null;
+  // Handing it back is for work not yet under way; once it moves off To Do,
+  // reassignment is a PM's call (the server enforces the same rule).
+  const canRelease =
+    !isProposal &&
+    isAssignee &&
+    (task.status == null || task.status.key === 'todo');
   // Group members are the valid subtask assignees (ERD R5); fall back to all users otherwise.
   const assigneeOptions = isGroupTask && roster.length ? roster : users;
   // const [coAssignees, setCoAssignees] = useState<number[]>([]);
@@ -1130,6 +1165,27 @@ export function ViewTaskBody({
               <p className="mt-2 text-sm font-semibold text-ink">Group: {task.group.name}</p>
             ) : (
               <p className="mt-2 text-sm text-ink-faint">Unassigned</p>
+            )}
+
+            {isOpen && (
+              <Button
+                className={`mt-3 w-full ${TEAL}`}
+                disabled={claim.isPending}
+                onClick={onClaim}
+              >
+                {claim.isPending ? 'Claiming…' : 'Claim this task'}
+              </Button>
+            )}
+
+            {canRelease && (
+              <Button
+                variant="outline"
+                className="mt-3 w-full"
+                disabled={release.isPending}
+                onClick={() => release.mutate(task.id)}
+              >
+                {release.isPending ? 'Releasing…' : 'Put back on open tasks'}
+              </Button>
             )}
           </div>
         )}
