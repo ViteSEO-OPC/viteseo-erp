@@ -13,7 +13,7 @@ class LeaveType extends Model
     protected $table = 'hr_leave_types';
 
     protected $fillable = [
-        'name', 'code', 'days_per_year', 'is_paid', 'color', 'description',
+        'name', 'code', 'days_per_year', 'is_paid', 'is_unlimited', 'color', 'description',
         'allow_backdated', 'backdate_limit_days',
         // FIN-034 — accrual. 'none' (default, hand-managed as before) | 'monthly' | 'annual'.
         // The cap and expiry are company policy, so neither has a shipped figure.
@@ -29,6 +29,7 @@ class LeaveType extends Model
         'carry_over_cap_days' => 'float',
         'carry_over_expiry_months' => 'integer',
         'is_paid' => 'boolean',
+        'is_unlimited' => 'boolean',
         'allow_backdated' => 'boolean',
         'backdate_limit_days' => 'integer',
     ];

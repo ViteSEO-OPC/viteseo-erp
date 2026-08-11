@@ -11,7 +11,6 @@ use App\Modules\Hr\Models\WorkSchedule;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\AttendanceService;
 use App\Modules\Hr\Services\OvertimeRequestService;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -182,14 +181,30 @@ class OvertimeAttendanceTest extends HrTestCase
         $this->assertSame(0, OvertimeRequest::where('status', 'approved')->count());
     }
 
-    /** An employee cannot cancel their own approved request — HR only. */
-    public function test_an_employee_cannot_cancel(): void
+    /**
+     * An employee cannot cancel their own APPROVED request — that stays HR's, because an approved
+     * request whose period is already paid raises an overpayment only they can settle.
+     *
+     * The refusal is a ValidationException, not an AuthorizationException, since employees may now
+     * withdraw their own PENDING overtime: they are permitted to cancel, just not from this state.
+     * Same shape as `LeaveService::cancel()`, and it gives them an actionable message instead of a
+     * bare 403. A cancel by someone who is NOT the owner is still an AuthorizationException —
+     * see CancelWorkScheduleRequestTest.
+     */
+    public function test_an_employee_cannot_cancel_their_own_approved_request(): void
     {
         $req = $this->approvedOt(self::WORKDAY, 3);
         $owner = $this->employee->user;
 
-        $this->expectException(AuthorizationException::class);
-        app(OvertimeRequestService::class)->cancel($req, $owner, 'Changed my mind');
+        try {
+            app(OvertimeRequestService::class)->cancel($req, $owner, 'Changed my mind');
+            $this->fail('An employee should not be able to cancel their own approved overtime.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('status', $e->errors());
+        }
+
+        // The point of the guard: the request is untouched.
+        $this->assertSame('approved', $req->fresh()->status);
     }
 
     public function test_a_rejected_request_cannot_be_cancelled(): void

@@ -70,15 +70,21 @@ Route::middleware('auth:sanctum')->group(function () {
     // own; service scopes by role.
     Route::get('half-day-requests', [HalfDayRequestController::class, 'index']);
     Route::post('half-day-requests', [HalfDayRequestController::class, 'store']);
+    // Withdraw your own, pending only. Ownership + status enforced in the service.
+    Route::post('half-day-requests/{halfDayRequest}/cancel', [HalfDayRequestController::class, 'cancel']);
 
     // Early-out (undertime) requests — separate from leave (always unpaid). Caller
     // files + views own; service scopes by role.
     Route::get('early-out-requests', [EarlyOutRequestController::class, 'index']);
     Route::post('early-out-requests', [EarlyOutRequestController::class, 'store']);
+    Route::post('early-out-requests/{earlyOutRequest}/cancel', [EarlyOutRequestController::class, 'cancel']);
     Route::get('overtime-requests', [OvertimeRequestController::class, 'index']);
     Route::get('overtime-requests/settings', [OvertimeRequestController::class, 'settings']);
     Route::get('overtime-requests/classify', [OvertimeRequestController::class, 'classify']);
     Route::post('overtime-requests', [OvertimeRequestController::class, 'store']);
+    // Not HR-gated any more: the service lets the OWNER withdraw a pending request, while
+    // cancelling an APPROVED one (which can raise an overpayment) stays HR-only.
+    Route::post('overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel']);
 
     // Attendance — the caller clocks their own time; HR sees the roster.
     Route::get('me/attendance', [AttendanceController::class, 'me']);
@@ -94,6 +100,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Reimbursement — caller files + views own; HR sees all + decides.
     Route::get('reimbursements', [ReimbursementController::class, 'index']);
     Route::post('reimbursements', [ReimbursementController::class, 'store']);
+    // Withdraw one you filed by mistake. Ownership + 'pending only' enforced in the service.
+    Route::post('reimbursements/{reimbursement}/cancel', [ReimbursementController::class, 'cancel']);
 
     // Requests — the caller files + views their own document/change requests.
     Route::get('me/documents', [EmployeeController::class, 'myDocuments']);
@@ -105,6 +113,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('me/payslip-requests', [PayslipRequestController::class, 'store']);
     Route::get('me/payroll-inquiries', [PayrollInquiryController::class, 'index']);
     Route::post('me/payroll-inquiries', [PayrollInquiryController::class, 'store']);
+    Route::post('me/payroll-inquiries/{payrollInquiry}/cancel', [PayrollInquiryController::class, 'cancel']);
 
     // FAQ / knowledge base — read (role-scoped: employees see published only) + view count.
     Route::get('faqs', [FaqController::class, 'index']);
@@ -113,6 +122,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Concerns + meeting invites — the caller's own (anonymity preserved server-side).
     Route::get('me/concerns', [ConcernController::class, 'meIndex']);
     Route::post('me/concerns', [ConcernController::class, 'store']);
+    Route::post('me/concerns/{concern}/cancel', [ConcernController::class, 'cancel']);
     Route::get('me/meetings', [MeetingController::class, 'meIndex']);
     Route::post('me/meetings/{meeting}/respond', [MeetingController::class, 'respond']);
 
@@ -250,7 +260,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('early-out-requests/{earlyOutRequest}/reopen', [EarlyOutRequestController::class, 'reopen']);
         Route::post('overtime-requests/{overtimeRequest}/approve', [OvertimeRequestController::class, 'approve']);
         Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
-        Route::post('overtime-requests/{overtimeRequest}/cancel', [OvertimeRequestController::class, 'cancel']);
         Route::post('overtime-requests/{overtimeRequest}/reopen', [OvertimeRequestController::class, 'reopen']);
         // FIN-039 — auto-mode overtime the caps held back, awaiting someone's yes. Derived on read:
         // it writes nothing, and an approval on the ordinary queue above makes an item disappear.

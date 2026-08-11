@@ -38,3 +38,9 @@ export async function reopenReimbursement(id: number, reason?: string): Promise<
   const res = await apiClient.post(`/hr/reimbursements/${id}/reopen`, { reason });
   return res.data.data;
 }
+
+/** The employee withdraws their own claim while it is still pending. Reason required. */
+export async function cancelReimbursement(id: number, reason: string): Promise<Reimbursement> {
+  const res = await apiClient.post(`/hr/reimbursements/${id}/cancel`, { reason });
+  return res.data.data;
+}

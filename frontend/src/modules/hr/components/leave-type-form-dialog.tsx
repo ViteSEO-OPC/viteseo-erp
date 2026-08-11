@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -21,13 +21,6 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/core/ui/select";
 import { cn } from "@/lib/utils";
 import {
   useCreateLeaveType,
@@ -35,8 +28,8 @@ import {
 } from "@/modules/hr/hooks/use-leave-config";
 import type { LeaveType } from "@/modules/hr/types/leave";
 
-// Quick-pick palette for the Color dropdown. `color` is stored as a hex string,
-// so these ARE data values (mirrors the leave-type seeder), not styling tokens.
+// Suggested swatches, not the only choices — the field below accepts any hex. `color` is stored
+// as a hex string, so these ARE data values (mirrors the leave-type seeder), not styling tokens.
 const COLOR_OPTIONS = [
   { name: "Teal", value: "#4FDBD7" },
   { name: "Green", value: "#22C55E" },
@@ -54,7 +47,14 @@ const schema = z.object({
   name: z.string().min(1, "Name is required").max(255),
   code: z.string().min(1, "Code is required").max(50),
   is_paid: z.boolean(),
-  color: z.string().max(20).optional(),
+  // Whether the type draws down credits at all. Independent of `is_paid`: paid/unpaid is what
+  // payroll does with the day, unlimited is whether there is an allowance to run out of.
+  is_unlimited: z.boolean(),
+  // Mirrors the server rule, so a bad hex is caught before the round trip.
+  color: z
+    .string()
+    .regex(/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Enter a hex code such as #4FDBD7")
+    .optional(),
   description: z.string().max(1000).optional(),
   allow_backdated: z.boolean(),
   // Kept as the raw text-input value; "" = no limit. Parsed to number | null on submit.
@@ -108,6 +108,7 @@ export function LeaveTypeFormDialog({
       name: "",
       code: "",
       is_paid: true,
+      is_unlimited: false,
       color: DEFAULT_COLOR,
       description: "",
       allow_backdated: false,
@@ -124,18 +125,10 @@ export function LeaveTypeFormDialog({
   const accrualMode = watch("accrual_mode");
   const isPaid = watch("is_paid");
   const color = watch("color") || DEFAULT_COLOR;
+  const isUnlimited = watch("is_unlimited");
 
   // Fold any stored hex that isn't a preset into the list so it stays selectable
   // and displays with its own swatch (no data loss on edit).
-  const colorOptions = useMemo(() => {
-    const known = COLOR_OPTIONS.some(
-      (c) => c.value.toLowerCase() === color.toLowerCase(),
-    );
-    return known
-      ? COLOR_OPTIONS
-      : [{ name: "Custom", value: color }, ...COLOR_OPTIONS];
-  }, [color]);
-
   useEffect(() => {
     if (open) {
       reset(
@@ -144,6 +137,7 @@ export function LeaveTypeFormDialog({
               name: leaveType.name,
               code: leaveType.code,
               is_paid: leaveType.is_paid,
+              is_unlimited: leaveType.is_unlimited,
               color: leaveType.color ?? DEFAULT_COLOR,
               description: leaveType.description ?? "",
               allow_backdated: leaveType.allow_backdated,
@@ -157,6 +151,7 @@ export function LeaveTypeFormDialog({
               name: "",
               code: "",
               is_paid: true,
+              is_unlimited: false,
               color: DEFAULT_COLOR,
               description: "",
               allow_backdated: false,
@@ -175,6 +170,7 @@ export function LeaveTypeFormDialog({
       name: values.name,
       code: values.code,
       is_paid: values.is_paid,
+      is_unlimited: values.is_unlimited,
       color: values.color || null,
       description: values.description?.trim() ? values.description.trim() : null,
       allow_backdated: values.allow_backdated,
@@ -244,30 +240,51 @@ export function LeaveTypeFormDialog({
             </div>
           </div>
 
-          {/* Color */}
+          {/* Colour — a native picker beside the hex, so any colour is reachable and the
+              stored value is always visible and typeable. The swatches below are shortcuts. */}
           <div className="space-y-1.5">
             <Label htmlFor="lt-color">Color</Label>
-            <Select
-              value={color}
-              onValueChange={(v) => setValue("color", v, { shouldDirty: true })}
-            >
-              <SelectTrigger id="lt-color" className="w-full">
-                <SelectValue placeholder="Select a color" />
-              </SelectTrigger>
-              <SelectContent>
-                {colorOptions.map((c) => (
-                  <SelectItem key={c.value} value={c.value}>
-                    <span className="flex items-center gap-2">
-                      <span
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: c.value }}
-                      />
-                      {c.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                aria-label="Pick a colour"
+                value={/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color) ? color : DEFAULT_COLOR}
+                onChange={(e) => setValue("color", e.target.value.toUpperCase(), { shouldDirty: true })}
+                className="h-8 w-12 shrink-0 cursor-pointer rounded-lg border border-input bg-transparent p-1"
+              />
+              <Input
+                id="lt-color"
+                value={color}
+                placeholder="#4FDBD7"
+                spellCheck={false}
+                aria-invalid={!!errors.color}
+                onChange={(e) => {
+                  // Accept a bare "4FDBD7" too — the # is the part people forget.
+                  const raw = e.target.value.trim();
+                  const next = raw && !raw.startsWith("#") ? `#${raw}` : raw;
+                  setValue("color", next.toUpperCase(), { shouldDirty: true, shouldValidate: true });
+                }}
+              />
+            </div>
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {COLOR_OPTIONS.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  title={c.name}
+                  aria-label={c.name}
+                  onClick={() => setValue("color", c.value, { shouldDirty: true, shouldValidate: true })}
+                  className={cn(
+                    "size-6 rounded-full border-2 transition-transform hover:scale-110",
+                    color.toLowerCase() === c.value.toLowerCase()
+                      ? "border-foreground"
+                      : "border-transparent",
+                  )}
+                  style={{ backgroundColor: c.value }}
+                />
+              ))}
+            </div>
+            {errors.color && <p className="text-xs text-destructive">{errors.color.message}</p>}
           </div>
 
           {/* Pay type */}
@@ -287,6 +304,30 @@ export function LeaveTypeFormDialog({
             </div>
             <p className="text-xs text-muted-foreground">
               Unpaid leave (LWOP) is deducted from pay by payroll at the daily rate.
+            </p>
+          </div>
+
+          {/* Credits — deliberately its own question. "Paid" is what payroll does with the day;
+              "Limited" is whether there is an allowance to run out of. All four combinations are
+              real, and unpaid-but-capped ("at most 10 LWOP days a year") had no way to be said. */}
+          <div className="space-y-2">
+            <Label>Credits</Label>
+            <div className="flex gap-2.5">
+              <PayChip
+                label="Limited"
+                active={!isUnlimited}
+                onClick={() => setValue("is_unlimited", false, { shouldDirty: true })}
+              />
+              <PayChip
+                label="Unlimited"
+                active={isUnlimited}
+                onClick={() => setValue("is_unlimited", true, { shouldDirty: true })}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {isUnlimited
+                ? "No allowance and no balance check — employees can file this as often as they need. Allotments below are ignored."
+                : "Draws down the employee's credits. Anyone allotted 0 days does not get this leave type."}
             </p>
           </div>
 

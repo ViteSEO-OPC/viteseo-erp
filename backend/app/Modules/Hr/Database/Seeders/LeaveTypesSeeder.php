@@ -12,13 +12,18 @@ class LeaveTypesSeeder extends Seeder
         // Unplanned leave (sick / emergency / bereavement) is commonly filed after the
         // fact, so those allow backdating within a 14-day window. Planned leave (annual,
         // SIL) and LWOP must be filed for today/future.
+        //
+        // `is_unlimited` is stated for every row rather than left to the column default: the
+        // migration that added it backfills unpaid types, but `migrate:fresh --seed` seeds AFTER
+        // migrating, so a fresh database would otherwise create LWOP capped at its 0 days — i.e.
+        // unfilable. It is a separate switch from `is_paid` on purpose; HR can cap LWOP later.
         $types = [
-            ['name' => 'Annual Leave', 'code' => 'ANL', 'days_per_year' => 15, 'is_paid' => true, 'color' => '#4FDBD7', 'allow_backdated' => false, 'backdate_limit_days' => null],
-            ['name' => 'Sick Leave', 'code' => 'SCK', 'days_per_year' => 10, 'is_paid' => true, 'color' => '#22C554', 'allow_backdated' => true, 'backdate_limit_days' => 14],
-            ['name' => 'Emergency Leave', 'code' => 'EMG', 'days_per_year' => 5, 'is_paid' => true, 'color' => '#F0A608', 'allow_backdated' => true, 'backdate_limit_days' => 14],
-            ['name' => 'Bereavement Leave', 'code' => 'BRV', 'days_per_year' => 3, 'is_paid' => true, 'color' => '#6B7280', 'allow_backdated' => true, 'backdate_limit_days' => 14],
-            ['name' => 'Service Incentive Leave', 'code' => 'SIL', 'days_per_year' => 5, 'is_paid' => true, 'color' => '#2563EB', 'allow_backdated' => false, 'backdate_limit_days' => null],
-            ['name' => 'Unpaid Leave (LWOP)', 'code' => 'LWOP', 'days_per_year' => 0, 'is_paid' => false, 'color' => '#EF4444', 'allow_backdated' => false, 'backdate_limit_days' => null],
+            ['name' => 'Annual Leave', 'code' => 'ANL', 'days_per_year' => 15, 'is_paid' => true, 'is_unlimited' => false, 'color' => '#4FDBD7', 'allow_backdated' => false, 'backdate_limit_days' => null],
+            ['name' => 'Sick Leave', 'code' => 'SCK', 'days_per_year' => 10, 'is_paid' => true, 'is_unlimited' => false, 'color' => '#22C554', 'allow_backdated' => true, 'backdate_limit_days' => 14],
+            ['name' => 'Emergency Leave', 'code' => 'EMG', 'days_per_year' => 5, 'is_paid' => true, 'is_unlimited' => false, 'color' => '#F0A608', 'allow_backdated' => true, 'backdate_limit_days' => 14],
+            ['name' => 'Bereavement Leave', 'code' => 'BRV', 'days_per_year' => 3, 'is_paid' => true, 'is_unlimited' => false, 'color' => '#6B7280', 'allow_backdated' => true, 'backdate_limit_days' => 14],
+            ['name' => 'Service Incentive Leave', 'code' => 'SIL', 'days_per_year' => 5, 'is_paid' => true, 'is_unlimited' => false, 'color' => '#2563EB', 'allow_backdated' => false, 'backdate_limit_days' => null],
+            ['name' => 'Unpaid Leave (LWOP)', 'code' => 'LWOP', 'days_per_year' => 0, 'is_paid' => false, 'is_unlimited' => true, 'color' => '#EF4444', 'allow_backdated' => false, 'backdate_limit_days' => null],
         ];
 
         foreach ($types as $type) {

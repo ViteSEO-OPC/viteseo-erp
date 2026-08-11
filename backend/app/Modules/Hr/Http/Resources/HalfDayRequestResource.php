@@ -20,6 +20,9 @@ class HalfDayRequestResource extends JsonResource
             'status' => $this->status,
             'review_note' => $this->review_note,
             'reviewed_at' => $this->reviewed_at,
+            'cancelled_at' => $this->cancelled_at,
+            'cancelled_by' => $this->canceller?->name,
+            'cancel_reason' => $this->cancel_reason,
             'reviewed_by' => $this->reviewer?->name,
             'employee' => [
                 'id' => $this->employee_id,

@@ -56,7 +56,7 @@ class LeaveLiabilityReportTest extends HrTestCase
 
         $this->ops = Department::create(['name' => 'Ops', 'code' => 'OPS']);
         $this->paid = LeaveType::create(['name' => 'Vacation', 'code' => 'VL', 'is_paid' => true]);
-        $this->unpaid = LeaveType::create(['name' => 'LWOP', 'code' => 'LWOP', 'is_paid' => false]);
+        $this->unpaid = LeaveType::create(['name' => 'LWOP', 'code' => 'LWOP', 'is_paid' => false, 'is_unlimited' => true]);
     }
 
     private function employee(string $no = 'E-001', float $salary = 30000, ?Department $dept = null): Employee

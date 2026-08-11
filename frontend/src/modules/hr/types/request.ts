@@ -104,6 +104,9 @@ export interface PayrollInquiry {
   resolved_by?: string | null;
   payslip_id: number | null;
   payslip_cycle: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
   employee: EmployeeRef;
   created_at: string;
 }

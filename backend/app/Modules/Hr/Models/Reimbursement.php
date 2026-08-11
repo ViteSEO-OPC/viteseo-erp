@@ -26,12 +26,16 @@ class Reimbursement extends Model
         'reviewed_at',
         'reviewed_by',
         'review_note',
+        'cancelled_at',
+        'cancelled_by',
+        'cancel_reason',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
         'expense_date' => 'date',
         'reviewed_at' => 'datetime',
+        'cancelled_at' => 'datetime',
         'receipt_paths' => 'array',
     ];
 
@@ -60,5 +64,11 @@ class Reimbursement extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
+    /** Who withdrew this request, when it was cancelled rather than decided. */
+    public function canceller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 }

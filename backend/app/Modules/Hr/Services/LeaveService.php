@@ -8,6 +8,7 @@ use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
+use App\Modules\Hr\Models\LeaveTypeAllotment;
 use App\Modules\Hr\Models\SharedLeaveBalance;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
@@ -95,13 +96,77 @@ class LeaveService
         return LeaveSetting::current()->allotment_mode === LeaveSetting::MODE_SHARED;
     }
 
+    /**
+     * The leave types this employee may actually file, newest rule first (§ Leave Type config).
+     *
+     * THE RULE, AND WHY EACH PART OF IT.
+     *
+     *  - UNLIMITED types are always offered. There is no entitlement to be zero — the type is
+     *    uncapped, so nothing about a per-person number can disqualify it. LWOP ships unlimited,
+     *    which is why a zero-means-hidden rule that ignored this flag would delete unpaid leave
+     *    from the product. Note the test for it is `is_unlimited`, NOT `is_paid`: HR can now cap
+     *    an unpaid type ("at most 10 LWOP days a year"), and a capped type earns its credits check
+     *    whether or not payroll pays the day.
+     *
+     *  - In SHARED mode every type is offered. They all draw the one SIL pool, so a per-type
+     *    number means nothing there; the pool is the only entitlement.
+     *
+     *  - In NOT-SHARED mode a capped type is offered only when this employee is entitled to more
+     *    than zero days of it. Their own balance row wins when they have one (HR can grant an
+     *    individual more or less than their band); otherwise the allotment default for their
+     *    employment status decides. Zero on both means they do not have that leave type.
+     *
+     * @return Collection<int, LeaveType>
+     */
+    public function selectableTypesFor(Employee $employee): Collection
+    {
+        $types = LeaveType::orderBy('name')->get();
+
+        if ($this->isSharedMode()) {
+            return $types;
+        }
+
+        $year = now(config('app.timezone_local'))->year;
+
+        $entitledByType = LeaveBalance::where('employee_id', $employee->id)
+            ->where('year', $year)
+            ->pluck('entitled_days', 'leave_type_id');
+
+        $defaultsByType = LeaveTypeAllotment::where('employment_status', $employee->employment_status)
+            ->pluck('days_per_year', 'leave_type_id');
+
+        return $types->filter(function (LeaveType $type) use ($entitledByType, $defaultsByType) {
+            // An unlimited type has no entitlement to be zero, so it is always offered.
+            if ($type->is_unlimited) {
+                return true;
+            }
+
+            // A balance row is the employee's actual entitlement, so it decides even when it is
+            // zero — that is HR having said "not this person", not a missing configuration.
+            $entitled = $entitledByType->has($type->id)
+                ? (float) $entitledByType->get($type->id)
+                : (float) ($defaultsByType->get($type->id) ?? 0);
+
+            return $entitled > 0;
+        })->values();
+    }
+
     /** The employee's balances for the current (Manila) year, with the type. */
     public function balancesForCurrentYear(Employee $employee): Collection
     {
         $year = now(config('app.timezone_local'))->year;
 
+        // `whereHas` drops balances whose leave type has been deleted. Deleting a type only soft-
+        // deletes it, so its balance rows survive with a `leaveType` that now resolves to NULL —
+        // and `LeaveBalanceResource` dereferences that relation. One deleted type therefore took
+        // the whole endpoint down with a 500 for every employee who had ever held that leave,
+        // which is what emptied the Work Schedule cards in both allotment modes.
+        //
+        // Filtered rather than deleted, because a soft delete is reversible: restore the type and
+        // these balances come back with it.
         return $employee->leaveBalances()
             ->with('leaveType')
+            ->whereHas('leaveType')
             ->where('year', $year)
             ->get();
     }
@@ -117,7 +182,13 @@ class LeaveService
     public function summaryForCurrentYear(Employee $employee): array
     {
         $shared = $this->isSharedMode();
-        $balances = $this->balancesForCurrentYear($employee);
+
+        // Zero-credit rows are dropped for the same reason the picker hides those types: a
+        // breakdown line reading "0 of 0 days" is not a balance, it is a leave type this employee
+        // does not have. Unlimited types have no meaningful entitlement to show, so nothing is lost.
+        $balances = $this->balancesForCurrentYear($employee)
+            ->filter(fn (LeaveBalance $b) => (float) $b->entitled_days > 0)
+            ->values();
 
         $pool = null;
         if ($shared) {
@@ -180,16 +251,17 @@ class LeaveService
         $isHalfDay = (bool) ($data['is_half_day'] ?? false);
         $days = $this->computeDays($data['start_date'], $data['end_date'], $isHalfDay);
 
-        // Unpaid leave (LWOP) has no credit pool — it's deducted from pay, not a
-        // balance — so it skips the balance requirement entirely. Paid leave still
-        // needs a balance with enough remaining credits.
+        // An UNLIMITED type has no credit pool to check against, so it skips the balance
+        // requirement entirely. Note this is `is_unlimited`, not `is_paid`: the two used to be the
+        // same switch, which made "at most 10 unpaid days a year" impossible to express. Payroll
+        // still docks the day or not on `is_paid` — that is a separate question.
         $type = LeaveType::find($data['leave_type_id']);
         $year = Carbon::parse($data['start_date'])->year;
 
         // Past-dated filing is gated per leave type (HR-configurable).
         $this->assertBackdatingAllowed($type, $data['start_date']);
 
-        if (! $type || $type->is_paid) {
+        if (! $type || ! $type->is_unlimited) {
             if ($this->isSharedMode()) {
                 // Shared mode: every paid leave type draws from ONE pool per
                 // employee. Validate against the pool's remaining, not per-type.
@@ -269,13 +341,14 @@ class LeaveService
                 return $request->load(['employee.user', 'leaveType', 'reviewer']);
             }
 
-            // Only paid leave draws down a credit balance; unpaid leave (LWOP) is
-            // deducted from pay by payroll, so it never touches used_days. Stamp
-            // the bucket we deduct from so cancel can reverse it precisely even if
-            // HR later flips the global mode.
+            // Only a CAPPED type draws down credits; an unlimited one has none to draw, so it
+            // never touches used_days. Keyed on `is_unlimited`, not `is_paid` — an unpaid type
+            // with a cap must still consume its allowance, and payroll docks the day either way.
+            // Stamp the bucket we deduct from so cancel can reverse it precisely even if HR later
+            // flips the global mode.
             $type = LeaveType::find($request->leave_type_id);
-            $paid = (! $type || $type->is_paid);
-            $bucket = ! $paid
+            $drawsCredits = (! $type || ! $type->is_unlimited);
+            $bucket = ! $drawsCredits
                 ? 'none'
                 : ($this->isSharedMode() ? 'pool' : 'per_type');
 
@@ -418,8 +491,8 @@ class LeaveService
         $bucket = $request->deducted_from;
         if ($bucket === null) {
             $type = LeaveType::find($request->leave_type_id);
-            $paid = (! $type || $type->is_paid);
-            $bucket = ! $paid
+            $drawsCredits = (! $type || ! $type->is_unlimited);
+            $bucket = ! $drawsCredits
                 ? 'none'
                 : ($this->isSharedMode() ? 'pool' : 'per_type');
         }

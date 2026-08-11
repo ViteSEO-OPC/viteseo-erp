@@ -62,3 +62,9 @@ export async function respondMeeting(
   const res = await apiClient.post(`/hr/me/meetings/${id}/respond`, { response });
   return res.data.data;
 }
+
+/** The employee withdraws their own pending concern. Reason required. */
+export async function cancelConcern(id: number, reason: string): Promise<Concern> {
+  const res = await apiClient.post(`/hr/me/concerns/${id}/cancel`, { reason });
+  return res.data.data;
+}

@@ -25,9 +25,18 @@ import {
   useLeaveRequests,
   useCancelLeaveRequest,
 } from "@/modules/hr/hooks/use-leave";
-import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
-import { useEarlyOutRequests } from "@/modules/hr/hooks/use-early-out";
-import { useOvertimeRequests } from "@/modules/hr/hooks/use-overtime";
+import {
+  useHalfDayRequests,
+  useCancelHalfDayRequest,
+} from "@/modules/hr/hooks/use-half-day";
+import {
+  useEarlyOutRequests,
+  useCancelEarlyOutRequest,
+} from "@/modules/hr/hooks/use-early-out";
+import {
+  useOvertimeRequests,
+  useCancelOvertimeRequest,
+} from "@/modules/hr/hooks/use-overtime";
 
 type RequestTab = "leave" | "half" | "early" | "overtime";
 
@@ -82,9 +91,9 @@ interface HistItem {
   decision: { at: string | null; by?: string | null; note: string | null };
   /** The label/value rows shown in the detail modal. */
   fields: DetailField[];
-  /** Only leave can be cancelled, so only leave fills this in. */
+  /** The withdrawal trail, once the employee has cancelled it. */
   cancelled: { at: string; by: string | null; reason: string | null } | null;
-  /** Employees can cancel only their own still-pending leave. */
+  /** Employees may withdraw only their own still-PENDING request, whatever the kind. */
   cancellable: boolean;
 }
 
@@ -143,7 +152,11 @@ export default function TimeOffPage() {
   const { data: halfDays } = useHalfDayRequests();
   const { data: earlyOuts } = useEarlyOutRequests();
   const { data: overtimes } = useOvertimeRequests();
+  // One dialog, four endpoints — `handleCancel` dispatches on the row's kind.
   const cancelMut = useCancelLeaveRequest();
+  const cancelHalfDayMut = useCancelHalfDayRequest();
+  const cancelEarlyOutMut = useCancelEarlyOutRequest();
+  const cancelOvertimeMut = useCancelOvertimeRequest();
   const [tab, setTab] = useState<RequestTab>("leave");
   const [detail, setDetail] = useState<HistItem | null>(null);
   const [cancelTarget, setCancelTarget] = useState<HistItem | null>(null);
@@ -267,8 +280,10 @@ export default function TimeOffPage() {
         },
         { label: "Pay", value: <span className="text-danger">Unpaid · 0.5 day</span> },
       ],
-      cancelled: null,
-      cancellable: false,
+      cancelled: h.cancelled_at
+        ? { at: h.cancelled_at, by: h.cancelled_by, reason: h.cancel_reason }
+        : null,
+      cancellable: h.status === "pending",
     })),
     ...(earlyOuts ?? []).map((e) => ({
       key: `e${e.id}`,
@@ -286,8 +301,10 @@ export default function TimeOffPage() {
         { label: "Leaving at", value: e.early_out_time },
         { label: "Pay", value: <span className="text-danger">Unpaid · undertime</span> },
       ],
-      cancelled: null,
-      cancellable: false,
+      cancelled: e.cancelled_at
+        ? { at: e.cancelled_at, by: e.cancelled_by, reason: e.cancel_reason }
+        : null,
+      cancellable: e.status === "pending",
     })),
     ...(overtimes ?? []).map((o) => ({
       key: `o${o.id}`,
@@ -309,8 +326,12 @@ export default function TimeOffPage() {
         { label: "Hours", value: `${o.hours.toFixed(1)} hrs` },
         { label: "Pay", value: <span className="text-success">Paid · overtime</span> },
       ],
-      cancelled: null,
-      cancellable: false,
+      cancelled: o.cancelled_at
+        ? { at: o.cancelled_at, by: o.cancelled_by, reason: o.cancel_reason }
+        : null,
+      // Pending only. Cancelling an APPROVED overtime can create an overpayment to claw back,
+      // so the service keeps that with HR — offering the button here would only 422.
+      cancellable: o.status === "pending",
     })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
@@ -370,9 +391,17 @@ export default function TimeOffPage() {
 
   async function handleCancel(reason: string) {
     if (!cancelTarget) return;
+
+    const { mutation, label } = {
+      leave: { mutation: cancelMut, label: "leave request" },
+      half: { mutation: cancelHalfDayMut, label: "half-day request" },
+      early: { mutation: cancelEarlyOutMut, label: "early-out request" },
+      overtime: { mutation: cancelOvertimeMut, label: "overtime request" },
+    }[cancelTarget.kind];
+
     try {
-      await cancelMut.mutateAsync({ id: cancelTarget.id, reason });
-      toast.success("Request cancelled", "Your leave request has been cancelled.");
+      await mutation.mutateAsync({ id: cancelTarget.id, reason });
+      toast.success("Request cancelled", `Your ${label} has been cancelled.`);
     } catch {
       toast.error("Couldn't cancel", "Please try again.");
       // Rethrow so the dialog stays open for a retry.
@@ -390,16 +419,20 @@ export default function TimeOffPage() {
       {/* Balance summary beside the one tabbed request card. */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <LeaveSummaryCard
-          featuredLabel={mode === "shared" ? "Leave Pool" : "Total Leave Credits"}
+          // Shared mode pools everything into Service Incentive Leave, so the headline names it
+          // rather than saying "Leave Pool" — SIL is what the payslip and the law call it.
+          featuredLabel={mode === "shared" ? "SIL Credits" : "Total Leave Credits"}
           featured={featured}
           emptyNote={
-            mode === "shared" ? "No pool for this year" : "No credits for this year"
+            mode === "shared" ? "No SIL credits for this year" : "No credits for this year"
           }
           pending={pendingCount}
           types={listItems}
           showCredits={mode !== "shared"}
           note={
-            mode === "shared" ? "All leave types draw from your shared pool." : undefined
+            mode === "shared"
+              ? "Every paid leave type draws from your SIL credits. Unpaid leave (LWOP) is unlimited and takes nothing from them."
+              : undefined
           }
         />
 

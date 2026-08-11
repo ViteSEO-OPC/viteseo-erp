@@ -9,6 +9,7 @@ use App\Modules\Hr\Http\Resources\ConcernResource;
 use App\Modules\Hr\Http\Resources\MeetingResource;
 use App\Modules\Hr\Models\Concern;
 use App\Modules\Hr\Services\ConcernService;
+use App\Modules\Hr\Http\Requests\CancelOwnRequestRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -80,5 +81,13 @@ class ConcernController extends Controller
 
         return MeetingResource::make($this->service->scheduleMeeting($concern, $data, $request->user()))
             ->response()->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    // POST /hr/.../{concern}/cancel — the employee withdraws their own pending concern.
+    public function cancel(CancelOwnRequestRequest $request, Concern $concern): JsonResponse
+    {
+        return ConcernResource::make(
+            $this->service->cancel($concern, $request->user(), $request->validated()['reason']),
+        )->response();
     }
 }

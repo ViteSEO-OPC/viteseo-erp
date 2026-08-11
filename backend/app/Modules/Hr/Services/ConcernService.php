@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Services;
 
 use App\Models\User;
 use App\Modules\Hr\Models\Concern;
+use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Meeting;
 use Illuminate\Database\Eloquent\Collection;
@@ -14,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 
 class ConcernService
 {
+    use CancelsOwnRequest;
+
     public const CATEGORIES = ['conduct', 'harassment', 'safety', 'policy', 'other'];
 
     public function __construct(private readonly AuditService $audit) {}
@@ -21,13 +24,13 @@ class ConcernService
     /** HR/Admin queue — all concerns, newest first. */
     public function listForHr(): Collection
     {
-        return Concern::with(['employee.user', 'meetings'])->latest('submitted_at')->get();
+        return Concern::with(['employee.user', 'meetings', 'canceller'])->latest('submitted_at')->get();
     }
 
     /** The employee's own concerns (named or anonymous). */
     public function listForEmployee(Employee $employee): Collection
     {
-        return Concern::with('meetings')
+        return Concern::with(['meetings', 'canceller'])
             ->where('employee_id', $employee->id)
             ->latest('submitted_at')
             ->get();
@@ -189,6 +192,23 @@ class ConcernService
         $this->audit->log('scheduled', 'Concerns', "Meeting scheduled re: {$concern->reference_no}", $concern);
 
         return $meeting->load('concern');
+    }
+
+    /** The employee withdraws a concern, while HR has yet to open it. */
+    public function cancel(Concern $concern, User $actor, string $reason): Concern
+    {
+        $this->applyCancellation($concern, $actor, $reason, 'concern');
+
+        // Reference number only — the description may name people, and audit lines are read by
+        // more eyes than the concern itself.
+        $this->audit->log(
+            'cancelled',
+            'Concerns',
+            "Concern {$concern->reference_no} withdrawn by the person who raised it",
+            $concern,
+        );
+
+        return $concern->load(['employee.user', 'canceller']);
     }
 
     private function uniqueReference(): string

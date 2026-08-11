@@ -33,12 +33,14 @@ import { downloadMyPayslipPdf } from "@/modules/hr/api/payroll";
 import {
   useCreatePayslipRequest,
   useMyPayrollInquiries,
+  useCancelPayrollInquiry,
   useMyPayslipRequests,
 } from "@/modules/hr/hooks/use-requests";
 import { PayrollInquiryDialog } from "@/modules/hr/components/payroll-inquiry-dialog";
 import { PayslipDocument } from "@/modules/hr/components/payslip-document";
 import { RejectionReasonDialog } from "@/core/components/rejection-reason-dialog";
 import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
+import { CancelLeaveDialog } from "@/modules/hr/components/cancel-leave-dialog";
 import type { PayslipSummary } from "@/modules/hr/types/payroll";
 import type { PayslipRequest } from "@/modules/hr/types/request";
 
@@ -94,6 +96,9 @@ export default function PayslipsPage() {
   // By id, then read back from the live list, so the modal picks up HR's reply
   // if it lands while the employee has it open.
   const [inqDetailId, setInqDetailId] = useState<number | null>(null);
+  // The inquiry being withdrawn — separate state so the confirm sits above the detail.
+  const [inqCancelId, setInqCancelId] = useState<number | null>(null);
+  const cancelInquiryMut = useCancelPayrollInquiry();
 
   const inquiryList = inquiries ?? [];
   const inqDetail = inquiryList.find((q) => q.id === inqDetailId) ?? null;
@@ -266,6 +271,25 @@ export default function PayslipsPage() {
         onOpenChange={setInquiryOpen}
         payslip={selected?.unlocked ? selected : undefined}
       />
+      <CancelLeaveDialog
+        open={inqCancelId !== null}
+        onOpenChange={(o) => !o && setInqCancelId(null)}
+        title="Cancel Inquiry"
+        subject="your payroll inquiry"
+        onConfirm={async (reason) => {
+          if (inqCancelId === null) return;
+          try {
+            await cancelInquiryMut.mutateAsync({ id: inqCancelId, reason });
+            toast.success("Inquiry cancelled");
+            setInqCancelId(null);
+            setInqDetailId(null);
+          } catch {
+            toast.error("Could not cancel this inquiry.");
+            throw new Error("cancel failed");
+          }
+        }}
+      />
+
       <RejectionReasonDialog
         open={!!declinedCopy}
         onOpenChange={(o) => !o && setDeclinedCopy(null)}
@@ -300,6 +324,23 @@ export default function PayslipsPage() {
             at: inqDetail.resolved_at,
             note: inqDetail.resolution_note,
           }}
+          cancellation={{
+            at: inqDetail.cancelled_at,
+            by: inqDetail.cancelled_by,
+            reason: inqDetail.cancel_reason,
+          }}
+          actions={
+            // Only before HR picks it up; after that their reply is the way it closes.
+            inqDetail.status === "pending" ? (
+              <Button
+                variant="outline"
+                className="text-danger hover:text-danger"
+                onClick={() => setInqCancelId(inqDetail.id)}
+              >
+                Cancel this inquiry
+              </Button>
+            ) : undefined
+          }
         >
           {inqDetail.attachment_url && (
             <a

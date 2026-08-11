@@ -31,11 +31,15 @@ class LeaveBalanceResource extends JsonResource
             'accrued_days' => (float) $this->accrued_days,
             'carried_days' => (float) $this->carried_days,
             'carried_expires_on' => $this->carried_expires_on?->format('Y-m-d'),
+            // Null-safe on purpose. The queries above already exclude balances whose type was
+            // deleted, but a resource that hard-crashes on a missing relation turns one bad row
+            // into a 500 for the entire list — the failure mode this is guarding against, not a
+            // hypothetical one. The placeholder keeps the shape the client expects.
             'leave_type' => [
-                'id' => $this->leaveType->id,
-                'name' => $this->leaveType->name,
-                'code' => $this->leaveType->code,
-                'color' => $this->leaveType->color,
+                'id' => $this->leaveType?->id,
+                'name' => $this->leaveType?->name ?? 'Deleted leave type',
+                'code' => $this->leaveType?->code ?? '',
+                'color' => $this->leaveType?->color,
             ],
         ];
     }
