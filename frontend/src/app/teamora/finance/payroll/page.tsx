@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { PlayCircle, Zap, Eye, EyeOff, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote, Percent, BookOpen, Scale } from "lucide-react";
+import { PlayCircle, Zap, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote, Percent, Scale } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,7 @@ import { TaxTableDialog } from "@/modules/hr/components/tax-table-dialog";
 import { PaymentBatchDialog } from "@/modules/hr/components/payment-batch-dialog";
 import { MinimumWageDialog } from "@/modules/hr/components/minimum-wage-dialog";
 import { StatCard } from "@/core/components/stat-card";
+import { MoneyStatCard } from "@/modules/hr/components/money-stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
@@ -54,12 +56,16 @@ import type {
 } from "@/modules/hr/types/payroll";
 import { PAY_FREQUENCIES, payFrequencyLabel } from "@/modules/hr/types/employee";
 import { SimpleSelect } from "@/modules/hr/ui/select";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 
 const TIMING_OPTIONS = [
   { value: "every", label: "Every cutoff (split)" },
   { value: "first", label: "First cutoff only" },
   { value: "last", label: "Last cutoff only" },
 ];
+
+/** The three headline totals, each with its own show/hide (FIN-043). */
+type MoneyTotal = "gross" | "deductions" | "net";
 
 export default function PayrollPage() {
   const { data: settings } = usePayrollSettings();
@@ -113,13 +119,27 @@ export default function PayrollPage() {
    *
    * Omitting amounts server-side would be the real control, and belongs with the restricted-role
    * work in Slice 6 — not here, where it would only mean the same authorised person sees less.
+   *
+   * Now per-card rather than one page-wide switch: the three headline totals are what a passer-by
+   * reads from across a desk, and they are hidden independently so a gross figure can be shown
+   * while net stays covered.
    */
-  const [masked, setMasked] = useState(false);
+  const [maskedTotals, setMaskedTotals] = useState<Record<MoneyTotal, boolean>>({
+    gross: false,
+    deductions: false,
+    net: false,
+  });
+  const anyMasked = Object.values(maskedTotals).some(Boolean);
+  const toggleTotal = (key: MoneyTotal) =>
+    setMaskedTotals((prev) => ({ ...prev, [key]: !prev[key] }));
   const [selectedFreq, setSelectedFreq] = useState<string>();
 
   const { data: openPayslip } = useHrPayslip(payslipId ?? undefined);
 
-  const peso = (v: number) => (masked ? "₱ ••••" : formatPeso(v));
+  // Masking is per-card now, so everything outside the three totals formats plainly.
+  const peso = (v: number) => formatPeso(v);
+  /** A headline total. MoneyStatCard does the masking itself. */
+  const total = (v: number | undefined) => (v === undefined ? "—" : formatPeso(v));
 
   // Pay groups (per-employee frequencies). HR runs one group at a time.
   const payGroups = settings?.pay_groups ?? [];
@@ -326,6 +346,13 @@ export default function PayrollPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
+        /*
+          This header carries ~10 actions, far more than the one or two most TeamOra pages have.
+          The shared `sm:flex-row` would put them beside the title from 640px up, leaving a tablet
+          about half a row of width and stacking them 3–4 deep. Holding the column layout until
+          `lg` gives the button row the full width on tablet.
+        */
+        className="sm:flex-col lg:flex-row"
         title="Payroll"
         subtitle={
           activeGroup && period
@@ -333,20 +360,12 @@ export default function PayrollPage() {
             : "Loading pay schedule…"
         }
         actions={
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={() => setMasked((m) => !m)}
-              title={
-                masked
-                  ? "Show amounts"
-                  : "Hide amounts on screen — for privacy from onlookers, not an access control"
-              }
-            >
-              {masked ? <EyeOff /> : <Eye />}
-              <span className="sr-only">{masked ? "Show amounts" : "Hide amounts"}</span>
-            </Button>
+          /*
+            No wrapper element: the TeamOra `PageHeader` already lays actions out as
+            `flex flex-wrap`, and nesting a non-wrapping flex row inside it was what pushed
+            these buttons off the right edge on tablet and mobile.
+          */
+          <>
             {/* FIN-009 — corrections owed. Badged, because an empty queue and an unseen queue
                 look identical otherwise, and being unseen is what this replaced. */}
             <Button variant="outline" onClick={() => setRetroOpen(true)}>
@@ -452,14 +471,14 @@ export default function PayrollPage() {
               <PlayCircle />
               {alreadyRun ? "Re-run / refresh" : "Run this pay group"}
             </Button>
-          </div>
+          </>
         }
       />
 
       {/* FIN-043 — visible while masking is on, because a tooltip nobody hovers is not a
           correction. Someone hiding amounts under the impression it is a security control needs to
           be told at the moment they are relying on it, not when they go looking. */}
-      {masked && (
+      {anyMasked && (
         <p className="mt-4 rounded-card border border-border bg-muted/40 px-4 py-2 text-caption text-muted-foreground">
           Amounts are hidden on screen only — for privacy from people nearby. They are still in the
           page data, so this is not an access control.
@@ -516,12 +535,11 @@ export default function PayrollPage() {
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
             Minimum daily wage
           </p>
-          <input
+          <Input
             type="number"
             min="0"
             step="0.01"
             aria-label="Regional minimum daily wage"
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-body"
             placeholder="Not set"
             defaultValue={settings?.minimum_daily_wage ?? ""}
             disabled={!settings || updateSettingsMut.isPending}
@@ -541,12 +559,12 @@ export default function PayrollPage() {
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
             These settings take effect from
           </p>
-          <input
-            type="date"
+          <DatePicker
             aria-label="Settings effective from"
-            className="h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-2 text-body sm:w-auto"
+            className="max-w-xs sm:w-auto"
+            placeholder="Today"
             value={settingsEffectiveFrom}
-            onChange={(e) => setSettingsEffectiveFrom(e.target.value)}
+            onChange={setSettingsEffectiveFrom}
           />
           <p className="text-caption text-muted-foreground">
             Leave blank for today. Set an earlier date only if the change genuinely applied then —
@@ -579,9 +597,24 @@ export default function PayrollPage() {
 
       {/* Current period for the selected group — blank until run */}
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total Gross" value={currentRun ? peso(currentRun.total_gross) : "—"} highlight />
-        <StatCard label="Total Deductions" value={currentRun ? peso(currentRun.total_deductions) : "—"} />
-        <StatCard label="Net Payout" value={currentRun ? peso(currentRun.total_net) : "—"} />
+        <MoneyStatCard
+          label="Total Gross"
+          value={total(currentRun?.total_gross)}
+          hidden={maskedTotals.gross}
+          onToggle={() => toggleTotal("gross")}
+        />
+        <MoneyStatCard
+          label="Total Deductions"
+          value={total(currentRun?.total_deductions)}
+          hidden={maskedTotals.deductions}
+          onToggle={() => toggleTotal("deductions")}
+        />
+        <MoneyStatCard
+          label="Net Payout"
+          value={total(currentRun?.total_net)}
+          hidden={maskedTotals.net}
+          onToggle={() => toggleTotal("net")}
+        />
         <StatCard
           label="This Period"
           value={alreadyRun ? "Computed" : "Not run yet"}
@@ -681,9 +714,24 @@ export default function PayrollPage() {
           {viewRun?.breakdown ? (
             <>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <StatCard label="Total Gross" value={peso(viewRun.total_gross)} highlight />
-                <StatCard label="Total Deductions" value={peso(viewRun.total_deductions)} />
-                <StatCard label="Net Payout" value={peso(viewRun.total_net)} />
+                <MoneyStatCard
+                  label="Total Gross"
+                  value={total(viewRun.total_gross)}
+                  hidden={maskedTotals.gross}
+                  onToggle={() => toggleTotal("gross")}
+                />
+                <MoneyStatCard
+                  label="Total Deductions"
+                  value={total(viewRun.total_deductions)}
+                  hidden={maskedTotals.deductions}
+                  onToggle={() => toggleTotal("deductions")}
+                />
+                <MoneyStatCard
+                  label="Net Payout"
+                  value={total(viewRun.total_net)}
+                  hidden={maskedTotals.net}
+                  onToggle={() => toggleTotal("net")}
+                />
               </div>
               <div className="max-h-[55vh] overflow-auto">
                 <DataTable
@@ -926,8 +974,7 @@ export default function PayrollPage() {
                 Run anyway — I have a reason
               </label>
               {minWageAck && (
-                <input
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-body"
+                <Input
                   placeholder="e.g. part-time staff, wage order does not cover this branch"
                   aria-label="Reason for running past the minimum-wage warning"
                   value={minWageReason}

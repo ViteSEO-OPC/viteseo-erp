@@ -7,6 +7,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
+import { MoneyStatCard } from "@/modules/hr/components/money-stat-card";
 import { EmployeeCell } from "@/modules/hr/components/employee-cell";
 import { StatusBadge } from "@/core/components/status-badge";
 import { ReviewDialog } from "@/core/components/review-dialog";
@@ -46,6 +47,11 @@ export default function ReimbursementPage() {
       paidCount: list.filter((c) => c.status === "paid").length,
     };
   }, [claims]);
+
+  // Which summary-card amounts are masked (privacy show/hide toggle).
+  const [hiddenAmounts, setHiddenAmounts] = useState<Record<string, boolean>>({});
+  const toggleAmount = (key: string) =>
+    setHiddenAmounts((h) => ({ ...h, [key]: !h[key] }));
 
   const [review, setReview] = useState<{ mode: "approve" | "reject"; c: Reimbursement } | null>(null);
   // Kept as an id and read back from the live list so deciding inside the modal
@@ -192,8 +198,16 @@ export default function ReimbursementPage() {
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Pending Claims" value={stats.pending}
-          subNote={`${formatPeso(stats.pendingSum)} awaiting`} highlight />
+        {/* The two cards carrying peso figures get a show/hide; the other two are counts. */}
+        <MoneyStatCard
+          label="Pending Claims"
+          value={String(stats.pending)}
+          subNote={`${formatPeso(stats.pendingSum)} awaiting`}
+          // The headline is a claim count, not an amount — only the peso figure below it hides.
+          maskValue={false}
+          hidden={!!hiddenAmounts.pending}
+          onToggle={() => toggleAmount("pending")}
+        />
         <StatCard
           label="Approved Unpaid"
           value={stats.approved + stats.scheduled}
@@ -203,8 +217,13 @@ export default function ReimbursementPage() {
               : "Queued for payroll"
           }
         />
-        <StatCard label="Paid" value={formatPeso(stats.paidSum)}
-          subNote={`${stats.paidCount} claim${stats.paidCount === 1 ? "" : "s"} processed`} />
+        <MoneyStatCard
+          label="Paid"
+          value={formatPeso(stats.paidSum)}
+          subNote={`${stats.paidCount} claim${stats.paidCount === 1 ? "" : "s"} processed`}
+          hidden={!!hiddenAmounts.paid}
+          onToggle={() => toggleAmount("paid")}
+        />
         <StatCard label="Avg Processing" value="2.1 days" subNote="Last 30 days (mock)" />
       </div>
 

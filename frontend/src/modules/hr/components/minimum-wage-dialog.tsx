@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { formatPeso, formatDate } from "@/core/lib/format";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { useMinimumWageCheck, useApplyMinimumWage } from "@/modules/hr/hooks/use-payroll";
 
 /**
@@ -203,10 +204,9 @@ export function MinimumWageDialog({
               <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
                 Takes effect from
               </p>
-              <Input
-                type="date"
+              <DatePicker
                 value={effectiveDate}
-                onChange={(e) => setEffectiveDate(e.target.value)}
+                onChange={setEffectiveDate}
                 aria-label="Date the adjustment takes effect"
                 className="w-full sm:w-auto"
               />

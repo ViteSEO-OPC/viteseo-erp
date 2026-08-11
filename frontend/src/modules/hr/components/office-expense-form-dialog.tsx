@@ -21,6 +21,7 @@ import {
 } from "@/modules/hr/hooks/use-office-expenses";
 import {
   EXPENSE_CATEGORIES,
+  EXPENSE_STATUSES,
   type OfficeExpense,
 } from "@/modules/hr/types/office-expense";
 import { SimpleSelect } from "@/modules/hr/ui/select";
@@ -56,6 +57,9 @@ function FormBody({ expense, onDone }: { expense: OfficeExpense | null; onDone: 
     expense_date: expense?.expense_date ?? "",
     vendor: expense?.vendor ?? "",
     description: expense?.description ?? "",
+    // New expenses start `recorded` — the same default the service applies.
+    status: expense?.status ?? "recorded",
+    review_note: expense?.review_note ?? "",
   }));
   const [receipt, setReceipt] = useState<File | null>(null);
 
@@ -70,6 +74,9 @@ function FormBody({ expense, onDone }: { expense: OfficeExpense | null; onDone: 
       expense_date: form.expense_date,
       description: form.description.trim(),
       vendor: form.vendor.trim(),
+      status: form.status,
+      // Only meaningful alongside a rejection; the server ignores it otherwise.
+      review_note: form.status === "rejected" ? form.review_note.trim() : "",
     };
     try {
       if (expense) {
@@ -132,6 +139,31 @@ function FormBody({ expense, onDone }: { expense: OfficeExpense | null; onDone: 
           <Label htmlFor="oe-receipt">Receipt (optional)</Label>
           <Input id="oe-receipt" type="file" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} />
         </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="oe-status">Status</Label>
+          <SimpleSelect
+            id="oe-status"
+            value={form.status}
+            onValueChange={(v) => set("status", v)}
+            options={EXPENSE_STATUSES.map((s) => ({ value: s.value, label: s.label }))}
+          />
+          <p className="text-caption text-muted-foreground">
+            {isEdit
+              ? "Approving or declining here records you as the reviewer, same as the buttons on the list."
+              : "Leave as Recorded unless this expense was already decided."}
+          </p>
+        </div>
+        {form.status === "rejected" && (
+          <div className="space-y-1.5">
+            <Label htmlFor="oe-note">Reason for declining</Label>
+            <Input
+              id="oe-note"
+              value={form.review_note}
+              onChange={(e) => set("review_note", e.target.value)}
+              placeholder="e.g. no receipt, duplicate of an earlier expense"
+            />
+          </div>
+        )}
       </div>
 
       <DialogFooter>

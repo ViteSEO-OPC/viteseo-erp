@@ -367,21 +367,27 @@ function BatchTransfers({ batchId }: { batchId: number }) {
         `disbursed`, so it should not run on a file nobody has read back.
       */}
       <div className="flex flex-wrap items-center gap-2">
-        <Label htmlFor={`recon-${batchId}`} className="text-caption text-muted-foreground">
-          Bank return file:
-        </Label>
-        <input
-          id={`recon-${batchId}`}
-          type="file"
-          accept=".csv,text/csv"
-          className="text-caption max-w-56"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void upload(file, false);
-            e.target.value = "";
-          }}
-        />
-        <span className="text-caption text-muted-foreground">preview, then</span>
+        <span className="text-caption text-muted-foreground">Bank return file:</span>
+        {/* Both controls are styled buttons hiding their own input — the pair reads as one
+            two-step action, which a bare browser file widget beside a button did not. */}
+        <Button variant="outline" size="sm" asChild>
+          <label>
+            <Upload className="size-4" />
+            Preview
+            <input
+              id={`recon-${batchId}`}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void upload(file, false);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </Button>
+        <span className="text-caption text-muted-foreground">then</span>
         <Button variant="outline" size="sm" asChild>
           <label>
             <Upload className="size-4" />
