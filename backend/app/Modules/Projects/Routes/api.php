@@ -91,7 +91,9 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     Route::post('subtasks/{subtask}/links', [LinkController::class, 'subtaskStore']);
     Route::delete('links/{link}', [LinkController::class, 'destroy']);
 
-    // Activity logs (read-only, task-scoped)
+    // Activity logs (read-only). The feed is the cross-project Recent Activity
+    // list (task + sub-task events only); the nested route is one task's History.
+    Route::get('activity-logs', [ActivityLogController::class, 'feed']);
     Route::get('tasks/{task}/activity-logs', [ActivityLogController::class, 'index']);
 
     // Private rich-text notes. Always "mine" — the note is resolved from the

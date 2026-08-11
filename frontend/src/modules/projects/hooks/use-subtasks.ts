@@ -56,6 +56,7 @@ export function useCreateSubtask(taskId: string) {
       qc.invalidateQueries({ queryKey: projectKeys.subtasks(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.task(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
     },
   });
 }
@@ -74,6 +75,7 @@ export function useUpdateSubtask(taskId: string) {
       qc.invalidateQueries({ queryKey: projectKeys.subtasks(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.task(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
     },
   });
 }
@@ -86,6 +88,7 @@ export function useDeleteSubtask(taskId: string) {
       qc.invalidateQueries({ queryKey: projectKeys.subtasks(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.task(taskId) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
     },
   });
 }

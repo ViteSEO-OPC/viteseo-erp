@@ -55,6 +55,7 @@ export function useProjectChannel(projectId?: string): void {
     // Board rows carry per-user fields (my_subtasks) the broadcast can't know,
     // so refetch rather than append a partial row.
     qc.invalidateQueries({ queryKey: tasksKey });
+    qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
   });
 
   useRealtimeEvent(channel, ".TaskUpdated", (task: Task) => {
@@ -73,6 +74,8 @@ export function useProjectChannel(projectId?: string): void {
         prev ? { ...prev, ...task } : prev,
       );
     }
+    // The update may have been a status move, which is logged.
+    qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
   });
 
   // A task was marked done by someone else — join the celebration.
@@ -139,6 +142,7 @@ export function useProjectChannel(projectId?: string): void {
     qc.invalidateQueries({ queryKey: projectKeys.subtasks(ev.task_id) });
     // Member "My Tasks" boards render subtask cards, so refresh the list too.
     qc.invalidateQueries({ queryKey: tasksKey });
+    qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
   });
 
   // Reconnect backfill: a dropped WebSocket silently loses every event fired during

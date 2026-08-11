@@ -32,6 +32,12 @@ export const projectKeys = {
     ["projects", "tasks", taskId, "subtasks"] as const,
   activity: (taskId: string) =>
     ["projects", "tasks", taskId, "activity"] as const,
+  // The cross-project Recent Activity feed. Its scope (workspace/project) is
+  // part of the key, so a mutation invalidates the shared prefix below to
+  // refresh every scope at once.
+  activityFeedRoot: ["projects", "activity-feed"] as const,
+  activityFeed: (params?: Record<string, unknown>) =>
+    ["projects", "activity-feed", params ?? {}] as const,
   comments: (taskId: string) =>
     ["projects", "tasks", taskId, "comments"] as const,
   links: (taskId: string) => ["projects", "tasks", taskId, "links"] as const,

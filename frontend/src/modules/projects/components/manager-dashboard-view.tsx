@@ -5,6 +5,7 @@ import { Button, Card, PlusIcon, PriorityBadge, StatCard, Tabs } from "@/core/ui
 import { CountBubble } from "@/modules/projects/components/pills";
 import { isOverdue, OverdueBadge } from "@/modules/projects/lib/overdue";
 import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
+import { ActivityFeed } from "@/modules/projects/components/activity-feed";
 import { NotesCard } from "@/modules/projects/components/notes-card";
 import type { NoteTarget } from "@/modules/projects/types/note";
 import {
@@ -19,16 +20,8 @@ import {
 } from "@/modules/projects/components/dashboard-shared";
 import Link from "next/dist/client/link";
 
-// Representative activity feed — no activity API yet, so it's templated over
-// real recent tasks and each entry opens that task in the global modal.
 /** The dashboard card and the task-view panel render this same note. */
 const USER_NOTE: NoteTarget = { scope: "user" };
-
-const ACTIVITY_TEMPLATES: Array<{ who: string; verb: string; when: string }> = [
-  { who: "Sarah L.", verb: "commented on", when: "12m ago" },
-  { who: "System", verb: "moved", when: "1h ago" },
-  { who: "Mike A.", verb: "updated", when: "4h ago" },
-];
 
 /** PM/Admin dashboard — org-wide Overview + a personal "My Tasks" tab. */
 export function ManagerDashboardView(): React.ReactElement {
@@ -79,18 +72,6 @@ export function ManagerDashboardView(): React.ReactElement {
   );
 
   const openTask = useOpenTask();
-
-  // Templated activity over the most recent real tasks so each entry opens a
-  // real task in the global modal (there's no activity API yet).
-  const activity = useMemo(
-    () =>
-      tasks.slice(0, ACTIVITY_TEMPLATES.length).map((t, i) => ({
-        ...ACTIVITY_TEMPLATES[i],
-        taskId: t.id,
-        title: t.title,
-      })),
-    [tasks],
-  );
 
   return (
     <div className="px-4 py-4 sm:px-6 lg:px-8">
@@ -235,33 +216,8 @@ export function ManagerDashboardView(): React.ReactElement {
 
             <section>
               <h2 className="text-lg font-bold text-ink">Activity Feed</h2>
-              <div className="mt-4 space-y-1">
-                {loading ? (
-                  <p className="text-sm text-ink-soft">Loading…</p>
-                ) : activity.length === 0 ? (
-                  <p className="text-sm text-ink-soft">No recent activity.</p>
-                ) : (
-                  activity.map((a) => (
-                    <button
-                      key={a.taskId}
-                      type="button"
-                      onClick={() => openTask(a.taskId)}
-                      className="flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-black/[0.03]"
-                    >
-                      <span className="mt-0.5 h-8 w-8 shrink-0 rounded-full bg-ink" />
-                      <div className="min-w-0">
-                        <p className="text-sm text-ink">
-                          <span className="font-bold">{a.who}</span> {a.verb}{" "}
-                          <span className="font-semibold">
-                            &lsquo;{a.title}&rsquo;
-                          </span>
-                        </p>
-                        <p className="text-xs text-ink-faint">{a.when}</p>
-                      </div>
-                    </button>
-                  ))
-                )}
-              </div>
+              {/* Platform-wide: task and sub-task events from every project. */}
+              <ActivityFeed className="mt-4 -mx-4" limit={6} showProject />
             </section>
           </div>
 

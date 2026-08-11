@@ -150,7 +150,7 @@ class ProjectsDemoSeeder extends Seeder
         $this->logStatusChange($home, $leo, $statuses['todo']->id, $statuses['in_progress']->id);
         $this->notifyAssigned($home, $leo, $marco);
 
-        Subtask::create([
+        $heroGrid = Subtask::create([
             'task_id' => $home->id,
             'name' => 'Implement responsive hero grid',
             'description' => 'CSS grid + clamp() typography.',
@@ -160,7 +160,10 @@ class ProjectsDemoSeeder extends Seeder
             'effort_score' => 5,
             'deadline' => $now->copy()->addDays(3)->toDateString(),
         ]);
-        Subtask::create([
+        $this->logSubtaskCreated($heroGrid, $marco);
+        $this->logSubtaskStatusChange($heroGrid, $leo, $statuses['todo']->id);
+
+        $ctaEvents = Subtask::create([
             'task_id' => $home->id,
             'name' => 'Wire up CTA analytics events',
             'assignee_id' => $grace?->id,
@@ -168,6 +171,7 @@ class ProjectsDemoSeeder extends Seeder
             'priority' => TaskPriority::MEDIUM,
             'effort_score' => 3,
         ]);
+        $this->logSubtaskCreated($ctaEvents, $marco);
 
         $this->comment($home, $marco, 'Please keep the hero above the fold on mobile — check the 375px breakpoint.');
         $comment = $this->comment($home, $leo, 'On it. Grid is done, wiring the CTA next.');
@@ -213,7 +217,7 @@ class ProjectsDemoSeeder extends Seeder
             ['Code-split the marketing bundle', $grace, TaskPriority::HIGH, 7, 'todo'],
             ['Preload brand fonts', $bea, TaskPriority::MEDIUM, 3, 'todo'],
         ] as [$name, $assignee, $priority, $effort, $status]) {
-            Subtask::create([
+            $subtask = Subtask::create([
                 'task_id' => $perf->id,
                 'name' => $name,
                 'assignee_id' => $assignee?->id,
@@ -222,6 +226,8 @@ class ProjectsDemoSeeder extends Seeder
                 'effort_score' => $effort,
                 'deadline' => $now->copy()->addDays(10)->toDateString(),
             ]);
+            $this->logSubtaskCreated($subtask, $marco);
+            $this->logSubtaskStatusChange($subtask, $assignee, $statuses['todo']->id);
         }
 
         // 4) A custom-status ("In Review") individual task.
@@ -271,7 +277,7 @@ class ProjectsDemoSeeder extends Seeder
             'submitted_by_id' => $leo?->id,
         ]);
         $this->logCreated($audit, $leo);
-        Subtask::create([
+        $crawler = Subtask::create([
             'task_id' => $audit->id,
             'name' => 'Run the crawler across staging',
             'assignee_id' => $leo?->id,
@@ -281,6 +287,7 @@ class ProjectsDemoSeeder extends Seeder
             'approval_status' => ApprovalStatus::PENDING,
             'submitted_by_id' => $leo?->id,
         ]);
+        $this->logSubtaskCreated($crawler, $leo);
 
         // 7) A proposal a PM already sent back — Grace can revise and resubmit it.
         $rejected = Task::create([
@@ -304,7 +311,7 @@ class ProjectsDemoSeeder extends Seeder
 
         // 8) A stand-alone sub-task proposal on an already-approved task — this one
         //    queues on its own, not as part of a bundle.
-        Subtask::create([
+        $keyboardNav = Subtask::create([
             'task_id' => $nav->id,
             'name' => 'Add keyboard navigation to the mega-menu',
             'description' => 'Arrow keys + Escape, focus trap while open.',
@@ -315,6 +322,7 @@ class ProjectsDemoSeeder extends Seeder
             'approval_status' => ApprovalStatus::PENDING,
             'submitted_by_id' => $bea?->id,
         ]);
+        $this->logSubtaskCreated($keyboardNav, $bea);
     }
 
     /**
@@ -378,7 +386,7 @@ class ProjectsDemoSeeder extends Seeder
             ['Draft store listings and screenshots', $leo, TaskPriority::LOW, 2, 'todo'],
             ['Wire crash reporting to the dashboard', $carlo, TaskPriority::HIGH, 6, 'in_progress'],
         ] as [$name, $assignee, $priority, $effort, $status]) {
-            Subtask::create([
+            $subtask = Subtask::create([
                 'task_id' => $release->id,
                 'name' => $name,
                 'assignee_id' => $assignee?->id,
@@ -387,6 +395,8 @@ class ProjectsDemoSeeder extends Seeder
                 'effort_score' => $effort,
                 'deadline' => $now->copy()->addDays(22)->toDateString(),
             ]);
+            $this->logSubtaskCreated($subtask, $marco);
+            $this->logSubtaskStatusChange($subtask, $assignee, $statuses['todo']->id);
         }
 
         $push = Task::create([
@@ -567,7 +577,7 @@ class ProjectsDemoSeeder extends Seeder
             ['Wire search across the docs', $grace, TaskPriority::LOW, 3, 'todo'],
             ['Port the changelog', $paolo, TaskPriority::LOW, 2, 'done'],
         ] as [$name, $assignee, $priority, $effort, $status]) {
-            Subtask::create([
+            $subtask = Subtask::create([
                 'task_id' => $docs->id,
                 'name' => $name,
                 'assignee_id' => $assignee?->id,
@@ -576,6 +586,8 @@ class ProjectsDemoSeeder extends Seeder
                 'effort_score' => $effort,
                 'deadline' => $now->copy()->addDays(19)->toDateString(),
             ]);
+            $this->logSubtaskCreated($subtask, $maya);
+            $this->logSubtaskStatusChange($subtask, $assignee, $statuses['todo']->id);
         }
 
         $this->comment($tokens, $marco, 'Cut a release candidate first so we can smoke-test consumers.');
@@ -673,6 +685,42 @@ class ProjectsDemoSeeder extends Seeder
             'field_changed' => 'status_id',
             'old_value' => (string) $oldStatusId,
             'new_value' => (string) $newStatusId,
+        ]);
+    }
+
+    private function logSubtaskCreated(Subtask $subtask, ?User $actor): void
+    {
+        if ($actor === null) {
+            return;
+        }
+
+        ActivityLog::create([
+            'task_id' => $subtask->task_id,
+            'subtask_id' => $subtask->id,
+            'user_id' => $actor->id,
+            'action' => 'subtask.created',
+        ]);
+    }
+
+    /**
+     * Sub-tasks are seeded straight into the status they are "already" in, so
+     * the move the assignee would have made is recorded here — otherwise the
+     * activity feed only ever shows sub-tasks being created, never progressing.
+     */
+    private function logSubtaskStatusChange(Subtask $subtask, ?User $actor, int $fromStatusId): void
+    {
+        if ($actor === null || (int) $subtask->status_id === $fromStatusId) {
+            return;
+        }
+
+        ActivityLog::create([
+            'task_id' => $subtask->task_id,
+            'subtask_id' => $subtask->id,
+            'user_id' => $actor->id,
+            'action' => 'subtask.status_changed',
+            'field_changed' => 'status_id',
+            'old_value' => (string) $fromStatusId,
+            'new_value' => (string) $subtask->status_id,
         ]);
     }
 

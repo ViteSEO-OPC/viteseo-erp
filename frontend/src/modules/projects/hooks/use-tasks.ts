@@ -60,6 +60,7 @@ export function useCreateTask(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
     },
   });
 }
@@ -104,6 +105,8 @@ export function useUpdateTask(projectId: string) {
       qc.invalidateQueries({ queryKey: projectKeys.task(id) });
       // Assignment/status changes move effort between members.
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
+      // A status change is logged, so the Recent Activity feed has news.
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
     },
   });
 }
@@ -116,6 +119,8 @@ export function useDeleteTask(projectId: string) {
       qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) });
       qc.removeQueries({ queryKey: projectKeys.task(id) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
+      // The task's log rows go with it, so the feed changes on a delete too.
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
     },
   });
 }

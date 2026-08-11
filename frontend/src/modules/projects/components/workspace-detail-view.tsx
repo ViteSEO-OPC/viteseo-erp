@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { User } from "@/core/types";
 import {
-  Avatar,
   AvatarStack,
   Button,
   Card,
@@ -26,6 +25,7 @@ import { useUsers } from "@/modules/projects/hooks/use-users";
 import { useWorkspace } from "@/modules/projects/hooks/use-workspaces";
 import type { StatusKey } from "@/modules/projects/types/common";
 import type { Project } from "@/modules/projects/types/project";
+import { ActivityFeed } from "@/modules/projects/components/activity-feed";
 import {
   CreateProjectModal,
 } from "@/modules/projects/components/create-project-modal";
@@ -54,30 +54,6 @@ function formatDate(value: string): string {
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
 }
-
-// Representative static activity feed — no activity API for workspaces yet.
-const RECENT_ACTIVITY = [
-  {
-    name: "Sarah L.",
-    text: "updated the Typography guidelines",
-    time: "2h ago",
-  },
-  {
-    name: "Mike A.",
-    text: "added 4 new components to Web library",
-    time: "5h ago",
-  },
-  {
-    name: "Jimmy Dane",
-    text: "removed archived 'Legacy' project",
-    time: "Yesterday",
-  },
-  {
-    name: "Emily R.",
-    text: "reviewed the accessibility audit logs",
-    time: "2 days ago",
-  },
-];
 
 function ProjectCard({
   project,
@@ -404,22 +380,11 @@ export function WorkspaceDetailView({
             )}
           </section>
 
-          {/* Recent Activity (representative static feed) */}
+          {/* Recent Activity — task and sub-task events across this workspace. */}
           <section className="mt-10">
             <h2 className="text-xl font-bold text-ink">Recent Activity</h2>
-            <Card className="mt-4 divide-y divide-line">
-              {RECENT_ACTIVITY.map((a, i) => (
-                <div key={i} className="flex items-start gap-3 px-4 py-3">
-                  <Avatar name={a.name} size={32} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-ink">
-                      <span className="font-bold">{a.name}</span>{" "}
-                      <span className="text-ink-soft">{a.text}</span>
-                    </p>
-                    <p className="mt-0.5 text-xs text-ink-faint">{a.time}</p>
-                  </div>
-                </div>
-              ))}
+            <Card className="mt-4 overflow-hidden py-0">
+              <ActivityFeed workspaceId={workspaceId} showProject />
             </Card>
           </section>
         </>

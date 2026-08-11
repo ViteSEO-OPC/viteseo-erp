@@ -25,6 +25,7 @@ function invalidateAfterReview(qc: ReturnType<typeof useQueryClient>): void {
   qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
   qc.invalidateQueries({ queryKey: ["projects", "projects"] });
   qc.invalidateQueries({ queryKey: projectKeys.workloads });
+  qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
 }
 
 /** `enabled` is false for non-managers — the endpoint 403s for them. */
