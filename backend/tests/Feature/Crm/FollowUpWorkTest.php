@@ -304,8 +304,13 @@ class FollowUpWorkTest extends TestCase
 
     /**
      * The cold-call follow-up exists precisely BECAUSE a call just happened, and that call leaves an
-     * open `call` event behind. If the dedupe guard widened to the shared category it would see that
-     * event and suppress the follow-up — so it stays a `follow-up`-only question.
+     * OPEN `call` event behind. If the dedupe guard widened to the shared category it would see that
+     * event and suppress the follow-up.
+     *
+     * The guard has since been allowed to see one further shape — a call that is `scheduled` AND
+     * dated, which the Calling lifecycle never produces — but this in-progress case must stay
+     * excluded forever. See FollowUpScheduler::coldCallFollowUpIsRedundant() and the edge tests in
+     * LeadFollowUpChannelRoutingTest.
      */
     public function test_an_open_call_event_does_not_suppress_the_cold_call_follow_up(): void
     {

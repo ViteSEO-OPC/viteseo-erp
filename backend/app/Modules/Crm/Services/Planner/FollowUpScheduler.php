@@ -6,16 +6,27 @@ use App\Modules\Crm\Controllers\PlannerEventController;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
 use App\Modules\Crm\Services\Outreach\InboundReplyProcessor;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Auth;
 
 /**
- * The single business component that creates Planner follow-up events. EVERY follow-up — whether it
- * originates from Cold Calling → Scheduled, the Lead Details "Schedule follow-up" Quick Action, the
- * generic Planner event endpoint, or a future integration — is born through {@see create()}. This
- * is enforced, not just conventional: {@see PlannerEventController::store()}
- * delegates here whenever `event_type === 'follow-up'`, so there is no second creation path.
+ * The single business component that creates events of the GENERIC `follow-up` type. Every such row
+ * — from Cold Calling → Scheduled, the generic Planner event endpoint, or a future integration — is
+ * born through {@see create()}. This is enforced, not just conventional:
+ * {@see PlannerEventController::store()} delegates here whenever `event_type === 'follow-up'`, so
+ * there is no second creation path for that type.
  *
- * `create()` is the sole `PlannerEvent::create` for follow-ups; it forces `event_type='follow-up'`
+ * SCOPE NOTE (Model B, Phase 2). This class is no longer the creator of ALL follow-up work. The Lead
+ * Details "Schedule follow-up" Quick Action now persists the BD's chosen channel structurally
+ * (`email` / `call` / `meeting` / `task`) and is therefore created by the controller's generic
+ * branch, not here — it passes every field this class would default. `follow-up` remains legal and
+ * unmigrated for legacy rows and for the auto-trigger below, which has no channel to record.
+ *
+ * The business CATEGORY "follow-up work" is {@see PlannerEvent::FOLLOW_UP_WORK_TYPES} and is wider
+ * than this class's output; consumers must ask that question via `followUpWork()`, never by matching
+ * the bare string here.
+ *
+ * `create()` is the sole `PlannerEvent::create` for `follow-up`; it forces `event_type='follow-up'`
  * and fills the follow-up defaults (todo / outreach / "{business} — follow-up" title / owner) that a
  * caller omits, while honoring anything the caller does pass (date, priority, note, provenance).
  * `scheduleForColdCall()` is the idempotent wrapper the LeadObserver uses.
@@ -54,15 +65,17 @@ class FollowUpScheduler
     /**
      * Ensure a pending follow-up exists for a lead whose Cold Calling was just set to 'scheduled'.
      *
-     * Idempotent by design: it does nothing if the lead already has an open (non-completed)
-     * follow-up, so repeated saves — or a scheduled → not-called → scheduled toggle — never stack
-     * duplicate follow-ups in the inbox. Returns the created event, or null when none was created.
-     * (The explicit Quick Action uses {@see create()} directly, which force-creates — an explicit
-     * "schedule a follow-up" click should not be silently skipped.)
+     * Idempotent by design: it does nothing when the lead already has open work that would make this
+     * a duplicate, so repeated saves — or a scheduled → not-called → scheduled toggle — never stack
+     * duplicate follow-ups in the inbox. Since the BD's channel is stored structurally, a call the BD
+     * has already PLANNED counts as that work; see {@see coldCallFollowUpIsRedundant()} for the exact
+     * (deliberately narrow) rule. Returns the created event, or null when none was created.
+     * (The explicit Quick Action posts its own event and never reaches this method — an explicit
+     * "schedule a follow-up" click is never silently skipped.)
      */
     public function scheduleForColdCall(Lead $lead): ?PlannerEvent
     {
-        if ($this->hasOpenFollowUp($lead)) {
+        if ($this->coldCallFollowUpIsRedundant($lead)) {
             return null;
         }
 
@@ -103,20 +116,49 @@ class FollowUpScheduler
     }
 
     /**
-     * Whether the lead already has a follow-up that has not been completed (the dedupe guard).
+     * Whether the lead already has open work that makes the auto cold-call follow-up a duplicate
+     * (the dedupe guard). Two shapes qualify, and NOTHING else:
      *
-     * DELIBERATELY NARROW — matches `follow-up` exactly and must NOT adopt the shared follow-up-work
-     * category. This guard runs from LeadObserver the moment a cold call is logged, and a cold call
-     * leaves an OPEN `call` event behind (CallSessionService completes it only on a CONNECTED
-     * outcome). Widening the guard would therefore see that event and suppress the very follow-up it
-     * exists to create.
+     *   1. an open generic `follow-up` — the original rule, unchanged;
+     *   2. a PLANNED call: `call` + status `scheduled` + a non-null `starts_at`.
+     *
+     * DELIBERATELY NARROW — it must NOT adopt the shared follow-up-work category. This guard runs
+     * from LeadObserver the moment a cold call is logged, and a cold call leaves an OPEN `call` event
+     * behind (CallSessionService completes it only on a CONNECTED outcome). Matching `call` broadly
+     * would therefore see that event and suppress the very follow-up this exists to create.
+     *
+     * Shape 2 is safe precisely because it is disjoint from every state the Calling lifecycle can
+     * produce, which is a property of that code and not a convention:
+     *   - `startAdHoc()` mints its event at `in_progress` with a NULL `starts_at`;
+     *   - `open()` moves any idle event it touches to `in_progress`;
+     *   - `finalize()` either completes the event (CONNECTED) or leaves it `in_progress` for a retry.
+     * No path produces a `scheduled` call, and no path back-fills `starts_at`. A call that is both
+     * `scheduled` and dated can therefore only have been PLANNED by a BD.
+     *
+     * THE BUSINESS RULE (PO-approved): any BD-planned scheduled Call with a non-null `starts_at`
+     * counts as existing follow-up work, REGARDLESS of whether it was created from Lead Details or
+     * the Planner event dialog. The two surfaces express the same intent, so the guard deliberately
+     * does not tell them apart — and a `source`-style discriminator was considered and rejected.
+     *
+     * Both conditions are load-bearing. `scheduled` alone would match a Board drag of an undated
+     * backlog call; requiring the date keeps this to genuinely planned work.
+     *
+     * Email / Meeting / Task are intentionally absent: they are different work from a call, so they
+     * do not make a cold-call follow-up redundant.
      */
-    private function hasOpenFollowUp(Lead $lead): bool
+    private function coldCallFollowUpIsRedundant(Lead $lead): bool
     {
         return PlannerEvent::query()
             ->where('lead_id', $lead->id)
-            ->where('event_type', 'follow-up')
             ->where('status', '!=', 'completed')
+            ->where(function (Builder $query): void {
+                $query
+                    ->where('event_type', 'follow-up')
+                    ->orWhere(fn (Builder $planned): Builder => $planned
+                        ->where('event_type', 'call')
+                        ->where('status', 'scheduled')
+                        ->whereNotNull('starts_at'));
+            })
             ->exists();
     }
 }

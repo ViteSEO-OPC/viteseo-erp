@@ -18,8 +18,13 @@ use Tests\TestCase;
  * the same frozen definition the reports page's overdue/today/upcoming buckets partition, reached
  * through one shared builder so the two surfaces cannot drift:
  *
- *   event_type = 'follow-up'  AND  starts_at IS NOT NULL  AND  status != 'completed'
+ *   event_type IN (follow-up, email, call, meeting)  AND  starts_at IS NOT NULL
+ *     AND  status != 'completed'
  *   scoped by PlannerEvent::visibleTo, day boundary in Asia/Manila
+ *
+ * The type list is PlannerEvent::FOLLOW_UP_WORK_TYPES, reached through `followUpWork()`. It is the
+ * whole CATEGORY, not the literal string — Lead Details stores the BD's channel structurally, so
+ * matching `'follow-up'` alone would silently drop most of this KPI's population.
  *
  * The PO ruling that an outbound email is NOT a follow-up is why this counts Planner events only —
  * `crm_emails` is deliberately not a source here.
