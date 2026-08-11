@@ -142,19 +142,59 @@ class UnansweredFollowUpEscalationTest extends TestCase
         $this->assertSame($this->bd->id, $task->assigned_to);
     }
 
-    /** A `lead.won` Activity is not a `lead.lost` one — the guard must read the event, not any activity. */
-    public function test_the_guard_is_specific_to_the_lost_activity(): void
+    /**
+     * `isLost()` must key on the `lead.lost` event specifically, not on "the lead has activities".
+     *
+     * SUPERSEDED EXPECTATION: this test previously used a `lead.won` Activity as its negative case and
+     * asserted that it did NOT suppress escalation. That was true when Won closed nothing — it is no
+     * longer the rule. Won now suppresses via {@see EscalateUnansweredFollowUp::isWon()}, so the
+     * negative case had to become an activity with no outcome meaning at all. A bare `lead.won`
+     * Activity with no Deal is still a valid probe of `isLost()` and is covered separately by
+     * `test_the_won_guard_is_structural_not_activity_based`.
+     */
+    public function test_the_lost_guard_is_specific_to_the_lost_activity(): void
+    {
+        $lead = $this->lead();
+        $lead->activities()->create([
+            'causer_id' => $this->bd->id,
+            'event' => 'lead.assigned',
+            'description' => 'reassigned',
+        ]);
+
+        $this->event('follow-up', $lead)->update(['status' => 'completed']);
+
+        $this->assertSame(1, $this->escalations($lead), 'only lead.lost may suppress via isLost()');
+    }
+
+    /**
+     * The Won guard reads the DEAL, not the Activity — so an Activity written without a Deal (an
+     * import artefact, a hand-written log line) cannot silently switch escalation off, and deleting a
+     * Deal restores it. This is the property that makes `isWon()` self-correcting where `isLost()`,
+     * bound to an append-only log, is not.
+     */
+    public function test_the_won_guard_is_structural_not_activity_based(): void
     {
         $lead = $this->lead();
         $lead->activities()->create([
             'causer_id' => $this->bd->id,
             'event' => 'lead.won',
-            'description' => 'marked won',
+            'description' => 'claims won, but no Deal exists',
         ]);
 
         $this->event('follow-up', $lead)->update(['status' => 'completed']);
 
-        $this->assertSame(1, $this->escalations($lead), 'only lead.lost may suppress escalation');
+        $this->assertSame(1, $this->escalations($lead), 'a lead.won Activity without a Deal is not won');
+    }
+
+    /** With a real Deal, the same completion is suppressed. */
+    public function test_a_lead_with_a_deal_does_not_escalate(): void
+    {
+        $lead = $this->lead();
+        $lead->deals()->create(['amount' => 50000, 'converted_at' => now()]);
+
+        $this->event('follow-up', $lead)->update(['status' => 'completed']);
+
+        $this->assertSame(0, $this->escalations($lead));
     }
 
     // ── 3. Pre-existing suppressions, unchanged ─────────────────────────────────────────────────

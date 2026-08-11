@@ -95,6 +95,21 @@ class PlannerEvent extends Model
      */
     public const MISSED_FOLLOW_UP_TYPES = ['follow-up', 'email'];
 
+    /**
+     * What marking a lead WON closes — the sales-CHASING channels only.
+     *
+     * Deliberately NOT {@see self::FOLLOW_UP_WORK_TYPES}, and this is the whole point of the constant:
+     * that category includes `meeting`, and a won deal is precisely when onboarding/kickoff meetings
+     * get booked. Closing the category wholesale would silently cancel real post-sale commitments.
+     *
+     * The asymmetry with LOST is intentional and is the business rule, not an oversight:
+     *  - LOST  → nothing is owed at all, so the whole follow-up-work category closes (meeting included).
+     *  - WON   → the pursuit is over, but the RELATIONSHIP has just started. Stop chasing
+     *            (`follow-up`/`email`/`call`); keep every scheduled engagement (`meeting`), plus
+     *            `task` and `consultation`, which sit outside the category already.
+     */
+    public const WON_CLOSES_TYPES = ['follow-up', 'email', 'call'];
+
     protected static function newFactory(): PlannerEventFactory
     {
         return PlannerEventFactory::new();

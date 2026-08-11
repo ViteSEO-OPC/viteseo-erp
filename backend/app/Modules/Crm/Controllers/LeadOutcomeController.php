@@ -18,7 +18,9 @@ use Illuminate\Http\JsonResponse;
  * Architecture (KB: Lead-Quick-Actions-Architecture):
  *  - Won is a DEAL concern: it creates a Deal (successful business only). Revenue and Conversion
  *    continue to be sourced EXCLUSIVELY from Deal records — this action writes a Deal, it does not
- *    change any computation. It touches no lead column, so the Lead Score is not recomputed.
+ *    change any computation. It touches no lead column, so the Lead Score is not recomputed. It also
+ *    closes the lead's open sales-chasing work, so a signed customer stops counting as overdue
+ *    follow-up against its BD forever.
  *  - Lost is a LEAD workflow Activity only: it records a `lead.lost` Activity (with an optional
  *    reason in `properties`) and completes outstanding follow-ups. It creates NO Deal, changes NO
  *    lead column, and therefore leaves Revenue, Conversion, and the Lead Score untouched — the
@@ -30,7 +32,8 @@ use Illuminate\Http\JsonResponse;
 class LeadOutcomeController extends Controller
 {
     /**
-     * Mark a lead as Won → create a Deal + a `lead.won` Activity.
+     * Mark a lead as Won → create a Deal + a `lead.won` Activity, then close the lead's outstanding
+     * sales-chasing work ({@see PlannerEvent::WON_CLOSES_TYPES} — `meeting` deliberately survives).
      * One active Deal per lead (repeat-business multi-deal is the future Opportunity pipeline).
      */
     public function won(MarkLeadWonRequest $request, Lead $lead): JsonResponse
@@ -56,6 +59,23 @@ class LeadOutcomeController extends Controller
             'description' => sprintf('%s marked %s as won', $request->user()->name, $lead->business_name),
             'properties' => ['deal_id' => $deal->id, 'amount' => $amount],
         ]);
+
+        // Stop chasing a customer we have already signed. Same Planner completion path as Mark Lost
+        // (the status write fires PlannerEventObserver → `planner-event.completed`), but a NARROWER
+        // set: {@see PlannerEvent::WON_CLOSES_TYPES} omits `meeting`, because a won deal is exactly
+        // when onboarding/kickoff meetings get booked — closing those would cancel real post-sale
+        // commitments. `task` and `consultation` sit outside the category already and also survive.
+        //
+        // Runs AFTER the Deal exists: EscalateUnansweredFollowUp resolves "is won" from
+        // `$lead->deals()->exists()`, so each completion below is correctly suppressed. Closing before
+        // the Deal was created would hand the BD a "No response — follow up" task for a signed
+        // customer — the same defect fixed for Mark Lost.
+        PlannerEvent::query()
+            ->where('lead_id', $lead->id)
+            ->followUpWork(PlannerEvent::WON_CLOSES_TYPES)
+            ->where('status', '!=', 'completed')
+            ->get()
+            ->each(fn (PlannerEvent $event) => $event->update(['status' => 'completed']));
 
         // RC3 Outreach Automation Pack — announce the outcome as a domain event (FROZEN #6) so the
         // `deal.won` n8n webhook (Thank You Email workflow) can react. Additive: Revenue/Conversion

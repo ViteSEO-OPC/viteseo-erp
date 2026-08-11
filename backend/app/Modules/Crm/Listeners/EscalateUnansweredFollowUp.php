@@ -19,9 +19,15 @@ use App\Modules\Crm\Models\PlannerEvent;
  * follow-up is completed, so a reply-driven completion is correctly NOT escalated). Idempotent: one open
  * system escalation task per lead.
  *
- * Three conditions suppress escalation, and each answers a different question: the lead REPLIED (a good
- * outcome), the lead is LOST (owed no further work — the completion was cleanup, not performed work; see
- * {@see isLost()}), or an escalation is already OPEN (idempotency).
+ * Four conditions suppress escalation, and each answers a different question: the lead REPLIED (a good
+ * outcome), the lead is WON (the sale overtook the follow-up; {@see isWon()}), the lead is LOST (owed no
+ * further work — the completion was cleanup, not performed work; {@see isLost()}), or an escalation is
+ * already OPEN (idempotency).
+ *
+ * The two outcome guards exist because BOTH outcome paths force-complete follow-up work as cleanup.
+ * Neither completion was performed by anyone, so neither may escalate — PLANNED != PERFORMED cuts both
+ * ways. They read different evidence only because Won and Lost are represented differently: Won has a
+ * Deal row, Lost has only an Activity.
  */
 class EscalateUnansweredFollowUp
 {
@@ -33,8 +39,8 @@ class EscalateUnansweredFollowUp
             return; // orphaned/lead-less follow-up — nothing to escalate.
         }
 
-        if ($this->hasReplied($lead) || $this->isLost($lead) || $this->hasOpenEscalation($lead)) {
-            return; // replied → good outcome; lost → owed no further work; already escalated → no-op.
+        if ($this->hasReplied($lead) || $this->isWon($lead) || $this->isLost($lead) || $this->hasOpenEscalation($lead)) {
+            return; // replied/won → good outcome; lost → owed nothing; already escalated → no-op.
         }
 
         $offset = (int) config('automation.escalation.start_offset_minutes', 1);
@@ -68,6 +74,26 @@ class EscalateUnansweredFollowUp
             ->where('lead_id', $lead->id)
             ->where('direction', 'inbound')
             ->exists();
+    }
+
+    /**
+     * Whether the lead has been marked Won — the deal is signed, so an unanswered follow-up is not a
+     * problem to chase; it is simply work the sale overtook.
+     *
+     * Mark Won closes the lead's open sales-chasing work
+     * ({@see \App\Modules\Crm\Controllers\LeadOutcomeController::won()}), and each of those closes
+     * fires FollowUpCompleted. Without this guard, signing a customer would hand the BD a
+     * high-priority "No response — follow up with X" task for that very customer — the same defect
+     * already fixed for Mark Lost, arriving through the other outcome.
+     *
+     * Unlike Lost, Won has a STRUCTURAL representation, so this needs no Activity scan: a Deal row is
+     * the definition of won, and `won()` already uses this exact expression as its duplicate guard.
+     * It is also self-correcting — delete the Deal and the lead escalates again — which the
+     * append-only `lead.lost` Activity can never be.
+     */
+    private function isWon(Lead $lead): bool
+    {
+        return $lead->deals()->exists();
     }
 
     /**
