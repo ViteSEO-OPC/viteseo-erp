@@ -9,6 +9,7 @@ import { DraftsList } from "@/modules/crm/features/follow-ups/components/drafts-
 import { SchedulerPanel } from "@/modules/crm/features/follow-ups/components/scheduler-panel";
 import { OutreachTabs, type OutreachTab } from "@/modules/crm/features/follow-ups/components/outreach-tabs";
 import { CopilotWidget } from "@/modules/crm/features/copilot/components/copilot-widget";
+import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { notify as toast } from "@/core/lib/notify";
 import { businessLocalToUtcIso } from "@/modules/crm/lib/timezone";
 import { useFollowUpsData } from "@/modules/crm/features/follow-ups/hooks/use-follow-ups-data";
@@ -49,6 +50,9 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
     toneOptions,
     selectPurpose,
     selectTone,
+    regenerate,
+    canRegenerate,
+    isDraftEdited,
   } = useFollowUpsData(leadId);
 
   const sendEmail = useSendEmail();
@@ -61,6 +65,7 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
   const [mobileView, setMobileView] = useState<MobileView>("inbox");
   const [schedulerOpen, setSchedulerOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<OutreachTab>("followups");
+  const [regenerateOpen, setRegenerateOpen] = useState(false);
 
   // Send: an already-saved draft transitions in place (same row); otherwise a fresh send.
   // The inbox row is a PlannerEvent, so the email targets its linked lead (`leadId`), not the
@@ -119,6 +124,24 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
     if (!selectedItem || selectedItem.isVirtual) return;
     markDone(selectedItem.id);
     setMobileView("inbox");
+  };
+
+  // Regenerate: swap in a different existing EMAIL PURPOSE for this lead while holding the BD's Tone
+  // fixed, through the same deterministic template path the dropdowns use. It overwrites the
+  // composer, so an edited draft is confirmed first rather than silently discarded.
+  const handleRegenerate = () => {
+    if (isDraftEdited) {
+      setRegenerateOpen(true);
+      return;
+    }
+    regenerate();
+    toast.success("Email regenerated from the template");
+  };
+
+  const confirmRegenerate = () => {
+    regenerate();
+    setRegenerateOpen(false);
+    toast.success("Email regenerated from the template");
   };
 
   // Save Draft: update the loaded draft in place, or create a new one for the selected lead.
@@ -194,8 +217,12 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
               toneOptions={toneOptions}
               onSelectPurpose={selectPurpose}
               onSelectTone={selectTone}
+              onRegenerate={canRegenerate ? handleRegenerate : undefined}
               onToggleSchedule={handleToggleSchedule}
-              onSaveDraft={handleSaveDraft}
+              // Withheld when the item has no lead: the draft endpoint is POST
+              // /leads/{leadId}/emails/drafts, so there is nothing to save against. Previously the
+              // handler returned silently and the click looked broken.
+              onSaveDraft={selectedItem.leadId ? handleSaveDraft : undefined}
               savingDraft={saveDraft.isPending || updateDraftMutation.isPending}
               onMarkDone={selectedItem.isVirtual ? undefined : handleMarkDone}
               markingDone={markingDone}
@@ -222,6 +249,15 @@ export function FollowUpsWorkspace({ leadId }: FollowUpsWorkspaceProps) {
           pendingId={sendDraft.isPending ? sendDraft.variables : discardDraft.isPending ? discardDraft.variables : null}
         />
       )}
+
+      <ConfirmDialog
+        open={regenerateOpen}
+        onOpenChange={setRegenerateOpen}
+        title="Replace your edits?"
+        description="Regenerating replaces the Subject and Body using a different Email Purpose for this lead, keeping your selected Tone. Your current changes will be lost."
+        confirmLabel="Regenerate"
+        onConfirm={confirmRegenerate}
+      />
 
       <SchedulerPanel
         open={schedulerOpen}
