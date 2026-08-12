@@ -15,6 +15,7 @@ use App\Modules\Crm\Controllers\GmailOAuthController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
 use App\Modules\Crm\Controllers\LeadFollowUpController;
+use App\Modules\Crm\Controllers\LeadImportStatusController;
 use App\Modules\Crm\Controllers\LeadOutcomeController;
 use App\Modules\Crm\Controllers\LeadQualificationController;
 use App\Modules\Crm\Controllers\NearbyClientController;
@@ -76,6 +77,11 @@ Route::prefix('v1/crm')->group(function (): void {
         // Declared before the /leads/{lead} wildcards, like priority-summary above.
         Route::get('/leads/status-summary', [LeadController::class, 'statusSummary'])->can('viewAny', Lead::class);
         Route::post('/leads/import', [LeadController::class, 'import'])->can('import', Lead::class);
+
+        // Poll a queued `.xls` conversion. Same `import` ability as the upload — no new permission
+        // surface; ownership is enforced per-record in XlsImportJobStore (foreign job => 404).
+        Route::get('/leads/import/{jobId}/status', [LeadImportStatusController::class, 'show'])
+            ->can('import', Lead::class);
         // Programmatic enrichment ingest — a discovery provider (Python Scraper) submits normalized
         // discovered businesses as JSON. Same `import` permission; lands fit-data only, assigns no owner.
         Route::post('/leads/discovered', [LeadController::class, 'ingestDiscovered'])->can('import', Lead::class);
