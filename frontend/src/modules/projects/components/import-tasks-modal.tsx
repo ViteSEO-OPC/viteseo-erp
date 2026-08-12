@@ -362,7 +362,10 @@ export function ImportTasksModal({
       width={plan ? 920 : 560}
       footer={
         plan ? (
-          <div className="flex w-full flex-wrap items-center justify-between gap-3">
+          // Stacks on a phone: the status line reads first, then the actions as a
+          // full-width block with the primary spanning both columns so the thing
+          // you actually came here to press is the biggest target on screen.
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-xs font-medium text-ink-soft">
               {blocked > 0
                 ? `${blocked} ${plural(blocked, "row")} still need${blocked === 1 ? "s" : ""} attention`
@@ -370,12 +373,17 @@ export function ImportTasksModal({
                   ? "Ready to send for review"
                   : "Everything checks out"}
             </span>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="ghost" onClick={close}>
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+              <Button
+                variant="ghost"
+                className="h-10 sm:h-9"
+                onClick={close}
+              >
                 Cancel
               </Button>
               <Button
                 variant="outline"
+                className="h-10 sm:h-9"
                 onClick={onRevalidate}
                 disabled={revalidate.isPending}
               >
@@ -385,18 +393,21 @@ export function ImportTasksModal({
                 Re-check
               </Button>
               <Button
+                className="col-span-2 h-10 sm:col-span-1 sm:h-9"
                 onClick={onImport}
                 disabled={blocked > 0 || commit.isPending}
               >
                 {commit.isPending && (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 )}
-                {isProposal
-                  ? `Submit ${rows.length} ${plural(rows.length, "task")} for review`
-                  : `Import ${rows.length} ${plural(rows.length, "task")}`}
-                {!isProposal &&
-                  subtaskCount > 0 &&
-                  ` · ${subtaskCount} ${plural(subtaskCount, "sub-task")}`}
+                <span className="truncate">
+                  {isProposal
+                    ? `Submit ${rows.length} ${plural(rows.length, "task")} for review`
+                    : `Import ${rows.length} ${plural(rows.length, "task")}`}
+                  {!isProposal &&
+                    subtaskCount > 0 &&
+                    ` · ${subtaskCount} ${plural(subtaskCount, "sub-task")}`}
+                </span>
               </Button>
             </div>
           </div>
@@ -496,8 +507,8 @@ export function ImportTasksModal({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <FileJson className="h-4 w-4 text-ink-faint" />
+          <div className="flex items-center gap-3">
+            <FileJson className="h-4 w-4 shrink-0 text-ink-faint" />
             <Summary
               tasks={rows.length}
               subtasks={subtaskCount}
@@ -531,7 +542,11 @@ export function ImportTasksModal({
             </section>
           )}
 
-          <div className="max-h-[46vh] overflow-y-auto">
+          {/* One scroll region on a phone, not two: the dialog itself is already
+              capped at 90vh and scrolls, and a nested scroller inside it is the
+              thing that makes a long list feel stuck under a thumb. The inner
+              cap only comes back once there is room for it to help. */}
+          <div className="sm:max-h-[46vh] sm:overflow-y-auto">
             <ImportPreviewTree
               tasks={rows}
               options={plan.options}
@@ -622,7 +637,7 @@ function Summary({
   isProposal: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-sm">
       <span className="font-semibold text-ink">
         {tasks} {plural(tasks, "task")}
         {subtasks > 0 && ` · ${subtasks} ${plural(subtasks, "sub-task")}`}
@@ -652,48 +667,61 @@ function RemapRow({
   const [value, setValue] = useState("");
 
   return (
-    <div className="flex flex-wrap items-end gap-2">
-      <div className="min-w-0 flex-1">
+    // Three things that don't fit one phone row: what's wrong, what to replace it
+    // with, and the action. The description gets its own row; the control and its
+    // button stay paired below it, since they're one gesture.
+    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+      {/* A floor on the description's width, so at the awkward middle sizes it
+          wraps onto its own row (the container wraps) rather than being squeezed
+          to one word per line beside the control. */}
+      <div className="min-w-0 sm:min-w-[14rem] sm:flex-1">
         <p className="text-sm font-medium text-ink">{entry.label}</p>
         <p className="text-xs text-ink-soft">
           used on {entry.count} {plural(entry.count, "row")}
         </p>
       </div>
 
-      {entry.kind === "number" ? (
-        <input
-          type="number"
-          min={0}
-          max={10}
-          placeholder="0-10"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          className="h-9 w-28 rounded-md border border-input bg-surface px-3 text-sm"
-        />
-      ) : (
-        <div className="w-52">
-          <Select value={value} onChange={(e) => setValue(e.target.value)}>
-            <option value="">Choose…</option>
-            {entry.candidates.map((option) => (
-              <option key={String(option.value)} value={String(option.value)}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-      )}
+      <div className="flex items-end gap-2">
+        {entry.kind === "number" ? (
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={10}
+            placeholder="0-10"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="h-10 w-full min-w-0 rounded-md border border-input bg-surface px-3 text-sm sm:h-9 sm:w-28"
+          />
+        ) : (
+          <div className="min-w-0 flex-1 sm:w-52 sm:flex-none">
+            <Select
+              className="h-10 sm:h-9"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+            >
+              <option value="">Choose…</option>
+              {entry.candidates.map((option) => (
+                <option key={String(option.value)} value={String(option.value)}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
 
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={value === ""}
-        onClick={() => {
-          onApply(value);
-          setValue("");
-        }}
-      >
-        Apply to all
-      </Button>
+        <Button
+          variant="outline"
+          className="h-10 shrink-0 sm:h-8"
+          disabled={value === ""}
+          onClick={() => {
+            onApply(value);
+            setValue("");
+          }}
+        >
+          Apply to all
+        </Button>
+      </div>
     </div>
   );
 }

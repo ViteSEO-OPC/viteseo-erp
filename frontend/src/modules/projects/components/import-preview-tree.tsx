@@ -103,7 +103,7 @@ function TaskRow({
   return (
     <div className={cn("px-3 py-2.5", blocked && "bg-warning-subtle/40")}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+        <span className="w-full min-w-0 truncate text-sm font-semibold text-ink sm:w-auto sm:flex-1">
           {task.title || (
             <span className="font-normal text-danger italic">Untitled task</span>
           )}
@@ -138,6 +138,7 @@ function TaskRow({
             {needs("status_id") && (
               <Editor label="Status">
                 <Select
+                  className="h-10 sm:h-9"
                   value={task.status_id ?? ""}
                   onChange={(e) =>
                     onPatch(task.ref, { status_id: e.target.value || null })
@@ -156,6 +157,7 @@ function TaskRow({
             {needs("priority") && (
               <Editor label="Priority">
                 <Select
+                  className="h-10 sm:h-9"
                   value={task.priority ?? ""}
                   onChange={(e) =>
                     onPatch(task.ref, {
@@ -179,6 +181,7 @@ function TaskRow({
                 task.errors.some((e) => e.includes("both an assignee"))) && (
               <Editor label="Assigned to">
                 <Select
+                  className="h-10 sm:h-9"
                   value={assignmentValue}
                   onChange={(e) =>
                     onPatch(task.ref, assignmentPatch(e.target.value))
@@ -230,7 +233,7 @@ function TaskRow({
             {task.errors.some((e) => e.includes("title")) && (
               <Editor label="Title" wide>
                 <input
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                  className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm sm:h-9"
                   value={task.title ?? ""}
                   placeholder="Give this task a title"
                   onChange={(e) =>
@@ -263,13 +266,15 @@ function SubtaskRow({
     subtask.unresolved_fields.includes(field);
 
   return (
-    <div className={cn("py-2 pr-3 pl-8", blocked && "bg-warning-subtle/40")}>
+    <div className={cn("py-2 pr-3 pl-5 sm:pl-8", blocked && "bg-warning-subtle/40")}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
-        <span className="min-w-0 flex-1 truncate text-sm text-ink">
-          {subtask.name || (
-            <span className="text-danger italic">Untitled sub-task</span>
-          )}
+        <span className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:flex-1">
+          <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+          <span className="min-w-0 truncate text-sm text-ink">
+            {subtask.name || (
+              <span className="text-danger italic">Untitled sub-task</span>
+            )}
+          </span>
         </span>
         {subtask.priority && (
           <PriorityBadge priority={subtask.priority} />
@@ -295,13 +300,14 @@ function SubtaskRow({
       </div>
 
       {blocked && (
-        <div className="mt-2 space-y-2 pl-6">
+        <div className="mt-2 space-y-2 sm:pl-6">
           <Problems errors={subtask.errors} />
 
           <div className="flex flex-wrap gap-2">
             {needs("status_id") && (
               <Editor label="Status">
                 <Select
+                  className="h-10 sm:h-9"
                   value={subtask.status_id ?? ""}
                   onChange={(e) =>
                     onPatch(subtask.ref, { status_id: e.target.value || null })
@@ -320,6 +326,7 @@ function SubtaskRow({
             {needs("priority") && (
               <Editor label="Priority">
                 <Select
+                  className="h-10 sm:h-9"
                   value={subtask.priority ?? ""}
                   onChange={(e) =>
                     onPatch(subtask.ref, {
@@ -341,6 +348,7 @@ function SubtaskRow({
             {!isProposal && needs("assignee_id") && (
               <Editor label="Assignee">
                 <Select
+                  className="h-10 sm:h-9"
                   value={subtask.assignee_id != null ? String(subtask.assignee_id) : ""}
                   onChange={(e) =>
                     onPatch(subtask.ref, {
@@ -380,7 +388,7 @@ function SubtaskRow({
             {subtask.errors.some((e) => e.includes("name")) && (
               <Editor label="Name" wide>
                 <input
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+                  className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm sm:h-9"
                   value={subtask.name ?? ""}
                   placeholder="Give this sub-task a name"
                   onChange={(e) =>
@@ -423,7 +431,7 @@ function Editor({
   children: React.ReactNode;
 }) {
   return (
-    <label className={cn("block", wide ? "w-full" : "w-44")}>
+    <label className={cn("block", wide ? "w-full" : "w-full sm:w-44")}>
       <span className="mb-1 block text-[11px] font-semibold tracking-wide text-ink-faint uppercase">
         {label}
       </span>
@@ -442,7 +450,7 @@ function DateInput({
   return (
     <input
       type="date"
-      className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+      className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm sm:h-9"
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
     />
@@ -461,7 +469,8 @@ function EffortInput({
       type="number"
       min={0}
       max={10}
-      className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+      inputMode="numeric"
+      className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm sm:h-9"
       value={value ?? ""}
       placeholder="0-10"
       onChange={(e) =>
