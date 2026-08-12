@@ -46,6 +46,7 @@ const LABELS: Record<string, string> = {
   frequency: "Pay frequency",
   deduction_timing: "Deductions land on",
   tax_timing: "Tax lands on",
+  allowance_timing: "Allowances land on",
 };
 
 /** Percent-valued fields, shown as "125%" rather than a bare number. */

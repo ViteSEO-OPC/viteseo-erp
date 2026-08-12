@@ -29,6 +29,8 @@ class Payslip extends Model
         // FIN-028 — the year-end true-up portion of withholding_tax. Signed: positive collected,
         // negative refunded.
         'tax_annualisation',
+        // FIN-054 — the year's taxable pay, tax due and prior withholding behind that adjustment.
+        'tax_annualisation_basis',
         // FIN-010 — an off-cycle corrective amount and what it is for.
         'adjustment_pay', 'adjustment_note',
         // FIN-014 — the terminal amounts on a final-pay payslip.
@@ -102,6 +104,8 @@ class Payslip extends Model
         'contribution_overrides' => 'array',
         // Slice B19 — contribution type => the monthly salary figure it was charged on.
         'contribution_bases' => 'array',
+        // FIN-054 — how the year-end tax settlement was arrived at.
+        'tax_annualisation_basis' => 'array',
         'total_deductions' => 'decimal:2',
         'deduction_carryover' => 'decimal:2',
         // FIN-053 — obligation => uncollected amount. Null when nothing went short.

@@ -26,8 +26,17 @@ class UpdatePayrollSettingsRequest extends FormRequest
             // FIN-030 — the regional minimum daily wage from the applicable DOLE wage order.
             'minimum_daily_wage' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999'],
             'frequency' => ['required', Rule::in(array_keys(PayScheduleService::PERIODS_PER_YEAR))],
-            'deduction_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],
+            // FIN-050 — NO `first` FOR CONTRIBUTIONS. A statutory contribution on `earnings` is a
+            // monthly amount on a monthly base, and the first cutoff cannot know the month: it can
+            // only ever be provisional, which means the last cutoff has to carry an adjustment —
+            // and once it does, "first cutoff only" IS a split, just a worse-shaped one (the whole
+            // month taken on the 15th and handed back on the 30th). Withholding tax and allowances
+            // keep all three: tax self-corrects at the year-end true-up, and an allowance is a
+            // fixed monthly figure with no base to discover.
+            'deduction_timing' => ['nullable', Rule::in(['every', 'last'])],
             'tax_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],
+            // FIN-048 — same three values as the timings above, and the same meaning.
+            'allowance_timing' => ['nullable', Rule::in(['every', 'first', 'last'])],
             'anchor_date' => ['nullable', 'date'],
             'pay_delay_days' => ['nullable', 'integer', 'min:0', 'max:31'],
             // Null = no ceiling, i.e. allowances stay entirely non-taxable.

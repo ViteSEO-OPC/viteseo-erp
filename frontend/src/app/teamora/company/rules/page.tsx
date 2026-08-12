@@ -31,7 +31,7 @@ import {
   useUpdatePayrollSettings,
 } from "@/modules/hr/hooks/use-payroll";
 import type { PayrollSettings } from "@/modules/hr/types/payroll";
-import { PAY_FREQUENCIES } from "@/modules/hr/types/employee";
+import { PAY_FREQUENCIES, payFrequencyLabel } from "@/modules/hr/types/employee";
 import {
   formatWorkdays,
   type DailyRateBasis,
@@ -1284,6 +1284,17 @@ const TIMING_OPTIONS = [
   { value: "last", label: "Last cutoff only" },
 ];
 
+/**
+ * FIN-050 — contributions have no "first cutoff only".
+ *
+ * SSS, PhilHealth and Pag-IBIG are monthly amounts on a monthly base, and the first cutoff cannot
+ * know what the month will earn. Anything it charges is provisional, so the last cutoff must carry
+ * an adjustment — at which point "first only" is just a split with the worst shape: the whole
+ * month taken on the 15th and part of it handed back on the 30th. Allowances and withholding tax
+ * keep all three (an allowance is a fixed monthly figure; tax self-corrects at year end).
+ */
+const CONTRIBUTION_TIMING_OPTIONS = TIMING_OPTIONS.filter((o) => o.value !== "first");
+
 function PayrollSettingsForm() {
   const { data: settings } = usePayrollSettings();
 
@@ -1310,6 +1321,9 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
   const [frequency, setFrequency] = useState(settings.frequency);
   const [deductionTiming, setDeductionTiming] = useState(settings.deduction_timing);
   const [taxTiming, setTaxTiming] = useState(settings.tax_timing);
+  const [allowanceTiming, setAllowanceTiming] = useState(settings.allowance_timing);
+  // FIN-046 — how many people this default actually decides the pay group for.
+  const inheritingCount = settings.inheriting_employee_count ?? 0;
   // A STRING so an empty box stays empty ("no floor set") instead of collapsing to 0, which
   // would be a wage order of nothing rather than no wage order at all.
   const [minimumWage, setMinimumWage] = useState(settings.minimum_daily_wage?.toString() ?? "");
@@ -1326,6 +1340,7 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
     setFrequency(settings.frequency);
     setDeductionTiming(settings.deduction_timing);
     setTaxTiming(settings.tax_timing);
+    setAllowanceTiming(settings.allowance_timing);
     setMinimumWage(settings.minimum_daily_wage?.toString() ?? "");
     setOpenCard(key);
   }
@@ -1337,6 +1352,7 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
         frequency,
         deduction_timing: deductionTiming,
         tax_timing: taxTiming,
+        allowance_timing: allowanceTiming,
         minimum_daily_wage: minimumWage.trim() === "" ? null : Number(minimumWage),
         effective_from: effectiveFrom || undefined,
       });
@@ -1417,6 +1433,26 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
           employees into a different pay group.
         </Hint>
 
+        {/* FIN-046 — THE COUNT, BEFORE THE SAVE.
+            Pay group membership is COALESCE(pay_frequency, <this setting>), so this one field
+            decides the pay group for everyone who never set their own. Changing it re-assigns all
+            of them at once and writes nothing to their records — the first symptom is a payroll
+            run that no longer finds them, or a re-run that cannot clean up after them because
+            their old payslip is already committed to a payment batch. Shown only once the value
+            has actually been changed, so it reads as a consequence rather than decoration. */}
+        {inheritingCount > 0 && frequency !== settings.frequency && (
+          <div className="mt-2 rounded-lg border border-warning/40 bg-warning-subtle px-3 py-2 text-xs text-foreground">
+            <strong>
+              {inheritingCount} employee{inheritingCount === 1 ? "" : "s"}
+            </strong>{" "}
+            {inheritingCount === 1 ? "has" : "have"} no pay schedule of their own and follow this
+            setting. Saving moves them from the{" "}
+            {payFrequencyLabel(settings.frequency).toLowerCase()} pay group to the{" "}
+            {payFrequencyLabel(frequency).toLowerCase()} one. Nothing is written to their records —
+            set a pay schedule on the employee to pin them.
+          </div>
+        )}
+
         <SubDivider />
 
         <FieldSelect
@@ -1424,12 +1460,15 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
           label="Government contributions"
           value={deductionTiming}
           onChange={setDeductionTiming}
-          options={TIMING_OPTIONS}
+          options={CONTRIBUTION_TIMING_OPTIONS}
         />
         <Hint>
-          When SSS, PhilHealth and Pag-IBIG come out. A month&apos;s amounts are either split
-          evenly across its cutoffs or taken whole on one of them — the monthly total is the
-          same either way, only the payslip it lands on changes.
+          When SSS, PhilHealth and Pag-IBIG come out. Split evenly, the first cutoff charges a
+          provisional half against the contracted salary and the last cutoff corrects it to what
+          the month actually earned. On the last cutoff only, the whole month is charged once,
+          when the earnings are already known. Either way the month totals the same — there is no
+          &ldquo;first cutoff only&rdquo;, because the first cutoff cannot know what the month
+          will earn.
         </Hint>
 
         <SubDivider />
@@ -1442,6 +1481,21 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
           options={TIMING_OPTIONS}
         />
         <Hint>When income tax is withheld.</Hint>
+
+        <SubDivider />
+
+        <FieldSelect
+          id="pay-allowance-timing"
+          label="Allowances"
+          value={allowanceTiming}
+          onChange={setAllowanceTiming}
+          options={TIMING_OPTIONS}
+        />
+        <Hint>
+          Allowances are configured as monthly amounts. Split evenly, a ₱1,500 allowance shows as
+          ₱750 on each of two semi-monthly payslips; paid on one cutoff it arrives whole. The
+          monthly total is the same either way.
+        </Hint>
       </SettingsDialog>
 
       <SettingsDialog

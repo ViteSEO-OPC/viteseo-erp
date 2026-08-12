@@ -189,25 +189,139 @@ class ContributionEarningsBasisTest extends HrTestCase
         $this->assertSame(300.0, (float) $slip['philhealth'], 'basic salary, unmoved by absence');
     }
 
-    /** Semi-monthly earnings are annualised back to a monthly figure before meeting a bracket. */
-    public function test_a_part_period_is_converted_to_a_monthly_equivalent(): void
+    /**
+     * FIN-050 — the month's base is its cutoffs ADDED, not one cutoff doubled.
+     *
+     * This replaces a test that asserted the annualisation (`period × periodsPerYear ÷ 12`).
+     * That arithmetic is right only when every cutoff of the month is identical: two unpaid weeks
+     * in the second half made the first payslip charge as though the month were whole, and the two
+     * halves could resolve to different SSS bands so the month's total matched no published
+     * figure. The expected ₱300 is unchanged — the mechanism reaching it is not.
+     */
+    public function test_the_final_cutoff_charges_on_the_months_cutoffs_added(): void
     {
         $this->version('sss', 'earnings');
         $employee = $this->employee(30000);
 
-        // 24 periods a year: each pays ₱15,000, which is a MONTHLY equivalent of ₱30,000.
-        // `count: 1` keeps the whole monthly contribution on this one slip.
-        $slip = app(PayrollService::class)->payslipFor(
-            employee: $employee->fresh(),
-            reimb: 0.0, unpaidDays: 0.0, periodsPerYear: 24, workingDaysInPeriod: 11,
-            dist: [
-                'index' => 0, 'count' => 1, 'deduction_timing' => 'every', 'tax_timing' => 'every',
-                'cycle_start' => '2026-08-01', 'cycle_end' => '2026-08-15',
-            ],
-        );
+        // The month's SECOND semi-monthly cutoff. The first already paid ₱15,000.
+        $slip = $this->semiMonthly($employee, index: 1, monthToDate: [
+            'earnings' => 15000.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0, 'periods' => 1,
+        ]);
 
         $this->assertSame(15000.0, (float) $slip['base_salary'], 'half a month of pay');
-        $this->assertSame(300.0, (float) $slip['sss'], 'but 1% of the ₱30,000 monthly equivalent');
+        $this->assertSame(300.0, (float) $slip['sss'], '1% of the ₱30,000 the month actually paid');
+    }
+
+    /**
+     * A HALF-MONTH OF ABSENCE MUST REACH THE MONTH'S BASE. This is the case the old arithmetic
+     * could not express: the first cutoff was normal, the second was not, and the month is the
+     * average of the two rather than either one doubled.
+     */
+    public function test_absence_in_one_cutoff_lowers_the_whole_months_base(): void
+    {
+        $this->version('sss', 'earnings');
+        $employee = $this->employee(30000);
+
+        // First cutoff paid in full (₱15,000); this one loses 5 days to unpaid leave.
+        $slip = $this->semiMonthly($employee, index: 1, unpaidDays: 5, monthToDate: [
+            'earnings' => 15000.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0, 'periods' => 1,
+        ]);
+
+        $earned = 15000.0 + (float) $slip['base_salary'];
+
+        $this->assertLessThan(30000.0, $earned, 'the month earned less than a full one');
+        $this->assertSame(round($earned * 0.01, 2), (float) $slip['sss'], '1% of what the month paid');
+    }
+
+    /**
+     * BEFORE THE MONTH IS FINISHED there is nothing to add up, so the provisional cutoff is
+     * charged on the CONTRACTED salary — the figure Philippine payroll engines use for the first
+     * half, and the only one that needs no knowledge of cutoffs that have not happened.
+     */
+    public function test_a_provisional_cutoff_is_charged_on_the_contracted_salary(): void
+    {
+        $this->version('sss', 'earnings');
+        $employee = $this->employee(30000);
+
+        // First of two cutoffs, with absence — which must NOT drag the provisional base down,
+        // because the month may yet be made up in the second half.
+        $slip = $this->semiMonthly($employee, index: 0, unpaidDays: 5);
+
+        $this->assertSame(150.0, (float) $slip['sss'], 'half of 1% of the contracted ₱30,000');
+    }
+
+    /**
+     * THE TRUE-UP. The final cutoff collects the month's real total MINUS what the earlier cutoffs
+     * already took, which is what lets a split deduction land on a published figure despite a
+     * provisional first half.
+     */
+    public function test_the_final_cutoff_trues_up_what_earlier_cutoffs_collected(): void
+    {
+        $this->version('sss', 'earnings');
+        $employee = $this->employee(30000);
+
+        // The month really earned ₱30,000 (₱15,000 + ₱15,000) so ₱300 is due for the month.
+        // ₱150 was already taken on the first cutoff, so this one takes the remaining ₱150.
+        $slip = $this->semiMonthly($employee, index: 1, monthToDate: [
+            'earnings' => 15000.0, 'sss' => 150.0, 'philhealth' => 0.0, 'pagibig' => 0.0, 'periods' => 1,
+        ]);
+
+        $this->assertSame(150.0, (float) $slip['sss'], '₱300 due for the month, ₱150 already paid');
+    }
+
+    /** Over-collected earlier in the month ⇒ this cutoff takes nothing. Never a negative deduction. */
+    public function test_the_true_up_never_goes_negative(): void
+    {
+        $this->version('sss', 'earnings');
+        $employee = $this->employee(30000);
+
+        $slip = $this->semiMonthly($employee, index: 1, monthToDate: [
+            'earnings' => 15000.0, 'sss' => 500.0, 'philhealth' => 0.0, 'pagibig' => 0.0, 'periods' => 1,
+        ]);
+
+        $this->assertSame(0.0, (float) $slip['sss'], 'already over-collected — take nothing');
+    }
+
+    /**
+     * A CUTOFF THAT WAS NEVER RUN IS A HOLE, NOT A ZERO. Running only the second cutoff of a month
+     * must not charge SSS on half a month's pay; the missing half is filled from the contract.
+     */
+    public function test_a_cutoff_that_was_never_run_is_filled_from_the_contract(): void
+    {
+        $this->version('sss', 'earnings');
+        $employee = $this->employee(30000);
+
+        // Second cutoff, but the first was never run — no prior payslip at all.
+        $slip = $this->semiMonthly($employee, index: 1);
+
+        $this->assertSame(300.0, (float) $slip['sss'], 'the missing half counted at contract rate');
+    }
+
+    /**
+     * One semi-monthly cutoff of August 2026. `index` picks which of the month's two it is;
+     * `monthToDate` is what the earlier cutoffs recorded, as `run()` preloads it.
+     *
+     * @param  array<string, mixed>  $monthToDate
+     * @return array<string, mixed>
+     */
+    private function semiMonthly(Employee $employee, int $index, float $unpaidDays = 0.0, array $monthToDate = []): array
+    {
+        $dist = [
+            'index' => $index, 'count' => 2,
+            'deduction_timing' => 'every', 'tax_timing' => 'every',
+            'cycle_start' => $index === 0 ? '2026-08-01' : '2026-08-16',
+            'cycle_end' => $index === 0 ? '2026-08-15' : '2026-08-31',
+        ];
+
+        if ($monthToDate !== []) {
+            $dist['month_to_date'] = $monthToDate;
+        }
+
+        return app(PayrollService::class)->payslipFor(
+            employee: $employee->fresh(),
+            reimb: 0.0, unpaidDays: $unpaidDays, periodsPerYear: 24, workingDaysInPeriod: 11,
+            dist: $dist,
+        );
     }
 
     // --- floors and ceilings still hold ------------------------------------------------

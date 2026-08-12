@@ -12,6 +12,7 @@ use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\WorkSchedule;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
+use App\Modules\Hr\Services\ReportService;
 use App\Modules\Hr\Services\TaxService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -147,6 +148,180 @@ class YearEndTaxAnnualisationTest extends HrTestCase
             'taxable' => round((float) $slips->sum('taxable_pay'), 2),
             'withheld' => round((float) $slips->sum('withholding_tax'), 2),
         ];
+    }
+
+    /**
+     * FIN-053 — A CYCLE THAT STRADDLES 31 DECEMBER STILL CLOSES THE YEAR.
+     *
+     * The containment test above exists precisely so weekly and bi-weekly groups reach the
+     * true-up: their final cutoff runs from late December into January and never lands on the
+     * 31st. But the year was derived from `cycle_end`, which for that cutoff is the FOLLOWING
+     * year — so it was compared against the wrong 31 December and failed, and the cutoff before it
+     * ends on the 27th and failed too. The result was that NO weekly or bi-weekly cycle ever
+     * annualised: those employees closed the year on twelve months of projections, permanently,
+     * with nothing anywhere to say so.
+     *
+     * Driven through a REAL RUN, not a re-implementation of the date rule: a test that restates
+     * the condition would pass against the broken code too, which is exactly how this survived.
+     * The observable is `tax_annualisation`, which is non-zero only when the true-up actually
+     * fired — the same signal `test_an_ordinary_cycle_carries_no_adjustment` asserts the absence of.
+     */
+    public function test_a_weekly_cycle_straddling_new_year_still_annualises(): void
+    {
+        // A deliberately uneven year, so a correction is genuinely owed and cannot come out at
+        // zero by luck.
+        $this->payJanToNov([80000, 20000, 80000, 20000, 80000, 20000, 80000, 20000, 80000, 20000, 80000]);
+        $this->workedDecember();
+
+        $this->employee->update(['pay_frequency' => 'weekly']);
+
+        // The weekly cutoff that contains 31 December 2026 and runs on into January.
+        $run = app(PayrollService::class)->run(
+            '2026-12-28', '2027-01-03', 'weekly', User::factory()->create(),
+        );
+
+        $slip = Payslip::where('payroll_run_id', $run->id)
+            ->where('employee_id', $this->employee->id)
+            ->firstOrFail();
+
+        $this->assertNotSame(
+            0.0,
+            round((float) $slip->tax_annualisation, 2),
+            'the cutoff containing 31 Dec must settle the year, not project it again',
+        );
+    }
+
+    /** The cutoff BEFORE it ends on 27 Dec — inside the year, but not the one that closes it. */
+    public function test_a_weekly_cycle_ending_before_the_year_end_carries_no_adjustment(): void
+    {
+        $this->payJanToNov([80000, 20000, 80000, 20000, 80000, 20000, 80000, 20000, 80000, 20000, 80000]);
+        $this->workedDecember();
+
+        $this->employee->update(['pay_frequency' => 'weekly']);
+
+        $run = app(PayrollService::class)->run(
+            '2026-12-21', '2026-12-27', 'weekly', User::factory()->create(),
+        );
+
+        $slip = Payslip::where('payroll_run_id', $run->id)
+            ->where('employee_id', $this->employee->id)
+            ->firstOrFail();
+
+        $this->assertSame(0.0, round((float) $slip->tax_annualisation, 2));
+    }
+
+    /**
+     * FIN-054 — the settlement records the figures that EXPLAIN it, and they add up.
+     *
+     * December folds the year's correction into the Withholding Tax line, and on the common case
+     * that line goes negative and net pay exceeds gross. Without these three numbers the payslip
+     * shows a negative tax with nothing to say why — so they are asserted to RECONCILE, not merely
+     * to be present: a stored explanation that does not equal the figure it explains is worse than
+     * none, because it invites the reader to trust it.
+     */
+    public function test_the_settlement_records_figures_that_reconcile(): void
+    {
+        $this->payJanToNov([200000, 200000, 200000, 20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000]);
+        $this->workedDecember();
+        $this->runDecember();
+
+        $slip = $this->decemberSlip();
+        $basis = $slip->tax_annualisation_basis;
+
+        $this->assertIsArray($basis, 'the closing payslip records its derivation');
+        $this->assertSame(self::YEAR, $basis['year']);
+
+        // due − already withheld = what this payslip withholds (negative here: a refund).
+        $this->assertSame(
+            round($basis['annual_tax_due'] - $basis['previously_withheld'], 2),
+            round((float) $slip->withholding_tax, 2),
+            'tax due minus prior withholding is this payslip’s withholding',
+        );
+
+        // The year's taxable is the year's payslips, this one included — the same total BIR 2316
+        // reports, so a figure the employee can check against their own payslips.
+        $this->assertSame(
+            $this->yearTotals()['taxable'],
+            round((float) $basis['year_taxable'], 2),
+            'the recorded year matches the payslips actually issued',
+        );
+
+        // And the tax due is genuinely the annual table applied to that figure.
+        $this->assertSame(
+            round(app(TaxService::class)->annualTax($basis['year_taxable'], '2026-12-31'), 2),
+            round((float) $basis['annual_tax_due'], 2),
+        );
+    }
+
+    /** Every other cycle records nothing — there is no settlement to explain. */
+    public function test_an_ordinary_cycle_records_no_settlement_basis(): void
+    {
+        $this->payJanToNov(array_fill(0, 11, 40000));
+        $march = app(PayrollService::class)->run(
+            '2026-03-01', '2026-03-31', 'monthly', User::factory()->create(),
+        );
+
+        $slip = Payslip::where('payroll_run_id', $march->id)->firstOrFail();
+
+        $this->assertNull($slip->tax_annualisation_basis);
+    }
+
+    /**
+     * FIN-055 — the reconciliation report agrees with a correctly settled year.
+     *
+     * The report recomputes each employee's annual tax from their payslips instead of trusting
+     * what payroll withheld, so this is a genuine cross-check of the settlement rather than a
+     * restatement of it: if the two ever disagree, one of them is wrong.
+     */
+    public function test_the_reconciliation_report_balances_a_settled_year(): void
+    {
+        $this->payJanToNov([200000, 200000, 200000, 20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000]);
+        $this->workedDecember();
+        $this->runDecember();
+
+        $report = app(ReportService::class)->get('tax_reconciliation', ['year' => self::YEAR]);
+        $summary = collect($report['summary'])->pluck('value', 'label');
+
+        $this->assertSame('1', $summary['Balanced']);
+        $this->assertSame('0', $summary['Short']);
+        $this->assertSame('0', $summary['Over-withheld']);
+        $this->assertSame('0', $summary['Not settled']);
+        $this->assertSame($summary['Tax due'], $summary['Tax withheld'], 'due equals withheld');
+        $this->assertStringContainsString('Every employee balances', $report['note']);
+    }
+
+    /**
+     * THE FAILURE THIS REPORT EXISTS FOR. An employee whose year was never settled is reported as
+     * UNSETTLED, not as over-withheld — every way the settlement silently fails to land (a
+     * December payslip already disbursed and so refused a recompute, a locked run, a whole pay
+     * group missed by a date bug) looks exactly like this from the outside, and the projection's
+     * ordinary over-withholding would otherwise disguise it as a routine refund.
+     */
+    public function test_an_employee_whose_year_never_settled_is_flagged_not_hidden(): void
+    {
+        $this->payJanToNov([200000, 200000, 200000, 20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000]);
+
+        // A December payslip that carries NO settlement — what a disbursed or locked December
+        // leaves behind.
+        $run = PayrollRun::firstOrCreate(
+            ['cycle_start' => '2026-12-01', 'cycle_end' => '2026-12-31', 'frequency' => 'monthly'],
+            ['type' => 'regular', 'status' => 'completed', 'run_at' => now()],
+        );
+        Payslip::create([
+            'payroll_run_id' => $run->id, 'employee_id' => $this->employee->id,
+            'base_salary' => 20000, 'gross' => 20000, 'taxable_pay' => 20000,
+            'withholding_tax' => 0, 'tax_annualisation' => 0,
+            'total_deductions' => 0, 'net_pay' => 20000, 'status' => 'disbursed',
+        ]);
+
+        $report = app(ReportService::class)->get('tax_reconciliation', ['year' => self::YEAR]);
+        $summary = collect($report['summary'])->pluck('value', 'label');
+        $row = $report['table']['rows'][0];
+
+        $this->assertSame('1', $summary['Not settled'], 'counted as unsettled');
+        $this->assertSame('0', $summary['Over-withheld'], 'NOT dressed up as an ordinary refund');
+        $this->assertSame('Not settled yet', $row[7]);
+        $this->assertStringContainsString('has not been closed yet', $report['note']);
     }
 
     // --- the point of the whole feature ---------------------------------------------------

@@ -25,6 +25,10 @@ class PayrollRunResource extends JsonResource
             'employee_count' => $this->employee_count,
             'run_at' => $this->run_at,
             'run_by' => $this->runner?->name,
+            // FIN-051 — how many payslips this run left untouched because they were already
+            // disbursed. Present only on the response to a run that just executed; null when the
+            // run is merely being read back, where it would describe an event, not a state.
+            'skipped_disbursed' => $this->resource->skippedDisbursedCount,
             // Slice 5 — a locked run can no longer be recomputed.
             'locked_at' => $this->locked_at,
             'locked_by' => $this->locker?->name,

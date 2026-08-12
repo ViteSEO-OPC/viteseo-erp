@@ -65,6 +65,9 @@ export interface Report {
   };
   /** FIN-041 — the pay groups that actually have completed runs. */
   pay_groups?: string[];
+  /** FIN-055 — tax years that have completed regular payroll, newest first. */
+  years?: number[];
+  selected_year?: number;
   note: string | null;
   exports: ReportExportEntry[];
   // Headcount & Movement specifics.

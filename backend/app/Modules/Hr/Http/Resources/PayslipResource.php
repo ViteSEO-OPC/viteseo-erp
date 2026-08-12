@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Models\ContributionVersion;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollSetting;
 use Illuminate\Http\Request;
@@ -99,6 +100,9 @@ class PayslipResource extends JsonResource
             // FIN-028 — the year-end tax correction, so a December payslip can explain a figure
             // that is not this period's ordinary projection. Negative means refunded.
             'tax_annualisation' => (float) $this->tax_annualisation,
+            // FIN-054 — the year's figures behind that adjustment. Null on every payslip but the
+            // one that settles a tax year, and on any written before the column existed.
+            'tax_annualisation_basis' => $this->tax_annualisation_basis,
             // FIN-014 — the terminal lines, so a final payslip can show its own derivation rather
             // than one opaque gross.
             'separation_pay' => $this->separation_pay === null ? null : (float) $this->separation_pay,
@@ -130,6 +134,9 @@ class PayslipResource extends JsonResource
             'employer_sss' => (float) $this->employer_sss,
             'employer_philhealth' => (float) $this->employer_philhealth,
             'employer_pagibig' => (float) $this->employer_pagibig,
+
+            // FIN-049 — WHAT EACH STATUTORY FIGURE WAS CHARGED ON. See contributionBasis().
+            'contribution_basis' => $this->contributionBasis(),
 
             // These two stay HR-only. Unlike the employer share, they are genuinely remittance
             // workflow: one says a filing cannot be made as it stands, the other is what a
@@ -334,6 +341,98 @@ class PayslipResource extends JsonResource
             ?? 0;
 
         return Carbon::parse($end)->addDays((int) $delay)->format('Y-m-d');
+    }
+
+    /**
+     * What each statutory contribution was actually charged on (FIN-049).
+     *
+     * THE QUESTION THIS ANSWERS. A ₱95,000 salary shows Pag-IBIG at ₱200 and reads as an error —
+     * 2% of ₱95,000 is ₱1,900. It is right: the rate applies to a ₱10,000 salary CAP. SSS is
+     * worse, because the rate multiplies a bracket's Monthly Salary Credit rather than the salary
+     * at all. Nothing on the payslip said either thing, so the only way to check a deduction was
+     * to open Company → Benefits and reconstruct the arithmetic by hand.
+     *
+     * BUILT FROM WHAT THE RUN STORED, never from live config: `contribution_bases` on this
+     * payslip and the rate version on the run's `policy_snapshot`. A payslip must keep explaining
+     * itself the same way after HR edits a rate, which is the whole reason both were snapshot.
+     *
+     * Degrades rather than guesses. A payslip predating either snapshot, or a bracket version
+     * whose bands were not captured, simply omits the entry and the document shows the figure
+     * with no note — the same choice `allowancesBreakdown()` makes.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function contributionBasis(): array
+    {
+        $bases = $this->contribution_bases;
+        $versions = $this->payrollRun?->policy_snapshot['contribution_versions'] ?? null;
+
+        if (! is_array($bases) || ! is_array($versions)) {
+            return [];
+        }
+
+        $overrides = is_array($this->contribution_overrides) ? $this->contribution_overrides : [];
+        $out = [];
+
+        foreach ($versions as $version) {
+            $type = $version['type'] ?? null;
+
+            if ($type === null || ! array_key_exists($type, $bases)) {
+                continue;
+            }
+
+            $base = (float) $bases[$type];
+            $rate = (float) ($version['employee_rate'] ?? 0);
+            $isBracket = ($version['basis'] ?? 'percentage') === 'bracket';
+
+            // A per-employee override replaces the EMPLOYEE side with a typed peso figure, so no
+            // rate was applied and describing one would be a lie about where the number came from.
+            if (($overrides[$type] ?? null) !== null) {
+                $out[$type] = ['overridden' => true];
+
+                continue;
+            }
+
+            $creditable = $isBracket
+                ? ContributionVersion::mscFor($version['brackets'] ?? [], $base)
+                : $this->clampToBand($base, $version);
+
+            if ($creditable === null) {
+                continue;
+            }
+
+            $out[$type] = [
+                'overridden' => false,
+                'basis' => $isBracket ? 'bracket' : 'percentage',
+                'rate' => $rate,
+                // The salary/earnings figure this contribution was computed FROM …
+                'salary' => round($base, 2),
+                // … and the figure the rate was actually applied TO. They differ whenever a cap,
+                // a floor or a bracket sits between them, which is exactly when the deduction
+                // looks wrong.
+                'charged_on' => round((float) $creditable, 2),
+                'capped' => ! $isBracket && $version['salary_cap'] !== null && $base > (float) $version['salary_cap'],
+                'floored' => ! $isBracket && $version['salary_floor'] !== null && $base < (float) $version['salary_floor'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /** The percentage path's creditable salary: the base held between its floor and cap. */
+    private function clampToBand(float $base, array $version): float
+    {
+        $creditable = $base;
+
+        if (($version['salary_floor'] ?? null) !== null) {
+            $creditable = max((float) $version['salary_floor'], $creditable);
+        }
+
+        if (($version['salary_cap'] ?? null) !== null) {
+            $creditable = min((float) $version['salary_cap'], $creditable);
+        }
+
+        return $creditable;
     }
 
     /**

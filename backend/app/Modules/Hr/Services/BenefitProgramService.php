@@ -260,10 +260,14 @@ class BenefitProgramService
     }
 
     /** Does this programme's rule cover this employee right now? */
-    public function covers(BenefitProgram $program, Employee $employee): bool
+    public function covers(BenefitProgram $program, Employee $employee, ?string $asOf = null): bool
     {
         return match ($program->eligibility) {
-            'custom' => $program->employees()->whereKey($employee->id)->exists(),
+            // FIN-047 — dated, for the reason `allowancesFor()` documents: an enrolment that has
+            // ended is not membership, and this is what the roster, the headcount and the
+            // override guard all ask. Defaults to today, so every existing caller is unaffected
+            // except in the case that was wrong.
+            'custom' => $this->isEnrolledOn($program, $employee, $asOf ?? now(config('app.timezone_local'))->toDateString()),
             'status' => in_array((string) $employee->employment_status, $program->eligibility_statuses ?? [], true),
             'management' => (bool) $employee->is_management,
             default => true, // 'all', and anything unrecognised — never narrower than intended
@@ -282,9 +286,21 @@ class BenefitProgramService
      * performance test caught exactly that). The `custom` pivot is only read when a custom
      * allowance actually exists, which today is never.
      *
+     * ENROLMENT DATES ARE HONOURED (FIN-047). `enrolled_at` / `ended_at` live on the pivot and
+     * are written by the Benefits screen, but nothing here ever read them: an allowance ended
+     * last year kept paying forever, and one dated to start next year paid immediately. Deleting
+     * the row was the only thing that actually stopped an allowance — which defeats the point of
+     * recording an end date, and loses the history of who had what.
+     *
+     * $asOf makes membership resolvable for a PAST CYCLE, the way the amount already is
+     * (`pricingAsOf`, Slice B11). Without it the two halves disagreed: re-running August priced
+     * the allowance at August's rate but applied TODAY's membership list. Null means "now", which
+     * is what every screen wants.
+     *
+     * @param  ?string  $asOf  Manila calendar date (Y-m-d); null = today
      * @return Collection<int, BenefitProgram>
      */
-    public function allowancesFor(Employee $employee): Collection
+    public function allowancesFor(Employee $employee, ?string $asOf = null): Collection
     {
         $catalogue = $this->activeAllowances();
 
@@ -292,15 +308,51 @@ class BenefitProgramService
             return new Collection;
         }
 
+        $on = $asOf ?? now(config('app.timezone_local'))->toDateString();
+
         $custom = $catalogue->contains(fn ($p) => $p->eligibility === 'custom')
-            ? $employee->benefitPrograms()->pluck('hr_benefit_programs.id')->all()
+            ? $this->enrolledProgramIdsFor($employee, $on)
             : [];
 
         return $catalogue
             ->filter(fn (BenefitProgram $p) => $p->eligibility === 'custom'
-                ? in_array((int) $p->id, array_map('intval', $custom), true)
+                ? in_array((int) $p->id, $custom, true)
                 : $this->covers($p, $employee))
             ->values();
+    }
+
+    /** Whether one enrolment row covers $on, with the same null/inclusive rules as below. */
+    private function isEnrolledOn(BenefitProgram $program, Employee $employee, string $on): bool
+    {
+        return $program->employees()
+            ->whereKey($employee->id)
+            ->where(fn ($q) => $q->whereNull('hr_benefit_enrollments.enrolled_at')
+                ->orWhereDate('hr_benefit_enrollments.enrolled_at', '<=', $on))
+            ->where(fn ($q) => $q->whereNull('hr_benefit_enrollments.ended_at')
+                ->orWhereDate('hr_benefit_enrollments.ended_at', '>=', $on))
+            ->exists();
+    }
+
+    /**
+     * The programme ids this employee's enrolment covers on $on.
+     *
+     * A null `enrolled_at` means "since forever" and a null `ended_at` means "still current" —
+     * both are the normal case, and the comparison must not exclude them. `ended_at` is treated
+     * as INCLUSIVE: an allowance ended on the 15th was still held on the 15th, which matches how
+     * `separation_date` is read as a last working day rather than a first absent one.
+     *
+     * @return list<int>
+     */
+    private function enrolledProgramIdsFor(Employee $employee, string $on): array
+    {
+        return $employee->benefitPrograms()
+            ->where(fn ($q) => $q->whereNull('hr_benefit_enrollments.enrolled_at')
+                ->orWhereDate('hr_benefit_enrollments.enrolled_at', '<=', $on))
+            ->where(fn ($q) => $q->whereNull('hr_benefit_enrollments.ended_at')
+                ->orWhereDate('hr_benefit_enrollments.ended_at', '>=', $on))
+            ->pluck('hr_benefit_programs.id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     /**

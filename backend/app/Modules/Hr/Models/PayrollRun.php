@@ -42,6 +42,16 @@ class PayrollRun extends Model
         'total_net' => 'decimal:2',
     ];
 
+    /**
+     * How many payslips this run REFUSED to recompute because they were already disbursed
+     * (FIN-051). Set by `PayrollService::run()`, never stored.
+     *
+     * A real declared property rather than a magic attribute: Eloquent's `__set` would otherwise
+     * file it among the model's attributes and the next `save()` would try to write a column that
+     * does not exist. Declaring it keeps it off the attribute bag entirely.
+     */
+    public ?int $skippedDisbursedCount = null;
+
     public function payslips(): HasMany
     {
         return $this->hasMany(Payslip::class);

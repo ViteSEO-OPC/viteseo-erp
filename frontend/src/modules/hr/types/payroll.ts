@@ -15,6 +15,12 @@ export interface PayrollSettings {
   frequency: string;
   deduction_timing: string; // every | first | last
   tax_timing: string;
+  /**
+   * FIN-048 — which cutoff the MONTHLY allowance lands on. `every` splits it across the month's
+   * cutoffs (the long-standing behaviour, which is why ₱1,500/month reads as ₱750 twice on a
+   * semi-monthly payslip); `first`/`last` pay it whole on one of them.
+   */
+  allowance_timing: string;
   anchor_date: string | null;
   pay_delay_days: number;
   /** Slice 10 -- annual ceiling above which allowances become taxable. null = no ceiling. */
@@ -22,6 +28,12 @@ export interface PayrollSettings {
   other_benefits_annual_cap: number | null;
   /** FIN-030 — regional minimum DAILY wage from the applicable DOLE wage order. Null = not set. */
   minimum_daily_wage: number | null;
+  /**
+   * FIN-046 — how many employees have NO explicit `pay_frequency` and therefore follow this
+   * default. Changing `frequency` moves every one of them into a different pay group, writing
+   * nothing to their records — so the number has to be visible BEFORE the change is saved.
+   */
+  inheriting_employee_count?: number;
   periods_per_year: number;
   current_period: PayrollPeriod;
   pay_groups: PayGroup[];
@@ -58,7 +70,41 @@ export interface PayrollRun {
   /** Slice 8 — the rules in force when this run executed. Detail view only. */
   policy_snapshot?: PolicySnapshot | null;
   rules_drift?: RulesDriftEntry[];
+  /**
+   * FIN-051 — payslips this run left untouched because they were already disbursed. Present on
+   * the response to a run that just executed; null when a run is merely read back.
+   */
+  skipped_disbursed?: number | null;
   breakdown?: PayrollBreakdownRow[];
+}
+
+/**
+ * How the year-end tax settlement on a December (or final-pay) payslip was arrived at (FIN-054).
+ * Absent on every other payslip. All figures are for the whole tax year, not the period.
+ */
+export interface TaxAnnualisationBasis {
+  year: number;
+  /** The year's total taxable pay, across every payslip issued — the BIR 2316 figure. */
+  year_taxable: number;
+  /** Annual tax actually due on that, from the graduated table. */
+  annual_tax_due: number;
+  /** What had already been withheld across the year before this payslip. */
+  previously_withheld: number;
+  /** What this payslip withholds once the year is settled. Negative = refund. */
+  settled_this_period: number;
+}
+
+/** How one statutory contribution on a payslip was arrived at (FIN-049). */
+export interface ContributionBasis {
+  overridden: boolean;
+  basis?: "bracket" | "percentage";
+  rate?: number;
+  /** The salary or earnings figure the contribution was computed from. */
+  salary?: number;
+  /** The figure the rate was actually applied to, after any cap, floor or bracket MSC. */
+  charged_on?: number;
+  capped?: boolean;
+  floored?: boolean;
 }
 
 /**
@@ -243,6 +289,19 @@ export interface Payslip {
   employer_sss?: number;
   employer_philhealth?: number;
   employer_pagibig?: number;
+  /**
+   * FIN-049 — what each statutory contribution was charged on, keyed by type. `salary` is the
+   * figure it was computed FROM, `charged_on` the figure the rate was applied TO; they differ
+   * whenever a cap, floor or SSS bracket sits between them, which is precisely when a deduction
+   * looks wrong. Absent for payslips predating the snapshot, and `{ overridden: true }` alone
+   * when a per-employee peso amount replaced the rate.
+   */
+  contribution_basis?: Record<string, ContributionBasis>;
+  /**
+   * FIN-054 — the year's figures behind a December settlement. Present only on the payslip that
+   * closes a tax year (or a final-pay slip), null everywhere else.
+   */
+  tax_annualisation_basis?: TaxAnnualisationBasis | null;
   /**
    * Slice B7 — which statutory deductions came from a per-employee amount on the profile rather
    * than the government rates. HR-only, and empty on payslips run before the column existed.

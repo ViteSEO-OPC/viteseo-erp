@@ -64,6 +64,10 @@ function GenericReport({ reportKey }: { reportKey: string }) {
   const [to, setTo] = useState("");
   const [payGroup, setPayGroup] = useState("all");
   const [run, setRun] = useState("");
+  // FIN-055 — the tax reconciliation is asked a YEAR, not a date range: annual tax is a property
+  // of the whole year, and a partial range would compute a bracket against pay that is not all of
+  // it. Empty means "whatever the server picked", which is the current year.
+  const [year, setYear] = useState("");
 
   const {
     data: report,
@@ -75,6 +79,7 @@ function GenericReport({ reportKey }: { reportKey: string }) {
     ...(to ? { to } : {}),
     ...(payGroup !== "all" ? { frequency: payGroup } : {}),
     ...(run ? { run } : {}),
+    ...(year ? { year } : {}),
   });
   const exportMut = useExportReport(reportKey);
 
@@ -128,8 +133,20 @@ function GenericReport({ reportKey }: { reportKey: string }) {
                 something to filter by, so a report that doesn't support one never shows it. */}
             {((report.departments?.length ?? 0) > 0 ||
               (report.pay_groups?.length ?? 0) > 0 ||
+              (report.years?.length ?? 0) > 0 ||
               (report.runs?.length ?? 0) > 0) && (
               <div className="flex flex-wrap items-end gap-3 rounded-card border border-border bg-card p-4">
+                {(report.years?.length ?? 0) > 0 && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="rep-year">Tax year</Label>
+                    <SimpleSelect
+                      className="w-36"
+                      value={year || String(report.selected_year ?? "")}
+                      onValueChange={setYear}
+                      options={report.years!.map((y) => ({ value: String(y), label: String(y) }))}
+                    />
+                  </div>
+                )}
                 {(report.runs?.length ?? 0) > 0 && (
                   <div className="space-y-1.5">
                     <Label htmlFor="rep-run">Run</Label>
@@ -173,15 +190,22 @@ function GenericReport({ reportKey }: { reportKey: string }) {
                   </div>
                 )}
                 {/* The range is offered on any report carrying a department list — every one of them
-                    aggregates over runs, so a period is always a meaningful thing to ask for. */}
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="rep-from">From</Label>
-                  <DatePicker id="rep-from" value={from} onChange={(v) => setFrom(v)} className="w-36" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="rep-to">To</Label>
-                  <DatePicker id="rep-to" value={to} onChange={(v) => setTo(v)} className="w-36" />
-                </div>
+                    aggregates over runs, so a period is always a meaningful thing to ask for.
+                    FIN-055 — EXCEPT a year-scoped one. Annual tax is a property of the whole year:
+                    a bracket found on part of it is not a partial answer, it is a wrong one. A
+                    report that asks for a year does not also offer a range that could contradict it. */}
+                {(report.years?.length ?? 0) === 0 && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="rep-from">From</Label>
+                      <DatePicker id="rep-from" value={from} onChange={(v) => setFrom(v)} className="w-36" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="rep-to">To</Label>
+                      <DatePicker id="rep-to" value={to} onChange={(v) => setTo(v)} className="w-36" />
+                    </div>
+                  </>
+                )}
                 {(from || to || department !== "all" || payGroup !== "all") && (
                   <Button
                     variant="ghost"

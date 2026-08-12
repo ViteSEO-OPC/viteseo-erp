@@ -202,14 +202,27 @@ export default function PayrollPage() {
   async function onRun() {
     if (!cycle) return;
     try {
-      await runMut.mutateAsync({
+      const run = await runMut.mutateAsync({
         ...cycle,
         // FIN-030b — only sent when there is something to acknowledge. The server refuses the run
         // otherwise, which is the point: paying below the floor may well be correct, but doing it
         // with nothing on the record is not.
         ...(minWageAck ? { minimum_wage_ack: true, minimum_wage_ack_reason: minWageReason } : {}),
       });
-      toast.success("Payroll computed — payslips generated");
+
+      // FIN-051 — a re-run REFUSES to touch payslips that were already disbursed, which is
+      // correct but was silent: the run reported success, the figures did not move, and nothing
+      // said which ones were skipped or why. A warning rather than a success, because "computed"
+      // on its own is the sentence that sends someone hunting for a bug that isn't there.
+      const skipped = run?.skipped_disbursed ?? 0;
+      if (skipped > 0) {
+        toast.warning(
+          `Payroll computed — ${skipped} payslip${skipped === 1 ? "" : "s"} left unchanged`,
+          `Already disbursed, so ${skipped === 1 ? "it was" : "they were"} not recomputed. Undo the disbursement on ${skipped === 1 ? "that row" : "those rows"} first if ${skipped === 1 ? "it needs" : "they need"} to change.`,
+        );
+      } else {
+        toast.success("Payroll computed — payslips generated");
+      }
       setConfirmOpen(false);
       setMinWageAck(false);
       setMinWageReason("");
@@ -491,10 +504,15 @@ export default function PayrollPage() {
         </p>
       )}
 
-      <div className="mt-6 flex items-start gap-3 rounded-card border border-warning/40 bg-warning-subtle px-4 py-3">
-        <Zap className="mt-0.5 size-5 shrink-0 text-warning" fill="currentColor" />
-        <p className="text-sm text-foreground">
-          <span className="font-semibold">Computation only — no money moves.</span>{" "}
+      {/* A PERMANENT EXPLAINER, NOT AN ALERT (FIN-052).
+          This carried the same amber that the outstanding/minimum-wage strip above uses. Two
+          identical yellow bars stacked meant the one that actually needs action read as
+          decoration — and this one is on screen every single visit, which is exactly what teaches
+          people to skip the colour. Warning styling is now reserved for things that want you. */}
+      <div className="mt-6 flex items-start gap-3 rounded-card border border-border bg-muted/40 px-4 py-3">
+        <Zap className="mt-0.5 size-5 shrink-0 text-muted-foreground" fill="currentColor" />
+        <p className="text-sm text-muted-foreground">
+          <span className="font-semibold text-foreground">Computation only — no money moves.</span>{" "}
           Running a pay group calculates gross, PH deductions and net for its employees
           and generates payslips so HR can disburse manually.
         </p>
