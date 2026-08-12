@@ -2,8 +2,9 @@
 
 namespace App\Modules\Crm\Services;
 
-use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Requests\StoreLeadRequest;
+use App\Modules\Crm\Services\Import\XlsConverter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,8 @@ use OpenSpout\Reader\XLSX\Reader as XlsxReader;
  */
 class LeadImportService
 {
+    public function __construct(private readonly XlsConverter $xls = new XlsConverter) {}
+
     /**
      * Header aliases → canonical Lead column. Header cells are normalized
      * (lowercased, trimmed, separators collapsed to single spaces) before lookup.
@@ -146,9 +149,21 @@ class LeadImportService
      *
      * @throws ValidationException when the file is empty or lacks the required columns
      */
-    public function import(UploadedFile $file, int $userId, bool $dryRun, ?int $assignedTo = null): array
-    {
-        $rows = $this->readRows($file);
+    public function import(
+        UploadedFile $file,
+        int $userId,
+        bool $dryRun,
+        ?int $assignedTo = null,
+        ?string $preConvertedPath = null,
+    ): array {
+        // A large `.xls` was already normalized to `.xlsx` by the queued job; reuse that result
+        // rather than converting a second time. Every other format reads straight from the upload.
+        $rows = $preConvertedPath !== null
+            ? $this->readRows($preConvertedPath, 'xlsx')
+            : $this->readRows(
+                (string) $file->getRealPath(),
+                strtolower($file->getClientOriginalExtension()),
+            );
 
         if ($rows === []) {
             throw ValidationException::withMessages(['file' => 'The file is empty.']);
@@ -691,12 +706,37 @@ class LeadImportService
      *
      * @return list<list<string>>
      */
-    private function readRows(UploadedFile $file): array
+    private function readRows(string $path, string $extension): array
     {
-        $extension = strtolower($file->getClientOriginalExtension());
+        // Legacy `.xls` is normalized to `.xlsx` first and then read by the SAME OpenSpout reader as
+        // a native `.xlsx` — one parsing path for both, so aliasing/translation/dedup cannot diverge.
+        // The generated file is ours and is always removed, including when parsing throws.
+        $converted = null;
+        if ($extension === 'xls') {
+            $converted = $this->xls->convert($path);
+            $path = $converted;
+            $extension = 'xlsx';
+        }
+
+        try {
+            return $this->readRowsFrom($path, $extension);
+        } finally {
+            if ($converted !== null && is_file($converted)) {
+                @unlink($converted);
+            }
+        }
+    }
+
+    /**
+     * The unchanged OpenSpout read. `.xlsx` and CSV/TXT reach this exactly as they always did.
+     *
+     * @return list<list<string>>
+     */
+    private function readRowsFrom(string $path, string $extension): array
+    {
         $reader = $extension === 'xlsx' ? new XlsxReader : new CsvReader;
 
-        $reader->open((string) $file->getRealPath());
+        $reader->open($path);
 
         $rows = [];
         foreach ($reader->getSheetIterator() as $sheet) {
