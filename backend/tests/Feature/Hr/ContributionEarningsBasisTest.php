@@ -234,20 +234,59 @@ class ContributionEarningsBasisTest extends HrTestCase
     }
 
     /**
-     * BEFORE THE MONTH IS FINISHED there is nothing to add up, so the provisional cutoff is
-     * charged on the CONTRACTED salary — the figure Philippine payroll engines use for the first
-     * half, and the only one that needs no knowledge of cutoffs that have not happened.
+     * BEFORE THE MONTH IS FINISHED there is nothing to add up, so the provisional cutoff scales
+     * ITS OWN earnings to a month — `period pay × cutoffs` — rather than assuming the contract was
+     * met. Someone who lost half the period is not charged as though they had worked it all, which
+     * also leaves a smaller correction for the final cutoff.
+     *
+     * The expectation is DERIVED from the slip's own pay rather than written as a literal, so the
+     * test states the rule ("the base is this period's earnings, scaled to a month") instead of
+     * pinning a number that says nothing about why.
      */
-    public function test_a_provisional_cutoff_is_charged_on_the_contracted_salary(): void
+    public function test_a_provisional_cutoff_is_charged_on_its_own_earnings_scaled_to_a_month(): void
     {
         $this->version('sss', 'earnings');
         $employee = $this->employee(30000);
 
-        // First of two cutoffs, with absence — which must NOT drag the provisional base down,
-        // because the month may yet be made up in the second half.
         $slip = $this->semiMonthly($employee, index: 0, unpaidDays: 5);
 
-        $this->assertSame(150.0, (float) $slip['sss'], 'half of 1% of the contracted ₱30,000');
+        $periodPay = (float) $slip['base_salary'];
+        // base = periodPay × 2, charged at 1% for the month, of which this cutoff takes half.
+        $expected = round(($periodPay * 2) * 0.01 / 2, 2);
+
+        $this->assertSame($expected, (float) $slip['sss']);
+        $this->assertLessThan(
+            150.0,
+            (float) $slip['sss'],
+            'and less than the ₱150 the contracted salary would have charged — the absence reached it',
+        );
+    }
+
+    /**
+     * A capped contribution takes at most its SHARE of the monthly ceiling on one cutoff, never
+     * the whole ceiling per cutoff.
+     *
+     * NOT A TEST OF THE `× cutoffs` SCALING, and worth saying so: it passes with or without it,
+     * because the ceiling clamps the monthly figure either way and the timing factor does the
+     * splitting separately. The scaling is guarded by
+     * `test_a_provisional_cutoff_is_charged_on_its_own_earnings_scaled_to_a_month`, which halves
+     * without it. This one guards the ceiling itself — that the split never resolves to a full
+     * monthly maximum on each payslip.
+     */
+    public function test_a_capped_contribution_takes_only_its_share_of_the_ceiling(): void
+    {
+        ContributionVersion::create([
+            'type' => 'sss', 'effective_from' => '2026-01-01', 'basis' => 'percentage',
+            'salary_basis' => 'earnings', 'employee_rate' => 0.05, 'employer_rate' => 0.10,
+            'salary_cap' => 35000,
+        ]);
+
+        // ₱95,000 a month — every cutoff is already past the ₱35,000 ceiling on its own.
+        $employee = $this->employee(95000);
+        $slip = $this->semiMonthly($employee, index: 0);
+
+        // The month's cap is 5% × ₱35,000 = ₱1,750, so ONE cutoff may take at most half of it.
+        $this->assertSame(875.0, (float) $slip['sss'], 'half the monthly ceiling, not the whole of it');
     }
 
     /**
@@ -269,17 +308,25 @@ class ContributionEarningsBasisTest extends HrTestCase
         $this->assertSame(150.0, (float) $slip['sss'], '₱300 due for the month, ₱150 already paid');
     }
 
-    /** Over-collected earlier in the month ⇒ this cutoff takes nothing. Never a negative deduction. */
-    public function test_the_true_up_never_goes_negative(): void
+    /**
+     * OVER-COLLECTED EARLIER IN THE MONTH ⇒ THE DIFFERENCE COMES BACK.
+     *
+     * This was floored at zero, so an employee whose month collapsed after a normal first half
+     * simply kept paying the higher figure. The correction lands on the cutoff being computed now
+     * and touches nothing historical, and the year-end tax settlement already refunds this way —
+     * a negative line here is the same mechanism, bounded by what the month itself collected.
+     */
+    public function test_over_collection_is_refunded_on_the_final_cutoff(): void
     {
         $this->version('sss', 'earnings');
         $employee = $this->employee(30000);
 
+        // ₱300 due for the month, ₱500 already taken ⇒ ₱200 back.
         $slip = $this->semiMonthly($employee, index: 1, monthToDate: [
             'earnings' => 15000.0, 'sss' => 500.0, 'philhealth' => 0.0, 'pagibig' => 0.0, 'periods' => 1,
         ]);
 
-        $this->assertSame(0.0, (float) $slip['sss'], 'already over-collected — take nothing');
+        $this->assertSame(-200.0, (float) $slip['sss'], 'the ₱200 over-collected comes back');
     }
 
     /**

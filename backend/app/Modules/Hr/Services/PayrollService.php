@@ -617,15 +617,26 @@ class PayrollService
         // whole, and the halves could resolve to different SSS bands.
         //
         // On the month's LAST cutoff every earlier cutoff exists, so the month's real earnings are
-        // simply their sum plus this one. Before that they cannot be known — the remaining cutoffs
-        // have not happened — so the base is the CONTRACTED monthly salary, which is what Philippine
-        // payroll engines use for the provisional half and needs no lookahead. The final cutoff
-        // then trues the month up (see contributionForPeriod()).
+        // simply their sum plus this one. The final cutoff then trues the month up — see
+        // contributionForPeriod().
+        //
+        // BEFORE THAT the month cannot be known, so this cutoff's own earnings are SCALED to a
+        // monthly estimate: `period pay × cutoffs in the month`. It used to use the contracted
+        // salary, which charges someone who lost half the period as though they had worked it all
+        // and leaves a larger correction for the final cutoff to claw back.
+        //
+        // THE SCALING IS THE WHOLE POINT AND IS NOT A NO-OP. It is tempting to read `× cutoffs`
+        // then `÷ cutoffs` as cancelling, and in the flat middle of the table it does. The bracket
+        // table is NOT flat: it is constant below the floor (MSC ₱5,000) and constant above the
+        // ceiling (MSC ₱35,000). Looking a HALF-month up in a monthly table applies both limits
+        // twice a month — ₱47,500 a cutoff is already past the ceiling, so each cutoff charges the
+        // monthly maximum and the employee pays double; ₱3,000 a cutoff is lifted to the floor
+        // twice. Scaling to a month first makes each limit apply once, where it belongs.
+        //
         // A CUTOFF THAT WAS NEVER RUN LEAVES A HOLE, and counting it as zero earnings would
         // under-charge the month — run only the second cutoff of a semi-monthly month and SSS
         // would be charged on half a month's pay. Known cutoffs use their actual figures; missing
-        // ones are filled at the contracted per-period rate, the same contract the provisional
-        // cutoffs above are charged on.
+        // ones are filled at the contracted per-period rate.
         $cutoffsInMonth = max(1, (int) ($dist['count'] ?? 1));
         $isFinalCutoff = ($dist['index'] ?? 0) >= ($cutoffsInMonth - 1);
         $priorEarnings = (float) ($dist['month_to_date']['earnings'] ?? 0.0);
@@ -643,7 +654,7 @@ class PayrollService
                         + $contributableAllowance,
                     2,
                 )
-                : round($monthlyBase + $contributableAllowance, 2),
+                : round(($taxablePeriodPay * $cutoffsInMonth) + $contributableAllowance, 2),
         ];
 
         // A taxable allowance is compensation in full — no ceiling applies to it at all. Already a
@@ -1208,11 +1219,19 @@ class PayrollService
      * second ₱875. The month totals ₱1,250 — a figure that appears on the SSS table, which the old
      * arithmetic could not guarantee.
      *
-     * FLOORED AT ZERO. If the earlier cutoffs already collected more than the month turned out to
-     * owe, this cutoff takes nothing; it never pays money back through a negative deduction, which
-     * would read as an earning and would not be reversible if the earlier payslip is already
-     * disbursed. The overcollection is visible in the payslip figures and is a refund decision for
-     * a person, not something payroll should do silently.
+     * DELIBERATELY ALLOWED TO GO NEGATIVE. If the earlier cutoffs collected more than the month
+     * turned out to owe — a normal first half followed by a collapsed second one — this cutoff
+     * REFUNDS the difference rather than keeping it.
+     *
+     * This was floored at zero, on the reasoning that a negative deduction could not be undone on
+     * an already-disbursed payslip. That reasoning was wrong: the correction lands on THIS cutoff,
+     * which is being computed now, and touches nothing historical. Keeping the floor meant the
+     * employee simply overpaid and never got it back. The year-end tax settlement already refunds
+     * exactly this way (its test asserts "nothing may clamp it at zero"), and the refund is bounded
+     * by what the month itself collected, so it cannot run away.
+     *
+     * Remittance stays consistent because both cutoffs sit inside the same month: the month totals
+     * the corrected figure, which is what the employee paid and what the company owes.
      *
      * With `salary_basis = basic` this changes nothing: the monthly figure is identical on every
      * cutoff, so the true-up subtracts exactly the shares already taken and lands on the same
@@ -1230,7 +1249,7 @@ class PayrollService
 
         $alreadyTaken = (float) ($dist['month_to_date'][$type] ?? 0.0);
 
-        return round(max(0.0, $monthly - $alreadyTaken), 2);
+        return round($monthly - $alreadyTaken, 2);
     }
 
     /** How much of a MONTHLY deduction lands on this period, per the timing setting. */
