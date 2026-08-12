@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 
 use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\Planner\FollowUpScheduler;
 use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,8 +25,12 @@ use Illuminate\Support\Facades\DB;
  */
 class LeadQualificationController extends Controller
 {
-    public function store(Request $request, Lead $lead, PlannerOwnershipTransfer $plannerOwnership): JsonResponse
-    {
+    public function store(
+        Request $request,
+        Lead $lead,
+        PlannerOwnershipTransfer $plannerOwnership,
+        FollowUpScheduler $followUps,
+    ): JsonResponse {
         $this->authorize('qualify', $lead);
 
         // ATOMIC CLAIM. The prospect pool is shared and unassigned, so two BDs can click "Add to
@@ -44,7 +49,7 @@ class LeadQualificationController extends Controller
         // `UPDATE … WHERE qualified_at IS NULL` via the query builder: a query-builder write fires
         // no model events, which would bypass LeadObserver entirely and silently drop the
         // `lead.qualified` Activity, the one-time Lead Score, and the LeadQualified event.
-        return DB::transaction(function () use ($request, $lead, $plannerOwnership): JsonResponse {
+        return DB::transaction(function () use ($request, $lead, $plannerOwnership, $followUps): JsonResponse {
             /** @var Lead|null $locked */
             $locked = Lead::query()->whereKey($lead->getKey())->lockForUpdate()->first();
 
@@ -84,6 +89,13 @@ class LeadQualificationController extends Controller
             // Taking ownership takes the outstanding work with it — the same rule as an Admin
             // reassignment, through the same service, inside the lock that already guards this claim.
             $plannerOwnership->transferOnReassignment($locked, $previousOwnerId, $request->user()->id);
+
+            // ...and, for a prospect that never had an owner, materializes the cold-call follow-up its
+            // `cold_calling = scheduled` state implies but could not create while unowned. The exact
+            // call LeadController::assign() makes, so the two ownership-acquisition paths cannot
+            // diverge — a prospect must not carry different Planner work depending on whether an Admin
+            // assigned it or a BD claimed it.
+            $followUps->materializeOnOwnershipAcquired($locked, $previousOwnerId);
 
             return response()->json([
                 'data' => new LeadResource($locked->refresh()),

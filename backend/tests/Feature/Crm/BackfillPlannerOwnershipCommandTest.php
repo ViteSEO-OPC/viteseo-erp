@@ -43,11 +43,18 @@ class BackfillPlannerOwnershipCommandTest extends TestCase
         return $user;
     }
 
-    /** `cold_calling` pinned — LeadFactory randomises it, and 'scheduled' auto-mints an extra event. */
-    private function lead(?User $owner): Lead
+    /**
+     * `cold_calling` pinned — LeadFactory randomises it, and 'scheduled' auto-mints an extra event.
+     *
+     * `business_name` is pinned too, and short on purpose: the report truncates the company column to
+     * 30 characters (mb_strimwidth), so a randomly-generated longer name makes any assertion against
+     * the full name fail intermittently.
+     */
+    private function lead(?User $owner, string $name = 'Acme Co'): Lead
     {
         return Lead::factory()->create([
             'assigned_to' => $owner?->id,
+            'business_name' => $name,
             'cold_calling' => 'not-called',
         ]);
     }

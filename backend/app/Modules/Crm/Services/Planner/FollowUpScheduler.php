@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Services\Planner;
 
+use App\Modules\Crm\Controllers\LeadController;
+use App\Modules\Crm\Controllers\LeadQualificationController;
 use App\Modules\Crm\Controllers\PlannerEventController;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -65,6 +67,11 @@ class FollowUpScheduler
     /**
      * Ensure a pending follow-up exists for a lead whose Cold Calling was just set to 'scheduled'.
      *
+     * The CALLER decides that the lead is scheduled — this method does not re-test `cold_calling`, and
+     * must not start to: it is called directly with leads in other states to exercise the dedupe rule
+     * in isolation. Ownership-acquisition callers go through
+     * {@see materializeOnOwnershipAcquired()} instead, which owns that condition.
+     *
      * Idempotent by design: it does nothing when the lead already has open work that would make this
      * a duplicate, so repeated saves — or a scheduled → not-called → scheduled toggle — never stack
      * duplicate follow-ups in the inbox. Since the BD's channel is stored structurally, a call the BD
@@ -72,9 +79,21 @@ class FollowUpScheduler
      * (deliberately narrow) rule. Returns the created event, or null when none was created.
      * (The explicit Quick Action posts its own event and never reaches this method — an explicit
      * "schedule a follow-up" click is never silently skipped.)
+     *
+     * AN UNOWNED LEAD PRODUCES NO FOLLOW-UP. {@see create()} takes the event's owner from the lead, so
+     * an unassigned lead would mint an ownerless event — work nobody is accountable for, and which no
+     * BD can even see (PlannerEvent::scopeVisibleTo matches on `assigned_to`). Worse, it would be
+     * permanent: PlannerOwnershipTransfer declines to move an event whose lead had no previous owner,
+     * and the backfill command only considers events that already have one. Three mechanisms each
+     * correctly refuse to touch such a row, so the only safe place to act is here — by never creating
+     * it. Nothing is skipped for a lead that HAS an owner.
      */
     public function scheduleForColdCall(Lead $lead): ?PlannerEvent
     {
+        if ($lead->assigned_to === null) {
+            return null;
+        }
+
         if ($this->coldCallFollowUpIsRedundant($lead)) {
             return null;
         }
@@ -85,6 +104,40 @@ class FollowUpScheduler
             'source' => 'outreach',
             'description' => 'Auto-created when Cold Calling was set to Scheduled.',
         ]);
+    }
+
+    /**
+     * Reconcile a lead's cold-call state at the moment it ACQUIRES its first owner.
+     *
+     * `cold_calling = scheduled` is a STATE on the lead, but LeadObserver only reacts to the EDGE
+     * (`created`, or `wasChanged('cold_calling')`). A lead that was unowned at that moment produces no
+     * follow-up — {@see scheduleForColdCall()} refuses to mint ownerless work — and nothing looks at
+     * that state again: both acquisition paths save in ways that never re-run the observer's check.
+     * Gaining an owner is when the work becomes real, so it is reconciled here.
+     *
+     * THE PREVIOUS-OWNER GATE IS THE POINT, and it is why this is a separate method rather than a
+     * condition inside `scheduleForColdCall()`. Only a FIRST acquisition may create; a reassignment
+     * transfers work and must never invent it. Leaving that to the dedupe would not be equivalent —
+     * dedupe only sees OPEN work, so a lead whose cold-call follow-up had already been COMPLETED would
+     * be handed a fresh one on every hop between BDs.
+     *
+     * Shared verbatim by {@see LeadController::assign()} (Admin assigns) and
+     * {@see LeadQualificationController} (a BD claims a prospect), so
+     * the same lead cannot end up with different Planner work depending on which path gave it an owner.
+     *
+     * @param  int|null  $previousOwnerId  The lead's owner BEFORE the write, captured by the caller.
+     */
+    public function materializeOnOwnershipAcquired(Lead $lead, ?int $previousOwnerId): ?PlannerEvent
+    {
+        if ($previousOwnerId !== null) {
+            return null;
+        }
+
+        if ($lead->cold_calling !== 'scheduled') {
+            return null;
+        }
+
+        return $this->scheduleForColdCall($lead);
     }
 
     /**

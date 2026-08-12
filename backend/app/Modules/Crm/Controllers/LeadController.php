@@ -26,6 +26,7 @@ use App\Models\User;
 use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Services\LeadImportService;
 use App\Modules\Crm\Services\LeadPdfExporter;
+use App\Modules\Crm\Services\Planner\FollowUpScheduler;
 use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
@@ -532,6 +533,7 @@ class LeadController extends Controller
         AssignLeadRequest $request,
         Lead $lead,
         PlannerOwnershipTransfer $plannerOwnership,
+        FollowUpScheduler $followUps,
     ): JsonResponse {
         $assignedTo = (int) $request->validated('assigned_to');
         // Captured BEFORE the write below — from that point on `$lead->assigned_to` is the NEW owner,
@@ -545,7 +547,7 @@ class LeadController extends Controller
         //
         // notify() and the broadcast stay OUTSIDE, after the commit — see the note below on why
         // their order is load-bearing, and so neither can fire for a handover that rolled back.
-        DB::transaction(function () use ($request, $lead, $assignedTo, $previousOwnerId, $plannerOwnership): void {
+        DB::transaction(function () use ($request, $lead, $assignedTo, $previousOwnerId, $plannerOwnership, $followUps): void {
             $lead->assigned_to = $assignedTo;
             // saveQuietly() skips the generic "updated" Activity — a dedicated lead.assigned
             // event is recorded below (clean attribution for the future Management Dashboard).
@@ -571,6 +573,12 @@ class LeadController extends Controller
             // new owner is NOT separately notified per event — the lead notification below is the
             // handover announcement, and one notification per transferred event would be noise.
             $plannerOwnership->transferOnReassignment($lead, $previousOwnerId, $assignedTo);
+
+            // ...and, on a FIRST acquisition only, materializes the cold-call follow-up the lead's
+            // `cold_calling = scheduled` state implies but could not create while unowned. This method
+            // saves quietly, so LeadObserver never re-reads that state — the reconciliation has to be
+            // explicit. The previous-owner gate lives inside the service, shared with qualification.
+            $followUps->materializeOnOwnershipAcquired($lead, $previousOwnerId);
         });
 
         // The durable record of the handover, for the new owner's Notification Center.
