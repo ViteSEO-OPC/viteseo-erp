@@ -254,7 +254,7 @@ Route::prefix('v1/crm')->group(function (): void {
             ->can('delete', 'attachment');
 
         // Planner — the single scheduling platform (Calendar + Board). The list is ownership-scoped
-        // (PlannerEvent::scopeVisibleTo: BD sees own/on-owned-leads; Admin/SA all); single-record
+        // (PlannerEvent::scopeVisibleTo: BD sees only events assigned to them; Admin/SA all); single-record
         // routes authorize via PlannerEventPolicy. Every write logs a `planner-event.*` Activity via
         // PlannerEventObserver → Activity Log. The permission namespace stays `calendar.*` (only the
         // UI module is branded "Planner"); `calendar.delete` is management-only (Admin/SA).

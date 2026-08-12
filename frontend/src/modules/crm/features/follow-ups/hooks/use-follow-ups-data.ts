@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { usePlannerEvents } from "@/modules/crm/features/calendar/hooks/use-planner-events";
 import { useUpdatePlannerEvent } from "@/modules/crm/features/calendar/hooks/use-planner-mutations";
 import { useLeadDetail } from "@/modules/crm/features/leads/hooks/use-lead-detail";
@@ -95,6 +95,8 @@ export function useFollowUpsData(leadId?: string) {
   // The id of the saved draft currently loaded in the composer, or null when composing fresh.
   // Drives whether Save updates-vs-creates and whether Send transitions an existing draft.
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  // The selected-item id the composer currently holds content for. See the re-hydration effect below.
+  const hydratedFor = useRef<string | null>(null);
 
   // Case A — the deep-linked lead already has a pending follow-up in the inbox: that real event
   // becomes the default selection (below), reusing the normal composer path. Derived, not synced via
@@ -139,6 +141,46 @@ export function useFollowUpsData(leadId?: string) {
     setActiveDraftId(null); // picking a follow-up starts a fresh compose context
   }, []);
 
+  const selectedItemId = selectedItem?.id ?? null;
+
+  /**
+   * The composer belongs to the SELECTED item — re-hydrate it whenever that identity changes.
+   *
+   * SAFETY, not tidiness. `draft` is one state object shared by the whole workspace, and Send/Save
+   * read `subject`/`body` from it while taking `leadId`/`to` from the selected item. Without this
+   * reset those two drift apart: an email addressed to lead B would carry lead A's name, company and
+   * body, and nothing on screen would look wrong.
+   *
+   * Keyed on the selected item's ID rather than done inside `selectItem`, because `selectedItem` is
+   * DERIVED — it also changes with no click at all: Mark Done clears `selectedId` and falls through
+   * to `items[0]`, a deep-link match resolves late, or the current row leaves the inbox. A reset that
+   * lived only in the click handler would miss every one of those.
+   *
+   * `hydratedFor` is what keeps `loadDraft` working: that path sets the ref to the item it is loading
+   * for, so this effect sees no change and leaves the restored draft alone. It is a ref, not state,
+   * because it must update synchronously with the same commit that changes the selection.
+   */
+  useEffect(() => {
+    if (selectedItemId === hydratedFor.current) {
+      return;
+    }
+    hydratedFor.current = selectedItemId;
+
+    // BLANK subject/body — deliberately not INITIAL_DRAFT's placeholder copy. That constant is a
+    // complete, plausible, sendable email that is IDENTICAL for every lead, so restoring it on each
+    // selection both looked like auto-generation and looked like one email following the BD from lead
+    // to lead. Blank is unambiguous, cannot be sent by accident (the send endpoint requires a subject
+    // and body), and keeps generation strictly on the Generate button. Purpose/Tone keep their
+    // defaults so the dropdowns still render and the Generate flow works unchanged.
+    setDraft({ ...INITIAL_DRAFT, subject: "", body: "" });
+    // Send-Later is per-email intent, never inherited: leaving it on would schedule a send for a lead
+    // the BD never configured it for.
+    setScheduler({ enabled: false, datetime: businessDaysAheadLocalInput(1, 9) });
+    // A saved draft belongs to the item it was opened on; carrying its id over would make Send
+    // transition the wrong stored row.
+    setActiveDraftId(null);
+  }, [selectedItemId]);
+
   // Mark Done: complete the follow-up through Planner's existing update flow. `completed` fails the
   // pending filter above, so the optimistic patch removes the row immediately; selection falls back
   // to the next follow-up (selectedItem recomputes). No manual score/KPI mutation — those engines
@@ -156,7 +198,14 @@ export function useFollowUpsData(leadId?: string) {
     if (d.leadId) {
       // Select the pending follow-up for this lead, if one is in the inbox.
       const match = items.find((i) => i.leadId === d.leadId);
-      if (match) setSelectedId(match.id);
+      if (match) {
+        setSelectedId(match.id);
+        // Claim the hydration for this item BEFORE the selection change commits, so the
+        // re-hydration effect treats it as already handled and does not wipe the draft we are
+        // about to restore. Opening a saved draft is the one selection change that legitimately
+        // brings its own content.
+        hydratedFor.current = match.id;
+      }
     }
     setDraft((prev) => ({ ...prev, subject: d.subject, body: d.body }));
     setActiveDraftId(d.id);
@@ -202,6 +251,71 @@ export function useFollowUpsData(leadId?: string) {
   const selectPurpose = useCallback((purpose: string) => applyTemplate(purpose, draft.tone), [applyTemplate, draft.tone]);
   const selectTone = useCallback((tone: string) => applyTemplate(draft.purpose, tone), [applyTemplate, draft.purpose]);
 
+  // The template the current Purpose + Tone resolve to. Null when the pair matches nothing — which is
+  // reachable: INITIAL_DRAFT seeds a purpose/tone before any template loads, and a lead-less item
+  // fetches no templates at all. Regenerate must say so rather than silently doing nothing.
+  const activeTemplate = useMemo(
+    () => templates.find((t) => t.purpose === draft.purpose && t.tone === draft.tone) ?? null,
+    [templates, draft.purpose, draft.tone],
+  );
+
+  // Whether the BD has edited away from the rendered template. Regenerate overwrites Subject + Body,
+  // so this is what decides between doing it immediately and asking first.
+  const isDraftEdited = useMemo(
+    () => {
+      if (activeTemplate === null) {
+        return false;
+      }
+      // A freshly selected item starts blank, and blank is not "edits worth protecting" — prompting
+      // "Replace your edits?" over an empty composer would be noise on the normal first-Generate.
+      if (draft.subject.trim() === "" && draft.body.trim() === "") {
+        return false;
+      }
+
+      return draft.subject !== activeTemplate.subject || draft.body !== activeTemplate.body;
+    },
+    [activeTemplate, draft.subject, draft.body],
+  );
+
+  /** Existing templates available for the tone the BD currently has selected. */
+  const templatesForTone = useMemo(
+    () => templates.filter((t) => t.tone === draft.tone),
+    [templates, draft.tone],
+  );
+
+  /**
+   * Regenerate — swap in a different existing EMAIL PURPOSE, holding TONE fixed.
+   *
+   * `GET /leads/{id}/email-templates` returns every active template already rendered for this lead
+   * (templates are global assets; the backend substitutes each row's tokens for the lead), so every
+   * entry is by construction a valid, existing combination. Picking among them invents nothing — no
+   * new template data, no AI, no new endpoint — and the choice is handed to the same `applyTemplate`
+   * the Purpose/Tone dropdowns already use.
+   *
+   * TONE IS NEVER RANDOMISED: the pool is pre-filtered to the BD's current tone and that same tone is
+   * passed straight back to `applyTemplate`, so the Tone dropdown reads identically before and after.
+   * Only Purpose moves.
+   *
+   * The current purpose is excluded so an explicit click visibly changes the draft; when the tone has
+   * just one purpose (several do — `proposal_follow_up`, `proposal`, `meeting_reminder`, `thank_you`
+   * exist only for Warm & professional) there is no alternative, and it re-applies that one, which is
+   * still the useful "restore the template after my edits" behaviour.
+   *
+   * Reading Math.random() here is safe — this runs from a click handler, never during render. And it
+   * is only ever reached from the Regenerate button: selecting another Outreach item cannot call it.
+   */
+  const regenerate = useCallback(() => {
+    if (templatesForTone.length === 0) {
+      return;
+    }
+
+    const alternatives = templatesForTone.filter((t) => t.purpose !== draft.purpose);
+    const pool = alternatives.length > 0 ? alternatives : templatesForTone;
+    const picked = pool[Math.floor(Math.random() * pool.length)] ?? pool[0];
+
+    applyTemplate(picked.purpose, draft.tone);
+  }, [templatesForTone, applyTemplate, draft.purpose, draft.tone]);
+
   return {
     items,
     selectedId: selectedItem?.id ?? "",
@@ -221,6 +335,13 @@ export function useFollowUpsData(leadId?: string) {
     toneOptions,
     selectPurpose,
     selectTone,
+    regenerate,
+    // Available whenever the CURRENT tone has at least one existing template — not only when the
+    // current Purpose/Tone pair happens to match one. That also clears the dead button on a pair with
+    // no template of its own (e.g. `proposal_follow_up` + Casual), whose dropdown behaviour is itself
+    // unchanged; Regenerate simply moves Purpose to one that does exist for that tone.
+    canRegenerate: templatesForTone.length > 0,
+    isDraftEdited,
     isLoading,
     isError,
   };

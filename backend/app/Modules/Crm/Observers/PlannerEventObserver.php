@@ -45,12 +45,34 @@ class PlannerEventObserver
         if ($event->wasChanged('status') && $event->status === 'completed') {
             $this->log($event, 'planner-event.completed', 'Event completed');
 
-            // RC3 Outreach Automation Pack — a completed FOLLOW-UP is a domain event (FROZEN #6): it
+            // RC3 Outreach Automation Pack — completed FOLLOW-UP WORK is a domain event (FROZEN #6): it
             // feeds the `follow-up.completed` n8n webhook (observability) and the server-side
-            // No-Response Escalation. Only follow-ups escalate; other event types just log completion.
-            if ($event->event_type === 'follow-up') {
+            // No-Response Escalation. Now the whole category ({@see PlannerEvent::scopeFollowUpWork}),
+            // per the PO rule that completed Email/Call follow-up work stays escalation-eligible; `task`
+            // and `consultation` still just log completion.
+            //
+            // PLANNED != PERFORMED is preserved by the trigger, not by the type set: this fires only on
+            // a transition INTO `completed`, so merely scheduling an event can never escalate. What
+            // counts as performing the work stays each channel's own decision — CallSessionService
+            // completes a `call` event only on a CONNECTED outcome, and an `email` task is completed by
+            // an actual send or a deliberate manual Mark Done.
+            if (in_array($event->event_type, PlannerEvent::FOLLOW_UP_WORK_TYPES, true)) {
                 event(new FollowUpCompleted($event));
             }
+
+            return;
+        }
+
+        // An ownership handover is its own semantic event, not a generic edit. It is logged with the
+        // from/to pair because "who owes this work" is the one field whose history the Activity trail
+        // could not otherwise reconstruct — every other change is recoverable from the current row.
+        // Emitted by PlannerOwnershipTransfer (lead reassignment) and by an Admin PATCHing
+        // `assigned_to` directly; both are the same business fact, so both read the same way.
+        if ($event->wasChanged('assigned_to')) {
+            $this->log($event, 'planner-event.reassigned', 'Event reassigned', [
+                'from' => $event->getOriginal('assigned_to'),
+                'to' => $event->assigned_to,
+            ]);
 
             return;
         }
@@ -63,7 +85,11 @@ class PlannerEventObserver
         $this->log($event, 'planner-event.deleted', 'Event removed');
     }
 
-    private function log(PlannerEvent $event, string $activity, string $description): void
+    /**
+     * @param  array<string, mixed>|null  $extra  Event-specific properties merged over the shared
+     *                                            three (never replacing them).
+     */
+    private function log(PlannerEvent $event, string $activity, string $description, ?array $extra = null): void
     {
         $subject = $event->lead ?? $event;
 
@@ -75,6 +101,7 @@ class PlannerEventObserver
                 'planner_event_id' => $event->id,
                 'event_type' => $event->event_type,
                 'title' => $event->title,
+                ...($extra ?? []),
             ],
         ]);
     }

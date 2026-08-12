@@ -213,9 +213,14 @@
   --chart-violet-strong: #8069C5;
   --chart-gray: #C5C5C5;
 
+  /* Planner calendar. The grid is a white surface like every other Zerem card; the weekday strip
+     sits one step below it on the neutral ramp. Both used to be warm/heavy fills (cream cells, a
+     mid-gray header) — the yellow cast came from there. Out-of-month cells stay white and are
+     distinguished by their dimmed date number alone: FullCalendar marks every cell in the view
+     out-of-month under a named timezone, so any fill here tints the whole grid. */
   --cal-today-bg: #E7FAFA;
-  --cal-othermonth-bg: #F5F5E8;
-  --cal-header-bg: #B0B0B0;
+  --cal-othermonth-bg: var(--white);
+  --cal-header-bg: var(--gray-50);
   --event-email-bg: #E7FAFA;
   --event-call-bg: #DAEDF9;
   --event-meeting-bg: #FEF8EE;
@@ -369,6 +374,14 @@
 
   /* Priority / lead / calendar / chart accents kept as brand hues (read on dark). */
 
+  /* Planner calendar surfaces. The light values are literal fills that assume a white page —
+     the mint "today" wash, the cream out-of-month cell and the gray weekday strip all read as
+     bright blocks on the dark card — so each is re-pointed onto the dark ramp. Same roles, same
+     geometry; light mode is untouched. */
+  --cal-today-bg: rgba(79, 216, 215, 0.10);   /* teal-400 @ 10% */
+  --cal-othermonth-bg: var(--dark-bg-page);   /* out-of-month sits one step below the card */
+  --cal-header-bg: var(--dark-table-header);  /* same strip the data tables use */
+
   /* Dashboard priority badge backgrounds — accent-tinted panels on dark (reference-matched).
      The light #FDEAEC/#FBEFDA/#E6EEFE would otherwise render as bright pills on the dark card. */
   --color-dashboard-priority-high-badge: rgba(239, 68, 68, 0.12);   /* red-500 @ 12% */
@@ -380,9 +393,16 @@
 @layer components {
   .calendar-grid .fc {
     font-family: var(--font-primary);
+    /* FullCalendar injects its stylesheet UNLAYERED, so its own defaults beat the rules below no
+       matter the specificity — its amber wash is what tinted the today cell, and its #ddd rules
+       drew the grid. Handing its two theming vars the Zerem tokens is what actually applies the
+       teal accent and the hairline dividers. */
+    --fc-today-bg-color: var(--cal-today-bg);
+    --fc-border-color: var(--color-border-subtle);
   }
   .calendar-grid .fc .fc-daygrid-day {
-    border: 1px solid #E5E7EB;
+    background-color: var(--color-surface-card);
+    border: 1px solid var(--color-border-subtle);
     padding: 0;
   }
   .calendar-grid .fc .fc-daygrid-day.cal-today {
@@ -392,7 +412,7 @@
   }
   .calendar-grid .fc .fc-daygrid-day.cal-other-month {
     background-color: var(--cal-othermonth-bg);
-    border: 1px solid #E5E7EB;
+    border: 1px solid var(--color-border-subtle);
   }
   .calendar-grid .fc .fc-daygrid-day.cal-other-month {
     background-color: var(--cal-othermonth-bg);
@@ -421,7 +441,8 @@
     padding: 0 4px;
   }
   .calendar-grid .fc .fc-scrollgrid {
-    border: 1px solid #E5E7EB;
+    background-color: var(--color-surface-card);
+    border: 1px solid var(--color-border-default);
   }
   .calendar-grid .fc .fc-scrollgrid-section-header td {
     border: none;
@@ -544,6 +565,7 @@
 
   /* Year (multiMonth) */
   .calendar-grid .fc .fc-multimonth {
+    background-color: var(--color-surface-card);
     border: none;
     gap: 12px;
   }
@@ -562,6 +584,73 @@
   .calendar-grid .fc .fc-multimonth-daygrid .fc-daygrid-day {
     background: transparent;
     border: none;
+  }
+
+  /* ── Planner calendar — DARK MODE ─────────────────────────────────────────
+     Color-only overrides of the rules above, scoped to the Zerem dark scope: every value comes
+     from the existing dark ramp (--color-surface-card / --color-border-* / --color-text-*), and
+     nothing here touches layout, spacing, type or borders' geometry. The light rules — and every
+     event-type hue — are left exactly as they were.
+
+     The remaining literals are the ones the rules above hard-code (#E5E7EB lines, --gray-900 /
+     --gray-500 ink) plus FullCalendar's own defaults, which assume a white page. */
+  [data-theme="dark"] .calendar-grid .fc {
+    --fc-border-color: var(--color-border-subtle);
+    --fc-page-bg-color: var(--color-surface-card);
+    --fc-neutral-bg-color: var(--color-surface-subtle);
+    --fc-today-bg-color: var(--cal-today-bg);
+  }
+  [data-theme="dark"] .calendar-grid .fc .fc-scrollgrid,
+  [data-theme="dark"] .calendar-grid .fc .fc-list {
+    background-color: var(--color-surface-card);
+    border-color: var(--color-border-default);
+  }
+  [data-theme="dark"] .calendar-grid .fc .fc-daygrid-day,
+  [data-theme="dark"] .calendar-grid .fc .fc-multimonth,
+  [data-theme="dark"] .calendar-grid .fc .fc-multimonth-month {
+    background-color: var(--color-surface-card);
+    border-color: var(--color-border-subtle);
+  }
+  /* Date numbers, weekday captions and the "+N more" affordance — the ink tokens flip, the
+     type does not. Out-of-month numbers keep their own dimmer rule from above. */
+  [data-theme="dark"] .calendar-grid .fc .cal-date-num,
+  [data-theme="dark"] .calendar-grid .fc .fc-daygrid-day-number,
+  [data-theme="dark"] .calendar-grid .fc .fc-list-event-title,
+  [data-theme="dark"] .calendar-grid .fc .fc-list-day-cushion {
+    color: var(--color-text-heading);
+  }
+  [data-theme="dark"] .calendar-grid .fc .fc-col-header-cell-cushion {
+    color: var(--color-text-secondary);
+  }
+  [data-theme="dark"] .calendar-grid .fc .fc-daygrid-more-link,
+  [data-theme="dark"] .calendar-grid .fc .fc-timegrid-slot-label,
+  [data-theme="dark"] .calendar-grid .fc .fc-timegrid-axis,
+  [data-theme="dark"] .calendar-grid .fc .fc-list-event-time {
+    color: var(--color-text-caption);
+  }
+  [data-theme="dark"] .calendar-grid .fc .fc-multimonth-title {
+    color: var(--teal-400);
+  }
+  /* Events keep their type color: the SAME accent hue (published as --cal-ev-accent by the grid
+     component) is re-mixed at low alpha over the dark card, replacing the light pastel that the
+     component sets as an inline fill — hence !important, the only way to beat an inline style.
+     The dots and the type→color mapping are untouched. */
+  [data-theme="dark"] .calendar-grid .fc .fc-event {
+    background-color: color-mix(in srgb, var(--cal-ev-accent, var(--chart-coral)) 22%, transparent) !important;
+  }
+  /* Month pills and Schedule rows are the two events that are NOT a filled block: the pill's
+     tint comes from the wrapper above it, and an agenda row is identified by its dot. */
+  [data-theme="dark"] .cal-event-pill,
+  [data-theme="dark"] .calendar-grid .fc .fc-list-event {
+    background-color: transparent !important;
+  }
+  [data-theme="dark"] .cal-event-pill {
+    color: var(--color-text-heading);
+  }
+  /* Week/Day event titles: FullCalendar writes the grid's near-black text color inline onto
+     .fc-event-main, so only !important can lift it to a readable ink on the dark tint. */
+  [data-theme="dark"] .calendar-grid .fc .fc-event .fc-event-main {
+    color: var(--color-text-heading) !important;
   }
 }
 

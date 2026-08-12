@@ -47,7 +47,11 @@ class DashboardController extends Controller
     {
         return fn (): Builder => PlannerEvent::query()
             ->visibleTo($user)
-            ->where('event_type', 'follow-up')
+            // The whole follow-up-work category ({@see PlannerEvent::scopeFollowUpWork}), not the bare
+            // `follow-up` literal: an Email/Call/Meeting task that is due IS work due, and once Lead
+            // Details routes the BD's channel choice into `event_type` those rows would otherwise
+            // disappear from this card and its three buckets.
+            ->followUpWork()
             ->where('status', '!=', 'completed')
             ->whereNotNull('starts_at');
     }
@@ -346,9 +350,10 @@ class DashboardController extends Controller
         // ---- Conversion funnel — a true SURVIVAL funnel: each qualification stage is a subset of the
         // one before it (cumulative AND filters), so the funnel narrows monotonically and each bar reads
         // as "leads that progressed at least this far". Definitions in the method docblock. ----
-        $engaged = fn (): Builder => $leads()
-            ->where(fn (Builder $q) => $q->where('email_outreach', '!=', 'none')
-                ->orWhere('cold_calling', '!=', 'not-called'));
+        // `Contacted` = the single canonical engagement definition ({@see Lead::scopeEngaged}) — declared
+        // outreach OR Zerem-verified activity. Shared verbatim with M-04 and the Conversion Rate
+        // denominator, so this stage can never disagree with Outreach Progress again.
+        $engaged = fn (): Builder => $leads()->engaged();
         // "In active conversation" statuses (responded / progressing) — engaged beyond `new`, excl. `declined`.
         $activeConversation = ['interested', 'awaiting-reply', 'call-back-req'];
 
@@ -422,9 +427,15 @@ class DashboardController extends Controller
 
         // ---- Quarter follow-through — live counts, plus the configured goals from Goal Management. The
         // PO-frozen rule still holds: nothing is fabricated, so an unconfigured goal stays null. ----
-        $missedFor = fn (string $type): int => PlannerEvent::query()
+        // Same partition rule as PerformanceSummaryService (the two implementations are deliberate
+        // duplicates of one frozen formula, so they must move together): `missedFollowUps` covers the
+        // follow-up work no sibling bucket reports — including a previously invisible overdue Email
+        // task — while `call`/`meeting` stay in their own KPIs.
+        //
+        // @param list<string> $types
+        $missedFor = fn (array $types): int => PlannerEvent::query()
             ->visibleTo($user)
-            ->where('event_type', $type)
+            ->followUpWork($types)
             ->whereNotNull('starts_at')
             ->where('starts_at', '<', now())
             ->where('status', '!=', 'completed')
@@ -477,9 +488,9 @@ class DashboardController extends Controller
             'consultations' => $consultationsHeld,
             'consultationsAwaitingOutcome' => $consultationsAwaitingOutcome,
             'confirmedClients' => $confirmed,
-            'missedFollowUps' => $missedFor('follow-up'),
-            'missedMeetings' => $missedFor('meeting'),
-            'missedCalls' => $missedFor('call'),
+            'missedFollowUps' => $missedFor(PlannerEvent::MISSED_FOLLOW_UP_TYPES),
+            'missedMeetings' => $missedFor(['meeting']),
+            'missedCalls' => $missedFor(['call']),
             'outreachCompletionPct' => $outreachCompletionPct,
             // Quarter goals from Goal Management — per BD, for the quarter containing today. Each is
             // null when nothing is configured, so a tile keeps its honest Pending marker rather than
