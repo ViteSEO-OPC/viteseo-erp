@@ -89,6 +89,71 @@ class PlannerOwnershipTransfer
     }
 
     /**
+     * READ-ONLY. Every open Planner event whose owner disagrees with its lead's owner — the
+     * historical drift left behind by reassignments that predate {@see transferOnReassignment()}.
+     *
+     * Returns a Builder, not results: the caller decides eager-loading and ordering, and a test can
+     * count against it without materialising rows. Nothing here writes.
+     *
+     * THIS RULE IS DELIBERATELY BROADER THAN THE FORWARD ONE, and the difference is not an oversight.
+     * The forward path moves only events owned by the PREVIOUS lead owner, which protects an event an
+     * Admin deliberately assigned to a third BD. Historical drift records no previous owner anywhere,
+     * so the only available comparison is against the CURRENT lead owner — meaning this cannot tell
+     * stale drift from a deliberate cross-assignment. That is exactly why the command built on it is
+     * read-only by default and prints every row: a human approves the list before anything moves.
+     *
+     * `lead.assigned_to IS NOT NULL` is load-bearing. Without it an owned event on an UNASSIGNED lead
+     * counts as drift and would be "transferred" to nobody, orphaning real work.
+     *
+     * An event with NO owner is deliberately NOT drift here. This slice reconciles one BD against
+     * another ("old BD → new BD"); an ownerless event on an owned lead is a different defect —
+     * unclaimed work — and folding it in would let a backfill silently assign work that was never
+     * anyone's. If such rows appear, they deserve their own decision, not this command's default.
+     *
+     * @return Builder<PlannerEvent>
+     */
+    public function driftedOpenWork(?int $leadId = null): Builder
+    {
+        return $this->openWork(PlannerEvent::query())
+            ->whereNotNull('lead_id')
+            ->whereNotNull('assigned_to')
+            ->when($leadId !== null, fn (Builder $q): Builder => $q->where('lead_id', $leadId))
+            // One correlated subquery covering both halves of the rule: the lead must HAVE an owner,
+            // and that owner must differ from the event's. Kept in a single whereHas so the two can
+            // never be satisfied by different rows.
+            ->whereHas('lead', fn (Builder $lead) => $lead
+                ->whereNotNull('crm_leads.assigned_to')
+                ->whereColumn('crm_leads.assigned_to', '!=', 'crm_planner_events.assigned_to'));
+    }
+
+    /**
+     * The backfill's per-row write: point one drifted event at its lead's current owner.
+     *
+     * Re-checks qualification against the freshly-read row rather than trusting the selection that
+     * produced it — a concurrent reassignment (or a completion) between the report and the write must
+     * skip the row, never blindly overwrite it. Returns false when the row no longer qualifies, so
+     * the command can report it as skipped instead of silently counting it as moved.
+     *
+     * Never called by the default command run. Only `--apply` reaches this.
+     */
+    public function alignToLeadOwner(PlannerEvent $event): bool
+    {
+        $event->refresh();
+        $leadOwnerId = $event->lead?->assigned_to;
+
+        if ($event->status === 'completed' || $leadOwnerId === null || $event->assigned_to === $leadOwnerId) {
+            return false;
+        }
+
+        // Normal save on purpose — PlannerEventObserver logs `planner-event.reassigned` with from/to.
+        // In a CLI run Auth::id() is null, so that Activity carries a null causer: correct and honest,
+        // because a backfill is a system action and not a person. Do not fake an admin causer here.
+        $event->update(['assigned_to' => $leadOwnerId]);
+
+        return true;
+    }
+
+    /**
      * The single definition of "open Planner work" for ownership purposes.
      *
      * `status <> 'completed'` is the completed-history protection, expressed ONCE so the forward path
