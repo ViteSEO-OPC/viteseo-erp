@@ -192,7 +192,8 @@ class PayrollReportingTest extends HrTestCase
         $this->actingAsHr()
             ->putJson('/api/v1/hr/payroll/settings', [
                 'frequency' => 'monthly',
-                'deduction_timing' => 'first',
+                // FIN-050 — `first` is no longer a contribution timing; see the test below.
+                'deduction_timing' => 'last',
                 'tax_timing' => 'every',
             ])
             ->assertOk();
@@ -200,6 +201,37 @@ class PayrollReportingTest extends HrTestCase
         $log = AuditLog::where('module', 'Payroll')->latest('id')->firstOrFail();
         $this->assertStringContainsString('frequency', $log->description);
         $this->assertSame('monthly', $log->after['frequency'] ?? null);
+    }
+
+    /**
+     * FIN-050 — contributions cannot be charged on the first cutoff only.
+     *
+     * The first cutoff cannot know what the month will earn, so its figure is provisional and the
+     * last cutoff must adjust it — which makes "first only" a split with the worst shape rather
+     * than a distinct option. Rejected at the request rather than quietly coerced, so a settings
+     * save that means something impossible fails loudly.
+     */
+    public function test_contributions_cannot_be_timed_to_the_first_cutoff(): void
+    {
+        $this->actingAsHr()
+            ->putJson('/api/v1/hr/payroll/settings', [
+                'frequency' => 'semi_monthly',
+                'deduction_timing' => 'first',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('deduction_timing');
+    }
+
+    /** Tax and allowances keep all three — neither has a base it must discover mid-month. */
+    public function test_tax_and_allowance_timing_still_accept_the_first_cutoff(): void
+    {
+        $this->actingAsHr()
+            ->putJson('/api/v1/hr/payroll/settings', [
+                'frequency' => 'semi_monthly',
+                'tax_timing' => 'first',
+                'allowance_timing' => 'first',
+            ])
+            ->assertOk();
     }
 
     // --- item 13: the tardiness penalty is itemised ---------------------------------

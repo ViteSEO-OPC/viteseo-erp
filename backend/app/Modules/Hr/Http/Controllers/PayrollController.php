@@ -61,20 +61,33 @@ class PayrollController extends Controller
             }
         }
 
+        // Counted BEFORE the write: these are the employees the change is about to move, and
+        // after it they are indistinguishable from anyone else in the destination group.
+        $inheriting = app(PayScheduleService::class)->inheritingDefaultCount();
+
         // FIN-025 — declare the effective date, then save: the model's `updated` hook records the
         // version, so there is exactly one writer and no way to update without versioning.
         PayrollSetting::effectiveFrom($effectiveFrom);
         $setting->update($validated);
 
         if ($before !== []) {
-            $audit->log(
-                'updated',
-                'Payroll',
-                'Payroll settings updated: ' . implode(', ', array_keys($before)),
-                $setting,
-                $before,
-                $after,
-            );
+            $description = 'Payroll settings updated: ' . implode(', ', array_keys($before));
+
+            // FIN-046 — a frequency change is not just a setting: every employee with no explicit
+            // `pay_frequency` follows it, so this line silently re-assigns them to a different pay
+            // group. Nothing is written to their records, so without this the move leaves no trace
+            // anywhere and only surfaces when a run stops finding them.
+            if (array_key_exists('frequency', $before) && $inheriting > 0) {
+                $description .= sprintf(
+                    ' — %d employee%s with no explicit pay frequency moved from the %s to the %s pay group',
+                    $inheriting,
+                    $inheriting === 1 ? '' : 's',
+                    str_replace('_', '-', (string) $before['frequency']),
+                    str_replace('_', '-', (string) $after['frequency']),
+                );
+            }
+
+            $audit->log('updated', 'Payroll', $description, $setting, $before, $after);
         }
 
         return response()->json(['data' => $this->settingsPayload()]);
@@ -89,10 +102,15 @@ class PayrollController extends Controller
             'frequency' => $setting->frequency,
             'deduction_timing' => $setting->deduction_timing,
             'tax_timing' => $setting->tax_timing,
+            // FIN-048 — which cutoff the monthly allowance lands on.
+            'allowance_timing' => $setting->allowance_timing,
             'anchor_date' => $setting->anchor_date?->toDateString(),
             'pay_delay_days' => $setting->pay_delay_days,
             'other_benefits_annual_cap' => $setting->other_benefits_annual_cap === null ? null : (float) $setting->other_benefits_annual_cap,
             'minimum_daily_wage' => $setting->minimum_daily_wage === null ? null : (float) $setting->minimum_daily_wage,
+            // FIN-046 — how many people this default actually decides the pay group for, so the
+            // Rules screen can say so BEFORE the frequency is changed rather than after.
+            'inheriting_employee_count' => app(PayScheduleService::class)->inheritingDefaultCount(),
             'periods_per_year' => PayScheduleService::periodsPerYear($setting->frequency),
             'current_period' => $this->schedule->currentPeriod($setting),
             // Active pay groups (per-employee frequencies) — each runs on its own period.

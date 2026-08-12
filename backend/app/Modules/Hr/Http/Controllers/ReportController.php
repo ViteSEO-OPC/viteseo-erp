@@ -22,6 +22,8 @@ class ReportController extends Controller
     private const FILTERS = [
         'action', 'from', 'to', 'department', 'months', 'page', 'per_page',
         'run', 'frequency', 'month',
+        // FIN-055 — the tax reconciliation is scoped to a whole tax year, not a date range.
+        'year',
     ];
 
     public function __construct(private readonly ReportService $service) {}

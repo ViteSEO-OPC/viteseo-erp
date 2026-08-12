@@ -66,10 +66,15 @@ class AllowanceService
      */
     public function linesFor(Employee $employee, ?string $asOf = null): array
     {
-        // The programmes whose RULE covers this employee today — not a stored enrolment list.
-        // A status change is therefore followed automatically, which is the drift B5 item 3 and
-        // B10 both described.
-        $programmes = $this->programs->allowancesFor($employee);
+        // The programmes whose RULE covers this employee ON THIS CYCLE — not a stored enrolment
+        // list. A status change is therefore followed automatically, which is the drift B5 item 3
+        // and B10 both described.
+        //
+        // FIN-047 — $asOf now reaches eligibility, not just pricing. It was passed for the amount
+        // and dropped here, so re-running August priced the allowance at August's rate while
+        // deciding WHO GOT IT from today's enrolment. One half of the answer was dated and the
+        // other was live.
+        $programmes = $this->programs->allowancesFor($employee, $asOf);
         $overrides = $this->programs->overridesFor($employee);
 
         // Slice B11 — what each allowance was worth ON THIS CYCLE, not today. Re-running an old

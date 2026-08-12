@@ -23,6 +23,48 @@
     $orDash = fn ($v) => ($v === null || $v === '') ? '—' : $v;
 
     /**
+     * FIN-049 — the one-line derivation under a statutory deduction, matching the on-screen
+     * document word for word. Kept here rather than in the resource because the screen builds the
+     * same sentence from the same fields; duplicating the DATA would drift, duplicating the
+     * WORDING is what the two surfaces are for.
+     *
+     * Null (no note printed) whenever the payslip predates the snapshot or the rate cannot
+     * describe the figure — never a guessed derivation.
+     */
+    $basisNote = function (string $type) use ($p) {
+        $b = $p['contribution_basis'][$type] ?? null;
+
+        if ($b === null) {
+            return null;
+        }
+
+        if (! empty($b['overridden'])) {
+            return 'Fixed amount set on this employee — the government rate was not applied';
+        }
+
+        if (! isset($b['rate'], $b['charged_on'])) {
+            return null;
+        }
+
+        $rate = rtrim(rtrim(number_format($b['rate'] * 100, 3), '0'), '.') . '%';
+        $on = '₱' . number_format((float) $b['charged_on'], 2);
+
+        if (($b['basis'] ?? null) === 'bracket') {
+            return "{$rate} of {$on} — the salary bracket for ₱" . number_format((float) ($b['salary'] ?? 0), 2);
+        }
+
+        if (! empty($b['capped'])) {
+            return "{$rate} of {$on} — the maximum this contribution is charged on";
+        }
+
+        if (! empty($b['floored'])) {
+            return "{$rate} of {$on} — the minimum this contribution is charged on";
+        }
+
+        return "{$rate} of {$on}";
+    };
+
+    /**
      * ONE PAGE, GUARANTEED — the two things that can make this document unbounded (2026-08-07).
      *
      * Every other block on the page has a fixed height. These two are lists whose length comes
@@ -386,10 +428,10 @@
                     by which these rows reach it. The styling says so and the arithmetic enforces it.
                 --}}
                 @foreach ([
-                    ['SSS Contribution', $p['sss'], $p['employer_sss'] ?? 0],
-                    ['PhilHealth', $p['philhealth'], $p['employer_philhealth'] ?? 0],
-                    ['Pag-IBIG', $p['pagibig'], $p['employer_pagibig'] ?? 0],
-                ] as [$label, $employeeShare, $employerShare])
+                    ['SSS Contribution', 'sss', $p['sss'], $p['employer_sss'] ?? 0],
+                    ['PhilHealth', 'philhealth', $p['philhealth'], $p['employer_philhealth'] ?? 0],
+                    ['Pag-IBIG', 'pagibig', $p['pagibig'], $p['employer_pagibig'] ?? 0],
+                ] as [$label, $type, $employeeShare, $employerShare])
                     {{-- The pair reads as one unit: the employee row drops its own rule when a
                          sub-line follows, and the sub-line carries it instead. --}}
                     <tr class="line{{ $employerShare > 0 ? ' pair' : '' }}">
@@ -402,8 +444,27 @@
                             <td class="amt eramt">{{ $amt($employerShare) }}</td>
                         </tr>
                     @endif
+                    {{-- FIN-049 — what the rate was applied to. The printed payslip is the copy
+                         an employee keeps and queries against, so it must explain the figure on
+                         the same terms the screen does. --}}
+                    @if ($basisNote($type) !== null)
+                        <tr class="ernote"><td colspan="2">{{ $basisNote($type) }}</td></tr>
+                    @endif
                 @endforeach
                 <tr class="line"><td>Withholding Tax</td><td class="amt">{{ $amt($p['withholding_tax']) }}</td></tr>
+                {{-- FIN-054 — the year-end settlement, shown as its derivation. On the common case
+                     the line above is NEGATIVE and net pay exceeds gross; the printed payslip is
+                     the copy an employee keeps and queries against, so it must explain that on the
+                     same terms the screen does. Absent on every other payslip. --}}
+                @if (($p['tax_annualisation_basis'] ?? null) !== null)
+                    @php $tb = $p['tax_annualisation_basis']; $isRefund = $tb['settled_this_period'] < 0; @endphp
+                    <tr class="ernote"><td colspan="2"><strong>Year-end tax settlement · {{ $tb['year'] }}</strong></td></tr>
+                    <tr class="ersub"><td class="erlbl">Taxable pay for the year</td><td class="amt eramt">{{ $amt($tb['year_taxable']) }}</td></tr>
+                    <tr class="ersub"><td class="erlbl">Tax due on that</td><td class="amt eramt">{{ $amt($tb['annual_tax_due']) }}</td></tr>
+                    <tr class="ersub"><td class="erlbl">Already withheld this year</td><td class="amt eramt">{{ $amt($tb['previously_withheld']) }}</td></tr>
+                    <tr class="ersub"><td class="erlbl">{{ $isRefund ? 'Refunded on this payslip' : 'Collected on this payslip' }}</td><td class="amt eramt">{{ $amt(abs($tb['settled_this_period'])) }}</td></tr>
+                    <tr class="ernote"><td colspan="2">Tax is withheld each period on an estimate of the year. Yours came out {{ $isRefund ? 'higher' : 'lower' }} than the year needed, so the difference is {{ $isRefund ? 'paid back' : 'collected' }} here.</td></tr>
+                @endif
                 <tr class="sum"><td>Total Gov</td><td class="amt">{{ $amt($t['government']) }}</td></tr>
                 @if ($erTotal > 0)
                     <tr class="ernote">

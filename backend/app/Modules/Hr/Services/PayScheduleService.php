@@ -155,6 +155,27 @@ class PayScheduleService
 
     /** Count Mon–Fri days in an inclusive date range (for the daily rate / proration). */
     /**
+     * How many employees have NO explicit `pay_frequency` and therefore follow the company
+     * default (FIN-046).
+     *
+     * WHY THIS IS WORTH COUNTING. The default is not a fallback that only matters for new
+     * records — via `COALESCE(NULLIF(pay_frequency,''), <default>)` it IS the pay group for
+     * everyone who never set one. Changing that one setting silently moves all of them from one
+     * pay group to another: no employee record changes, nothing is logged against them, and the
+     * first symptom is a payroll run that no longer finds them. When one of them already has a
+     * payslip committed to a payment batch, the re-run cannot clean up after them at all — see
+     * PayrollService::assertDroppable().
+     *
+     * Surfacing the number is what turns that into an informed choice.
+     */
+    public function inheritingDefaultCount(): int
+    {
+        return Employee::query()
+            ->where(fn ($q) => $q->whereNull('pay_frequency')->orWhere('pay_frequency', ''))
+            ->count();
+    }
+
+    /**
      * The active pay groups: one per distinct effective frequency among employees
      * (employee.pay_frequency, falling back to the company default), each with its
      * headcount and current period.

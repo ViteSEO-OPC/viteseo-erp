@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Http\Resources;
 
+use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -24,6 +25,10 @@ class PayrollRunResource extends JsonResource
             'employee_count' => $this->employee_count,
             'run_at' => $this->run_at,
             'run_by' => $this->runner?->name,
+            // FIN-051 — how many payslips this run left untouched because they were already
+            // disbursed. Present only on the response to a run that just executed; null when the
+            // run is merely being read back, where it would describe an event, not a state.
+            'skipped_disbursed' => $this->resource->skippedDisbursedCount,
             // Slice 5 — a locked run can no longer be recomputed.
             'locked_at' => $this->locked_at,
             'locked_by' => $this->locker?->name,
@@ -35,6 +40,14 @@ class PayrollRunResource extends JsonResource
             // Slice 8 — the rules in force when this run executed. Detail view only: it's a
             // sizeable blob and the runs LIST would carry one per row for no reason.
             'policy_snapshot' => $this->whenLoaded('payslips', fn () => $this->policy_snapshot),
+            // Which of those captured rules would price this cycle differently TODAY. Without
+            // this the panel is silently stale: a rule changed after the run still applies to
+            // the cycle (it is dated on or before cycle_end), so the frozen record and the
+            // Company rules screen disagree and nothing explains why.
+            'rules_drift' => $this->whenLoaded(
+                'payslips',
+                fn () => app(PayrollService::class)->snapshotDrift($this->resource),
+            ),
             // Per-employee breakdown (only when payslips are eager-loaded).
             'breakdown' => $this->whenLoaded('payslips', fn () => $this->payslips->map(fn ($p) => [
                 'id' => $p->id,

@@ -32,6 +32,8 @@ export async function updatePayrollSettings(input: {
   frequency: string;
   deduction_timing?: string;
   tax_timing?: string;
+  /** FIN-048 — which cutoff the monthly allowance lands on: every | first | last. */
+  allowance_timing?: string;
   /** Slice 10 — null clears the ceiling (allowances fully tax-free). */
   other_benefits_annual_cap?: number | null;
   /**

@@ -17,6 +17,7 @@ use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\ReportExport;
 use App\Modules\Hr\Models\Requisition;
 use App\Modules\Hr\Services\RecruitmentService;
+use App\Modules\Hr\Services\TaxService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -40,6 +41,8 @@ class ReportService
         'leave_liability',
         // FIN-042 — the pre-disbursement review screen: register → totals → variance.
         'payroll_register',
+        // FIN-055 — the year-end check: tax due against tax withheld, per employee.
+        'tax_reconciliation',
         // The three month-scoped attendance views, built by AttendanceReportService.
         ...AttendanceReportService::KEYS,
     ];
@@ -54,6 +57,9 @@ class ReportService
         // The attendance reports share one month-long day grid; they live in their own service so
         // the three of them can read the same calendar instead of rebuilding it each.
         private readonly AttendanceReportService $attendanceReports,
+        // FIN-055 — the reconciliation recomputes each employee's annual tax from the same dated
+        // table payroll used, rather than trusting the figure payroll happened to withhold.
+        private readonly TaxService $tax,
     ) {}
 
     /** @param array<string, mixed> $filters */
@@ -65,6 +71,7 @@ class ReportService
             'leave' => $this->leave($filters),
             'leave_liability' => $this->leaveLiability($filters),
             'payroll_register' => $this->payrollRegister($filters),
+            'tax_reconciliation' => $this->taxReconciliation($filters),
             'compensation' => $this->compensation($filters),
             'payroll' => $this->payroll($filters),
             'recruitment' => $this->recruitment($filters),
@@ -99,7 +106,9 @@ class ReportService
         // MF-11 — the liability report exports CSV for the same reason the audit trail does: it is a
         // row-per-employee table that accounting reconciles against, not a chart anyone reads. The
         // attendance reports are the same shape: a register HR reconciles, not a chart.
-        return in_array($key, ['audit', 'leave_liability', 'payroll_register', ...AttendanceReportService::KEYS], true)
+        // FIN-055 — the tax reconciliation joins that list for the same reason: it is a
+        // row-per-employee table accounting works through against BIR 2316, not a chart.
+        return in_array($key, ['audit', 'leave_liability', 'payroll_register', 'tax_reconciliation', ...AttendanceReportService::KEYS], true)
             ? 'csv'
             : 'pdf';
     }
@@ -178,6 +187,7 @@ class ReportService
             'leave' => 'Absences & Leaves',
             'leave_liability' => 'Leave Liability',
             'payroll_register' => 'Payroll Register',
+            'tax_reconciliation' => 'Year-End Tax Reconciliation',
             'compensation' => 'Compensation & Benefits',
             'attrition' => 'Attrition & Tenure',
             'diversity' => 'Diversity',
@@ -641,6 +651,198 @@ class ReportService
      *
      * @param  array<string, mixed>  $filters
      */
+    /**
+     * Year-end tax reconciliation (FIN-055) — per employee, tax DUE against tax WITHHELD.
+     *
+     * WHY THIS EXISTS RATHER THAN MORE GUARDS INSIDE PAYROLL. Withholding is a projection: each
+     * period taxes itself as though the year continued unchanged, and December settles the
+     * difference. That settlement is one step in one run, and every way it can silently not happen
+     * looks identical from the outside — a payslip already disbursed is refused a recompute, a
+     * locked run cannot be re-run, an employee who changed pay groups mid-year is counted in one
+     * group and settled in another, December is never re-run after a late correction, and a date
+     * bug once meant no weekly or bi-weekly cycle ever settled at all (FIN-053). Each of those was
+     * invisible in the app and would have surfaced at filing.
+     *
+     * Guards inside the engine can fail the same way the thing they guard fails. This reads the
+     * FINISHED payslips and recomputes the answer independently, so it cannot be fooled by the
+     * mechanism it is checking — and it is the same figure pair BIR 2316 and the alphalist report,
+     * so it is work that has to exist regardless.
+     *
+     * TAXABLE PAY IS SUMMED, NOT RE-DERIVED. `taxable_pay` is what each payslip actually taxed;
+     * rebuilding it from today's salaries and rules would measure the year against a rulebook it
+     * was never paid under, which is the drift every snapshot in this module exists to prevent.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array<string, mixed>
+     */
+    private function taxReconciliation(array $filters = []): array
+    {
+        $year = (int) ($filters['year'] ?? now(config('app.timezone_local'))->year);
+        $tolerance = 1.0; // a peso — below this is rounding across a year of payslips, not a gap.
+
+        $slips = DB::table('hr_payslips')
+            ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
+            ->join('hr_employees', 'hr_payslips.employee_id', '=', 'hr_employees.id')
+            ->leftJoin('users', 'hr_employees.user_id', '=', 'users.id')
+            ->leftJoin('hr_departments', 'hr_employees.department_id', '=', 'hr_departments.id')
+            ->whereNull('hr_payslips.deleted_at')
+            ->whereNull('hr_payroll_runs.deleted_at')
+            ->where('hr_payroll_runs.type', 'regular')
+            ->where('hr_payroll_runs.status', 'completed')
+            ->whereYear('hr_payroll_runs.cycle_start', $year)
+            ->groupBy('hr_payslips.employee_id', 'users.name', 'hr_departments.name')
+            ->selectRaw(
+                'hr_payslips.employee_id, users.name AS employee, hr_departments.name AS department,'
+                .' SUM(hr_payslips.taxable_pay) AS taxable,'
+                .' SUM(hr_payslips.withholding_tax) AS withheld,'
+                // Non-zero on the payslip that settled the year — so "was this employee ever
+                // annualised at all?" is answerable, which is the question that catches a whole
+                // pay group silently missing out.
+                .' SUM(ABS(hr_payslips.tax_annualisation)) AS settled,'
+                .' COUNT(*) AS periods'
+            )
+            ->orderBy('users.name')
+            ->get();
+
+        $rows = [];
+        $short = 0;
+        $over = 0;
+        $unsettled = 0;
+        $totalDue = 0.0;
+        $totalWithheld = 0.0;
+
+        foreach ($slips as $s) {
+            $taxable = round((float) $s->taxable, 2);
+            $withheld = round((float) $s->withheld, 2);
+            $due = round($this->tax->annualTax($taxable, "{$year}-12-31"), 2);
+            $gap = round($withheld - $due, 2);
+
+            $totalDue = round($totalDue + $due, 2);
+            $totalWithheld = round($totalWithheld + $withheld, 2);
+
+            $settledEver = round((float) $s->settled, 2) > 0.0;
+            if (! $settledEver) {
+                $unsettled++;
+            }
+            // Counted only once the year is settled for them, so the headline figures agree with
+            // the Status column rather than contradicting it on an open year.
+            if ($settledEver && $gap < -$tolerance) {
+                $short++;
+            } elseif ($settledEver && $gap > $tolerance) {
+                $over++;
+            }
+
+            $rows[] = [
+                $s->employee ?? '—',
+                $s->department ?? 'Unassigned',
+                (string) $s->periods,
+                $this->pesoExact($taxable),
+                $this->pesoExact($due),
+                $this->pesoExact($withheld),
+                ($gap > 0 ? '+' : '') . $this->pesoExact($gap),
+                // The word, not the sign — "short ₱1,300" is the sentence someone acts on.
+                //
+                // An employee whose year was never settled is reported as UNSETTLED rather than as
+                // over- or under-withheld, whatever the difference says. Until the closing cycle
+                // runs, that difference is the projection working as designed; calling it a
+                // discrepancy would make the report wrong on every payslip of every open year.
+                match (true) {
+                    abs($gap) <= $tolerance && $settledEver => 'Balanced',
+                    ! $settledEver => 'Not settled yet',
+                    $gap < 0 => 'SHORT — under-withheld',
+                    default => 'OVER — refund owed',
+                },
+            ];
+        }
+
+        $balanced = count($rows) - $short - $over - $unsettled;
+
+        return [
+            'title' => 'Year-End Tax Reconciliation',
+            'description' => 'Per employee, the tax actually due on the year against the tax actually withheld — the BIR 2316 pair, recomputed from the payslips themselves.',
+            'mock' => false,
+            'summary' => [
+                ['label' => 'Employees', 'value' => (string) count($rows)],
+                ['label' => 'Balanced', 'value' => (string) $balanced],
+                ['label' => 'Short', 'value' => (string) $short],
+                ['label' => 'Over-withheld', 'value' => (string) $over],
+                ['label' => 'Not settled', 'value' => (string) $unsettled],
+                ['label' => 'Tax due', 'value' => $this->pesoExact($totalDue)],
+                ['label' => 'Tax withheld', 'value' => $this->pesoExact($totalWithheld)],
+            ],
+            'bars' => null,
+            'table' => [
+                'columns' => ['Employee', 'Department', 'Payslips', 'Taxable pay', 'Tax due', 'Tax withheld', 'Difference', 'Status'],
+                'rows' => $rows,
+            ],
+            'years' => $this->reconciliationYears(),
+            'selected_year' => $year,
+            'note' => $this->reconciliationNote(count($rows), $short, $over, $unsettled, $year),
+        ];
+    }
+
+    /** Years that actually have completed regular payroll, newest first. */
+    private function reconciliationYears(): array
+    {
+        return DB::table('hr_payroll_runs')
+            ->whereNull('deleted_at')
+            ->where('type', 'regular')
+            ->where('status', 'completed')
+            ->selectRaw('DISTINCT YEAR(cycle_start) AS y')
+            ->orderByDesc('y')
+            ->pluck('y')
+            ->map(fn ($y) => (int) $y)
+            ->all();
+    }
+
+    /**
+     * What the reader should do about it, in one sentence.
+     *
+     * A MID-YEAR GAP IS NORMAL AND MUST NOT READ AS AN ALARM. Withholding projects each period
+     * across a full year, so a year only part-way through has collected against pay that has not
+     * happened: every employee legitimately shows as over-withheld until the closing cycle settles
+     * them. A report that cries wolf every month is one nobody reads in December, when it matters —
+     * so an unsettled year is described as unfinished rather than as a discrepancy.
+     */
+    private function reconciliationNote(int $count, int $short, int $over, int $unsettled, int $year): string
+    {
+        if ($count === 0) {
+            return "No completed regular payroll in {$year} — there is nothing to reconcile.";
+        }
+
+        // Nobody settled ⇒ the year has not been closed yet. The differences below are the
+        // projection doing its job, not a fault.
+        if ($unsettled === $count) {
+            return "{$year} has not been closed yet — no payslip has carried the year-end settlement, "
+                . 'so these differences are the ordinary effect of withholding against a projected '
+                . "year. Run the cycle that contains 31 December {$year}, then read this again.";
+        }
+
+        if ($short === 0 && $over === 0) {
+            return "Every employee balances: the tax withheld equals the tax due on the year's actual pay.";
+        }
+
+        $parts = [];
+        if ($short > 0) {
+            $parts[] = "{$short} under-withheld";
+        }
+        if ($over > 0) {
+            $parts[] = "{$over} over-withheld";
+        }
+
+        $note = implode(' and ', $parts)
+            . '. A gap after the year is closed usually means the settlement did not reach them — a '
+            . 'payslip already disbursed is never recomputed, and a locked run cannot be re-run. '
+            . 'Check December for those employees before filing.';
+
+        // The sharpest signal in the report: the year IS closed for some people and not for these.
+        // That is the shape every silent failure took — a whole pay group missed, one employee's
+        // December disbursed before the correction, a run locked early.
+        return $unsettled > 0
+            ? $note . " {$unsettled} never carried a settlement at all — start there."
+            : $note;
+    }
+
     private function payrollRegister(array $filters = []): array
     {
         $deptId = $filters['department'] ?? null;

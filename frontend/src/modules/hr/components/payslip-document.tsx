@@ -5,7 +5,14 @@ import { Fragment, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
 import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
-import type { Payslip, PayslipDeductionKey, PayslipLine } from "@/modules/hr/types/payroll";
+import { formatPeso } from "@/core/lib/format";
+import type {
+  ContributionBasis,
+  Payslip,
+  PayslipDeductionKey,
+  PayslipLine,
+  TaxAnnualisationBasis,
+} from "@/modules/hr/types/payroll";
 
 /** Column name → what the employee should see it called. */
 const DEDUCTION_LABELS: Record<PayslipDeductionKey, string> = {
@@ -203,19 +210,29 @@ export function PayslipDocument({
                 rather than in a detached block of its own. Never in Total Gov. */}
             {(
               [
-                ["SSS Contribution", p.sss, p.employer_sss],
-                ["PhilHealth", p.philhealth, p.employer_philhealth],
-                ["Pag-IBIG", p.pagibig, p.employer_pagibig],
+                ["SSS Contribution", "sss", p.sss, p.employer_sss],
+                ["PhilHealth", "philhealth", p.philhealth, p.employer_philhealth],
+                ["Pag-IBIG", "pagibig", p.pagibig, p.employer_pagibig],
               ] as const
-            ).map(([label, employee, employer]) => (
+            ).map(([label, type, employee, employer]) => (
               <Fragment key={label}>
                 <Row label={label} value={amount(employee)} pair={(employer ?? 0) > 0} />
                 {(employer ?? 0) > 0 && (
                   <SubRow label="+ employer share" value={amount(employer ?? 0)} />
                 )}
+                {/* FIN-049 — the rate alone does not explain the figure: 2% of a ₱95,000 salary
+                    is not ₱200, because the rate is applied to a ₱10,000 cap. This names the
+                    number the rate multiplied. */}
+                <BasisNote basis={p.contribution_basis?.[type]} />
               </Fragment>
             ))}
             <Row label="Withholding Tax" value={amount(p.withholding_tax)} />
+            {/* FIN-054 — December folds the year's correction into the line above, and on the
+                common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
+                not enough: a lone "refund ₱5,432" is the same opacity moved somewhere else. These
+                are the figures it was computed from, so the employee can add it up — and they are
+                the same ones BIR 2316 will show them. */}
+            <TaxSettlement basis={p.tax_annualisation_basis} amount={amount} />
             <Row label="Total Gov" value={amount(t.government)} total />
           </Table>
         </div>
@@ -419,6 +436,124 @@ function Row({
  * computed by the API from the employee's own deductions, so there is no path by which this
  * reaches it. The styling says so; the arithmetic enforces it.
  */
+/**
+ * The year-end tax settlement, shown as its derivation rather than as one figure (FIN-054).
+ *
+ * Every period withholds by projecting that period across the year, which is only right if every
+ * period is identical — they never are. December settles the difference. The result is usually a
+ * REFUND, which turns Withholding Tax negative and makes net pay larger than gross; without this
+ * block the employee sees both and has nothing to reconcile them against.
+ *
+ * Renders only on the payslip that closes a year. Payslips written before the figures were stored
+ * show nothing rather than a reconstruction, which would change as later runs alter the year.
+ */
+function TaxSettlement({
+  basis,
+  amount,
+}: {
+  basis?: TaxAnnualisationBasis | null;
+  amount: (n: number) => string;
+}) {
+  if (!basis) return null;
+
+  const refund = basis.settled_this_period < 0;
+
+  return (
+    <div className="border-b border-border px-4 pb-3 pt-2 pl-9">
+      <p className="text-caption font-semibold text-foreground">
+        Year-end tax settlement · {basis.year}
+      </p>
+      <SettlementLine label="Taxable pay for the year" value={amount(basis.year_taxable)} />
+      <SettlementLine label="Tax due on that" value={amount(basis.annual_tax_due)} />
+      <SettlementLine label="Already withheld this year" value={amount(basis.previously_withheld)} />
+      <SettlementLine
+        label={refund ? "Refunded on this payslip" : "Collected on this payslip"}
+        value={amount(Math.abs(basis.settled_this_period))}
+        strong
+      />
+      <p className="pt-1 text-[0.6875rem] text-muted-foreground">
+        {refund
+          ? "Tax is withheld each period on an estimate of the year. Yours came out higher than the year needed, so the difference is paid back here."
+          : "Tax is withheld each period on an estimate of the year. Yours came out lower than the year needed, so the difference is collected here."}
+      </p>
+    </div>
+  );
+}
+
+function SettlementLine({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 text-caption">
+      <span className={strong ? "font-medium text-foreground" : "text-muted-foreground"}>
+        {label}
+      </span>
+      <span
+        className={cn(
+          "shrink-0 font-mono tabular-nums",
+          strong ? "font-semibold text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * How a statutory deduction was arrived at, in one line (FIN-049).
+ *
+ * WHY IT IS WORTH THE ROW. The three rates are public knowledge and still do not explain the
+ * figures: Pag-IBIG's 2% is charged on a ₱10,000 cap, so a ₱95,000 earner pays ₱200 rather than
+ * ₱1,900, and SSS multiplies a bracket's Monthly Salary Credit rather than the salary at all.
+ * Both read as errors until someone names the amount the rate was applied to.
+ *
+ * Renders nothing when the payslip predates the snapshot, rather than inventing a derivation.
+ */
+function BasisNote({ basis }: { basis?: ContributionBasis }) {
+  if (!basis) return null;
+
+  const note = basis.overridden
+    ? "Fixed amount set on this employee — the government rate was not applied"
+    : describeBasis(basis);
+
+  if (!note) return null;
+
+  return (
+    <div className="border-b border-border px-4 pb-2.5 pl-9 text-caption text-muted-foreground">
+      {note}
+    </div>
+  );
+}
+
+function describeBasis(b: ContributionBasis): string | null {
+  if (b.rate == null || b.charged_on == null) return null;
+
+  // Trailing zeroes on a rate read as false precision — 2.5% and 2%, not 2.500% and 2.000%.
+  const rate = `${Number((b.rate * 100).toFixed(3))}%`;
+  const on = formatPeso(b.charged_on);
+
+  if (b.basis === "bracket") {
+    return `${rate} of ${on} — the salary bracket for ${formatPeso(b.salary ?? 0)}`;
+  }
+
+  if (b.capped) {
+    return `${rate} of ${on} — the maximum this contribution is charged on`;
+  }
+
+  if (b.floored) {
+    return `${rate} of ${on} — the minimum this contribution is charged on`;
+  }
+
+  return `${rate} of ${on}`;
+}
+
 function SubRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border px-4 pb-2.5 pl-9 text-caption italic text-muted-foreground">

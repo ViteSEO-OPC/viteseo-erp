@@ -13,6 +13,7 @@ import {
   Wallet,
   ClipboardList,
   CalendarCheck,
+  Scale,
   type LucideIcon,
 } from "lucide-react";
 
@@ -65,6 +66,14 @@ const REPORTS: {
     title: "Payroll Register",
     description: "Per-employee gross-to-net for one run, with department subtotals and a comparison against the previous period. Its totals reconcile to the run exactly — review this before disbursing.",
     icon: ClipboardList,
+  },
+  {
+    // FIN-055 — the year-end check. Sits beside the register because it answers the question the
+    // register cannot: not "what did we pay" but "was the tax on it right".
+    key: "tax_reconciliation",
+    title: "Year-End Tax Reconciliation",
+    description: "Per employee, the tax actually due on the year against the tax actually withheld — recomputed from the payslips rather than trusting what payroll withheld. Flags anyone the year-end settlement never reached. The BIR 2316 pair.",
+    icon: Scale,
   },
   {
     key: "compensation",

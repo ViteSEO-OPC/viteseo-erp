@@ -10,6 +10,9 @@ class PayrollSetting extends Model
 
     protected $fillable = [
         'frequency', 'deduction_timing', 'tax_timing', 'anchor_date', 'pay_delay_days',
+        // FIN-048 — which cutoff the monthly allowance lands on. Same three values as the two
+        // timings above; `every` is the even split that was previously the only behaviour.
+        'allowance_timing',
         // Slice 10 — annual ceiling above which allowances become taxable (null = none).
         'other_benefits_annual_cap',
         // FIN-030 — the regional minimum DAILY wage. Null = not configured, warns about nothing.
