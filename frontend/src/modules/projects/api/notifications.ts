@@ -1,5 +1,5 @@
 import apiClient from "@/core/api/client";
-import type { Paginated } from "@/core/types";
+import type { ApiResource, Paginated } from "@/core/types";
 import type { NotificationDto } from "@/modules/projects/types/notification";
 
 export async function getNotifications(
@@ -13,10 +13,10 @@ export async function getNotifications(
 }
 
 export async function getUnreadCount(): Promise<number> {
-  const { data } = await apiClient.get<{ unread_count: number }>(
+  const { data } = await apiClient.get<ApiResource<{ unread_count: number }>>(
     "/projects/notifications/unread-count",
   );
-  return data.unread_count;
+  return data.data.unread_count;
 }
 
 export async function markNotificationRead(id: string): Promise<void> {
