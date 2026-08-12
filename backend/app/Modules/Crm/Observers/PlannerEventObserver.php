@@ -63,6 +63,20 @@ class PlannerEventObserver
             return;
         }
 
+        // An ownership handover is its own semantic event, not a generic edit. It is logged with the
+        // from/to pair because "who owes this work" is the one field whose history the Activity trail
+        // could not otherwise reconstruct — every other change is recoverable from the current row.
+        // Emitted by PlannerOwnershipTransfer (lead reassignment) and by an Admin PATCHing
+        // `assigned_to` directly; both are the same business fact, so both read the same way.
+        if ($event->wasChanged('assigned_to')) {
+            $this->log($event, 'planner-event.reassigned', 'Event reassigned', [
+                'from' => $event->getOriginal('assigned_to'),
+                'to' => $event->assigned_to,
+            ]);
+
+            return;
+        }
+
         $this->log($event, 'planner-event.updated', 'Event updated');
     }
 
@@ -71,7 +85,11 @@ class PlannerEventObserver
         $this->log($event, 'planner-event.deleted', 'Event removed');
     }
 
-    private function log(PlannerEvent $event, string $activity, string $description): void
+    /**
+     * @param  array<string, mixed>|null  $extra  Event-specific properties merged over the shared
+     *                                            three (never replacing them).
+     */
+    private function log(PlannerEvent $event, string $activity, string $description, ?array $extra = null): void
     {
         $subject = $event->lead ?? $event;
 
@@ -83,6 +101,7 @@ class PlannerEventObserver
                 'planner_event_id' => $event->id,
                 'event_type' => $event->event_type,
                 'title' => $event->title,
+                ...($extra ?? []),
             ],
         ]);
     }

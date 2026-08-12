@@ -26,6 +26,7 @@ use App\Models\User;
 use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Services\LeadImportService;
 use App\Modules\Crm\Services\LeadPdfExporter;
+use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -512,30 +513,50 @@ class LeadController extends Controller
             ->all();
     }
 
-    public function assign(AssignLeadRequest $request, Lead $lead): JsonResponse
-    {
+    public function assign(
+        AssignLeadRequest $request,
+        Lead $lead,
+        PlannerOwnershipTransfer $plannerOwnership,
+    ): JsonResponse {
         $assignedTo = (int) $request->validated('assigned_to');
+        // Captured BEFORE the write below — from that point on `$lead->assigned_to` is the NEW owner,
+        // and the transfer needs to know whose work is being handed over.
+        $previousOwnerId = $lead->assigned_to;
 
-        $lead->assigned_to = $assignedTo;
-        // saveQuietly() skips the generic "updated" Activity — a dedicated lead.assigned
-        // event is recorded below (clean attribution for the future Management Dashboard).
-        $lead->saveQuietly();
-        $lead->load('assignedTo');
+        // One transaction around the handover itself: the ownership row, its Activity, and the open
+        // Planner work must land together or not at all. A partial failure here is precisely the
+        // defect this transfer exists to fix — a lead that changed hands while its outstanding work
+        // stayed pointed at the previous BD, invisible to the person now accountable for it.
+        //
+        // notify() and the broadcast stay OUTSIDE, after the commit — see the note below on why
+        // their order is load-bearing, and so neither can fire for a handover that rolled back.
+        DB::transaction(function () use ($request, $lead, $assignedTo, $previousOwnerId, $plannerOwnership): void {
+            $lead->assigned_to = $assignedTo;
+            // saveQuietly() skips the generic "updated" Activity — a dedicated lead.assigned
+            // event is recorded below (clean attribution for the future Management Dashboard).
+            $lead->saveQuietly();
+            $lead->load('assignedTo');
 
-        $lead->activities()->create([
-            'causer_id' => $request->user()->id,
-            'event' => 'lead.assigned',
-            'description' => sprintf(
-                '%s assigned %s to %s',
-                $request->user()->name,
-                $lead->business_name,
-                $lead->assignedTo->name,
-            ),
-            'properties' => [
-                'assigned_to' => $assignedTo,
-                'to_name' => $lead->assignedTo->name,
-            ],
-        ]);
+            $lead->activities()->create([
+                'causer_id' => $request->user()->id,
+                'event' => 'lead.assigned',
+                'description' => sprintf(
+                    '%s assigned %s to %s',
+                    $request->user()->name,
+                    $lead->business_name,
+                    $lead->assignedTo->name,
+                ),
+                'properties' => [
+                    'assigned_to' => $assignedTo,
+                    'to_name' => $lead->assignedTo->name,
+                ],
+            ]);
+
+            // Open work follows the lead; completed work stays with the BD who performed it. The
+            // new owner is NOT separately notified per event — the lead notification below is the
+            // handover announcement, and one notification per transferred event would be noise.
+            $plannerOwnership->transferOnReassignment($lead, $previousOwnerId, $assignedTo);
+        });
 
         // The durable record of the handover, for the new owner's Notification Center.
         // notify() is the only entry point: persisting fires NotificationSent, and

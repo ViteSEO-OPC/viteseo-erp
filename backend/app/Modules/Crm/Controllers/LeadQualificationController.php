@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 
 use App\Modules\Crm\Resources\LeadResource;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -23,7 +24,7 @@ use Illuminate\Support\Facades\DB;
  */
 class LeadQualificationController extends Controller
 {
-    public function store(Request $request, Lead $lead): JsonResponse
+    public function store(Request $request, Lead $lead, PlannerOwnershipTransfer $plannerOwnership): JsonResponse
     {
         $this->authorize('qualify', $lead);
 
@@ -43,7 +44,7 @@ class LeadQualificationController extends Controller
         // `UPDATE … WHERE qualified_at IS NULL` via the query builder: a query-builder write fires
         // no model events, which would bypass LeadObserver entirely and silently drop the
         // `lead.qualified` Activity, the one-time Lead Score, and the LeadQualified event.
-        return DB::transaction(function () use ($request, $lead): JsonResponse {
+        return DB::transaction(function () use ($request, $lead, $plannerOwnership): JsonResponse {
             /** @var Lead|null $locked */
             $locked = Lead::query()->whereKey($lead->getKey())->lockForUpdate()->first();
 
@@ -66,6 +67,12 @@ class LeadQualificationController extends Controller
                 ], 409);
             }
 
+            // Captured before the write — a prospect is normally unassigned (the pool is shared), in
+            // which case the transfer below is a documented no-op. It is NOT always null: a lead can
+            // be assigned at creation and qualified later, and that lead may already carry auto-created
+            // follow-up work (FollowUpScheduler mints one the moment Cold Calling is set to Scheduled).
+            $previousOwnerId = $locked->assigned_to;
+
             // Cross the boundary: stamp the lifecycle + take ownership. The observer detects the
             // qualified_at transition → logs `lead.qualified` and computes the Lead Score once.
             $locked->update([
@@ -73,6 +80,10 @@ class LeadQualificationController extends Controller
                 'qualified_by' => $request->user()->id,
                 'assigned_to' => $request->user()->id,
             ]);
+
+            // Taking ownership takes the outstanding work with it — the same rule as an Admin
+            // reassignment, through the same service, inside the lock that already guards this claim.
+            $plannerOwnership->transferOnReassignment($locked, $previousOwnerId, $request->user()->id);
 
             return response()->json([
                 'data' => new LeadResource($locked->refresh()),
