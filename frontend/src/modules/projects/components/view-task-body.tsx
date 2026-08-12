@@ -148,7 +148,7 @@ function SubtaskRow({
   };
 
   return (
-    <li className="rounded-xl border border-[#e4e4d8] bg-white px-3 py-2.5">
+    <li className="rounded-xl border border-line-warm bg-white px-3 py-2.5">
       <div className="flex items-start gap-3">
         <span className="shrink-0">
           {subtask.assignee ? (
@@ -300,7 +300,7 @@ function SubtaskRow({
           <Field label="Description">
             <Textarea rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Assignee">
               <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
                 <option value="">Unassigned</option>
@@ -406,15 +406,27 @@ export function ViewTaskBody({
   const [confirmDeleteTask, setConfirmDeleteTask] = useState(false);
   const [subtaskToDelete, setSubtaskToDelete] = useState<Subtask | null>(null);
 
+  // Both of these swallow the rejection on purpose: the hook's onError has
+  // already said what went wrong, and the catch is what stops an unhandled
+  // rejection. The dialog stays open on failure so the action is still there to
+  // retry — closing it would look like the delete had worked.
   const handleDeleteTask = async () => {
-    await deleteTask.mutateAsync(task.id);
+    try {
+      await deleteTask.mutateAsync(task.id);
+    } catch {
+      return;
+    }
     setConfirmDeleteTask(false);
     onClose();
   };
 
   const handleDeleteSubtask = async () => {
     if (!subtaskToDelete) return;
-    await deleteSubtask.mutateAsync(subtaskToDelete.id);
+    try {
+      await deleteSubtask.mutateAsync(subtaskToDelete.id);
+    } catch {
+      return;
+    }
     setSubtaskToDelete(null);
   };
 
@@ -821,7 +833,7 @@ export function ViewTaskBody({
         )}
 
         <DetailsPanel>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <p className={`mb-2 ${sectionLabel}`}>Status:</p>
               {canEditStatus ? (
@@ -873,7 +885,7 @@ export function ViewTaskBody({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <p className={`mb-2 ${sectionLabel}`}>Start Date:</p>
               {editing ? (
@@ -980,7 +992,7 @@ export function ViewTaskBody({
                       href={l.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="truncate text-[#0f766e] underline hover:text-[#0d655e]"
+                      className="truncate text-brand-strong underline hover:text-brand-strong-hover"
                     >
                       {l.url}
                     </a>

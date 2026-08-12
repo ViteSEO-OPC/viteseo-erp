@@ -39,8 +39,8 @@ export function StatusPill({
 
   const colorMap: Record<string, string> = {
     todo: "bg-ink-soft/10 text-ink-soft",
-    in_progress: "bg-indigo-50 text-[#6366f1]",
-    done: "bg-emerald-50 text-[#10b981]",
+    in_progress: "bg-indigo-50 text-indigo-500",
+    done: "bg-emerald-50 text-emerald-500",
   };
   return (
     <Badge className={colorMap[statusKey]}>
@@ -106,7 +106,7 @@ function StatusSection({
         data-scroll-root
         className="hidden max-h-[400px] overflow-auto rounded-xl border border-line md:block"
       >
-        <div className="sticky top-0 z-5 grid min-w-[720px] grid-cols-[160px_minmax(200px,1fr)_84px_160px_92px] items-center gap-4 border-b border-line bg-[#f9fafb] px-5 py-3 text-xs font-bold uppercase tracking-wide text-ink-soft">
+        <div className="sticky top-0 z-5 grid min-w-[720px] grid-cols-[160px_minmax(200px,1fr)_84px_160px_92px] items-center gap-4 border-b border-line bg-surface-alt px-5 py-3 text-xs font-bold uppercase tracking-wide text-ink-soft">
           <span>Project Name</span>
           <span>Task Name</span>
           <span>Priority</span>

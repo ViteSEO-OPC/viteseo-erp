@@ -7,6 +7,7 @@ import {
   updateComment,
 } from "@/modules/projects/api/comments";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 export function useTaskComments(taskId: string) {
   return useQuery({
@@ -19,6 +20,7 @@ export function useTaskComments(taskId: string) {
 export function useAddComment(taskId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't post that comment"),
     mutationFn: (content: string) =>
       addTaskComment(taskId, content),
     onSuccess: () => {
@@ -32,6 +34,7 @@ export function useAddComment(taskId: string) {
 export function useUpdateComment(taskId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't save that comment"),
     mutationFn: ({ id, content }: { id: string; content: string }) =>
       updateComment(id, content),
     onSuccess: () => {

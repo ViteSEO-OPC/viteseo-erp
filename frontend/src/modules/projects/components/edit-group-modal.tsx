@@ -49,14 +49,20 @@ export function EditGroupModal({
   const color = watch('color');
 
   const submit = handleSubmit(async (data) => {
-    await update.mutateAsync({
-      id: group.id,
-      payload: {
-        name: data.name,
-        color: data.color,
-        leader_id: Number(data.leader_id),
-      },
-    });
+    try {
+      await update.mutateAsync({
+        id: group.id,
+        payload: {
+          name: data.name,
+          color: data.color,
+          leader_id: Number(data.leader_id),
+        },
+      });
+    } catch {
+      // The hook's onError has already explained the failure; this stops the
+      // form from closing and resetting as though the save had gone through.
+      return;
+    }
     onClose();
   });
 

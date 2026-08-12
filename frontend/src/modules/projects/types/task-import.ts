@@ -1,4 +1,8 @@
-import type { AssignmentType, Priority } from "@/modules/projects/types/common";
+import type {
+  AssignmentType,
+  Priority,
+  StatusKey,
+} from "@/modules/projects/types/common";
 
 /** A pickable value in a remap dropdown or an inline editor. */
 export interface ImportOption {
@@ -7,9 +11,19 @@ export interface ImportOption {
   label: string;
 }
 
+/**
+ * A status option, carrying what the board's own StatusPill needs to tint it:
+ * the stable key for the default columns, and the status's own colour when it
+ * is a custom one.
+ */
+export interface ImportStatusOption extends ImportOption {
+  key: StatusKey;
+  color: string | null;
+}
+
 /** Everything the preview screen can offer as a replacement value. */
 export interface ImportOptions {
-  statuses: ImportOption[];
+  statuses: ImportStatusOption[];
   groups: ImportOption[];
   members: ImportOption[];
   priorities: ImportOption[];

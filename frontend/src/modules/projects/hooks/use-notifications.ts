@@ -10,6 +10,7 @@ import {
 import { notificationKeys } from "@/modules/projects/lib/query-keys";
 import { fromResource } from "@/modules/projects/lib/notifications";
 import type { AppNotification } from "@/modules/projects/types/notification";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 /**
  * The authenticated user's notifications, mapped to the UI shape. The cache
@@ -31,6 +32,7 @@ export function useNotifications() {
 export function useMarkNotificationRead() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't mark that as read"),
     mutationFn: (id: string) => markNotificationRead(id),
     onSuccess: (_data, id) => {
       qc.setQueryData<AppNotification[]>(notificationKeys.all, (prev) =>
@@ -43,6 +45,7 @@ export function useMarkNotificationRead() {
 export function useMarkAllNotificationsRead() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't mark all as read"),
     mutationFn: () => markAllNotificationsRead(),
     onSuccess: () => {
       qc.setQueryData<AppNotification[]>(notificationKeys.all, (prev) =>

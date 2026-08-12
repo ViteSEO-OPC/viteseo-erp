@@ -81,7 +81,13 @@ export function AllProjectsView() {
 
   const confirmDelete = async () => {
     if (!toDelete) return;
-    await del.mutateAsync(toDelete.id);
+    try {
+      await del.mutateAsync(toDelete.id);
+    } catch {
+      // Keep the dialog open so the action is still there to retry — closing it
+      // would look like the delete had worked.
+      return;
+    }
     setToDelete(null);
   };
 
@@ -200,7 +206,7 @@ export function AllProjectsView() {
                     ? "grid-cols-[2fr_2.5fr_1.2fr_1fr_1fr_76px]"
                     : "grid-cols-[2fr_2.5fr_1.2fr_1fr_1fr]"
                 } items-center gap-4 px-6 py-4 transition-colors hover:bg-brand/5 ${
-                  idx % 2 === 1 ? "bg-[#FAFAF0]" : ""
+                  idx % 2 === 1 ? "bg-surface-warm" : ""
                 }`}
               >
                 <div className="flex min-w-0 items-center gap-2">

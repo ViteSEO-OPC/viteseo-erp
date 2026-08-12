@@ -9,6 +9,7 @@ import {
   updateWorkloadCapacity,
 } from "@/modules/projects/api/workload";
 import { projectKeys, workloadKeys } from "@/modules/projects/lib/query-keys";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 /**
  * Live workload for a member, fetched on demand only when a valid assignee is
@@ -58,6 +59,7 @@ export function useWorkloadTasks(params?: Record<string, unknown>) {
 export function useUpdateWorkloadCapacity() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't save the capacity settings"),
     mutationFn: (payload: {
       max_capacity: number;
       light_max: number;

@@ -43,7 +43,13 @@ function CreateWorkspaceModal({ open, onClose }: { open: boolean; onClose: () =>
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
   const submit = handleSubmit(async (data) => {
-    await create.mutateAsync({ name: data.name, description: data.description || undefined });
+    try {
+      await create.mutateAsync({ name: data.name, description: data.description || undefined });
+    } catch {
+      // The hook's onError has already explained the failure; this stops the
+      // form from closing and resetting as though the save had gone through.
+      return;
+    }
     reset();
     onClose();
   });
@@ -94,7 +100,11 @@ export function WorkspacesView() {
 
   const confirmDelete = async () => {
     if (!toDelete) return;
-    await del.mutateAsync(toDelete.id);
+    try {
+      await del.mutateAsync(toDelete.id);
+    } catch {
+      return;
+    }
     setToDelete(null);
   };
 
@@ -181,7 +191,7 @@ export function WorkspacesView() {
                       </button>
                     </div>
                   )}
-                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-soft text-lg font-bold text-[#0f8f8b]">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-soft text-lg font-bold text-brand-mid">
                     {ws.name.charAt(0).toUpperCase()}
                   </span>
                   <h3 className="mt-4 text-lg font-bold text-ink">{ws.name}</h3>

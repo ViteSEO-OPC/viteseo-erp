@@ -288,7 +288,7 @@ export function CreateTaskBody({
         </div>
 
         <DetailsPanel>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Status" error={errors.status_id?.message}>
               <Select {...register('status_id')}>
                 {statuses.map((s) => (
@@ -309,7 +309,7 @@ export function CreateTaskBody({
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Start Date" error={errors.start_date?.message}>
               <Input type="date" min={todayStr} {...register('start_date')} />
             </Field>
@@ -386,7 +386,7 @@ export function CreateTaskBody({
                       href={l.url}
                       target="_blank"
                       rel="noreferrer"
-                      className="min-w-0 flex-1 truncate text-brand underline hover:text-brand-hover"
+                      className="min-w-0 flex-1 truncate text-brand-strong underline hover:text-brand-strong-hover"
                     >
                       {l.url}
                     </a>

@@ -54,15 +54,21 @@ export function EditProjectModal({
   const selectedColor = watch('color');
 
   const submit = handleSubmit(async (data) => {
-    await update.mutateAsync({
-      id: project.id,
-      payload: {
-        name: data.name,
-        description: data.description || null,
-        priority: data.priority,
-        color: data.color,
-      },
-    });
+    try {
+      await update.mutateAsync({
+        id: project.id,
+        payload: {
+          name: data.name,
+          description: data.description || null,
+          priority: data.priority,
+          color: data.color,
+        },
+      });
+    } catch {
+      // The hook's onError has already explained the failure; this stops the
+      // form from closing and resetting as though the save had gone through.
+      return;
+    }
     onClose();
   });
 
@@ -92,7 +98,7 @@ export function EditProjectModal({
           <Textarea rows={3} placeholder="What is this project about?" {...register('description')} />
         </Field>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Priority" error={errors.priority?.message}>
             <Select {...register('priority')}>
               {PRIORITY_OPTIONS.map((opt) => (

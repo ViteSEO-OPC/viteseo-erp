@@ -83,14 +83,23 @@ export function StatusManagerModal({
 
   const submit = async () => {
     if (!canAdd) return;
-    await create.mutateAsync({ name: trimmed, color });
+    try {
+      await create.mutateAsync({ name: trimmed, color });
+    } catch {
+      // Keep the typed name and colour so the status can be resubmitted.
+      return;
+    }
     setName('');
     setColor('#6366f1');
   };
 
   const confirmDelete = async () => {
     if (!toDelete) return;
-    await del.mutateAsync(toDelete.id);
+    try {
+      await del.mutateAsync(toDelete.id);
+    } catch {
+      return;
+    }
     setToDelete(null);
   };
 

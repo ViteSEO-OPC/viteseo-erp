@@ -29,10 +29,16 @@ export function EditWorkspaceModal({
   });
 
   const submit = handleSubmit(async (data) => {
-    await update.mutateAsync({
-      id: workspace.id,
-      payload: { name: data.name, description: data.description || null },
-    });
+    try {
+      await update.mutateAsync({
+        id: workspace.id,
+        payload: { name: data.name, description: data.description || null },
+      });
+    } catch {
+      // The hook's onError has already explained the failure; this stops the
+      // form from closing and resetting as though the save had gone through.
+      return;
+    }
     onClose();
   });
 

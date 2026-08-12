@@ -45,7 +45,7 @@ export function RoleBadge({ role }: { role?: UserRole }) {
     return <Badge tone="danger">Admin</Badge>;
   }
   return (
-    <Badge className="border-brand bg-white text-[#0f8f8b]">
+    <Badge className="border-brand bg-white text-brand-mid">
       {roleLabel(role)}
     </Badge>
   );
@@ -322,7 +322,7 @@ export function MembersTable({
               className={`flex flex-col gap-3 rounded-xl border border-line p-4 md:grid md:items-center md:gap-4 md:rounded-none md:border-0 md:p-0 md:py-4 ${MEMBER_COLS} ${
                 // Zebra striping only reads as striping in a table — on stacked
                 // cards it looks like rows were highlighted at random.
-                idx % 2 === 1 ? "md:bg-[#FAFAF0]" : ""
+                idx % 2 === 1 ? "md:bg-surface-warm" : ""
               }`}
             >
               <div className="flex min-w-0 items-center gap-3">
@@ -503,7 +503,7 @@ export function GroupsPanel({
               <button
                 type="button"
                 onClick={onCreate}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-3 py-1.5 text-sm font-bold text-[#0f766e] transition-colors hover:bg-brand/10"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-3 py-1.5 text-sm font-bold text-brand-strong transition-colors hover:bg-brand/10"
               >
                 <span className="text-base">+</span>
                 Create Group

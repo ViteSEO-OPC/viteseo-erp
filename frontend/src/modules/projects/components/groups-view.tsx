@@ -449,7 +449,11 @@ export function GroupsView(): React.ReactElement {
         onClose={() => setMemberToRemove(null)}
         onConfirm={async () => {
           if (!memberToRemove) return;
-          await groupMembers.remove.mutateAsync(memberToRemove.id);
+          try {
+            await groupMembers.remove.mutateAsync(memberToRemove.id);
+          } catch {
+            return;
+          }
           setMemberToRemove(null);
         }}
         title="Remove member"
@@ -473,7 +477,11 @@ export function GroupsView(): React.ReactElement {
         onClose={() => setToDelete(null)}
         onConfirm={async () => {
           if (!toDelete) return;
-          await deleteGroup.mutateAsync(toDelete.id);
+          try {
+            await deleteGroup.mutateAsync(toDelete.id);
+          } catch {
+            return;
+          }
           // Deleted group may have been the selection — fall back to the first.
           setSelectedId(null);
           setToDelete(null);

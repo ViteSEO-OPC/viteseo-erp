@@ -306,7 +306,7 @@ function ConfirmStep({
         <div className="overflow-x-auto">
         <table className="w-full min-w-[300px] border-collapse text-sm">
           <thead>
-            <tr className="border-b border-line bg-[#f9fafb]">
+            <tr className="border-b border-line bg-surface-alt">
               <th className="px-4 py-2 text-left text-xs font-bold uppercase tracking-wide text-ink-soft">
                 Setting
               </th>

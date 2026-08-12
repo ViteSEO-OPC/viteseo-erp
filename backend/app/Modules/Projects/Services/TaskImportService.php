@@ -397,8 +397,18 @@ class TaskImportService
     private function options(array $maps): array
     {
         return [
+            // `key` and `color` ride along so the preview can render a status the
+            // same way the board does — the pill is tinted from the status key,
+            // or from the status's own colour when it is a custom one. Without
+            // them the client can only print the name as plain text, which is
+            // exactly how the preview drifted out of step with every other table.
             'statuses' => $maps['statusList']
-                ->map(fn (ProjectStatus $s): array => ['value' => (string) $s->uuid, 'label' => $s->name])
+                ->map(fn (ProjectStatus $s): array => [
+                    'value' => (string) $s->uuid,
+                    'label' => $s->name,
+                    'key' => $s->key->value,
+                    'color' => $s->color,
+                ])
                 ->all(),
             'groups' => $maps['groupList']
                 ->map(fn (Group $g): array => ['value' => (string) $g->uuid, 'label' => $g->name])

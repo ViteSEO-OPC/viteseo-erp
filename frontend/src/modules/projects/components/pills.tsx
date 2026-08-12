@@ -116,7 +116,7 @@ export function NamePill({
 }
 
 const COUNT_TONES = {
-  brand: "bg-[#0f766e] text-white",
+  brand: "bg-brand-strong text-white",
   danger: "bg-danger-soft text-danger",
   neutral: "bg-surface text-ink-soft",
 } as const;
