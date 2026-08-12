@@ -1,4 +1,4 @@
-import { ManagerTeamView } from "@/modules/projects/components/team/ManagerTeamView";
+import { ManagerTeamView } from "@/modules/projects/components/manager-team-view";
 import { RequireManager } from "@/core/auth/RequireRole";
 
 export default function ManagerTeamPage() {

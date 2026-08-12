@@ -4,11 +4,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { LayoutGrid, X } from "lucide-react";
+import { BarChart3, ClipboardCheck, LayoutGrid, X } from "lucide-react";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import { useSidebar } from "@/core/layout/SidebarContext";
 import { cn } from "@/core/lib/utils";
-import { useProjects, useWorkspaces } from "@/modules/projects/hooks";
+import { usePendingTasks } from "@/modules/projects/hooks/use-approvals";
+import { useProjects } from "@/modules/projects/hooks/use-projects";
+import { useWorkspaces } from "@/modules/projects/hooks/use-workspaces";
 import {
   Avatar,
   ChevronLeftIcon,
@@ -36,6 +38,7 @@ function NavLink({
   active,
   icon,
   collapsed,
+  badge,
   children,
 }: {
   href: string;
@@ -43,6 +46,8 @@ function NavLink({
   icon: React.ReactNode;
   /** When true, hide the label + center the icon at the `lg` breakpoint. */
   collapsed: boolean;
+  /** Optional count bubble (omitted when zero/undefined). */
+  badge?: number;
   children: React.ReactNode;
 }) {
   return (
@@ -55,10 +60,28 @@ function NavLink({
         collapsed && "lg:justify-center lg:px-2",
       )}
     >
-      <span className="shrink-0">{icon}</span>
+      <span className="relative shrink-0">
+        {icon}
+        {/* Collapsed rows have no label to sit beside, so the count rides the icon. */}
+        {!!badge && collapsed && (
+          <span className="absolute -right-1.5 -top-1 hidden h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white lg:flex">
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
+      </span>
       <span className={cn("truncate", collapsed && "lg:hidden")}>
         {children}
       </span>
+      {!!badge && (
+        <span
+          className={cn(
+            "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-[11px] font-bold text-white",
+            collapsed && "lg:hidden",
+          )}
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
     </Link>
   );
 }
@@ -176,6 +199,13 @@ export function Sidebar() {
   const { collapsed, toggleCollapsed, mobileOpen, closeMobile } = useSidebar();
   const { data: workspaces } = useWorkspaces();
   const { data: projectsPage } = useProjects();
+  // How much work is waiting on a review decision — managers only; members have
+  // no approvals endpoint (403), so the query never runs for them.
+  const { data: pendingPage } = usePendingTasks(
+    { per_page: 1, state: "all" },
+    isManager,
+  );
+  const pendingCount = pendingPage?.meta.total ?? 0;
   const [spacesOpen, setSpacesOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
 
@@ -369,6 +399,31 @@ export function Sidebar() {
           >
             Team
           </NavLink>
+
+          {/* Workload Analysis is open to everyone — the payload is scoped by
+              role, so a member sees only their own work. */}
+          <NavLink
+            href="/sprintly/workload"
+            active={pathname.startsWith("/sprintly/workload")}
+            collapsed={collapsed}
+            icon={<BarChart3 className="h-6 w-6" />}
+          >
+            Workload Analysis
+          </NavLink>
+
+          {/* Approvals is a management surface — Admin/PM only. The badge is the
+              count of work still waiting on a review decision. */}
+          {isManager && (
+            <NavLink
+              href="/sprintly/approvals"
+              active={pathname.startsWith("/sprintly/approvals")}
+              collapsed={collapsed}
+              icon={<ClipboardCheck className="h-6 w-6" />}
+              badge={pendingCount}
+            >
+              Approvals
+            </NavLink>
+          )}
 
           {/* Archives is a management surface — Admin/PM only. */}
           {isManager && (

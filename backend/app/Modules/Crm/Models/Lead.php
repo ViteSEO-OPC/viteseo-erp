@@ -4,6 +4,8 @@ namespace App\Modules\Crm\Models;
 
 use App\Models\User;
 
+use App\Modules\Crm\Enums\CallOutcome;
+use App\Modules\Crm\Enums\CallStatus;
 use App\Modules\Crm\Observers\LeadObserver;
 use App\Modules\Crm\Database\Factories\LeadFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -320,6 +322,90 @@ class Lead extends Model
     {
         $query->where(function (Builder $q): void {
             $q->whereNull('source')->orWhereNotNull('qualified_at');
+        });
+    }
+
+    /**
+     * ENGAGED — the single canonical definition of "this lead has been contacted at all".
+     *
+     * **One predicate, three consumers**: M-04 Engagement Coverage (BdKpiService), the Conversion Rate
+     * denominator + Outreach Progress counts (PerformanceSummaryService), and the Reports funnel's
+     * `Contacted` stage (DashboardController). They previously carried three byte-identical copies of
+     * the declared-field test, which could drift independently; this scope is now the only place the
+     * rule lives.
+     *
+     * A lead is engaged when EITHER of two things is true:
+     *
+     *  **A. DECLARED / OFF-SYSTEM** — `email_outreach != 'none'` OR `cold_calling != 'not-called'`.
+     *     Unchanged, and deliberately preserved: real business contact happens outside Zerem (a site
+     *     visit, a personal mobile, mail from a BD's own client, a conversation at an event). The BD's
+     *     declaration is the only record of it, so it must keep counting.
+     *
+     *  **B. ZEREM-VERIFIED ACTIVITY** — the platform itself holds proof that outreach happened, so the
+     *     BD should not have to restate it by hand:
+     *       - an outbound email that actually went out (`direction=outbound`, `status=sent`), or
+     *       - a concluded call attempt (see below).
+     *
+     * This scope READS evidence; it never writes `email_outreach` or `cold_calling`. Those remain
+     * manual BD controls, and Lead Score — which reads only those two columns — is untouched by design.
+     *
+     * EMAIL EVIDENCE is `status='sent'` and nothing else. `draft`, `scheduled`, `queued`, `sending`,
+     * `failed` and `cancelled` are all excluded: only a delivered send is outreach. A Send-Later email
+     * therefore starts NOT qualifying and begins qualifying at the moment delivery flips its row to
+     * `sent` — which makes an immediate send and a successfully delivered scheduled send equivalent,
+     * exactly as the frozen pipeline intends (both terminate in OutreachEmailService::sendExisting()).
+     *
+     * CALL EVIDENCE is a concluded call whose disposition PROVES a dial actually happened — see
+     * {@see self::VERIFIED_CALL_OUTCOMES}. The rule is deliberately conservative: verified evidence
+     * must prove an outreach attempt, so anything that cannot is left to the BD's manual declaration.
+     *
+     * Counts UNIQUE LEADS. `whereHas` is existence-only, so ten emails and five calls to one lead still
+     * make it one engaged lead. `reorder()` strips the relations' default ORDER BY, which is useless
+     * inside an EXISTS subquery.
+     *
+     * @param  Builder<Lead>  $query
+     */
+    /**
+     * Call dispositions that PROVE an outreach attempt actually took place, for engagement evidence.
+     *
+     * Each of these is only reachable after the BD dialled and the call concluded, so each is proof of
+     * effort — which is what M-04 measures ("is the BD working the whole book?"), not whether the
+     * prospect picked up. `connected` reached them; `no_answer`, `busy` and `voicemail` did not, but a
+     * dial demonstrably occurred.
+     *
+     * Deliberately EXCLUDED — none of them proves a dial:
+     *  - `failed`      — ambiguous in the current lifecycle: it may be a technical failure to PLACE the
+     *                    call rather than a real attempt, and `crm_calls` cannot distinguish the two.
+     *                    Conservative reading: not evidence. (The enum keeps the case; only this
+     *                    predicate ignores it. A BD who did attempt the call can still declare
+     *                    `cold_calling` manually.)
+     *  - `cancelled`   — the "Discard" action, documented as abandoning a session *without a real
+     *                    disposition*.
+     *  - NULL outcome / `in_progress` — the session never concluded.
+     *
+     * @var list<CallOutcome>
+     */
+    private const VERIFIED_CALL_OUTCOMES = [
+        CallOutcome::CONNECTED,
+        CallOutcome::NO_ANSWER,
+        CallOutcome::BUSY,
+        CallOutcome::VOICEMAIL,
+    ];
+
+    public function scopeEngaged(Builder $query): void
+    {
+        $query->where(function (Builder $q): void {
+            // A. Declared / off-system (unchanged behaviour).
+            $q->where('email_outreach', '!=', 'none')
+                ->orWhere('cold_calling', '!=', 'not-called')
+                // B1. A real outbound email that actually went out.
+                ->orWhereHas('emails', fn (Builder $e) => $e->reorder()
+                    ->where('direction', 'outbound')
+                    ->where('status', 'sent'))
+                // B2. A concluded call that PROVES a dial actually happened.
+                ->orWhereHas('calls', fn (Builder $c) => $c->reorder()
+                    ->where('status', CallStatus::COMPLETED)
+                    ->whereIn('outcome', self::VERIFIED_CALL_OUTCOMES));
         });
     }
 

@@ -48,11 +48,10 @@ class PerformanceSummaryService
         $assignedLeads = Lead::query()->active()->visibleTo($user)->count();
         $activeLeads = Lead::query()->active()->visibleTo($user)->whereIn('status', $activeSet)->count();
 
-        // Engagement basis (M-04): any outreach started OR any calling activity.
-        $engagedLeads = Lead::query()->active()->visibleTo($user)
-            ->where(fn (Builder $q) => $q->where('email_outreach', '!=', 'none')
-                ->orWhere('cold_calling', '!=', 'not-called'))
-            ->count();
+        // Engagement basis (M-04): declared outreach OR Zerem-verified outreach activity — the single
+        // canonical definition ({@see Lead::scopeEngaged}), shared with the KPI Engine and the Reports
+        // funnel. Also the Conversion Rate denominator below, whose FORMULA is unchanged.
+        $engagedLeads = Lead::query()->active()->visibleTo($user)->engaged()->count();
 
         // Converted leads + revenue from the deals table, scoped to the user's visible leads.
         $convertedLeads = Lead::query()->active()->visibleTo($user)->has('deals')->count();
@@ -76,10 +75,16 @@ class PerformanceSummaryService
         // PlannerEvent::visibleTo (a BD sees their own events, Admin/SA all).
         //
         // Follow-up discipline (PO-frozen rule): "missed" = an event whose `starts_at` is in the past
-        // and whose `status` is not `completed` — grouped by event_type (follow-up / meeting / call).
-        $missedFor = fn (string $type): int => PlannerEvent::query()
+        // and whose `status` is not `completed`. The TIMING rule is unchanged; only the type set each
+        // bucket reads has moved off a bare literal onto the shared category
+        // ({@see PlannerEvent::scopeFollowUpWork}). `missedFollowUps` now also catches an overdue
+        // Email task, which no bucket reported before; `call`/`meeting` keep their own buckets and are
+        // held out of it, so the three stay a partition and nothing is counted twice.
+        //
+        // @param list<string> $types
+        $missedFor = fn (array $types): int => PlannerEvent::query()
             ->visibleTo($user)
-            ->where('event_type', $type)
+            ->followUpWork($types)
             ->whereNotNull('starts_at')
             ->where('starts_at', '<', now())
             ->where('status', '!=', 'completed')
@@ -87,9 +92,11 @@ class PerformanceSummaryService
 
         // Completed Follow-ups — count for the CURRENT month, timestamped by the real `completed_at`
         // (never `updated_at`). Rows completed before `completed_at` existed carry null and are excluded.
+        // Reads the whole category: a BD who completed an Email task did follow-up work, and once Lead
+        // Details routes channels structurally this is the only definition that keeps counting it.
         $completedFollowUps = PlannerEvent::query()
             ->visibleTo($user)
-            ->where('event_type', 'follow-up')
+            ->followUpWork()
             ->where('status', 'completed')
             ->where('completed_at', '>=', now()->startOfMonth())
             ->count();
@@ -117,9 +124,9 @@ class PerformanceSummaryService
                 ? null
                 : ['value' => $targetValue, 'progress' => $convertedLeads],
             'followUpDiscipline' => [
-                'missedFollowUps' => $missedFor('follow-up'),
-                'missedMeetings' => $missedFor('meeting'),
-                'missedCalls' => $missedFor('call'),
+                'missedFollowUps' => $missedFor(PlannerEvent::MISSED_FOLLOW_UP_TYPES),
+                'missedMeetings' => $missedFor(['meeting']),
+                'missedCalls' => $missedFor(['call']),
             ],
         ];
     }

@@ -26,6 +26,8 @@ use App\Models\User;
 use App\Modules\Crm\Services\LeadCreator;
 use App\Modules\Crm\Services\LeadImportService;
 use App\Modules\Crm\Services\LeadPdfExporter;
+use App\Modules\Crm\Services\Planner\FollowUpScheduler;
+use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
 use App\Modules\Crm\Services\Scoring\LeadScorer;
 use App\Modules\Crm\Services\Scoring\ScoreSignal;
 use Illuminate\Contracts\Database\Eloquent\Builder;
@@ -40,15 +42,28 @@ class LeadController extends Controller
 {
     public function index(IndexLeadRequest $request): AnonymousResourceCollection
     {
-        // Sort whitelist → [column, direction]. Default ('recent'/absent) = newest first, i.e. the
-        // prior `latest('id')` behavior, unchanged. Export reuses this same ordering (filter-aware).
+        // Sort whitelist → [column, direction]. Export reuses this same ordering (filter-aware).
+        //
+        // `recent` (the default) means MOST RECENTLY ENTERED THE CRM — not the highest row id. The two
+        // are the same thing only for leads created directly here. A discovered prospect is inserted
+        // into the Nearby pool the day it is scraped and can sit there for months, so its id records
+        // DISCOVERY time, not the moment a BD accepted it. Ordering by id therefore filed a prospect
+        // accepted today onto whatever page its months-old id happened to land on, which is why
+        // "Accept into CRM" looked like it had silently done nothing.
+        //
+        // COALESCE picks each lead's actual crossing point into the CRM: `qualified_at` for an accepted
+        // prospect, `created_at` for a lead created or imported directly. The latter never carry a
+        // `qualified_at`, so their relative order is unchanged — this only moves accepted prospects,
+        // to where the BD who just accepted them expects to find them.
+        $enteredCrmAt = DB::raw('COALESCE(qualified_at, created_at)');
+
         [$sortColumn, $sortDir] = match ($request->validated('sort')) {
             'oldest' => ['id', 'asc'],
             'score-desc' => ['score', 'desc'],
             'score-asc' => ['score', 'asc'],
             'name-asc' => ['business_name', 'asc'],
             'name-desc' => ['business_name', 'desc'],
-            default => ['id', 'desc'],
+            default => [$enteredCrmAt, 'desc'],
         };
 
         // Active CRM leads only — discovered prospects live in the Nearby Clients pool and enter the
@@ -67,6 +82,8 @@ class LeadController extends Controller
             ->orderBy($sortColumn, $sortDir)
             // Stable tiebreaker so pagination is deterministic when the primary sort has ties
             // (id is monotonic with creation → also keeps just-imported leads grouped sensibly).
+            // Load-bearing for the default sort too: a bulk import gives every row the same
+            // `created_at` to the second, so without this their page order would be arbitrary.
             ->when($sortColumn !== 'id', fn (Builder $sub) => $sub->orderByDesc('id'))
             ->paginate(10);
 
@@ -512,30 +529,57 @@ class LeadController extends Controller
             ->all();
     }
 
-    public function assign(AssignLeadRequest $request, Lead $lead): JsonResponse
-    {
+    public function assign(
+        AssignLeadRequest $request,
+        Lead $lead,
+        PlannerOwnershipTransfer $plannerOwnership,
+        FollowUpScheduler $followUps,
+    ): JsonResponse {
         $assignedTo = (int) $request->validated('assigned_to');
+        // Captured BEFORE the write below — from that point on `$lead->assigned_to` is the NEW owner,
+        // and the transfer needs to know whose work is being handed over.
+        $previousOwnerId = $lead->assigned_to;
 
-        $lead->assigned_to = $assignedTo;
-        // saveQuietly() skips the generic "updated" Activity — a dedicated lead.assigned
-        // event is recorded below (clean attribution for the future Management Dashboard).
-        $lead->saveQuietly();
-        $lead->load('assignedTo');
+        // One transaction around the handover itself: the ownership row, its Activity, and the open
+        // Planner work must land together or not at all. A partial failure here is precisely the
+        // defect this transfer exists to fix — a lead that changed hands while its outstanding work
+        // stayed pointed at the previous BD, invisible to the person now accountable for it.
+        //
+        // notify() and the broadcast stay OUTSIDE, after the commit — see the note below on why
+        // their order is load-bearing, and so neither can fire for a handover that rolled back.
+        DB::transaction(function () use ($request, $lead, $assignedTo, $previousOwnerId, $plannerOwnership, $followUps): void {
+            $lead->assigned_to = $assignedTo;
+            // saveQuietly() skips the generic "updated" Activity — a dedicated lead.assigned
+            // event is recorded below (clean attribution for the future Management Dashboard).
+            $lead->saveQuietly();
+            $lead->load('assignedTo');
 
-        $lead->activities()->create([
-            'causer_id' => $request->user()->id,
-            'event' => 'lead.assigned',
-            'description' => sprintf(
-                '%s assigned %s to %s',
-                $request->user()->name,
-                $lead->business_name,
-                $lead->assignedTo->name,
-            ),
-            'properties' => [
-                'assigned_to' => $assignedTo,
-                'to_name' => $lead->assignedTo->name,
-            ],
-        ]);
+            $lead->activities()->create([
+                'causer_id' => $request->user()->id,
+                'event' => 'lead.assigned',
+                'description' => sprintf(
+                    '%s assigned %s to %s',
+                    $request->user()->name,
+                    $lead->business_name,
+                    $lead->assignedTo->name,
+                ),
+                'properties' => [
+                    'assigned_to' => $assignedTo,
+                    'to_name' => $lead->assignedTo->name,
+                ],
+            ]);
+
+            // Open work follows the lead; completed work stays with the BD who performed it. The
+            // new owner is NOT separately notified per event — the lead notification below is the
+            // handover announcement, and one notification per transferred event would be noise.
+            $plannerOwnership->transferOnReassignment($lead, $previousOwnerId, $assignedTo);
+
+            // ...and, on a FIRST acquisition only, materializes the cold-call follow-up the lead's
+            // `cold_calling = scheduled` state implies but could not create while unowned. This method
+            // saves quietly, so LeadObserver never re-reads that state — the reconciliation has to be
+            // explicit. The previous-owner gate lives inside the service, shared with qualification.
+            $followUps->materializeOnOwnershipAcquired($lead, $previousOwnerId);
+        });
 
         // The durable record of the handover, for the new owner's Notification Center.
         // notify() is the only entry point: persisting fires NotificationSent, and

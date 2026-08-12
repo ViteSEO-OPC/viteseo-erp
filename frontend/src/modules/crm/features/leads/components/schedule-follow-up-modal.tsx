@@ -24,7 +24,7 @@ import { businessLocalToUtcIso, formatBusiness } from "@/modules/crm/lib/timezon
 import { cn } from "@/modules/crm/lib/utils";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
 import { useCreatePlannerEvent, type PlannerEventDraft } from "@/modules/crm/features/calendar/hooks/use-planner-mutations";
-import type { PlannerEventPriority } from "@/modules/crm/features/calendar/types/calendar-types";
+import type { EventType, PlannerEventPriority } from "@/modules/crm/features/calendar/types/calendar-types";
 
 const FIELD =
   "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
@@ -34,11 +34,31 @@ const TEXTAREA =
 
 // Value-equals-label selects (base-ui SelectValue renders the raw value, matching the Planner/Nearby
 // convention). The follow-up is created through the SAME `POST /planner-events` path as every
-// Planner event, but always with `event_type: 'follow-up'` — so the backend delegates to the single
-// canonical FollowUpScheduler (the one creator of follow-ups) and the event surfaces in the Outreach
-// inbox. "Follow-up Type" is the touchpoint channel; it is captured in the event title, not the
-// event_type (which is invariably 'follow-up'). No second scheduling system, no second creator.
+// Planner event — no second scheduling system, no second creator.
+//
+// Phase 2 of the PO-approved Model B: "Follow-up Type" is the touchpoint CHANNEL and it is now
+// persisted STRUCTURALLY in `event_type`, not flattened to the literal 'follow-up' with the choice
+// surviving only as a title prefix. The title keeps its prefix for readability, but no backend logic
+// may parse it — `title` is user-editable, so it was never safe evidence.
+//
+// The category that used to be spelled `event_type = 'follow-up'` is now PlannerEvent::
+// FOLLOW_UP_WORK_TYPES ('follow-up' | 'email' | 'call' | 'meeting'), migrated across every consumer
+// in Phase 1. That is what makes this routing non-destructive: the rows keep counting.
 const TYPES = ["Call", "Email", "Meeting", "Task"] as const;
+
+// The channel → canonical `event_type` map. 'follow-up' remains legal for legacy/generic follow-up
+// work (and is still minted by the Cold Calling auto-trigger via FollowUpScheduler); it is simply no
+// longer the destination for a BD who explicitly picked a channel here.
+// Keyed by the select's literal values (the file's Record<string, …> + `??` idiom, as PRIORITY_VALUE
+// below). The fallback is unreachable — the Select only emits a TYPES member — and is deliberately
+// the legacy generic bucket, which is still inside FOLLOW_UP_WORK_TYPES, so an impossible value can
+// never drop the event out of follow-up reporting.
+const EVENT_TYPE: Record<string, EventType> = {
+  Call: "call",
+  Email: "email",
+  Meeting: "meeting",
+  Task: "task",
+};
 const PRIORITIES = ["Low", "Medium", "High"] as const;
 const PRIORITY_VALUE: Record<string, PlannerEventPriority> = { Low: "low", Medium: "medium", High: "high" };
 const REMINDERS = ["15 minutes before", "30 minutes before", "1 hour before", "1 day before", "No reminder"] as const;
@@ -123,10 +143,15 @@ function FollowUpForm({ leadId, leadName, onClose }: { leadId: string; leadName:
     if (found.date || found.time || found.schedule) return;
 
     const draft: PlannerEventDraft = {
+      // Display only — readable in the Planner list, and never parsed by backend logic.
       title: `${type} — ${leadName}`,
-      // Canonical follow-up: the delegating POST /planner-events routes event_type='follow-up' to
-      // FollowUpScheduler (the sole follow-up creator), so it lands in the Outreach inbox.
-      eventType: "follow-up",
+      // The BD's channel choice, stored structurally (Model B). Consequences, all intended:
+      // Email lands in the Outreach inbox AND becomes auto-completable when the email actually sends
+      // (follow-ups-workspace gates that on eventType === 'email'), which is what closes the open
+      // "Planner task stays open after delivery" gap for the immediate-send path. Call and Meeting
+      // leave the *email* inbox — where a Call follow-up never belonged — and are counted by their
+      // own missed-KPI buckets. Task leaves follow-up-work reporting entirely (PO decision 3).
+      eventType: EVENT_TYPE[type] ?? "follow-up",
       status: "scheduled",
       priority: PRIORITY_VALUE[priority] ?? "medium",
       startsAt: businessLocalToUtcIso(`${date}T${time}`),

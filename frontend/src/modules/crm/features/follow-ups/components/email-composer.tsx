@@ -26,6 +26,8 @@ type EmailComposerProps = {
   toneOptions?: string[];
   onSelectPurpose?: (value: string) => void;
   onSelectTone?: (value: string) => void;
+  /** Re-render Subject + Body from the current Purpose + Tone. Omitted when no template matches. */
+  onRegenerate?: () => void;
   onToggleSchedule: () => void;
   onSaveDraft?: () => void;
   savingDraft?: boolean;
@@ -46,6 +48,7 @@ export function EmailComposer({
   toneOptions,
   onSelectPurpose,
   onSelectTone,
+  onRegenerate,
   onToggleSchedule,
   onSaveDraft,
   savingDraft,
@@ -112,10 +115,17 @@ export function EmailComposer({
           </FormField>
         </div>
 
+        {/*
+          A newly selected item starts BLANK (see the re-hydration effect in useFollowUpsData), so
+          these placeholders carry the "what now?" — without them an empty composer reads as broken
+          rather than as a clean start. Placeholder text is never submitted, unlike the seeded copy it
+          replaced, which was a fully sendable email identical for every lead.
+        */}
         <FormField label="SUBJECT">
           <Input
             className="h-10"
             value={draft.subject}
+            placeholder="Write a subject, or pick a Purpose and Tone and click Generate"
             onChange={(e) => onUpdateDraft({ subject: e.target.value })}
           />
         </FormField>
@@ -124,14 +134,26 @@ export function EmailComposer({
           <Textarea
             className="min-h-[200px]"
             value={draft.body}
+            placeholder="Write your message here, or click Generate to draft it from the selected Purpose and Tone."
             onChange={(e) => onUpdateDraft({ body: e.target.value })}
           />
         </FormField>
       </div>
 
+      {/*
+        Keyed by the selected item so switching Outreach items REMOUNTS the bar. Without it React
+        reconciles by position and reuses the instance, so `useCopyToClipboard`'s `copied` flag (and
+        its pending 2s timer) survive the switch — copying item A then selecting B within 2s showed B
+        as "Copied" while the clipboard actually held A's text. The bar holds no other state, so a
+        remount costs nothing.
+      */}
       <ComposerActionBar
+        key={item.id}
         scheduleEnabled={scheduler.enabled}
         onScheduleToggle={onToggleSchedule}
+        onRegenerate={onRegenerate}
+        subject={draft.subject}
+        body={draft.body}
         onSaveDraft={onSaveDraft}
         savingDraft={savingDraft}
         onMarkDone={onMarkDone}

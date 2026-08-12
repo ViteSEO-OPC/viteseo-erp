@@ -133,6 +133,13 @@ export default function CalendarGridInner({
         }}
         events={eventInputs}
         eventClick={handleEventClick}
+        // Publishes the event's accent hue to CSS. Light mode is unaffected (it paints the inline
+        // colors set above); the dark theme mixes this hue into a tint that reads on the dark
+        // card instead of the light pastel. Purely a color hand-off — no rendering behavior.
+        eventDidMount={({ el, event }) => {
+          const cfg = TYPE_CONFIG[(event.extendedProps.evType as string) || ""] ?? FALLBACK;
+          el.style.setProperty("--cal-ev-accent", cfg.dot);
+        }}
         views={{
           dayGridMonth: {
             dayCellContent: (arg) => (

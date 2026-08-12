@@ -21,18 +21,33 @@ class SubtaskPolicy
             return true;
         }
 
+        // The author of a proposal may always follow it through review.
+        if ((int) $subtask->submitted_by_id === (int) $user->id) {
+            return true;
+        }
+
         // The subtask's assignee may always view it.
         return $subtask->assignee_id === $user->id;
     }
 
+    /**
+     * `.create` is the direct create; `.propose` is a member submitting a subtask
+     * for review. SubtaskController::store decides which one applies and also
+     * checks that a proposer actually owns the parent work.
+     */
     public function create(User $user): bool
     {
-        return $user->can('projects.subtasks.create');
+        return $user->can('projects.subtasks.create') || $user->can('projects.subtasks.propose');
     }
 
     public function update(User $user, Subtask $subtask): bool
     {
         if ($user->can('projects.subtasks.update')) {
+            return true;
+        }
+
+        // The author may keep revising their own proposal until it is approved.
+        if ($subtask->isEditableProposalFor($user->id)) {
             return true;
         }
 
@@ -66,6 +81,27 @@ class SubtaskPolicy
         }
 
         // The leader of the parent group task may also archive its subtasks.
-        return $this->isParentGroupLeader($user, $subtask);
+        if ($this->isParentGroupLeader($user, $subtask)) {
+            return true;
+        }
+
+        // Withdrawing your own unapproved proposal is not a delete of real work.
+        return $subtask->isEditableProposalFor($user->id);
+    }
+
+    /**
+     * Review a member's proposal (approve / reject) — PM/Admin only.
+     */
+    public function approve(User $user, ?Subtask $subtask = null): bool
+    {
+        return $user->can('projects.subtasks.approve');
+    }
+
+    /**
+     * Re-submit a rejected proposal — its author only, and only while unapproved.
+     */
+    public function resubmit(User $user, Subtask $subtask): bool
+    {
+        return $subtask->isEditableProposalFor($user->id);
     }
 }

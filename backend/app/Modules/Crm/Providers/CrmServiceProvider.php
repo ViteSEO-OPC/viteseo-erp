@@ -4,6 +4,7 @@ namespace App\Modules\Crm\Providers;
 
 use App\Models\User;
 use App\Modules\Crm\Console\Commands\BackfillNichesCommand;
+use App\Modules\Crm\Console\Commands\BackfillPlannerOwnershipCommand;
 use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
@@ -217,6 +218,10 @@ class CrmServiceProvider extends ServiceProvider
                 // One-shot Business Niche registry backfill. Not scheduled — run manually once the
                 // canonical built-in list is approved and NicheSeeder has been run.
                 BackfillNichesCommand::class,
+                // One-shot Planner ownership reconciliation for drift predating the forward transfer.
+                // Deliberately NOT scheduled: it is read-only by default and its --apply run is
+                // approved from a printed row list, never automated.
+                BackfillPlannerOwnershipCommand::class,
             ]);
         }
 

@@ -34,7 +34,9 @@ class NotificationController extends Controller
             ->unread()
             ->count();
 
-        return response()->json(['unread_count' => $count]);
+        // `{ data: ... }` like every other endpoint — this and read-all were the
+        // only two in the module answering with a bare object.
+        return response()->json(['data' => ['unread_count' => $count]]);
     }
 
     public function markRead(Request $request, Notification $notification): NotificationResource
@@ -53,6 +55,6 @@ class NotificationController extends Controller
             ->unread()
             ->update(['read_at' => now()]);
 
-        return response()->json(['status' => 'ok']);
+        return response()->json(['data' => ['status' => 'ok']]);
     }
 }

@@ -7,10 +7,12 @@ namespace App\Modules\Projects\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Projects\Events\CommentCreated;
 use App\Modules\Projects\Events\CommentDeleted;
+use App\Modules\Projects\Events\CommentUpdated;
 use App\Modules\Projects\Models\Comment;
 use App\Modules\Projects\Models\Subtask;
 use App\Modules\Projects\Models\Task;
 use App\Modules\Projects\Requests\StoreCommentRequest;
+use App\Modules\Projects\Requests\UpdateCommentRequest;
 use App\Modules\Projects\Resources\CommentResource;
 use App\Modules\Projects\Services\CommentService;
 use App\Support\SafeBroadcast;
@@ -76,6 +78,37 @@ class CommentController extends Controller
         ));
 
         return new CommentResource($comment->load('author'));
+    }
+
+    /**
+     * Revise your own comment. The original stays readable to the whole thread
+     * (CommentResource exposes it), so an edit is transparent, not a rewrite.
+     */
+    public function update(UpdateCommentRequest $request, Comment $comment): CommentResource
+    {
+        $this->authorize('update', $comment);
+
+        $comment = $this->commentService->update($comment, $request->validated());
+
+        [$projectUuid, $taskUuid] = $this->parentUuids($comment);
+        SafeBroadcast::toOthers(new CommentUpdated($comment, $projectUuid, $taskUuid));
+
+        return new CommentResource($comment->load('author'));
+    }
+
+    /**
+     * The project + parent-task uuids a comment broadcasts on, whichever side of
+     * the task XOR subtask split it sits on.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function parentUuids(Comment $comment): array
+    {
+        $comment->loadMissing('task.project', 'subtask.task.project');
+
+        return $comment->task_id !== null
+            ? [(string) $comment->task->project->uuid, (string) $comment->task->uuid]
+            : [(string) $comment->subtask->task->project->uuid, (string) $comment->subtask->task->uuid];
     }
 
     public function destroy(Comment $comment): Response

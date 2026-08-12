@@ -38,7 +38,7 @@ class SearchService
 
         return Project::query()
             ->with('workspace')
-            ->withCount('tasks')
+            ->withCount(['tasks' => fn (Builder $q) => $q->approved()])
             ->when(
                 ! $this->isManager($user),
                 fn (Builder $q) => $q->whereHas(
@@ -68,6 +68,8 @@ class SearchService
         $like = $this->likeTerm($term);
 
         return Task::query()
+            // Proposals awaiting review are not part of the project's work yet.
+            ->approved()
             ->with(['project', 'status', 'assignee'])
             // A task is reachable only through a project the user can see, so
             // scope on the project's roster rather than on the task itself.
@@ -100,9 +102,11 @@ class SearchService
         $like = $this->likeTerm($term);
 
         return Subtask::query()
+            ->approved()
             // The parent task supplies the row's context and its open target,
             // and the project behind it supplies the visibility rule.
             ->with(['task.project', 'status', 'assignee'])
+            ->whereHas('task', fn (Builder $q) => $q->approved())
             ->when(
                 ! $this->isManager($user),
                 fn (Builder $q) => $q->whereHas(

@@ -41,12 +41,13 @@ class BdKpiService
             ->map(fn ($count): int => (int) $count)
             ->all();
 
-        // M-04 numerator: engaged = any outreach started OR any calling activity.
+        // M-04 numerator: engaged = declared outreach OR Zerem-verified outreach activity.
+        // Single canonical definition — {@see Lead::scopeEngaged}. Reports' `Contacted` stage and the
+        // Conversion Rate denominator read the SAME scope, so the three can no longer drift apart.
         $engagedCount = Lead::query()
             ->active()
             ->visibleTo($user)
-            ->where(fn ($q) => $q->where('email_outreach', '!=', 'none')
-                ->orWhere('cold_calling', '!=', 'not-called'))
+            ->engaged()
             ->count();
 
         // M-06: scoped activities within the rolling window (effort proxy).

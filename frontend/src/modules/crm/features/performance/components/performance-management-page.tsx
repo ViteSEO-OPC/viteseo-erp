@@ -8,7 +8,7 @@ import { BusinessRulesPage } from "@/modules/crm/features/business-rules/compone
 import { PerformanceTargetsPanel } from "@/modules/crm/features/performance/components/performance-targets-panel";
 
 /**
- * Performance Management — the destination behind Reports & Performance → Manage Performance.
+ * Performance Management — the destination behind Settings → Administrator → Performance Management.
  *
  * Two surfaces, one context, so a manager never feels sent into Lead Scoring:
  *   KPI Definitions    — the seeded M-01…M-06 catalog, rendered by the EXISTING Business Rules
