@@ -24,6 +24,16 @@ class CommentPolicy
         return $user->can('projects.comments.create');
     }
 
+    /**
+     * Only the author may edit their own comment — a comment is attributed
+     * speech, so nobody else gets to put words in their mouth, managers
+     * included. The original stays readable to everyone either way.
+     */
+    public function update(User $user, Comment $comment): bool
+    {
+        return $comment->author_id === $user->id;
+    }
+
     public function delete(User $user, Comment $comment): bool
     {
         // The author may always delete their own comment.

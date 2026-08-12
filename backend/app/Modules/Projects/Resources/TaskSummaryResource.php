@@ -76,7 +76,14 @@ class TaskSummaryResource extends JsonResource
                 'priority' => $s->priority?->value,
                 'deadline' => $s->deadline?->toIso8601String(),
                 'effort_score' => $s->effort_score,
+                'approval_status' => $s->approval_status?->value,
+                'rejection_reason' => $s->rejection_reason,
             ])->values()),
+            // Review state — a board row is 'approved' unless it is the viewer's
+            // own proposal, which only they can see (see Task::scopeVisibleTo).
+            'approval_status' => $this->approval_status?->value,
+            'rejection_reason' => $this->rejection_reason,
+            'submitted_by_id' => $this->submitted_by_id,
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

@@ -27,7 +27,20 @@ class Comment extends Model
         'subtask_id',
         'author_id',
         'content',
+        // Edit history. Set by CommentService::update, never from a request.
+        'original_content',
+        'edited_at',
     ];
+
+    protected $casts = [
+        'edited_at' => 'datetime',
+    ];
+
+    /** Whether this comment has been revised since it was posted. */
+    public function wasEdited(): bool
+    {
+        return $this->edited_at !== null;
+    }
 
     public function task(): BelongsTo
     {

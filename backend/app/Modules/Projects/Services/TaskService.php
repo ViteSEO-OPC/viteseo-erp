@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace App\Modules\Projects\Services;
 
 use App\Models\User;
+use App\Modules\Projects\Enums\ApprovalStatus;
 use App\Modules\Projects\Enums\AssignmentType;
+use App\Modules\Projects\Enums\StatusKey;
+use App\Modules\Projects\Exceptions\TaskAlreadyClaimedException;
 use App\Modules\Projects\Models\ActivityLog;
 use App\Modules\Projects\Models\Group;
 use App\Modules\Projects\Models\Project;
 use App\Modules\Projects\Models\ProjectStatus;
 use App\Modules\Projects\Models\Task;
+use App\Modules\Projects\Support\PublicId;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +22,111 @@ use Illuminate\Validation\ValidationException;
 
 class TaskService
 {
-    public function __construct(private readonly NotificationService $notifications) {}
+    public function __construct(
+        private readonly NotificationService $notifications,
+        private readonly ProjectService $projects,
+    ) {}
+
+    /**
+     * The open-task pool: approved work nobody owns yet.
+     *
+     * Deliberately NOT scoped to the caller's projects. With one person per
+     * discipline in a pod, a pod-scoped pool is a pool of one — the whole value
+     * is that an engineer in another pod can pick the work up. This widens
+     * DISCOVERY only: task detail is already readable module-wide (TaskPolicy::
+     * view short-circuits on `projects.tasks.view`, which every member holds).
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LengthAwarePaginator<Task>
+     */
+    public function claimable(array $filters, int $perPage): LengthAwarePaginator
+    {
+        $query = Task::query()
+            ->approved()
+            ->whereNull('assignee_id')
+            ->whereNull('group_id')
+            ->with(['project', 'status', 'submittedBy'])
+            // Finished work is not up for grabs. A null status ("no status", left
+            // behind by a deleted custom status) still is.
+            ->where(fn (Builder $q) => $q
+                ->whereNull('status_id')
+                ->orWhereHas('status', fn (Builder $s) => $s->where('key', '!=', StatusKey::DONE->value)))
+            ->latest();
+
+        if (! empty($filters['project_id'])) {
+            $query->where('project_id', PublicId::toInternalId(Project::class, $filters['project_id']));
+        }
+
+        return $query->paginate($perPage);
+    }
+
+    /**
+     * Take an open task.
+     *
+     * The guard is the UPDATE, not a read-then-write: two members clicking Claim
+     * in the same second both pass the policy, so the second has to lose on the
+     * write. Zero affected rows means someone got there first.
+     */
+    public function claim(Task $task, User $user): Task
+    {
+        return DB::transaction(function () use ($task, $user): Task {
+            $claimed = Task::query()
+                ->whereKey($task->getKey())
+                ->whereNull('assignee_id')
+                ->whereNull('group_id')
+                ->where('approval_status', ApprovalStatus::APPROVED->value)
+                ->update([
+                    'assignee_id' => $user->id,
+                    // The claimer is the one who put them on it.
+                    'assigned_by_id' => $user->id,
+                ]);
+
+            if ($claimed === 0) {
+                throw new TaskAlreadyClaimedException($task->refresh());
+            }
+
+            $task->refresh()->loadMissing('project');
+
+            // Claiming work on another pod's project makes you part of that
+            // project — this is what keeps the board, search, activity feed and
+            // sub-task assignment coherent afterwards. Safe for the group↔project
+            // reconciler: adding a member can only ever attach more groups, never
+            // detach the pod already there.
+            $this->projects->addMember($task->project, $user);
+
+            ActivityLog::create([
+                'task_id' => $task->id,
+                'user_id' => $user->id,
+                'action' => 'task.claimed',
+            ]);
+
+            $this->notifications->notifyTaskClaimed($task, $user);
+
+            return $task;
+        });
+    }
+
+    /**
+     * Hand a task back to the pool. The claimer stays on the project roster —
+     * removing them could detach their pod from it.
+     */
+    public function release(Task $task, User $user): Task
+    {
+        return DB::transaction(function () use ($task, $user): Task {
+            $task->update([
+                'assignee_id' => null,
+                'assigned_by_id' => null,
+            ]);
+
+            ActivityLog::create([
+                'task_id' => $task->id,
+                'user_id' => $user->id,
+                'action' => 'task.released',
+            ]);
+
+            return $task->refresh();
+        });
+    }
 
     /**
      * @param  array<string, mixed>  $filters
@@ -28,12 +136,16 @@ class TaskService
     {
         $query = Task::query()
             ->where('project_id', $project->id)
+            // Unapproved proposals stay off the board — except for their own author.
+            ->visibleTo($currentUserId)
             ->with(['project', 'status', 'assignee', 'group'])
             ->withCount([
-                'subtasks',
+                'subtasks' => fn (Builder $q) => $q->visibleTo($currentUserId),
                 // Whether the requesting user is assigned a subtask under this task —
                 // lets a member see the parent task of a subtask assigned to them.
-                'subtasks as my_subtasks_count' => fn (Builder $q) => $q->where('assignee_id', $currentUserId),
+                'subtasks as my_subtasks_count' => fn (Builder $q) => $q
+                    ->where('assignee_id', $currentUserId)
+                    ->visibleTo($currentUserId),
             ]);
 
         // Eager-load the requesting user's own subtasks (with status) so the
@@ -43,6 +155,7 @@ class TaskService
                 // Eager-load closure receives the relation query, not a Builder.
                 'subtasks' => fn ($q) => $q
                     ->where('assignee_id', $currentUserId)
+                    ->visibleTo($currentUserId)
                     ->with('status'),
             ]);
         }
@@ -78,16 +191,24 @@ class TaskService
 
     /**
      * Eager-load every relation needed to render a single task's detail view.
+     *
+     * $viewerId scopes the subtask list: unapproved subtask proposals are hidden
+     * from everyone except their own author — and from a reviewer, who needs to
+     * see the whole bundle to edit it before approving ($canReview).
      */
-    public function detail(Task $task): Task
+    public function detail(Task $task, ?int $viewerId = null, bool $canReview = false): Task
     {
         return $task->load([
             'project',
             'group',
             'assignee',
             'assignedBy',
+            'submittedBy',
             'status',
-            'subtasks' => fn ($query) => $query->with(['assignee', 'status'])->orderBy('created_at'),
+            'subtasks' => fn ($query) => $query
+                ->when(! $canReview, fn ($q) => $q->visibleTo($viewerId))
+                ->with(['assignee', 'status', 'submittedBy'])
+                ->orderBy('created_at'),
             'comments' => fn ($query) => $query->with('author')->orderBy('created_at', 'desc'),
             'links' => fn ($query) => $query->with('user')->orderBy('created_at', 'desc'),
             'activityLogs' => fn ($query) => $query->with('user')->orderBy('created_at', 'desc'),

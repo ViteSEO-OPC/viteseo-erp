@@ -81,6 +81,54 @@ Resource routes registered via `Route::apiResource(...)` expand to
 | PUT/PATCH | `/tasks/{task}` | `update` | Update a task (`UpdateTaskRequest`). |
 | DELETE | `/tasks/{task}` | `delete` (Manager) | Soft-delete a task. |
 
+## Bulk task import
+
+Open to **both tiers**, on any project the caller can `view` — but they produce
+different things, and `TaskImportService::isProposer()` decides which from the
+caller's permission. The permissions are checked explicitly rather than through
+`TaskPolicy::create`, which collapses `create` and `propose` into one answer.
+
+| Method | Path | Guard | Purpose |
+|---|---|---|---|
+| GET | `/projects/{project}/tasks/import/template` | `tasks.create` **or** `tasks.propose` | Download the Markdown brief for this project (`text/markdown` attachment): JSON schema, allowed values, and every rule the importer enforces. Written to be handed to an LLM. **Two variants** — see below. |
+| POST | `/projects/{project}/tasks/import/preview` | same | Dry run. Multipart `file` (`mimes:json,txt`, ≤2 MB). Parses, resolves names → ids scoped to the project, validates each row against `StoreTaskRequest`/`StoreSubtaskRequest`, returns `{mode, summary, options, unresolved[], tasks[], workload}`. Writes nothing. Unresolved values are **aggregated** — one invented status used on 14 rows is a single entry carrying all 14 `refs`. |
+| POST | `/projects/{project}/tasks/import` | same | Create the corrected plan. One transaction; each row goes through `TaskService::create` / `SubtaskService::create`, so uuids, `task.created`/`subtask.created` activity logs, `assigned_by_id` and assignee notifications all behave as for a hand-created task. With `dry_run: true` it re-validates and returns `errors` keyed by row ref without creating — that is what the preview's "Re-check" calls. |
+
+### `direct` mode — `projects.tasks.create` (PM / Admin)
+
+Brief carries the project's statuses, groups and **member display names** (never email
+addresses — it is pasted into a third-party assistant). A task may name an `assignee`
+**or** a `group`, or neither (open pool). Cap **200 tasks / 1000 items**. Tasks land
+`approval_status = approved`, straight onto the board, and the commit broadcasts **one**
+`TasksImported` on `project.{uuid}`.
+
+### `proposal` mode — `projects.tasks.propose` only (member)
+
+A member can only post work for themselves, so their brief has **no `assignee` and no
+`group` field at all** — which also means no roster data leaves the org on this path.
+Both fields are ignored if present, and the assignment is re-forced on commit, not just
+on preview. `effort_score` is **required on every task and sub-task** (it is their own
+capacity being committed). Cap **25 tasks** (`MAX_MEMBER_TASKS`).
+
+Everything lands `approval_status = pending` with `submitted_by_id` set; sub-tasks
+inherit that review through `SubtaskService`, so a task and its sub-tasks reach the
+approvals queue as **one bundle** (`ApprovalService::subtasks()` excludes sub-tasks whose
+parent is unapproved). Deliberately **silent**: no `TasksImported` broadcast (a pending
+task is on nobody's board) and no review notification — `notifyTaskAssigned` already
+returns early on self-assignment, so an import lands as one batch in the queue rather
+than N entries in every PM's bell.
+
+The preview also returns a `workload` projection for this mode: `{current, adds,
+projected, level, projected_level, thresholds}`. `current` counts **approved work only**
+(`WorkloadService::effortFor`), so this is "what your load becomes if your PM approves
+all of it", and `adds` mirrors WorkloadService's rule — a task with sub-tasks contributes
+nothing and only its sub-tasks count. Advisory: it warns, it never blocks.
+
+Row identity is a synthetic `ref` (`t3`, `t3s1`) so the client can address rows for bulk
+remaps and the server can report errors against the same identity. In either mode an
+assignee is resolved against `pm_project_members` — an import can never put work on
+someone who is not on the project.
+
 ## Subtasks (nested index/store, shallow show/update/delete)
 
 | Method | Path | Guard | Purpose |
@@ -139,7 +187,7 @@ Resource routes registered via `Route::apiResource(...)` expand to
 | POST | `/admin/archives/tasks/{uuid}/restore` | Manager | Restore a task. |
 | POST | `/admin/archives/subtasks/{uuid}/restore` | Manager | Restore a subtask. |
 
-**Total PMS endpoints: 57** (`apiResource` expanded to its 5 verbs each;
+**Total PMS endpoints: 60** (`apiResource` expanded to its 5 verbs each;
 `PUT`/`PATCH` `match` routes counted once). Note: a `channels.php` file also
 registers private Reverb broadcast channels for real-time collaboration (inert
 until a broadcaster is configured) — those are WebSocket channels, not HTTP

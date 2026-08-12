@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Modules\Projects\Models;
 
 use App\Models\User;
+use App\Modules\Projects\Concerns\HasApprovalWorkflow;
 use App\Modules\Projects\Concerns\HasPublicUuid;
 use App\Modules\Projects\Database\Factories\TaskFactory;
+use App\Modules\Projects\Enums\ApprovalStatus;
 use App\Modules\Projects\Enums\AssignmentType;
 use App\Modules\Projects\Enums\TaskPriority;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,7 +23,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Task extends Model
 {
     /** @use HasFactory<TaskFactory> */
-    use HasFactory, HasPublicUuid, SoftDeletes;
+    use HasApprovalWorkflow, HasFactory, HasPublicUuid, SoftDeletes;
 
     protected static function newFactory(): TaskFactory
     {
@@ -43,6 +45,13 @@ class Task extends Model
         'effort_score',
         'deadline',
         'start_date',
+        // Approval workflow. NEVER accepted from a Form Request — these are set
+        // only by TaskService / ApprovalService (see HasApprovalWorkflow).
+        'approval_status',
+        'submitted_by_id',
+        'reviewed_by_id',
+        'reviewed_at',
+        'rejection_reason',
     ];
 
     protected $casts = [
@@ -51,6 +60,8 @@ class Task extends Model
         'effort_score' => 'integer',
         'deadline' => 'date',
         'start_date' => 'date',
+        'approval_status' => ApprovalStatus::class,
+        'reviewed_at' => 'datetime',
     ];
 
     public function project(): BelongsTo
@@ -96,5 +107,35 @@ class Task extends Model
     public function activityLogs(): HasMany
     {
         return $this->hasMany(ActivityLog::class, 'task_id');
+    }
+
+    /**
+     * An OPEN task: real work (approved) that nobody owns yet — no individual
+     * assignee and no group.
+     *
+     * This is the claim pool's definition, kept on the model so the policy, the
+     * pool query and the claim write can't drift apart on what "open" means.
+     */
+    public function isOpen(): bool
+    {
+        return ! $this->isProposal()
+            && $this->assignee_id === null
+            && $this->group_id === null;
+    }
+
+    /**
+     * Whether $userId posted this open task and nobody has claimed it yet.
+     *
+     * An open post skips review precisely because it commits no one, which would
+     * otherwise leave its author unable to fix a typo in it — they are neither
+     * the assignee nor a proposal author. So they keep the same latitude a
+     * proposal's author has, and lose it the moment someone claims the work.
+     */
+    public function isEditableOpenPostFor(?int $userId): bool
+    {
+        return $userId !== null
+            && $this->submitted_by_id !== null
+            && (int) $this->submitted_by_id === $userId
+            && $this->isOpen();
     }
 }

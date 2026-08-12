@@ -38,6 +38,11 @@ class SubtaskResource extends JsonResource
             'deadline' => $this->deadline?->toIso8601String(),
             'flag_reason' => $this->flag_reason?->value,
             'flagged_at' => $this->flagged_at?->toIso8601String(),
+            // Review state — 'approved' for everything a manager creates directly.
+            'approval_status' => $this->approval_status?->value,
+            'rejection_reason' => $this->rejection_reason,
+            'submitted_by_id' => $this->submitted_by_id,
+            'submitted_by' => new UserResource($this->whenLoaded('submittedBy')),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

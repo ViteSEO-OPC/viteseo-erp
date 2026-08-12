@@ -76,6 +76,20 @@ class RolesAndPermissionsSeeder extends Seeder
         $projectsPermissions[] = 'projects.activity_logs.view';
         $projectsPermissions[] = 'projects.groups.manage_members';
         $projectsPermissions[] = 'projects.projects.manage_members';
+        // Member task proposals: `.propose` submits work for review (members),
+        // `.approve` reviews it (PM/Admin). Both are listed here so the manager
+        // tier and super_admin receive them with the rest of the projects set.
+        $projectsPermissions[] = 'projects.tasks.propose';
+        $projectsPermissions[] = 'projects.subtasks.propose';
+        $projectsPermissions[] = 'projects.tasks.approve';
+        $projectsPermissions[] = 'projects.subtasks.approve';
+        // Taking an unassigned task off the open pool. Separate from `.update` so
+        // a member can own work without being able to edit anyone else's.
+        $projectsPermissions[] = 'projects.tasks.claim';
+        // Workload Analysis: everyone may read it (scoped by role in the service);
+        // retuning the platform-wide capacity bands is a management action.
+        $projectsPermissions[] = 'projects.workload.view';
+        $projectsPermissions[] = 'projects.workload.manage_capacity';
 
         foreach ($projectsPermissions as $name) {
             Permission::firstOrCreate(['name' => $name, 'guard_name' => 'web']);
@@ -92,6 +106,16 @@ class RolesAndPermissionsSeeder extends Seeder
             'projects.comments.view', 'projects.comments.create',
             'projects.links.view', 'projects.links.create',
             'projects.activity_logs.view',
+            // Members may submit their own tasks/sub-tasks for PM review. They
+            // deliberately have NO .create/.update — a proposal only becomes real
+            // work once a PM/Admin approves it.
+            'projects.tasks.propose',
+            'projects.subtasks.propose',
+            // ...and they may take an open task off the pool. An unassigned task
+            // commits nobody, so posting and claiming one needs no review.
+            'projects.tasks.claim',
+            // Members see the analysis page too, scoped to their own work.
+            'projects.workload.view',
         ];
 
         // HRIS self-service subset (view own payslip, file leave, clock in, etc.) — the

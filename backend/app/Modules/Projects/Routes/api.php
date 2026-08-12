@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Modules\Projects\Controllers\ActivityLogController;
+use App\Modules\Projects\Controllers\ApprovalController;
 use App\Modules\Projects\Controllers\ArchiveController;
 use App\Modules\Projects\Controllers\CommentController;
 use App\Modules\Projects\Controllers\GroupController;
@@ -14,7 +15,9 @@ use App\Modules\Projects\Controllers\ProjectStatusController;
 use App\Modules\Projects\Controllers\SearchController;
 use App\Modules\Projects\Controllers\SubtaskController;
 use App\Modules\Projects\Controllers\TaskController;
+use App\Modules\Projects\Controllers\TaskImportController;
 use App\Modules\Projects\Controllers\UserDirectoryController;
+use App\Modules\Projects\Controllers\WorkloadAnalysisController;
 use App\Modules\Projects\Controllers\WorkloadController;
 use App\Modules\Projects\Controllers\WorkspaceController;
 use Illuminate\Support\Facades\Route;
@@ -49,12 +52,31 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     // Workload indicators — live active effort aggregation, loaded on demand
     // when selecting an assignee (member or group) in the task modal, and for
     // the Groups page. Advisory only.
+    // Workload Analysis. Open to everyone — the payload is scoped by role
+    // (managers see the platform, members see their own work). Retuning the
+    // capacity bands is manager-only, enforced in the controller.
+    Route::get('workload/analysis', [WorkloadAnalysisController::class, 'index']);
+    Route::get('workload/analysis/tasks', [WorkloadAnalysisController::class, 'tasks']);
+    Route::match(['put', 'patch'], 'workload/capacity', [WorkloadAnalysisController::class, 'updateCapacity']);
+
     Route::get('members/{user}/workload', [WorkloadController::class, 'show']);
     Route::get('groups/{group}/workload', [WorkloadController::class, 'showGroup']);
 
     // Tasks (nested index/store, shallow member routes)
+    //
+    // Bulk import is declared first: `tasks/import` is a literal segment and must
+    // not be reachable as a task uuid. Manager-only (`projects.tasks.create`),
+    // enforced in the controller and both form requests.
+    Route::get('projects/{project}/tasks/import/template', [TaskImportController::class, 'template']);
+    Route::post('projects/{project}/tasks/import/preview', [TaskImportController::class, 'preview']);
+    Route::post('projects/{project}/tasks/import', [TaskImportController::class, 'store']);
     Route::get('projects/{project}/tasks', [TaskController::class, 'index']);
     Route::post('projects/{project}/tasks', [TaskController::class, 'store']);
+    // The open-task pool and its two verbs. `tasks/claimable` MUST come before
+    // `tasks/{task}` or the UUID binding swallows the literal segment.
+    Route::get('tasks/claimable', [TaskController::class, 'claimable']);
+    Route::post('tasks/{task}/claim', [TaskController::class, 'claim']);
+    Route::post('tasks/{task}/release', [TaskController::class, 'release']);
     Route::get('tasks/{task}', [TaskController::class, 'show']);
     Route::match(['put', 'patch'], 'tasks/{task}', [TaskController::class, 'update']);
     Route::delete('tasks/{task}', [TaskController::class, 'destroy']);
@@ -71,6 +93,8 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     Route::post('tasks/{task}/comments', [CommentController::class, 'taskStore']);
     Route::get('subtasks/{subtask}/comments', [CommentController::class, 'subtaskIndex']);
     Route::post('subtasks/{subtask}/comments', [CommentController::class, 'subtaskStore']);
+    // Authors may revise their own comment; the original stays readable to all.
+    Route::match(['put', 'patch'], 'comments/{comment}', [CommentController::class, 'update']);
     Route::delete('comments/{comment}', [CommentController::class, 'destroy']);
 
     // Links (task XOR subtask parent)
@@ -80,7 +104,9 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     Route::post('subtasks/{subtask}/links', [LinkController::class, 'subtaskStore']);
     Route::delete('links/{link}', [LinkController::class, 'destroy']);
 
-    // Activity logs (read-only, task-scoped)
+    // Activity logs (read-only). The feed is the cross-project Recent Activity
+    // list (task + sub-task events only); the nested route is one task's History.
+    Route::get('activity-logs', [ActivityLogController::class, 'feed']);
     Route::get('tasks/{task}/activity-logs', [ActivityLogController::class, 'index']);
 
     // Private rich-text notes. Always "mine" — the note is resolved from the
@@ -111,4 +137,25 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
         Route::post('tasks/{uuid}/restore', [ArchiveController::class, 'restoreTask']);
         Route::post('subtasks/{uuid}/restore', [ArchiveController::class, 'restoreSubtask']);
     });
+
+    // Review queue for member-submitted work (Admin/PM only — enforced by the
+    // `approve` policy ability). Reviewers EDIT a proposal through the ordinary
+    // PATCH tasks/{task} and PATCH subtasks/{subtask} routes above.
+    Route::prefix('admin/approvals')->group(function (): void {
+        Route::get('tasks', [ApprovalController::class, 'tasks']);
+        Route::get('subtasks', [ApprovalController::class, 'subtasks']);
+
+        // Bulk routes come first: `tasks/bulk-approve` must not bind {task}.
+        Route::post('tasks/bulk-approve', [ApprovalController::class, 'bulkApproveTasks']);
+        Route::post('subtasks/bulk-approve', [ApprovalController::class, 'bulkApproveSubtasks']);
+
+        Route::post('tasks/{task}/approve', [ApprovalController::class, 'approveTask']);
+        Route::post('tasks/{task}/reject', [ApprovalController::class, 'rejectTask']);
+        Route::post('subtasks/{subtask}/approve', [ApprovalController::class, 'approveSubtask']);
+        Route::post('subtasks/{subtask}/reject', [ApprovalController::class, 'rejectSubtask']);
+    });
+
+    // Author-side: send a revised (rejected) proposal back for review.
+    Route::post('tasks/{task}/resubmit', [ApprovalController::class, 'resubmitTask']);
+    Route::post('subtasks/{subtask}/resubmit', [ApprovalController::class, 'resubmitSubtask']);
 });

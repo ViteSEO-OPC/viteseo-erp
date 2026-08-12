@@ -2,11 +2,11 @@
 
 import { RequireAuth } from "@/core/auth-context";
 import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
-import { ProjectNotificationListener } from "@/modules/projects/use-project-notifications";
+import { ProjectNotificationListener } from "@/modules/projects/components/project-notification-listener";
 import { Sidebar } from "@/core/layout/Sidebar";
 import { Topbar } from "@/core/layout/Topbar";
 import { SidebarProvider } from "@/core/layout/SidebarContext";
-import { GlobalTaskModal } from "@/modules/projects/components/tasks/GlobalTaskModal";
+import { GlobalTaskModal } from "@/modules/projects/components/global-task-modal";
 
 /**
  * Projects section shell. Uses the platform's shared <RequireAuth> (single
