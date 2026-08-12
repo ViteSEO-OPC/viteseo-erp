@@ -14,6 +14,7 @@ import {
 } from "@/modules/projects/api/subtasks";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import type { Subtask } from "@/modules/projects/types/subtask";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 /** Fetch and merge subtasks across many tasks (for workspace-level views). */
 export function useWorkspaceSubtasks(taskIds: string[]): {
@@ -44,6 +45,7 @@ export function useSubtasks(taskId: string) {
 export function useCreateSubtask(taskId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't add that sub-task"),
     mutationFn: (payload: {
       name: string;
       assignee_id: number | null;
@@ -64,6 +66,7 @@ export function useCreateSubtask(taskId: string) {
 export function useUpdateSubtask(taskId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't save that sub-task"),
     mutationFn: ({
       id,
       payload,
@@ -83,6 +86,7 @@ export function useUpdateSubtask(taskId: string) {
 export function useDeleteSubtask(taskId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't delete that sub-task"),
     mutationFn: (id: string) => deleteSubtask(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.subtasks(taskId) });

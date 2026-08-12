@@ -14,6 +14,7 @@ import {
   resubmitTask,
 } from "@/modules/projects/api/approvals";
 import { approvalKeys, projectKeys } from "@/modules/projects/lib/query-keys";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 /**
  * A decision (or a resubmission) moves work between the queue and the board, so
@@ -50,6 +51,7 @@ export function usePendingSubtasks(params?: Record<string, unknown>) {
 export function useApproveTask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't approve that task"),
     mutationFn: (id: string) => approveTask(id),
     onSuccess: () => invalidateAfterReview(qc),
   });
@@ -58,6 +60,7 @@ export function useApproveTask() {
 export function useBulkApproveTasks() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't approve the selected tasks"),
     mutationFn: (ids: string[]) => bulkApproveTasks(ids),
     onSuccess: () => invalidateAfterReview(qc),
   });
@@ -66,6 +69,7 @@ export function useBulkApproveTasks() {
 export function useBulkApproveSubtasks() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't approve the selected sub-tasks"),
     mutationFn: (ids: string[]) => bulkApproveSubtasks(ids),
     onSuccess: () => invalidateAfterReview(qc),
   });
@@ -74,6 +78,7 @@ export function useBulkApproveSubtasks() {
 export function useRejectTask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't reject that task"),
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       rejectTask(id, reason),
     onSuccess: () => invalidateAfterReview(qc),
@@ -83,6 +88,7 @@ export function useRejectTask() {
 export function useApproveSubtask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't approve that sub-task"),
     mutationFn: (id: string) => approveSubtask(id),
     onSuccess: () => invalidateAfterReview(qc),
   });
@@ -91,6 +97,7 @@ export function useApproveSubtask() {
 export function useRejectSubtask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't reject that sub-task"),
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       rejectSubtask(id, reason),
     onSuccess: () => invalidateAfterReview(qc),
@@ -100,6 +107,7 @@ export function useRejectSubtask() {
 export function useResubmitTask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't resubmit that task"),
     mutationFn: (id: string) => resubmitTask(id),
     onSuccess: () => invalidateAfterReview(qc),
   });
@@ -108,6 +116,7 @@ export function useResubmitTask() {
 export function useResubmitSubtask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't resubmit that sub-task"),
     mutationFn: (id: string) => resubmitSubtask(id),
     onSuccess: () => invalidateAfterReview(qc),
   });

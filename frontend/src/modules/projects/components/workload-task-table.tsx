@@ -73,7 +73,7 @@ export function WorkloadTaskTable({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] border-collapse">
             <thead>
-              <tr className="border-b border-line bg-[#f9fafb]">
+              <tr className="border-b border-line bg-surface-alt">
                 {columns.map((c) => (
                   <th
                     key={c}
@@ -103,7 +103,7 @@ export function WorkloadTaskTable({
                     key={`${r.kind}-${r.id}`}
                     onClick={() => r.task_id && openTask(r.task_id)}
                     className={`cursor-pointer border-b border-line last:border-b-0 hover:bg-black/[0.02] ${
-                      idx % 2 === 1 ? "bg-[#f9fafb]" : "bg-white"
+                      idx % 2 === 1 ? "bg-surface-alt" : "bg-white"
                     }`}
                   >
                     <td className="px-5 py-3.5">
@@ -191,7 +191,7 @@ export function WorkloadGroupTable({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] border-collapse">
           <thead>
-            <tr className="border-b border-line bg-[#f9fafb]">
+            <tr className="border-b border-line bg-surface-alt">
               {columns.map((c) => (
                 <th
                   key={c}
@@ -220,7 +220,7 @@ export function WorkloadGroupTable({
                 <tr
                   key={g.id}
                   className={`border-b border-line last:border-b-0 ${
-                    idx % 2 === 1 ? "bg-[#f9fafb]" : "bg-white"
+                    idx % 2 === 1 ? "bg-surface-alt" : "bg-white"
                   }`}
                 >
                   <td className="px-5 py-3.5 text-sm font-semibold text-ink">{g.name}</td>

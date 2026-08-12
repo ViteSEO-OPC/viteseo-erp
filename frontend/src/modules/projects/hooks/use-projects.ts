@@ -11,6 +11,7 @@ import {
   updateProject,
 } from "@/modules/projects/api/projects";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 export function useProjects(workspaceId?: string) {
   return useQuery({
@@ -30,6 +31,7 @@ export function useProject(id: string) {
 export function useCreateProject() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't create that project"),
     mutationFn: createProject,
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["projects", "projects"] }),
@@ -39,6 +41,7 @@ export function useCreateProject() {
 export function useUpdateProject() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't save that project"),
     mutationFn: ({
       id,
       payload,
@@ -56,6 +59,7 @@ export function useUpdateProject() {
 export function useDeleteProject() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't delete that project"),
     mutationFn: (id: string) => deleteProject(id),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["projects", "projects"] }),
@@ -67,6 +71,7 @@ export function useProjectMembers(projectId: string) {
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: projectKeys.project(projectId) });
   const add = useMutation({
+    onError: notifyMutationError("Couldn't add that member"),
     mutationFn: (userId: number) =>
       addProjectMember(projectId, userId),
     onSuccess: invalidate,

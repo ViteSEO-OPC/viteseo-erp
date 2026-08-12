@@ -48,13 +48,19 @@ export function CreateProjectModal({ open, onClose, workspaceId }: CreateProject
   const selectedColor = watch('color');
 
   const submit = handleSubmit(async (data) => {
-    await create.mutateAsync({
-      workspace_id: workspaceId,
-      name: data.name,
-      description: data.description || undefined,
-      priority: data.priority,
-      color: data.color,
-    });
+    try {
+      await create.mutateAsync({
+        workspace_id: workspaceId,
+        name: data.name,
+        description: data.description || undefined,
+        priority: data.priority,
+        color: data.color,
+      });
+    } catch {
+      // The hook's onError has already explained the failure; this stops the
+      // form from closing and resetting as though the save had gone through.
+      return;
+    }
     reset();
     onClose();
   });
@@ -90,7 +96,7 @@ export function CreateProjectModal({ open, onClose, workspaceId }: CreateProject
           <Textarea rows={3} placeholder="What is this project about?" {...register('description')} />
         </Field>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Priority" error={errors.priority?.message}>
             <Select {...register('priority')}>
               {PRIORITY_OPTIONS.map((opt) => (

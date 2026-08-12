@@ -14,6 +14,7 @@ import {
 } from "@/modules/projects/api/statuses";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import type { ProjectStatus } from "@/modules/projects/types/project";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 export function useStatuses(projectId: string) {
   return useQuery({
@@ -26,6 +27,7 @@ export function useStatuses(projectId: string) {
 export function useCreateStatus(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't create that status"),
     mutationFn: (payload: { name: string; color: string }) =>
       createStatus(projectId, payload),
     onSuccess: () =>
@@ -36,6 +38,7 @@ export function useCreateStatus(projectId: string) {
 export function useUpdateStatus(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't save that status"),
     mutationFn: ({
       id,
       payload,
@@ -51,6 +54,7 @@ export function useUpdateStatus(projectId: string) {
 export function useDeleteStatus(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't delete that status"),
     mutationFn: (id: string) => deleteStatus(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.statuses(projectId) });

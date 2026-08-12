@@ -9,6 +9,7 @@ import {
   updateWorkspace,
 } from "@/modules/projects/api/workspaces";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 export function useWorkspaces(params?: Record<string, unknown>) {
   return useQuery({
@@ -28,6 +29,7 @@ export function useWorkspace(id: string) {
 export function useCreateWorkspace() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't create that workspace"),
     mutationFn: createWorkspace,
     onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.workspaces }),
   });
@@ -36,6 +38,7 @@ export function useCreateWorkspace() {
 export function useUpdateWorkspace() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't save that workspace"),
     mutationFn: ({
       id,
       payload,
@@ -53,6 +56,7 @@ export function useUpdateWorkspace() {
 export function useDeleteWorkspace() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't delete that workspace"),
     mutationFn: (id: string) => deleteWorkspace(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.workspaces });

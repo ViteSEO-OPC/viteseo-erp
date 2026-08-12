@@ -106,7 +106,7 @@ export function AdminTable<T extends { id: string }>({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] border-collapse">
             <thead>
-              <tr className="border-b border-line bg-[#f9fafb]">
+              <tr className="border-b border-line bg-surface-alt">
                 {selection && (
                   <th className="w-[44px] px-5 py-3 text-left">
                     <input
@@ -162,7 +162,7 @@ export function AdminTable<T extends { id: string }>({
                   <tr
                     key={row.id}
                     className={`border-b border-line last:border-b-0 ${
-                      idx % 2 === 1 ? "bg-[#f9fafb]" : "bg-white"
+                      idx % 2 === 1 ? "bg-surface-alt" : "bg-white"
                     }`}
                   >
                     {selection && (

@@ -82,12 +82,18 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps): Reac
   };
 
   const submit = handleSubmit(async (data) => {
-    await create.mutateAsync({
-      name: data.name,
-      color: data.color,
-      leader_id: Number(data.leader_id),
-      member_ids: data.member_ids.map(Number),
-    });
+    try {
+      await create.mutateAsync({
+        name: data.name,
+        color: data.color,
+        leader_id: Number(data.leader_id),
+        member_ids: data.member_ids.map(Number),
+      });
+    } catch {
+      // The hook's onError has already explained the failure; this stops the
+      // form from closing and resetting as though the save had gone through.
+      return;
+    }
     reset();
     setSearch('');
     onClose();

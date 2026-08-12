@@ -328,7 +328,7 @@ function MemberWorkloadPanel({
             {
               label: "In Progress",
               value: completion?.in_progress ?? 0,
-              className: "text-[#6366f1]",
+              className: "text-indigo-500",
             },
             { label: "Done", value: completion?.done ?? 0, className: "text-brand" },
           ].map((s) => (

@@ -13,7 +13,7 @@ import {
   PencilIcon,
   PlusIcon,
 } from "@/core/ui";
-import { Download, DownloadIcon, Import, ImportIcon, Upload as UploadIcon } from "lucide-react";
+import { ImportIcon } from "lucide-react";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import type { StatusKey } from "@/modules/projects/types/common";
 import type { BlockingWork } from "@/modules/projects/types/project";
@@ -617,7 +617,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               <button
                 type="button"
                 onClick={() => setPickerOpen(true)}
-                className="inline-flex items-center gap-1.5 self-start rounded-lg border border-brand px-3 py-1.5 text-sm font-bold text-[#0f766e] transition-colors hover:bg-brand/10"
+                className="inline-flex items-center gap-1.5 self-start rounded-lg border border-brand px-3 py-1.5 text-sm font-bold text-brand-strong transition-colors hover:bg-brand/10"
               >
                 <PlusIcon className="h-4 w-4" />
                 Add Member

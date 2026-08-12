@@ -11,6 +11,7 @@ import {
   updateGroup,
 } from "@/modules/projects/api/groups";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 export function useGroups(projectId?: string) {
   return useQuery({
@@ -30,6 +31,7 @@ export function useGroup(id: string) {
 export function useCreateGroup() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't create that group"),
     mutationFn: createGroup,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects", "groups"] }),
   });
@@ -38,6 +40,7 @@ export function useCreateGroup() {
 export function useUpdateGroup() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't save that group"),
     mutationFn: ({
       id,
       payload,
@@ -55,6 +58,7 @@ export function useUpdateGroup() {
 export function useDeleteGroup() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't delete that group"),
     mutationFn: (id: string) => deleteGroup(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects", "groups"] }),
   });
@@ -65,10 +69,12 @@ export function useGroupMembers(groupId: string) {
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: projectKeys.group(groupId) });
   const add = useMutation({
+    onError: notifyMutationError("Couldn't add that member"),
     mutationFn: (userId: number) => addGroupMember(groupId, userId),
     onSuccess: invalidate,
   });
   const remove = useMutation({
+    onError: notifyMutationError("Couldn't remove that member"),
     mutationFn: (userId: number) =>
       removeGroupMember(groupId, userId),
     onSuccess: invalidate,

@@ -244,4 +244,34 @@
   --color-warning-soft: #fef3c7;
   --color-danger-soft: #fee2e2;
   --color-info-soft: #e0e7ff;
+
+  /*
+    Colours the Projects components were already using as raw hex values, given
+    names. Every value below is exactly what was hardcoded, so naming them is a
+    refactor and not a restyle.
+
+    `brand-strong` is the one worth understanding: --brand (#4fdbd7) is the
+    bright cyan of fills and accents, and it sits at roughly 1.9:1 on white —
+    far under the 4.5:1 that body text needs. So anywhere the brand had to be
+    *read* — a link, a button label, an outlined control — the components
+    reached for this darker teal instead. It is the brand at text contrast
+    (~4.8:1), not a second brand.
+  */
+  --color-brand-strong: #0f766e;
+  --color-brand-strong-hover: #0d655e;
+  /* The same teal one step lighter, for text on an already-tinted surface. */
+  --color-brand-mid: #0f8f8b;
+
+  /* Table headers and zebra striping. */
+  --color-surface-alt: #f9fafb;
+  /* Warm equivalents, used by the roster/list surfaces.
+     NOTE: these three creams are within ~2% of each other and almost certainly
+     want to be one value — that is a design call, so they are named as found
+     rather than quietly collapsed. */
+  --color-surface-warm: #fafaf0;
+  --color-surface-warm-alt: #fafaf7;
+  --color-surface-cream: #fbfbef;
+
+  /* Warm border that pairs with the cream surfaces (--color-line is cooler). */
+  --color-line-warm: #e4e4d8;
 }

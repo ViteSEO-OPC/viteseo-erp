@@ -20,6 +20,7 @@ import {
 } from "@/modules/projects/api/tasks";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import type { CreateTaskPayload, Task } from "@/modules/projects/types/task";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 export function useTasks(projectId: string) {
   return useQuery({
@@ -58,6 +59,7 @@ export function useWorkspaceTasks(projectIds: string[]): {
 export function useCreateTask(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't create that task"),
     mutationFn: (payload: CreateTaskPayload) =>
       createTask(projectId, payload),
     onSuccess: () => {
@@ -93,8 +95,11 @@ export function useUpdateTask(projectId: string) {
       }
       return { prev };
     },
-    onError: (_err, _vars, ctx) => {
+    onError: (err, _vars, ctx) => {
+      // Put the board back the way it was — and then say why. A silent revert
+      // reads as "the drag didn't register", so the user just tries again.
       if (ctx?.prev) qc.setQueryData(key, ctx.prev);
+      notifyMutationError("Couldn't save that change")(err);
     },
     onSuccess: (data, { payload }) => {
       // Celebrate when this update transitioned the task into "done".
@@ -120,6 +125,7 @@ export function useUpdateTask(projectId: string) {
 export function useDeleteTask(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't delete that task"),
     mutationFn: (id: string) => deleteTask(id),
     onSuccess: (_data, id) => {
       qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) });
@@ -179,6 +185,7 @@ export function useClaimTask() {
 export function useReleaseTask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't release that task"),
     mutationFn: (id: string) => releaseTask(id),
     onSuccess: (task) => {
       qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });

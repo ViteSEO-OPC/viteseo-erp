@@ -12,6 +12,7 @@ import {
   restoreWorkspace,
 } from "@/modules/projects/api/archives";
 import { archiveKeys, projectKeys } from "@/modules/projects/lib/query-keys";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 
 export function useArchivedWorkspaces(params?: Record<string, unknown>) {
   return useQuery({
@@ -23,6 +24,7 @@ export function useArchivedWorkspaces(params?: Record<string, unknown>) {
 export function useRestoreWorkspace() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't restore that workspace"),
     mutationFn: (id: string) => restoreWorkspace(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: archiveKeys.workspaces });
@@ -41,6 +43,7 @@ export function useArchivedProjects(params?: Record<string, unknown>) {
 export function useRestoreProject() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't restore that project"),
     mutationFn: (id: string) => restoreProject(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: archiveKeys.projects });
@@ -59,6 +62,7 @@ export function useArchivedTasks(params?: Record<string, unknown>) {
 export function useRestoreTask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't restore that task"),
     mutationFn: (id: string) => restoreTask(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: archiveKeys.tasks });
@@ -78,6 +82,7 @@ export function useArchivedSubtasks(params?: Record<string, unknown>) {
 export function useRestoreSubtask() {
   const qc = useQueryClient();
   return useMutation({
+    onError: notifyMutationError("Couldn't restore that sub-task"),
     mutationFn: (id: string) => restoreSubtask(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: archiveKeys.subtasks });

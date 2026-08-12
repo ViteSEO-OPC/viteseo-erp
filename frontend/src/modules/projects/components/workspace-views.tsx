@@ -32,6 +32,7 @@ import {
   useWorkspaceStatuses,
 } from "@/modules/projects/hooks/use-statuses";
 import { useWorkspaceTasks } from "@/modules/projects/hooks/use-tasks";
+import { notifyMutationError } from "@/modules/projects/lib/api-error";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import type { Project } from "@/modules/projects/types/project";
 import { ProjectChannel } from "@/modules/projects/hooks/use-project-channel";
@@ -311,6 +312,19 @@ function WorkspaceViewsInner({
       });
       // Refresh the parent task detail too (its subtask list / status changed).
       await qc.invalidateQueries({ queryKey: projectKeys.task(item.id) });
+    } catch (error) {
+      // Without this the drop failed in silence: `finally` dropped the override,
+      // the card snapped back to its old column, and the rejection went nowhere.
+      // From the other side of the screen that reads as "the drag didn't take",
+      // so the natural response is to drag it again — and get the same nothing.
+      notifyMutationError(
+        `Couldn't move “${item.title}” to ${target.name}`,
+      )(error);
+      // Board state is unknown after a failed write; re-read it rather than
+      // trusting the pre-drag cache.
+      void qc.invalidateQueries({
+        queryKey: projectKeys.tasks(item.projectId),
+      });
     } finally {
       setDragOverride((o) => {
         const n = { ...o };

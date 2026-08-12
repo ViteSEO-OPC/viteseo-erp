@@ -252,7 +252,7 @@ export function DashboardTaskTable({
         data-scroll-root
         className="mt-4 hidden max-h-[400px] overflow-y-auto overflow-hidden rounded-xl border border-line md:block"
       >
-        <div className="sticky top-0 z-5 grid grid-cols-[180px_1fr_100px_140px_100px] items-center gap-4 border-b border-line bg-[#f9fafb] px-5 py-3 text-xs font-bold uppercase tracking-wide text-ink-soft">
+        <div className="sticky top-0 z-5 grid grid-cols-[180px_1fr_100px_140px_100px] items-center gap-4 border-b border-line bg-surface-alt px-5 py-3 text-xs font-bold uppercase tracking-wide text-ink-soft">
           <span>Project Name</span>
           <span>Task Name</span>
           <span>Priority</span>

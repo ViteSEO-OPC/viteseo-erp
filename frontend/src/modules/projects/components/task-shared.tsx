@@ -26,8 +26,8 @@ export const PRIORITIES: Priority[] = ['Low', 'Medium', 'High'];
 export const sectionLabel = 'text-xs font-bold uppercase tracking-wide text-ink-soft';
 
 // --- Figma task-modal redesign tokens ---
-export const TEAL = 'bg-[#0f766e] text-white hover:bg-[#0d655e]';
-export const TEAL_OUTLINE = 'border border-[#0f766e] bg-white text-[#0f766e] hover:bg-[#0f766e]/5';
+export const TEAL = 'bg-brand-strong text-white hover:bg-brand-strong-hover';
+export const TEAL_OUTLINE = 'border border-brand-strong bg-white text-brand-strong hover:bg-brand-strong/5';
 
 /**
  * The details panel renders its status / priority selects as tinted pills
@@ -280,11 +280,11 @@ export function EffortScoreInput({
 /** PLACEHOLDER — AI scheduling suggestion (no backend yet). */
 export function AiBanner() {
   return (
-    <div className="rounded-xl border border-[#e4e4d8] bg-[#fbfbef] p-4">
+    <div className="rounded-xl border border-line-warm bg-surface-cream p-4">
       <div className="flex items-start gap-2.5">
         <span
           aria-hidden
-          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#f59e0b] text-sm font-bold text-white"
+          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-sm font-bold text-white"
         >
           !
         </span>
@@ -487,7 +487,7 @@ export function CollapsiblePanel({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="rounded-xl bg-[#FAFAF7] p-3">
+    <div className="rounded-xl bg-surface-warm-alt p-3">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -571,7 +571,7 @@ export function SubtaskFields({
           placeholder="e.g. Export the design tokens"
         />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="Assignee">
           <Select value={assignee} onChange={(e) => onAssignee(e.target.value)}>
             <option value="">Unassigned</option>
