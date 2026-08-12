@@ -1,7 +1,7 @@
 "use client";
 
 import { isAxiosError, isCancel } from "axios";
-import { notify } from "@/core/lib/notify";
+import { notify } from "../../../core/lib/notify";
 
 /**
  * Pull the useful sentence out of a Laravel error envelope.
