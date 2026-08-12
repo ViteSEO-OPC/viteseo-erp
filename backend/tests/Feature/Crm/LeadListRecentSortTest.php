@@ -157,11 +157,20 @@ class LeadListRecentSortTest extends TestCase
         // Alma is the OLDEST by id/creation but was accepted today — it would jump to the front under
         // the default sort. None of these sorts may be affected by that.
         $alma = $this->prospect('Alma', now()->subMonths(3));
-        $this->crmLead($bd, 'Zeta', now()->subDay())->update(['score' => 10]);
-        $alma->update(['score' => 99]);
+        $zeta = $this->crmLead($bd, 'Zeta', now()->subDay());
 
         Sanctum::actingAs($bd);
         $this->postJson("/api/v1/crm/leads/{$alma->id}/qualify")->assertCreated();
+
+        // Scores are pinned AFTER qualification, and quietly. LeadObserver computes the one-time Lead
+        // Score on the `qualified_at` transition, so a score set beforehand is overwritten by a value
+        // derived from LeadFactory's randomised scoring inputs — which made this assertion flaky
+        // rather than wrong. Setting the attribute directly also sidesteps mass-assignment rules.
+        $alma = $alma->fresh();
+        $alma->score = 99;
+        $alma->saveQuietly();
+        $zeta->score = 10;
+        $zeta->saveQuietly();
 
         $this->assertSame($expected, $this->listedNames($bd, ['sort' => $sort]));
     }
