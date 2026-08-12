@@ -37,6 +37,7 @@ import {
   type AdminQuery,
   type AdminSelection,
 } from "@/modules/projects/components/admin-table";
+import { CountBubble } from "@/modules/projects/components/pills";
 import {
   RejectReasonDialog,
 } from "@/modules/projects/components/reject-reason-dialog";
@@ -109,6 +110,28 @@ export function ApprovalsView() {
     }
   }, [isAuthenticated, isLoading, router]);
 
+  // How much is actually waiting on a reviewer, per queue.
+  //
+  // Always the PENDING count, whatever the state filter is set to — "needs
+  // approval" doesn't change meaning because you're currently looking at the
+  // rejected list, and a number that shifted under the filter would be a worse
+  // signal, not a better one.
+  //
+  // `per_page: 1` because only `meta.total` is read; the rows are thrown away.
+  // Both share the `approvalKeys` prefixes that invalidateAfterReview() already
+  // busts, so approving or rejecting anything re-counts these for free.
+  //
+  // Declared above the early returns below — hooks can't sit behind a branch.
+  const countParams = { state: "pending", per_page: 1 } as const;
+  const pendingTaskCount = usePendingTasks(countParams, isManager).data?.meta
+    .total;
+  const pendingSubtaskCount = usePendingSubtasks(countParams, isManager).data
+    ?.meta.total;
+  const pendingCounts: Record<TabKey, number | undefined> = {
+    tasks: pendingTaskCount,
+    subtasks: pendingSubtaskCount,
+  };
+
   if (isLoading) {
     return <div className="p-8 text-ink-soft">Loading...</div>;
   }
@@ -148,19 +171,41 @@ export function ApprovalsView() {
       <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <SegmentedControl className="w-full overflow-x-auto sm:w-auto">
-            {TABS.map((t) => (
-              <SegmentedItem
-                key={t.key}
-                active={tab === t.key}
-                onClick={() => {
-                  setTab(t.key);
-                  reset();
-                }}
-                className="flex-1 sm:flex-none"
-              >
-                {t.label}
-              </SegmentedItem>
-            ))}
+            {TABS.map((t) => {
+              const count = pendingCounts[t.key];
+              return (
+                <SegmentedItem
+                  key={t.key}
+                  active={tab === t.key}
+                  onClick={() => {
+                    setTab(t.key);
+                    reset();
+                  }}
+                  className="flex-1 sm:flex-none"
+                  title={
+                    count === undefined
+                      ? undefined
+                      : `${count} ${t.label.toLowerCase()} awaiting review`
+                  }
+                >
+                  {t.label}
+                  {/* Rendered only once counted, so the control doesn't jolt
+                      wider on load. A zero is still worth showing here — "this
+                      queue is clear" is the answer a reviewer opens the page
+                      for — but it drops to a flat grey so only real work pulls
+                      the eye. */}
+                  {count !== undefined && (
+                    <CountBubble
+                      className={
+                        count === 0 ? "bg-black/5 text-ink-faint" : undefined
+                      }
+                    >
+                      {count}
+                    </CountBubble>
+                  )}
+                </SegmentedItem>
+              );
+            })}
           </SegmentedControl>
 
           <SegmentedControl className="w-full overflow-x-auto sm:w-auto">

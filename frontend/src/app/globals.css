@@ -265,12 +265,12 @@
   /* Table headers and zebra striping. */
   --color-surface-alt: #f9fafb;
   /* Warm equivalents, used by the roster/list surfaces.
-     NOTE: these three creams are within ~2% of each other and almost certainly
+     NOTE: these two creams are within ~2% of each other and almost certainly
      want to be one value — that is a design call, so they are named as found
-     rather than quietly collapsed. */
+     rather than quietly collapsed. (A third, #fbfbef, went with the AI
+     scheduling placeholder that used to sit in the task form.) */
   --color-surface-warm: #fafaf0;
   --color-surface-warm-alt: #fafaf7;
-  --color-surface-cream: #fbfbef;
 
   /* Warm border that pairs with the cream surfaces (--color-line is cooler). */
   --color-line-warm: #e4e4d8;

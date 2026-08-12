@@ -41,10 +41,15 @@ export function usePendingTasks(
   });
 }
 
-export function usePendingSubtasks(params?: Record<string, unknown>) {
+/** `enabled` is false for non-managers — the endpoint 403s for them. */
+export function usePendingSubtasks(
+  params?: Record<string, unknown>,
+  enabled = true,
+) {
   return useQuery({
     queryKey: [...approvalKeys.subtasks, params ?? {}],
     queryFn: () => getPendingSubtasks(params),
+    enabled,
   });
 }
 

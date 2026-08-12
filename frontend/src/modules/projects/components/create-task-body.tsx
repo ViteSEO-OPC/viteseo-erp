@@ -13,7 +13,6 @@ import { useGroup, useGroups } from "@/modules/projects/hooks/use-groups";
 import { useProject } from "@/modules/projects/hooks/use-projects";
 import { useCreateTask } from "@/modules/projects/hooks/use-tasks";
 import {
-  AiBanner,
   CoAssigneePanel,
   CollapsiblePanel,
   DetailsPanel,
@@ -250,8 +249,6 @@ export function CreateTaskBody({
       {/* LEFT */}
       <div className="min-w-0 space-y-5">
         {projectSelector}
-
-        <AiBanner />
 
         {isProposal && (
           <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-ink">
