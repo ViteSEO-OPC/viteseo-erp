@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Models;
 use App\Models\User;
 use App\Modules\Crm\Database\Factories\PlannerEventFactory;
 use App\Modules\Crm\Observers\PlannerEventObserver;
+use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
@@ -203,9 +204,25 @@ class PlannerEvent extends Model
 
     /**
      * Ownership-visibility boundary — the single source of truth for who can see which planner
-     * events. Mirrors Lead::scopeVisibleTo / Activity::scopeVisibleTo (closes the deferred
-     * Phase 2b Planner scoping). Admin / Super Admin see every event; a Business Development
-     * Manager sees only events assigned to them OR linked to a lead they own.
+     * events. Admin / Super Admin see every event; a Business Development Manager sees exactly the
+     * events ASSIGNED TO THEM. Mirrors Lead::scopeVisibleTo, which is the same strict rule.
+     *
+     * THE PLANNER IS "MY WORK", NOT "MY BOOK OF BUSINESS" (PO-approved). This scope previously also
+     * admitted every event linked to a lead the BD owns, which produced two defects that were really
+     * one: a BD saw cards stamped with another BD's name, and every Planner-derived KPI charged the
+     * same row to two people at once — the assignee AND the lead owner.
+     *
+     * The lead-ownership branch is deliberately NOT replaced by anything here. Work follows ownership
+     * structurally instead: {@see PlannerOwnershipTransfer} moves a lead's OPEN events to the new
+     * owner on reassignment, so the assignee and the lead owner agree by construction rather than by
+     * a query papering over the difference.
+     *
+     * COMPLETED work is the case that proves the rule. It is never transferred — `completed_at` plus
+     * the Activity trail record who actually performed it — so a new lead owner does NOT see the
+     * previous BD's completed events here, and must not: they are not their work. That history is
+     * still fully visible to them on the LEAD's timeline, which is lead-scoped by
+     * {@see Activity::scopeVisibleTo}. Planner answers "what do I owe?"; the lead timeline answers
+     * "what has happened to this lead?" — two different questions, two different scopes.
      *
      * @param  Builder<PlannerEvent>  $query
      */
@@ -215,13 +232,7 @@ class PlannerEvent extends Model
             return;
         }
 
-        $query->where(function (Builder $scoped) use ($user): void {
-            $scoped->where('assigned_to', $user->id)
-                ->orWhereIn(
-                    'lead_id',
-                    Lead::where('assigned_to', $user->id)->select('id'),
-                );
-        });
+        $query->where('assigned_to', $user->id);
     }
 
     /**
@@ -244,18 +255,19 @@ class PlannerEvent extends Model
         $query->whereIn('event_type', $types ?? self::FOLLOW_UP_WORK_TYPES);
     }
 
-    /** Whether the given user may see this event (Admin/SA: all; BD: own or on an owned lead). */
+    /**
+     * Whether the given user may see this event (Admin/SA: all; BD: only their own).
+     *
+     * The row-level twin of {@see scopeVisibleTo()} — PlannerEventPolicy composes BOTH (the scope for
+     * the list, this for single-record view/update/delete), so the two must express the identical
+     * rule. If they ever diverge, a BD can reach by id something the list would never show them.
+     */
     public function isVisibleTo(User $user): bool
     {
         if ($user->hasAnyRole(['crm_admin', 'super_admin'])) {
             return true;
         }
 
-        if ($this->assigned_to === $user->id) {
-            return true;
-        }
-
-        return $this->lead_id !== null
-            && Lead::where('id', $this->lead_id)->where('assigned_to', $user->id)->exists();
+        return $this->assigned_to === $user->id;
     }
 }

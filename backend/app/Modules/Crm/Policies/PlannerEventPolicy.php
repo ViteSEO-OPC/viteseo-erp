@@ -8,7 +8,7 @@ use App\Models\User;
 /**
  * Authorization for Planner events. Combines the `calendar.*` permission with the ownership
  * boundary (PlannerEvent::isVisibleTo): a Business Development Manager may act only on events
- * they own or that are linked to a lead they own; Admin sees/acts on all; Super Admin bypasses
+ * ASSIGNED TO THEM; Admin sees/acts on all; Super Admin bypasses
  * every check via Gate::before. The permission namespace stays `calendar.*` (only the UI module
  * is branded "Planner"); `calendar.delete` is management-only (Admin/SA), matching leads.delete.
  */

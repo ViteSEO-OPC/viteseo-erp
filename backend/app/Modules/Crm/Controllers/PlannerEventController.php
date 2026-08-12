@@ -16,7 +16,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
  * Planner events — the single scheduling surface (Calendar + Board). The list is ownership-scoped
- * via PlannerEvent::scopeVisibleTo (BD sees own/on-owned-leads; Admin/SA see all); single-record
+ * via PlannerEvent::scopeVisibleTo (BD sees only events assigned to them; Admin/SA see all); single-record
  * routes authorize through PlannerEventPolicy. Every write logs a `planner-event.*` Activity via
  * PlannerEventObserver, so the controller stays thin.
  */
