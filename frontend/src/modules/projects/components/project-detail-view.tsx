@@ -13,6 +13,7 @@ import {
   PencilIcon,
   PlusIcon,
 } from "@/core/ui";
+import { Download, DownloadIcon, Import, ImportIcon, Upload as UploadIcon } from "lucide-react";
 import { useAuth, useIsManager } from "@/core/auth/AuthProvider";
 import type { StatusKey } from "@/modules/projects/types/common";
 import type { BlockingWork } from "@/modules/projects/types/project";
@@ -51,6 +52,7 @@ import {
   type WorkItem,
 } from "@/modules/projects/components/workspace-view-shared";
 import { BlockingWorkDialog } from "@/modules/projects/components/blocking-work-dialog";
+import { ImportTasksModal } from "@/modules/projects/components/import-tasks-modal";
 import { TaskModal } from "@/modules/projects/components/task-modal";
 import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
 import {
@@ -124,6 +126,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDone, setConfirmDone] = useState(false);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
+  const [importTasksOpen, setImportTasksOpen] = useState(false);
   const updateProject = useUpdateProject();
   const isDone = project?.status === "done";
 
@@ -501,12 +504,23 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
                   {taskItems.length}
                 </span>
               </div>
-              {/* Members may submit their own work; it goes to the PM review
-                  queue rather than straight onto the board. */}
-              <Button onClick={() => setAddTaskOpen(true)}>
-                <PlusIcon className="h-4 w-4" />
-                {"Add Task"}
-              </Button>
+              {/* Both tiers may add and import; what they produce differs. A
+                  manager's lands on the board approved, a member's is their own
+                  work submitted to the PM review queue. The server decides which
+                  from the caller's permission — the button is the same. */}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="brand-outline"
+                  onClick={() => setImportTasksOpen(true)}
+                >
+                  <ImportIcon className="h-4 w-4" />
+                  {isManager ? "Import Tasks" : "Import My Tasks"}
+                </Button>
+                <Button onClick={() => setAddTaskOpen(true)}>
+                  <PlusIcon className="h-4 w-4" />
+                  {"Add Task"}
+                </Button>
+              </div>
             </div>
 
             {tasksQuery.isLoading ? (
@@ -537,6 +551,15 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               projectId={projectId}
               statuses={statusesQuery.data ?? []}
               mode="create"
+            />
+          )}
+
+          {importTasksOpen && (
+            <ImportTasksModal
+              open
+              onClose={() => setImportTasksOpen(false)}
+              projectId={projectId}
+              projectName={project?.name}
             />
           )}
 

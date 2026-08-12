@@ -15,6 +15,7 @@ use App\Modules\Projects\Controllers\ProjectStatusController;
 use App\Modules\Projects\Controllers\SearchController;
 use App\Modules\Projects\Controllers\SubtaskController;
 use App\Modules\Projects\Controllers\TaskController;
+use App\Modules\Projects\Controllers\TaskImportController;
 use App\Modules\Projects\Controllers\UserDirectoryController;
 use App\Modules\Projects\Controllers\WorkloadAnalysisController;
 use App\Modules\Projects\Controllers\WorkloadController;
@@ -62,6 +63,13 @@ Route::prefix('v1/projects')->middleware('auth:sanctum')->group(function (): voi
     Route::get('groups/{group}/workload', [WorkloadController::class, 'showGroup']);
 
     // Tasks (nested index/store, shallow member routes)
+    //
+    // Bulk import is declared first: `tasks/import` is a literal segment and must
+    // not be reachable as a task uuid. Manager-only (`projects.tasks.create`),
+    // enforced in the controller and both form requests.
+    Route::get('projects/{project}/tasks/import/template', [TaskImportController::class, 'template']);
+    Route::post('projects/{project}/tasks/import/preview', [TaskImportController::class, 'preview']);
+    Route::post('projects/{project}/tasks/import', [TaskImportController::class, 'store']);
     Route::get('projects/{project}/tasks', [TaskController::class, 'index']);
     Route::post('projects/{project}/tasks', [TaskController::class, 'store']);
     // The open-task pool and its two verbs. `tasks/claimable` MUST come before

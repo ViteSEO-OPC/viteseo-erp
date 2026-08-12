@@ -58,6 +58,17 @@ export function useProjectChannel(projectId?: string): void {
     qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
   });
 
+  // One frame for a whole bulk import, rather than one TaskCreated per task —
+  // see Events/TasksImported. Everything it touched has to be refetched anyway,
+  // plus the workloads, since an import lands a lot of effort at once.
+  useRealtimeEvent(channel, ".TasksImported", () => {
+    qc.invalidateQueries({ queryKey: tasksKey });
+    qc.invalidateQueries({ queryKey: statusesKey });
+    qc.invalidateQueries({ queryKey: projectKeys.workloads });
+    qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
+    qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
+  });
+
   useRealtimeEvent(channel, ".TaskUpdated", (task: Task) => {
       qc.setQueryData<Paginated<Task>>(tasksKey, (prev) =>
         prev
