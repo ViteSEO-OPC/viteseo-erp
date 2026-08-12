@@ -2,25 +2,20 @@
 
 import { useState } from "react";
 import { isAxiosError } from "axios";
-import { Button, PriorityBadge } from "@/core/ui";
+import { Button } from "@/core/ui";
 import { notify } from "@/core/lib/notify";
-import { ProjectPill } from "@/modules/projects/components/pills";
+import {
+  DashboardTaskTable,
+  type DashboardTaskRow,
+} from "@/modules/projects/components/dashboard-shared";
 import { useClaimableTasks, useClaimTask } from "@/modules/projects/hooks/use-tasks";
 import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
-import { isOverdue, OverdueBadge } from "@/modules/projects/lib/overdue";
 
 export interface ClaimableTasksPanelProps {
   /** Scope to one project. Omit for the whole pool (every project). */
   projectId?: string;
   limit?: number;
   className?: string;
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return "no due date";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "no due date";
-  return `due ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
 }
 
 /**
@@ -30,6 +25,10 @@ function formatDate(value: string | null): string {
  * a row can be taken between the fetch and the click. The server settles that
  * with a 409, and this turns it into "X took it" plus a refetch rather than a
  * generic failure.
+ *
+ * Rendered through the shared DashboardTaskTable so this reads as the same table
+ * as every other task list — the dashboards, the board's List view and the
+ * archives all share that column layout. Claim rides in as its action column.
  */
 export function ClaimableTasksPanel({
   projectId,
@@ -86,49 +85,47 @@ export function ClaimableTasksPanel({
     }
   };
 
+  // ClaimableTask nests its project; the shared table looks projects up by id,
+  // so build those maps from what the pool already returned rather than firing
+  // another projects request.
+  const projectName = new Map<string, string>();
+  const projectColor = new Map<string, string | null>();
+  for (const t of tasks) {
+    if (t.project) {
+      projectName.set(t.project.id, t.project.name);
+      projectColor.set(t.project.id, null);
+    }
+  }
+
+  const rows: (DashboardTaskRow & { id: string; title: string })[] = tasks.map(
+    (t) => ({
+      id: t.id,
+      project_id: t.project?.id ?? "",
+      title: t.title,
+      priority: t.priority,
+      status: t.status,
+      deadline: t.deadline,
+    }),
+  );
+
   return (
-    <div className={`divide-y divide-line ${className}`}>
-      {tasks.map((task) => {
-        const overdue = isOverdue(task.deadline, task.status?.key);
-
-        return (
-          <div key={task.id} className="flex items-start gap-3 px-4 py-3">
-            <button
-              type="button"
-              onClick={() => openTask(task.id)}
-              className="min-w-0 flex-1 text-left"
-            >
-              <p className="truncate font-bold text-ink">{task.title}</p>
-              <div className="mt-1 flex flex-wrap items-center gap-2">
-                {task.project && (
-                  <ProjectPill name={task.project.name} color={null} />
-                )}
-                <PriorityBadge priority={task.priority} />
-                <span
-                  className={`text-xs ${overdue ? "font-semibold text-danger" : "text-ink-faint"}`}
-                >
-                  {formatDate(task.deadline)}
-                </span>
-                {overdue && <OverdueBadge />}
-                {task.posted_by && (
-                  <span className="text-xs text-ink-faint">
-                    posted by {task.posted_by.name}
-                  </span>
-                )}
-              </div>
-            </button>
-
-            <Button
-              size="sm"
-              className="shrink-0"
-              disabled={claiming !== null}
-              onClick={() => onClaim(task.id, task.title)}
-            >
-              {claiming === task.id ? "Claiming…" : "Claim"}
-            </Button>
-          </div>
-        );
-      })}
+    <div className={className}>
+      <DashboardTaskTable
+        items={rows}
+        projectName={projectName}
+        projectColor={projectColor}
+        onOpen={openTask}
+        actionHeader="Action"
+        action={(row) => (
+          <Button
+            size="sm"
+            disabled={claiming !== null}
+            onClick={() => onClaim(row.id, row.title)}
+          >
+            {claiming === row.id ? "Claiming…" : "Claim"}
+          </Button>
+        )}
+      />
     </div>
   );
 }

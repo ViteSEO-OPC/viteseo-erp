@@ -213,10 +213,20 @@ export function MemberDashboardView(): React.ReactElement {
           </section>
             </div>
 
+            {/* Notes rail — sticky so it stays reachable while the lists scroll.
+                `top-20` clears the 69px sticky topbar; at `top-4` the card's
+                whole header (title, save state, expand/collapse) parked behind
+                it and became unclickable. Matches the manager dashboard and the
+                task-view notes panel, which both already use `top-20`. */}
             <NotesCard
               target={USER_NOTE}
               uiName="dashboard-card"
-              className="mt-8 xl:sticky xl:top-4"
+              className="mt-8 xl:sticky xl:top-20"
+              // Below xl the card sits in normal flow, so it keeps the compact
+              // default. From xl it is pinned to a full-height rail, and a 13rem
+              // pad left ~570px of that rail empty — so it fills the space it is
+              // already occupying, scrolling internally once the note outgrows it.
+              editorClassName="min-h-[13rem] max-h-[60vh] xl:min-h-[calc(100dvh-13rem)] xl:max-h-[calc(100dvh-13rem)]"
             />
           </div>
         </>

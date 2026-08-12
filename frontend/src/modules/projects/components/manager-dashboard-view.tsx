@@ -223,9 +223,12 @@ export function ManagerDashboardView(): React.ReactElement {
 
           {/* Unassigned tasks needing an owner */}
           <section className="mt-10">
-            <div className="flex items-center gap-2 w-full bg-danger-soft px-4 py-2 rounded-lg">
+            {/* Amber, not red: work without an owner needs attention, but it
+                isn't a failure — and red here competed with the genuine OVERDUE
+                badges further up the page. */}
+            <div className="flex w-full items-center gap-2 rounded-lg bg-warning-soft px-4 py-2">
               <h2 className="text-lg font-bold text-ink">Unassigned Tasks</h2>
-              <CountBubble tone="danger">{unassigned.length}</CountBubble>
+              <CountBubble tone="warning">{unassigned.length}</CountBubble>
             </div>
             {loading ? (
               <Card className="mt-4">
@@ -253,6 +256,11 @@ export function ManagerDashboardView(): React.ReactElement {
               target={USER_NOTE}
               uiName="dashboard-card"
               className="mt-8 xl:sticky xl:top-20"
+              // Below xl the card sits in normal flow, so it keeps the compact
+              // default. From xl it is pinned to a full-height rail, and a 13rem
+              // pad left ~570px of that rail empty — so it fills the space it is
+              // already occupying, scrolling internally once the note outgrows it.
+              editorClassName="min-h-[13rem] max-h-[60vh] xl:min-h-[calc(100dvh-13rem)] xl:max-h-[calc(100dvh-13rem)]"
             />
           </div>
         </>

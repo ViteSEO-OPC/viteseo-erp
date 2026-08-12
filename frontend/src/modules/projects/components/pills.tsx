@@ -119,6 +119,11 @@ const COUNT_TONES = {
   brand: "bg-brand-strong text-white",
   danger: "bg-danger-soft text-danger",
   neutral: "bg-surface text-ink-soft",
+  // Solid rather than soft-on-soft: this one sits ON a tinted bar, and a
+  // `bg-warning-soft` chip on a `bg-warning-soft` header is invisible — which is
+  // what happened to the danger bubble it replaced. Ink on amber is 8.9:1;
+  // white on amber would have been 2.1:1.
+  warning: "bg-warning text-ink",
 } as const;
 
 /**

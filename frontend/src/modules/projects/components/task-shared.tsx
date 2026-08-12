@@ -277,31 +277,6 @@ export function EffortScoreInput({
   );
 }
 
-/** PLACEHOLDER — AI scheduling suggestion (no backend yet). */
-export function AiBanner() {
-  return (
-    <div className="rounded-xl border border-line-warm bg-surface-cream p-4">
-      <div className="flex items-start gap-2.5">
-        <span
-          aria-hidden
-          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-500 text-sm font-bold text-white"
-        >
-          !
-        </span>
-        <div>
-          <p className="text-base font-bold text-ink">Lock in between, Mon, July 12 and Wed, July 14</p>
-          <p className="mt-1 text-sm text-ink-soft">
-            Optimal 3-day window to complete the workload safely ahead of the Friday deadline.
-          </p>
-        </div>
-      </div>
-      <p className="mt-2 text-[10px] font-bold uppercase tracking-wide text-ink-faint">
-        Suggested • AI scheduling coming soon
-      </p>
-    </div>
-  );
-}
-
 /** Level → badge tone + human description (per the Member Workload spec). */
 const WORKLOAD_META: Record<
   WorkloadLevel,

@@ -22,6 +22,12 @@ export interface NotesCardProps {
   className?: string;
   /** Show the collapse chevron (the project sidebar wants to reclaim space). */
   collapsible?: boolean;
+  /**
+   * Height limits for the scrolling editor area. The default suits a card sat
+   * in normal flow; a surface that pins the card to a tall rail passes its own
+   * so the pad fills the space instead of leaving it empty.
+   */
+  editorClassName?: string;
 }
 
 /**
@@ -37,6 +43,7 @@ export function NotesCard({
   uiName,
   className = "",
   collapsible = false,
+  editorClassName = "min-h-[13rem] max-h-[60vh]",
 }: NotesCardProps): React.ReactElement {
   const { user } = useAuth();
   const autosave = useNoteAutosave(target);
@@ -129,7 +136,7 @@ export function NotesCard({
             <NotesBody
               autosave={autosave}
               scope={scope}
-              editorClassName="min-h-[13rem] max-h-[60vh]"
+              editorClassName={editorClassName}
             />
           )
         )}

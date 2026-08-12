@@ -203,17 +203,42 @@ export function MyTasksTab({
  * `onOpen`. Tasks are lazily revealed in BATCH_SIZE chunks as the fixed-height
  * container is scrolled, so every dashboard table reads and behaves identically.
  */
-export function DashboardTaskTable({
+/**
+ * The only fields this table reads. Declared structurally rather than as `Task`
+ * so anything task-shaped can use it — the open-task pool passes ClaimableTask,
+ * which carries the same handful of fields under a slightly different shape.
+ * `Task[]` still satisfies it, so existing callers are unaffected.
+ */
+export interface DashboardTaskRow {
+  id: string;
+  project_id: string;
+  title: string;
+  priority: Task["priority"];
+  status?: { key: string; name: string; color: string | null } | null;
+  deadline: string | null;
+}
+
+export function DashboardTaskTable<T extends DashboardTaskRow>({
   items,
   projectName,
   projectColor,
   onOpen,
+  action,
+  actionHeader = "",
 }: {
-  items: Task[];
+  items: T[];
   projectName: Map<string, string>;
   projectColor: Map<string, string | null>;
   onOpen: (taskId: string) => void;
+  /** Optional trailing column — e.g. the open-task pool's Claim button. */
+  action?: (row: T) => React.ReactNode;
+  actionHeader?: string;
 }): React.ReactElement {
+  // One template for header and rows, widened when an action column is present
+  // so the two can never drift apart.
+  const cols = action
+    ? "grid-cols-[180px_1fr_100px_140px_100px_110px]"
+    : "grid-cols-[180px_1fr_100px_140px_100px]";
   const [visible, setVisible] = useState(BATCH_SIZE);
   // Separate sentinels: desktop table and mobile card list are both mounted
   // (one is display:none per breakpoint), so each needs its own observed node.
@@ -252,41 +277,51 @@ export function DashboardTaskTable({
         data-scroll-root
         className="mt-4 hidden max-h-[400px] overflow-y-auto overflow-hidden rounded-xl border border-line md:block"
       >
-        <div className="sticky top-0 z-5 grid grid-cols-[180px_1fr_100px_140px_100px] items-center gap-4 border-b border-line bg-surface-alt px-5 py-3 text-xs font-bold uppercase tracking-wide text-ink-soft">
+        <div
+          className={`sticky top-0 z-5 grid ${cols} items-center gap-4 border-b border-line bg-surface-alt px-5 py-3 text-xs font-bold tracking-wide text-ink-soft uppercase`}
+        >
           <span>Project Name</span>
           <span>Task Name</span>
           <span>Priority</span>
           <span>Status</span>
           <span>Due date</span>
+          {action && <span>{actionHeader}</span>}
         </div>
         <div className="divide-y divide-line">
           {shown.map((t) => (
-            <button
+            <div
               key={t.id}
-              type="button"
-              onClick={() => onOpen(t.id)}
-              className="grid w-full grid-cols-[180px_1fr_100px_140px_100px] items-center gap-4 px-5 py-3.5 text-left transition-colors hover:bg-black/[0.02]"
+              className={`relative grid ${cols} w-full items-center gap-4 px-5 py-3.5 text-left transition-colors hover:bg-black/[0.02]`}
             >
-              <span className="flex min-w-0 items-center">
+              {/* Whole-row click target. An overlay rather than wrapping the row
+                  in a <button>, because the action column holds a button of its
+                  own and buttons cannot nest. */}
+              <button
+                type="button"
+                onClick={() => onOpen(t.id)}
+                aria-label={`Open ${t.title}`}
+                className="absolute inset-0 cursor-pointer rounded-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+              />
+              <span className="pointer-events-none relative flex min-w-0 items-center">
                 <ProjectPill
                   name={projectName.get(t.project_id) ?? "—"}
                   color={projectColor.get(t.project_id)}
                 />
               </span>
-              <span className="min-w-0 truncate font-medium text-ink">
+              <span className="pointer-events-none relative min-w-0 truncate font-medium text-ink">
                 {t.title}
               </span>
-              <span>
+              <span className="pointer-events-none relative">
                 <PriorityBadge priority={t.priority} />
               </span>
-              <span>
+              <span className="pointer-events-none relative">
                 <StatusPill
                   statusKey={t.status?.key ?? null}
                   statusName={t.status?.name ?? null}
                   statusColor={t.status?.color ?? null}
                 />
               </span>
-              <span className="flex items-center gap-1.5">
+              <span className="pointer-events-none relative flex items-center gap-1.5">
                 <span
                   className={`text-sm ${
                     isOverdue(t.deadline, t.status?.key)
@@ -306,7 +341,13 @@ export function DashboardTaskTable({
                   </span>
                 )}
               </span>
-            </button>
+              {/* Sits above the overlay so it stays clickable. */}
+              {action && (
+                <span className="relative z-10 flex justify-end">
+                  {action(t)}
+                </span>
+              )}
+            </div>
           ))}
           {/* Sentinel for lazy loading trigger */}
           {hasMore && (
@@ -326,13 +367,17 @@ export function DashboardTaskTable({
         className="mt-4 max-h-[400px] space-y-3 overflow-y-auto md:hidden"
       >
         {shown.map((t) => (
-          <button
+          <div
             key={t.id}
-            type="button"
-            onClick={() => onOpen(t.id)}
-            className="w-full rounded-xl border border-line bg-surface p-4 text-left transition-colors hover:bg-black/[0.02]"
+            className="relative w-full rounded-xl border border-line bg-surface p-4 text-left transition-colors hover:bg-black/[0.02]"
           >
-            <div className="flex items-start justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => onOpen(t.id)}
+              aria-label={`Open ${t.title}`}
+              className="absolute inset-0 rounded-xl focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+            />
+            <div className="pointer-events-none relative flex items-start justify-between gap-3">
               <ProjectPill
                 name={projectName.get(t.project_id) ?? "—"}
                 color={projectColor.get(t.project_id)}
@@ -341,8 +386,10 @@ export function DashboardTaskTable({
                 <PriorityBadge priority={t.priority} />
               </span>
             </div>
-            <p className="mt-2 font-medium text-ink">{t.title}</p>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
+            <p className="pointer-events-none relative mt-2 font-medium text-ink">
+              {t.title}
+            </p>
+            <div className="pointer-events-none relative mt-3 flex flex-wrap items-center gap-3">
               <StatusPill
                 statusKey={t.status?.key ?? null}
                 statusName={t.status?.name ?? null}
@@ -359,7 +406,12 @@ export function DashboardTaskTable({
               </span>
               {isOverdue(t.deadline, t.status?.key) && <OverdueBadge />}
             </div>
-          </button>
+            {action && (
+              <div className="relative z-10 mt-3 flex justify-end">
+                {action(t)}
+              </div>
+            )}
+          </div>
         ))}
         {hasMore && (
           <div
