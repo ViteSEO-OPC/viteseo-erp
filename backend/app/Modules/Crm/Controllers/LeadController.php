@@ -41,15 +41,28 @@ class LeadController extends Controller
 {
     public function index(IndexLeadRequest $request): AnonymousResourceCollection
     {
-        // Sort whitelist → [column, direction]. Default ('recent'/absent) = newest first, i.e. the
-        // prior `latest('id')` behavior, unchanged. Export reuses this same ordering (filter-aware).
+        // Sort whitelist → [column, direction]. Export reuses this same ordering (filter-aware).
+        //
+        // `recent` (the default) means MOST RECENTLY ENTERED THE CRM — not the highest row id. The two
+        // are the same thing only for leads created directly here. A discovered prospect is inserted
+        // into the Nearby pool the day it is scraped and can sit there for months, so its id records
+        // DISCOVERY time, not the moment a BD accepted it. Ordering by id therefore filed a prospect
+        // accepted today onto whatever page its months-old id happened to land on, which is why
+        // "Accept into CRM" looked like it had silently done nothing.
+        //
+        // COALESCE picks each lead's actual crossing point into the CRM: `qualified_at` for an accepted
+        // prospect, `created_at` for a lead created or imported directly. The latter never carry a
+        // `qualified_at`, so their relative order is unchanged — this only moves accepted prospects,
+        // to where the BD who just accepted them expects to find them.
+        $enteredCrmAt = DB::raw('COALESCE(qualified_at, created_at)');
+
         [$sortColumn, $sortDir] = match ($request->validated('sort')) {
             'oldest' => ['id', 'asc'],
             'score-desc' => ['score', 'desc'],
             'score-asc' => ['score', 'asc'],
             'name-asc' => ['business_name', 'asc'],
             'name-desc' => ['business_name', 'desc'],
-            default => ['id', 'desc'],
+            default => [$enteredCrmAt, 'desc'],
         };
 
         // Active CRM leads only — discovered prospects live in the Nearby Clients pool and enter the
@@ -68,6 +81,8 @@ class LeadController extends Controller
             ->orderBy($sortColumn, $sortDir)
             // Stable tiebreaker so pagination is deterministic when the primary sort has ties
             // (id is monotonic with creation → also keeps just-imported leads grouped sensibly).
+            // Load-bearing for the default sort too: a bulk import gives every row the same
+            // `created_at` to the second, so without this their page order would be arbitrary.
             ->when($sortColumn !== 'id', fn (Builder $sub) => $sub->orderByDesc('id'))
             ->paginate(10);
 
