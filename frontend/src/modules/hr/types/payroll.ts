@@ -57,14 +57,45 @@ export interface PayrollRun {
   can_lock?: boolean;
   /** Slice 8 — the rules in force when this run executed. Detail view only. */
   policy_snapshot?: PolicySnapshot | null;
+  rules_drift?: RulesDriftEntry[];
   breakdown?: PayrollBreakdownRow[];
 }
 
-/** One statutory contribution as it stood when a run executed. */
+/**
+ * One rule that has changed since the run executed and WOULD price this cycle differently on a
+ * re-run. The snapshot stays frozen; this is what reconciles it with the Company rules screen.
+ */
+export interface RulesDriftEntry {
+  group: "attendance_policy" | "payroll_setting" | "contributions" | string;
+  key: string;
+  was: unknown;
+  now: unknown;
+}
+
+/**
+ * Whether the company operates a statutory contribution at all. Its `config` column is DEAD —
+ * a pre-Slice-B9 leftover that is no longer written and no longer prices anything. The rates
+ * live on `contribution_versions`; read them from there, never from here.
+ */
 export interface PolicySnapshotContribution {
   type: string;
   is_active: boolean;
   config: Record<string, number | string | null> | null;
+}
+
+/** The dated rate version of one contribution that was actually in force for the cycle. */
+export interface PolicySnapshotContributionVersion {
+  type: string;
+  basis: "percentage" | "bracket" | string;
+  employee_rate: string | number | null;
+  employer_rate: string | number | null;
+  salary_floor: string | number | null;
+  salary_cap: string | number | null;
+  employee_amount_cap: string | number | null;
+  employer_amount_cap: string | number | null;
+  fixed_employer_add_on: string | number | null;
+  add_on_min_salary: string | number | null;
+  effective_from: string | null;
 }
 
 /**
@@ -75,7 +106,10 @@ export interface PolicySnapshot {
   version?: number;
   captured_at?: string;
   attendance_policy?: Record<string, unknown>;
+  /** Enrolment only ("does the company operate this?") — NOT the rates. */
   contributions?: PolicySnapshotContribution[];
+  /** The rates that actually priced the run. Absent on runs from before Slice B3a. */
+  contribution_versions?: PolicySnapshotContributionVersion[];
   payroll_setting?: Record<string, unknown>;
 }
 

@@ -865,6 +865,128 @@ class PayrollService
         ];
     }
 
+    /**
+     * Which captured rules NO LONGER match what would price this cycle today.
+     *
+     * WHY THIS EXISTS. `policySnapshot()` is frozen at run time, and correctly so — it records
+     * what actually priced these payslips. But a rule change dated on or before the cycle end
+     * silently makes the panel disagree with the Company rules screen, and the panel said nothing
+     * about it: HR switches late deduction on, opens the run, reads "Late deduction: none", and
+     * concludes the setting did not take. The record was right; its SILENCE was the defect.
+     *
+     * Comparison is against `asOf(cycle_end)` — the same resolution payroll itself would use on a
+     * re-run — so a listed field is exactly a field a re-run would price differently. A change
+     * dated AFTER the cycle end is correctly absent: it cannot touch this cycle either way.
+     *
+     * Both sides go through `->only()` on a cast model and are compared as encoded JSON, because
+     * the raw payload and the cast attribute disagree on shape (`1` vs `true`, `"14.6538000"` vs
+     * `14.6538`) for values that are in fact identical — comparing them directly reports drift
+     * on every boolean and decimal in the policy.
+     *
+     * @return list<array{group: string, key: string, was: mixed, now: mixed}>
+     */
+    public function snapshotDrift(PayrollRun $run): array
+    {
+        $snapshot = $run->policy_snapshot;
+
+        // v1 runs stored a flat map with no groups; there is nothing coherent to compare.
+        if (! is_array($snapshot) || ($snapshot['version'] ?? 1) < 2) {
+            return [];
+        }
+
+        $cycleEnd = $run->cycle_end?->toDateString();
+
+        if ($cycleEnd === null) {
+            return [];
+        }
+
+        $current = [
+            'attendance_policy' => $this->attendancePolicy->asOf($cycleEnd)
+                ->only(array_keys(AttendancePolicyService::DEFAULTS)),
+            'payroll_setting' => PayrollSetting::asOf($cycleEnd)->only((new PayrollSetting)->getFillable()),
+            'contributions' => $this->contributions->versionsAsOf($cycleEnd)
+                ->mapWithKeys(fn ($v) => [$v->type => [
+                    'basis' => $v->basis,
+                    'employee_rate' => $v->employee_rate,
+                    'employer_rate' => $v->employer_rate,
+                    'effective_from' => $v->effective_from?->toDateString(),
+                ]])
+                ->all(),
+        ];
+
+        $was = [
+            'attendance_policy' => $snapshot['attendance_policy'] ?? [],
+            'payroll_setting' => $snapshot['payroll_setting'] ?? [],
+            'contributions' => collect($snapshot['contribution_versions'] ?? [])
+                ->mapWithKeys(fn ($v) => [$v['type'] => [
+                    'basis' => $v['basis'] ?? null,
+                    'employee_rate' => $v['employee_rate'] ?? null,
+                    'employer_rate' => $v['employer_rate'] ?? null,
+                    'effective_from' => $v['effective_from'] ?? null,
+                ]])
+                ->all(),
+        ];
+
+        $drift = [];
+
+        foreach ($current as $group => $fields) {
+            foreach ($fields as $key => $now) {
+                // A key absent from the snapshot is a setting added after the run, not a change
+                // to one — reporting it would flag every run predating a new column.
+                if (! array_key_exists($key, $was[$group])) {
+                    continue;
+                }
+
+                if (in_array($key, self::DRIFT_IGNORED, true)) {
+                    continue;
+                }
+
+                $before = $was[$group][$key];
+
+                if (self::sameValue($before, $now)) {
+                    continue;
+                }
+
+                $drift[] = ['group' => $group, 'key' => $key, 'was' => $before, 'now' => $now];
+            }
+        }
+
+        return $drift;
+    }
+
+    /**
+     * Captured for the record, but incapable of re-pricing a payslip — so listing them as
+     * changes on a panel headed "what priced these payslips" is noise that buries the fields
+     * that DO move money (`violation_rules` alone is a four-category ladder that renders longer
+     * than the rest of the panel put together).
+     *
+     * These govern the badge ladder, task-note validation and where someone may punch in. Each
+     * acts at CLOCK-IN or on a report, never when attendance already on file is turned into pay,
+     * which is the only thing a re-run redoes.
+     */
+    private const DRIFT_IGNORED = [
+        'violation_rules', 'task_format',
+        'geofence_enabled', 'office_lat', 'office_lng', 'office_radius_m', 'office_ips',
+    ];
+
+    /**
+     * Whether two captured values mean the same thing to the engine.
+     *
+     * `null` and `0` are the same setting here: every numeric policy field is read through an
+     * `(int)`/`(float)` cast, so an uncapped limit stored as `null` in an old payload and as `0`
+     * today is not a change — reporting it as one trains HR to ignore the banner.
+     */
+    private static function sameValue(mixed $before, mixed $now): bool
+    {
+        $empty = fn (mixed $v) => $v === null || $v === 0 || $v === 0.0 || $v === '0';
+
+        if ($empty($before) && $empty($now)) {
+            return true;
+        }
+
+        return json_encode($before) === json_encode($now);
+    }
+
     /** How much of a MONTHLY deduction lands on this period, per the timing setting. */
     private function timingFactor(string $timing, int $index, int $count): float
     {

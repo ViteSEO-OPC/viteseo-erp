@@ -8,6 +8,15 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { WorkScheduleFormDialog } from "@/modules/hr/components/work-schedule-form-dialog";
@@ -17,6 +26,12 @@ import {
   useAttendancePolicy,
   useUpdateAttendancePolicy,
 } from "@/modules/hr/hooks/use-rules";
+import {
+  usePayrollSettings,
+  useUpdatePayrollSettings,
+} from "@/modules/hr/hooks/use-payroll";
+import type { PayrollSettings } from "@/modules/hr/types/payroll";
+import { PAY_FREQUENCIES } from "@/modules/hr/types/employee";
 import {
   formatWorkdays,
   type DailyRateBasis,
@@ -32,6 +47,7 @@ import {
 } from "@/modules/hr/types/rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { formatDate } from "@/core/lib/format";
 import { manilaToday } from "@/modules/hr/lib/manila-date";
 
 export default function RulesPage() {
@@ -63,7 +79,7 @@ export default function RulesPage() {
     <div className="p-4 sm:p-8">
       <PageHeader
         title="Company Rules"
-        subtitle="Work schedules and the attendance policy the violation system reads. Set individual schedules in each employee's profile."
+        subtitle="Work schedules per role, attendance policy, and per-employee overrides."
         actions={
           <Button onClick={openCreate}>
             <Plus />
@@ -90,6 +106,12 @@ export default function RulesPage() {
 
         {/* Section B — attendance policy */}
         <AttendancePolicyForm />
+
+        {/* Section C — payroll settings. Kept visually separate from the attendance policy
+            rather than folded into its card grid: both sections carry an "Effective from"
+            date, but they mean DIFFERENT things (see the two banners), and the payroll rules
+            have nothing to do with the violation engine the attendance heading describes. */}
+        <PayrollSettingsForm />
       </div>
 
       <WorkScheduleFormDialog
@@ -115,18 +137,12 @@ export default function RulesPage() {
 // Column widths shared by the header and every row so they line up. Matches the
 // Figma frame (Schedule / Workdays / Hours / Grace / Actions).
 const COL = {
-  schedule: "w-[26%] min-w-[150px]",
-  workdays: "flex-1 min-w-[140px]",
-  hours: "w-[120px]",
-  paid: "w-[120px]",
-  grace: "w-[90px]",
+  schedule: "w-[24%] min-w-[160px]",
+  workdays: "flex-1 min-w-[160px]",
+  hours: "w-[130px]",
+  grace: "w-[100px]",
   actions: "w-[80px]",
 };
-
-function paidDayLabel(mins: number | null): string {
-  if (mins == null) return "—";
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-}
 
 function SchedulesTable({
   rows,
@@ -140,13 +156,12 @@ function SchedulesTable({
   return (
     <div className="w-full overflow-hidden rounded-lg border border-border bg-card">
       <div className="overflow-x-auto">
-        <div className="min-w-[820px]">
+        <div className="min-w-[700px]">
           {/* Header strip — shaded, uppercase gray labels. */}
           <div className="flex items-center gap-4 border-b border-border bg-muted/60 px-5 py-3 text-label font-bold uppercase tracking-wide text-muted-foreground">
             <div className={COL.schedule}>Schedule</div>
             <div className={COL.workdays}>Workdays</div>
             <div className={COL.hours}>Hours</div>
-            <div className={COL.paid}>Paid day</div>
             <div className={COL.grace}>Grace</div>
             <div className={cn(COL.actions, "text-right")}>Actions</div>
           </div>
@@ -174,12 +189,6 @@ function SchedulesTable({
                 </div>
                 <div className={cn(COL.hours, "text-sm text-foreground")}>
                   {s.start_time}–{s.end_time}
-                </div>
-                <div className={cn(COL.paid, "text-sm text-foreground")}>
-                  {paidDayLabel(s.expected_minutes)}
-                  <span className="block text-xs text-muted-foreground">
-                    {s.unpaid_break_minutes}m lunch
-                  </span>
                 </div>
                 <div className={cn(COL.grace, "text-sm text-foreground")}>
                   {s.grace_minutes} min
@@ -209,7 +218,7 @@ function AttendancePolicyForm() {
   const { data: policy } = useAttendancePolicy();
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-6">
       <div className="space-y-1">
         <h2 className="text-h3 font-bold text-foreground">Attendance policy</h2>
         <p className="text-sm text-muted-foreground">
@@ -224,6 +233,76 @@ function AttendancePolicyForm() {
     </section>
   );
 }
+
+/**
+ * The policy is edited one group at a time, each behind its own card. The card
+ * carries the summary HR reads to decide whether to open it, so the title and
+ * description live here rather than inside the dialog.
+ */
+type PolicyCardKey =
+  | "violation"
+  | "time_deductions"
+  | "early_ot"
+  | "geofence"
+  | "premium_rates"
+  | "basis"
+  | "break";
+
+interface PolicyCard {
+  key: PolicyCardKey;
+  title: string;
+  description: string;
+}
+
+// Order matches the Figma grid, read left to right.
+const POLICY_CARDS: PolicyCard[] = [
+  {
+    key: "violation",
+    title: "Violation flags",
+    description:
+      "The four alert levels shown in the Attendance modal — set what makes a late, an absence, or a missed clock-out each colour. These are disciplinary flags; they never deduct pay.",
+  },
+  {
+    key: "time_deductions",
+    title: "Time-based pay deductions",
+    description:
+      "How missed time (lateness and leaving early) reduces pay when payroll runs. Deducts only the actual time missed unless you set a threshold rule for lateness.",
+  },
+  {
+    key: "early_ot",
+    title: "Early arrival & overtime",
+    description: "Clocking in early, and how extra time past the schedule is treated.",
+  },
+  {
+    key: "geofence",
+    title: "Geofenced clock-in",
+    description:
+      "Check where someone is when they time in. Off, the time clock works exactly as it does today.",
+  },
+  {
+    key: "premium_rates",
+    title: "Premium & overtime rates",
+    description:
+      "Legal pay multipliers for overtime, holidays, rest days and night work. Raise any of them, but never below the DOLE minimum.",
+  },
+  {
+    key: "basis",
+    title: "Daily rate basis",
+    description:
+      "How one day of pay is priced — this affects absence deductions for everyone, not just minutes.",
+  },
+  {
+    key: "break",
+    title: "Break overage",
+    description:
+      "How far past their own break allowance a day may run before it is flagged. Over-long breaks are never deducted from pay.",
+  },
+];
+
+const CARD = Object.fromEntries(POLICY_CARDS.map((c) => [c.key, c])) as Record<
+  PolicyCardKey,
+  PolicyCard
+>;
 
 // Read a level's threshold out of the stored violation ladder, falling back to default.
 function rungValue(
@@ -347,8 +426,10 @@ function AttendancePolicyEditor() {
   const [lunchGrace, setLunchGrace] = useState(String(policy?.lunch_grace_minutes ?? 15));
   const [breakGrace, setBreakGrace] = useState(String(policy?.break_grace_minutes ?? 15));
 
-  // Which card is currently saving (so only its button shows a spinner).
-  const [saving, setSaving] = useState<string | null>(null);
+  // Which card's dialog is open, and which one is currently saving (so only its
+  // button shows a spinner).
+  const [openCard, setOpenCard] = useState<PolicyCardKey | null>(null);
+  const [saving, setSaving] = useState<PolicyCardKey | null>(null);
 
   // The date this save counts from. Payroll resolves the rules in force at a cycle's END, so
   // today (the default) reaches the open cycle and every future one, but never a cycle that has
@@ -357,7 +438,13 @@ function AttendancePolicyEditor() {
   const [effectiveFrom, setEffectiveFrom] = useState(manilaToday);
 
   // Save just ONE card's fields (partial update — the API only touches keys it's sent).
-  async function saveCard(key: string, fields: Record<string, unknown>, guard?: () => boolean) {
+  async function saveCard(
+    key: PolicyCardKey,
+    fields: Record<string, unknown>,
+    guard?: () => boolean,
+  ) {
+    // A failed guard leaves the dialog open on the offending field rather than
+    // closing over a toast the user then can't act on.
     if (guard && !guard()) return;
     setSaving(key);
     try {
@@ -365,6 +452,7 @@ function AttendancePolicyEditor() {
       // date applies to all the rules as they stand after this save, not only this card's.
       await update.mutateAsync({ ...fields, effective_from: effectiveFrom });
       toast.success("Saved");
+      setOpenCard(null);
     } catch {
       toast.error("Could not save.");
     } finally {
@@ -555,54 +643,70 @@ function AttendancePolicyEditor() {
     geofenceOn && (cleanIps().length === 0 || officeLat.trim() === "" || officeLng.trim() === "");
 
   return (
-    <div className="w-full overflow-hidden rounded-card border border-border bg-card">
-      {/* HOW FAR A SAVE ON THIS PAGE REACHES. Stated ONCE, at the top, rather than repeated on
-          each money-moving card: every rule here is read live by PayrollService at compute time
+    <div className="space-y-6">
+      {/* HOW FAR A SAVE ON THIS PAGE REACHES. Stated ONCE, at the top, rather than repeated in
+          each money-moving dialog: every rule here is read live by PayrollService at compute time
           (there is no effective-date on the attendance policy, unlike allowances and salary), so
           the caveat is identical for all of them — and a per-card notice would silently miss
           whichever card is added next. The cards' own warnings say what a rule DOES; this says
           which payslips it can still change. */}
-      <div className="space-y-4 border-b border-border p-6">
-        <div className="rounded-lg border border-warning bg-warning-subtle p-3">
-          <p className="text-xs text-foreground">
-            <strong>A change here reaches the whole of any cycle it applies to — it is not split
-            at the date you save it.</strong>{" "}
-            Payroll prices each cycle using the rules in force on its <strong>last day</strong>,
-            so saving today reaches the cycle that is still open and every cycle after it. Cycles
-            that have already ended keep the rules they were run under. A <strong>locked</strong>{" "}
-            run and an already-<strong>disbursed</strong> payslip can never be repriced at all.
-          </p>
-        </div>
+      <div className="rounded-lg border border-success bg-success-subtle p-4">
+        <p className="text-xs text-foreground">
+          <strong>A change here reaches the whole of any cycle it applies to — it is not split
+          at the date you save it.</strong>{" "}
+          Payroll prices each cycle using the rules in force on its <strong>last day</strong>,
+          so saving today reaches the cycle that is still open and every cycle after it. Cycles
+          that have already ended keep the rules they were run under. A <strong>locked</strong>{" "}
+          run and an already-<strong>disbursed</strong> payslip can never be repriced at all.
+        </p>
+      </div>
+
+      <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <div className="flex items-center">
-            <Label htmlFor="pol-effective-from" className="mr-4">
-              Effective from
-            </Label>
-            <DatePicker
-              id="pol-effective-from"
-              value={effectiveFrom}
-              onChange={setEffectiveFrom}
-              className="w-44"
-            />
-          </div>
-          <Hint className="max-w-xl">
-            Leave as today unless you are correcting a cycle that has already been run — then set
-            it to a date inside that cycle and re-run payroll. This dates <strong>every</strong>{" "}
-            rule on this page as it stands when you save, not only the card you save.
-          </Hint>
+          <Label htmlFor="pol-effective-from">Effective from</Label>
+          <DatePicker
+            id="pol-effective-from"
+            value={effectiveFrom}
+            onChange={setEffectiveFrom}
+            className="w-44"
+          />
         </div>
+        <Hint>
+          Leave as today unless you are correcting a cycle that has already been run — then set
+          it to a date inside that cycle and re-run payroll. This dates <strong>every</strong>{" "}
+          rule on this page as it stands when you save, not only the card you save.
+        </Hint>
+      </div>
+
+      <Divider />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {POLICY_CARDS.map((card) => (
+          <button
+            key={card.key}
+            type="button"
+            onClick={() => setOpenCard(card.key)}
+            className="rounded-card border border-border bg-card p-6 text-left transition-colors hover:border-brand/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
+            <h3 className="text-h3 font-bold text-foreground">{card.title}</h3>
+            <p className="mt-1.5 text-sm text-muted-foreground">{card.description}</p>
+          </button>
+        ))}
       </div>
 
       {/* Violation flags — the colour ladder HR sets. Uses the same four alert levels as
           the Attendance modal legend (Low/Informational → Caution → Warning → Critical).
           Disciplinary only; never pay. */}
-      <PolicySection
-        title="Violation flags"
-        description="The four alert levels shown in the Attendance modal — set what makes a late, an absence, or a missed clock-out each colour. These are disciplinary flags; they never deduct pay."
+      <SettingsDialog
+        card={CARD.violation}
+        open={openCard === "violation"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "violation"}
+        onSave={() => saveCard("violation", violationFields(), guardLadder)}
       >
         <div className="space-y-3">
           <p className="text-[13px] font-semibold text-foreground">Lateness — lates in a month</p>
-          <div className="flex flex-wrap items-end gap-4">
+          <div className="grid grid-cols-2 items-end gap-4 sm:grid-cols-4">
             <NumberField id="pol-late-low" label="Low / Informational at" value={lateLow} onChange={setLateLow} min={0} max={31} dot="green" />
             <NumberField id="pol-late-caution" label="Caution at" value={lateCaution} onChange={setLateCaution} min={Number(lateLow) + 1} max={31} dot="yellow" />
             <NumberField id="pol-late-warning" label="Warning at" value={lateWarning} onChange={setLateWarning} min={Number(lateCaution) + 1} max={31} dot="orange" />
@@ -613,7 +717,7 @@ function AttendancePolicyEditor() {
           <p className="text-[13px] font-semibold text-foreground">
             Unauthorised absence — consecutive days with no approved leave
           </p>
-          <div className="flex flex-wrap items-end gap-4">
+          <div className="grid grid-cols-2 items-end gap-4 sm:grid-cols-4">
             <NumberField id="pol-absent-low" label="Low / Informational at" value={absentLow} onChange={setAbsentLow} min={0} max={31} dot="green" />
             <NumberField id="pol-absent-caution" label="Caution at" value={absentCaution} onChange={setAbsentCaution} min={Number(absentLow) + 1} max={31} dot="yellow" />
             <NumberField id="pol-absent-warning" label="Warning at" value={absentWarning} onChange={setAbsentWarning} min={Number(absentCaution) + 1} max={31} dot="orange" />
@@ -628,7 +732,7 @@ function AttendancePolicyEditor() {
           <p className="text-[13px] font-semibold text-foreground">
             Missed clock-out — times this month
           </p>
-          <div className="flex flex-wrap items-end gap-4">
+          <div className="grid grid-cols-2 items-end gap-4 sm:grid-cols-4">
             <NumberField id="pol-missed-low" label="Low / Informational at" value={missedLow} onChange={setMissedLow} min={0} max={31} dot="green" />
             <NumberField id="pol-missed-caution" label="Caution at" value={missedCaution} onChange={setMissedCaution} min={Number(missedLow) + 1} max={31} dot="yellow" />
             <NumberField id="pol-missed-warning" label="Warning at" value={missedWarning} onChange={setMissedWarning} min={Number(missedCaution) + 1} max={31} dot="orange" />
@@ -644,7 +748,7 @@ function AttendancePolicyEditor() {
           <p className="text-[13px] font-semibold text-foreground">
             Over-long break — days this month
           </p>
-          <div className="flex flex-wrap items-end gap-4">
+          <div className="grid grid-cols-2 items-end gap-4 sm:grid-cols-4">
             <NumberField id="pol-break-low" label="Low / Informational at" value={breakLow} onChange={setBreakLow} min={0} max={31} dot="green" />
             <NumberField id="pol-break-caution" label="Caution at" value={breakCaution} onChange={setBreakCaution} min={Number(breakLow) + 1} max={31} dot="yellow" />
             <NumberField id="pol-break-warning" label="Warning at" value={breakWarning} onChange={setBreakWarning} min={Number(breakCaution) + 1} max={31} dot="orange" />
@@ -652,7 +756,7 @@ function AttendancePolicyEditor() {
           </div>
           <Hint>
             A day counts when break + lunch runs past that employee&apos;s own schedule allowance by
-            more than the grace set under <strong>Break overage</strong> below. Flag only — a long
+            more than the grace set under <strong>Break overage</strong>. Flag only — a long
             break never docks pay.
           </Hint>
         </div>
@@ -669,15 +773,23 @@ function AttendancePolicyEditor() {
           Each level must use a higher number than the one before it (0 is allowed for the lowest).
           These exact numbers appear in the Attendance modal&apos;s Alert Color Legend.
         </Hint>
-        <SaveButton pending={saving === "violation"} onClick={() => saveCard("violation", violationFields(), guardLadder)} />
-      </PolicySection>
-
-      <Divider />
+      </SettingsDialog>
 
       {/* Time-based pay deductions — lateness (two independent switches) + undertime. */}
-      <PolicySection
-        title="Time-based pay deductions"
-        description="How missed time (lateness and leaving early) reduces pay when payroll runs. Deducts only the actual time missed unless you set a threshold rule for lateness."
+      <SettingsDialog
+        card={CARD.time_deductions}
+        open={openCard === "time_deductions"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "time_deductions"}
+        onSave={() =>
+          saveCard("time_deductions", {
+            ...chargeFields(),
+            late_penalty_enabled: latePenaltyEnabled,
+            lates_per_deduction: Number(latesPerDeduction),
+            undertime_deduction_mode: undertimeMode,
+            daily_deduction_cap: 1,
+          })
+        }
       >
         {/* Lateness — two switches that can BOTH be on. */}
         <SubHeading>When someone is late</SubHeading>
@@ -743,29 +855,28 @@ function AttendancePolicyEditor() {
         <Hint>
           Leaving early is billed to the exact minute. A <strong>forgotten clock-out</strong> is
           auto-credited to the scheduled end time — it never docks pay and never counts as overtime; it&apos;s
-          flagged in Violation history (set its alert levels under <strong>Violation flags</strong> above).
+          flagged in Violation history (set its alert levels under <strong>Violation flags</strong>).
         </Hint>
-
-        <SaveButton
-          pending={saving === "time_deductions"}
-          onClick={() =>
-            saveCard("time_deductions", {
-              ...chargeFields(),
-              late_penalty_enabled: latePenaltyEnabled,
-              lates_per_deduction: Number(latesPerDeduction),
-              undertime_deduction_mode: undertimeMode,
-              daily_deduction_cap: 1,
-            })
-          }
-        />
-      </PolicySection>
-
-      <Divider />
+      </SettingsDialog>
 
       {/* Early arrival & overtime. */}
-      <PolicySection
-        title="Early arrival &amp; overtime"
-        description="Clocking in early, and how extra time past the schedule is treated."
+      <SettingsDialog
+        card={CARD.early_ot}
+        open={openCard === "early_ot"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "early_ot"}
+        // Slice 14 — early_arrival_mode is deliberately NOT sent: the control is disabled
+        // (no engine reads it) and the API now rejects anything but "none", so echoing a
+        // stored value back would 422 and block HR from saving the overtime settings.
+        onSave={() =>
+          saveCard("early_ot", {
+            early_clock_in_mode: earlyClockIn,
+            overtime_mode: overtimeMode,
+            overtime_threshold_minutes: Number(overtimeThreshold),
+            auto_overtime_daily_cap_minutes: Number(otDailyCap),
+            auto_overtime_period_cap_minutes: Number(otPeriodCap),
+          })
+        }
       >
         <SubHeading>When someone times in before their shift starts</SubHeading>
         <div className="flex flex-wrap items-end gap-4">
@@ -881,30 +992,16 @@ function AttendancePolicyEditor() {
           request; <strong>No overtime</strong> switches it off. Rest-day work is paid only through an
           approved request, never auto-detected.
         </Hint>
-        <SaveButton
-          pending={saving === "early_ot"}
-          // Slice 14 — early_arrival_mode is deliberately NOT sent: the control is disabled
-          // (no engine reads it) and the API now rejects anything but "none", so echoing a
-          // stored value back would 422 and block HR from saving the overtime settings.
-          onClick={() =>
-            saveCard("early_ot", {
-              early_clock_in_mode: earlyClockIn,
-              overtime_mode: overtimeMode,
-              overtime_threshold_minutes: Number(overtimeThreshold),
-              auto_overtime_daily_cap_minutes: Number(otDailyCap),
-              auto_overtime_period_cap_minutes: Number(otPeriodCap),
-            })
-          }
-        />
-      </PolicySection>
-
-      <Divider />
+      </SettingsDialog>
 
       {/* Geofenced clock-in. The switch is the kill switch: off = today's clock-in, with
           nothing else in the app changing. On but half-configured fails OPEN by design. */}
-      <PolicySection
-        title="Geofenced clock-in"
-        description="Check where someone is when they time in. Off, the time clock works exactly as it does today."
+      <SettingsDialog
+        card={CARD.geofence}
+        open={openCard === "geofence"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "geofence"}
+        onSave={() => saveCard("geofence", geofenceFields(), guardGeofence)}
       >
         <CheckBox
           checked={geofenceOn}
@@ -1005,19 +1102,25 @@ function AttendancePolicyEditor() {
             )}
           </div>
         )}
-
-        <SaveButton
-          pending={saving === "geofence"}
-          onClick={() => saveCard("geofence", geofenceFields(), guardGeofence)}
-        />
-      </PolicySection>
-
-      <Divider />
+      </SettingsDialog>
 
       {/* Premium & overtime rates (Premium Pay epic, Phase 0). Editable, floored at DOLE minimums. */}
-      <PolicySection
-        title="Premium &amp; overtime rates"
-        description="Legal pay multipliers for overtime, holidays, rest days and night work. Raise any of them, but never below the DOLE minimum."
+      <SettingsDialog
+        card={CARD.premium_rates}
+        open={openCard === "premium_rates"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "premium_rates"}
+        onSave={() =>
+          saveCard("premium_rates", {
+            premium_rest_day_pct: Number(premRestDay),
+            premium_special_day_pct: Number(premSpecialDay),
+            premium_regular_holiday_pct: Number(premRegHoliday),
+            overtime_ordinary_pct: Number(otOrdinary),
+            overtime_rest_special_pct: Number(otRestSpecial),
+            overtime_regular_holiday_pct: Number(otRegHoliday),
+            night_diff_pct: Number(nightDiff),
+          })
+        }
       >
         <div className="space-y-3">
           <SubHeading>Working a premium day (first 8 hours)</SubHeading>
@@ -1052,26 +1155,21 @@ function AttendancePolicyEditor() {
           premium and the night differential each read their rate here on the next payroll run —
           changing one changes what people are paid.
         </Hint>
-        <SaveButton
-          pending={saving === "premium_rates"}
-          onClick={() =>
-            saveCard("premium_rates", {
-              premium_rest_day_pct: Number(premRestDay),
-              premium_special_day_pct: Number(premSpecialDay),
-              premium_regular_holiday_pct: Number(premRegHoliday),
-              overtime_ordinary_pct: Number(otOrdinary),
-              overtime_rest_special_pct: Number(otRestSpecial),
-              overtime_regular_holiday_pct: Number(otRegHoliday),
-              night_diff_pct: Number(nightDiff),
-            })
-          }
-        />
-      </PolicySection>
+      </SettingsDialog>
 
       {/* Daily-rate basis. */}
-      <PolicySection
-        title="Daily rate basis"
-        description="How one day of pay is priced — this affects absence deductions for everyone, not just minutes."
+      <SettingsDialog
+        card={CARD.basis}
+        open={openCard === "basis"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "basis"}
+        onSave={() =>
+          saveCard("basis", {
+            daily_rate_basis: rateBasis,
+            annual_divisor: Number(divisor),
+            hours_per_day_divisor: Number(hoursPerDay),
+          })
+        }
       >
         <div className="flex flex-wrap items-end gap-4">
           <FieldSelect
@@ -1101,19 +1199,21 @@ function AttendancePolicyEditor() {
             </p>
           </div>
         )}
-        <SaveButton
-          pending={saving === "basis"}
-          onClick={() => saveCard("basis", { daily_rate_basis: rateBasis, annual_divisor: Number(divisor), hours_per_day_divisor: Number(hoursPerDay) })}
-        />
-      </PolicySection>
-
-      <Divider />
+      </SettingsDialog>
 
       {/* Break overage (flag only). The LIMIT lives on each work schedule; this is the
           tolerance on top of it — see ViolationService (Slice 9). */}
-      <PolicySection
-        title="Break overage"
-        description="How far past their own break allowance a day may run before it is flagged. Over-long breaks are never deducted from pay."
+      <SettingsDialog
+        card={CARD.break}
+        open={openCard === "break"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "break"}
+        onSave={() =>
+          saveCard("break", {
+            lunch_grace_minutes: Number(lunchGrace),
+            break_grace_minutes: Number(breakGrace),
+          })
+        }
       >
         <div className="flex flex-wrap items-end gap-4">
           <NumberField id="pol-lunch-grace" label="Lunch grace (minutes)" value={lunchGrace} onChange={setLunchGrace} min={0} max={240} />
@@ -1130,16 +1230,296 @@ function AttendancePolicyEditor() {
           for a long break. Set a grace to <strong>0</strong> for no tolerance at all — exactly the
           allowance still passes, one minute over is flagged.
         </Hint>
-        <SaveButton
-          pending={saving === "break"}
-          onClick={() => saveCard("break", {
-            lunch_grace_minutes: Number(lunchGrace),
-            break_grace_minutes: Number(breakGrace),
-          })}
-        />
-      </PolicySection>
-
+      </SettingsDialog>
     </div>
+  );
+}
+
+// ---- Section C: payroll settings ----
+
+/**
+ * Company-wide payroll configuration. Structurally the same animal as the attendance
+ * policy — one singleton row, dated into a versions table — with one crucial difference:
+ * payroll REPLAYS these. PayrollService resolves them as of each cycle's end, so a period
+ * already run keeps what it was priced with, whereas the attendance rules are read live.
+ * That difference is why the two sections keep separate dates and separate banners rather
+ * than sharing one control that would be a lie about one of them.
+ *
+ * These used to sit on the payroll page itself, inline above Run / Lock / Disburse. They
+ * are company configuration touched a few times a year, not part of running a cycle, and
+ * an ungated dropdown that can change pay frequency does not belong next to Disburse.
+ */
+type PayrollCardKey = "schedule" | "minimum_wage";
+
+interface PayrollCard {
+  key: PayrollCardKey;
+  title: string;
+  description: string;
+}
+
+const PAYROLL_CARDS: PayrollCard[] = [
+  {
+    key: "schedule",
+    title: "Pay schedule & deduction timing",
+    description:
+      "The default pay frequency, and which cutoff in a month carries the government contributions and the withholding tax.",
+  },
+  {
+    key: "minimum_wage",
+    title: "Minimum wage check",
+    description:
+      "The regional daily floor from your DOLE wage order. Every run is checked against it before the money is committed. Blank skips the check.",
+  },
+];
+
+const PAYROLL_CARD = Object.fromEntries(PAYROLL_CARDS.map((c) => [c.key, c])) as Record<
+  PayrollCardKey,
+  PayrollCard
+>;
+
+// When a month's statutory amounts land. "every" splits them across that month's cutoffs.
+const TIMING_OPTIONS = [
+  { value: "every", label: "Every cutoff (split)" },
+  { value: "first", label: "First cutoff only" },
+  { value: "last", label: "Last cutoff only" },
+];
+
+function PayrollSettingsForm() {
+  const { data: settings } = usePayrollSettings();
+
+  return (
+    <section className="space-y-6">
+      <div className="space-y-1">
+        <h2 className="text-h3 font-bold text-foreground">Payroll settings</h2>
+        <p className="text-sm text-muted-foreground">
+          How and when pay is computed, for every pay group.
+        </p>
+      </div>
+      {settings ? (
+        <PayrollSettingsEditor settings={settings} />
+      ) : (
+        <p className="text-sm text-muted-foreground">Loading payroll settings…</p>
+      )}
+    </section>
+  );
+}
+
+function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
+  const update = useUpdatePayrollSettings();
+
+  const [frequency, setFrequency] = useState(settings.frequency);
+  const [deductionTiming, setDeductionTiming] = useState(settings.deduction_timing);
+  const [taxTiming, setTaxTiming] = useState(settings.tax_timing);
+  // A STRING so an empty box stays empty ("no floor set") instead of collapsing to 0, which
+  // would be a wage order of nothing rather than no wage order at all.
+  const [minimumWage, setMinimumWage] = useState(settings.minimum_daily_wage?.toString() ?? "");
+  // Blank = today, which is what every change used to be recorded as whether or not it was true.
+  const [effectiveFrom, setEffectiveFrom] = useState("");
+
+  const [openCard, setOpenCard] = useState<PayrollCardKey | null>(null);
+  const [saving, setSaving] = useState<PayrollCardKey | null>(null);
+
+  // Re-seed from the server on open so Cancel genuinely discards. Without this, an edit
+  // abandoned in one dialog would ride along with the next dialog's save — the API takes
+  // the whole settings object, so every save writes every field.
+  function openCardFresh(key: PayrollCardKey) {
+    setFrequency(settings.frequency);
+    setDeductionTiming(settings.deduction_timing);
+    setTaxTiming(settings.tax_timing);
+    setMinimumWage(settings.minimum_daily_wage?.toString() ?? "");
+    setOpenCard(key);
+  }
+
+  async function save(key: PayrollCardKey) {
+    setSaving(key);
+    try {
+      await update.mutateAsync({
+        frequency,
+        deduction_timing: deductionTiming,
+        tax_timing: taxTiming,
+        minimum_daily_wage: minimumWage.trim() === "" ? null : Number(minimumWage),
+        effective_from: effectiveFrom || undefined,
+      });
+      toast.success(
+        effectiveFrom ? `Saved, effective ${formatDate(effectiveFrom)}` : "Saved",
+      );
+      setOpenCard(null);
+    } catch {
+      toast.error("Could not save.");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Deliberately not the colour or the wording of the attendance banner above: these
+          settings are replayed per cycle, those are read live. Two notices that looked the
+          same would teach HR the wrong rule about one of them. */}
+      <div className="rounded-lg border border-info bg-info-subtle p-4">
+        <p className="text-xs text-foreground">
+          <strong>Each cycle is priced with the settings in force for that cycle.</strong>{" "}
+          A change saved today does not reprice a period that has already been run, and
+          re-running an old cycle keeps what it was priced with — unlike the attendance rules
+          above, which every cycle still open reads live.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Label htmlFor="pay-effective-from">Effective from</Label>
+          <DatePicker
+            id="pay-effective-from"
+            value={effectiveFrom}
+            onChange={setEffectiveFrom}
+            placeholder="Today"
+            className="w-44"
+          />
+        </div>
+        <Hint>
+          Leave blank for today. Set an earlier date only if the change genuinely applied then —
+          periods already run keep the settings they were priced with.
+        </Hint>
+      </div>
+
+      <Divider />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {PAYROLL_CARDS.map((card) => (
+          <button
+            key={card.key}
+            type="button"
+            onClick={() => openCardFresh(card.key)}
+            className="rounded-card border border-border bg-card p-6 text-left transition-colors hover:border-brand/60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+          >
+            <h3 className="text-h3 font-bold text-foreground">{card.title}</h3>
+            <p className="mt-1.5 text-sm text-muted-foreground">{card.description}</p>
+          </button>
+        ))}
+      </div>
+
+      <SettingsDialog
+        card={PAYROLL_CARD.schedule}
+        open={openCard === "schedule"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "schedule"}
+        onSave={() => save("schedule")}
+      >
+        <FieldSelect
+          id="pay-frequency"
+          label="Default pay schedule"
+          value={frequency}
+          onChange={setFrequency}
+          options={PAY_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
+        />
+        <Hint>
+          Used for employees who have no frequency of their own. Changing it moves those
+          employees into a different pay group.
+        </Hint>
+
+        <SubDivider />
+
+        <FieldSelect
+          id="pay-deduction-timing"
+          label="Government contributions"
+          value={deductionTiming}
+          onChange={setDeductionTiming}
+          options={TIMING_OPTIONS}
+        />
+        <Hint>
+          When SSS, PhilHealth and Pag-IBIG come out. A month&apos;s amounts are either split
+          evenly across its cutoffs or taken whole on one of them — the monthly total is the
+          same either way, only the payslip it lands on changes.
+        </Hint>
+
+        <SubDivider />
+
+        <FieldSelect
+          id="pay-tax-timing"
+          label="Withholding tax"
+          value={taxTiming}
+          onChange={setTaxTiming}
+          options={TIMING_OPTIONS}
+        />
+        <Hint>When income tax is withheld.</Hint>
+      </SettingsDialog>
+
+      <SettingsDialog
+        card={PAYROLL_CARD.minimum_wage}
+        open={openCard === "minimum_wage"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "minimum_wage"}
+        onSave={() => save("minimum_wage")}
+      >
+        <div className="w-full max-w-[360px] space-y-1.5">
+          <Label htmlFor="pay-min-wage">Minimum daily wage (₱)</Label>
+          <Input
+            id="pay-min-wage"
+            type="number"
+            min={0}
+            max={99999}
+            step={0.01}
+            placeholder="Not set"
+            value={minimumWage}
+            onChange={(e) => setMinimumWage(e.target.value)}
+          />
+        </div>
+        <Hint>
+          From the DOLE wage order for your region. Before a run is paid out, every employee it
+          covers is checked against this figure and anyone below it is flagged.
+        </Hint>
+        <Hint>
+          Leave it blank to skip the check. There is no national figure to fall back on, so a
+          guess here would flag the wrong people.
+        </Hint>
+      </SettingsDialog>
+    </div>
+  );
+}
+
+/**
+ * One settings group's editor, shared by the attendance and payroll sections. The
+ * card's own title and description head the dialog — HR opened it on the strength
+ * of that summary, so repeating it here is what keeps the two readable as the same
+ * thing.
+ */
+function SettingsDialog({
+  card,
+  open,
+  onOpenChange,
+  pending,
+  onSave,
+  children,
+}: {
+  card: { title: string; description: string };
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  pending: boolean;
+  onSave: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{card.title}</DialogTitle>
+          <DialogDescription>{card.description}</DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">{children}</div>
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button type="button" variant="outline">
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button type="button" onClick={onSave} disabled={pending}>
+            {pending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1217,26 +1597,6 @@ function IpList({
   );
 }
 
-function PolicySection({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-4 p-6">
-      <div className="space-y-1">
-        <h3 className="text-base font-bold text-foreground">{title}</h3>
-        <p className="text-[13px] text-muted-foreground">{description}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
 function Hint({ children, className }: { children: ReactNode; className?: string }) {
   return <p className={cn("text-xs text-muted-foreground", className)}>{children}</p>;
 }
@@ -1249,17 +1609,6 @@ function SubHeading({ children }: { children: ReactNode }) {
 // Light divider between subsections of one card.
 function SubDivider() {
   return <div className="h-px w-full bg-border" />;
-}
-
-// Per-card save — each policy section saves only its own fields (partial update).
-function SaveButton({ onClick, pending }: { onClick: () => void; pending: boolean }) {
-  return (
-    <div className="pt-1">
-      <Button size="sm" onClick={onClick} disabled={pending}>
-        {pending ? "Saving…" : "Save"}
-      </Button>
-    </div>
-  );
 }
 
 function FieldSelect({
@@ -1314,7 +1663,8 @@ function NumberField({
   dot?: keyof typeof SEVERITY_DOT;
 }) {
   return (
-    <div className="w-48 space-y-1.5">
+    // max-w-full so the same field also fits a narrow grid cell inside a dialog.
+    <div className="w-48 max-w-full space-y-1.5">
       <Label htmlFor={id} className="flex items-center gap-1.5">
         {dot && <span className={cn("size-2 shrink-0 rounded-full", SEVERITY_DOT[dot])} />}
         {label}
