@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\ChangeRequest;
 use App\Modules\Hr\Models\Concern;
+use App\Modules\Hr\Models\ConcernRevealRequest;
 use App\Modules\Hr\Models\DocumentRequest;
 use App\Modules\Hr\Models\EarlyOutRequest;
 use App\Modules\Hr\Models\EmployeeLoan;
@@ -383,6 +384,21 @@ class NotificationService
                 'subtitle' => $c->reference_no,
                 'href' => '/teamora/concerns',
                 'at' => $c->resolved_at,
+            ]));
+
+        // HR has asked to know who filed one of their anonymous concerns. The one item in this
+        // list the employee is expected to ACT on rather than read — and it expires by being
+        // answered, so it is surfaced by its own status rather than a date window.
+        ConcernRevealRequest::with('concern')
+            ->where('status', 'pending')
+            ->whereHas('concern', fn ($q) => $q->where('employee_id', $employee->id))
+            ->latest('id')->take(5)->get()
+            ->each(fn ($r) => $items->push([
+                'id' => "reveal-{$r->id}",
+                'title' => 'HR asked to know who you are',
+                'subtitle' => $r->concern?->reference_no ?? 'Anonymous concern',
+                'href' => '/teamora/concerns',
+                'at' => $r->created_at,
             ]));
 
         $sorted = $items->sortByDesc('at')->take(8)->values();

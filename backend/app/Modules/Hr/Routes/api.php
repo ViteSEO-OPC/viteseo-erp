@@ -138,6 +138,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/concerns', [ConcernController::class, 'meIndex']);
     Route::post('me/concerns', [ConcernController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
     Route::post('me/concerns/{concern}/cancel', [ConcernController::class, 'cancel']);
+    // Answering HR's request to be identified. NOT role-gated on purpose — this decision
+    // belongs to the reporter, and the service checks the caller IS them.
+    Route::post('me/concern-reveal-requests/{revealRequest}/accept', [ConcernController::class, 'acceptReveal']);
+    Route::post('me/concern-reveal-requests/{revealRequest}/decline', [ConcernController::class, 'declineReveal']);
     Route::get('me/meetings', [MeetingController::class, 'meIndex']);
     Route::post('me/meetings/{meeting}/respond', [MeetingController::class, 'respond']);
 
@@ -480,6 +484,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('concerns/{concern}/status', [ConcernController::class, 'status']);
         Route::post('concerns/{concern}/reopen', [ConcernController::class, 'reopen']);
         Route::post('concerns/{concern}/meetings', [ConcernController::class, 'scheduleMeeting']);
+        // Ask an anonymous reporter to identify themselves. Asking only — the identity is not
+        // emitted until they accept, and the answer is theirs to give.
+        Route::post('concerns/{concern}/reveal-requests', [ConcernController::class, 'requestReveal']);
 
         // Finance → Office Expenses (HR only).
         Route::get('office-expenses', [OfficeExpenseController::class, 'index']);

@@ -24,13 +24,15 @@ class ConcernService
     /** HR/Admin queue — all concerns, newest first. */
     public function listForHr(): Collection
     {
-        return Concern::with(['employee.user', 'meetings', 'canceller'])->latest('submitted_at')->get();
+        return Concern::with(['employee.user', 'meetings', 'canceller', 'revealRequests.requester'])
+            ->latest('submitted_at')
+            ->get();
     }
 
     /** The employee's own concerns (named or anonymous). */
     public function listForEmployee(Employee $employee): Collection
     {
-        return Concern::with(['meetings', 'canceller'])
+        return Concern::with(['meetings', 'canceller', 'revealRequests.requester'])
             ->where('employee_id', $employee->id)
             ->latest('submitted_at')
             ->get();
@@ -139,7 +141,7 @@ class ConcernService
             $concern,
         );
 
-        return $concern->load(['employee.user', 'meetings']);
+        return $concern->load(['employee.user', 'meetings', 'revealRequests.requester']);
     }
 
     /**
@@ -166,7 +168,7 @@ class ConcernService
             $concern,
         );
 
-        return $concern->load(['employee.user', 'meetings']);
+        return $concern->load(['employee.user', 'meetings', 'revealRequests.requester']);
     }
 
     /**
@@ -208,7 +210,7 @@ class ConcernService
             $concern,
         );
 
-        return $concern->load(['employee.user', 'canceller']);
+        return $concern->load(['employee.user', 'canceller', 'revealRequests.requester']);
     }
 
     private function uniqueReference(): string

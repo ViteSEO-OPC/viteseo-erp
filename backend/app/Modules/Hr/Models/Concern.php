@@ -16,12 +16,13 @@ class Concern extends Model
 
     protected $fillable = [
         'employee_id', 'reference_no', 'category', 'description', 'reported_person',
-        'attachments', 'is_anonymous', 'status', 'submitted_at', 'resolved_at',
-        'cancelled_at', 'cancelled_by', 'cancel_reason',
+        'attachments', 'is_anonymous', 'identity_revealed_at', 'status', 'submitted_at',
+        'resolved_at', 'cancelled_at', 'cancelled_by', 'cancel_reason',
     ];
 
     protected $casts = [
         'is_anonymous' => 'boolean',
+        'identity_revealed_at' => 'datetime',
         'attachments' => 'array',
         'submitted_at' => 'datetime',
         'resolved_at' => 'datetime',
@@ -45,6 +46,29 @@ class Concern extends Model
     public function meetings(): HasMany
     {
         return $this->hasMany(Meeting::class);
+    }
+
+    /** Every time HR has asked this reporter to identify themselves, newest first. */
+    public function revealRequests(): HasMany
+    {
+        return $this->hasMany(ConcernRevealRequest::class)->latest('id');
+    }
+
+    /**
+     * May a viewer see who filed this?
+     *
+     * The one question the whole anonymity feature turns on, answered in one place so that a
+     * new screen cannot accidentally answer it differently. A named concern: always. An
+     * anonymous one: only HR, and only once the reporter has agreed to be named.
+     */
+    public function identityVisibleTo(?\App\Models\User $viewer): bool
+    {
+        if (! $this->is_anonymous) {
+            return true;
+        }
+
+        return $this->identity_revealed_at !== null
+            && (bool) $viewer?->hasRole('hr_officer');
     }
 
     /** Who withdrew this request, when it was cancelled rather than decided. */

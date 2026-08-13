@@ -13,6 +13,9 @@ import {
   scheduleEmployeeMeeting,
   getMyMeetings,
   respondMeeting,
+  requestConcernReveal,
+  acceptConcernReveal,
+  declineConcernReveal,
 } from "@/modules/hr/api/concerns";
 
 const CONCERNS_KEY = ["hr", "concerns"] as const;
@@ -63,6 +66,46 @@ export function useReopenConcern() {
       qc.invalidateQueries({ queryKey: CONCERNS_KEY });
       qc.invalidateQueries({ queryKey: MY_CONCERNS_KEY });
     },
+  });
+}
+
+/**
+ * Every reveal decision changes what the OTHER side's list says, so both are invalidated on
+ * each of the three mutations below — HR's queue holds the ask, the employee's page holds the
+ * answer, and an accepted one changes whether a name is emitted at all.
+ */
+function invalidateBothQueues(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: CONCERNS_KEY });
+  qc.invalidateQueries({ queryKey: MY_CONCERNS_KEY });
+  // The bell carries the employee's pending ask.
+  qc.invalidateQueries({ queryKey: ["hr", "me", "notifications"] });
+}
+
+/** HR asks an anonymous reporter to identify themselves. */
+export function useRequestConcernReveal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ concernId, reason }: { concernId: number; reason: string }) =>
+      requestConcernReveal(concernId, reason),
+    onSuccess: () => invalidateBothQueues(qc),
+  });
+}
+
+/** The reporter agrees — this is what makes their name visible to HR. */
+export function useAcceptConcernReveal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => acceptConcernReveal(id),
+    onSuccess: () => invalidateBothQueues(qc),
+  });
+}
+
+/** The reporter declines, with a reason HR sees in place of the name. */
+export function useDeclineConcernReveal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) => declineConcernReveal(id, reason),
+    onSuccess: () => invalidateBothQueues(qc),
   });
 }
 

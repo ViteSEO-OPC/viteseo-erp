@@ -1,5 +1,5 @@
 import { apiClient } from "@/core/api-client";
-import type { Concern, Meeting } from "@/modules/hr/types/concern";
+import type { Concern, ConcernRevealRequest, Meeting } from "@/modules/hr/types/concern";
 
 // --- Concerns ---
 
@@ -66,5 +66,35 @@ export async function respondMeeting(
 /** The employee withdraws their own pending concern. Reason required. */
 export async function cancelConcern(id: number, reason: string): Promise<Concern> {
   const res = await apiClient.post(`/hr/me/concerns/${id}/cancel`, { reason });
+  return res.data.data;
+}
+
+// --- Identity reveal on an anonymous concern -------------------------------------------------
+
+/**
+ * HR asks who filed this. Asking only — the identity is not emitted until the reporter accepts.
+ * The reason is required and has a minimum length server-side: the reporter is being asked to
+ * give up the one protection they chose, and they cannot weigh "need to know".
+ */
+export async function requestConcernReveal(
+  concernId: number,
+  reason: string,
+): Promise<ConcernRevealRequest> {
+  const res = await apiClient.post(`/hr/concerns/${concernId}/reveal-requests`, { reason });
+  return res.data.data;
+}
+
+/** The reporter agrees to be named. Only this makes an identity visible to HR. */
+export async function acceptConcernReveal(id: number): Promise<ConcernRevealRequest> {
+  const res = await apiClient.post(`/hr/me/concern-reveal-requests/${id}/accept`);
+  return res.data.data;
+}
+
+/** The reporter says no, and says why. HR sees the reason instead of the name. */
+export async function declineConcernReveal(
+  id: number,
+  reason: string,
+): Promise<ConcernRevealRequest> {
+  const res = await apiClient.post(`/hr/me/concern-reveal-requests/${id}/decline`, { reason });
   return res.data.data;
 }

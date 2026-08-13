@@ -5,9 +5,13 @@ namespace App\Modules\Hr\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreConcernRequest;
+use App\Modules\Hr\Http\Requests\StoreConcernRevealRequest;
 use App\Modules\Hr\Http\Resources\ConcernResource;
+use App\Modules\Hr\Http\Resources\ConcernRevealRequestResource;
 use App\Modules\Hr\Http\Resources\MeetingResource;
 use App\Modules\Hr\Models\Concern;
+use App\Modules\Hr\Models\ConcernRevealRequest;
+use App\Modules\Hr\Services\ConcernRevealService;
 use App\Modules\Hr\Services\ConcernService;
 use App\Modules\Hr\Http\Requests\CancelOwnRequestRequest;
 use Illuminate\Http\JsonResponse;
@@ -16,7 +20,10 @@ use Illuminate\Http\Response;
 
 class ConcernController extends Controller
 {
-    public function __construct(private readonly ConcernService $service) {}
+    public function __construct(
+        private readonly ConcernService $service,
+        private readonly ConcernRevealService $reveal,
+    ) {}
 
     // GET /hr/concerns — HR/Admin queue (identity hidden for anonymous).
     public function index(): JsonResponse
@@ -81,6 +88,46 @@ class ConcernController extends Controller
 
         return MeetingResource::make($this->service->scheduleMeeting($concern, $data, $request->user()))
             ->response()->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * POST /hr/concerns/{concern}/reveal-requests — HR asks who filed this (HR only).
+     *
+     * Asking is all this does. The identity stays hidden until the reporter says yes, and the
+     * ask itself is recorded whether they do or not.
+     */
+    public function requestReveal(StoreConcernRevealRequest $request, Concern $concern): JsonResponse
+    {
+        return ConcernRevealRequestResource::make(
+            $this->reveal->request($concern, $request->user(), $request->validated('reason')),
+        )->response()->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * POST /hr/me/concern-reveal-requests/{revealRequest}/accept — the reporter agrees.
+     *
+     * Not HR-gated, and deliberately so: the whole point is that this decision is not HR's.
+     * The service checks the caller IS the reporter.
+     */
+    public function acceptReveal(Request $request, ConcernRevealRequest $revealRequest): JsonResponse
+    {
+        return ConcernRevealRequestResource::make(
+            $this->reveal->accept($revealRequest, $request->user()),
+        )->response();
+    }
+
+    // POST /hr/me/concern-reveal-requests/{revealRequest}/decline — the reporter says no, with a reason.
+    public function declineReveal(Request $request, ConcernRevealRequest $revealRequest): JsonResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Say why you would rather stay anonymous — HR sees this instead of your name.',
+        ]);
+
+        return ConcernRevealRequestResource::make(
+            $this->reveal->decline($revealRequest, $request->user(), $data['reason']),
+        )->response();
     }
 
     // POST /hr/.../{concern}/cancel — the employee withdraws their own pending concern.
