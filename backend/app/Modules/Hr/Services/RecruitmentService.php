@@ -3,13 +3,11 @@
 namespace App\Modules\Hr\Services;
 
 use App\Models\User;
-use App\Modules\Hr\Mail\CandidateNotificationMail;
 use App\Modules\Hr\Models\Candidate;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Requisition;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -230,77 +228,14 @@ class RecruitmentService
     }
 
     /**
-     * Send a stage-specific email to a candidate (online/final interview invite,
-     * assessment, job offer, or rejection). The type must match the candidate's current
-     * stage. Records the type in `emails_sent` so the board shows per-stage "sent" state.
-     * Never fails the action if the mail transport is down.
+     * Reject a candidate: move to the rejected stage with a reason. A hired candidate
+     * can't be rejected.
      *
-     * The assessment email is the one HR composes: `$compose` carries the link,
-     * instructions and deadline, which are stored on the candidate as the record of what
-     * was sent (and so a re-send can repeat it).
-     *
-     * @param  array{link?: ?string, instructions?: ?string, deadline?: ?string}  $compose
+     * Rejecting no longer sends anything. The rejection email is composed like every other
+     * candidate email — the dialog rejects first, then opens the compose modal — so this
+     * method's job ends at the stage change and the reason.
      */
-    public function sendEmail(Candidate $candidate, string $type, array $compose = []): Candidate
-    {
-        if (! in_array($type, self::EMAIL_TYPES, true)) {
-            throw ValidationException::withMessages(['type' => ['Unknown email type.']]);
-        }
-        if (! $candidate->email) {
-            throw ValidationException::withMessages([
-                'email' => ['This candidate has no email address on file.'],
-            ]);
-        }
-        if (self::emailTypeForStage($candidate->stage) !== $type) {
-            throw ValidationException::withMessages([
-                'type' => ["This email doesn't match the candidate's current stage."],
-            ]);
-        }
-
-        if ($type === 'assessment') {
-            $link = trim((string) ($compose['link'] ?? '')) ?: null;
-            $instructions = trim((string) ($compose['instructions'] ?? '')) ?: null;
-
-            if (! $link && ! $instructions) {
-                throw ValidationException::withMessages([
-                    'instructions' => ['Give the candidate a link, instructions, or both.'],
-                ]);
-            }
-
-            // Persisted before sending so the mail renders from the same values HR will
-            // see on the candidate afterwards.
-            $candidate->update([
-                'assessment_link' => $link,
-                'assessment_instructions' => $instructions,
-                'assessment_deadline' => $compose['deadline'] ?? null,
-                'assessment_sent_at' => now(),
-            ]);
-        }
-
-        $candidate->loadMissing('requisition');
-
-        try {
-            Mail::to($candidate->email)->send(
-                new CandidateNotificationMail($candidate, $candidate->requisition, $type),
-            );
-        } catch (\Throwable $e) {
-            // Don't fail the action if the mail transport is down — log and carry on.
-            report($e);
-        }
-
-        $sent = collect($candidate->emails_sent ?? [])->push($type)->unique()->values()->all();
-        $candidate->update(['emails_sent' => $sent]);
-
-        $this->audit->log('updated', 'Recruitment', "Sent {$this->emailLabel($type)} email to {$candidate->name}", $candidate);
-
-        return $candidate->fresh('requisition');
-    }
-
-    /**
-     * Reject a candidate: move to the rejected stage with a reason, and optionally
-     * send the rejection email. A hired candidate can't be rejected.
-     */
-    public function reject(Candidate $candidate, string $reason, ?string $note, bool $sendEmail): Candidate
+    public function reject(Candidate $candidate, string $reason, ?string $note): Candidate
     {
         if ($candidate->hired_employee_id) {
             throw ValidationException::withMessages(['stage' => ['A hired candidate cannot be rejected.']]);
@@ -317,23 +252,7 @@ class RecruitmentService
 
         $this->audit->log('updated', 'Recruitment', "Rejected candidate {$candidate->name} ({$reason})", $candidate);
 
-        if ($sendEmail && $candidate->email) {
-            return $this->sendEmail($candidate->fresh('requisition'), 'rejection');
-        }
-
         return $candidate->fresh('requisition');
-    }
-
-    private function emailLabel(string $type): string
-    {
-        return match ($type) {
-            'online_interview' => 'online interview',
-            'final_interview' => 'final interview',
-            'assessment' => 'assessment',
-            'offer' => 'offer',
-            'rejection' => 'rejection',
-            default => $type,
-        };
     }
 
     /**

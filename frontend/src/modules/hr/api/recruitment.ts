@@ -1,5 +1,10 @@
 import { apiClient } from "@/core/api-client";
-import type { Requisition, Candidate } from "@/modules/hr/types/recruitment";
+import type {
+  Requisition,
+  Candidate,
+  CandidateEmail,
+  CandidateEmailDraft,
+} from "@/modules/hr/types/recruitment";
 
 export async function getRequisitions(): Promise<Requisition[]> {
   const res = await apiClient.get("/hr/requisitions");
@@ -88,30 +93,68 @@ export async function hireCandidate(id: number): Promise<Candidate> {
   return res.data.data;
 }
 
-/** What HR composes for an assessment email; ignored by the templated types. */
-export interface AssessmentCompose {
-  link?: string | null;
-  instructions?: string | null;
-  /** "yyyy-MM-dd" */
+/** What the compose modal opens with: the stage template, or the last email of this type. */
+export async function getCandidateEmailDraft(
+  id: number,
+  type: string,
+): Promise<CandidateEmailDraft> {
+  const res = await apiClient.get(`/hr/candidates/${id}/email/draft`, {
+    params: { type },
+  });
+  return res.data.data;
+}
+
+/** Every email sent to this candidate, newest first. */
+export async function getCandidateEmails(id: number): Promise<CandidateEmail[]> {
+  const res = await apiClient.get(`/hr/candidates/${id}/emails`);
+  return res.data.data;
+}
+
+/** A composed candidate email, as the modal hands it over. */
+export interface CandidateEmailInput {
+  type: string;
+  to: string;
+  cc: string[];
+  bcc: string[];
+  reply_to: string | null;
+  subject: string;
+  body_html: string;
+  /** Assessment only — the board badge reads it off the candidate. "yyyy-MM-dd". */
   deadline?: string | null;
+  attachments: File[];
 }
 
 /**
- * Send a stage-specific email (online/final interview invite, assessment, offer,
- * rejection). `compose` applies to the assessment email, which HR writes.
+ * Send the composed email. Always multipart, even with no files: a mixed JSON/multipart
+ * pair of code paths is one more thing to keep in step for no gain.
+ *
+ * Returns the updated candidate as well as the log row — the board reads `emails_sent`
+ * off the candidate to decide what the card shows next.
  */
 export async function sendCandidateEmail(
   id: number,
-  type: string,
-  compose?: AssessmentCompose,
-): Promise<Candidate> {
-  const res = await apiClient.post(`/hr/candidates/${id}/email`, { type, ...compose });
+  input: CandidateEmailInput,
+): Promise<{ candidate: Candidate; email: CandidateEmail }> {
+  const form = new FormData();
+  form.append("type", input.type);
+  form.append("to", input.to);
+  input.cc.forEach((address) => form.append("cc[]", address));
+  input.bcc.forEach((address) => form.append("bcc[]", address));
+  if (input.reply_to) form.append("reply_to", input.reply_to);
+  form.append("subject", input.subject);
+  form.append("body_html", input.body_html);
+  if (input.deadline) form.append("deadline", input.deadline);
+  input.attachments.forEach((file) => form.append("attachments[]", file));
+
+  const res = await apiClient.post(`/hr/candidates/${id}/email`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
   return res.data.data;
 }
 
 export async function rejectCandidate(
   id: number,
-  input: { reason: string; note: string | null; send_email: boolean },
+  input: { reason: string; note: string | null },
 ): Promise<Candidate> {
   const res = await apiClient.post(`/hr/candidates/${id}/reject`, input);
   return res.data.data;

@@ -9,11 +9,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/core/components/avatar";
 import { formatDate } from "@/core/lib/format";
-import { AssessmentEmailDialog } from "@/modules/hr/components/assessment-email-dialog";
-import {
-  useHireCandidate,
-  useSendCandidateEmail,
-} from "@/modules/hr/hooks/use-recruitment";
+import { CandidateEmailDialog } from "@/modules/hr/components/candidate-email-dialog";
+import { useHireCandidate } from "@/modules/hr/hooks/use-recruitment";
 import {
   sourceLabel,
   STAGE_EMAIL,
@@ -84,7 +81,6 @@ export function CandidateCard({
   // Track the pointer-down point so dragging the card doesn't also open details.
   const downPos = useRef<{ x: number; y: number } | null>(null);
   const hireMut = useHireCandidate();
-  const emailMut = useSendCandidateEmail();
   const stageEmail = candidate.stage ? STAGE_EMAIL[candidate.stage] : undefined;
   const [composeOpen, setComposeOpen] = useState(false);
 
@@ -101,38 +97,20 @@ export function CandidateCard({
     }
   }
 
-  async function onSendEmail(type: string, label: string) {
-    const cap = label.charAt(0).toUpperCase() + label.slice(1);
-    try {
-      await emailMut.mutateAsync({ id: candidate.id, type });
-      toast.success(`${cap} sent to ${candidate.name}`);
-    } catch {
-      toast.error(`Could not send the ${label}.`);
-    }
-  }
-
-  // "Send X email" button, or a "sent" marker once it's been sent for this stage.
-  // The assessment email is composed first, so its button opens a dialog instead.
+  // "Send X email", or a "sent" marker plus a re-send once it's gone out for this stage.
+  // Every one of them opens the compose modal — the template is a starting point, not the
+  // message, so nothing is sent without HR seeing it first.
   function emailAction(type: string, label: string) {
-    const composed = type === "assessment";
     const sent = candidate.emails_sent.includes(type);
-
-    if (sent && !composed) {
-      const cap = label.charAt(0).toUpperCase() + label.slice(1);
-      return (
-        <p className="mt-2 flex items-center gap-1 text-caption font-medium text-info">
-          <Mail className="size-3.5" /> {cap} sent
-        </p>
-      );
-    }
+    const cap = label.charAt(0).toUpperCase() + label.slice(1);
 
     if (sent) {
       return (
         <div className="mt-2 space-y-1">
           <p className="flex items-center gap-1 text-caption font-medium text-info">
             <Mail className="size-3.5" />
-            Assessment sent
-            {candidate.assessment_deadline
+            {cap} sent
+            {type === "assessment" && candidate.assessment_deadline
               ? ` · due ${formatDate(candidate.assessment_deadline)}`
               : ""}
           </p>
@@ -154,17 +132,13 @@ export function CandidateCard({
         size="xs"
         variant="outline"
         className="mt-2 w-full"
-        disabled={emailMut.isPending || !candidate.email}
+        disabled={!candidate.email}
         title={candidate.email ? undefined : "No email on file"}
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={() => (composed ? setComposeOpen(true) : onSendEmail(type, label))}
+        onClick={() => setComposeOpen(true)}
       >
         <Mail />
-        {composed
-          ? "Send assessment"
-          : emailMut.isPending
-            ? "Sending…"
-            : `Send ${label}`}
+        Compose {label}
       </Button>
     );
   }
@@ -226,8 +200,13 @@ export function CandidateCard({
 
       {/* Kept outside the draggable element: a portal still bubbles its events through
           the React tree, so clicks inside the dialog would reach the drag listeners. */}
-      {composeOpen && (
-        <AssessmentEmailDialog candidate={candidate} open onOpenChange={setComposeOpen} />
+      {composeOpen && stageEmail && (
+        <CandidateEmailDialog
+          candidate={candidate}
+          type={stageEmail.type}
+          open
+          onOpenChange={setComposeOpen}
+        />
       )}
     </>
   );

@@ -2,7 +2,16 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Zap, Check, Pencil, Trash2, RotateCcw } from "lucide-react";
+import {
+  Plus,
+  Zap,
+  Check,
+  Pencil,
+  Trash2,
+  RotateCcw,
+  Mail,
+  MailCheck,
+} from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -41,6 +50,7 @@ import { RequisitionFormDialog } from "@/modules/hr/components/requisition-form-
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { CandidateFormDialog } from "@/modules/hr/components/candidate-form-dialog";
 import { CandidateDetailDialog } from "@/modules/hr/components/candidate-detail-dialog";
+import { CandidateEmailDialog } from "@/modules/hr/components/candidate-email-dialog";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { CandidatesTable } from "@/modules/hr/components/candidates-table";
 import {
@@ -69,6 +79,9 @@ export default function RecruitmentPage() {
   const [detail, setDetail] = useState<Candidate | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [rejecting, setRejecting] = useState<Candidate | null>(null);
+  // Set once a rejection is committed and HR asked to write the email — the compose
+  // modal opens on the server's copy, which is already in the `rejected` stage.
+  const [rejectionEmail, setRejectionEmail] = useState<Candidate | null>(null);
 
   const moveMut = useMoveCandidate();
   const deleteReqMut = useDeleteRequisition();
@@ -366,7 +379,17 @@ export default function RecruitmentPage() {
       <RejectionDialog
         candidate={rejecting}
         onOpenChange={(o) => !o && setRejecting(null)}
+        onCompose={setRejectionEmail}
       />
+
+      {rejectionEmail && (
+        <CandidateEmailDialog
+          candidate={rejectionEmail}
+          type="rejection"
+          open
+          onOpenChange={(o) => !o && setRejectionEmail(null)}
+        />
+      )}
 
       <DeleteConfirmDialog
         open={!!deletingReq}
@@ -380,14 +403,21 @@ export default function RecruitmentPage() {
   );
 }
 
-// Confirm a rejection: capture a reason (+ optional note) and optionally email the
-// candidate. Opened when a card is dragged onto the Rejected column.
+// Confirm a rejection: capture a reason (+ optional note), then optionally hand the
+// candidate to the compose modal. Opened when a card is dragged onto the Rejected column.
+//
+// Rejecting and emailing are now two steps rather than one checkbox that fired a template.
+// The rejection is committed first — it is a record either way — and the email, being the
+// part a person reads, is written before it goes.
 function RejectionDialog({
   candidate,
   onOpenChange,
+  onCompose,
 }: {
   candidate: Candidate | null;
   onOpenChange: (open: boolean) => void;
+  /** Called with the rejected candidate when HR asked to email them. */
+  onCompose: (candidate: Candidate) => void;
 }) {
   const rejectMut = useRejectCandidate();
   const [reason, setReason] = useState<string>(REJECTION_REASONS[0]);
@@ -407,17 +437,16 @@ function RejectionDialog({
     if (!candidate) return;
     const willEmail = sendEmail && !!candidate.email;
     try {
-      await rejectMut.mutateAsync({
+      const rejected = await rejectMut.mutateAsync({
         id: candidate.id,
         reason,
         note: note || null,
-        send_email: willEmail,
       });
-      toast.success(
-        `${candidate.name} moved to Rejected`,
-        willEmail ? "A rejection email was sent." : undefined,
-      );
+      toast.success(`${candidate.name} moved to Rejected`);
       handleOpenChange(false);
+      // Handed over AFTER this dialog closes, and with the server's copy of the
+      // candidate — the compose modal needs the stage to already be `rejected`.
+      if (willEmail) onCompose(rejected);
     } catch {
       toast.error("Could not reject the candidate.");
     }
@@ -431,7 +460,7 @@ function RejectionDialog({
             <DialogHeader>
               <DialogTitle>Reject {candidate.name}?</DialogTitle>
               <DialogDescription>
-                Record a reason, and optionally send a courteous rejection email.
+                Record a reason. You can write the rejection email straight after.
               </DialogDescription>
             </DialogHeader>
 
@@ -469,7 +498,7 @@ function RejectionDialog({
                   disabled={!candidate.email}
                   onChange={(e) => setSendEmail(e.target.checked)}
                 />
-                Send a courteous rejection email
+                Write a rejection email next
                 {!candidate.email && (
                   <span className="text-caption">(no email on file)</span>
                 )}
@@ -507,6 +536,11 @@ function RejectedColumn({
   const { setNodeRef, isOver } = useDroppable({ id: "rejected" });
   const [open, setOpen] = useState(false);
 
+  // Rejected, has an address, and has never been sent the rejection email.
+  const unTold = cards.filter(
+    (c) => c.email && !c.emails_sent.includes("rejection"),
+  ).length;
+
   return (
     <div
       ref={setNodeRef}
@@ -532,6 +566,13 @@ function RejectedColumn({
             className="w-full rounded-lg border border-dashed border-border py-2 text-caption text-muted-foreground hover:bg-muted"
           >
             Review {cards.length} rejected
+            {/* Surfaced on the collapsed button because that is this column's resting
+                state — a candidate rejected but never told would otherwise stay hidden. */}
+            {unTold > 0 && (
+              <span className="mt-0.5 block text-[0.7rem] font-medium text-warning">
+                {unTold} not emailed yet
+              </span>
+            )}
           </button>
         ) : (
           <>
@@ -551,7 +592,12 @@ function RejectedColumn({
   );
 }
 
-// A compact one-line rejected entry — name + reason, with a reopen action.
+// A compact one-line rejected entry — name + reason, with email and reopen actions.
+//
+// The email action is here and not only in the rejection dialog because rejecting and
+// telling the candidate are separate steps: the dialog's checkbox can be unchecked, the
+// compose modal can be cancelled, and a send can fail. Without an entry point on the row,
+// any of those left the candidate rejected with no way to ever write to them.
 function RejectedRow({
   candidate,
   onSelect,
@@ -561,25 +607,60 @@ function RejectedRow({
   onSelect: (c: Candidate) => void;
   onReopen: (c: Candidate) => void;
 }) {
+  const [composeOpen, setComposeOpen] = useState(false);
+  const sent = candidate.emails_sent.includes("rejection");
+
   return (
-    <div className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1.5">
-      <button onClick={() => onSelect(candidate)} className="min-w-0 flex-1 text-left">
-        <p className="truncate text-caption font-medium text-foreground">{candidate.name}</p>
-        {candidate.rejection_reason && (
-          <p className="truncate text-[0.7rem] text-muted-foreground">
-            {candidate.rejection_reason}
-          </p>
-        )}
-      </button>
-      <button
-        onClick={() => onReopen(candidate)}
-        title="Reopen — move back to the first stage"
-        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        <RotateCcw className="size-3.5" />
-        <span className="sr-only">Reopen</span>
-      </button>
-    </div>
+    <>
+      <div className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1.5">
+        <button onClick={() => onSelect(candidate)} className="min-w-0 flex-1 text-left">
+          <p className="truncate text-caption font-medium text-foreground">{candidate.name}</p>
+          {candidate.rejection_reason && (
+            <p className="truncate text-[0.7rem] text-muted-foreground">
+              {candidate.rejection_reason}
+            </p>
+          )}
+        </button>
+        <button
+          onClick={() => setComposeOpen(true)}
+          disabled={!candidate.email}
+          title={
+            !candidate.email
+              ? "No email on file"
+              : sent
+                ? "Rejection sent — re-send or edit"
+                : "Write the rejection email"
+          }
+          className={cn(
+            "shrink-0 rounded p-1 transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40",
+            // The icon IS the sent marker — there is no room for a label on this row.
+            sent ? "text-info" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {sent ? <MailCheck className="size-3.5" /> : <Mail className="size-3.5" />}
+          <span className="sr-only">
+            {sent ? "Rejection sent — re-send or edit" : "Write the rejection email"}
+          </span>
+        </button>
+        <button
+          onClick={() => onReopen(candidate)}
+          title="Reopen — move back to the first stage"
+          className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <RotateCcw className="size-3.5" />
+          <span className="sr-only">Reopen</span>
+        </button>
+      </div>
+
+      {composeOpen && (
+        <CandidateEmailDialog
+          candidate={candidate}
+          type="rejection"
+          open
+          onOpenChange={setComposeOpen}
+        />
+      )}
+    </>
   );
 }
 

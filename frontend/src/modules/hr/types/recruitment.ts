@@ -32,16 +32,27 @@ export function employmentTypeLabel(v: string | null): string {
 export const INTERVIEW_STAGES = ["online_interview", "final_interview"];
 
 /**
- * The email a candidate at a given stage can be sent — type + button label. All but
- * `assessment` are fixed templates sent in one click; the assessment email is composed
- * by HR first (see AssessmentEmailDialog).
+ * The email a candidate at a given stage can be sent — type, button label, and the
+ * modal's own title. Every one of these opens the compose modal: the server supplies a
+ * stage template as the starting text, and HR edits it before sending.
  */
-export const STAGE_EMAIL: Record<string, { type: string; label: string }> = {
-  online_interview: { type: "online_interview", label: "online interview invite" },
-  final_interview: { type: "final_interview", label: "final interview invite" },
-  assessment: { type: "assessment", label: "assessment email" },
-  hired: { type: "offer", label: "offer email" },
-  rejected: { type: "rejection", label: "rejection notice" },
+export const STAGE_EMAIL: Record<
+  string,
+  { type: string; label: string; title: string }
+> = {
+  online_interview: {
+    type: "online_interview",
+    label: "online interview invite",
+    title: "Online interview invitation",
+  },
+  final_interview: {
+    type: "final_interview",
+    label: "final interview invite",
+    title: "Final interview invitation",
+  },
+  assessment: { type: "assessment", label: "assessment email", title: "Assessment" },
+  hired: { type: "offer", label: "offer email", title: "Job offer" },
+  rejected: { type: "rejection", label: "rejection notice", title: "Rejection notice" },
 };
 
 /** Reasons offered when rejecting a candidate. */
@@ -107,6 +118,45 @@ export interface Candidate {
   hired_employee_id: number | null;
   resume_path: string | null;
   resume_url: string | null;
+  created_at: string;
+}
+
+/** What the compose modal opens with — the stage template, or the last email of this type. */
+export interface CandidateEmailDraft {
+  to: string;
+  cc: string[];
+  bcc: string[];
+  reply_to: string | null;
+  subject: string;
+  body_html: string;
+  /** Set when this draft repeats a previous send, so the modal can say so. */
+  previous_sent_at: string | null;
+}
+
+export interface CandidateEmailAttachment {
+  name: string;
+  size: number | null;
+  mime: string | null;
+  /** Short-lived signed URL, null once it expires or if the file is gone. */
+  url: string | null;
+}
+
+/** One email sent to a candidate — including the attempts that failed. */
+export interface CandidateEmail {
+  id: number;
+  candidate_id: number;
+  type: string;
+  to_email: string;
+  cc: string[];
+  bcc: string[];
+  reply_to: string | null;
+  subject: string;
+  body_html: string;
+  attachments: CandidateEmailAttachment[];
+  status: "sent" | "failed";
+  error: string | null;
+  sent_at: string | null;
+  sent_by: string | null;
   created_at: string;
 }
 

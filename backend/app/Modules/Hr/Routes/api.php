@@ -253,6 +253,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('candidates', [RecruitmentController::class, 'storeCandidate'])->middleware('throttle:20,1,hr-upload:');
         Route::post('candidates/{candidate}/move', [RecruitmentController::class, 'moveCandidate']);
         Route::post('candidates/{candidate}/hire', [RecruitmentController::class, 'hireCandidate']);
+        Route::get('candidates/{candidate}/email/draft', [RecruitmentController::class, 'emailDraft']);
+        Route::get('candidates/{candidate}/emails', [RecruitmentController::class, 'emailHistory']);
+        // Attachments push this past a plain JSON POST, so it shares the upload throttle's spirit
+        // while keeping the tighter send limit.
         Route::post('candidates/{candidate}/email', [RecruitmentController::class, 'sendEmail'])->middleware('throttle:10,1,hr-email:');
         Route::post('candidates/{candidate}/reject', [RecruitmentController::class, 'reject']);
         Route::post('reimbursements/{reimbursement}/approve', [ReimbursementController::class, 'approve']);
