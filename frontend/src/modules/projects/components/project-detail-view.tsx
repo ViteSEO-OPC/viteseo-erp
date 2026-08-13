@@ -62,6 +62,11 @@ import {
   STATUS_COLORS,
   StatusDonut,
 } from "@/modules/projects/components/status-donut";
+import {
+  SkeletonBoard,
+  SkeletonPage,
+  SkeletonTableRows,
+} from "@/modules/projects/components/skeletons";
 
 export interface ProjectDetailViewProps {
   projectId: string;
@@ -315,9 +320,9 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
   // for a moment before the 403 arrives and redirects them.
   if (projectQuery.isLoading) {
     return (
-      <div className="px-4 py-4 sm:px-6 lg:px-8">
-        <p className="text-ink-soft">Loading project…</p>
-      </div>
+      <SkeletonPage>
+        <SkeletonBoard />
+      </SkeletonPage>
     );
   }
 
@@ -524,7 +529,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
             </div>
 
             {tasksQuery.isLoading ? (
-              <p className="text-sm text-ink-soft">Loading tasks…</p>
+              <SkeletonTableRows rows={5} columns={4} />
             ) : taskItems.length === 0 ? (
               <p className="py-6 text-center text-sm text-ink-soft">
                 {isManager

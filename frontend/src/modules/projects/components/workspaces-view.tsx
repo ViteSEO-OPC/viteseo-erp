@@ -26,6 +26,9 @@ import {
 } from "@/modules/projects/hooks/use-workspaces";
 import type { Workspace } from "@/modules/projects/types/workspace";
 import { EditWorkspaceModal } from "@/modules/projects/components/edit-workspace-modal";
+import {
+  SkeletonCardGrid,
+} from "@/modules/projects/components/skeletons";
 
 const schema = z.object({
   name: z.string().min(1, 'Name is required').max(255),
@@ -136,7 +139,7 @@ export function WorkspacesView() {
 
       {/* Content */}
       <div className="mt-6">
-        {isLoading && <p className="text-ink-soft">Loading workspaces…</p>}
+        {isLoading && <SkeletonCardGrid count={3} />}
 
         {isError && (
           <Card className="p-8 text-center">

@@ -20,6 +20,9 @@ import {
   GroupWorkloadBadge,
   UserWorkloadBadge,
 } from "@/modules/projects/components/task-shared";
+import {
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 
 export const PAGE_SIZE = 8;
 export const ROLE_OPTIONS: UserRole[] = ["Admin", "PM", "Member"];
@@ -308,7 +311,7 @@ export function MembersTable({
       </div>
 
       {isLoading ? (
-        <p className="py-10 text-center text-ink-soft">Loading members...</p>
+        <SkeletonList rows={5} className="py-6" />
       ) : rows.length === 0 ? (
         <p className="py-10 text-center text-ink-soft">
           No members match your filters.
@@ -513,7 +516,7 @@ export function GroupsPanel({
         </div>
 
         {isLoading ? (
-          <p className="mt-4 text-ink-soft">Loading groups...</p>
+          <SkeletonList rows={4} withAvatar={false} className="mt-4" />
         ) : groups.length === 0 ? (
           <Card className="mt-4 rounded-xl p-6 text-center">
             <p className="text-sm font-bold text-ink">No groups yet</p>

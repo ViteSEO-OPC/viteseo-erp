@@ -31,6 +31,12 @@ import {
   CategoryLegend,
   WorkloadKpiCards,
 } from "@/modules/projects/components/workload-shared";
+import {
+  Skeleton,
+  SkeletonPage,
+  SkeletonStatCards,
+  SkeletonTableRows,
+} from "@/modules/projects/components/skeletons";
 
 const PER_PAGE = 5;
 
@@ -70,7 +76,14 @@ export function WorkloadAnalysisView() {
   const projectsQuery = useProjects();
   const groupsQuery = useGroups();
 
-  if (isLoading) return <div className="p-8 text-ink-soft">Loading...</div>;
+  if (isLoading) {
+    return (
+      <SkeletonPage>
+        <SkeletonStatCards />
+        <SkeletonTableRows className="mt-6 rounded-xl border border-line bg-surface" />
+      </SkeletonPage>
+    );
+  }
   if (!isAuthenticated) return null;
 
   const data = analysis.data;
@@ -217,8 +230,20 @@ export function WorkloadAnalysisView() {
           </div>
           <div className="mt-4">
             {analysis.isLoading ? (
-              <div className="flex h-[240px] items-center justify-center text-sm text-ink-soft sm:h-[300px] lg:h-[340px]">
-                Loading workload…
+              <div
+                className="flex h-[240px] items-end gap-3 px-2 sm:h-[300px] lg:h-[340px]"
+                aria-busy="true"
+                aria-label="Loading workload"
+              >
+                {/* Bars of uneven height, so the placeholder reads as the chart
+                    it is standing in for. */}
+                {[60, 85, 45, 70, 55, 90, 40].map((h, i) => (
+                  <Skeleton
+                    key={i}
+                    className="flex-1"
+                    style={{ height: `${h}%` }}
+                  />
+                ))}
               </div>
             ) : (
               <WorkloadChart
@@ -282,7 +307,14 @@ function MemberWorkloadPanel({
       <div>
         <h2 className="text-lg font-bold text-ink">My Workload</h2>
         {isLoading ? (
-          <p className="mt-6 text-sm text-ink-soft">Loading…</p>
+          <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row sm:gap-8">
+            <Skeleton className="h-32 w-32 shrink-0 rounded-full" />
+            <div className="w-full space-y-3">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-4 w-40" />
+            </div>
+          </div>
         ) : (
           <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row sm:items-center sm:gap-8">
             <EffortDonut

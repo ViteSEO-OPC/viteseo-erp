@@ -20,6 +20,9 @@ import type {
 import type { Group } from "@/modules/projects/types/group";
 import type { ProjectStatus } from "@/modules/projects/types/project";
 import type { WorkloadLevel } from "@/modules/projects/types/workload";
+import { cn } from "@/core/lib/utils";
+import { Skeleton } from "@/modules/projects/components/skeletons";
+import { MODAL_PANEL_ENTER, OVERLAY_ENTER } from "@/modules/projects/lib/motion";
 
 export const PRIORITIES: Priority[] = ['Low', 'Medium', 'High'];
 
@@ -124,16 +127,26 @@ export function activityLine(log: ActivityLog): string {
   return field ? `${who} ${verb} ${field}` : `${who} ${verb}`;
 }
 
-/** Standalone 900px modal shell with the project-name pill header. */
+/**
+ * Standalone 900px modal shell with the project-name pill header.
+ *
+ * `loading` swaps the header pill for a placeholder and marks the dialog busy.
+ * It exists so the shell can be mounted BEFORE its contents are known: the
+ * global task modal opens straight into this, skeleton inside, and swaps in the
+ * real body when the fetch lands. Rendering a separate loading overlay instead
+ * would mount a second dialog and replay the open animation on arrival.
+ */
 export function ModalShell({
   open,
   onClose,
   projectName,
+  loading = false,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   projectName: string;
+  loading?: boolean;
   children: React.ReactNode;
 }) {
   useEffect(() => {
@@ -147,17 +160,38 @@ export function ModalShell({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden />
+      <div
+        className={cn("absolute inset-0 bg-black/50", OVERLAY_ENTER)}
+        onClick={onClose}
+        aria-hidden
+      />
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={projectName}
-        className="relative z-10 flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-hidden rounded-2xl bg-surface shadow-xl"
+        aria-busy={loading || undefined}
+        aria-label={loading ? 'Loading task' : projectName}
+        className={cn(
+          "relative z-10 flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-hidden rounded-2xl bg-surface shadow-xl",
+          // While loading, hold the panel AT its cap instead of letting a
+          // short skeleton size it. ViewTaskBody's content runs past its own
+          // `max-h-[70vh]` for any task with a details panel and sub-tasks, so
+          // the loaded panel lands on this same 90vh — pinning it here is what
+          // makes the two states the same height, not just the same width.
+          loading && "h-[90vh]",
+          MODAL_PANEL_ENTER,
+        )}
       >
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-6 sm:py-4">
-          <NamePill tone="info" title={projectName}>
-            {projectName}
-          </NamePill>
+          {loading ? (
+            // The project name arrives with the task, so there is nothing to
+            // put in the pill yet — a placeholder of the pill's own size keeps
+            // the header from resizing when the real name lands.
+            <Skeleton className="h-[22px] w-40 rounded-full" />
+          ) : (
+            <NamePill tone="info" title={projectName}>
+              {projectName}
+            </NamePill>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -167,7 +201,9 @@ export function ModalShell({
             <XIcon className="h-4 w-4" />
           </button>
         </div>
-        <div className="overflow-y-auto">{children}</div>
+        <div className={cn("overflow-y-auto", loading && "flex-1")}>
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -44,6 +44,10 @@ import {
   StatusDonut,
   type StatusCounts,
 } from "@/modules/projects/components/status-donut";
+import {
+  SkeletonCardGrid,
+  SkeletonPage,
+} from "@/modules/projects/components/skeletons";
 
 export interface WorkspaceDetailViewProps {
   workspaceId: string;
@@ -215,9 +219,9 @@ export function WorkspaceDetailView({
 
   if (workspaceQuery.isLoading) {
     return (
-      <div className="px-4 py-4 sm:px-6 lg:px-8">
-        <p className="text-ink-soft">Loading workspace…</p>
-      </div>
+      <SkeletonPage>
+        <SkeletonCardGrid />
+      </SkeletonPage>
     );
   }
 
@@ -327,7 +331,7 @@ export function WorkspaceDetailView({
             )}
 
             {projectsQuery.isLoading && (
-              <p className="mt-4 text-ink-soft">Loading projects…</p>
+              <SkeletonCardGrid className="mt-4" count={3} />
             )}
 
             {projectsQuery.isError && (

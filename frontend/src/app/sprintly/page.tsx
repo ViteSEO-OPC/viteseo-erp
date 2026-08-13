@@ -4,6 +4,11 @@ import { useAuth } from '@/core/auth/AuthProvider';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { DashboardView } from '@/modules/projects/components/dashboard-view';
+import {
+  SkeletonCardGrid,
+  SkeletonPage,
+  SkeletonStatCards,
+} from '@/modules/projects/components/skeletons';
 
 export default function ProjectsPage() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -16,7 +21,12 @@ export default function ProjectsPage() {
   }, [isAuthenticated, isLoading, router]);
 
   if (isLoading) {
-    return <div className="p-8">Loading...</div>;
+    return (
+      <SkeletonPage>
+        <SkeletonStatCards />
+        <SkeletonCardGrid className="mt-6" count={3} />
+      </SkeletonPage>
+    );
   }
 
   if (!isAuthenticated) {

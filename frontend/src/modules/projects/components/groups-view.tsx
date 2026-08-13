@@ -33,6 +33,9 @@ import { EditGroupModal } from "@/modules/projects/components/edit-group-modal";
 import {
   MemberPickerModal,
 } from "@/modules/projects/components/member-picker-modal";
+import {
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 
 /** Round colored avatar standing in for the group icon (Figma uses a solid
  *  color circle). Uses the group's stored hex as the background. */
@@ -171,7 +174,7 @@ export function GroupsView(): React.ReactElement {
 
             <div className="mt-4 space-y-3">
               {groupsQuery.isLoading && (
-                <p className="text-ink-soft">Loading groups…</p>
+                <SkeletonList rows={4} withAvatar={false} />
               )}
 
               {!groupsQuery.isLoading && filtered.length === 0 && (
@@ -226,9 +229,11 @@ export function GroupsView(): React.ReactElement {
             {effectiveSelectedId === "" ||
             (detailQuery.isLoading && !selected) ? (
               <Card className="p-10 text-center text-ink-soft">
-                {groups.length === 0 && !groupsQuery.isLoading
-                  ? "No group selected."
-                  : "Loading group…"}
+                {groups.length === 0 && !groupsQuery.isLoading ? (
+                  "No group selected."
+                ) : (
+                  <SkeletonList rows={4} className="text-left" />
+                )}
               </Card>
             ) : detailQuery.isError || !selected ? (
               <Card className="p-8 text-center">
