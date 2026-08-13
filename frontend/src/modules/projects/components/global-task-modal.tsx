@@ -30,7 +30,17 @@ function GlobalTaskModalInner(): React.ReactElement | null {
   return <TaskModalLoader taskId={taskId} onClose={close} />;
 }
 
-/** Fetches the task (+ its project's statuses) and renders the view modal. */
+/**
+ * Fetches the task (+ its project's statuses) and renders the view modal.
+ *
+ * One `<TaskModal>` for every state — loading, failed, loaded. It used to
+ * return a hand-built overlay while fetching and switch to `<TaskModal>` on
+ * arrival, which is a different element type in the same slot: React tore the
+ * first dialog down and mounted a second, so the open animation played twice
+ * and the panel jumped from placeholder size to full size. Keeping the element
+ * type stable means the shell mounts once, animates once, and only its body
+ * changes underneath.
+ */
 function TaskModalLoader({
   taskId,
   onClose,
@@ -43,29 +53,18 @@ function TaskModalLoader({
   const statusesQuery = useStatuses(task?.project_id ?? "");
   const statuses = statusesQuery.data ?? [];
 
-  if (!task) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div
-          className="absolute inset-0 bg-black/50"
-          onClick={onClose}
-          aria-hidden
-        />
-        <div className="relative z-10 rounded-2xl bg-surface px-8 py-6 text-sm font-semibold text-ink-soft shadow-xl">
-          {taskQuery.isError ? "Couldn't load this task." : "Loading task…"}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <TaskModal
       open
       onClose={onClose}
-      projectId={task.project_id}
+      // Empty until the task names its project; `useProject` stays disabled and
+      // the header shows its placeholder pill until then.
+      projectId={task?.project_id ?? ""}
       statuses={statuses}
       mode="view"
       task={task}
+      loading={!task && !taskQuery.isError}
+      loadError={taskQuery.isError ? "Couldn't load this task." : undefined}
     />
   );
 }

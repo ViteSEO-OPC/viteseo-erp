@@ -35,6 +35,10 @@ import {
   type AdminColumn,
   type AdminQuery,
 } from "@/modules/projects/components/admin-table";
+import {
+  SkeletonPage,
+  SkeletonTableRows,
+} from "@/modules/projects/components/skeletons";
 
 type TabKey = "workspaces" | "projects" | "tasks" | "subtasks";
 
@@ -95,7 +99,14 @@ export function ArchivesView() {
   }, [isAuthenticated, isLoading, router]);
 
   if (isLoading) {
-    return <div className="p-8 text-ink-soft">Loading...</div>;
+    return (
+      <SkeletonPage>
+        <SkeletonTableRows
+          rows={6}
+          className="rounded-xl border border-line bg-surface"
+        />
+      </SkeletonPage>
+    );
   }
 
   if (!isAuthenticated) {

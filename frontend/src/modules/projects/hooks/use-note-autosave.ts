@@ -123,7 +123,8 @@ export function useNoteAutosave(target: NoteTarget): NoteAutosave {
   const [conflict, setConflict] = useState<NoteConflict | null>(null);
   const [draftHandled, setDraftHandled] = useState(false);
   const [hydration, setHydration] = useState<Hydration | null>(null);
-  const [externalContent, setExternalContent] = useState<ExternalContent | null>(null);
+  const [externalContent, setExternalContent] =
+    useState<ExternalContent | null>(null);
 
   // --- mutable engine state (refs: never drives rendering) ---
   const versionRef = useRef(1);
@@ -237,7 +238,10 @@ export function useNoteAutosave(target: NoteTarget): NoteAutosave {
             retryRef.current = null;
             saveRef.current(latestRef.current ?? json);
           }, retryDelayRef.current);
-          retryDelayRef.current = Math.min(retryDelayRef.current * 2, RETRY_MAX_MS);
+          retryDelayRef.current = Math.min(
+            retryDelayRef.current * 2,
+            RETRY_MAX_MS,
+          );
         }
       } finally {
         inFlightRef.current = false;
@@ -314,7 +318,9 @@ export function useNoteAutosave(target: NoteTarget): NoteAutosave {
       versionRef.current = message.version;
       latestRef.current = message.content;
       queryClient.setQueryData<Note>(queryKey, (old) =>
-        old ? { ...old, content: message.content, version: message.version } : old,
+        old
+          ? { ...old, content: message.content, version: message.version }
+          : old,
       );
       setExternalContent({ content: message.content, token: Date.now() });
       setStatus("saved");
@@ -419,7 +425,9 @@ export function useNoteAutosave(target: NoteTarget): NoteAutosave {
         dirtyRef.current = false;
         if (userId > 0) clearDraft(userId, stableTarget);
         queryClient.setQueryData<Note>(queryKey, (old) =>
-          old ? { ...old, content: current.content, version: current.version } : old,
+          old
+            ? { ...old, content: current.content, version: current.version }
+            : old,
         );
         setExternalContent({ content: current.content, token: Date.now() });
         setStatus("saved");
@@ -493,10 +501,31 @@ export function useNoteHasUnsavedDraft(target: NoteTarget): boolean {
     const check = () =>
       setDirty(Boolean(readDraft(userId, { scope, projectId })?.dirty));
     check();
-    const id = setInterval(check, 2000);
+
+    // `storage` covers OTHER tabs; the interval is what catches this tab's own
+    // writes, so it only needs to run while this tab is the one being typed in.
+    let id: ReturnType<typeof setInterval> | undefined;
+    const start = () => {
+      id ??= setInterval(check, 2000);
+    };
+    const stop = () => {
+      if (id !== undefined) clearInterval(id);
+      id = undefined;
+    };
+    const onVisibility = () => {
+      if (document.hidden) stop();
+      else {
+        check();
+        start();
+      }
+    };
+
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("storage", check);
     return () => {
-      clearInterval(id);
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("storage", check);
     };
   }, [projectId, scope, userId]);

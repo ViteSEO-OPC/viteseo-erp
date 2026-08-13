@@ -7,6 +7,9 @@ import { NoteEditor } from "@/modules/projects/components/note-editor";
 import {
   SaveStatusBadge,
 } from "@/modules/projects/components/save-status-badge";
+import {
+  SkeletonText,
+} from "@/modules/projects/components/skeletons";
 
 export interface NotesBodyProps {
   autosave: NoteAutosave;
@@ -33,10 +36,8 @@ export function NotesBody({
 
   if (isLoading || initialContent === null) {
     return (
-      <div className="space-y-2 py-2" aria-busy>
-        <div className="h-3 w-2/3 animate-pulse rounded bg-black/5" />
-        <div className="h-3 w-1/2 animate-pulse rounded bg-black/5" />
-        <div className="h-3 w-3/4 animate-pulse rounded bg-black/5" />
+      <div className="py-2" aria-busy>
+        <SkeletonText lines={3} />
       </div>
     );
   }

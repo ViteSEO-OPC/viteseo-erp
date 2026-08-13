@@ -15,6 +15,7 @@ import {
 } from "@/modules/projects/api/approvals";
 import { approvalKeys, projectKeys } from "@/modules/projects/lib/query-keys";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 /**
  * A decision (or a resubmission) moves work between the queue and the board, so
@@ -23,8 +24,12 @@ import { notifyMutationError } from "@/modules/projects/lib/api-error";
 function invalidateAfterReview(qc: ReturnType<typeof useQueryClient>): void {
   qc.invalidateQueries({ queryKey: approvalKeys.tasks });
   qc.invalidateQueries({ queryKey: approvalKeys.subtasks });
-  qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
-  qc.invalidateQueries({ queryKey: ["projects", "projects"] });
+  // A decision lands the item on its board and rewrites its detail. The
+  // shared helper has no id to narrow by (bulk decisions cover many), so the
+  // two roots stand — both are far tighter than they were: boards no longer
+  // sit under the projects root, so the project list is left alone.
+  qc.invalidateQueries({ queryKey: projectKeys.tasksRoot });
+  qc.invalidateQueries({ queryKey: projectKeys.boardsRoot });
   qc.invalidateQueries({ queryKey: projectKeys.workloads });
   qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
 }
@@ -38,6 +43,8 @@ export function usePendingTasks(
     queryKey: [...approvalKeys.tasks, params ?? {}],
     queryFn: () => getPendingTasks(params),
     enabled,
+    // No channel behind the queue — a short window keeps it live.
+    staleTime: STALE.short,
   });
 }
 
@@ -50,6 +57,7 @@ export function usePendingSubtasks(
     queryKey: [...approvalKeys.subtasks, params ?? {}],
     queryFn: () => getPendingSubtasks(params),
     enabled,
+    staleTime: STALE.short,
   });
 }
 

@@ -27,6 +27,9 @@ import {
   PAGE_SIZE,
   Pagination,
 } from "@/modules/projects/components/team-shared";
+import {
+  SkeletonTableRows,
+} from "@/modules/projects/components/skeletons";
 
 /** Capitalises the API's lowercase priority into the PriorityBadge's enum. */
 function toPriority(p: string | null): Priority | null {
@@ -189,9 +192,7 @@ export function AllProjectsView() {
           </div>
 
           {isLoading ? (
-            <p className="py-10 text-center text-ink-soft">
-              Loading projects...
-            </p>
+            <SkeletonTableRows rows={5} columns={4} />
           ) : rows.length === 0 ? (
             <p className="py-10 text-center text-ink-soft">
               No projects match your search.

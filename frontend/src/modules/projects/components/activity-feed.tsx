@@ -5,6 +5,9 @@ import { useActivityFeed } from "@/modules/projects/hooks/use-activity-logs";
 import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
 import { activityFeedLine } from "@/modules/projects/lib/activity-feed";
 import { relativeTime } from "@/modules/projects/lib/notifications";
+import {
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 
 export interface ActivityFeedProps {
   /** Scope the feed to one workspace. Omit both ids for the whole platform. */
@@ -42,7 +45,7 @@ export function ActivityFeed({
   const entries = data?.data ?? [];
 
   if (isLoading) {
-    return <p className={`text-sm text-ink-soft ${className}`}>Loading…</p>;
+    return <SkeletonList rows={4} className={className} />;
   }
 
   if (isError) {

@@ -41,6 +41,10 @@ import { CountBubble } from "@/modules/projects/components/pills";
 import {
   RejectReasonDialog,
 } from "@/modules/projects/components/reject-reason-dialog";
+import {
+  SkeletonPage,
+  SkeletonTableRows,
+} from "@/modules/projects/components/skeletons";
 
 type TabKey = "tasks" | "subtasks";
 type StateKey = "pending" | "rejected" | "all";
@@ -133,7 +137,14 @@ export function ApprovalsView() {
   };
 
   if (isLoading) {
-    return <div className="p-8 text-ink-soft">Loading...</div>;
+    return (
+      <SkeletonPage>
+        <SkeletonTableRows
+          rows={6}
+          className="rounded-xl border border-line bg-surface"
+        />
+      </SkeletonPage>
+    );
   }
 
   if (!isAuthenticated) {

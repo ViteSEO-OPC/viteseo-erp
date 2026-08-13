@@ -10,6 +10,7 @@ import {
 } from "@/modules/projects/api/workload";
 import { projectKeys, workloadKeys } from "@/modules/projects/lib/query-keys";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 /**
  * Live workload for a member, fetched on demand only when a valid assignee is
@@ -42,6 +43,9 @@ export function useWorkloadAnalysis(params?: Record<string, unknown>) {
   return useQuery({
     queryKey: [...workloadKeys.analysis, params ?? {}],
     queryFn: () => getWorkloadAnalysis(params),
+    // The heaviest read in the module (it aggregates every active task and
+    // sub-task), and nothing pushes to it — so a short window, not none.
+    staleTime: STALE.short,
   });
 }
 
@@ -49,6 +53,7 @@ export function useWorkloadTasks(params?: Record<string, unknown>) {
   return useQuery({
     queryKey: [...workloadKeys.tasks, params ?? {}],
     queryFn: () => getWorkloadTasks(params),
+    staleTime: STALE.short,
   });
 }
 
@@ -66,7 +71,7 @@ export function useUpdateWorkloadCapacity() {
       moderate_max: number;
     }) => updateWorkloadCapacity(payload),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["projects", "workload"] });
+      qc.invalidateQueries({ queryKey: workloadKeys.root });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
     },
   });

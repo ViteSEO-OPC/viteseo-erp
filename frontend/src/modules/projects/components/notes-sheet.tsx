@@ -8,6 +8,11 @@ import {
   NotesBody,
   NotesHeader,
 } from "@/modules/projects/components/notes-body";
+import { cn } from "@/core/lib/utils";
+import {
+  OVERLAY_ENTER,
+  SHEET_FROM_BOTTOM_ENTER,
+} from "@/modules/projects/lib/motion";
 
 /**
  * The mobile bottom sheet — one gesture model for all three surfaces.
@@ -67,12 +72,15 @@ export function NotesSheet({
         type="button"
         aria-label="Close notes"
         onClick={close}
-        className="absolute inset-0 bg-black/40"
+        className={cn("absolute inset-0 bg-black/40", OVERLAY_ENTER)}
       />
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="relative flex h-[90dvh] w-full flex-col rounded-t-2xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-2xl outline-none"
+        className={cn(
+          "relative flex h-[90dvh] w-full flex-col rounded-t-2xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-2xl outline-none",
+          SHEET_FROM_BOTTOM_ENTER,
+        )}
       >
         {/* Drag handle — affordance only; tapping the scrim closes. */}
         <div className="flex justify-center pt-2" aria-hidden>

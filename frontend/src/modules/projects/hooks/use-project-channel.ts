@@ -7,6 +7,7 @@ import {
   useRealtimeReconnect,
 } from "@/core/realtime/use-realtime";
 import { celebrateTask } from "@/core/lib/confetti";
+import { invalidateProjectTasks } from "@/modules/projects/lib/cache-scope";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import type { ProjectStatus } from "@/modules/projects/types/project";
 import type { Task } from "@/modules/projects/types/task";
@@ -70,23 +71,32 @@ export function useProjectChannel(projectId?: string): void {
   });
 
   useRealtimeEvent(channel, ".TaskUpdated", (task: Task) => {
-      qc.setQueryData<Paginated<Task>>(tasksKey, (prev) =>
-        prev
-          ? {
-              ...prev,
-              data: prev.data.map((t) =>
-                t.id === task.id ? { ...t, ...task } : t,
-              ),
-            }
-          : prev,
-      );
+    // Only a status move is logged, so only a status move gives the Recent
+    // Activity feed news. Comparing against what is already cached keeps a
+    // drag-heavy session from refetching the feed once per card, per client.
+    const cachedBoard = qc.getQueryData<Paginated<Task>>(tasksKey);
+    const previous = cachedBoard?.data.find((t) => t.id === task.id);
+    const statusChanged =
+      previous !== undefined && previous.status?.id !== task.status?.id;
+
+    qc.setQueryData<Paginated<Task>>(tasksKey, (prev) =>
+      prev
+        ? {
+            ...prev,
+            data: prev.data.map((t) =>
+              t.id === task.id ? { ...t, ...task } : t,
+            ),
+          }
+        : prev,
+    );
     if (qc.getQueryData(projectKeys.task(task.id))) {
       qc.setQueryData<Task>(projectKeys.task(task.id), (prev) =>
         prev ? { ...prev, ...task } : prev,
       );
     }
-    // The update may have been a status move, which is logged.
-    qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
+    if (statusChanged) {
+      qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
+    }
   });
 
   // A task was marked done by someone else — join the celebration.
@@ -130,9 +140,10 @@ export function useProjectChannel(projectId?: string): void {
     qc.setQueryData<ProjectStatus[]>(statusesKey, (prev) =>
       prev ? prev.filter((s) => s.id !== ev.id) : prev,
     );
-    // Tasks/subtasks whose status was deleted fall back to "no status".
+    // Tasks/subtasks whose status was deleted fall back to "no status" —
+    // this project's, not every task the session has open.
     qc.invalidateQueries({ queryKey: tasksKey });
-    qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+    invalidateProjectTasks(qc, ev.project_id);
   });
 
   // --- Comments (rendered off the full-detail task) ---
@@ -159,9 +170,9 @@ export function useProjectChannel(projectId?: string): void {
   // Reconnect backfill: a dropped WebSocket silently loses every event fired during
   // the gap (unlike notifications, this channel's events aren't otherwise re-synced).
   // After the connection re-establishes, refetch this project's board + statuses and
-  // any open task's detail — comments/subtasks/links all live under the
-  // ["projects","tasks"] prefix, which is disjoint from the ["projects","projects"]
-  // board keys.
+  // any open task detail belonging to it. Scoped to this project: a dropped
+  // socket on one board is no reason to refetch every task the session has
+  // open elsewhere.
   //
   // The "is this a reconnect or the first connect?" test used to be hand-rolled here
   // against `pusher.connection.state`; it is the manager's now, with the same
@@ -170,7 +181,7 @@ export function useProjectChannel(projectId?: string): void {
     if (!channel) return;
     qc.invalidateQueries({ queryKey: tasksKey });
     qc.invalidateQueries({ queryKey: statusesKey });
-    qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+    invalidateProjectTasks(qc, projectId);
   });
 }
 

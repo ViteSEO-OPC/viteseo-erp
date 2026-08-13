@@ -18,6 +18,10 @@ import {
   formatDate,
   useDashboardData,
 } from "@/modules/projects/components/dashboard-shared";
+import {
+  SkeletonCardGrid,
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 import Link from "next/dist/client/link";
 
 /** The dashboard card and the task-view panel render this same note. */
@@ -148,7 +152,7 @@ export function ManagerDashboardView(): React.ReactElement {
           </div>
 
           {loading ? (
-            <p className="mt-4 text-ink-soft">Loading projects…</p>
+            <SkeletonCardGrid className="mt-4" count={3} />
           ) : projects.length === 0 ? (
             <Card className="mt-4 p-8 text-center">
               <p className="text-ink-soft">No projects yet.</p>
@@ -171,7 +175,7 @@ export function ManagerDashboardView(): React.ReactElement {
               <h2 className="text-lg font-bold text-ink">Upcoming Deadlines</h2>
               <div className="mt-4 space-y-4">
                 {loading ? (
-                  <p className="text-sm text-ink-soft">Loading…</p>
+                  <SkeletonList rows={3} />
                 ) : upcoming.length === 0 ? (
                   <p className="text-sm text-ink-soft">
                     No upcoming deadlines.
@@ -232,7 +236,7 @@ export function ManagerDashboardView(): React.ReactElement {
             </div>
             {loading ? (
               <Card className="mt-4">
-                <p className="px-5 py-4 text-sm text-ink-soft">Loading…</p>
+                <SkeletonList rows={3} className="px-5 py-4" />
               </Card>
             ) : unassigned.length === 0 ? (
               <Card className="mt-4">

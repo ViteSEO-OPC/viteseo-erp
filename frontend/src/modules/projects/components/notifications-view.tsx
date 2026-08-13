@@ -9,6 +9,9 @@ import {
   useMarkNotificationRead,
   useNotifications,
 } from "@/modules/projects/hooks/use-notifications";
+import {
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 
 /**
  * Notifications page — date-grouped activity feed, from the Figma
@@ -41,7 +44,7 @@ export function NotificationsView() {
       </div>
 
       {isLoading ? (
-        <p className="mt-8 text-ink-soft">Loading notifications…</p>
+        <SkeletonList rows={6} className="mt-6" />
       ) : items.length === 0 ? (
         <Card className="mt-6 p-10 text-center">
           <p className="text-ink-soft">You&apos;re all caught up — no notifications.</p>

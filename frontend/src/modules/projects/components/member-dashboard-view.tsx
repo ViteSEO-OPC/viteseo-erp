@@ -13,6 +13,10 @@ import {
   MyTasksTab,
   useDashboardData,
 } from "@/modules/projects/components/dashboard-shared";
+import {
+  SkeletonCardGrid,
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 import Link from "next/dist/client/link";
 
 /** The dashboard card and the task-view panel render this same note. */
@@ -156,7 +160,7 @@ export function MemberDashboardView(): React.ReactElement {
             )}
           </div>
           {loading ? (
-            <p className="mt-4 text-ink-soft">Loading projects…</p>
+            <SkeletonCardGrid className="mt-4" count={3} />
           ) : projects.length === 0 ? (
             <Card className="mt-4 p-8 text-center">
               <p className="text-ink-soft">
@@ -182,7 +186,7 @@ export function MemberDashboardView(): React.ReactElement {
             </h2>
             {loading ? (
               <Card className="mt-4">
-                <p className="px-5 py-4 text-sm text-ink-soft">Loading…</p>
+                <SkeletonList rows={3} className="px-5 py-4" />
               </Card>
             ) : upcoming.length === 0 ? (
               <Card className="mt-4">
