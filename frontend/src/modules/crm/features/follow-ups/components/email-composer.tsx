@@ -116,6 +116,22 @@ export function EmailComposer({
         </div>
 
         {/*
+          Templates are rendered PER LEAD (GET /leads/{leadId}/email-templates substitutes each row's
+          {{tokens}} for that lead), so a follow-up with no linked lead has no options to offer and
+          the controls above hold only their current value while Regenerate stays disabled. That is
+          correct behaviour, but silent — this says why, so an inert composer reads as "this row has
+          no lead" instead of "Purpose and Tone are broken".
+
+          Keyed off the item's lead, NOT off an empty option list: while templates are still loading
+          the list is legitimately empty for a lead-linked row too, and this must not flash there.
+        */}
+        {!item.leadId ? (
+          <p className="-mt-1 text-xs text-muted-foreground">
+            Templates need a linked lead — this follow-up has none.
+          </p>
+        ) : null}
+
+        {/*
           A newly selected item starts BLANK (see the re-hydration effect in useFollowUpsData), so
           these placeholders carry the "what now?" — without them an empty composer reads as broken
           rather than as a clean start. Placeholder text is never submitted, unlike the seeded copy it
