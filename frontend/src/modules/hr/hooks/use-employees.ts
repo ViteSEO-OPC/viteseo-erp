@@ -8,7 +8,6 @@ import {
   createEmployee,
   updateEmployee,
   getSalaryHistory,
-  getStatutoryPreview,
   activateEmployee,
   reopenOnboarding,
   setHrRole,
@@ -31,6 +30,14 @@ import {
   separateEmployee,
   reinstateEmployee,
   rehireEmployee,
+  createEmploymentHistory,
+  updateEmploymentHistory,
+  deleteEmploymentHistory,
+  createSalaryHistory,
+  updateSalaryHistory,
+  deleteSalaryHistory,
+  type EmploymentHistoryInput,
+  type SalaryHistoryInput,
 } from "@/modules/hr/api/employees";
 import type { EmployeeInput, EmployeeUpdateInput } from "@/modules/hr/types/employee";
 
@@ -150,17 +157,63 @@ export function useSalaryHistory(id: number) {
 }
 
 /**
- * What the rates would charge this employee, beside any per-employee override (Slice B7).
- * `useUpdateEmployee` invalidates `EMPLOYEES_KEY` as a prefix, which covers this key too — so
- * clearing an override refreshes the comparison without any extra wiring.
+ * Hand-corrections to the two timelines.
+ *
+ * All six invalidate the whole employee key rather than a narrower one, and that breadth is load-
+ * bearing in both directions: the employment timeline is embedded in the employee record itself
+ * (`employment_history`), and a compensation edit can move `base_salary` on the record too, because
+ * the server re-syncs the column to whichever entry is in force today.
  */
-export function useStatutoryPreview(id: number) {
-  return useQuery({
-    queryKey: [...EMPLOYEES_KEY, id, "statutory-preview"],
-    queryFn: () => getStatutoryPreview(id),
-    enabled: Number.isFinite(id),
+export function useCreateEmploymentHistory(employeeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: EmploymentHistoryInput) => createEmploymentHistory(employeeId, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
   });
 }
+
+export function useUpdateEmploymentHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: EmploymentHistoryInput }) =>
+      updateEmploymentHistory(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
+  });
+}
+
+export function useDeleteEmploymentHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => deleteEmploymentHistory(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
+  });
+}
+
+export function useCreateSalaryHistory(employeeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SalaryHistoryInput) => createSalaryHistory(employeeId, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
+  });
+}
+
+export function useUpdateSalaryHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: number; input: SalaryHistoryInput }) =>
+      updateSalaryHistory(id, input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
+  });
+}
+
+export function useDeleteSalaryHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => deleteSalaryHistory(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: EMPLOYEES_KEY }),
+  });
+}
+
 
 export function useEmployeeDocuments(id: number) {
   return useQuery({

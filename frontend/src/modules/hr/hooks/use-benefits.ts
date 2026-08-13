@@ -6,6 +6,7 @@ import {
   getContributionSettings,
   updateContributionSetting,
   getEmployeeBenefits,
+  getMyContributions,
   updateEmployeeBenefits,
   getContributionVersions,
   saveContributionVersion,
@@ -41,6 +42,20 @@ export function useEmployeeBenefits(employeeId: number | null) {
     queryKey: employeeId ? benefitsKey(employeeId) : ["hr", "benefits", "employee", "none"],
     queryFn: () => getEmployeeBenefits(employeeId as number),
     enabled: employeeId != null,
+  });
+}
+
+/**
+ * The caller's own contribution enrolment (self-service, read-only).
+ *
+ * DISTINCT KEY from `use-benefit-programs`'s `useMyBenefits`, which already owns
+ * ["hr","me","benefits"] for a different payload. Two hooks sharing a key serve each other's data.
+ */
+export function useMyContributions(enabled = true) {
+  return useQuery({
+    queryKey: ["hr", "me", "contribution-enrolment"],
+    queryFn: getMyContributions,
+    enabled,
   });
 }
 

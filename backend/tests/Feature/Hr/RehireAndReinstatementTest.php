@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeLoan;
+use App\Modules\Hr\Models\EmploymentHistory;
 use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
@@ -66,6 +67,18 @@ class RehireAndReinstatementTest extends HrTestCase
     private function service(): EmployeeService
     {
         return app(EmployeeService::class);
+    }
+
+    /** The open role every employee created through the service starts with. */
+    private function openRole(string $title = 'Staff', string $start = '2020-01-01'): EmploymentHistory
+    {
+        return EmploymentHistory::create([
+            'employee_id' => $this->employee->id,
+            'title' => $title,
+            'start_date' => $start,
+            'end_date' => null,
+            'status' => 'current',
+        ]);
     }
 
     private function separate(string $lastDay = '2026-06-30', string $type = 'voluntary'): Employee
@@ -361,6 +374,163 @@ class RehireAndReinstatementTest extends HrTestCase
             ->getJson('/api/v1/hr/employees')
             ->assertOk()
             ->assertJsonCount(0, 'data');
+    }
+
+    // --- the employment-history timeline --------------------------------------------------------
+
+    /**
+     * Only a job-title change used to move this timeline, so the one transition that ends every
+     * employment was the one it did not record: the record read "Left on 30 June" in the header and
+     * "Present · current" in the role below it, at the same time.
+     */
+    public function test_separating_closes_the_open_role_on_the_last_working_day(): void
+    {
+        $role = $this->openRole();
+
+        $this->service()->separate($this->employee, [
+            'separation_type' => 'voluntary',
+            'separation_date' => '2026-06-30',
+            'reason' => 'Resigned',
+        ]);
+
+        $role->refresh();
+        $this->assertSame('2026-06-30', $role->end_date->toDateString(), 'not the date HR filled it in');
+        $this->assertSame('separated', $role->status);
+        $this->assertSame('Resigned', $role->reason);
+    }
+
+    /** A role that ends before it begins is worse than an imprecise one. */
+    public function test_a_backdated_last_day_never_inverts_the_role_it_closes(): void
+    {
+        $role = $this->openRole('Senior Staff', '2026-05-01');
+
+        $this->service()->separate($this->employee, [
+            'separation_type' => 'voluntary',
+            'separation_date' => '2026-03-31',
+        ]);
+
+        $this->assertSame('2026-05-01', $role->refresh()->end_date->toDateString());
+    }
+
+    /** Reinstatement's claim is that the ending never happened, so the phantom exit goes too. */
+    public function test_reinstating_reopens_the_role_the_separation_closed(): void
+    {
+        $role = $this->openRole();
+        $this->separate('2026-06-30');
+
+        $this->service()->reinstate(Employee::withTrashed()->find($this->employee->id));
+
+        $role->refresh();
+        $this->assertNull($role->end_date);
+        $this->assertSame('current', $role->status);
+        $this->assertSame(1, EmploymentHistory::count(), 'reinstatement adds no new stint');
+    }
+
+    /** A role closed by a promotion is a real ending — reinstating must not resurrect that job. */
+    public function test_reinstating_leaves_a_role_closed_by_a_promotion_alone(): void
+    {
+        $old = $this->openRole('Junior Staff', '2020-01-01');
+        $old->update(['end_date' => '2024-01-01', 'status' => 'promoted']);
+        $current = $this->openRole('Staff', '2024-01-02');
+        $this->separate('2026-06-30');
+
+        $this->service()->reinstate(Employee::withTrashed()->find($this->employee->id));
+
+        $this->assertSame('promoted', $old->refresh()->status);
+        $this->assertSame('2024-01-01', $old->end_date->toDateString());
+        $this->assertSame('current', $current->refresh()->status, 'only the separated one reopens');
+    }
+
+    /** A rehire is a new relationship, so it is a new entry — the break stays visible. */
+    public function test_rehiring_opens_a_new_role_and_leaves_the_old_one_closed(): void
+    {
+        $old = $this->openRole();
+        $this->separate('2026-06-30');
+
+        $this->service()->rehire(Employee::withTrashed()->find($this->employee->id), '2026-09-01');
+
+        $this->assertSame('2026-06-30', $old->refresh()->end_date->toDateString());
+        $this->assertSame(2, EmploymentHistory::where('employee_id', $this->employee->id)->count());
+
+        $new = EmploymentHistory::where('employee_id', $this->employee->id)
+            ->whereNull('end_date')->firstOrFail();
+        $this->assertSame('2026-09-01', $new->start_date->toDateString());
+        $this->assertSame('current', $new->status);
+        $this->assertSame('Staff', $new->title, 'the role they come back into');
+    }
+
+    /**
+     * Anyone separated before separations closed the timeline still has an open role. Rehiring them
+     * must not leave two stints both claiming to be current.
+     */
+    public function test_rehiring_a_record_whose_timeline_was_left_open_closes_it_first(): void
+    {
+        $stale = $this->openRole();
+        $this->separate('2026-06-30');
+        $stale->update(['end_date' => null, 'status' => 'current']); // as the old code left it
+
+        $this->service()->rehire(Employee::withTrashed()->find($this->employee->id), '2026-09-01');
+
+        $this->assertSame('2026-06-30', $stale->refresh()->end_date->toDateString());
+        $this->assertSame(
+            1,
+            EmploymentHistory::where('employee_id', $this->employee->id)->whereNull('end_date')->count(),
+            'exactly one current role',
+        );
+    }
+
+    /** A record with no timeline at all (predates the feature) must not blow up on the way out. */
+    public function test_separating_a_record_with_no_timeline_is_a_no_op(): void
+    {
+        $this->separate('2026-06-30');
+
+        $this->assertSame(0, EmploymentHistory::count());
+    }
+
+    /**
+     * The directory's "Former staff" roster links every card at this route, and Reinstate/Rehire are
+     * only reachable from the record it opens — so without `withTrashed()` on the read, every one of
+     * those cards was a dead link and the way back existed on the API alone.
+     */
+    public function test_a_former_employees_record_can_still_be_opened(): void
+    {
+        $this->openRole();
+        $this->separate('2026-06-30');
+
+        $this->actingAs($this->hrUser())
+            ->getJson("/api/v1/hr/employees/{$this->employee->id}")
+            ->assertOk()
+            ->assertJsonPath('data.is_separated', true)
+            ->assertJsonPath('data.separation_date', '2026-06-30')
+            ->assertJsonPath('data.employment_history.0.end_date', '2026-06-30')
+            ->assertJsonPath('data.employment_history.0.status', 'separated');
+    }
+
+    /** The read is widened, the write is not — an archived record is read-only. */
+    public function test_a_former_employees_record_still_cannot_be_edited(): void
+    {
+        $this->separate('2026-06-30');
+
+        $this->actingAs($this->hrUser())
+            ->patchJson("/api/v1/hr/employees/{$this->employee->id}", ['job_title' => 'Ghost'])
+            ->assertNotFound();
+    }
+
+    /** End to end, through the resource the Job tab reads. */
+    public function test_the_timeline_the_job_tab_reads_shows_both_stints_after_a_rehire(): void
+    {
+        $this->openRole();
+        $this->separate('2026-06-30');
+
+        $this->actingAs($this->hrUser())
+            ->postJson("/api/v1/hr/employees/{$this->employee->id}/rehire", ['hire_date' => '2026-09-01'])
+            ->assertOk()
+            // The relation orders the open role first, which is the order the tab renders.
+            ->assertJsonCount(2, 'data.employment_history')
+            ->assertJsonPath('data.employment_history.0.start_date', '2026-09-01')
+            ->assertJsonPath('data.employment_history.0.end_date', null)
+            ->assertJsonPath('data.employment_history.1.end_date', '2026-06-30')
+            ->assertJsonPath('data.employment_history.1.status', 'separated');
     }
 
     /** Final pay becomes reachable once a separation exists — the point of the whole item. */

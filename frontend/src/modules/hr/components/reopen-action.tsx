@@ -73,6 +73,7 @@ export function ReopenAction<T>({
   return (
     <>
       <Button
+        type="button"
         size={size}
         variant="outline"
         className={cn("text-muted-foreground", className)}

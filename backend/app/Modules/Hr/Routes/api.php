@@ -21,6 +21,8 @@ use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
 use App\Modules\Hr\Http\Controllers\EmployeeSensitiveController;
+use App\Modules\Hr\Http\Controllers\EmploymentHistoryController;
+use App\Modules\Hr\Http\Controllers\SalaryHistoryController;
 use App\Modules\Hr\Http\Controllers\LeaveConfigController;
 use App\Modules\Hr\Http\Controllers\HalfDayRequestController;
 use App\Modules\Hr\Http\Controllers\EarlyOutRequestController;
@@ -150,6 +152,18 @@ Route::middleware('auth:sanctum')->group(function () {
       the dated version history.
     */
     Route::get('contribution-settings', [BenefitController::class, 'settingsIndex']);
+
+    // Which contributions the caller pays into, READ-ONLY (identity from token). The hr_officer
+    // reader for the same data stays where it is: an employee may see what is deducted from them —
+    // every payslip itemises it — but deciding it is HR's. Without this the Compensation tab
+    // rendered the enrolment block against a 403, which drew three ticked, clickable checkboxes
+    // for a change the server was always going to refuse.
+    //
+    // No matching `me/allowances`: `me/benefit-programs` already serves the caller their own
+    // allowance amounts, in a shape that deliberately omits the programme's standard figure and
+    // who set an exception (MyBenefitResource) — a self-service page must not tell someone they
+    // are paid above or below their colleagues.
+    Route::get('me/benefits', [BenefitController::class, 'myBenefits']);
 
     // Payslips — the caller's own (identity from token).
     Route::get('me/next-payday', [PayrollController::class, 'myNextPayday']);
@@ -288,9 +302,30 @@ Route::middleware('auth:sanctum')->group(function () {
         // Employee directory + records (HR only).
         Route::get('employees', [EmployeeController::class, 'index']);
         Route::post('employees', [EmployeeController::class, 'store']);
-        Route::get('employees/{employee}', [EmployeeController::class, 'show']);
+        // `withTrashed()` on the READ only. The directory's "Former staff" roster links every card
+        // here, and a separated employee is soft-deleted, so without it those cards were dead links —
+        // and with them the only route to Reinstate/Rehire, which live on the record's Job tab.
+        // Deliberately not on the update below: an archived record is read-only (the record page
+        // drops its edit affordances for a leaver), so a Save that resolved would be a Save the rest
+        // of the record's endpoints could not honour anyway.
+        Route::get('employees/{employee}', [EmployeeController::class, 'show'])->withTrashed();
         Route::match(['put', 'patch'], 'employees/{employee}', [EmployeeController::class, 'update']);
         Route::get('employees/{employee}/salary-history', [EmployeeController::class, 'salaryHistory']);
+
+        // Hand-corrections to the two timelines on the record. Both are also written automatically —
+        // the employment one by a job-title change, the compensation one by a salary change — and
+        // that stays as it is; these exist for the mistakes automation cannot fix.
+        //
+        // The compensation writes are NOT the same risk as the employment ones: every salary row
+        // prices a payroll run, so SalaryHistoryService refuses a delete that a completed run
+        // depends on and demands an acknowledgement before correcting one. See its docblock.
+        Route::get('employees/{employee}/employment-histories', [EmploymentHistoryController::class, 'index']);
+        Route::post('employees/{employee}/employment-histories', [EmploymentHistoryController::class, 'store']);
+        Route::match(['put', 'patch'], 'employment-histories/{employmentHistory}', [EmploymentHistoryController::class, 'update']);
+        Route::delete('employment-histories/{employmentHistory}', [EmploymentHistoryController::class, 'destroy']);
+        Route::post('employees/{employee}/salary-histories', [SalaryHistoryController::class, 'store']);
+        Route::match(['put', 'patch'], 'salary-histories/{salaryHistory}', [SalaryHistoryController::class, 'update']);
+        Route::delete('salary-histories/{salaryHistory}', [SalaryHistoryController::class, 'destroy']);
         // Profile picture: set/replace or clear (falls back to initials).
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'updatePhoto'])->middleware('throttle:20,1,hr-upload:');
         Route::delete('employees/{employee}/photo', [EmployeeController::class, 'destroyPhoto']);
@@ -388,7 +423,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('employees/{employee}/benefits', [BenefitController::class, 'employeeBenefitsIndex']);
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);
         // Slice B7 — what the rates would charge, beside any per-employee override.
-        Route::get('employees/{employee}/statutory-preview', [BenefitController::class, 'statutoryPreview']);
 
         // Company → Rules: work schedules + per-employee assignment + attendance policy.
         Route::get('work-schedules', [WorkScheduleController::class, 'index']);

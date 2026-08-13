@@ -50,10 +50,8 @@ class Employee extends Model
         'currency',
         'bank_account_type',
         'bank_account_name',
-        'sss_contribution',
-        'pagibig_contribution',
-        'philhealth_contribution',
-        // Membership NUMBERS for the payslip header — not the peso overrides above.
+        // Membership NUMBERS for the payslip header. The peso *_contribution overrides that
+        // used to sit here are gone — contributions follow the company rates for everyone.
         'tin',
         'sss_number',
         'philhealth_number',

@@ -531,14 +531,6 @@ class PayrollService
         // period (Slice B3a) — not whatever they are today.
         $contribConfig = $this->contributions->effectiveFor($employee, $dist['cycle_end'] ?? null);
 
-        // Per-employee statutory OVERRIDES: an amount set on the profile wins over the
-        // company-config computation (for contributions the employee is enrolled in).
-        $overrides = [
-            'sss' => $employee->sss_contribution !== null ? (float) $employee->sss_contribution : null,
-            'philhealth' => $employee->philhealth_contribution !== null ? (float) $employee->philhealth_contribution : null,
-            'pagibig' => $employee->pagibig_contribution !== null ? (float) $employee->pagibig_contribution : null,
-        ];
-
         // Withholding tracks compensation ACTUALLY earned: the monthly-equivalent of the
         // (absence-prorated) base pay. Equals the full monthly salary when there are no
         // unpaid days, so a normal period is unchanged; it scales down only when pay is
@@ -698,7 +690,7 @@ class PayrollService
             $dist['cycle_end'] ?? null,
         );
 
-        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $contributionBases, $taxableMonthly, $contribConfig, $overrides, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium, $otherDeductions);
+        $slip = $this->computePayslip($basePay, $reimb, $perPeriodAllowance, $contributionBases, $taxableMonthly, $contribConfig, $dist, $holidayPremium, $overtimePay, $nightDiffPay, $restDayPremium, $otherDeductions);
 
         // The payslip shows the FULL period basic with the absence charged as its own deduction
         // line, rather than a basic figure quietly net of it. `absence_deduction` is the charge
@@ -1273,11 +1265,10 @@ class PayrollService
      *
      * @param  array{basic: float, earnings: float}  $contribBases
      * @param  array<string, array<string, mixed>>  $contribConfig
-     * @param  array{sss:?float, philhealth:?float, pagibig:?float}  $overrides
      * @param  array{index:int, count:int, deduction_timing:string, tax_timing:string}  $dist
      * @return array<string, mixed>
      */
-    public function computePayslip(float $basePay, float $reimb, float $allowances, array $contribBases, float $taxableMonthly, array $contribConfig, array $overrides, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0, array $otherDeductions = ['total' => 0.0, 'lines' => []]): array
+    public function computePayslip(float $basePay, float $reimb, float $allowances, array $contribBases, float $taxableMonthly, array $contribConfig, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0, array $otherDeductions = ['total' => 0.0, 'lines' => []]): array
     {
         // Slice B19 — each contribution is charged on the figure ITS OWN version asks for, which
         // is why this is resolved per type rather than once. PhilHealth stays on basic salary by
@@ -1288,9 +1279,9 @@ class PayrollService
 
         // SSS/PhilHealth/Pag-IBIG are MONTHLY amounts (on a monthly base); the
         // timing setting decides which cutoff(s) in the month they land on.
-        $sssM = $this->monthlyContribution('sss', $contribConfig, $overrides, $sssBase);
-        $phM = $this->monthlyContribution('philhealth', $contribConfig, $overrides, $phBase);
-        $pgM = $this->monthlyContribution('pagibig', $contribConfig, $overrides, $pgBase);
+        $sssM = $this->monthlyContribution('sss', $contribConfig, $sssBase);
+        $phM = $this->monthlyContribution('philhealth', $contribConfig, $phBase);
+        $pgM = $this->monthlyContribution('pagibig', $contribConfig, $pgBase);
 
         $cf = $this->timingFactor($dist['deduction_timing'] ?? 'every', $dist['index'] ?? 0, $dist['count'] ?? 1);
         $sss = $this->contributionForPeriod('sss', $sssM, $cf, $dist);
@@ -1462,16 +1453,12 @@ class PayrollService
             'employer_sss' => $erSss,
             'employer_philhealth' => $erPh,
             'employer_pagibig' => $erPg,
-            // Slice B7 — which of the three came from a per-employee amount on the profile rather
-            // than the government rates. An override replaces the EMPLOYEE side only, so the pair
-            // above and below can belong to different salary brackets; without this the payslip
-            // and the remittance file present that mismatch as if it were a proper contribution.
-            // Recorded only for types the employee is enrolled in — an override on something they
-            // are not enrolled in deducts nothing and is not in force.
-            'contribution_overrides' => array_values(array_filter(
-                ['sss', 'philhealth', 'pagibig'],
-                fn ($t) => isset($contribConfig[$t]) && ($overrides[$t] ?? null) !== null,
-            )) ?: null,
+            // Slice B7 recorded which of the three came from a per-employee amount rather than the
+            // government rates. Per-employee amounts are gone — every contribution now follows the
+            // company rates for everyone — so a new payslip has nothing to declare here. The column
+            // and its readers stay: payslips issued while the override existed must keep saying so,
+            // or the remittance mismatch they carry becomes invisible after the fact.
+            'contribution_overrides' => null,
             // Slice B19 — what each contribution was actually charged on, snapshot because it can
             // no longer be re-derived: the earnings basis depends on this period's attendance and
             // premium lines, and on a per-allowance `contributable` flag HR can change afterwards.
@@ -1661,21 +1648,21 @@ class PayrollService
     }
 
     /**
-     * The monthly amount for one statutory contribution: 0 if the employee isn't
-     * enrolled, else the per-employee override if set, else the config computation.
+     * The monthly amount for one statutory contribution: 0 if the employee isn't enrolled, else
+     * the company-config computation.
+     *
+     * There is no per-employee escape hatch any more. A profile amount used to win over the rates
+     * here, and it replaced the EMPLOYEE side only — the employer half kept following the brackets,
+     * so one payslip could carry a pair that exists on no SSS table and a remittance built from it
+     * could not be filed. Un-enrolling (ContributionEnrolment) is the honest way to say someone
+     * does not pay a contribution; a different amount for the same bracket was never one.
      *
      * @param  array<string, array<string, mixed>>  $config
-     * @param  array{sss:?float, philhealth:?float, pagibig:?float}  $overrides
      */
-    private function monthlyContribution(string $type, array $config, array $overrides, float $base): float
+    private function monthlyContribution(string $type, array $config, float $base): float
     {
         if (! isset($config[$type])) {
-            return 0.0; // not enrolled → no deduction, override irrelevant
-        }
-
-        $override = $overrides[$type] ?? null;
-        if ($override !== null) {
-            return round(max(0, $override), 2);
+            return 0.0; // not enrolled → no deduction
         }
 
         return $this->contribution($config[$type], $base);

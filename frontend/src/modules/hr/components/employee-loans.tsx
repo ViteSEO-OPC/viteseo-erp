@@ -135,7 +135,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
             </>
           )}
         </p>
-        <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>
+        <Button type="button" size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>
           <Plus />
           Record a loan
         </Button>
@@ -259,6 +259,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
 
           <div className="sm:col-span-5">
             <Button
+              type="button"
               size="sm"
               disabled={createMut.isPending || !form.principal || !form.per_period_amount}
               onClick={submit}
@@ -342,6 +343,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                     {l.status === "requested" && (
                       <span className="inline-flex gap-1">
                         <Button
+                          type="button"
                           size="xs"
                           disabled={decideMut.isPending}
                           onClick={async () => {
@@ -356,6 +358,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                           Approve
                         </Button>
                         <Button
+                          type="button"
                           size="xs"
                           variant="outline"
                           disabled={decideMut.isPending}
@@ -380,7 +383,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                       </span>
                     )}
                     {l.status === "active" && (
-                      <Button size="xs" variant="ghost" onClick={() => setCancelling(l)}>
+                      <Button type="button" size="xs" variant="ghost" onClick={() => setCancelling(l)}>
                         <Ban className="size-3.5" />
                         <span className="sr-only">Cancel loan</span>
                       </Button>

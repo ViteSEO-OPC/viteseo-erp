@@ -101,9 +101,6 @@ const schema = z
       .string()
       .trim()
       .refine((v) => v === "" || /^[A-Za-z]{3}$/.test(v), "Use a 3-letter code, e.g. PHP"),
-    sss_contribution: optionalMoney("SSS"),
-    pagibig_contribution: optionalMoney("Pag-IBIG"),
-    philhealth_contribution: optionalMoney("PhilHealth"),
     tin: optionalText(32),
     sss_number: optionalText(32),
     philhealth_number: optionalText(32),
@@ -139,8 +136,7 @@ const EMPTY: FormValues = {
   hire_date: "", base_salary: "", is_management: false, bank_name: "",
   bank_account: "", height: "", weight: "", health_condition: "",
   pay_frequency: "semi_monthly", currency: "PHP", bank_account_type: "",
-  bank_account_name: "", sss_contribution: "", pagibig_contribution: "",
-  philhealth_contribution: "",
+  bank_account_name: "",
   tin: "", sss_number: "", philhealth_number: "", pagibig_number: "",
 };
 
@@ -217,9 +213,6 @@ export function EmployeeFormDialog({
       currency: s(v.currency)?.toUpperCase(),
       bank_account_type: s(v.bank_account_type),
       bank_account_name: s(v.bank_account_name),
-      sss_contribution: s(v.sss_contribution),
-      pagibig_contribution: s(v.pagibig_contribution),
-      philhealth_contribution: s(v.philhealth_contribution),
       tin: s(v.tin),
       sss_number: s(v.sss_number),
       philhealth_number: s(v.philhealth_number),
@@ -538,15 +531,10 @@ export function EmployeeFormDialog({
               <Field label="Bank account name" error={errors.bank_account_name?.message}>
                 <Input placeholder="Juan Dela Cruz" {...register("bank_account_name")} />
               </Field>
-              <Field label="SSS (₱ / mo)" error={errors.sss_contribution?.message}>
-                <Input type="number" min="0" step="0.01" {...register("sss_contribution")} />
-              </Field>
-              <Field label="Pag-IBIG (₱ / mo)" error={errors.pagibig_contribution?.message}>
-                <Input type="number" min="0" step="0.01" {...register("pagibig_contribution")} />
-              </Field>
-              <Field label="PhilHealth (₱ / mo)" error={errors.philhealth_contribution?.message}>
-                <Input type="number" min="0" step="0.01" {...register("philhealth_contribution")} />
-              </Field>
+              {/* No per-employee SSS / Pag-IBIG / PhilHealth amounts. They replaced the
+                  EMPLOYEE side of the deduction while the employer side kept following the
+                  brackets, so one payslip could carry a pair on no government table. Everyone
+                  is charged the company rates; un-enrolling is how someone stops paying one. */}
               {/* Slice B9 — no allowance boxes here. Allowances are programmes in
                   Company → Benefits: the catalogue grows and shrinks, so three fixed fields
                   could never describe it, and payroll stopped reading these columns in B1. */}

@@ -407,64 +407,6 @@ class ContributionService
     }
 
     /**
-     * What the government rates WOULD charge this employee, next to the per-employee override that
-     * is suppressing it (Slice B7).
-     *
-     * WHY THIS EXISTS. Ten profiles carry a peso amount typed into `sss_contribution` and friends.
-     * That amount replaces the EMPLOYEE side of the deduction and nothing else — the employer side
-     * still follows the rates — so the two halves of one payslip can belong to different salary
-     * brackets, and a remittance built from them cannot be filed. Nothing on the employee form said
-     * so: they read as three ordinary peso boxes next to the bank details. This is what the form
-     * shows beside each one.
-     *
-     * The arithmetic is `ContributionCalculator`, i.e. the same code payroll runs — a second
-     * implementation of "what SSS costs" would drift, which is the failure this whole audit is about.
-     *
-     * @return array<int, array<string, mixed>>
-     */
-    public function overridePreviewFor(Employee $employee, ?string $asOf = null): array
-    {
-        $config = $this->effectiveFor($employee, $asOf);
-        $base = (float) $employee->base_salary;
-
-        $overrides = [
-            'sss' => $employee->sss_contribution,
-            'philhealth' => $employee->philhealth_contribution,
-            'pagibig' => $employee->pagibig_contribution,
-        ];
-
-        $rows = [];
-
-        foreach ($overrides as $type => $override) {
-            $enrolled = isset($config[$type]);
-            $rows[] = [
-                'type' => $type,
-                // Not enrolled ⇒ nothing is deducted at all, and an override on it is inert. Saying
-                // so is the difference between "this is suppressed" and "this does nothing".
-                'enrolled' => $enrolled,
-                'override' => $override !== null ? round((float) $override, 2) : null,
-                'calculated_employee' => $enrolled ? ContributionCalculator::employee($config[$type], $base) : 0.0,
-                // Shown because it does NOT move with the override — the mismatch is the point.
-                'calculated_employer' => $enrolled ? ContributionCalculator::employer($config[$type], $base) : 0.0,
-                'basis' => $enrolled ? ($config[$type]['basis'] ?? 'percentage') : null,
-                // Slice B19 — WHAT THE FIGURE ABOVE ASSUMES, and it has to be said out loud.
-                //
-                // This preview has only one salary to work with: the profile's `base_salary`. For
-                // a contribution on the `basic` basis that IS the base payroll uses, so the number
-                // is exact. For one on `earnings` it is a perfect month — no absences, no lates,
-                // no overtime, no premium and every contributable allowance included — which the
-                // employee's actual payslip will rarely match. Returning the same shape for both
-                // and letting the form present them identically is how a preview becomes a figure
-                // people quote back at you.
-                'salary_basis' => $enrolled ? ($config[$type]['salary_basis'] ?? 'basic') : null,
-                'is_estimate' => $enrolled && ($config[$type]['salary_basis'] ?? 'basic') === 'earnings',
-            ];
-        }
-
-        return $rows;
-    }
-
-    /**
      * The version of each contribution in force on a date: the latest row whose `effective_from`
      * is on or before it. One query, memoized per date for the run.
      *

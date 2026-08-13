@@ -22,17 +22,13 @@ import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
 import { EmployeePersonalSection } from "@/modules/hr/components/employee-personal-section";
 import { EmployeeJobSection } from "@/modules/hr/components/employee-job-section";
 import { EmploymentLifecycleSection } from "@/modules/hr/components/employment-lifecycle-section";
+import { EmploymentHistorySection } from "@/modules/hr/components/employment-history-section";
+import { CompensationHistorySection } from "@/modules/hr/components/compensation-history-section";
 import { EmployeeCompensationSection } from "@/modules/hr/components/employee-compensation-section";
 import { Button } from "@/components/ui/button";
-import { formatPeso, formatDate } from "@/core/lib/format";
+import { formatDate } from "@/core/lib/format";
+import { type Employee, type MyDocument } from "@/modules/hr/types/employee";
 import {
-  salaryChangeLabel,
-  type Employee,
-  type EmploymentHistoryEntry,
-  type MyDocument,
-} from "@/modules/hr/types/employee";
-import {
-  useSalaryHistory,
   useActivateEmployee,
   useReopenOnboarding,
   useSetHrRole,
@@ -77,19 +73,40 @@ export function EmployeeRecord({
   const [tab, setTab] = useState<TabKey>("personal");
   const visibleTabs = TABS;
 
+  /**
+   * MF-18 — ending someone's employment ARCHIVES the record, and an archived record is read-only.
+   *
+   * HR can still open it (that is how a leaver is reinstated or rehired at all), but every editing
+   * affordance goes: the employee is soft-deleted, and only the record's own GET resolves a trashed
+   * one, so a Save would 404 against endpoints that cannot see them. Blocks that fetch their own
+   * data — schedule, leave credits, salary history, loans, documents — are hidden for the same
+   * reason rather than left to render an error each.
+   *
+   * The single exception is the lifecycle section, which stays on `isHr`: it is the way back.
+   */
+  const archived = employee.is_separated;
+  const canEdit = isHr && !archived;
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
       {/* Left: identity + tab rail */}
       <div className="rounded-card border border-border bg-card p-6">
         <div className="flex flex-col items-center text-center">
-          <ProfilePhoto employee={employee} canEdit={isHr} />
+          <ProfilePhoto employee={employee} canEdit={canEdit} />
           <p className="mt-3 text-h3 font-bold text-foreground">{employee.name}</p>
           <p className="text-caption text-muted-foreground">
             {employee.job_title}
             {employee.department ? ` · ${employee.department.name}` : ""}
           </p>
           <div className="mt-2">
-            {employee.onboarding_status === "pending" ? (
+            {archived ? (
+              // Never "Active" for someone who has left — the same grey `archived` key the
+              // directory card uses, so the two surfaces agree.
+              <StatusBadge
+                status="archived"
+                label={employee.separation_date ? `Left ${employee.separation_date}` : "Former"}
+              />
+            ) : employee.onboarding_status === "pending" ? (
               <StatusBadge status="pending" label="Onboarding" />
             ) : (
               <StatusBadge status="active" label="Active" />
@@ -119,13 +136,27 @@ export function EmployeeRecord({
 
       {/* Right: tab content. Each editable tab owns its own form + Save/Cancel. */}
       <div className="rounded-card border border-border bg-card p-6">
+        {/* Says why the Edit links are missing, before HR goes looking for them. */}
+        {archived && (
+          <div className="mb-6 rounded-card border border-border bg-muted/40 p-4">
+            <p className="text-sm font-semibold text-foreground">
+              This record is archived
+              {employee.separation_date ? ` — they left on ${employee.separation_date}` : ""}.
+            </p>
+            <p className="mt-1 text-caption text-muted-foreground">
+              It is read-only while they are a former employee. Reinstate or rehire them from the
+              Job tab to edit it again.
+            </p>
+          </div>
+        )}
+
         {tab === "personal" && (
           <EmployeePersonalSection
             employee={employee}
-            canEdit={isHr}
+            canEdit={canEdit}
             headerExtra={
               onRequestChange && (
-                <Button size="sm" variant="outline" onClick={onRequestChange}>
+                <Button type="button" size="sm" variant="outline" onClick={onRequestChange}>
                   <Pencil />
                   Request Change
                 </Button>
@@ -135,9 +166,9 @@ export function EmployeeRecord({
         )}
 
         {tab === "job" && (
-          <EmployeeJobSection employee={employee} canEdit={isHr}>
+          <EmployeeJobSection employee={employee} canEdit={canEdit}>
             {/* Work schedule: HR assigns/overrides here (moved off the Rules page). */}
-            {isHr && (
+            {canEdit && (
               <div className="border-t border-border pt-6">
                 <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
                   Work Schedule
@@ -150,12 +181,18 @@ export function EmployeeRecord({
               <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
                 Employment History
               </p>
-              <EmploymentHistoryList entries={employee.employment_history} />
+              {/* Still written automatically by a job-title change; `canEdit` only adds the
+                  hand-correction controls on top of that. */}
+              <EmploymentHistorySection
+                employeeId={employee.id}
+                entries={employee.employment_history}
+                canEdit={canEdit}
+              />
             </div>
 
-            {isHr && <OnboardingPanel employee={employee} />}
+            {canEdit && <OnboardingPanel employee={employee} />}
 
-            {isHr && <HrAccessSection employee={employee} />}
+            {canEdit && <HrAccessSection employee={employee} />}
 
             {/* MF-18 — separate / reinstate / rehire. On the Job tab because tenure and the last
                 working day are job facts, and next to Employment History for the same reason. */}
@@ -168,31 +205,36 @@ export function EmployeeRecord({
         )}
 
         {tab === "compensation" && (
-          <EmployeeCompensationSection employee={employee} canEdit={isHr}>
-            <div className="border-t border-border pt-6">
-              <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
-                Leave Credits
-              </p>
-              {/* HR edits this person's credits (source of truth, moved off the
-                  Leave Type page); an employee sees their own read-only via "me". */}
-              {isHr ? (
-                <EmployeeLeaveCreditsEditor employeeId={employee.id} />
-              ) : (
-                <MyLeaveCredits />
-              )}
-            </div>
+          <EmployeeCompensationSection employee={employee} canEdit={canEdit} isHr={isHr}>
+            {/* Each of the three blocks below fetches against an employee-scoped route that does not
+                resolve a soft-deleted employee, so for an archived record they are hidden rather
+                than left to render three separate load errors. */}
+            {!archived && (
+              <div className="border-t border-border pt-6">
+                <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
+                  Leave Credits
+                </p>
+                {/* HR edits this person's credits (source of truth, moved off the
+                    Leave Type page); an employee sees their own read-only via "me". */}
+                {isHr ? (
+                  <EmployeeLeaveCreditsEditor employeeId={employee.id} />
+                ) : (
+                  <MyLeaveCredits />
+                )}
+              </div>
+            )}
 
-            {isHr && (
+            {canEdit && (
               <div className="border-t border-border pt-6">
                 <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
                   Compensation History
                 </p>
-                <CompensationHistory employeeId={employee.id} />
+                <CompensationHistorySection employeeId={employee.id} canEdit={canEdit} />
               </div>
             )}
 
             {/* Slice 11b — loans & cash advances repaid through payroll. */}
-            {isHr && (
+            {canEdit && (
               <div className="border-t border-border pt-6">
                 <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
                   Loans &amp; Cash Advances
@@ -204,7 +246,12 @@ export function EmployeeRecord({
         )}
 
         {tab === "documents" &&
-          (isHr ? (
+          (archived ? (
+            // Same reason as the compensation blocks: the documents route cannot see a leaver.
+            <p className="text-sm text-muted-foreground">
+              Documents are not available while the record is archived.
+            </p>
+          ) : isHr ? (
             <DocumentsTab employeeId={employee.id} />
           ) : (
             <MyDocuments onRequestDocument={onRequestDocument} />
@@ -517,6 +564,7 @@ function OnboardingPanel({ employee }: { employee: Employee }) {
         <p className="text-xs text-muted-foreground">Mark complete once this hire is fully onboarded.</p>
       </div>
       <Button
+        type="button"
         size="sm"
         disabled={activate.isPending}
         onClick={async () => {
@@ -572,6 +620,7 @@ function HrAccessSection({ employee }: { employee: Employee }) {
           </p>
         </div>
         <Button
+          type="button"
           variant={isOn ? "outline" : "default"}
           size="sm"
           disabled={setHrRole.isPending}
@@ -658,86 +707,6 @@ function LeaveCreditsGrid({
             </span>
           </p>
           <p className="text-caption text-muted-foreground">{b.used_days} used this year</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Compensation history timeline — base salary shown annualised, with a typed badge
-// (Promotion/Merit/Hire) and the % change vs the previous (older) entry.
-function CompensationHistory({ employeeId }: { employeeId: number }) {
-  const { data: history, isLoading } = useSalaryHistory(employeeId);
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>;
-  const rows = history ?? [];
-  if (rows.length === 0) {
-    return <p className="text-sm text-muted-foreground">No compensation history yet.</p>;
-  }
-
-  return (
-    <div className="divide-y divide-border">
-      {rows.map((h, i) => {
-        const prev = rows[i + 1]; // rows are newest-first; the next one is older
-        const pct =
-          prev && prev.base_salary
-            ? Math.round(((h.base_salary - prev.base_salary) / prev.base_salary) * 100)
-            : null;
-        const isHire = h.change_type === "hire";
-        const badge = isHire
-          ? "Hire"
-          : `${salaryChangeLabel(h.change_type)}${pct != null ? ` ${pct >= 0 ? "+" : ""}${pct}%` : ""}`;
-        return (
-          <div key={h.id} className="flex items-center justify-between gap-3 py-3">
-            <div>
-              <p className="text-sm font-semibold text-foreground">{formatPeso(h.base_salary * 12)}</p>
-              <p className="text-caption text-muted-foreground">
-                Eff. {HISTORY_MONTH(h.effective_date)}
-              </p>
-            </div>
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold uppercase",
-                h.change_type === "promotion"
-                  ? "bg-success-subtle text-success"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              {badge}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-const HISTORY_MONTH = (iso: string) =>
-  new Date(iso).toLocaleDateString("en-PH", { month: "short", year: "numeric" });
-
-function EmploymentHistoryList({ entries }: { entries: EmploymentHistoryEntry[] }) {
-  if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground">No employment history yet.</p>;
-  }
-  return (
-    <div className="divide-y divide-border">
-      {entries.map((h) => (
-        <div key={h.id} className="flex items-center justify-between gap-3 py-3">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground">{h.title}</p>
-            <p className="text-caption text-muted-foreground">
-              {HISTORY_MONTH(h.start_date)} – {h.end_date ? HISTORY_MONTH(h.end_date) : "Present"}
-            </p>
-          </div>
-          <span
-            className={cn(
-              "shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold uppercase",
-              h.status === "current"
-                ? "bg-success-subtle text-success"
-                : "bg-muted text-muted-foreground",
-            )}
-          >
-            {h.status}
-          </span>
         </div>
       ))}
     </div>
