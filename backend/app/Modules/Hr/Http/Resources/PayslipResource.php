@@ -27,14 +27,14 @@ class PayslipResource extends JsonResource
             // can pay out on the 15th.
             'issued_at' => $this->payrollRun?->run_at?->toIso8601String(),
             'employee' => [
-                'id' => $this->employee->id,
-                'name' => $this->employee->user?->name,
+                'id' => $this->employee?->id,
+                'name' => $this->employee?->user?->name,
                 // Identity block. A payslip has to be usable as evidence of employment and
                 // income, which means it carries who you are and your government numbers.
-                'employee_no' => $this->employee->employee_no,
-                'job_title' => $this->employee->job_title,
-                'department' => $this->employee->department?->name,
-                'address' => $this->employee->address,
+                'employee_no' => $this->employee?->employee_no,
+                'job_title' => $this->employee?->job_title,
+                'department' => $this->employee?->department?->name,
+                'address' => $this->employee?->address,
                 // FIN-022 — FULL for the employee reading their OWN payslip, masked for anyone
                 // else. A payslip has to be usable as evidence of employment and income, which
                 // means the person it belongs to must see their own government numbers on it.
@@ -476,13 +476,13 @@ class PayslipResource extends JsonResource
      */
     private function identityNumbers(Request $request): array
     {
-        $isOwner = $request->user()?->employee?->id === $this->employee->id;
+        $isOwner = $request->user()?->employee?->id === $this->employee?->id;
 
         $fields = ['tin', 'sss_number', 'philhealth_number', 'pagibig_number'];
         $out = [];
 
         foreach ($fields as $field) {
-            $value = $this->employee->{$field};
+            $value = $this->employee?->getAttribute($field);
             $out[$field] = $isOwner ? $value : Employee::maskSensitive($value);
         }
 

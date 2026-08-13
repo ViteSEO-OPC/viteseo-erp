@@ -19,8 +19,8 @@ class EmployeeLoanResource extends JsonResource
             // per-record list leaves it unloaded and the key resolves to null, so that payload
             // is byte-identical to before.
             'employee' => $this->whenLoaded('employee', fn () => [
-                'id' => $this->employee->id,
-                'name' => $this->employee->user?->name,
+                'id' => $this->employee?->id,
+                'name' => $this->employee?->user?->name,
             ]),
             'type' => $this->type,
             'reference' => $this->reference,

@@ -21,7 +21,7 @@ class ViolationResource extends JsonResource
             'resolved' => (bool) $this->resolved,
             'employee' => [
                 'id' => $this->employee_id,
-                'name' => $this->whenLoaded('employee', fn () => $this->employee->user?->name),
+                'name' => $this->whenLoaded('employee', fn () => $this->employee?->user?->name),
             ],
         ];
     }

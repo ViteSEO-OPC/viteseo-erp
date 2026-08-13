@@ -41,8 +41,8 @@ class PayrollInquiryResource extends JsonResource
             'payslip_cycle' => $this->payslipCycle(),
             'employee' => [
                 'id' => $this->employee_id,
-                'name' => $this->whenLoaded('employee', fn () => $this->employee->user?->name),
-                'photo_url' => $this->whenLoaded('employee', fn () => $this->employee->photo_url),
+                'name' => $this->whenLoaded('employee', fn () => $this->employee?->user?->name),
+                'photo_url' => $this->whenLoaded('employee', fn () => $this->employee?->photo_url),
             ],
             'created_at' => $this->created_at,
         ];

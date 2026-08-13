@@ -56,7 +56,7 @@ class ConcernResource extends JsonResource
             // Named concerns: always. Anonymous: HR only (must keep it private).
             'employee' => $revealIdentity ? [
                 'id' => $this->employee_id,
-                'name' => $this->whenLoaded('employee', fn () => $this->employee->user?->name),
+                'name' => $this->whenLoaded('employee', fn () => $this->employee?->user?->name),
             ] : null,
             'meetings' => MeetingResource::collection($this->whenLoaded('meetings')),
             'created_at' => $this->created_at,

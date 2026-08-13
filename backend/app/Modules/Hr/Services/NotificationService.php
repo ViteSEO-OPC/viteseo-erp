@@ -60,7 +60,7 @@ class NotificationService
             $items->push([
                 'id' => "leave-{$l->id}",
                 'title' => "Leave request · {$l->employee->user?->name}",
-                'subtitle' => "{$l->leaveType->name} · {$l->days} day(s)",
+                'subtitle' => ($l->leaveType?->name ?? 'Leave') . " · {$l->days} day(s)",
                 'href' => self::WORK_SCHEDULE_REQUESTS,
                 'at' => $l->created_at,
             ]);
@@ -246,7 +246,7 @@ class NotificationService
             ->each(fn ($l) => $items->push([
                 'id' => "leave-{$l->id}",
                 'title' => "Leave {$l->status}",
-                'subtitle' => "{$l->leaveType->name} · {$l->days} day(s)",
+                'subtitle' => ($l->leaveType?->name ?? 'Leave') . " · {$l->days} day(s)",
                 'href' => self::MY_TIME_LEAVE,
                 'at' => $l->reviewed_at,
             ]));
