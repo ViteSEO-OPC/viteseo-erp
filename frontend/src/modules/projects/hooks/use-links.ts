@@ -4,12 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addTaskLink, getTaskLinks } from "@/modules/projects/api/links";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 export function useTaskLinks(taskId: string) {
   return useQuery({
     queryKey: projectKeys.links(taskId),
     queryFn: () => getTaskLinks(taskId),
     enabled: !!taskId,
+    staleTime: STALE.standard,
   });
 }
 

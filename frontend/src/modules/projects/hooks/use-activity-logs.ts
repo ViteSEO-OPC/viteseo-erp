@@ -6,12 +6,16 @@ import {
   getActivityLogs,
 } from "@/modules/projects/api/activity-logs";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 export function useActivityLogs(taskId: string) {
   return useQuery({
     queryKey: projectKeys.activity(taskId),
     queryFn: () => getActivityLogs(taskId),
     enabled: !!taskId,
+    // One task's History. Appended to by the same events that refresh the task
+    // itself, so it does not need its own refetch-on-mount.
+    staleTime: STALE.standard,
   });
 }
 
