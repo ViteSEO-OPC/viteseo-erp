@@ -18,6 +18,7 @@ use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
 use App\Modules\Hr\Http\Controllers\TaxTableController;
 use App\Modules\Hr\Http\Controllers\RestDayRequestController;
+use App\Modules\Hr\Http\Controllers\WorkSuspensionController;
 use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
@@ -81,6 +82,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('rest-day-requests', [RestDayRequestController::class, 'index']);
     Route::post('rest-day-requests', [RestDayRequestController::class, 'store']);
     Route::post('rest-day-requests/{restDayRequest}/cancel', [RestDayRequestController::class, 'cancel']);
+
+    // HR-declared non-working days (typhoon, shutdown). Readable by everyone: the time
+    // clock tells the employee work is suspended today, and a rule they cannot see is one
+    // they discover by being marked absent. Writes are HR-only, below.
+    Route::get('work-suspensions', [WorkSuspensionController::class, 'index']);
 
     // Early-out (undertime) requests — separate from leave (always unpaid). Caller
     // files + views own; service scopes by role.
@@ -493,6 +499,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('holiday-sets/{holidaySet}/holidays', [HolidayController::class, 'storeHoliday']);
         Route::match(['put', 'patch'], 'holidays/{holiday}', [HolidayController::class, 'updateHoliday']);
         Route::delete('holidays/{holiday}', [HolidayController::class, 'destroyHoliday']);
+        // Work suspensions — deliberately NOT holidays: a holiday is a legal, classified
+        // calendar date; this is the company cancelling one day and saying whether it is paid.
+        Route::post('work-suspensions', [WorkSuspensionController::class, 'store']);
+        Route::match(['put', 'patch'], 'work-suspensions/{workSuspension}', [WorkSuspensionController::class, 'update']);
+        Route::delete('work-suspensions/{workSuspension}', [WorkSuspensionController::class, 'destroy']);
 
         // Company → FAQ authoring (HR only).
         Route::post('faqs', [FaqController::class, 'store']);

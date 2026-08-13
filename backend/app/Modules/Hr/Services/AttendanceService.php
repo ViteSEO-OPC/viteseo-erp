@@ -28,7 +28,21 @@ class AttendanceService
         private readonly GeofenceService $geofence,
         private readonly PayrollFreezeService $freeze,
         private readonly RestDayRequestService $restDays,
+        private readonly WorkSuspensionService $suspensions,
     ) {}
+
+    /**
+     * HR-declared non-working days in an inclusive range, as 'Y-m-d' => is_paid.
+     *
+     * Thin wrapper so every reader in this file goes through one name, the way
+     * nonWorkingHolidays() already does — the service memoizes the query itself.
+     *
+     * @return array<string, bool>
+     */
+    private function suspensionsBetween(string $start, string $end): array
+    {
+        return $this->suspensions->betweenAsMap($start, $end);
+    }
 
     /**
      * Non-working holidays in an inclusive range, as date 'Y-m-d' => type. Fetched ONCE per
@@ -218,7 +232,8 @@ class AttendanceService
      * a client that re-derived them could offer a button the server would refuse.
      *
      * @return array{mode: string, opens_at: ?string, defers_to: ?string, geofence: bool,
-     *               is_workday: bool, rest_day_request: array{id: int, status: string, requested_at: ?string, review_note: ?string}|null}
+     *               is_workday: bool, rest_day_request: array{id: int, status: string, requested_at: ?string, review_note: ?string}|null,
+     *               suspension: array{name: string, is_paid: bool, status: string}|null}
      *                                   both times are Manila "HH:MM"
      */
     public function clockInWindowFor(Employee $employee): array
@@ -237,6 +252,12 @@ class AttendanceService
             ? null
             : $this->restDays->forDate($employee, $local->toDateString());
 
+        // Only meaningful on a day they would otherwise be expected in — telling someone work
+        // is cancelled on their rest day is noise.
+        $suspension = $isWorkday
+            ? $this->suspensions->forDate($local->toDateString())
+            : null;
+
         // Only meaningful right now, and only in defer mode: the time this punch WOULD be
         // recorded at if they pressed the button this second. Null once the shift has
         // started, because from then on the punch is stamped normally.
@@ -252,6 +273,14 @@ class AttendanceService
             // whose answer will be ignored would be theatre.
             'geofence' => $this->geofence->enforcing(),
             'is_workday' => $isWorkday,
+            // Work cancelled today. Deliberately does NOT disable the button: a skeleton crew
+            // still comes in during a suspension, and blocking them would leave the people who
+            // actually worked with no record of it. The panel says they need not clock in.
+            'suspension' => $suspension === null ? null : [
+                'name' => $suspension->name,
+                'is_paid' => (bool) $suspension->is_paid,
+                'status' => $suspension->status(),
+            ],
             'rest_day_request' => $restDayRequest === null ? null : [
                 'id' => $restDayRequest->id,
                 'status' => $restDayRequest->status,
@@ -792,6 +821,9 @@ class AttendanceService
         $onLeaveIds = $this->onLeaveIds($date);
         // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
         $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
+        // Neither is a day HR cancelled — paid or unpaid, nobody was expected in. Counting
+        // the whole company "absent" on a typhoon day is the exact failure this prevents.
+        $isSuspended = array_key_exists($date, $this->suspensionsBetween($date, $date));
 
         $s = [
             'checked_in' => 0, 'not_checked_in' => 0, 'on_leave' => 0,
@@ -823,7 +855,7 @@ class AttendanceService
                 $s['checked_in']++;
                 $cat = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)['category'];
                 $s[$cat === 'early' ? 'early_arrivals' : ($cat === 'late' ? 'late_arrivals' : 'on_time')]++;
-            } elseif (! $isOnLeave && $eff['is_workday'] && ! $isHoliday) {
+            } elseif (! $isOnLeave && $eff['is_workday'] && ! $isHoliday && ! $isSuspended) {
                 // No clock-in on a workday: it's a true absence only once the day has
                 // passed (or HR explicitly marked it absent). During today the employee
                 // can still clock in, so it's "not checked in" — mirrors allForDate().
@@ -860,10 +892,14 @@ class AttendanceService
         $leaveMap = $this->onLeaveMap($date);
         // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
         $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
+        // HR cancelled work on this date. Null = an ordinary day; true/false = paid/unpaid.
+        // Derived here rather than stored per employee, so flipping the declaration moves the
+        // whole roster at once instead of leaving rows asserting yesterday's answer.
+        $suspendedPaid = $this->suspensionsBetween($date, $date)[$date] ?? null;
 
         return Employee::with(['user', 'department', 'workSchedule'])
             ->get()
-            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday) {
+            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday, $suspendedPaid) {
                 $att = $rows->get($emp->id);
                 $eff = $this->schedule->effectiveFor($emp, $dateCarbon);
                 $leaveName = $leaveMap->get($emp->id);
@@ -881,6 +917,12 @@ class AttendanceService
                 } elseif ($isHoliday && ($eff['is_workday'] ?? false)) {
                     // Non-working holiday on what would have been a workday — not an absence.
                     $status = 'holiday';
+                } elseif ($suspendedPaid !== null && ($eff['is_workday'] ?? false)) {
+                    // HR cancelled work on what would have been a workday. Ranked BELOW the
+                    // holiday branch on purpose: a holiday already pays and already carries a
+                    // statutory premium, so a suspension declared over one changes nothing and
+                    // must not overwrite the classification payroll prices from.
+                    $status = $suspendedPaid ? 'suspended_paid' : 'suspended_unpaid';
                 } elseif ($emp->isManagement()) {
                     // Management is exempt from attendance — auto-present on a scheduled
                     // workday, rest day otherwise. Never absent/not-checked-in.
@@ -1544,6 +1586,8 @@ class AttendanceService
 
         // Non-working holidays in the cycle (Slice 1). One query for the whole range.
         $holidays = $this->nonWorkingHolidays($start, $end);
+        // HR-declared non-working days, date => is_paid. Same shape, same one-query rule.
+        $suspensions = $this->suspensionsBetween($start, $end);
 
         // The employment window (Slice 4). The DIVISOR deliberately stays the full period's
         // scheduled workdays — under the `period_workdays` basis, shrinking it would raise the
@@ -1614,6 +1658,40 @@ class AttendanceService
                 }
             }
 
+            // --- HR-declared work suspension (Slice B) -----------------------------------
+            // The company cancelled the day. Whether it still costs anyone a day's pay is the
+            // single decision HR recorded, and it is priced here and nowhere else.
+            //
+            // Ranked AFTER the holiday branch: a holiday is already covered by salary, so a
+            // suspension declared over one must not be able to turn a paid statutory day into
+            // an unpaid one.
+            //
+            // Someone who WORKED through it falls through to the ordinary paid-day path — they
+            // are paid for the day they worked, with no premium: this is the company's own
+            // cancellation, not a legal holiday, so no statutory rate attaches to it.
+            $suspensionIsPaid = $suspensions[$dateStr] ?? null;
+            if ($suspensionIsPaid !== null) {
+                $suspensionRow = $rows->get($dateStr);
+                // An HR override on this one person's day beats the company-wide declaration —
+                // that is what an override IS, and it is how the two exceptions get expressed:
+                // the skeleton crew who worked a suspended day, and the one person docked on a
+                // day everybody else was paid for. Falls through to the override switch below.
+                if ($suspensionRow?->status_override) {
+                    // no-op: let the override decide
+                } elseif (! ($suspensionRow && $suspensionRow->time_in)) {
+                    if ($suspensionIsPaid === false) {
+                        $unpaid += 1.0;
+                    }
+
+                    // `$prevWorkdayUnpaid` is deliberately left ALONE, even on an unpaid
+                    // suspension. That flag exists to forfeit a following regular holiday after
+                    // the employee was absent without pay — and a day the company cancelled is
+                    // not the employee's absence. Charging them for the day AND taking the next
+                    // holiday off them would punish them twice for someone else's decision.
+                    continue;
+                }
+            }
+
             $row = $rows->get($dateStr);
 
             // --- HR's explicit status wins (Slice 16) -------------------------------------
@@ -1635,8 +1713,16 @@ class AttendanceService
                         continue 2;
                     case 'rest_day':
                     case 'holiday':
+                    case 'suspended_paid':
                         // Not a working day at all — it can neither be unpaid nor break the
                         // "absent the day before" chain.
+                        continue 2;
+                    case 'suspended_unpaid':
+                        // HR cancelled this one person's day without pay. Costs a day, but it
+                        // is still not their absence, so the following-holiday chain is left
+                        // alone for the same reason as the company-wide branch above.
+                        $unpaid += 1.0;
+
                         continue 2;
                     case 'on_leave':
                         // Defer to the leave that covers it; unpaid leave still costs a day.

@@ -36,6 +36,7 @@ class AttendanceController extends Controller
                         'geofence' => false,
                         'is_workday' => true,
                         'rest_day_request' => null,
+                        'suspension' => null,
                     ],
                 ],
             ]);

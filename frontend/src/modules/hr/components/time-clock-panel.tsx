@@ -153,6 +153,11 @@ export function TimeClockPanel() {
   const needsRestDayRequest = !isWorkday && state === "not_clocked_in";
   const restDayMut = useCreateRestDayRequest();
 
+  // Work suspended today (Slice B). Shown, never enforced: the button stays live because a
+  // skeleton crew does come in, and someone who works a cancelled day must still be able to
+  // record it. What changes is what the panel SAYS — nobody has to time in.
+  const suspension = data?.clock_in?.suspension ?? null;
+
   // `defer` mode: they pressed Time in before their shift, so the punch is stamped at the
   // shift start and is still in the future. Derived against the ticking clock rather than
   // read from the server, so it flips to a real clocked-in state on the minute — the same
@@ -337,10 +342,23 @@ export function TimeClockPanel() {
         <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 lg:pr-5">
           <div className="flex items-center gap-2">
             <span
-              className={cn("size-2.5 rounded-full", queuedUntil ? "bg-warning" : meta.dot)}
+              className={cn(
+                "size-2.5 rounded-full",
+                queuedUntil
+                  ? "bg-warning"
+                  : // A red "Clocked out" dot on a day work was cancelled reads as a mark
+                    // against the employee. Amber, and named for what actually happened.
+                    suspension && state === "not_clocked_in"
+                    ? "bg-warning"
+                    : meta.dot,
+              )}
             />
             <span className="text-sm font-semibold">
-              {queuedUntil ? "Queued" : meta.label}
+              {queuedUntil
+                ? "Queued"
+                : suspension && state === "not_clocked_in"
+                  ? "Work suspended"
+                  : meta.label}
             </span>
           </div>
           {alertFlag && <AttendanceAlertBanner violation={alertFlag} />}
@@ -364,7 +382,15 @@ export function TimeClockPanel() {
                 : restDayExpired
                   ? "Your earlier request for today lapsed without a decision — ask HR to add the day on the Attendance screen."
                   : "Today isn't one of your workdays. Ask HR to work it — you'll be timed in from the moment you ask, not when they approve.")}
-          {state === "not_clocked_in" && isWorkday &&
+          {/* A cancelled day outranks every ordinary not-clocked-in message: "you haven't
+              clocked in yet today" is actively wrong when nobody was asked to. */}
+          {state === "not_clocked_in" && isWorkday && suspension &&
+            `${suspension.name} — work is suspended today, so you don't need to time in. ${
+              suspension.is_paid
+                ? "The day is paid."
+                : "The day is unpaid; coming in anyway is paid normally."
+            }`}
+          {state === "not_clocked_in" && isWorkday && !suspension &&
             (awaitingReview
               ? `Sent to HR at ${formatTimeManila(myCheckin?.submitted_at)} — you'll be timed in at that moment once they approve it.`
               : wasRejected

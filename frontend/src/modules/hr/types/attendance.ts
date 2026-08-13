@@ -74,6 +74,18 @@ export interface ClockInWindow {
     requested_at: string | null;
     review_note: string | null;
   } | null;
+  /**
+   * HR has cancelled work today (typhoon, shutdown). Null on an ordinary day and on the
+   * employee's own rest day, where saying "work is cancelled" would be noise.
+   *
+   * It does NOT disable the time clock: a skeleton crew still comes in, and blocking them
+   * would leave the people who actually worked with no record of it.
+   */
+  suspension: {
+    name: string;
+    is_paid: boolean;
+    status: "suspended_paid" | "suspended_unpaid";
+  } | null;
 }
 
 /**

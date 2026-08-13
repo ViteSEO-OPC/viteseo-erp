@@ -20,11 +20,32 @@ class Attendance extends Model
      *   half_day   half an unpaid day
      *   rest_day   not a working day — never unpaid
      *   holiday    paid, no deduction
+     *   suspended_paid    work cancelled by HR, still paid — no deduction, nobody expected in
+     *   suspended_unpaid  work cancelled by HR, not paid — one unpaid day, still nobody expected in
+     *
+     * The two `suspended_*` values are normally DERIVED from `hr_work_suspensions` rather than
+     * stored (see AttendanceService::allForDate), so that flipping a declaration from paid to
+     * unpaid moves every affected day at once. They are listed here so HR can still override ONE
+     * person's day — the skeleton crew who came in, or the one branch that stayed open.
      */
-    public const HR_STATUSES = ['present', 'late', 'absent', 'on_leave', 'half_day', 'rest_day', 'holiday'];
+    public const HR_STATUSES = [
+        'present', 'late', 'absent', 'on_leave', 'half_day', 'rest_day', 'holiday',
+        'suspended_paid', 'suspended_unpaid',
+    ];
 
-    /** Statuses that mean the day is fully paid and raises no violation. */
-    public const PAID_STATUSES = ['present', 'late', 'on_leave', 'rest_day', 'holiday'];
+    /**
+     * Statuses that mean the day is fully paid and raises no violation.
+     *
+     * `suspended_unpaid` is deliberately absent — it costs a day's pay — but note that the
+     * violation engine skips suspended days on its own, because nobody was expected in either
+     * way. Not being in this list means "unpaid", not "the employee did something wrong".
+     */
+    public const PAID_STATUSES = [
+        'present', 'late', 'on_leave', 'rest_day', 'holiday', 'suspended_paid',
+    ];
+
+    /** Both halves of a suspension, for the places that only care that the day was cancelled. */
+    public const SUSPENDED_STATUSES = ['suspended_paid', 'suspended_unpaid'];
 
     use SoftDeletes;
 

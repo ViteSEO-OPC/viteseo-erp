@@ -43,6 +43,11 @@ const STATUS_OPTIONS = [
   { value: "half_day", label: "Half day — 0.5 unpaid" },
   { value: "rest_day", label: "Rest day — not a workday" },
   { value: "holiday", label: "Holiday — paid" },
+  // The per-person exceptions to a company-wide declaration: the one person who came in on a
+  // cancelled day, or the one docked on a day everyone else was paid for. The declaration
+  // itself lives on Company → Holiday List, not here.
+  { value: "suspended_paid", label: "Work suspended — paid" },
+  { value: "suspended_unpaid", label: "Work suspended — 1 unpaid day" },
 ];
 
 /** Mirror of Attendance::HR_STATUSES — the values this dialog is allowed to send. */

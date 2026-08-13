@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import { CloudOff, Plus, RefreshCw } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { HolidayFormDialog } from "@/modules/hr/components/holiday-form-dialog";
+import { WorkSuspensionFormDialog } from "@/modules/hr/components/work-suspension-form-dialog";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
   useHolidaySets,
@@ -19,9 +20,14 @@ import {
   useDeleteHoliday,
 } from "@/modules/hr/hooks/use-holidays";
 import {
+  useWorkSuspensions,
+  useDeleteWorkSuspension,
+} from "@/modules/hr/hooks/use-work-suspensions";
+import {
   COUNTRIES,
   countryName,
   type Holiday,
+  type WorkSuspension,
 } from "@/modules/hr/types/holiday";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
@@ -241,6 +247,8 @@ export default function HolidaysPage() {
         )}
       </div>
 
+      <WorkSuspensionsSection year={year} />
+
       {activeSet && (
         <HolidayFormDialog open={dialogOpen} onOpenChange={setDialogOpen} setId={activeSet.id} holiday={editing} />
       )}
@@ -258,6 +266,145 @@ export default function HolidaysPage() {
             toast.success("Removed");
           } catch {
             toast.error("Could not remove.");
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * HR-declared non-working days — typhoons, shutdowns.
+ *
+ * On this page but NOT in the holiday table, which is the point the copy has to carry: a
+ * holiday is a legal calendar date whose class decides a statutory premium, while this is the
+ * company cancelling one day and saying whether it is still paid. They live side by side
+ * because HR looks for both in the same place; they are separate because payroll prices them
+ * differently and always will.
+ */
+function WorkSuspensionsSection({ year }: { year: string }) {
+  const { data: suspensions, isLoading } = useWorkSuspensions();
+  const deleteMut = useDeleteWorkSuspension();
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState<WorkSuspension | null>(null);
+  const [deleting, setDeleting] = useState<WorkSuspension | null>(null);
+
+  // Scoped to the year the page is already showing, so the two tables agree about what
+  // period is on screen.
+  const rows = (suspensions ?? []).filter((s) => s.date.startsWith(year));
+
+  const columns: Column<WorkSuspension>[] = [
+    {
+      header: "Date",
+      cell: (s) => <span className="text-muted-foreground">{shortDate(s.date)}</span>,
+      className: "whitespace-nowrap",
+    },
+    { header: "Day", cell: (s) => <span className="text-muted-foreground">{weekday(s.date)}</span> },
+    { header: "Reason", cell: (s) => <span className="font-medium text-foreground">{s.name}</span> },
+    {
+      header: "Pay",
+      cell: (s) => (
+        <span
+          className={cn(
+            "inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold",
+            s.is_paid ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger",
+          )}
+        >
+          {s.is_paid ? "Paid" : "Unpaid · 1 day"}
+        </span>
+      ),
+    },
+    {
+      header: "Declared by",
+      cell: (s) => <span className="text-muted-foreground">{s.declared_by ?? "—"}</span>,
+    },
+    {
+      header: "Actions",
+      align: "right",
+      cell: (s) => (
+        <div className="flex justify-end gap-3 text-sm font-medium">
+          <button
+            type="button"
+            className="text-brand hover:underline"
+            onClick={() => {
+              setEditing(s);
+              setDialogOpen(true);
+            }}
+          >
+            Edit
+          </button>
+          <button type="button" className="text-danger hover:underline" onClick={() => setDeleting(s)}>
+            Withdraw
+          </button>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <div className="mt-12">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-h3 font-bold text-foreground">Work Suspensions</h2>
+          <p className="mt-1 mb-4 max-w-2xl text-sm text-muted-foreground">
+            Days the company cancelled — a typhoon, a flood, a shutdown. Nobody has to time in
+            and nobody is flagged absent. Paid means the day costs no one a day&apos;s pay;
+            unpaid deducts one day from everyone who didn&apos;t work it. These are separate from
+            holidays, which are set by law and carry their own premium.
+          </p>
+        </div>
+        <Button
+          onClick={() => {
+            setEditing(null);
+            setDialogOpen(true);
+          }}
+        >
+          <Plus />
+          Declare Non-Working Day
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading work suspensions…</p>
+      ) : rows.length > 0 ? (
+        <DataTable columns={columns} rows={rows} rowKey={(s) => s.id} pageSize={0} empty="" />
+      ) : (
+        <div className="rounded-card border border-dashed border-border bg-card p-10 text-center">
+          <CloudOff className="mx-auto size-8 text-muted-foreground" />
+          <p className="mt-2 text-sm font-medium text-foreground">
+            No non-working days declared for {year}.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Declare one when work is cancelled, so the day isn&apos;t counted as everyone being
+            absent.
+          </p>
+        </div>
+      )}
+
+      <WorkSuspensionFormDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        suspension={editing}
+      />
+
+      <DeleteConfirmDialog
+        open={!!deleting}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        title="Withdraw non-working day"
+        question={`Withdraw “${deleting?.name ?? ""}” on ${deleting ? shortDate(deleting.date) : ""}?`}
+        description="The day goes back to being an ordinary workday — absences and violations apply to it again. Re-run any payroll that covered it."
+        confirmLabel="Withdraw"
+        onConfirm={async () => {
+          try {
+            await deleteMut.mutateAsync(deleting!.id);
+            toast.success("Withdrawn", "That date is an ordinary workday again.");
+          } catch (err) {
+            const msg =
+              err instanceof AxiosError
+                ? (err.response?.data?.errors?.date?.[0] ?? "Could not withdraw it.")
+                : "Could not withdraw it.";
+            toast.error(msg);
           }
         }}
       />
