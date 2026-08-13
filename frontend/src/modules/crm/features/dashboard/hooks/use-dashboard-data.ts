@@ -192,7 +192,9 @@ export type ActivityApi = {
     | "note.updated"
     | "note.deleted"
     | "call.started"
-    | "call.completed";
+    | "call.completed"
+    // Sales outcome written by LeadOutcomeController::won alongside the Deal.
+    | "lead.won";
   description: string;
   actor: string | null;
   changes: { changed?: string[]; from?: string; from_name?: string } | null;
@@ -210,6 +212,8 @@ export function activityIcon(event: ActivityApi["event"]): ActivityType {
   if (event === "auth.login" || event === "auth.logout") return "auth";
   if (event === "note.created" || event === "note.updated" || event === "note.deleted") return "note";
   if (event === "call.started" || event === "call.completed") return "call";
+  // Sales outcome — the Deal-creating event behind the Won badge on Lead Details.
+  if (event === "lead.won") return "won";
 
   return "ai";
 }

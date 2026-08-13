@@ -91,6 +91,8 @@ export function LeadDetailPage() {
         <LeadDetailHeader
           title={lead.business}
           subtitle={lead.industry}
+          deal={lead.deal}
+          outcome={lead.outcome}
           canAssign={canAssign}
           canDelete={canDelete}
           assigned={!!lead.assignedTo}

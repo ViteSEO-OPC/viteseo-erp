@@ -352,8 +352,15 @@ class LeadController extends Controller
 
     public function show(Lead $lead): JsonResponse
     {
+        // Both outcome signals are resolved HERE ONLY (not in index/store/update/assign), so the list
+        // keeps its exact current payload and query count. `deals` is eager-loaded because the Won
+        // badge shows the amount and date; Lost needs only a boolean, so it is an EXISTS subquery
+        // rather than a second relation load.
+        $lead->load(['assignedTo', 'deals'])
+            ->loadExists(['activities as is_lost' => fn ($query) => $query->where('event', 'lead.lost')]);
+
         return response()->json([
-            'data' => new LeadResource($lead->load('assignedTo')),
+            'data' => new LeadResource($lead),
         ]);
     }
 
