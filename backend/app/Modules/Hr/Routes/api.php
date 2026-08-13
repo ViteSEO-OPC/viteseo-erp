@@ -344,6 +344,9 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('throttle:5,1,final-pay:');
         Route::get('employees/{employee}/sensitive', [EmployeeSensitiveController::class, 'show'])
             ->middleware('throttle:20,1,employee-sensitive:');
+        // Every employee's loans, for the approvals queue. Declared before `loans/{loan}` so the
+        // literal path is never read as an id.
+        Route::get('loans', [EmployeeLoanController::class, 'all']);
         Route::get('employees/{employee}/loans', [EmployeeLoanController::class, 'index']);
         Route::post('employees/{employee}/loans', [EmployeeLoanController::class, 'store']);
         Route::match(['put', 'patch'], 'loans/{loan}', [EmployeeLoanController::class, 'update']);

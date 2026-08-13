@@ -6,9 +6,12 @@ use App\Models\User;
 use App\Modules\Hr\Models\ChangeRequest;
 use App\Modules\Hr\Models\Concern;
 use App\Modules\Hr\Models\DocumentRequest;
+use App\Modules\Hr\Models\EarlyOutRequest;
+use App\Modules\Hr\Models\EmployeeLoan;
 use App\Modules\Hr\Models\HalfDayRequest;
 use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\Meeting;
+use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\PayrollInquiry;
 use App\Modules\Hr\Models\PayslipRequest;
 use App\Modules\Hr\Models\Reimbursement;
@@ -25,6 +28,21 @@ use Illuminate\Support\Collection;
  */
 class NotificationService
 {
+    /**
+     * Where leave, half-day, early-out and overtime are all reviewed.
+     *
+     * A constant because it is also a BADGE KEY: the sidebar matches `navBadges[child.href]` by
+     * exact string, so a count written against a stale path is silently discarded rather than
+     * failing loudly — which is exactly how the leave badge went missing.
+     */
+    private const WORK_SCHEDULE_REQUESTS = '/teamora/requests/work-schedule';
+
+    /** The employee's own leave page. This was `/teamora/time-off`, which is not a route. */
+    private const MY_TIME_LEAVE = '/teamora/time-leave';
+
+    /** Where an employee sees their own schedule requests decided. */
+    private const MY_WORK_SCHEDULE = '/teamora/work-schedule';
+
     public function forUser(User $user, int $limit = 20, int $offset = 0): array
     {
         return $user->hasAnyRole(['hr_officer', 'super_admin'])
@@ -43,7 +61,7 @@ class NotificationService
                 'id' => "leave-{$l->id}",
                 'title' => "Leave request · {$l->employee->user?->name}",
                 'subtitle' => "{$l->leaveType->name} · {$l->days} day(s)",
-                'href' => '/teamora/requests/leave',
+                'href' => self::WORK_SCHEDULE_REQUESTS,
                 'at' => $l->created_at,
             ]);
         }
@@ -55,8 +73,51 @@ class NotificationService
                 'id' => "halfday-{$h->id}",
                 'title' => "Half-day request · {$h->employee->user?->name}",
                 'subtitle' => "{$h->work_date->format('M j')} · {$h->period} (unpaid)",
-                'href' => '/teamora/requests/leave',
+                'href' => self::WORK_SCHEDULE_REQUESTS,
                 'at' => $h->created_at,
+            ]);
+        }
+
+        // Early-out and overtime were reviewable from the day they shipped and appeared in NO
+        // aggregate: not here, not on the dashboard, not as a badge. The only way to find one was
+        // to open its page and look. Same review page as leave and half-day.
+        $pendingEarlyOut = EarlyOutRequest::with('employee.user')
+            ->where('status', 'pending')->latest()->get();
+        foreach ($pendingEarlyOut as $e) {
+            $items->push([
+                'id' => "earlyout-{$e->id}",
+                'title' => "Early-out request · {$e->employee->user?->name}",
+                'subtitle' => $e->work_date->format('M j') . ' · unpaid',
+                'href' => self::WORK_SCHEDULE_REQUESTS,
+                'at' => $e->created_at,
+            ]);
+        }
+
+        $pendingOvertime = OvertimeRequest::with('employee.user')
+            ->where('status', 'pending')->latest()->get();
+        foreach ($pendingOvertime as $o) {
+            $items->push([
+                'id' => "overtime-{$o->id}",
+                'title' => "Overtime request · {$o->employee->user?->name}",
+                'subtitle' => $o->work_date->format('M j') . ' · ' . rtrim(rtrim((string) $o->hours, '0'), '.') . ' hour(s)',
+                'href' => self::WORK_SCHEDULE_REQUESTS,
+                'at' => $o->created_at,
+            ]);
+        }
+
+        // A loan sits at `requested` until HR decides. Approving does not start the deduction —
+        // the employee still has to authorise it (Art. 113) — but nobody was being told to decide.
+        $requestedLoans = EmployeeLoan::with('employee.user')
+            ->where('status', 'requested')->latest()->get();
+        foreach ($requestedLoans as $loan) {
+            $items->push([
+                'id' => "loan-{$loan->id}",
+                'title' => ucfirst($loan->type) . " request · {$loan->employee->user?->name}",
+                'subtitle' => '₱' . number_format((float) $loan->principal, 2) . ' principal',
+                // Decided on the employee's record (Compensation tab). `/teamora/loans` is the
+                // EMPLOYEE's own page — sending HR there would show them their own loans.
+                'href' => "/teamora/people/employees/{$loan->employee_id}",
+                'at' => $loan->requested_at ?? $loan->created_at,
             ]);
         }
 
@@ -157,7 +218,12 @@ class NotificationService
             'has_more' => ($offset + $limit) < $total,
             'nav' => [
                 '/teamora/attendance' => $pendingCheckins->count(),
-                '/teamora/requests/leave' => $pendingLeave->count() + $pendingHalfDay->count(),
+                // Keyed by NAV HREF, matched exactly by the sidebar (`navBadges[child.href]`).
+                // This said `/teamora/requests/leave`, which is not a nav item and not a page —
+                // leave and half-day are reviewed on the work-schedule page with early-out and
+                // overtime. Every count written here was therefore dropped on the floor.
+                self::WORK_SCHEDULE_REQUESTS => $pendingLeave->count() + $pendingHalfDay->count()
+                    + $pendingEarlyOut->count() + $pendingOvertime->count(),
                 '/teamora/finance/reimbursement' => $pendingReimb->count(),
                 '/teamora/requests/document' => $pendingDocs->count() + $pendingChanges->count(),
                 '/teamora/requests/payroll' => $pendingPayslipReqs->count() + $openInquiries->count(),
@@ -181,7 +247,7 @@ class NotificationService
                 'id' => "leave-{$l->id}",
                 'title' => "Leave {$l->status}",
                 'subtitle' => "{$l->leaveType->name} · {$l->days} day(s)",
-                'href' => '/teamora/time-off',
+                'href' => self::MY_TIME_LEAVE,
                 'at' => $l->reviewed_at,
             ]));
 
@@ -191,8 +257,45 @@ class NotificationService
                 'id' => "halfday-{$h->id}",
                 'title' => "Half-day {$h->status}",
                 'subtitle' => "{$h->work_date->format('M j')} · {$h->period}",
-                'href' => '/teamora/time-off',
+                'href' => self::MY_TIME_LEAVE,
                 'at' => $h->reviewed_at,
+            ]));
+
+        // The employee was told about leave, half-day, claims, check-ins, documents, changes,
+        // payslips, inquiries and concerns — but not about the three below, so an approved
+        // overtime or a decided loan simply never appeared. A loan is the one that matters most:
+        // approval does NOT start the deduction, the employee has to authorise it themselves
+        // (Art. 113), and they cannot do that if nothing tells them there is anything to do.
+        EarlyOutRequest::where('employee_id', $employee->id)
+            ->whereNotNull('reviewed_at')->latest('reviewed_at')->take(5)->get()
+            ->each(fn ($e) => $items->push([
+                'id' => "earlyout-{$e->id}",
+                'title' => "Early-out {$e->status}",
+                'subtitle' => $e->work_date->format('M j') . ' · unpaid',
+                'href' => self::MY_WORK_SCHEDULE,
+                'at' => $e->reviewed_at,
+            ]));
+
+        OvertimeRequest::where('employee_id', $employee->id)
+            ->whereNotNull('reviewed_at')->latest('reviewed_at')->take(5)->get()
+            ->each(fn ($o) => $items->push([
+                'id' => "overtime-{$o->id}",
+                'title' => "Overtime {$o->status}",
+                'subtitle' => $o->work_date->format('M j') . ' · ' . rtrim(rtrim((string) $o->hours, '0'), '.') . ' hour(s)',
+                'href' => self::MY_WORK_SCHEDULE,
+                'at' => $o->reviewed_at,
+            ]));
+
+        EmployeeLoan::where('employee_id', $employee->id)
+            ->whereNotNull('approved_at')->latest('approved_at')->take(5)->get()
+            ->each(fn ($loan) => $items->push([
+                'id' => "loan-{$loan->id}",
+                'title' => $loan->status === 'pending_authorization'
+                    ? ucfirst($loan->type) . ' approved — your authorisation needed'
+                    : ucfirst($loan->type) . " {$loan->status}",
+                'subtitle' => '₱' . number_format((float) $loan->principal, 2) . ' principal',
+                'href' => '/teamora/loans',
+                'at' => $loan->approved_at,
             ]));
 
         Reimbursement::where('employee_id', $employee->id)

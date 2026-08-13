@@ -18,6 +18,7 @@ import {
   uploadEmployeePhoto,
   deleteEmployeePhoto,
   getEmployeeLoans,
+  getAllLoans,
   createEmployeeLoan,
   cancelEmployeeLoan,
   reopenEmployeeLoan,
@@ -317,6 +318,14 @@ export function useReopenEmployeeLoan(id: number) {
 // --- The employee's own loans (Slice B15) -----------------------------------------
 
 const MY_LOANS_KEY = ["hr", "me", "loans"] as const;
+
+/** Every employee's loans, for the approvals queue. HR only. */
+export function useAllLoans(status = "requested") {
+  return useQuery({
+    queryKey: ["hr", "loans", { status }] as const,
+    queryFn: () => getAllLoans(status),
+  });
+}
 
 export function useMyLoans() {
   return useQuery({ queryKey: MY_LOANS_KEY, queryFn: getMyLoans });

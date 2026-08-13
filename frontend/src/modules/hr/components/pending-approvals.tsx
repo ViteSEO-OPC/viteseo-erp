@@ -29,10 +29,18 @@ import {
   usePayrollInquiries,
 } from "@/modules/hr/hooks/use-requests";
 import { useConcerns } from "@/modules/hr/hooks/use-concerns";
+import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
+import { useEarlyOutRequests } from "@/modules/hr/hooks/use-early-out";
+import { useOvertimeRequests } from "@/modules/hr/hooks/use-overtime";
+import { useAllLoans } from "@/modules/hr/hooks/use-employees";
 import { useRemoteCheckins } from "@/modules/hr/hooks/use-remote-checkins";
 
 type Kind =
   | "leave"
+  | "half_day"
+  | "early_out"
+  | "overtime"
+  | "loan"
   | "claim"
   | "change"
   | "payslip"
@@ -53,6 +61,10 @@ interface Item {
 // Chip label = the *type of request* (so "Expense", not "supplies").
 const KIND_TAG: Record<Kind, string> = {
   leave: "Leave",
+  half_day: "Half-day",
+  early_out: "Early-out",
+  overtime: "Overtime",
+  loan: "Loan",
   claim: "Expense",
   change: "Profile",
   payslip: "Payslip",
@@ -65,6 +77,10 @@ const KIND_TAG: Record<Kind, string> = {
 // Chip colours mapped to the semantic status tokens (no raw hexes).
 const KIND_TONE: Record<Kind, string> = {
   leave: "bg-success-subtle text-success",
+  half_day: "bg-success-subtle text-success",
+  early_out: "bg-warning-subtle text-warning",
+  overtime: "bg-info-subtle text-info",
+  loan: "bg-warning-subtle text-warning",
   claim: "bg-warning-subtle text-warning",
   change: "bg-brand-subtle text-brand-foreground",
   payslip: "bg-severity-orange-subtle text-severity-orange",
@@ -90,6 +106,13 @@ export function PendingApprovals() {
   const { data: documents } = useDocumentRequests();
   const { data: inquiries } = usePayrollInquiries();
   const { data: concerns } = useConcerns();
+  // The four that were reviewable from the day they shipped and appeared in no aggregate:
+  // half-day, early-out and overtime (decided on the work-schedule page) and loan requests
+  // (decided on the employee's record). They are navigate-only here — see REVIEWABLE.
+  const { data: halfDays } = useHalfDayRequests();
+  const { data: earlyOuts } = useEarlyOutRequests();
+  const { data: overtimes } = useOvertimeRequests();
+  const { data: loans } = useAllLoans();
   // Already filtered to pending by the endpoint's default.
   const { data: checkins } = useRemoteCheckins();
 
@@ -114,6 +137,49 @@ export function PendingApprovals() {
         name: l.employee.name ?? "—",
         createdAt: l.created_at,
         href: "/teamora/requests/work-schedule",
+      })),
+    ...(halfDays ?? [])
+      .filter((h) => h.status === "pending")
+      .map((h) => ({
+        key: `half_day-${h.id}`,
+        kind: "half_day" as const,
+        id: h.id,
+        name: h.employee?.name ?? "—",
+        createdAt: h.created_at,
+        href: "/teamora/requests/work-schedule",
+      })),
+    ...(earlyOuts ?? [])
+      .filter((e) => e.status === "pending")
+      .map((e) => ({
+        key: `early_out-${e.id}`,
+        kind: "early_out" as const,
+        id: e.id,
+        name: e.employee?.name ?? "—",
+        createdAt: e.created_at,
+        href: "/teamora/requests/work-schedule",
+      })),
+    ...(overtimes ?? [])
+      .filter((o) => o.status === "pending")
+      .map((o) => ({
+        key: `overtime-${o.id}`,
+        kind: "overtime" as const,
+        id: o.id,
+        name: o.employee?.name ?? "—",
+        createdAt: o.created_at,
+        href: "/teamora/requests/work-schedule",
+      })),
+    ...(loans ?? [])
+      .filter((l) => l.status === "requested")
+      .map((l) => ({
+        key: `loan-${l.id}`,
+        kind: "loan" as const,
+        id: l.id,
+        name: l.employee?.name ?? "—",
+        // `requested_at` is when the employee asked; `start_date` is the fallback for a
+        // loan HR issued directly, which has no request moment.
+        createdAt: l.requested_at ?? l.start_date,
+        // Decided on the record's Compensation tab, where the amounts and their consent state are.
+        href: `/teamora/people/employees/${l.employee?.id ?? ""}`,
       })),
     ...(claims ?? [])
       .filter((c) => c.status === "pending")

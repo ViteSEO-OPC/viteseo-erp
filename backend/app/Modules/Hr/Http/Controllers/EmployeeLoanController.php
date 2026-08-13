@@ -22,6 +22,21 @@ class EmployeeLoanController extends Controller
 {
     public function __construct(private readonly LoanService $service) {}
 
+    /**
+     * GET /api/v1/hr/loans?status=requested — every employee's loans, HR-only.
+     *
+     * The aggregate the module never had: without it a loan request was reachable only from the
+     * record it belongs to, so it could not appear on the dashboard or in any queue.
+     */
+    public function all(Request $request): JsonResponse
+    {
+        $status = $request->query('status');
+
+        return EmployeeLoanResource::collection(
+            $this->service->all(is_string($status) && $status !== '' ? $status : null),
+        )->response();
+    }
+
     // GET /api/v1/hr/employees/{employee}/loans
     public function index(Employee $employee): JsonResponse
     {

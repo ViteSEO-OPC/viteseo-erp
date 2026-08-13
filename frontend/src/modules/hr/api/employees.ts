@@ -230,6 +230,8 @@ export async function getMyEmployee(): Promise<Employee> {
 export interface EmployeeLoan {
   id: number;
   employee_id: number;
+  /** Only on the cross-employee list (`getAllLoans`) — null on the per-record one. */
+  employee?: { id: number; name: string | null } | null;
   type: "loan" | "cash_advance" | "other";
   reference: string | null;
   principal: number;
@@ -296,6 +298,19 @@ export interface EmployeeLoanInput {
 
 export async function getEmployeeLoans(id: number): Promise<EmployeeLoan[]> {
   const res = await apiClient.get(`/hr/employees/${id}/loans`);
+  return res.data.data;
+}
+
+/**
+ * Every employee's loans, optionally by status — the approvals queue.
+ *
+ * Without this a loan sitting at `requested` was reachable only from the record it belongs to,
+ * so no dashboard or queue could show that it was waiting on HR.
+ */
+export async function getAllLoans(status?: string): Promise<EmployeeLoan[]> {
+  const res = await apiClient.get("/hr/loans", {
+    params: status ? { status } : undefined,
+  });
   return res.data.data;
 }
 
