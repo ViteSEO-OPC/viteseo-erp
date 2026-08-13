@@ -44,6 +44,32 @@ export interface HalfDayRequest {
   created_at: string;
 }
 
+/**
+ * Rest-day work requests — permission to work a day the employee's schedule calls a rest day.
+ *
+ * Unlike every other request here, there is no form: it is filed by pressing Time in on a rest
+ * day. `requested_at` is that press, and approving stamps attendance at it — so the field is the
+ * paid time-in, not metadata about the row.
+ *
+ * `expired` is its own status: a pending request goes stale 24h after `requested_at`, because
+ * approving one later would back-date a shift.
+ */
+export interface RestDayRequest {
+  id: number;
+  work_date: string;
+  requested_at: string;
+  reason: string | null;
+  status: "pending" | "approved" | "rejected" | "cancelled" | "expired";
+  review_note: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
+  employee: EmployeeRef;
+  created_at: string;
+}
+
 // Early-out (undertime) requests — separate from leave, always unpaid: the employee
 // leaves before their scheduled end. Payroll deducts the proportional undertime.
 export interface EarlyOutRequest {

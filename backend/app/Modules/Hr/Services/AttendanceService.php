@@ -27,6 +27,7 @@ class AttendanceService
         private readonly HolidayService $holidays,
         private readonly GeofenceService $geofence,
         private readonly PayrollFreezeService $freeze,
+        private readonly RestDayRequestService $restDays,
     ) {}
 
     /**
@@ -216,7 +217,8 @@ class AttendanceService
      * Computed here rather than in the panel so these rules have exactly one reader —
      * a client that re-derived them could offer a button the server would refuse.
      *
-     * @return array{mode: string, opens_at: ?string, defers_to: ?string, geofence: bool}
+     * @return array{mode: string, opens_at: ?string, defers_to: ?string, geofence: bool,
+     *               is_workday: bool, rest_day_request: array{id: int, status: string, requested_at: ?string, review_note: ?string}|null}
      *                                   both times are Manila "HH:MM"
      */
     public function clockInWindowFor(Employee $employee): array
@@ -224,6 +226,16 @@ class AttendanceService
         $local = $this->localNow();
         $eff = $this->schedule->effectiveFor($employee, $local);
         $mode = $this->policy->get()->early_clock_in_mode;
+
+        // Rest-day work (RD-2): today is not a scheduled workday, so pressing the button files a
+        // request instead of punching in. The panel needs BOTH facts — that the day is a rest day,
+        // and how the current request stands — because the same button has three meanings
+        // depending on the answer, and re-deriving "is today a workday" client-side would put a
+        // second, drifting copy of the schedule rules in the browser.
+        $isWorkday = (bool) ($eff['is_workday'] ?? true);
+        $restDayRequest = $isWorkday || $employee->isManagement()
+            ? null
+            : $this->restDays->forDate($employee, $local->toDateString());
 
         // Only meaningful right now, and only in defer mode: the time this punch WOULD be
         // recorded at if they pressed the button this second. Null once the shift has
@@ -239,6 +251,13 @@ class AttendanceService
             // unconfigured fails open server-side, so making the employee answer a question
             // whose answer will be ignored would be theatre.
             'geofence' => $this->geofence->enforcing(),
+            'is_workday' => $isWorkday,
+            'rest_day_request' => $restDayRequest === null ? null : [
+                'id' => $restDayRequest->id,
+                'status' => $restDayRequest->status,
+                'requested_at' => $restDayRequest->requested_at?->toIso8601String(),
+                'review_note' => $restDayRequest->review_note,
+            ],
         ];
     }
 
@@ -270,6 +289,33 @@ class AttendanceService
     ): Attendance {
         $this->assertNotManagement($employee);
 
+        $local = $this->localNow();
+        // Lateness is measured against the employee's EFFECTIVE schedule (start +
+        // grace), resolved from override → assigned → default — not a fixed cutoff.
+        $eff = $this->schedule->effectiveFor($employee, $local);
+
+        // Rest-day work (RD-2). A day the schedule does not cover is not the employee's to
+        // start: it earns a rest-day premium, so somebody has to agree to spend it. The punch
+        // is not lost — RestDayRequestService records this moment and an approval stamps
+        // attendance at it — but it is not attendance until then.
+        //
+        // Deliberately BEFORE the open-shift and already-clocked-in checks: on an approved
+        // request the row already exists, and "you have already clocked in today" is the right
+        // answer to a second press. This gate is only ever reached without one.
+        if (! ($eff['is_workday'] ?? true)) {
+            $pending = $this->restDays->forDate($employee, $this->today());
+
+            throw ValidationException::withMessages([
+                'time_in' => [
+                    $pending?->status === 'pending'
+                        ? 'Your request to work today is still with HR — you will be timed in at '
+                            . $pending->requested_at?->timezone(config('app.timezone_local'))->format('g:i A')
+                            . ', when you asked, once they approve it.'
+                        : 'Today is not one of your scheduled workdays. Send HR a request to work it — you will be timed in at the moment you asked, not when they approve.',
+                ],
+            ]);
+        }
+
         // An overnight shift from a previous date is still running — starting a second one
         // would leave the first permanently open and silently unpaid.
         $open = $this->openRow($employee);
@@ -292,11 +338,6 @@ class AttendanceService
                 'time_in' => ['You have already clocked in today.'],
             ]);
         }
-
-        $local = $this->localNow();
-        // Lateness is measured against the employee's EFFECTIVE schedule (start +
-        // grace), resolved from override → assigned → default — not a fixed cutoff.
-        $eff = $this->schedule->effectiveFor($employee, $local);
 
         // Strict clock-in (Company → Rules): the shift can't be started before it begins.
         $opensAt = $this->clockInOpensAt($eff, $local);

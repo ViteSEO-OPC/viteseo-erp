@@ -17,6 +17,7 @@ use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
 use App\Modules\Hr\Http\Controllers\TaxTableController;
+use App\Modules\Hr\Http\Controllers\RestDayRequestController;
 use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
@@ -74,6 +75,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('half-day-requests', [HalfDayRequestController::class, 'store']);
     // Withdraw your own, pending only. Ownership + status enforced in the service.
     Route::post('half-day-requests/{halfDayRequest}/cancel', [HalfDayRequestController::class, 'cancel']);
+
+    // Rest-day work requests — filed by pressing Time in on a non-workday, so there is no
+    // date in the body: the server uses the caller's Manila today. Caller files + views own.
+    Route::get('rest-day-requests', [RestDayRequestController::class, 'index']);
+    Route::post('rest-day-requests', [RestDayRequestController::class, 'store']);
+    Route::post('rest-day-requests/{restDayRequest}/cancel', [RestDayRequestController::class, 'cancel']);
 
     // Early-out (undertime) requests — separate from leave (always unpaid). Caller
     // files + views own; service scopes by role.
@@ -285,6 +292,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('half-day-requests/{halfDayRequest}/approve', [HalfDayRequestController::class, 'approve']);
         Route::post('half-day-requests/{halfDayRequest}/reject', [HalfDayRequestController::class, 'reject']);
         Route::post('half-day-requests/{halfDayRequest}/reopen', [HalfDayRequestController::class, 'reopen']);
+        // Approve/decline rest-day work requests (HR only). Approving WRITES the attendance
+        // row, stamped at the moment the employee pressed the button.
+        Route::post('rest-day-requests/{restDayRequest}/approve', [RestDayRequestController::class, 'approve']);
+        Route::post('rest-day-requests/{restDayRequest}/reject', [RestDayRequestController::class, 'reject']);
+        Route::post('rest-day-requests/{restDayRequest}/reopen', [RestDayRequestController::class, 'reopen']);
         // Approve/decline early-out requests (HR only).
         Route::post('early-out-requests/{earlyOutRequest}/approve', [EarlyOutRequestController::class, 'approve']);
         Route::post('early-out-requests/{earlyOutRequest}/reject', [EarlyOutRequestController::class, 'reject']);
