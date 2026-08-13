@@ -57,11 +57,30 @@ export function useMyPerformanceSummary() {
   });
 }
 
-/** ₱ with thousands abbreviated (e.g. 160000 → "₱160K"); "—" when the value is unavailable. */
+/**
+ * ₱ in compact notation — "₱793K", "₱1.5M", "₱1.98M"; "—" when the value is unavailable.
+ *
+ * The unit is chosen from the ROUNDED figure, not the raw one, which is what stops the two ugly
+ * cases: 1977123 reads "₱1.98M" rather than "₱1977K" (thousands never run past three digits), and
+ * 999999 reads "₱1M" rather than "₱1000K" — rounding it to a thousand thousands promotes it to the
+ * next unit instead of printing a value that has outgrown its own suffix.
+ *
+ * Millions carry up to 2 decimals with trailing zeros dropped by Number→string ("₱1M", "₱1.5M",
+ * "₱1.98M"). Display only: the raw value is untouched and every KPI computation is server-side.
+ */
 export function formatPeso(value: number | undefined): string {
   if (value === undefined) return "—";
-  if (value >= 1000) return `₱${Math.round(value / 1000)}K`;
-  return `₱${Math.round(value)}`;
+
+  // Below a thousand there is nothing to abbreviate.
+  if (Math.abs(value) < 1000) return `₱${Math.round(value)}`;
+
+  const thousands = Math.round(value / 1000);
+  if (Math.abs(thousands) < 1000) return `₱${thousands}K`;
+
+  // Two decimals, via round-then-scale so 1.977… lands on 1.98 rather than truncating to 1.97.
+  const millions = Math.round(value / 10_000) / 100;
+
+  return `₱${millions}M`;
 }
 
 /** Conversion rate for display: "28.6%" or "—" when undefined (no engaged leads). */

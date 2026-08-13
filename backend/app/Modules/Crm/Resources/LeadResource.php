@@ -66,6 +66,28 @@ class LeadResource extends JsonResource
                 'id' => (string) $this->assignedTo->id,
                 'name' => $this->assignedTo->name,
             ] : null),
+            // Won conversion projection — READ-ONLY. The Deal remains the single source of truth for
+            // conversion and revenue; this exposes it so Lead Details can show a Won indicator without
+            // a second request. `whenLoaded` keeps the key OUT of the list payload entirely (only
+            // show() eager-loads `deals`), so the Leads list response and its query cost are unchanged.
+            // One active Deal per lead is enforced by LeadOutcomeController's duplicate guard; the
+            // sort is defensive so seeded/legacy multi-deal rows still resolve to the latest one.
+            'deal' => $this->whenLoaded('deals', function () {
+                $deal = $this->deals->sortByDesc('converted_at')->first();
+
+                return $deal ? [
+                    'id' => (string) $deal->id,
+                    'amount' => (float) $deal->amount,
+                    'convertedAt' => $deal->converted_at?->toIso8601String(),
+                ] : null;
+            }),
+            // Lost outcome — READ-ONLY, and derived, because Mark Lost deliberately persists nothing
+            // but a `lead.lost` Activity (no Deal, no column, no status change). Resolved by an EXISTS
+            // subquery in show() (`loadExists`), NOT by loading the activity feed: a busy lead carries
+            // hundreds of activities and none of them are needed to answer one boolean. Absent from
+            // every other endpoint — the attribute is null unless show() asked for it, so the Leads
+            // list payload and its query count are unchanged.
+            'lost' => $this->when($this->is_lost !== null, fn () => (bool) $this->is_lost),
             'lastActivity' => $this->last_activity?->toIso8601String(),
             'createdAt' => $this->created_at,
             'updatedAt' => $this->updated_at,

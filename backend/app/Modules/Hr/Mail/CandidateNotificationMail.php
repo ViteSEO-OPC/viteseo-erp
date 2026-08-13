@@ -4,6 +4,8 @@ namespace App\Modules\Hr\Mail;
 
 use App\Modules\Hr\Models\Candidate;
 use App\Modules\Hr\Models\Requisition;
+use App\Support\Mail\Module;
+use App\Support\Mail\SendsAsModule;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
@@ -17,7 +19,7 @@ use Illuminate\Queue\SerializesModels;
  */
 class CandidateNotificationMail extends Mailable
 {
-    use Queueable, SerializesModels;
+    use Queueable, SendsAsModule, SerializesModels;
 
     public function __construct(
         public Candidate $candidate,
@@ -38,7 +40,12 @@ class CandidateNotificationMail extends Mailable
             default => "Update — {$role}",
         };
 
-        return new Envelope(subject: $subject);
+        // Candidate mail goes out as HR, not as the platform-wide MAIL_FROM_ADDRESS: an
+        // applicant should hear from HR even though CRM and PMS share the same relay.
+        return new Envelope(
+            subject: $subject,
+            from: $this->moduleSender(Module::Hr)->toAddress(),
+        );
     }
 
     public function content(): Content

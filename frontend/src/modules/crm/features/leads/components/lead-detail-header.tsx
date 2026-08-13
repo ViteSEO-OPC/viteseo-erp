@@ -1,10 +1,41 @@
 import Link from "next/link";
-import { ArrowLeft, Download, Edit3, Loader2, Paperclip, Trash2, UserPlus } from "lucide-react";
+import { ArrowLeft, BadgeCheck, Download, Edit3, Frown, Loader2, Paperclip, Trash2, UserPlus } from "lucide-react";
 import { Button } from "@/modules/crm/components/ui/button";
+import { cn } from "@/modules/crm/lib/utils";
+import { formatDateTimeLong } from "@/modules/crm/lib/formatters";
+import type { LeadOutcome } from "@/modules/crm/features/leads/components/lead-score-ring";
+import type { LeadDeal } from "@/modules/crm/features/leads/types/lead-detail-types";
+
+// Header outcome badge — the same glyph + tint pairing the score ring uses, so Won and Lost read
+// identically wherever they appear on the page.
+const OUTCOME_BADGE = {
+  won: {
+    label: "Won",
+    Icon: BadgeCheck,
+    tone: "bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-400",
+    title: "This lead has been converted into a deal",
+  },
+  lost: {
+    label: "Lost",
+    Icon: Frown,
+    tone: "bg-destructive/10 text-destructive",
+    title: "This lead has been marked as a lost opportunity",
+  },
+} as const;
 
 type Props = {
   title: string;
   subtitle: string;
+  /**
+   * The lead's Won conversion, or null when it has none. Read-only projection of the Deal; it
+   * supplies the realized amount and conversion date shown under the title.
+   */
+  deal?: LeadDeal | null;
+  /**
+   * Resolved outcome driving the badge. Won deliberately leaves the Lead Status, the estimate, and
+   * the score alone, so without this the page states the outcome nowhere but the score ring.
+   */
+  outcome?: LeadOutcome | null;
   /** Assign/Reassign is Admin/SA only. */
   canAssign?: boolean;
   /** Delete requires the leads.delete permission (BDMs lack it). */
@@ -23,6 +54,8 @@ type Props = {
 export function LeadDetailHeader({
   title,
   subtitle,
+  deal,
+  outcome,
   canAssign,
   canDelete,
   assigned,
@@ -33,6 +66,8 @@ export function LeadDetailHeader({
   exportingPdf,
   onAttachments,
 }: Props) {
+  const badge = outcome ? OUTCOME_BADGE[outcome] : null;
+
   return (
     <div>
       <Link
@@ -45,10 +80,38 @@ export function LeadDetailHeader({
 
       <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold leading-tight text-card-foreground">
-            {title}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-3xl font-bold leading-tight text-card-foreground">
+              {title}
+            </h1>
+            {badge ? (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em]",
+                  badge.tone,
+                )}
+                title={badge.title}
+              >
+                <badge.Icon className="h-3.5 w-3.5" aria-hidden />
+                {badge.label}
+              </span>
+            ) : null}
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+          {/* Realized deal value + when it converted. Peso formatting matches the sibling Amount
+              field on the Summary card, so the estimate and the realized value read consistently
+              while staying clearly labelled as different numbers. */}
+          {deal ? (
+            <p className="mt-1 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+              ₱{deal.amount.toLocaleString("en-PH")}
+              {deal.convertedAt ? (
+                <span className="font-normal text-muted-foreground">
+                  {" · Converted "}
+                  {formatDateTimeLong(deal.convertedAt)}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">

@@ -20,7 +20,16 @@ return [
     | `mailbox` is the address whose inbox is synchronized.
     */
     'inbound_provider' => env('OUTREACH_INBOUND_PROVIDER', 'gmail'),
-    'mailbox' => env('OUTREACH_MAILBOX', env('MAIL_FROM_ADDRESS')),
+
+    // The address whose inbox is synchronized. It MUST be the same mailbox the CRM sends
+    // FROM, or prospects reply to an inbox nobody polls and threading stops silently — so
+    // the fallback chain deliberately mirrors mail.module_senders.crm rather than jumping
+    // straight to MAIL_FROM_ADDRESS. Without that, setting CRM_MAIL_FROM_ADDRESS alone
+    // would move the sender and leave the polled mailbox behind.
+    //
+    // OUTREACH_MAILBOX still wins when set, which is the only supported way to split them
+    // (send as one address, poll another) — deliberate, never accidental.
+    'mailbox' => env('OUTREACH_MAILBOX', env('CRM_MAIL_FROM_ADDRESS', env('OUTREACH_FROM_ADDRESS', env('MAIL_FROM_ADDRESS')))),
 
     // The provider must (re)establish a cursor in two situations. They share mechanics — ingest a
     // bounded window of INBOX, then baseline the cursor to "now" — but they are DIFFERENT decisions
@@ -134,10 +143,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Default sender identity for outbound outreach email
+    | Default sender identity for outbound outreach email — DEPRECATED
     |--------------------------------------------------------------------------
-    | Falls back to the framework MAIL_FROM_* so a single SMTP config works with
-    | Google Workspace, Microsoft 365, Zoho, Hostinger, cPanel, and others.
+    | SUPERSEDED by config('mail.module_senders.crm'), which is now the single source
+    | of truth for the CRM's outbound identity and is what OutreachEmailService reads.
+    | The platform sends as several businesses over one shared relay, so sender identity
+    | belongs in the shared registry beside the transport rather than in a module config.
+    |
+    | OUTREACH_FROM_ADDRESS / OUTREACH_FROM_NAME are UNCHANGED and still authoritative:
+    | mail.module_senders.crm falls back to them ahead of MAIL_FROM_*, so existing
+    | deployments keep their exact sender with no env change. Set CRM_MAIL_FROM_ADDRESS
+    | to override them going forward.
+    |
+    | Retained (not deleted) so any config:cache'd deployment or out-of-tree reader does
+    | not break on a missing key. Nothing in app/ reads it any more — verify with
+    | `grep -rn "outreach.from" app/` before removing it in a later slice.
     */
     'from' => [
         'address' => env('OUTREACH_FROM_ADDRESS', env('MAIL_FROM_ADDRESS', 'hello@crm-enterprise.com')),

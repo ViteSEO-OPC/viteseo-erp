@@ -131,10 +131,20 @@ export function useFollowUpsData(leadId?: string) {
   }, [leadId, isLoading, deepLinkMatch, deepLinkLead]);
 
   // Effective selection, most-specific first: an explicit manual pick, then the deep-linked lead's
-  // follow-up (Case A), then the injected lead context (Case B), then the first follow-up as the
-  // default; undefined once everything is empty. `selectedId` stays "" until the BD picks a row.
+  // follow-up (Case A), then the injected lead context (Case B), then a follow-up as the default;
+  // undefined once everything is empty. `selectedId` stays "" until the BD picks a row.
+  //
+  // The DEFAULT prefers a lead-linked row over `items[0]`. Purpose, Tone, and Regenerate are all fed
+  // by GET /leads/{leadId}/email-templates, which cannot run without a lead — so defaulting to a
+  // lead-less row opened the composer with one frozen option in each dropdown and Regenerate
+  // disabled, which reads as a broken feature rather than as an item that has no lead. A manual pick
+  // still wins, and a lead-less row remains selectable (it just says so — see EmailComposer).
   const selectedItem =
-    items.find((i) => i.id === selectedId) ?? deepLinkMatch ?? injectedItem ?? items[0];
+    items.find((i) => i.id === selectedId)
+    ?? deepLinkMatch
+    ?? injectedItem
+    ?? items.find((i) => i.leadId)
+    ?? items[0];
 
   const selectItem = useCallback((id: string) => {
     setSelectedId(id);

@@ -55,7 +55,9 @@ export type LeadRow = {
   status: LeadStatus;
 };
 
-export type ActivityType = "ai" | "email" | "call" | "auth" | "note";
+// "won" is the sales-outcome tile (`lead.won`): a converted lead is the one activity a BD scans a
+// timeline for, and it previously fell through to the generic "ai" glyph.
+export type ActivityType = "ai" | "email" | "call" | "auth" | "note" | "won";
 
 export type ActivityItem = {
   id: string;

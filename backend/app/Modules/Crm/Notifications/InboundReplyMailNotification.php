@@ -4,6 +4,8 @@ namespace App\Modules\Crm\Notifications;
 
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
+use App\Support\Mail\Module;
+use App\Support\Mail\SendsAsModule;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -28,7 +30,7 @@ use Symfony\Component\Mime\Email as MimeEmail;
  */
 class InboundReplyMailNotification extends Notification implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, SendsAsModule;
 
     public function __construct(
         private readonly Lead $lead,
@@ -52,7 +54,16 @@ class InboundReplyMailNotification extends Notification implements ShouldQueue
         $sender = $this->email->from_name ?? $this->email->from_email ?? 'the prospect';
         $preview = Str::limit(trim((string) $this->email->body), 300);
 
+        // Named `$from` and not `$sender`: `$sender` above is the PROSPECT who replied, and this is
+        // the CRM identity the alert is sent under. Two different senders in one method.
+        $from = $this->moduleSender(Module::Crm);
+
         $mail = (new MailMessage)
+            // Sent under the CRM's own identity rather than the platform-wide MAIL_FROM_ADDRESS, so a
+            // staff alert about a Zerem lead arrives from Zerem even though HR and PMS share the relay.
+            // Same identity as customer outreach by design — one CRM mailbox, and the reply guidance
+            // below (plus the Auto-Submitted header) is what separates alert from conversation.
+            ->from($from->address, $from->name)
             // Subject is prefixed so internal alerts are trivially filterable in a staff inbox and are
             // never mistaken for the customer-facing thread.
             ->subject("[Zerem CRM] New reply from {$business}")

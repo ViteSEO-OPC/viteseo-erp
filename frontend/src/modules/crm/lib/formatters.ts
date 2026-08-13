@@ -32,6 +32,26 @@ export function formatDateLong(date: Date | string | null | undefined): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+/**
+ * Absolute date AND time with the year — "Jun 27, 2026, 9:59 AM". For moments where both halves
+ * matter and the value can be arbitrarily old: the Lead Details "Converted" line reads a Deal's
+ * `converted_at`, which is frequently from a previous month or year, so the year-less forms above
+ * would render it ambiguously. Same en-US style as {@link formatDateLong}.
+ */
+export function formatDateTimeLong(date: Date | string | null | undefined): string {
+  if (!date) return "—";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 export function formatTimestamp(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
   const now = new Date();
