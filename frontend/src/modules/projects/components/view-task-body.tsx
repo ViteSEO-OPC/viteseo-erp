@@ -417,7 +417,12 @@ export function ViewTaskBody({
       return;
     }
     setConfirmDeleteTask(false);
-    onClose();
+    // A frame between the two. Closing the confirm dialog and unmounting the
+    // modal underneath it in the same tick made Radix's layer teardown race the
+    // parent unmount, and a lost race leaves `document.body` stuck at
+    // `pointer-events: none` — an unclickable page. Letting the dialog unwind
+    // first removes the race rather than relying on winning it.
+    requestAnimationFrame(() => onClose());
   };
 
   const handleDeleteSubtask = async () => {
