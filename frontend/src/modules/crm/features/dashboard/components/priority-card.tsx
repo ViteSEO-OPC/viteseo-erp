@@ -47,9 +47,9 @@ type Props = {
    */
   action?: "navigate" | "filter";
   /**
-   * True when THIS bucket is the list's current `website_status` filter, so the card shows the
-   * selected state. Owned by the caller: the Leads page derives it from the one URL-driven filter
-   * value the list already runs on, so there is no second source of truth for "what is selected".
+   * True when THIS bucket is the list's current `priority` filter, so the card shows the selected
+   * state. Owned by the caller: the Leads page derives it from the one URL-driven filter value the
+   * list already runs on, so there is no second source of truth for "what is selected".
    * Defaults to false, which is why the Dashboard's `action="navigate"` cards are untouched.
    */
   isActive?: boolean;
@@ -63,18 +63,21 @@ export function PriorityCard({ bucket, action = "navigate", isActive = false }: 
 
   return (
     <Link
-      href={`/zerem/leads?website_status=${bucket.websiteStatus}`}
+      // Drill down on the SAME column the card counts and chips (`leads.priority`), so the rows
+      // you land on always match the card you clicked. `?priority=` is the list's existing,
+      // already-validated filter — no new param.
+      href={`/zerem/leads?priority=${bucket.priority}`}
       className="group block h-full rounded-xl transition duration-200 hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <Card
         className={cn(
           "h-full shadow-card ring-0 transition-shadow duration-200 group-hover:shadow-md [--card-spacing:--spacing(6)]",
           "border",
-          priorityBorder[bucket.tone],
+          priorityBorder[bucket.priority],
           // Selected filter: tone ring + a lifted shadow tinted to that same tone.
           // `transition-shadow` above already covers both (a ring IS a box-shadow), so selecting a
           // card eases in rather than snapping.
-          isActive && ["shadow-md ring-2", priorityActive[bucket.tone]],
+          isActive && ["shadow-md ring-2", priorityActive[bucket.priority]],
         )}
       >
         <CardContent className="flex flex-1 flex-col">
@@ -85,10 +88,11 @@ export function PriorityCard({ bucket, action = "navigate", isActive = false }: 
               <span className="text-display font-extrabold leading-none text-card-foreground">
                 {bucket.count}
               </span>
-              {/* "High Priority" per the approved design. Note the chip reflects the card's
-                  website-condition tone, not the lead's `priority` column — see the Lead Priority
-                  Overview note in the KB. Wording is fixed by the approved design. */}
-              <PriorityChip priority={bucket.tone} variant="full" />
+              {/* The chip now reflects the lead's own `priority` column — the same value this card
+                  counts and drills down on. It previously showed a tone mapped from
+                  `website_status`, which is why a card chipped "High Priority" could open a list
+                  of Medium-priority leads. */}
+              <PriorityChip priority={bucket.priority} variant="full" />
             </div>
             <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-secondary-foreground transition-colors group-hover:text-primary-accent">
               {actionLabel}
@@ -105,15 +109,15 @@ export function PriorityCard({ bucket, action = "navigate", isActive = false }: 
           </p>
 
           <ProgressBar
-            value={bucket.pipelinePct}
-            tone={bucket.tone}
+            value={bucket.totalPct}
+            tone={bucket.priority}
             className="mt-4"
           />
 
           <CardFooterMeta
             items={[
               `AVG LEAD SCORE ${bucket.avgScore}`,
-              `${bucket.pipelinePct}% OF PIPELINE`,
+              `${bucket.totalPct}% OF LEADS`,
             ]}
           />
         </CardContent>

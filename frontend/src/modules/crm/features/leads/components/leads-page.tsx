@@ -204,12 +204,13 @@ export function LeadsPageLayout() {
   }
 
   // Lead Priority Overview cards mirror the table's dataset: pass the current filters MINUS
-  // `website_status` (the cards' own drill-down — including it would zero the other two) and MINUS
+  // `priority` (the cards' own drill-down — including it would zero the other two) and MINUS
   // `sort` (order doesn't change which leads are counted). The backend applies the same
-  // own-dimension rule, so this is belt-and-braces and also keeps the query key stable while
-  // drilling. React Query hashes the key by value, so a fresh object per render is fine.
+  // own-dimension rule (`applyPriority: false`), so this is belt-and-braces and also keeps the
+  // query key stable while drilling. React Query hashes the key by value, so a fresh object per
+  // render is fine.
   const summaryFilters: Record<string, string> = Object.fromEntries(
-    Object.entries(listParams).filter(([key]) => key !== "website_status" && key !== "sort"),
+    Object.entries(listParams).filter(([key]) => key !== "priority" && key !== "sort"),
   );
 
   /**
@@ -260,12 +261,12 @@ export function LeadsPageLayout() {
             layout leads with the BD tabs instead, so the cards are not rendered for that audience;
             not rendering them also skips their /dashboard/priority-buckets request. The BD page is
             unchanged, and the Dashboard keeps its own copy of these cards either way. */}
-        {/* `listParams.website_status` is the validated, URL-driven value the list itself queries
-            on, so the selected card and the filtered table can never disagree. */}
+        {/* `listParams.priority` is the validated, URL-driven value the list itself queries on, so
+            the selected card and the filtered table can never disagree. */}
         {canAssign ? null : (
           <LeadsKpiRow
             filters={summaryFilters}
-            activeWebsiteStatus={listParams.website_status ?? ""}
+            activePriority={listParams.priority ?? ""}
           />
         )}
         <div className="flex flex-col gap-4">
