@@ -33,11 +33,15 @@ export function useCalendarData() {
   );
 
   // "Upcoming" rail — the next few dated events from today (business timezone) onward, soonest
-  // first.
+  // first. Completed work is excluded: the API deliberately keeps recent completions in this list
+  // (7 rolling days for a BD, indefinitely for Admin/SA, who are exempt from that window) so the
+  // Board and the grid can show them, which would otherwise leave a finished task sitting in
+  // "Upcoming". Same predicate the sidebar Planner badge already counts by, over the same cache.
   const upcoming = useMemo<UpcomingItem[]>(() => {
     const todayStart = startOfBusinessTodayUtc();
     return plannerEvents
       .filter((e): e is PlannerEvent & { startsAt: string } => Boolean(e.startsAt))
+      .filter((e) => e.status !== "completed")
       .filter((e) => parseISO(e.startsAt) >= todayStart)
       .sort((a, b) => compareAsc(parseISO(a.startsAt), parseISO(b.startsAt)))
       .slice(0, UPCOMING_LIMIT)
