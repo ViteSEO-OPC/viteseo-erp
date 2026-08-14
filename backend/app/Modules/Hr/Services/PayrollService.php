@@ -2837,7 +2837,16 @@ class PayrollService
 
     public function listRuns(): Collection
     {
-        return PayrollRun::withCount('payslips')->latest('cycle_start')->get();
+        return PayrollRun::withCount('payslips')
+            // The register states gross BEFORE the absence charge (see Payslip::registerTotals()),
+            // which the stored run columns do not hold. Summed here so a page of runs still costs
+            // one query rather than one per row.
+            ->withCount(['payslips as slips_count'])
+            ->withSum('payslips as slips_gross', 'gross')
+            ->withSum('payslips as slips_absence', 'absence_deduction')
+            ->withSum('payslips as slips_net', 'net_pay')
+            ->latest('cycle_start')
+            ->get();
     }
 
     public function runWithBreakdown(PayrollRun $run): PayrollRun

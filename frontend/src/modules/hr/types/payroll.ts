@@ -184,6 +184,13 @@ export interface PayslipLine {
    * Optional because `allowances_breakdown` predates it and carries none.
    */
   note?: string | null;
+  /**
+   * Which table this line belongs in. The document prints allowances BELOW the
+   * net-of-contributions subtotal rather than among the earnings, so the split is decided by the
+   * API — see PayslipResource::earningsBreakdown. Absent on `allowances_breakdown` and
+   * `other_deductions_breakdown`, which are already single-purpose lists.
+   */
+  kind?: "earning" | "allowance";
 }
 
 /**
@@ -196,16 +203,24 @@ export interface PayslipLine {
  * collected — `uncollected` is a disclosure, and adding it back would overstate net pay.
  */
 export interface PayslipTotals {
-  /** Full period basic + every earning line. */
+  /** Full period basic + every earning line, allowances included. */
   compensation: number;
+  /** The Compensation table's own total: `compensation` with allowances taken out. */
+  earnings: number;
+  /** The Allowances table's total, summed from the allowance-kind earnings lines. */
+  allowances: number;
   /** The absence charge less the late/undertime portion of it. */
   absences: number;
   /** The late + undertime portion, clamped so the two absence rows can't over-total. */
   late_undertime: number;
   /** Absence charge + benefit shares + loans. */
   deductions: number;
+  /** "Total Current Amount" — `earnings - deductions`, before any contribution. */
+  current: number;
   /** SSS + PhilHealth + Pag-IBIG + withholding tax. */
   government: number;
+  /** "Initial Net Salary" — `current - government`, still without allowances. */
+  initial_net: number;
   /** Deductions pay couldn't cover. Disclosed, not summed into net — see the note above. */
   uncollected: number;
   /**
@@ -213,6 +228,27 @@ export interface PayslipTotals {
    * nothing went short, and on payslips issued before the split — the migration doesn't backfill.
    */
   uncollected_breakdown: Partial<Record<PayslipDeductionKey, number>>;
+}
+
+/**
+ * One row of the Deductions table: a REASON, its dates, and its money.
+ *
+ * The pesos are apportioned by the API from the two authoritative figures rather than multiplied
+ * out from `days × daily_rate` — basic pay clamps at zero, so on a heavily-absent period the
+ * multiplied figures each look defensible and their column does not add up to the total printed
+ * beneath it. See PayslipResource::deductionsBreakdown.
+ */
+export interface PayslipDeductionRow {
+  /** `absent` · `undertime` · `half_day` · `late` · `suspended_unpaid` · … · `other`. */
+  key: string;
+  name: string;
+  /** How many dated occurrences — the red badge beside the label. 0 hides it. */
+  count: number;
+  days: number;
+  /** Late and undertime only; null on every other reason. */
+  minutes: number | null;
+  dates: { date: string | null; detail: string | null }[];
+  amount: number;
 }
 
 /** The deduction columns a shortfall can land on, in the order the cap is allocated. */
@@ -261,6 +297,59 @@ export interface TaxBasis {
   monthly_tax: number;
   timing_factor: number;
   timing: string;
+}
+
+/**
+ * Where a slip sits among its calendar month's cutoffs, from the SCHEDULE rather than from the
+ * slips that happen to exist — on the month's first cutoff the second has not been run yet.
+ * Null on every run type but `regular`: a 13th-month or final-pay run is not a cutoff of anything.
+ */
+export interface PayslipCutoff {
+  /** 0-based position within the month. */
+  index: number;
+  /** How many cutoffs the month has: 1 monthly, 2 semi-monthly, 4–5 weekly. */
+  count: number;
+  is_last: boolean;
+  /** "1st Cut-Off" / "2nd Cut-Off", or "Cut-Off 3 of 4" beyond two. Null when the month has one. */
+  label: string | null;
+}
+
+/** One cutoff restated inside the month roll-up. */
+export interface PayslipMonthPeriod {
+  label: string;
+  cycle_start: string | null;
+  cycle_end: string | null;
+  /** That cutoff's own "Total Current Amount". */
+  current_amount: number;
+  net_pay: number;
+  is_current: boolean;
+}
+
+/**
+ * The whole month, carried by its LAST cutoff (FIN — payslip redesign).
+ *
+ * With the contribution/tax/allowance timings set to `last`, the month's deductions all land on
+ * one slip and no single slip is a picture of the month. This is that picture: every cutoff
+ * restated and carried through the same four steps.
+ *
+ * Summed across the month's slips, never inferred from this one — that shortcut holds only under
+ * `last` and under-reports the month under `every`. The identity:
+ *
+ *     total_current - government = initial_net
+ *     initial_net + allowances = total_month = the month's net pay
+ *     total_month - already_paid = this slip's own net pay
+ *
+ * Null unless this is the last cutoff of a month with more than one, where an earlier one ran.
+ */
+export interface PayslipMonthSummary {
+  periods: PayslipMonthPeriod[];
+  total_current: number;
+  government: number;
+  allowances: number;
+  initial_net: number;
+  total_month: number;
+  /** What earlier cutoffs already paid out. */
+  already_paid: number;
 }
 
 export interface Payslip {
@@ -322,9 +411,15 @@ export interface Payslip {
   /** Slice 11a — recurring benefit shares (HMO, union dues) and loans. Post-tax. */
   other_deductions: number;
   other_deductions_breakdown: PayslipLine[];
+  /** The Deductions table, one row per reason with the dates behind it. */
+  deductions_breakdown: PayslipDeductionRow[];
   total_deductions: number;
   net_pay: number;
   totals: PayslipTotals;
+  /** Which cutoff of the month this is. Null on non-regular runs. */
+  cutoff: PayslipCutoff | null;
+  /** The month rolled up — present on the last cutoff of a multi-cutoff month only. */
+  month_summary: PayslipMonthSummary | null;
   /** Company counterpart contributions. HR-only — absent from an employee's own response. */
   employer_sss?: number;
   employer_philhealth?: number;
@@ -361,6 +456,12 @@ export interface Payslip {
   // Attendance basis — how base_salary was derived (0 on older payslips).
   working_days: number;
   daily_rate: number;
+  /**
+   * The same rate said three ways, for the document's header block. `hourly` divides by the run's
+   * own `hours_per_day` divisor rather than a hardcoded 8, so it reconciles with the
+   * late/undertime charge further down the same document.
+   */
+  rates: { daily: number; hourly: number; half_day: number };
   unpaid_days: number;
   late_minutes: number;
   undertime_minutes: number;

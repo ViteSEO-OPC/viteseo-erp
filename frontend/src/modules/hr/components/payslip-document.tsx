@@ -7,10 +7,11 @@ import { payFrequencyLabel } from "@/modules/hr/types/employee";
 import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
 import { formatPeso } from "@/core/lib/format";
 import type {
-  ContributionBasis,
   Payslip,
   PayslipDeductionKey,
+  PayslipDeductionRow,
   PayslipLine,
+  PayslipMonthSummary,
   TaxAnnualisationBasis,
 } from "@/modules/hr/types/payroll";
 
@@ -31,17 +32,50 @@ const DEDUCTION_LABELS: Record<PayslipDeductionKey, string> = {
  * owns those. That is what lets the same markup serve a page, a modal and a print target
  * without any of them leaking into the others.
  *
- * WHAT IT SHOWS. Every factor that moved the money, not just the headline figures: the full
- * period basic with the absence charged against it, each allowance component by name, all four
- * premium lines, every statutory and non-statutory deduction, and the counts and rates the
- * peso figures were derived from.
+ * THE WALK IT PRINTS (the 2026-08 redesign). The document now moves in four steps rather than
+ * settling everything at once, because that is the order the money actually happens in:
+ *
+ *     earnings − deductions   → Total Current Amount
+ *     less contributions & tax → Initial Net Salary
+ *     plus allowances          → Total Net
+ *
+ * Allowances sit BELOW the contributions rather than among the earnings, which is what the
+ * separation is for: they are paid on top of a salary that was already taxed, and printing them
+ * inside Compensation made them look like part of the base the deductions were taken from.
+ *
+ * THE MONTH. With HR's timing rules set to `last`, a month's contributions, tax and allowances all
+ * land on its final cutoff and no single slip is a picture of the month. That slip therefore
+ * carries `month_summary`: the earlier cutoffs restated, totalled, and walked through the same
+ * four steps, ending in TOTAL MONTH SALARY. Every figure in it is summed across the month's slips
+ * by the API — never inferred from this one, which would be right only under `last`.
+ *
+ * WHAT IT DELIBERATELY DOES NOT SHOW (trimmed 2026-08-14, Joshua's call). The identity block's
+ * government numbers and address, the computation-basis table, and the one-line derivation under
+ * each statutory contribution — "2% of ₱10,000.00, the maximum this contribution is charged on" —
+ * are all gone. The document states what was earned, what was taken and what was paid; the
+ * workings live on the screens that own them.
+ *
+ * The withholding derivation and the year-end settlement stay, because they are not workings in
+ * the same sense: December's tax line can go NEGATIVE and make net pay exceed gross, and nothing
+ * else on the page would account for that. So does the disclosure when pay could not cover a
+ * deduction, which is a debt the employee still owes.
  *
  * Company details are literals because there is no company-settings table — the same reason
  * the PDF has always hardcoded them.
  */
 
-const COMPANY_NAME = "VITE SEO";
-const COMPANY_ADDRESS = "Makati City, Metro Manila, Philippines";
+const COMPANY_NAME = "VITE SEO DIGITAL ADVERTISING OPC";
+const COMPANY_ADDRESS =
+  "26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines";
+
+/**
+ * The rows the Compensation table shows even at zero, in the order it shows them.
+ *
+ * A reader checking a payslip is checking a list they already expect. A missing "Overtime" row is
+ * indistinguishable from overtime that was worked and silently dropped, so on an ordinary period
+ * the skeleton is printed whole and anything else the run paid is appended after it.
+ */
+const EARNING_SKELETON = ["Basic Pay", "Overtime", "Night Differential", "Rest Day", "Holiday"];
 
 /** Bare grouped amount — no ₱. The document states its currency once, on the net pay bar. */
 function amount(n: number): string {
@@ -80,13 +114,14 @@ function stamp(iso: string | null | undefined): string {
   return `${date} · ${time}`;
 }
 
-function hours(minutes: number): string {
-  return (minutes / 60).toFixed(1);
+/** Two peso figures that differ by more than rounding. */
+function differs(a: number, b: number): boolean {
+  return Math.abs(a - b) > 0.005;
 }
 
-/** Trims trailing zeros off a day count: 1.00 → "1", 1.50 → "1.5". */
-function days(n: number): string {
-  return String(Number(n.toFixed(2)));
+/** A header rate, or an em dash when the employee is not paid on one. */
+function rate(n: number): string | null {
+  return n > 0 ? amount(n) : null;
 }
 
 export function PayslipDocument({
@@ -103,6 +138,7 @@ export function PayslipDocument({
   // Derived by the API, not here — the PDF renders the same figures and the arithmetic is
   // subtle enough (see PayslipResource::documentTotals) that two implementations would drift.
   const t = p.totals;
+  const month = p.month_summary;
 
   const employerTotal =
     (p.employer_sss ?? 0) + (p.employer_philhealth ?? 0) + (p.employer_pagibig ?? 0);
@@ -110,14 +146,10 @@ export function PayslipDocument({
   // Slice B7 — snapshotted on the payslip at run time, not read from the profile now: the
   // override may since have been cleared, and this payslip still charged what it charged.
   const overridden = p.contribution_overrides ?? [];
-  // Slice B19 — the monthly salary each contribution was charged on, snapshot at run time. Shown
-  // only when the three do NOT agree: with every contribution on the basic basis they are all the
-  // same figure and printing it three times would be noise. They diverge once one is moved onto
-  // actual earnings, and that is exactly when a remittance query needs to see it.
-  const bases = p.contribution_bases ?? null;
-  const baseValues = bases ? Object.values(bases) : [];
-  const basesDiffer =
-    baseValues.length > 0 && new Set(baseValues.map((v) => Number(v).toFixed(2))).size > 1;
+  // On the month's last cutoff the walk continues from the MONTH's figures, not this period's —
+  // that is the whole point of the summary. Everywhere else the two are the same thing.
+  const initialNet = month ? month.initial_net : t.initial_net;
+  const netLabel = p.cutoff?.label ? `Total Net (${p.cutoff.label})` : "Total Net";
 
   return (
     <div
@@ -128,8 +160,12 @@ export function PayslipDocument({
     >
       {/* Header */}
       <div className="flex flex-col items-center gap-2">
-        <p className="text-2xl font-extrabold tracking-tight">{COMPANY_NAME}</p>
-        <p className="text-center text-xs text-muted-foreground">{COMPANY_ADDRESS}</p>
+        <p className="text-center text-lg font-extrabold uppercase tracking-tight sm:text-xl">
+          {COMPANY_NAME}
+        </p>
+        <p className="max-w-[36rem] text-center text-caption text-muted-foreground">
+          {COMPANY_ADDRESS}
+        </p>
       </div>
 
       {/* Title + period */}
@@ -155,29 +191,27 @@ export function PayslipDocument({
       <div className="flex flex-col gap-6 rounded-lg border border-border p-6">
         <div className="flex flex-col gap-6 sm:flex-row">
           <Info label="Employee Name" value={p.employee.name} />
-          <Info label="Employee ID" value={p.employee.employee_no} />
-        </div>
-        <div className="flex flex-col gap-6 sm:flex-row">
           <Info label="Job Role" value={p.employee.job_title} />
-          <Info label="Department" value={p.employee.department} />
         </div>
-        <Info label="Address" value={p.employee.address} />
         <div className="border-t border-border" />
-        <div className="grid grid-cols-2 gap-6 sm:grid-cols-4">
-          <Info label="TIN" value={p.employee.tin} />
-          <Info label="SSS #" value={p.employee.sss_number} />
-          <Info label="PhilHealth" value={p.employee.philhealth_number} />
-          <Info label="Pag-IBIG" value={p.employee.pagibig_number} />
+        {/* The three rates the deduction arithmetic below is quoted in. Per-hour follows the run's
+            own hours-per-day divisor, so it reconciles with the late/undertime charge.
+
+            EM DASHES, NOT ZEROES, when there is no daily rate. Management staff are not paid by
+            the day and their payslips carry `daily_rate` 0 — printing "Per Day 0.00" on one states
+            that a day of their time is worth nothing, rather than that the figure does not apply
+            to them. Payslips predating the attendance columns are in the same position. */}
+        <div className="grid grid-cols-3 gap-6">
+          <Info label="Per Day" value={rate(p.rates.daily)} mono />
+          <Info label="Per Hour" value={rate(p.rates.hourly)} mono />
+          <Info label="Half Day" value={rate(p.rates.half_day)} mono />
         </div>
       </div>
 
       {/* The money */}
       <div className="flex flex-col gap-6">
         <Table heading="Compensation">
-          {/* FIN-011 — one loop over `earnings_breakdown`, built by PayslipResource. The old
-              hardcoded list was an ordinary period's earnings, so a 13th-month, adjustment or
-              final-pay slip rendered "Basic Pay ₱0" and no line for what it actually paid. */}
-          {p.earnings_breakdown.map((line: PayslipLine) => (
+          {earningRows(p).map((line) => (
             <Row
               key={line.name}
               label={line.name}
@@ -185,65 +219,83 @@ export function PayslipDocument({
               value={amount(line.amount)}
             />
           ))}
-          <Row label="Total Compensation" value={amount(t.compensation)} total />
+          <Row label="Total Compensation" value={amount(t.earnings)} total />
         </Table>
 
-        <ComputationBasis payslip={p} />
+        <Table heading="Deductions">
+          {deductionRows(p).map((row, i) => (
+            <DeductionRow key={`${row.key}-${row.name}-${i}`} row={row} />
+          ))}
+          <Row label="Total Deduction" value={amount(t.deductions)} total />
+        </Table>
 
-        <div className="flex flex-col gap-6 lg:flex-row">
-          <Table heading="Deductions" className="flex-1">
-            {t.absences > 0 && <Row label="Absences" value={amount(t.absences)} />}
-            {t.late_undertime > 0 && (
-              <Row label="Late / Undertime" value={amount(t.late_undertime)} />
-            )}
-            {p.other_deductions_breakdown.map((line: PayslipLine) => (
+        <HighlightBar label="Total Current Amount" value={amount(t.current)} />
+
+        {/* The month, restated. Only on its last cutoff, and only when an earlier one ran. */}
+        {month && <SalarySummary summary={month} />}
+
+        <Table heading="Government Benefits & Tax">
+          {/* Each statutory line carries the employer's counterpart directly beneath it.
+              Beside the employee's own figure it means something — ₱875 of their pay went to
+              SSS and the company put ₱1,765 in alongside it — which is why it lives here
+              rather than in a detached block of its own. Never in the total. */}
+          {(
+            [
+              ["SSS", p.sss, p.employer_sss],
+              ["PhilHealth", p.philhealth, p.employer_philhealth],
+              ["Pag-IBIG", p.pagibig, p.employer_pagibig],
+            ] as const
+          ).map(([label, employee, employer]) => (
+            <Fragment key={label}>
+              <Row label={label} value={amount(employee)} pair={(employer ?? 0) > 0} />
+              {(employer ?? 0) > 0 && (
+                <SubRow label="+ employer share" value={amount(employer ?? 0)} />
+              )}
+            </Fragment>
+          ))}
+          <Row label="Withholding Tax" value={amount(p.withholding_tax)} pair={!!p.tax_basis} />
+          {/* FIN-055 — the least checkable figure on the document: an annualised projection of
+              one period, net of contributions, against a dated bracket table. Four steps, none
+              of them visible, ending in a peso amount the reader was expected to accept. */}
+          <TaxBasisNote basis={p.tax_basis} />
+          {/* FIN-054 — December folds the year's correction into the line above, and on the
+              common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
+              not enough: a lone "refund ₱5,432" is the same opacity moved somewhere else. These
+              are the figures it was computed from, so the employee can add it up — and they are
+              the same ones BIR 2316 will show them. */}
+          <TaxSettlement basis={p.tax_annualisation_basis} amount={amount} />
+          {/* When the month's contributions did not all land here, BOTH figures are printed: the
+              rows above sum to the first, and the second is what the walk below continues from.
+              One row labelled "monthly" sitting under rows that do not add up to it would be the
+              one error a payslip cannot make. */}
+          {month && differs(month.government, t.government) && (
+            <Row label="Total Benefits (This Cut-Off)" value={amount(t.government)} total />
+          )}
+          <Row
+            label={month ? "Total Monthly Benefits" : "Total Benefits"}
+            value={amount(month ? month.government : t.government)}
+            total
+          />
+        </Table>
+
+        <HighlightBar label="Initial Net Salary" value={amount(initialNet)} />
+
+        <Table heading="Non-Taxable Allowance">
+          {p.earnings_breakdown
+            .filter((line) => line.kind === "allowance")
+            .map((line) => (
               <Row key={line.name} label={line.name} value={amount(line.amount)} />
             ))}
-            {t.deductions === 0 && <Row label="None" value={amount(0)} />}
-            <Row label="Total Deductions" value={amount(t.deductions)} total />
-          </Table>
-
-          <Table heading="Gov Contributions & Tax" className="flex-1">
-            {/* Each statutory line carries the employer's counterpart directly beneath it.
-                Beside the employee's own figure it means something — ₱875 of their pay went to
-                SSS and the company put ₱1,765 in alongside it — which is why it lives here
-                rather than in a detached block of its own. Never in Total Gov. */}
-            {(
-              [
-                ["SSS Contribution", "sss", p.sss, p.employer_sss],
-                ["PhilHealth", "philhealth", p.philhealth, p.employer_philhealth],
-                ["Pag-IBIG", "pagibig", p.pagibig, p.employer_pagibig],
-              ] as const
-            ).map(([label, type, employee, employer]) => (
-              <Fragment key={label}>
-                <Row label={label} value={amount(employee)} pair={(employer ?? 0) > 0} />
-                {(employer ?? 0) > 0 && (
-                  <SubRow label="+ employer share" value={amount(employer ?? 0)} />
-                )}
-                {/* FIN-049 — the rate alone does not explain the figure: 2% of a ₱95,000 salary
-                    is not ₱200, because the rate is applied to a ₱10,000 cap. This names the
-                    number the rate multiplied. */}
-                <BasisNote basis={p.contribution_basis?.[type]} />
-              </Fragment>
-            ))}
-            <Row
-              label="Withholding Tax"
-              value={amount(p.withholding_tax)}
-              pair={!!p.tax_basis}
-            />
-            {/* FIN-055 — the least checkable figure on the document: an annualised projection of
-                one period, net of contributions, against a dated bracket table. Four steps, none
-                of them visible, ending in a peso amount the reader was expected to accept. */}
-            <TaxBasisNote basis={p.tax_basis} />
-            {/* FIN-054 — December folds the year's correction into the line above, and on the
-                common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
-                not enough: a lone "refund ₱5,432" is the same opacity moved somewhere else. These
-                are the figures it was computed from, so the employee can add it up — and they are
-                the same ones BIR 2316 will show them. */}
-            <TaxSettlement basis={p.tax_annualisation_basis} amount={amount} />
-            <Row label="Total Gov" value={amount(t.government)} total />
-          </Table>
-        </div>
+          {t.allowances === 0 && !month && <Row label="None" value={amount(0)} />}
+          {month && differs(month.allowances, t.allowances) && (
+            <Row label="Total Allowance (This Cut-Off)" value={amount(t.allowances)} total />
+          )}
+          <Row
+            label={month ? "Total Monthly Allowance" : "Total Allowance"}
+            value={amount(month ? month.allowances : t.allowances)}
+            total
+          />
+        </Table>
 
         {/*
           Disclosure, not a term in the total (FIN-053). The figures above are what was actually
@@ -261,7 +313,10 @@ export function PayslipDocument({
               {Object.keys(t.uncollected_breakdown ?? {}).length > 0 && (
                 <p className="text-caption text-muted-foreground pt-1">
                   {Object.entries(t.uncollected_breakdown)
-                    .map(([key, value]) => `${DEDUCTION_LABELS[key as PayslipDeductionKey] ?? key} ${amount(value)}`)
+                    .map(
+                      ([key, value]) =>
+                        `${DEDUCTION_LABELS[key as PayslipDeductionKey] ?? key} ${amount(value)}`,
+                    )
                     .join(" · ")}
                 </p>
               )}
@@ -272,16 +327,14 @@ export function PayslipDocument({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-foreground px-6 py-5 text-background">
-          <p className="font-mono text-lg font-bold uppercase">Total Net Pay</p>
-          <p className="font-mono text-2xl font-extrabold tabular-nums">
-            PHP {amount(p.net_pay)}
-          </p>
-        </div>
+        <NetBar label={netLabel} value={amount(p.net_pay)} />
+        {/* The month total sits BELOW this cutoff's net, not instead of it: the employee is owed
+            both answers — what lands in their account now, and what the month came to. */}
+        {month && <NetBar label="Total Month Salary" value={amount(month.total_month)} />}
 
         {/* HR keeps ONE extra thing the employee has no use for: the employer TOTAL, which is
             what gets filed. The three components are already inline above for both audiences,
-            so the old standalone "Employer Share (for remittance)" table was repeating them. */}
+            so a standalone "Employer Share (for remittance)" table would repeat them. */}
         {showEmployer && (
           <p className="px-1 text-caption text-muted-foreground">
             Total employer share for remittance:{" "}
@@ -290,25 +343,17 @@ export function PayslipDocument({
             </span>
           </p>
         )}
+      </div>
 
-        {/* Slice B19 — WHAT each contribution was charged on. Not derivable after the fact once a
-            contribution follows actual earnings: the figure depends on this period's attendance and
-            premium lines, and on a per-allowance switch HR can change later. HR-only: it is
-            remittance workflow, not something the employee can act on. */}
-        {variant === "hr" && basesDiffer && bases && (
-          <Table heading="Charged on (monthly salary)">
-            {(["sss", "philhealth", "pagibig"] as const).map((type) =>
-              bases[type] === undefined ? null : (
-                <Row
-                  key={type}
-                  label={CONTRIBUTION_LABELS[type] ?? type}
-                  value={amount(bases[type] as number)}
-                />
-              ),
-            )}
-          </Table>
-        )}
+      {/*
+        SUPPORTING DETAIL — the one thing left that is a warning rather than a figure.
 
+        The computation-basis table and the per-contribution derivations that used to sit here were
+        removed on 2026-08-14 at Joshua's request: the document states what was paid and taken, and
+        the workings belong on the screens that own them. What survives is not a derivation — it is
+        a statement that a figure above cannot be filed as it stands.
+      */}
+      <div className="flex flex-col gap-6">
         {/* Slice B7 — an override replaces the EMPLOYEE half only, so the pair above belongs to
             no single salary bracket and cannot be filed as it stands. HR-only: the employee
             cannot act on it, and it must not appear on the copy they receive. */}
@@ -337,7 +382,7 @@ export function PayslipDocument({
             <span className="text-xs font-normal">System Automated Check</span>
           </Meta>
         </div>
-        <Signature name={p.processed_by} role="Human Resource" />
+        <Signature name={p.processed_by} role="HR Manager" />
         <Signature name={p.employee.name} role="Employee" />
       </div>
     </div>
@@ -345,50 +390,116 @@ export function PayslipDocument({
 }
 
 /**
- * The counts and rates behind the peso figures — how many days the period had, what a day is
- * worth, and the attendance that moved it. Kept out of the money tables precisely because none
- * of these are amounts.
+ * The Compensation table's rows: the ordinary period's skeleton, then whatever else this run paid.
+ *
+ * Only an ordinary period HAS a skeleton. A 13th-month, adjustment or final-pay run has no basic
+ * pay and no overtime, and printing five zero rows above the one line that carries the money would
+ * describe the slip as an ordinary period that paid nothing — which is the exact defect FIN-011
+ * fixed by introducing `earnings_breakdown` in the first place.
  */
-function ComputationBasis({ payslip: p }: { payslip: Payslip }) {
-  // Payslips that predate the attendance columns, and management staff, have nothing to show.
-  if (p.working_days === 0) return null;
+function earningRows(p: Payslip): PayslipLine[] {
+  const earnings = p.earnings_breakdown.filter((line) => line.kind !== "allowance");
+
+  if (p.run_type !== "regular") {
+    return earnings;
+  }
+
+  const skeleton = EARNING_SKELETON.map(
+    (name) => earnings.find((line) => line.name === name) ?? { name, amount: 0, note: null },
+  );
+
+  return [...skeleton, ...earnings.filter((line) => !EARNING_SKELETON.includes(line.name))];
+}
+
+/**
+ * The Deductions table's rows, as the API grouped them.
+ *
+ * Zero rows are kept on an ordinary period for the same reason the earnings skeleton is, and
+ * dropped on every other run type for the same reason it is: there was no attendance to charge.
+ */
+function deductionRows(p: Payslip): PayslipDeductionRow[] {
+  const rows = p.deductions_breakdown ?? [];
+
+  return p.run_type === "regular" ? rows : rows.filter((row) => row.amount !== 0);
+}
+
+/**
+ * One reason the period was charged for, with the dates behind it.
+ *
+ * The count badge and the date line are the whole point of the row: "Absences 1,316.00" is a
+ * figure the reader has to take on trust, and "Absences ②, Aug 5, Aug 10" is one they can check
+ * against their own memory of the month.
+ */
+function DeductionRow({ row }: { row: PayslipDeductionRow }) {
+  const dates = row.dates ?? [];
+  const isTime = row.minutes !== null && row.minutes !== undefined;
 
   return (
-    <Table heading="Computation Basis">
-      <Row label="Working days in period" value={String(p.working_days)} />
-      <Row label="Daily rate" value={amount(p.daily_rate)} />
-      {p.unpaid_days > 0 && (
-        <Row label="Unpaid days" value={days(p.unpaid_days)} pair={!!unpaidNote(p)} />
+    <>
+      <div
+        className={cn(
+          "flex items-center justify-between gap-4 px-4 py-3 text-sm",
+          dates.length === 0 && "border-b border-border",
+          dates.length > 0 && "pb-1",
+        )}
+      >
+        <span className="flex items-center gap-2">
+          {row.name}
+          {row.count > 0 && (
+            <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded bg-destructive px-1 font-mono text-[11px] font-semibold text-white tabular-nums">
+              {row.count}
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 font-mono font-medium tabular-nums">{amount(row.amount)}</span>
+      </div>
+      {dates.length > 0 && (
+        <div className="flex items-baseline justify-between gap-4 border-b border-border px-4 pb-2.5 text-caption text-muted-foreground">
+          <span>{describeDates(row)}</span>
+          {/* The minute total belongs beside the dates, not on the money row — it is what the
+              dates add up to, and the money row already carries what the minutes cost. */}
+          {isTime && (row.minutes ?? 0) > 0 && (
+            <span className="shrink-0 font-mono tabular-nums">{row.minutes} min</span>
+          )}
+        </div>
       )}
-      {/* WHICH days, and where the decimal came from. "4.5 unpaid days" is unanswerable to the
-          person reading it — before this the only way to check was to ask HR to open the roster
-          next to you. Grouped by reason with each one's day total, so the parts add back up. */}
-      <ChargeNote text={unpaidNote(p)} />
-      {p.late_minutes > 0 && (
+    </>
+  );
+}
+
+/** "Aug 5, Aug 10" for a day charge; "Aug 1 180m · Aug 5 120m" once minutes are what varies. */
+function describeDates(row: PayslipDeductionRow): string {
+  const isTime = row.minutes !== null && row.minutes !== undefined;
+
+  return (row.dates ?? [])
+    .map((d) => {
+      const day = d.date ? shortDay(d.date) : "—";
+      if (!isTime) return day;
+      const minutes = d.detail?.match(/^(\d+)\s*min/)?.[1];
+      return minutes ? `${day} ${minutes}m` : day;
+    })
+    .join(isTime ? " · " : ", ");
+}
+
+/**
+ * THE MONTH, RESTATED — the table that makes the last cutoff a picture of the whole month.
+ *
+ * Each earlier cutoff is restated by its TOTAL CURRENT AMOUNT rather than by its net pay. The two
+ * are equal only on a cutoff that took no contributions, which is precisely the case this must not
+ * silently depend on: under HR's `every` timing the earlier slips take contributions of their own,
+ * and adding a net to a pre-contribution subtotal would double-count them out of the month total.
+ */
+function SalarySummary({ summary }: { summary: PayslipMonthSummary }) {
+  return (
+    <Table heading="Salary Summary">
+      {summary.periods.map((period, i) => (
         <Row
-          label="Late"
-          value={`${p.late_minutes} min`}
-          pair={latenessNotes(p).length > 0}
+          key={`${period.cycle_start}-${i}`}
+          label={`${period.is_current ? "Current Salary" : "Last Salary"} (${period.label})`}
+          value={amount(period.current_amount)}
         />
-      )}
-      {latenessNotes(p).map((text, i, all) => (
-        <ChargeNote key={i} text={text} continues={i < all.length - 1} />
       ))}
-      {p.undertime_minutes > 0 && (
-        <Row label="Undertime" value={`${p.undertime_minutes} min`} />
-      )}
-      {p.late_penalty_days > 0 && (
-        <Row label="Tardiness penalty" value={`${days(p.late_penalty_days)} day`} />
-      )}
-      {p.overtime_minutes > 0 && (
-        <Row label="Overtime rendered" value={`${hours(p.overtime_minutes)} hrs`} />
-      )}
-      {p.night_diff_minutes > 0 && (
-        <Row label="Night hours" value={`${hours(p.night_diff_minutes)} hrs`} />
-      )}
-      {p.rest_day_minutes > 0 && (
-        <Row label="Rest day worked" value={`${hours(p.rest_day_minutes)} hrs`} />
-      )}
+      <Row label="Total Amount" value={amount(summary.total_current)} total />
     </Table>
   );
 }
@@ -412,6 +523,31 @@ function Table({
         <span>Amount</span>
       </div>
       {children}
+    </div>
+  );
+}
+
+/**
+ * A subtotal the walk pauses on — quieter than the net bars, louder than a table row.
+ *
+ * Total Current Amount and Initial Net Salary are not tables and not conclusions: they are the two
+ * points where the document stops and states where the money has got to.
+ */
+function HighlightBar({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted px-4 py-3.5">
+      <p className="font-mono text-sm font-extrabold uppercase tracking-wide">{label}</p>
+      <p className="font-mono text-base font-extrabold tabular-nums">{value}</p>
+    </div>
+  );
+}
+
+/** A conclusion: what was actually paid. */
+function NetBar({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-foreground px-6 py-5 text-background">
+      <p className="font-mono text-lg font-bold uppercase">{label}</p>
+      <p className="font-mono text-2xl font-extrabold tabular-nums">PHP {value}</p>
     </div>
   );
 }
@@ -451,14 +587,6 @@ function Row({
   );
 }
 
-/**
- * A note ON the row above, not a row of its own — the employer's counterpart contribution.
- *
- * Indented, smaller, italic and muted: four signals at once that this belongs to the line above
- * and is not another deduction. It is never in `Total Gov` — that figure is `totals.government`,
- * computed by the API from the employee's own deductions, so there is no path by which this
- * reaches it. The styling says so; the arithmetic enforces it.
- */
 /**
  * The year-end tax settlement, shown as its derivation rather than as one figure (FIN-054).
  *
@@ -529,77 +657,6 @@ function SettlementLine({
   );
 }
 
-/**
- * How a statutory deduction was arrived at, in one line (FIN-049).
- *
- * WHY IT IS WORTH THE ROW. The three rates are public knowledge and still do not explain the
- * figures: Pag-IBIG's 2% is charged on a ₱10,000 cap, so a ₱95,000 earner pays ₱200 rather than
- * ₱1,900, and SSS multiplies a bracket's Monthly Salary Credit rather than the salary at all.
- * Both read as errors until someone names the amount the rate was applied to.
- *
- * Renders nothing when the payslip predates the snapshot, rather than inventing a derivation.
- */
-function BasisNote({ basis }: { basis?: ContributionBasis }) {
-  if (!basis) return null;
-
-  const note = basis.overridden
-    ? "Fixed amount set on this employee — the government rate was not applied"
-    : describeBasis(basis);
-
-  if (!note) return null;
-
-  return (
-    <div className="border-b border-border px-4 pb-2.5 pl-9 text-caption text-muted-foreground">
-      {note}
-    </div>
-  );
-}
-
-function describeBasis(b: ContributionBasis): string | null {
-  if (b.rate == null || b.charged_on == null) return null;
-
-  // Trailing zeroes on a rate read as false precision — 2.5% and 2%, not 2.500% and 2.000%.
-  const rate = `${Number((b.rate * 100).toFixed(3))}%`;
-  const on = formatPeso(b.charged_on);
-
-  if (b.basis === "bracket") {
-    return `${rate} of ${on} — the salary bracket for ${formatPeso(b.salary ?? 0)}`;
-  }
-
-  if (b.capped) {
-    return `${rate} of ${on} — the maximum this contribution is charged on`;
-  }
-
-  if (b.floored) {
-    return `${rate} of ${on} — the minimum this contribution is charged on`;
-  }
-
-  return `${rate} of ${on}`;
-}
-
-/**
- * The dates behind an attendance count, as one grey line under the figure.
- *
- * Deliberately a sentence rather than a table. The ask was for the basis to be visible, not for
- * the payslip to grow a second document inside it — and grouping by reason ("Absent — Aug 5, 6,
- * 12") is both shorter than a row per date and closer to how the reader would say it.
- */
-function ChargeNote({ text, continues = false }: { text: string | null; continues?: boolean }) {
-  if (!text) return null;
-
-  return (
-    <div
-      className={cn(
-        "px-4 pl-9 text-caption text-muted-foreground",
-        // No rule between the two halves of one explanation — they are one note, not two.
-        continues ? "pb-0.5" : "border-b border-border pb-2.5",
-      )}
-    >
-      {text}
-    </div>
-  );
-}
-
 /** "Aug 5" — the payslip's dates are all inside one period, so the year is noise. */
 function shortDay(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -607,95 +664,6 @@ function shortDay(iso: string): string {
     month: "short",
     day: "numeric",
   });
-}
-
-const CHARGE_LABELS: Record<string, string> = {
-  absent: "Absent",
-  half_day: "Half day",
-  leave_unpaid: "Leave without pay",
-  suspended_unpaid: "Work suspended",
-  holiday_forfeited: "Holiday forfeited",
-  not_employed: "Outside employment",
-  early_out: "Early out",
-  late_penalty: "Tardiness penalty",
-  late: "Late",
-  undertime: "Undertime",
-};
-
-/** "4 days" / "0.5 day" / "0.13 day" — the unit follows the count, as it would be said aloud. */
-function dayCount(n: number): string {
-  return `${days(n)} ${n === 1 ? "day" : "days"}`;
-}
-
-/**
- * Where the unpaid-days figure comes from — INCLUDING its decimal.
- *
- * Each reason carries its own day total, so the reader can add the parts back to the number
- * printed beside them: "Absent 4 days … Late 0.5 day" explains a 4.5 that four dates alone
- * did not. That gap was the first version's real defect: it looked like an explanation while
- * silently omitting the only part anyone would query.
- */
-function unpaidNote(p: Payslip): string | null {
-  const lines = p.attendance_lines?.unpaid ?? [];
-  if (lines.length === 0) return null;
-
-  const byKind = new Map<string, { days: number; dates: string[] }>();
-
-  for (const line of lines) {
-    const label = CHARGE_LABELS[line.kind] ?? line.kind.replace(/_/g, " ");
-    const entry = byKind.get(label) ?? { days: 0, dates: [] };
-    entry.days += line.days;
-    entry.dates.push(shortDay(line.date));
-    byKind.set(label, entry);
-  }
-
-  return [...byKind.entries()]
-    .map(([label, e]) => `${label} ${dayCount(e.days)} — ${e.dates.join(", ")}`)
-    .join(" · ");
-}
-
-/**
- * How the late/undertime minutes became the peso figure on the deductions side.
- *
- * Two sentences, because there are two questions: which days and how long (the minutes are the
- * fact the employee can check against their own memory), and what the policy did with them
- * (the part they cannot possibly derive — a tier ladder can make 20 minutes and 200 minutes
- * cost exactly the same, and nothing on the document said so).
- */
-function latenessNotes(p: Payslip): string[] {
-  const lines = p.attendance_lines?.late ?? [];
-  if (lines.length === 0) return [];
-
-  const out: string[] = [];
-
-  const perDay = lines.map((line) => {
-    const minutes = line.detail?.match(/^(\d+) min/)?.[1];
-    const kind = line.kind === "undertime" ? " UT" : "";
-    return `${shortDay(line.date)} ${minutes ?? "—"}m${kind}`;
-  });
-  out.push(perDay.join(" · "));
-
-  const rule = p.deduction_rule;
-  const charged = lines.reduce((sum, l) => sum + l.days, 0);
-  const pesos = p.late_deduction + p.undertime_deduction;
-
-  if (rule && charged > 0) {
-    const tier = rule.late_mode === "tiered" ? rule.late_tiers[0] : null;
-    // The tier ladder first — it is the step that makes the arithmetic look wrong otherwise.
-    const how = tier
-      ? `Over ${tier.over} min charges ${tier.hours} hr`
-      : rule.rounding === "exact"
-        ? "Charged by the minute"
-        : `Rounded ${rule.rounding.replace("round_", "")} to ${rule.block_minutes} min`;
-
-    out.push(
-      `${how} ÷ ${rule.hours_per_day}-hr day = ${dayCount(charged)} × ${formatPeso(
-        p.daily_rate,
-      )} daily rate = ${formatPeso(pesos)}`,
-    );
-  }
-
-  return out;
 }
 
 /**
@@ -728,6 +696,14 @@ function TaxBasisNote({ basis }: { basis: Payslip["tax_basis"] }) {
   );
 }
 
+/**
+ * A note ON the row above, not a row of its own — the employer's counterpart contribution.
+ *
+ * Indented, smaller, italic and muted: four signals at once that this belongs to the line above
+ * and is not another deduction. It is never in the government total — that figure is
+ * `totals.government`, computed by the API from the employee's own deductions, so there is no path
+ * by which this reaches it. The styling says so; the arithmetic enforces it.
+ */
 function SubRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border px-4 pb-2.5 pl-9 text-caption italic text-muted-foreground">
@@ -755,13 +731,29 @@ function Meta({
   );
 }
 
-function Info({ label, value }: { label: string; value: string | null }) {
+function Info({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string | null;
+  /** Rates and figures are read by column, so they get the tabular face. */
+  mono?: boolean;
+}) {
   return (
     <div className="min-w-0 flex-1">
       <p className="font-mono text-[10px] font-semibold uppercase text-muted-foreground">
         {label}
       </p>
-      <p className="mt-1 break-words text-sm font-semibold">{value || "—"}</p>
+      <p
+        className={cn(
+          "mt-1 break-words text-sm font-semibold",
+          mono && "font-mono tabular-nums",
+        )}
+      >
+        {value || "—"}
+      </p>
     </div>
   );
 }
@@ -770,7 +762,7 @@ function Signature({ name, role }: { name: string | null; role: string }) {
   return (
     <div className="flex flex-col items-center gap-1">
       <div className="h-10 w-[160px] border-b border-foreground" />
-      <p className="text-[10px] uppercase">{name || "\u00a0"}</p>
+      <p className="text-[10px] uppercase">{name || " "}</p>
       <p className="font-mono text-[10px] uppercase text-muted-foreground">{role}</p>
     </div>
   );
