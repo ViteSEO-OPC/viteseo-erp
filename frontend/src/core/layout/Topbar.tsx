@@ -8,8 +8,8 @@ import { BellIcon } from "@/core/ui";
 import { useAuth } from "@/core/auth-context";
 import { getAccessibleModules } from "@/core/access";
 import { useSidebar } from "@/core/layout/SidebarContext";
-import { NotificationDropdown } from "@/modules/projects/components/notification-dropdown";
-import { GlobalSearch } from "@/modules/projects/components/global-search";
+import { NotificationDropdown } from "@/modules/projects/components/notifications/notification-dropdown";
+import { GlobalSearch } from "@/modules/projects/components/shared/global-search";
 import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
 import type { AppNotification } from "@/modules/projects/types/notification";
 import {
@@ -104,7 +104,7 @@ export function Topbar() {
           >
             <BellIcon className="h-6 w-6" />
             {unread > 0 && (
-              <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
+              <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-2xs font-bold text-white">
                 {unread}
               </span>
             )}

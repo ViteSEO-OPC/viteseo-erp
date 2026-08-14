@@ -28,7 +28,19 @@ import {
 /** Workspaces carry no stored colour, so the swatch is assigned by position. */
 const SPACE_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
-/** Shared nav-row geometry — icon, label, 12px gap, 12px radius (Figma 801:22341). */
+/**
+ * Shared nav-row geometry — icon, label, 12px gap, 12px radius (Figma 801:22341).
+ *
+ * Every row's glyph is 24px (`h-6 w-6`), which is deliberately OFF the icon
+ * scale in core/ui/icons.tsx: that table sizes an icon from the text beside it
+ * (`text-sm` → 16px), and it is written for body copy. A nav rail is read by its
+ * icons — they stay legible and tappable when the rail collapses to icons only,
+ * where there is no label to be proportional to. So the rail sets one size for
+ * all of its rows and does not follow the label.
+ *
+ * Icon-only controls that are NOT rows (the mobile close, log out) sit at 20px,
+ * sized by their hit target rather than by the rail.
+ */
 const ROW = "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors";
 const ROW_IDLE = "text-sidebar-ink/60 hover:text-sidebar-ink";
 const ROW_ACTIVE = "text-brand";
@@ -64,7 +76,7 @@ function NavLink({
         {icon}
         {/* Collapsed rows have no label to sit beside, so the count rides the icon. */}
         {!!badge && collapsed && (
-          <span className="absolute -right-1.5 -top-1 hidden h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white lg:flex">
+          <span className="absolute -right-1.5 -top-1 hidden h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-2xs font-bold text-white lg:flex">
             {badge > 99 ? "99+" : badge}
           </span>
         )}
@@ -75,7 +87,7 @@ function NavLink({
       {!!badge && (
         <span
           className={cn(
-            "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-[11px] font-bold text-white",
+            "ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1.5 text-2xs font-bold text-white",
             collapsed && "lg:hidden",
           )}
         >
@@ -335,7 +347,7 @@ export function Sidebar() {
                     active={pathname === `/sprintly/workspaces/${ws.id}`}
                     glyph={
                       <span
-                        className="flex h-[18px] w-[18px] items-center justify-center rounded-md text-[10px] font-bold text-white"
+                        className="flex h-[18px] w-[18px] items-center justify-center rounded-md text-2xs font-bold text-white"
                         style={{
                           backgroundColor: SPACE_COLORS[i % SPACE_COLORS.length],
                         }}
@@ -447,7 +459,10 @@ export function Sidebar() {
             collapsed && "lg:justify-center lg:px-2",
           )}
         >
-          <LayoutGrid className="h-5 w-5 shrink-0" />
+          {/* 24px like every other nav row's glyph — this row is built from the
+              same recipe as ROW, so its icon follows the rail, not the 16px
+              that `text-sm` would call for in body copy. */}
+          <LayoutGrid className="h-6 w-6 shrink-0" />
           <span className={labelHidden}>Switch app</span>
         </Link>
 

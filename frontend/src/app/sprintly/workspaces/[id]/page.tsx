@@ -1,5 +1,5 @@
 import { RequireManager } from '@/core/auth/RequireRole';
-import { WorkspaceDetailView } from '@/modules/projects/components/workspace-detail-view';
+import { WorkspaceDetailView } from '@/modules/projects/components/workspaces/workspace-detail-view';
 
 export default async function WorkspaceDetailPage({
   params,

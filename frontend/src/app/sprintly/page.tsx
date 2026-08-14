@@ -3,12 +3,12 @@
 import { useAuth } from '@/core/auth/AuthProvider';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { DashboardView } from '@/modules/projects/components/dashboard-view';
+import { DashboardView } from '@/modules/projects/components/dashboard/dashboard-view';
 import {
   SkeletonCardGrid,
   SkeletonPage,
   SkeletonStatCards,
-} from '@/modules/projects/components/skeletons';
+} from '@/modules/projects/components/shared/skeletons';
 
 export default function ProjectsPage() {
   const { isAuthenticated, isLoading } = useAuth();

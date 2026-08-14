@@ -2,11 +2,12 @@
 
 import { RequireAuth } from "@/core/auth-context";
 import { RealtimeProvider } from "@/core/realtime/RealtimeProvider";
-import { ProjectNotificationListener } from "@/modules/projects/components/project-notification-listener";
+import { ProjectNotificationListener } from "@/modules/projects/components/projects/project-notification-listener";
 import { Sidebar } from "@/core/layout/Sidebar";
 import { Topbar } from "@/core/layout/Topbar";
 import { SidebarProvider } from "@/core/layout/SidebarContext";
-import { GlobalTaskModal } from "@/modules/projects/components/global-task-modal";
+import { GlobalTaskModal } from "@/modules/projects/components/tasks/global-task-modal";
+import { PaperTheme } from "@/modules/projects/components/shared/paper-theme";
 
 /**
  * Projects section shell. Uses the platform's shared <RequireAuth> (single
@@ -21,6 +22,8 @@ export default function ProjectsLayout({
 }) {
   return (
     <RequireAuth>
+      {/* Projects-only shape scale — see globals.css [data-design="paper"]. */}
+      <PaperTheme />
       <RealtimeProvider>
         {/* Projects' own live-notification handler. It used to be embedded inside
             RealtimeProvider, which is how platform infrastructure ended up owning one
