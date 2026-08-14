@@ -223,6 +223,46 @@ export type PayslipDeductionKey =
   | "withholding_tax"
   | "other_deductions";
 
+/** One day the period charged for, and why. */
+export interface AttendanceChargeLine {
+  date: string;
+  /**
+   * absent · half_day · leave_unpaid · suspended_unpaid · holiday_forfeited · not_employed ·
+   * early_out · late_penalty (the unpaid group), or late · undertime (the time group).
+   */
+  kind: string;
+  days: number;
+  detail: string | null;
+}
+
+/**
+ * How minutes become money: the charging mode, the tier ladder that can make 20 minutes and
+ * 200 minutes cost the same, and the DOLE day the fraction is taken against.
+ */
+export interface DeductionRule {
+  late_mode: string;
+  late_tiers: { over: number; hours: number }[];
+  undertime_mode: string;
+  hours_per_day: number;
+  rounding: string;
+  block_minutes: number;
+}
+
+/**
+ * The four steps behind a withholding figure: this period's taxable pay, the contributions
+ * netted off it, the annualised projection, and the bracket that projection landed in.
+ */
+export interface TaxBasis {
+  taxable_monthly: number;
+  contributions_monthly: number;
+  annual_taxable: number;
+  annual_tax: number;
+  band: { min: number; base: number; rate: number } | null;
+  monthly_tax: number;
+  timing_factor: number;
+  timing: string;
+}
+
 export interface Payslip {
   id: number;
   cycle_start: string;
@@ -328,6 +368,25 @@ export interface Payslip {
   undertime_deduction: number;
   /** Whole days charged by the per-N-lates penalty (item 13b.13). */
   late_penalty_days: number;
+  /**
+   * FIN-055 — the per-date ledger behind `unpaid_days` and `late_minutes`, grouped by the two
+   * questions people actually ask. Null on payslips issued before the column existed, which the
+   * document renders by simply not showing the note.
+   *
+   * The `days` across `unpaid` sum to `unpaid_days`. `late` entries can carry `days: 0` — the
+   * minutes happened even where the policy charges nothing for them.
+   */
+  attendance_lines: {
+    unpaid: AttendanceChargeLine[];
+    late: AttendanceChargeLine[];
+  } | null;
+  /**
+   * FIN-055 — the rule that turned late/undertime minutes into a fraction of a day, from the
+   * run's own policy snapshot. Null when nothing was charged, or on runs predating the snapshot.
+   */
+  deduction_rule: DeductionRule | null;
+  /** FIN-055 — how `withholding_tax` was arrived at. Null when nothing was withheld. */
+  tax_basis: TaxBasis | null;
   /** Deductions that gross couldn't cover (item 13a.1). */
   deduction_carryover: number;
 }

@@ -31,6 +31,103 @@
      * Null (no note printed) whenever the payslip predates the snapshot or the rate cannot
      * describe the figure — never a guessed derivation.
      */
+    /**
+     * FIN-055 — the days behind an attendance count, grouped by reason. Same sentence the
+     * screen builds ("Absent — Aug 5, 6, 12"), for the same reason `$basisNote` exists: the
+     * two surfaces share the DATA and each renders the wording, so a change to either is
+     * visible in review rather than silently one-sided.
+     */
+    $labelFor = fn (string $kind) => [
+        'absent' => 'Absent', 'half_day' => 'Half day', 'leave_unpaid' => 'Leave without pay',
+        'suspended_unpaid' => 'Work suspended', 'holiday_forfeited' => 'Holiday forfeited',
+        'not_employed' => 'Outside employment', 'early_out' => 'Early out',
+        'late_penalty' => 'Tardiness penalty', 'late' => 'Late', 'undertime' => 'Undertime',
+    ][$kind] ?? str_replace('_', ' ', $kind);
+
+    $dayUnit = fn ($n) => $dayCount($n) . ((float) $n === 1.0 ? ' day' : ' days');
+
+    /**
+     * FIN-055 — where the unpaid-days figure comes from, INCLUDING its decimal. Each reason
+     * carries its own day total so the parts add back to the number beside them: four dates
+     * under a "4.5" left the .5 unexplained, which is worse than saying nothing.
+     *
+     * Same sentence the screen builds, for the same reason `$basisNote` exists: the two
+     * surfaces share the DATA and each renders the wording, so a change to either is visible
+     * in review rather than silently one-sided.
+     */
+    $unpaidNote = function () use ($p, $labelFor, $dayUnit) {
+        $lines = $p['attendance_lines']['unpaid'] ?? [];
+
+        if ($lines === []) {
+            return null;
+        }
+
+        $byKind = [];
+        foreach ($lines as $line) {
+            $label = $labelFor($line['kind']);
+            $byKind[$label]['days'] = ($byKind[$label]['days'] ?? 0) + (float) $line['days'];
+            $byKind[$label]['dates'][] = \Illuminate\Support\Carbon::parse($line['date'])->format('M j');
+        }
+
+        $parts = [];
+        foreach ($byKind as $label => $e) {
+            $parts[] = $label . ' ' . $dayUnit($e['days']) . ' — ' . implode(', ', $e['dates']);
+        }
+
+        return implode(' · ', $parts);
+    };
+
+    /**
+     * How the minutes became money. Two sentences, because there are two questions: which days
+     * and how long (the fact the employee can check against their own memory), and what the
+     * policy did with them (the part they cannot derive — a tier ladder makes 20 minutes and
+     * 200 minutes cost exactly the same, and nothing on the document said so).
+     *
+     * @return list<string>
+     */
+    $latenessNotes = function () use ($p, $amt, $dayCount, $dayUnit) {
+        $lines = $p['attendance_lines']['late'] ?? [];
+
+        if ($lines === []) {
+            return [];
+        }
+
+        $perDay = [];
+        foreach ($lines as $line) {
+            $minutes = preg_match('/^(\d+) min/', (string) $line['detail'], $m) ? $m[1] : '—';
+            $perDay[] = \Illuminate\Support\Carbon::parse($line['date'])->format('M j')
+                . ' ' . $minutes . 'm' . ($line['kind'] === 'undertime' ? ' UT' : '');
+        }
+
+        $out = [implode(' · ', $perDay)];
+
+        $rule = $p['deduction_rule'] ?? null;
+        $charged = array_sum(array_column($lines, 'days'));
+        $pesos = (float) $p['late_deduction'] + (float) $p['undertime_deduction'];
+
+        if ($rule && $charged > 0) {
+            $tier = $rule['late_mode'] === 'tiered' ? ($rule['late_tiers'][0] ?? null) : null;
+
+            // The tier ladder first — it is the step that makes the arithmetic look wrong.
+            //
+            // NOTE: never write a Blade directive name inside a comment in here. The compiler
+            // scans this block for directives without caring that it is commented out, opens a
+            // second one, and fails the whole view on an unbalanced brace — which is exactly
+            // what the first draft of this comment did.
+            $how = $tier
+                ? 'Over ' . $tier['over'] . ' min charges ' . $tier['hours'] . ' hr'
+                : ($rule['rounding'] === 'exact'
+                    ? 'Charged by the minute'
+                    : 'Rounded ' . str_replace('round_', '', $rule['rounding'])
+                        . ' to ' . $rule['block_minutes'] . ' min');
+
+            $out[] = $how . ' ÷ ' . $rule['hours_per_day'] . '-hr day = ' . $dayUnit($charged)
+                . ' × ' . $amt($p['daily_rate']) . ' daily rate = ' . $amt($pesos);
+        }
+
+        return $out;
+    };
+
     $basisNote = function (string $type) use ($p) {
         $b = $p['contribution_basis'][$type] ?? null;
 
@@ -214,6 +311,15 @@
         /* Said once, under the total it is deliberately absent from. */
         .ernote td { padding: 3px 8px 0; font-size: 7.5px; font-style: italic; color: #6b7280; }
 
+        /* FIN-055 — the days behind a count, and the tax derivation. Spans both columns
+           because it is a sentence, not an amount: giving it the `amt` column would leave a
+           ragged empty cell beside every note. Same indent and grey as `.ersub` so it reads
+           as a note on the row above rather than as another line item. */
+        .why td { border-bottom: 1px solid #e5e7eb; padding: 0 8px 3.5px 24px;
+                  font-size: 7.5px; color: #6b7280; }
+        /* A note continued on the next row — no rule between the two halves of one sentence. */
+        .why.open td { border-bottom: none; padding-bottom: 1px; }
+
         /* Footer */
         .foot { margin-top: 14px; page-break-inside: avoid; }
         .foot td { vertical-align: bottom; }
@@ -385,12 +491,25 @@
                     <tr class="thead"><td>Computation Basis</td><td class="amt">Amount</td></tr>
                     <tr class="line"><td>Working days in period</td><td class="amt">{{ $p['working_days'] }}</td></tr>
                     <tr class="line"><td>Daily rate</td><td class="amt">{{ $amt($p['daily_rate']) }}</td></tr>
+                    @php
+                        $unpaidWhy = $unpaidNote();
+                        $lateWhy = $latenessNotes();
+                    @endphp
                     @if ($p['unpaid_days'] > 0)
-                        <tr class="line"><td>Unpaid days</td><td class="amt">{{ $dayCount($p['unpaid_days']) }}</td></tr>
+                        <tr class="line {{ $unpaidWhy ? 'pair' : '' }}"><td>Unpaid days</td><td class="amt">{{ $dayCount($p['unpaid_days']) }}</td></tr>
+                    @endif
+                    {{-- WHICH days, and where the decimal came from. "4.5 unpaid days" is
+                         unanswerable to the person holding this document; before this the only
+                         way to check it was to ask HR. --}}
+                    @if ($unpaidWhy)
+                        <tr class="why"><td colspan="2">{{ $unpaidWhy }}</td></tr>
                     @endif
                     @if ($p['late_minutes'] > 0)
-                        <tr class="line"><td>Late</td><td class="amt">{{ $p['late_minutes'] }} min</td></tr>
+                        <tr class="line {{ $lateWhy ? 'pair' : '' }}"><td>Late</td><td class="amt">{{ $p['late_minutes'] }} min</td></tr>
                     @endif
+                    @foreach ($lateWhy as $line)
+                        <tr class="why {{ $loop->last ? '' : 'open' }}"><td colspan="2">{{ $line }}</td></tr>
+                    @endforeach
                     @if ($p['undertime_minutes'] > 0)
                         <tr class="line"><td>Undertime</td><td class="amt">{{ $p['undertime_minutes'] }} min</td></tr>
                     @endif
@@ -451,7 +570,41 @@
                         <tr class="ernote"><td colspan="2">{{ $basisNote($type) }}</td></tr>
                     @endif
                 @endforeach
-                <tr class="line"><td>Withholding Tax</td><td class="amt">{{ $amt($p['withholding_tax']) }}</td></tr>
+                @php
+                    // Built here rather than with inline directives: Blade will not parse an
+                    // `@if` that directly follows a digit ("÷ 12@if(...)" compiles the endif
+                    // and leaves the if literal), and the sentence reads better assembled than
+                    // stitched out of six template fragments. Same approach as $basisNote.
+                    $taxWhy = $p['tax_basis'] ?? null;
+                    $taxWhyLines = [];
+
+                    if ($taxWhy) {
+                        $taxWhyLines[] = '(' . $amt($taxWhy['taxable_monthly']) . ' taxable − '
+                            . $amt($taxWhy['contributions_monthly']) . ' contributions) × 12 = '
+                            . $amt($taxWhy['annual_taxable']) . ' a year';
+
+                        if (! empty($taxWhy['band'])) {
+                            $rate = rtrim(rtrim(number_format($taxWhy['band']['rate'] * 100, 3), '0'), '.');
+                            $over = $taxWhy['band']['base'] > 0
+                                ? ' plus ' . $amt($taxWhy['band']['base'])
+                                : '';
+                            $split = $taxWhy['timing_factor'] != 1
+                                ? ' × ' . $taxWhy['timing_factor']
+                                : '';
+
+                            $taxWhyLines[] = $rate . '% over ' . $amt($taxWhy['band']['min']) . $over
+                                . ' = ' . $amt($taxWhy['annual_tax']) . ' a year ÷ 12' . $split;
+                        }
+                    }
+                @endphp
+                <tr class="line {{ $taxWhyLines ? 'pair' : '' }}"><td>Withholding Tax</td><td class="amt">{{ $amt($p['withholding_tax']) }}</td></tr>
+                {{-- FIN-055 — the least checkable figure on the document: an annualised
+                     projection of one period, net of contributions, against a dated bracket
+                     table. Four steps, none of them visible, ending in a peso amount the reader
+                     was expected to take on trust. --}}
+                @foreach ($taxWhyLines as $line)
+                    <tr class="why {{ $loop->last ? '' : 'open' }}"><td colspan="2">{{ $line }}</td></tr>
+                @endforeach
                 {{-- FIN-054 — the year-end settlement, shown as its derivation. On the common case
                      the line above is NEGATIVE and net pay exceeds gross; the printed payslip is
                      the copy an employee keeps and queries against, so it must explain that on the

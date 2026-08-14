@@ -226,7 +226,15 @@ export function PayslipDocument({
                 <BasisNote basis={p.contribution_basis?.[type]} />
               </Fragment>
             ))}
-            <Row label="Withholding Tax" value={amount(p.withholding_tax)} />
+            <Row
+              label="Withholding Tax"
+              value={amount(p.withholding_tax)}
+              pair={!!p.tax_basis}
+            />
+            {/* FIN-055 — the least checkable figure on the document: an annualised projection of
+                one period, net of contributions, against a dated bracket table. Four steps, none
+                of them visible, ending in a peso amount the reader was expected to accept. */}
+            <TaxBasisNote basis={p.tax_basis} />
             {/* FIN-054 — December folds the year's correction into the line above, and on the
                 common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
                 not enough: a lone "refund ₱5,432" is the same opacity moved somewhere else. These
@@ -349,8 +357,23 @@ function ComputationBasis({ payslip: p }: { payslip: Payslip }) {
     <Table heading="Computation Basis">
       <Row label="Working days in period" value={String(p.working_days)} />
       <Row label="Daily rate" value={amount(p.daily_rate)} />
-      {p.unpaid_days > 0 && <Row label="Unpaid days" value={days(p.unpaid_days)} />}
-      {p.late_minutes > 0 && <Row label="Late" value={`${p.late_minutes} min`} />}
+      {p.unpaid_days > 0 && (
+        <Row label="Unpaid days" value={days(p.unpaid_days)} pair={!!unpaidNote(p)} />
+      )}
+      {/* WHICH days, and where the decimal came from. "4.5 unpaid days" is unanswerable to the
+          person reading it — before this the only way to check was to ask HR to open the roster
+          next to you. Grouped by reason with each one's day total, so the parts add back up. */}
+      <ChargeNote text={unpaidNote(p)} />
+      {p.late_minutes > 0 && (
+        <Row
+          label="Late"
+          value={`${p.late_minutes} min`}
+          pair={latenessNotes(p).length > 0}
+        />
+      )}
+      {latenessNotes(p).map((text, i, all) => (
+        <ChargeNote key={i} text={text} continues={i < all.length - 1} />
+      ))}
       {p.undertime_minutes > 0 && (
         <Row label="Undertime" value={`${p.undertime_minutes} min`} />
       )}
@@ -552,6 +575,157 @@ function describeBasis(b: ContributionBasis): string | null {
   }
 
   return `${rate} of ${on}`;
+}
+
+/**
+ * The dates behind an attendance count, as one grey line under the figure.
+ *
+ * Deliberately a sentence rather than a table. The ask was for the basis to be visible, not for
+ * the payslip to grow a second document inside it — and grouping by reason ("Absent — Aug 5, 6,
+ * 12") is both shorter than a row per date and closer to how the reader would say it.
+ */
+function ChargeNote({ text, continues = false }: { text: string | null; continues?: boolean }) {
+  if (!text) return null;
+
+  return (
+    <div
+      className={cn(
+        "px-4 pl-9 text-caption text-muted-foreground",
+        // No rule between the two halves of one explanation — they are one note, not two.
+        continues ? "pb-0.5" : "border-b border-border pb-2.5",
+      )}
+    >
+      {text}
+    </div>
+  );
+}
+
+/** "Aug 5" — the payslip's dates are all inside one period, so the year is noise. */
+function shortDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString("en-PH", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+const CHARGE_LABELS: Record<string, string> = {
+  absent: "Absent",
+  half_day: "Half day",
+  leave_unpaid: "Leave without pay",
+  suspended_unpaid: "Work suspended",
+  holiday_forfeited: "Holiday forfeited",
+  not_employed: "Outside employment",
+  early_out: "Early out",
+  late_penalty: "Tardiness penalty",
+  late: "Late",
+  undertime: "Undertime",
+};
+
+/** "4 days" / "0.5 day" / "0.13 day" — the unit follows the count, as it would be said aloud. */
+function dayCount(n: number): string {
+  return `${days(n)} ${n === 1 ? "day" : "days"}`;
+}
+
+/**
+ * Where the unpaid-days figure comes from — INCLUDING its decimal.
+ *
+ * Each reason carries its own day total, so the reader can add the parts back to the number
+ * printed beside them: "Absent 4 days … Late 0.5 day" explains a 4.5 that four dates alone
+ * did not. That gap was the first version's real defect: it looked like an explanation while
+ * silently omitting the only part anyone would query.
+ */
+function unpaidNote(p: Payslip): string | null {
+  const lines = p.attendance_lines?.unpaid ?? [];
+  if (lines.length === 0) return null;
+
+  const byKind = new Map<string, { days: number; dates: string[] }>();
+
+  for (const line of lines) {
+    const label = CHARGE_LABELS[line.kind] ?? line.kind.replace(/_/g, " ");
+    const entry = byKind.get(label) ?? { days: 0, dates: [] };
+    entry.days += line.days;
+    entry.dates.push(shortDay(line.date));
+    byKind.set(label, entry);
+  }
+
+  return [...byKind.entries()]
+    .map(([label, e]) => `${label} ${dayCount(e.days)} — ${e.dates.join(", ")}`)
+    .join(" · ");
+}
+
+/**
+ * How the late/undertime minutes became the peso figure on the deductions side.
+ *
+ * Two sentences, because there are two questions: which days and how long (the minutes are the
+ * fact the employee can check against their own memory), and what the policy did with them
+ * (the part they cannot possibly derive — a tier ladder can make 20 minutes and 200 minutes
+ * cost exactly the same, and nothing on the document said so).
+ */
+function latenessNotes(p: Payslip): string[] {
+  const lines = p.attendance_lines?.late ?? [];
+  if (lines.length === 0) return [];
+
+  const out: string[] = [];
+
+  const perDay = lines.map((line) => {
+    const minutes = line.detail?.match(/^(\d+) min/)?.[1];
+    const kind = line.kind === "undertime" ? " UT" : "";
+    return `${shortDay(line.date)} ${minutes ?? "—"}m${kind}`;
+  });
+  out.push(perDay.join(" · "));
+
+  const rule = p.deduction_rule;
+  const charged = lines.reduce((sum, l) => sum + l.days, 0);
+  const pesos = p.late_deduction + p.undertime_deduction;
+
+  if (rule && charged > 0) {
+    const tier = rule.late_mode === "tiered" ? rule.late_tiers[0] : null;
+    // The tier ladder first — it is the step that makes the arithmetic look wrong otherwise.
+    const how = tier
+      ? `Over ${tier.over} min charges ${tier.hours} hr`
+      : rule.rounding === "exact"
+        ? "Charged by the minute"
+        : `Rounded ${rule.rounding.replace("round_", "")} to ${rule.block_minutes} min`;
+
+    out.push(
+      `${how} ÷ ${rule.hours_per_day}-hr day = ${dayCount(charged)} × ${formatPeso(
+        p.daily_rate,
+      )} daily rate = ${formatPeso(pesos)}`,
+    );
+  }
+
+  return out;
+}
+
+/**
+ * How the withholding figure was reached, in two lines the reader can follow with a calculator.
+ *
+ * The projection first (what a year of this period would be), then the bracket it landed in.
+ * Both are needed: the annual figure alone does not say why the rate is what it is, and the
+ * bracket alone does not say what it was applied to.
+ */
+function TaxBasisNote({ basis }: { basis: Payslip["tax_basis"] }) {
+  if (!basis) return null;
+
+  const rate = basis.band ? `${Number((basis.band.rate * 100).toFixed(3))}%` : null;
+
+  return (
+    <div className="space-y-0.5 border-b border-border px-4 pb-2.5 pl-9 text-caption text-muted-foreground">
+      <p>
+        ({formatPeso(basis.taxable_monthly)} taxable − {formatPeso(basis.contributions_monthly)}{" "}
+        contributions) × 12 = {formatPeso(basis.annual_taxable)} a year
+      </p>
+      {basis.band && (
+        <p>
+          {rate} over {formatPeso(basis.band.min)}
+          {basis.band.base > 0 ? ` plus ${formatPeso(basis.band.base)}` : ""} ={" "}
+          {formatPeso(basis.annual_tax)} a year ÷ 12
+          {basis.timing_factor !== 1 ? ` × ${basis.timing_factor}` : ""}
+        </p>
+      )}
+    </div>
+  );
 }
 
 function SubRow({ label, value }: { label: string; value: string }) {

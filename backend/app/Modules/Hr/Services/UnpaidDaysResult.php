@@ -18,6 +18,11 @@ final class UnpaidDaysResult
      * @param  float  $undertimeDays  undertime portion in days
      * @param  float  $latePenaltyDays  whole days charged by the per-N-lates penalty (item 13b.13)
      * @param  list<string>  $flags  non-pay flags raised for HR review
+     * @param  list<array{date: string, kind: string, days: float, detail: string|null}>  $lines
+     *         the per-date ledger behind `$unpaidDays` — which days were charged, and why.
+     *         `late`/`undertime` lines also appear with `days: 0` when the policy charges
+     *         nothing for them, because the minutes still happened and the payslip says so.
+     *         The `days` across every line sum to `$unpaidDays`.
      */
     public function __construct(
         public readonly float $unpaidDays,
@@ -27,5 +32,6 @@ final class UnpaidDaysResult
         public readonly float $undertimeDays = 0.0,
         public readonly float $latePenaltyDays = 0.0,
         public readonly array $flags = [],
+        public readonly array $lines = [],
     ) {}
 }

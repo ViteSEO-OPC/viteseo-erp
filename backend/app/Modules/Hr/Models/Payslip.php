@@ -59,6 +59,9 @@ class Payslip extends Model
         'working_days', 'daily_rate', 'unpaid_days',
         'late_minutes', 'undertime_minutes', 'late_deduction', 'undertime_deduction',
         'late_penalty_days',
+        // Why those figures are what they are: the per-date charge ledger, and the withholding
+        // derivation. Snapshots — see the migration for why neither is derived at read time.
+        'attendance_lines', 'tax_basis',
     ];
 
     protected $casts = [
@@ -74,6 +77,8 @@ class Payslip extends Model
         'late_deduction' => 'decimal:2',
         'undertime_deduction' => 'decimal:2',
         'late_penalty_days' => 'decimal:2',
+        'attendance_lines' => 'array',
+        'tax_basis' => 'array',
         'reimbursements' => 'decimal:2',
         'adjustment_pay' => 'decimal:2',
         'separation_pay' => 'decimal:2',

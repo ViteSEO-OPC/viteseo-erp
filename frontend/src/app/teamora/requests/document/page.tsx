@@ -82,7 +82,7 @@ export default function RequestsPage() {
       <div className="mt-10">
         <h2 className="text-h3 font-bold text-foreground">Change Requests</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Profile change requests are submitted by employees and approved by Miss Chris.
+          Profile change requests are submitted by employees.
         </p>
         <div className="mt-4">
           <ChangeQueue />

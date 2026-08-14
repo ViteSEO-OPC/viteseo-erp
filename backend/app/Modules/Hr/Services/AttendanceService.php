@@ -1603,6 +1603,24 @@ class AttendanceService
         $lateDays = 0.0;
         $undertimeDays = 0.0;
         $flags = [];
+
+        /**
+         * The per-date ledger behind the totals — what the payslip shows when someone asks
+         * "which days?".
+         *
+         * Every charge below records a line, so the ledger always sums to `$unpaid`. That
+         * property is the whole point: a breakdown that does not reconcile with the figure it
+         * explains is worse than no breakdown, because it invites the reader to trust it.
+         */
+        $lines = [];
+        $charge = function (string $date, string $kind, float $days = 0.0, ?string $detail = null) use (&$lines) {
+            $lines[] = [
+                'date' => $date,
+                'kind' => $kind,
+                'days' => round($days, 4),
+                'detail' => $detail,
+            ];
+        };
         // DOLE: holiday pay for a REGULAR holiday is forfeited when the employee was absent
         // without pay on the workday immediately before it. Null = no prior workday seen yet
         // in this range, in which case we don't know and pay the holiday (employee-favourable).
@@ -1625,11 +1643,13 @@ class AttendanceService
             // and also correct for a cycle that has not finished.
             if ($employmentStart !== null && $dateStr < $employmentStart) {
                 $unpaid += 1.0;
+                $charge($dateStr, 'not_employed', 1.0, 'Before hire date');
 
                 continue;
             }
             if ($employmentEnd !== null && $dateStr > $employmentEnd) {
                 $unpaid += 1.0;
+                $charge($dateStr, 'not_employed', 1.0, 'After last working day');
 
                 continue;
             }
@@ -1650,6 +1670,7 @@ class AttendanceService
                     // before; special non-working days carry no such condition.
                     if ($holidayType === 'regular' && $prevWorkdayUnpaid === true) {
                         $unpaid += 1.0;
+                        $charge($dateStr, 'holiday_forfeited', 1.0, 'Absent without pay the workday before');
                     }
 
                     // A holiday is not a workday for this purpose — it can neither break nor
@@ -1681,6 +1702,7 @@ class AttendanceService
                 } elseif (! ($suspensionRow && $suspensionRow->time_in)) {
                     if ($suspensionIsPaid === false) {
                         $unpaid += 1.0;
+                        $charge($dateStr, 'suspended_unpaid', 1.0, 'Work suspended (unpaid)');
                     }
 
                     // `$prevWorkdayUnpaid` is deliberately left ALONE, even on an unpaid
@@ -1703,11 +1725,13 @@ class AttendanceService
                 switch ($row->status) {
                     case 'absent':
                         $unpaid += 1.0;
+                        $charge($dateStr, 'absent', 1.0, 'Marked absent by HR');
                         $prevWorkdayUnpaid = true;
 
                         continue 2;
                     case 'half_day':
                         $unpaid += 0.5;
+                        $charge($dateStr, 'half_day', 0.5, 'Marked half day by HR');
                         $prevWorkdayUnpaid = false;
 
                         continue 2;
@@ -1722,6 +1746,7 @@ class AttendanceService
                         // is still not their absence, so the following-holiday chain is left
                         // alone for the same reason as the company-wide branch above.
                         $unpaid += 1.0;
+                        $charge($dateStr, 'suspended_unpaid', 1.0, 'Work suspended (unpaid)');
 
                         continue 2;
                     case 'on_leave':
@@ -1733,7 +1758,9 @@ class AttendanceService
                             // FIN-034 — a HALF day of LWOP costs half a day. HR stamping the row
                             // `on_leave` must not turn it into a whole one; that would charge double
                             // for the same absence and disagree with the half-day branch below.
-                            $unpaid += ($covering && $covering->is_half_day) ? 0.5 : 1.0;
+                            $days = ($covering && $covering->is_half_day) ? 0.5 : 1.0;
+                            $unpaid += $days;
+                            $charge($dateStr, 'leave_unpaid', $days, 'Leave without pay');
                         }
                         // Half a day is never a full absence, so it can't forfeit a holiday either.
                         $prevWorkdayUnpaid = $isUnpaidLeave && ! ($covering && $covering->is_half_day);
@@ -1768,6 +1795,9 @@ class AttendanceService
             if ($leave && $leave->is_half_day) {
                 $halfUnpaid = ($leave->leaveType && ! $leave->leaveType->is_paid) ? 0.5 : 0.0;
                 $unpaid += $halfUnpaid;
+                if ($halfUnpaid > 0) {
+                    $charge($dateStr, 'leave_unpaid', $halfUnpaid, 'Half day leave without pay');
+                }
 
                 if ($row && $row->status === 'late') {
                     $lateCount++;
@@ -1779,6 +1809,9 @@ class AttendanceService
                 }
                 $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 $unpaid += $eoFrac;
+                if ($eoFrac > 0) {
+                    $charge($dateStr, 'early_out', $eoFrac, 'Approved early-out');
+                }
 
                 if ($deductionsActive && $row && $row->time_in) {
                     $ded = $this->deduction->forDay(
@@ -1798,6 +1831,19 @@ class AttendanceService
                     $lateDays += $ded->lateFraction;
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
+                    // Recorded per DAY, unlike the running totals above.
+                    //
+                    // These sit inside the deduction block deliberately, which means no `late`
+                    // line exists when no late-deduction mode is on. That is the correct scope,
+                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
+                    // policy that charges nothing prints no minutes either. The note explains the
+                    // figure beside it, and the two can never disagree about whether it exists.
+                    if ($ded->lateMinutes > 0) {
+                        $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
+                    }
+                    if ($ded->undertimeMinutes > 0) {
+                        $charge($dateStr, 'undertime', $ded->undertimeFraction, $ded->undertimeMinutes . ' min undertime');
+                    }
                 }
 
                 // Half a day worked is not an absence, so a following regular holiday stands.
@@ -1811,6 +1857,7 @@ class AttendanceService
                 $isUnpaidLeave = $leave->leaveType && ! $leave->leaveType->is_paid;
                 if ($isUnpaidLeave) {
                     $unpaid += 1.0;
+                    $charge($dateStr, 'leave_unpaid', 1.0, 'Leave without pay');
                 }
                 // LWOP the day before a regular holiday forfeits the holiday pay; paid leave
                 // does not.
@@ -1829,6 +1876,7 @@ class AttendanceService
                 // can both pass. Cheap defence against that and against direct inserts.
                 $halfUnpaid = min(1.0, 0.5 * $dayHalves->count());
                 $unpaid += $halfUnpaid;
+                $charge($dateStr, 'half_day', $halfUnpaid, 'Approved half-day request');
 
                 // Item 8 — a late arrival on a half-day used to escape the per-N-lates penalty
                 // entirely, because this branch never touched the tally.
@@ -1846,6 +1894,9 @@ class AttendanceService
                 }
                 $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 $unpaid += $eoFrac;
+                if ($eoFrac > 0) {
+                    $charge($dateStr, 'early_out', $eoFrac, 'Approved early-out');
+                }
 
                 if ($deductionsActive && $dayHalves->count() === 1 && $row && $row->time_in) {
                     $ded = $this->deduction->forDay(
@@ -1858,6 +1909,19 @@ class AttendanceService
                     $lateDays += $ded->lateFraction;
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
+                    // Recorded per DAY, unlike the running totals above.
+                    //
+                    // These sit inside the deduction block deliberately, which means no `late`
+                    // line exists when no late-deduction mode is on. That is the correct scope,
+                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
+                    // policy that charges nothing prints no minutes either. The note explains the
+                    // figure beside it, and the two can never disagree about whether it exists.
+                    if ($ded->lateMinutes > 0) {
+                        $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
+                    }
+                    if ($ded->undertimeMinutes > 0) {
+                        $charge($dateStr, 'undertime', $ded->undertimeFraction, $ded->undertimeMinutes . ' min undertime');
+                    }
                 }
 
                 // Half a day worked is not an absence, so it doesn't forfeit a following
@@ -1893,6 +1957,19 @@ class AttendanceService
                     $lateDays += $ded->lateFraction;
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
+                    // Recorded per DAY, unlike the running totals above.
+                    //
+                    // These sit inside the deduction block deliberately, which means no `late`
+                    // line exists when no late-deduction mode is on. That is the correct scope,
+                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
+                    // policy that charges nothing prints no minutes either. The note explains the
+                    // figure beside it, and the two can never disagree about whether it exists.
+                    if ($ded->lateMinutes > 0) {
+                        $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
+                    }
+                    if ($ded->undertimeMinutes > 0) {
+                        $charge($dateStr, 'undertime', $ded->undertimeFraction, $ded->undertimeMinutes . ' min undertime');
+                    }
                 }
 
                 $prevWorkdayUnpaid = false; // they showed up
@@ -1901,6 +1978,7 @@ class AttendanceService
             }
             if ($row && $row->status === 'absent') {
                 $unpaid += 1.0;
+                $charge($dateStr, 'absent', 1.0, 'Absent');
                 $prevWorkdayUnpaid = true;
 
                 continue;
@@ -1908,6 +1986,7 @@ class AttendanceService
             // No usable record: unpaid only once the workday is in the past.
             if ($d->lt($today)) {
                 $unpaid += 1.0;
+                $charge($dateStr, 'absent', 1.0, 'No time in recorded');
                 $prevWorkdayUnpaid = true;
             } else {
                 $prevWorkdayUnpaid = false; // today/future — not an absence yet
@@ -1922,6 +2001,13 @@ class AttendanceService
             // days disappearing into `unpaid_days` alongside genuine absences.
             $latePenaltyDays = (float) intdiv($lateCount, (int) $policy->lates_per_deduction);
             $unpaid += $latePenaltyDays;
+
+            if ($latePenaltyDays > 0) {
+                // Dated to the period end, not to a day: it is charged for a COUNT of lates
+                // across the range, so pinning it on one of them would misattribute it.
+                $charge($last->toDateString(), 'late_penalty', $latePenaltyDays,
+                    "{$lateCount} lates × 1 day per {$policy->lates_per_deduction}");
+            }
         }
 
         return new UnpaidDaysResult(
@@ -1932,6 +2018,7 @@ class AttendanceService
             undertimeDays: round($undertimeDays, 6),
             latePenaltyDays: $latePenaltyDays,
             flags: array_values(array_unique($flags)),
+            lines: $lines,
         );
     }
 

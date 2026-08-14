@@ -164,6 +164,104 @@ class PayslipResource extends JsonResource
             'late_deduction' => (float) $this->late_deduction,
             'undertime_deduction' => (float) $this->undertime_deduction,
             'late_penalty_days' => (float) $this->late_penalty_days,
+
+            // — Why those figures are what they are (FIN-055) —
+            // The counts above say "2.5 unpaid days"; these say WHICH days, and how the tax
+            // figure was reached. Null on payslips issued before the columns existed, which the
+            // document renders as simply not showing the note.
+            'attendance_lines' => $this->attendanceLines(),
+            // How minutes became a fraction of a day — the missing half of the lateness note.
+            'deduction_rule' => $this->deductionRule(),
+            'tax_basis' => $this->tax_basis,
+        ];
+    }
+
+    /**
+     * The per-date charge ledger, grouped into the two questions people actually ask.
+     *
+     * `unpaid` — WHERE THE FIGURE COMES FROM, and specifically where its decimal comes from.
+     * It carries every line that cost a fraction of a day, lateness included, because "4.5
+     * unpaid days" beside a list of four absences leaves the .5 unexplained and the reader
+     * worse off than before: they can now see that the note does not add up.
+     *
+     * `late` — HOW THE MINUTES BECAME MONEY. Every late/undertime line, whether or not it was
+     * charged, so the minute counts printed above it can be traced to their days.
+     *
+     * A late line therefore appears in BOTH, deliberately. They answer different questions and
+     * each note says which one it is answering; suppressing it from one of them to avoid the
+     * repetition is what broke the first version.
+     *
+     * Grouped HERE rather than in each surface for the same reason `earningsBreakdown()` is:
+     * the React document and the PDF both render it, and two hand-maintained groupings would
+     * disagree the first time a charge kind was added.
+     *
+     * Returns null, not an empty array, when there is nothing to explain.
+     *
+     * @return array{unpaid: list<array<string, mixed>>, late: list<array<string, mixed>>}|null
+     */
+    private function attendanceLines(): ?array
+    {
+        $lines = $this->attendance_lines;
+
+        if (! is_array($lines) || $lines === []) {
+            return null;
+        }
+
+        $timeKinds = ['late', 'undertime'];
+        $unpaid = [];
+        $late = [];
+
+        foreach ($lines as $line) {
+            if (in_array($line['kind'] ?? null, $timeKinds, true)) {
+                $late[] = $line;
+            }
+
+            // Everything that cost days lands in `unpaid`, including lateness — that is what
+            // makes the group sum to the figure it explains.
+            if (round((float) ($line['days'] ?? 0), 4) > 0) {
+                $unpaid[] = $line;
+            }
+        }
+
+        if ($unpaid === [] && $late === []) {
+            return null;
+        }
+
+        return ['unpaid' => $unpaid, 'late' => $late];
+    }
+
+    /**
+     * The rule that turned late/undertime MINUTES into a fraction of a day (FIN-055).
+     *
+     * Read from the run's own `policy_snapshot`, never from live config: a payslip must keep
+     * explaining itself the same way after HR changes the tiers or the divisor, which is the
+     * whole reason the snapshot exists. Null on runs written before it did, and on payslips
+     * where nothing was charged — an explanation of a rule that took nothing is noise.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function deductionRule(): ?array
+    {
+        $policy = $this->payrollRun?->policy_snapshot['attendance_policy'] ?? null;
+
+        if (! is_array($policy)) {
+            return null;
+        }
+
+        if ((float) $this->late_deduction == 0.0 && (float) $this->undertime_deduction == 0.0) {
+            return null;
+        }
+
+        return [
+            'late_mode' => $policy['late_deduction_mode'] ?? 'none',
+            // Only meaningful under the tiered mode, and the thing that explains why 194 minutes
+            // and 72 minutes can cost exactly the same.
+            'late_tiers' => $policy['late_tiers'] ?? [],
+            'undertime_mode' => $policy['undertime_deduction_mode'] ?? 'none',
+            // The DOLE day the fraction is taken against — dailyRate ÷ this.
+            'hours_per_day' => (int) ($policy['hours_per_day_divisor'] ?? 8),
+            'rounding' => $policy['deduction_rounding'] ?? 'exact',
+            'block_minutes' => (int) ($policy['deduction_block_minutes'] ?? 60),
         ];
     }
 

@@ -726,6 +726,10 @@ class PayrollService
         $slip['undertime_deduction'] = round(($unpaidDetail?->undertimeDays ?? 0.0) * $dailyRate, 2);
         // Item 13b.13 — the per-N-lates penalty, itemised rather than hidden in unpaid_days.
         $slip['late_penalty_days'] = round($unpaidDetail?->latePenaltyDays ?? 0.0, 2);
+        // WHICH days those were, and why. Snapshot rather than derived — see the migration:
+        // an attendance correction after the run must not silently rewrite the explanation
+        // printed under a figure that has not moved.
+        $slip['attendance_lines'] = $unpaidDetail?->lines ?: null;
 
         return $slip;
     }
@@ -1300,9 +1304,34 @@ class PayrollService
         // caller put into `taxableMonthly` (Slice 10): base pay + all four premium lines, plus
         // any allowance above the de-minimis ceiling. Reimbursements are never in it.
         $annualTaxable = max(0, ($taxableMonthly - ($sssM + $phM + $pgM)) * 12);
-        $monthlyTax = $this->annualWithholdingTax($annualTaxable, $dist['cycle_end'] ?? null) / 12;
+        $annualTax = $this->annualWithholdingTax($annualTaxable, $dist['cycle_end'] ?? null);
+        $monthlyTax = $annualTax / 12;
         $tf = $this->timingFactor($dist['tax_timing'] ?? 'every', $dist['index'] ?? 0, $dist['count'] ?? 1);
         $wht = round($monthlyTax * $tf, 2);
+
+        // FIN-055 — the derivation behind that one figure, snapshot for the payslip.
+        //
+        // Withholding is the least checkable number on the document: it is computed on an
+        // ANNUALISED projection of a period, net of contributions, against a dated bracket table
+        // — four steps, none of them visible, ending in a peso amount the reader is expected to
+        // accept. Every intermediate is already in scope here, so recording them costs nothing
+        // and is the only place that can.
+        //
+        // Null when nothing was withheld: an empty derivation under a ₱0 line is noise.
+        $taxBasis = $wht == 0.0 ? null : [
+            'taxable_monthly' => round($taxableMonthly, 2),
+            'contributions_monthly' => round($sssM + $phM + $pgM, 2),
+            'annual_taxable' => round($annualTaxable, 2),
+            'annual_tax' => round($annualTax, 2),
+            // The band it landed in, from the table in force for THIS cycle — so a payslip keeps
+            // citing the brackets it was priced under after HR adds a new tax version.
+            'band' => $this->tax->bandFor($annualTaxable, $dist['cycle_end'] ?? null),
+            'monthly_tax' => round($monthlyTax, 2),
+            // How the month's tax was split across this period's cutoffs (1 = the whole month
+            // lands here; 0.5 = half on each of two).
+            'timing_factor' => round($tf, 4),
+            'timing' => $dist['tax_timing'] ?? 'every',
+        ];
         $taxAnnualisation = 0.0;
         // FIN-054 — populated only on the cycle that settles a tax year; null everywhere else, so
         // the payslip renders the settlement block exactly when it has the figures for it.
@@ -1445,6 +1474,8 @@ class PayrollService
             // FIN-054 — the year's figures behind that adjustment, so the payslip can show its
             // derivation instead of one unexplained (and often negative) tax line.
             'tax_annualisation_basis' => $taxAnnualisationBasis,
+            // FIN-055 — how `withholding_tax` was arrived at. Null when none was withheld.
+            'tax_basis' => $taxBasis,
             'taxable_pay' => $taxablePay,
             // Slice 11a — recurring benefit shares, with the breakdown so the payslip can
             // name them rather than show one opaque figure.
