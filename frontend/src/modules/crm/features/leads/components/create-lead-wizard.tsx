@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { Controller } from "react-hook-form";
-import { ChevronDown, X } from "lucide-react";
+import { SelectShell } from "@/modules/crm/components/shared/select-shell/select-shell";
+import { X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -61,19 +62,6 @@ const EMPTY_VALUES: CreateLeadValues = {
   assignedTo: "",
   notes: "",
 };
-
-/** Wraps a native <select> to overlay a chevron (selects use appearance-none). */
-function SelectShell({ children }: { children: ReactNode }) {
-  return (
-    <div className="relative">
-      {children}
-      <ChevronDown
-        className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-        aria-hidden
-      />
-    </div>
-  );
-}
 
 type Props = {
   open: boolean;

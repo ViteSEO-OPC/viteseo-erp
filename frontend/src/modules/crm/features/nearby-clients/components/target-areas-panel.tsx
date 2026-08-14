@@ -12,6 +12,7 @@ import {
   useDeleteServiceArea,
 } from "@/modules/crm/features/nearby-clients/hooks/use-service-areas";
 import type { ServiceAreaLevel } from "@/modules/crm/features/nearby-clients/types/nearby-clients-types";
+import { SelectShell } from "@/modules/crm/components/shared/select-shell/select-shell";
 
 const FIELD =
   "h-10 w-full rounded-lg border border-border bg-background px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
@@ -73,16 +74,18 @@ export function TargetAreasPanel({ className }: { className?: string }) {
           onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
           aria-label="Target area name"
         />
-        <select
-          className={cn(SELECT, "sm:w-40")}
-          value={level}
-          onChange={(e) => setLevel(e.target.value as ServiceAreaLevel)}
-          aria-label="Area level"
-        >
-          {LEVELS.map((l) => (
-            <option key={l.value} value={l.value}>{l.label}</option>
-          ))}
-        </select>
+        <SelectShell>
+          <select
+            className={cn(SELECT, "sm:w-40")}
+            value={level}
+            onChange={(e) => setLevel(e.target.value as ServiceAreaLevel)}
+            aria-label="Area level"
+          >
+            {LEVELS.map((l) => (
+              <option key={l.value} value={l.value}>{l.label}</option>
+            ))}
+          </select>
+        </SelectShell>
         <Button
           variant="default"
           size="default"
