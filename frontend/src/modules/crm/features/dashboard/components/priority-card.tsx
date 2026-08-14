@@ -16,6 +16,27 @@ const priorityBorder: Record<string, string> = {
   low: "border-dashboard-priority-low-border",
 };
 
+// Selected-filter emphasis, per tone. Both halves reuse the SAME `-border` token the resting card
+// is already outlined with, so the active state is the card's own hue turned up rather than a new
+// colour — and the ring and the shadow read as ONE treatment in that hue, not a coloured edge over
+// a grey drop shadow.
+//
+// The shadow is the same token at `/25`. Tailwind resolves that with `color-mix(… , transparent)`,
+// so it compounds with the token's own 50% alpha to land near 12% — a tint that colours the cast
+// shadow without becoming a glow. Left ungraded it would sit at the full 50% and read as a halo.
+//
+// A ring — not `border-2` — is what thickens the edge, and that is deliberate. The cards are grid
+// items whose row height is set by the tallest card's intrinsic height, so growing the border to
+// 2px would add 2px to every card in the row the moment a filter is applied. A ring is painted as
+// a box-shadow: it sits flush outside the existing 1px border, reads as a thicker edge, and takes
+// part in no layout at all — the card's box is byte-identical selected or not. This is the same
+// `shadow-md ring-2` emphasis idiom the Calendar board card already uses for its lifted state.
+const priorityActive: Record<string, string> = {
+  high: "ring-dashboard-priority-high-border shadow-dashboard-priority-high-border/25",
+  medium: "ring-dashboard-priority-medium-border shadow-dashboard-priority-medium-border/25",
+  low: "ring-dashboard-priority-low-border shadow-dashboard-priority-low-border/25",
+};
+
 type Props = {
   bucket: PriorityBucket;
   /**
@@ -25,9 +46,16 @@ type Props = {
    * Both render the identical card and link to the identical target.
    */
   action?: "navigate" | "filter";
+  /**
+   * True when THIS bucket is the list's current `website_status` filter, so the card shows the
+   * selected state. Owned by the caller: the Leads page derives it from the one URL-driven filter
+   * value the list already runs on, so there is no second source of truth for "what is selected".
+   * Defaults to false, which is why the Dashboard's `action="navigate"` cards are untouched.
+   */
+  isActive?: boolean;
 };
 
-export function PriorityCard({ bucket, action = "navigate" }: Props) {
+export function PriorityCard({ bucket, action = "navigate", isActive = false }: Props) {
   // Same card, same data, same target — only the affordance wording differs, because on the
   // Dashboard the click leaves for the workspace while on Leads it filters the list in place.
   const actionLabel = action === "filter" ? "Click to filter" : "View leads";
@@ -43,6 +71,10 @@ export function PriorityCard({ bucket, action = "navigate" }: Props) {
           "h-full shadow-card ring-0 transition-shadow duration-200 group-hover:shadow-md [--card-spacing:--spacing(6)]",
           "border",
           priorityBorder[bucket.tone],
+          // Selected filter: tone ring + a lifted shadow tinted to that same tone.
+          // `transition-shadow` above already covers both (a ring IS a box-shadow), so selecting a
+          // card eases in rather than snapping.
+          isActive && ["shadow-md ring-2", priorityActive[bucket.tone]],
         )}
       >
         <CardContent className="flex flex-1 flex-col">

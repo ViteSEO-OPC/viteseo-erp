@@ -260,7 +260,14 @@ export function LeadsPageLayout() {
             layout leads with the BD tabs instead, so the cards are not rendered for that audience;
             not rendering them also skips their /dashboard/priority-buckets request. The BD page is
             unchanged, and the Dashboard keeps its own copy of these cards either way. */}
-        {canAssign ? null : <LeadsKpiRow filters={summaryFilters} />}
+        {/* `listParams.website_status` is the validated, URL-driven value the list itself queries
+            on, so the selected card and the filtered table can never disagree. */}
+        {canAssign ? null : (
+          <LeadsKpiRow
+            filters={summaryFilters}
+            activeWebsiteStatus={listParams.website_status ?? ""}
+          />
+        )}
         <div className="flex flex-col gap-4">
           {/* Admin/Super Admin only — a BD never mounts this, so their Leads page is unchanged. */}
           {canAssign ? (

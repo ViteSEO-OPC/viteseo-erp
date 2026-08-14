@@ -14,9 +14,16 @@ import { usePriorityBuckets } from "@/modules/crm/features/dashboard/hooks/use-d
  */
 type Props = {
   filters: Record<string, string>;
+  /**
+   * The list's current `website_status` filter, or "" when none is applied — the bucket whose card
+   * renders as selected. It has to arrive separately because `filters` above is deliberately the
+   * summary filter set, which strips `website_status` (see the note on that prop); reading the
+   * selection from it would always come back empty.
+   */
+  activeWebsiteStatus?: string;
 };
 
-export function LeadsKpiRow({ filters }: Props) {
+export function LeadsKpiRow({ filters, activeWebsiteStatus = "" }: Props) {
   const { data: buckets, isLoading, isError } = usePriorityBuckets(filters);
 
   if (isLoading) return <PrioritySkeleton />;
@@ -27,7 +34,12 @@ export function LeadsKpiRow({ filters }: Props) {
     <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
       {buckets.map((bucket) => (
         // "Click to filter": on this page the card narrows the list instead of navigating away.
-        <PriorityCard key={bucket.websiteStatus} bucket={bucket} action="filter" />
+        <PriorityCard
+          key={bucket.websiteStatus}
+          bucket={bucket}
+          action="filter"
+          isActive={bucket.websiteStatus === activeWebsiteStatus}
+        />
       ))}
     </div>
   );
