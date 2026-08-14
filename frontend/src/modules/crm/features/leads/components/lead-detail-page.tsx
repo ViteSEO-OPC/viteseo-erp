@@ -139,6 +139,8 @@ export function LeadDetailPage() {
               statusPending={updateLead.isPending}
               onWon={() => setWonOpen(true)}
               onLost={() => setLostOpen(true)}
+              wonDeal={lead.deal}
+              isLost={lead.lost}
             />
             <LeadTimelinePanel
               leadId={params.id}
@@ -191,13 +193,18 @@ export function LeadDetailPage() {
         leadId={params.id}
         leadName={lead.business}
         defaultAmount={lead.amount}
+        alreadyWon={!!lead.deal}
       />
 
+      {/* Both read the raw outcome flags, never `lead.outcome` — that one resolves Won first, so a
+          lead marked both would report "won" and the Lost dialog would never see its own state. */}
       <LostConfirmDialog
         open={lostOpen}
         onOpenChange={setLostOpen}
         leadId={params.id}
         leadName={lead.business}
+        alreadyLost={lead.lost}
+        alreadyWon={!!lead.deal}
       />
 
       <ConfirmDialog

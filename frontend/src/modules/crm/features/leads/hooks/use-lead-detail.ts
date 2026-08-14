@@ -60,6 +60,9 @@ function mapToLeadDetail(api: LeadApiDetail): LeadDetail {
     score: api.score,
     amount: api.amount,
     deal: api.deal ?? null,
+    // Kept alongside `outcome` on purpose: the outcome below collapses to "won" for a lead that is
+    // both, so only this raw flag can answer "is this lead already lost?".
+    lost: api.lost ?? false,
     // Won takes precedence over Lost: the Deal is a binding conversion record, a `lead.lost` activity
     // is an append-only note, and nothing stops a lead that was written off from later being signed.
     outcome: api.deal ? "won" : api.lost ? "lost" : null,

@@ -26,6 +26,10 @@ export type LeadDetail = LeadRow & {
   // The Won conversion, or null when this lead has no Deal. `deal !== null` IS "is won" — there is
   // no separate flag, so the badge and the disabled Won button can never disagree with the Deal.
   deal: LeadDeal | null;
+  // Whether a `lead.lost` Activity exists. Historical, never a stored state: Lost is append-only
+  // (no column, no status change), so this is monotonic — once true it stays true. Distinct from
+  // `outcome` below, which resolves Won FIRST and so reports "won" for a lead that is both.
+  lost: boolean;
   // Resolved sales outcome for presentation (the Lead Score ring). Derived, never stored: Won comes
   // from the Deal. Null while the lead is still active/unresolved.
   outcome: LeadOutcome | null;

@@ -12,7 +12,8 @@ import {
 } from "@/modules/crm/components/ui/dialog";
 import { Button } from "@/modules/crm/components/ui/button";
 import { FormField } from "@/modules/crm/components/forms/form-field/form-field";
-import { useMarkWon } from "@/modules/crm/features/leads/hooks/use-lead-outcome";
+import { notify as toast } from "@/core/lib/notify";
+import { ALREADY_WON_MESSAGE, useMarkWon } from "@/modules/crm/features/leads/hooks/use-lead-outcome";
 
 const FIELD =
   "h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-400/30";
@@ -24,6 +25,11 @@ type Props = {
   leadName: string;
   /** Estimated Deal Value (leads.amount) — pre-fills the editable deal amount. */
   defaultAmount: number | null;
+  /**
+   * The lead already has a Deal. Unlike Lost, confirming does NOT submit: one active Deal per lead
+   * is a financial invariant (Revenue = Σ deals.amount), and the backend would 409 anyway.
+   */
+  alreadyWon: boolean;
 };
 
 /**
@@ -31,7 +37,14 @@ type Props = {
  * is editable before confirming. Confirming creates a Deal (backend); Revenue/Conversion are sourced
  * only from Deals and update server-side.
  */
-export function WonConfirmDialog({ open, onOpenChange, leadId, leadName, defaultAmount }: Props) {
+export function WonConfirmDialog({
+  open,
+  onOpenChange,
+  leadId,
+  leadName,
+  defaultAmount,
+  alreadyWon,
+}: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent showCloseButton={false} className="flex w-full flex-col gap-0 p-0 sm:max-w-[440px]">
@@ -40,6 +53,7 @@ export function WonConfirmDialog({ open, onOpenChange, leadId, leadName, default
             leadId={leadId}
             leadName={leadName}
             defaultAmount={defaultAmount}
+            alreadyWon={alreadyWon}
             onClose={() => onOpenChange(false)}
           />
         )}
@@ -52,17 +66,26 @@ function WonForm({
   leadId,
   leadName,
   defaultAmount,
+  alreadyWon,
   onClose,
 }: {
   leadId: string;
   leadName: string;
   defaultAmount: number | null;
+  alreadyWon: boolean;
   onClose: () => void;
 }) {
   const markWon = useMarkWon();
   const [amount, setAmount] = useState(defaultAmount != null ? String(defaultAmount) : "");
 
   function handleConfirm() {
+    // No second Deal can be created, so skip the round-trip that would only come back 409.
+    // useMarkWon keeps that 409 branch as the backstop for what this cached flag cannot see.
+    if (alreadyWon) {
+      toast.info(ALREADY_WON_MESSAGE);
+      onClose();
+      return;
+    }
     const parsed = amount.trim() === "" ? null : Number(amount);
     markWon.mutate({ id: leadId, amount: parsed }, { onSuccess: onClose });
   }
@@ -89,6 +112,13 @@ function WonForm({
       </DialogHeader>
 
       <div className="px-6 py-4">
+        {/* Unlike Lost, this one IS a dead end — one Deal per lead — so it states the outcome of
+            confirming rather than merely noting the existing state. */}
+        {alreadyWon ? (
+          <p className="mb-3 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+            This lead already has a deal. No second deal will be created.
+          </p>
+        ) : null}
         <FormField label="Deal Amount (₱)">
           <input
             type="number"
