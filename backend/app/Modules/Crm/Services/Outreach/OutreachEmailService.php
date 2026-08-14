@@ -10,6 +10,9 @@ use App\Models\User;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\EmailMessage;
 use App\Modules\Crm\Services\Mail\SentEmail;
+use App\Support\Mail\Module;
+use App\Support\Mail\ModuleSender;
+use App\Support\Mail\ModuleSenderResolver;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -24,7 +27,23 @@ use Illuminate\Validation\ValidationException;
  */
 class OutreachEmailService
 {
-    public function __construct(private readonly EmailProvider $provider) {}
+    public function __construct(
+        private readonly EmailProvider $provider,
+        private readonly ModuleSenderResolver $senders,
+    ) {}
+
+    /**
+     * The CRM's outbound identity, from the shared registry (config/mail.php
+     * `module_senders.crm`). Resolved per call rather than cached on the instance so a
+     * config change takes effect without a rebind.
+     *
+     * Historically this was read straight from `outreach.from`; that key is deprecated
+     * and OUTREACH_FROM_* now feeds the registry instead, so the address is unchanged.
+     */
+    private function sender(): ModuleSender
+    {
+        return $this->senders->for(Module::Crm);
+    }
 
     /**
      * @throws ValidationException when no recipient can be resolved
@@ -39,12 +58,14 @@ class OutreachEmailService
         // send, so a provider failure is recorded as `failed` history (with the reason) instead of
         // vanishing on a thrown exception. This stays fully synchronous — no queue, no async — and
         // reuses the SAME single outbound pipeline (sendExisting) drafts and scheduled sends funnel through.
+        $from = $this->sender();
+
         $email = Email::create([
             'lead_id' => $lead->id,
             'user_id' => $sender->id,
             'direction' => 'outbound',
-            'from_email' => (string) config('outreach.from.address'),
-            'from_name' => (string) config('outreach.from.name'),
+            'from_email' => $from->address,
+            'from_name' => $from->name,
             'to_email' => $toEmail,
             'to_name' => $lead->contact_name,
             'subject' => $subject,
@@ -111,8 +132,8 @@ class OutreachEmailService
 
         $email = DB::transaction(function () use ($email, $lead, $sender, $subject, $toEmail, $sent): Email {
             $email->update([
-                'from_email' => (string) config('outreach.from.address'),
-                'from_name' => (string) config('outreach.from.name'),
+                'from_email' => $this->sender()->address,
+                'from_name' => $this->sender()->name,
                 'to_email' => $toEmail,
                 'to_name' => $lead->contact_name,
                 'provider' => $sent->provider,
@@ -160,13 +181,15 @@ class OutreachEmailService
     /** Hand the message to the configured transport (provider-agnostic). */
     private function dispatch(Lead $lead, string $toEmail, string $subject, string $body): SentEmail
     {
+        $from = $this->sender();
+
         return $this->provider->send(new EmailMessage(
             toEmail: $toEmail,
             toName: $lead->contact_name,
             subject: $subject,
             body: $body,
-            fromEmail: (string) config('outreach.from.address'),
-            fromName: (string) config('outreach.from.name'),
+            fromEmail: $from->address,
+            fromName: $from->name,
         ));
     }
 

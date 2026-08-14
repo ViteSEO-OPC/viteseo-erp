@@ -17,6 +17,9 @@ import {
   useStatuses,
 } from "@/modules/projects/hooks/use-statuses";
 import type { Project, ProjectStatus } from "@/modules/projects/types/project";
+import {
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 
 const PRESET_COLORS = [
   '#6366f1',
@@ -137,7 +140,7 @@ export function StatusManagerModal({
               Statuses
             </p>
             {statusesQuery.isLoading ? (
-              <p className="text-sm text-ink-soft">Loading…</p>
+              <SkeletonList rows={3} withAvatar={false} />
             ) : (
               <ul className="space-y-1.5">
                 {statuses.map((s) => (

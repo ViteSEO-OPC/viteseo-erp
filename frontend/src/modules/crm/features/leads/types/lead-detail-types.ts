@@ -1,6 +1,18 @@
 import type { LeadRow, PriorityLevel, LeadStatus, ActivityType } from "@/modules/crm/features/dashboard/types/dashboard-types";
+import type { LeadOutcome } from "@/modules/crm/features/leads/components/lead-score-ring";
 
 export type { PriorityLevel, LeadStatus };
+
+/**
+ * The lead's Won conversion, projected read-only from its Deal (GET /leads/{id}). The Deal remains
+ * the single source of truth for conversion and revenue — nothing here is editable, and `amount` is
+ * REALIZED revenue, distinct from `LeadDetail.amount` (the prospect-stage estimate).
+ */
+export type LeadDeal = {
+  id: string;
+  amount: number;
+  convertedAt: string | null;
+};
 
 export type LeadDetail = LeadRow & {
   contact: string;
@@ -11,6 +23,16 @@ export type LeadDetail = LeadRow & {
   score: number;
   // Estimated Deal Value (prospect-stage) — NOT revenue. Null until set.
   amount: number | null;
+  // The Won conversion, or null when this lead has no Deal. `deal !== null` IS "is won" — there is
+  // no separate flag, so the badge and the disabled Won button can never disagree with the Deal.
+  deal: LeadDeal | null;
+  // Whether a `lead.lost` Activity exists. Historical, never a stored state: Lost is append-only
+  // (no column, no status change), so this is monotonic — once true it stays true. Distinct from
+  // `outcome` below, which resolves Won FIRST and so reports "won" for a lead that is both.
+  lost: boolean;
+  // Resolved sales outcome for presentation (the Lead Score ring). Derived, never stored: Won comes
+  // from the Deal. Null while the lead is still active/unresolved.
+  outcome: LeadOutcome | null;
   assignedTo: { id: string; name: string } | null;
   // Digital Presence (social) + Marketplace Presence (e-commerce) + Website Domain. All nullable.
   // Surfaced on Lead Details only when a value exists; ready for clickable links / future analytics.

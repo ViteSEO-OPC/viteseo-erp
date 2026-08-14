@@ -17,16 +17,30 @@ export const projectKeys = {
   workloads: ["projects", "workloads"] as const,
   workspaces: ["projects", "workspaces"] as const,
   workspace: (id: string) => ["projects", "workspaces", id] as const,
+  groupsRoot: ["projects", "groups"] as const,
   groups: (projectId?: string) =>
     ["projects", "groups", projectId ?? "all"] as const,
   group: (id: string) => ["projects", "groups", "detail", id] as const,
+  // The project list and a single project's detail. Both sit under this root,
+  // and NOTHING else does — boards and statuses used to, which made
+  // `["projects","projects"]` (still the shorthand for "the project list
+  // changed") quietly refetch every board and status list in the cache.
+  projectsRoot: ["projects", "projects"] as const,
   projects: (workspaceId?: string) =>
-    ["projects", "projects", workspaceId ?? "all"] as const,
+    ["projects", "projects", "list", workspaceId ?? "all"] as const,
   project: (id: string) => ["projects", "projects", "detail", id] as const,
-  statuses: (projectId: string) =>
-    ["projects", "projects", projectId, "statuses"] as const,
-  tasks: (projectId: string) =>
-    ["projects", "projects", projectId, "tasks"] as const,
+  // Boards and statuses get their own roots so they can be invalidated — or
+  // left alone — independently of the project list.
+  statusesRoot: ["projects", "statuses"] as const,
+  statuses: (projectId: string) => ["projects", "statuses", projectId] as const,
+  boardsRoot: ["projects", "boards"] as const,
+  tasks: (projectId: string) => ["projects", "boards", projectId] as const,
+  // A task's detail and everything hanging off it (sub-tasks, comments, links,
+  // activity) share this prefix, so `task(id)` refreshes the whole bundle. The
+  // ROOT, by contrast, is every task in the cache — reach for
+  // invalidateProjectTasks() in lib/cache-scope.ts instead where the change is
+  // confined to one project, which is nearly always.
+  tasksRoot: ["projects", "tasks"] as const,
   task: (id: string) => ["projects", "tasks", id] as const,
   subtasks: (taskId: string) =>
     ["projects", "tasks", taskId, "subtasks"] as const,
@@ -60,6 +74,7 @@ export const archiveKeys = {
 
 /** Workload Analysis. */
 export const workloadKeys = {
+  root: ["projects", "workload"] as const,
   analysis: ["projects", "workload", "analysis"] as const,
   tasks: ["projects", "workload", "tasks"] as const,
 };

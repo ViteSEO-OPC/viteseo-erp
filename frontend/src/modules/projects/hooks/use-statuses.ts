@@ -15,12 +15,16 @@ import {
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import type { ProjectStatus } from "@/modules/projects/types/project";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
+import { invalidateProjectTasks } from "@/modules/projects/lib/cache-scope";
 
 export function useStatuses(projectId: string) {
   return useQuery({
     queryKey: projectKeys.statuses(projectId),
     queryFn: () => getStatuses(projectId),
     enabled: !!projectId,
+    // Kept live by the project channel's Status* handlers.
+    staleTime: STALE.standard,
   });
 }
 
@@ -60,7 +64,7 @@ export function useDeleteStatus(projectId: string) {
       qc.invalidateQueries({ queryKey: projectKeys.statuses(projectId) });
       // Deleting a status falls its tasks/subtasks back to "no status".
       qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) });
-      qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+      invalidateProjectTasks(qc, projectId);
     },
   });
 }
@@ -74,6 +78,9 @@ export function useWorkspaceStatuses(
       queryKey: projectKeys.statuses(pid),
       queryFn: () => getStatuses(pid),
       enabled: !!pid,
+      // One query PER PROJECT: a workspace of twenty projects refetched twenty
+      // status lists on every mount and every window focus.
+      staleTime: STALE.standard,
     })),
   });
 

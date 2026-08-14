@@ -10,6 +10,9 @@ import {
 } from "@/modules/projects/components/dashboard-shared";
 import { useClaimableTasks, useClaimTask } from "@/modules/projects/hooks/use-tasks";
 import { useOpenTask } from "@/modules/projects/hooks/use-task-modal";
+import {
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 
 export interface ClaimableTasksPanelProps {
   /** Scope to one project. Omit for the whole pool (every project). */
@@ -44,7 +47,7 @@ export function ClaimableTasksPanel({
   const tasks = data?.data ?? [];
 
   if (isLoading) {
-    return <p className={`text-sm text-ink-soft ${className}`}>Loading…</p>;
+    return <SkeletonList rows={3} withAvatar={false} className={className} />;
   }
 
   if (isError) {

@@ -52,6 +52,9 @@ import {
   type ViewKey,
   type WorkItem,
 } from "@/modules/projects/components/workspace-view-shared";
+import {
+  SkeletonBoard,
+} from "@/modules/projects/components/skeletons";
 
 export interface WorkspaceViewsProps {
   projects: Project[];
@@ -410,7 +413,7 @@ function WorkspaceViewsInner({
       <div className="mt-5 flex items-start gap-5">
         <div className="min-w-0 flex-1">
         {isLoading ? (
-          <p className="text-ink-soft">Loading tasks…</p>
+          <SkeletonBoard />
         ) : sorted.length === 0 ? (
           <Card className="p-10 text-center">
             <p className="text-lg font-bold text-ink">
@@ -485,7 +488,7 @@ function WorkspaceViewsInner({
 
 export function WorkspaceViews(props: WorkspaceViewsProps): React.ReactElement {
   return (
-    <Suspense fallback={<p className="mt-6 text-ink-soft">Loading tasks…</p>}>
+    <Suspense fallback={<SkeletonBoard className="mt-6" />}>
       <WorkspaceViewsInner {...props} />
     </Suspense>
   );

@@ -15,6 +15,7 @@ import {
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import type { Subtask } from "@/modules/projects/types/subtask";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 /** Fetch and merge subtasks across many tasks (for workspace-level views). */
 export function useWorkspaceSubtasks(taskIds: string[]): {
@@ -26,6 +27,9 @@ export function useWorkspaceSubtasks(taskIds: string[]): {
       queryKey: projectKeys.subtasks(tid),
       queryFn: () => getSubtasks(tid),
       enabled: !!tid,
+      // One query PER TASK on the workspace board — the widest fan-out in the
+      // module, and it was refetching all of them on every focus.
+      staleTime: STALE.standard,
     })),
   });
 
@@ -39,6 +43,8 @@ export function useSubtasks(taskId: string) {
     queryKey: projectKeys.subtasks(taskId),
     queryFn: () => getSubtasks(taskId),
     enabled: !!taskId,
+    // Kept live by the project channel's SubtaskUpdated handler.
+    staleTime: STALE.standard,
   });
 }
 

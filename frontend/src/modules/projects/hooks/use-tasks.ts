@@ -21,12 +21,16 @@ import {
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import type { CreateTaskPayload, Task } from "@/modules/projects/types/task";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 export function useTasks(projectId: string) {
   return useQuery({
     queryKey: projectKeys.tasks(projectId),
     queryFn: () => getTasks(projectId),
     enabled: !!projectId,
+    // The board is patched in place by the project channel's Task*/Status*
+    // handlers, so refetching is a backstop rather than the delivery path.
+    staleTime: STALE.standard,
   });
 }
 
@@ -35,6 +39,7 @@ export function useTask(id: string) {
     queryKey: projectKeys.task(id),
     queryFn: () => getTask(id),
     enabled: !!id,
+    staleTime: STALE.standard,
   });
 }
 
@@ -48,6 +53,7 @@ export function useWorkspaceTasks(projectIds: string[]): {
       queryKey: projectKeys.tasks(pid),
       queryFn: () => getTasks(pid),
       enabled: !!pid,
+      staleTime: STALE.standard,
     })),
   });
 
@@ -60,8 +66,7 @@ export function useCreateTask(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     onError: notifyMutationError("Couldn't create that task"),
-    mutationFn: (payload: CreateTaskPayload) =>
-      createTask(projectId, payload),
+    mutationFn: (payload: CreateTaskPayload) => createTask(projectId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.tasks(projectId) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
@@ -163,8 +168,9 @@ export function useClaimableTasks(
 /**
  * Take an open task.
  *
- * Claiming puts you on the project, so this invalidates the project list too —
- * boards, pickers and "my projects" counts all read from it.
+ * Claiming puts you on the project, so the project list changes too — pickers
+ * and "my projects" counts read from it. Only the gaining project's board is
+ * refreshed, not every board in the cache.
  */
 export function useClaimTask() {
   const qc = useQueryClient();
@@ -172,8 +178,10 @@ export function useClaimTask() {
     mutationFn: (id: string) => claimTask(id),
     onSuccess: (task) => {
       qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
-      qc.invalidateQueries({ queryKey: ["projects", "projects"] });
-      qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+      // Joining the project changes the project list, not every board on it.
+      qc.invalidateQueries({ queryKey: projectKeys.projectsRoot });
+      // The board that gains the task, and the task's own bundle.
+      qc.invalidateQueries({ queryKey: projectKeys.tasks(task.project_id) });
       qc.invalidateQueries({ queryKey: projectKeys.task(task.id) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
       qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
@@ -189,7 +197,8 @@ export function useReleaseTask() {
     mutationFn: (id: string) => releaseTask(id),
     onSuccess: (task) => {
       qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
-      qc.invalidateQueries({ queryKey: ["projects", "tasks"] });
+      // The board it leaves, and the task's own bundle.
+      qc.invalidateQueries({ queryKey: projectKeys.tasks(task.project_id) });
       qc.invalidateQueries({ queryKey: projectKeys.task(task.id) });
       qc.invalidateQueries({ queryKey: projectKeys.workloads });
       qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });

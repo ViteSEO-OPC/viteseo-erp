@@ -1,5 +1,3 @@
-import type { WebsiteStatus } from "@/modules/crm/features/leads/types/lead-types";
-
 export type DeltaDirection = "up" | "down" | "flat";
 export type DeltaTone = "positive" | "warning" | "neutral";
 
@@ -26,18 +24,26 @@ export type KpiStat = {
 
 export type PriorityLevel = "high" | "medium" | "low";
 
-// Sprint 6: the overview cards segment leads by website_status. `tone` is the existing
-// visual slot (high/medium/low colour + chip) preserved unchanged so the UI is identical;
-// `websiteStatus` drives the count, copy, and drill-down filter. Type name left as-is for
-// the demo sprint (rename deferred with the endpoint/hook/query-key refactor).
+/**
+ * A Lead Priority Overview card.
+ *
+ * Segments on `leads.priority` — the canonical, human-set business priority the Leads table
+ * renders in its Priority column — so a card's chip and its drill-down filter are the SAME field
+ * and can never contradict each other. `priority` drives the count, the copy, the colour/chip and
+ * the `?priority=` drill-down; there is no separate `tone`, because the tone IS the priority.
+ *
+ * Deliberately NOT `website_status` (no-website / needs-redesign / has-website). That column is a
+ * machine-derived assessment of web presence written by the enrichment pipeline, not a priority,
+ * and the two are independent by design (see PDR-001). It previously fed these cards, which is why
+ * a card chipped "High Priority" could list leads whose actual priority was Medium.
+ */
 export type PriorityBucket = {
-  websiteStatus: WebsiteStatus;
-  tone: PriorityLevel;
+  priority: PriorityLevel;
   count: number;
   title: string;
   description: string;
   avgScore: number;
-  pipelinePct: number;
+  totalPct: number;
 };
 
 export type LeadStatus =
@@ -55,7 +61,9 @@ export type LeadRow = {
   status: LeadStatus;
 };
 
-export type ActivityType = "ai" | "email" | "call" | "auth" | "note";
+// "won" is the sales-outcome tile (`lead.won`): a converted lead is the one activity a BD scans a
+// timeline for, and it previously fell through to the generic "ai" glyph.
+export type ActivityType = "ai" | "email" | "call" | "auth" | "note" | "won";
 
 export type ActivityItem = {
   id: string;

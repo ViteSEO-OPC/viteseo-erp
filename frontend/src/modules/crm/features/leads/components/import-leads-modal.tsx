@@ -23,7 +23,7 @@ import { FormField } from "@/modules/crm/components/forms/form-field/form-field"
 import { RelationshipSelect } from "@/modules/crm/components/shared/relationship-select/relationship-select";
 import { useBdUsers } from "@/modules/crm/hooks/use-bd-users";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
-import { useImportLeads } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
+import { useImportLeads, useImportJobStatus } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import type { KpiStat } from "@/modules/crm/features/dashboard/types/dashboard-types";
 import type { ImportResult, ImportSummary } from "@/modules/crm/features/leads/types/lead-types";
 
@@ -46,7 +46,9 @@ function buildStats(summary: ImportSummary): KpiStat[] {
 }
 
 /** Upload → analysis → commit. Every transition is driven by a real event, never a timer. */
-type ImportPhase = "empty" | "uploading" | "analyzing" | "preview" | "importing";
+// `converting` is the ONLY addition: a large legacy .xls is normalized to .xlsx on the queue
+// before its preview exists. Every other format skips straight from `analyzing` to `preview`.
+type ImportPhase = "empty" | "uploading" | "analyzing" | "converting" | "preview" | "importing";
 
 /**
  * Derive the stage list from what has actually happened.
@@ -131,25 +133,30 @@ type Props = {
 export function ImportLeadsModal({ open, onOpenChange }: Props) {
   // Opens on the empty (dropzone) state per Import-Leads-Design-Specification §8 / §8.1
   // ("on open, focus the dialog/dropzone"; focus order step 2 = Dropzone).
-  const [step, setStep] = useState<ImportPhase>("empty");
+  const [phase, setPhase] = useState<ImportPhase>("empty");
   const [progress, setProgress] = useState(0);
   const [file, setFile] = useState<File | null>(null);
-  const [result, setResult] = useState<ImportResult | null>(null);
+  const [localResult, setResult] = useState<ImportResult | null>(null);
   // Owning BD for the imported leads. Admin/SA pick it; a BD's own import auto-assigns to
   // themselves (backend), so the selector is hidden for BDs.
   const [assignedTo, setAssignedTo] = useState<string>("");
+  // Set only when the server answers 202 (large .xls routed to the queue). While it is set the
+  // status hook polls; the commit then sends this id instead of re-uploading the workbook.
+  const [jobId, setJobId] = useState<string | null>(null);
 
   const { hasMinRole } = usePermissions();
   const isManager = hasMinRole("crm_admin");
   const importLeads = useImportLeads();
+  const jobStatus = useImportJobStatus(jobId);
   // Only Admin/SA need the BD list (BDs lack users.view — avoid a 403).
   const { bdUsers, isLoading: bdLoading } = useBdUsers(isManager);
   const abortRef = useRef<AbortController | null>(null);
 
   const resetState = () => {
     abortRef.current?.abort();
+    setJobId(null);
     abortRef.current = null;
-    setStep("empty");
+    setPhase("empty");
     setProgress(0);
     setFile(null);
     setResult(null);
@@ -164,7 +171,7 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
   const handleFile = async (selected: File) => {
     setFile(selected);
     setProgress(0);
-    setStep("uploading");
+    setPhase("uploading");
     const controller = new AbortController();
     abortRef.current = controller;
     try {
@@ -176,17 +183,24 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
           setProgress(percent);
           // Every byte is sent, so the server is now doing the work. A real transition — the phase
           // flips on the transfer completing, not on a timer.
-          if (percent >= 100) setStep("analyzing");
+          if (percent >= 100) setPhase("analyzing");
         },
         signal: controller.signal,
       });
-      setResult(res);
-      setStep("preview");
+      if ("queued" in res) {
+        // Too large to convert inside the request. The job id is now the handle for both the
+        // preview (polled below) and the eventual commit — the workbook is converted only once.
+        setJobId(res.jobId);
+        setPhase("converting");
+      } else {
+        setResult(res);
+        setPhase("preview");
+      }
     } catch {
       // Cancelled or failed (error toast handled in the hook). Only reset if this
       // upload is still the active one (a cancel already resets and clears the ref).
       if (abortRef.current === controller) {
-        setStep("empty");
+        setPhase("empty");
         setFile(null);
       }
     } finally {
@@ -197,22 +211,36 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
   const handleCancelUpload = () => {
     abortRef.current?.abort();
     abortRef.current = null;
-    setStep("empty");
+    setPhase("empty");
     setProgress(0);
     setFile(null);
   };
 
   const handleImport = async () => {
     if (!file) return;
-    setStep("importing");
+    setPhase("importing");
     try {
-      await importLeads.mutateAsync({ file, dryRun: false, assignedTo: assignedTo || undefined });
+      // A queued .xls commits by id — the server still holds the converted copy, so a 10 MB
+      // workbook is never uploaded or converted twice. Everything else re-sends the file as before.
+      await importLeads.mutateAsync(
+        jobId
+          ? { jobId, dryRun: false, assignedTo: assignedTo || undefined }
+          : { file, dryRun: false, assignedTo: assignedTo || undefined },
+      );
       handleOpenChange(false); // success toast handled in the hook
     } catch {
       // Commit failed; toast shown by the hook. Return to preview so the user can retry.
-      setStep("preview");
+      setPhase("preview");
     }
   };
+
+  // DERIVED, not synced. A queued .xls has no local `result` until its conversion finishes, so the
+  // polled preview is folded in here and the existing preview/commit JSX below renders unchanged.
+  // Deriving avoids a setState-in-effect (React 19 lint) and keeps one source of truth per value.
+  const queuedResult = jobStatus.data?.status === "ready" ? jobStatus.data.result : null;
+  const jobFailed = jobStatus.data?.status === "failed";
+  const result = localResult ?? queuedResult;
+  const step: ImportPhase = phase === "converting" && queuedResult ? "preview" : phase;
 
   const validCount = result?.summary.valid ?? 0;
   const stages = buildStages(step, progress, result);
@@ -291,6 +319,33 @@ export function ImportLeadsModal({ open, onOpenChange }: Props) {
                   busy={step === "analyzing"}
                 />
                 {showStages && <ImportStages stages={stages} />}
+              </>
+            )}
+
+            {/* Large legacy .xls only: converted on the queue because a workbook this size cannot
+                be normalized inside a request. Same visual language as the other phases — no new
+                surface, and a failure is shown here rather than silently resetting the dialog. */}
+            {step === "converting" && file && (
+              <>
+                <UploadProgressItem
+                  filename={file.name}
+                  size={formatBytes(file.size)}
+                  percent={100}
+                  status={
+                    jobFailed
+                      ? "Conversion failed"
+                      : "Large .xls — converting on the server…"
+                  }
+                  busy={!jobFailed}
+                />
+                {jobFailed && (
+                  <AlertBanner
+                    message={
+                      jobStatus.data?.error ??
+                      "The Excel file could not be processed. Please re-save it as .xlsx and try again."
+                    }
+                  />
+                )}
               </>
             )}
 

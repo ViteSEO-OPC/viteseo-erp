@@ -18,7 +18,15 @@ class ImportLeadsRequest extends FormRequest
     {
         return [
             // 10 MB cap (10240 KB) matches the documented import payload-size ceiling.
-            'file' => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:10240'],
+            // `.xls` shares the SAME 10 MB ceiling as every other format — it is never the
+            // lesser-capability option. A large one is routed to the queue, not rejected.
+            // `required_without:job_id`: a commit that references an already-converted job carries
+            // no file, because re-uploading a 10 MB workbook to convert it twice is the thing the
+            // job id exists to avoid.
+            'file' => ['required_without:job_id', 'file', 'mimes:csv,txt,xls,xlsx', 'max:10240'],
+            // Opaque id of a completed queued conversion, owned by the caller. Ownership, readiness
+            // and single-use are enforced in XlsImportJobStore, never here.
+            'job_id' => ['sometimes', 'string', 'uuid'],
             // Default true = Preview (no writes). Client sends false to commit the import.
             // Accept the string tokens a multipart FormData sends; interpreted via boolean() below.
             'dry_run' => ['sometimes', Rule::in(['true', 'false', '1', '0'])],

@@ -4,6 +4,9 @@ import type { ReactNode } from "react";
 import { Card } from "@/core/ui";
 import type { Paginated } from "@/core/types";
 import { Pagination } from "@/modules/projects/components/team-shared";
+import {
+  SkeletonTableRows,
+} from "@/modules/projects/components/skeletons";
 
 /**
  * The management-surface table shell: striped rows, a trailing action column and
@@ -143,9 +146,14 @@ export function AdminTable<T extends { id: string }>({
                 <tr>
                   <td
                     colSpan={columns.length + (selection ? 2 : 1)}
-                    className="py-10 text-center text-ink-soft"
+                    className="p-0"
+                    aria-busy="true"
+                    aria-label={`Loading ${label}`}
                   >
-                    Loading {label}...
+                    <SkeletonTableRows
+                      rows={5}
+                      columns={columns.length + (selection ? 1 : 0)}
+                    />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (

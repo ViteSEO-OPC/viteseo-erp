@@ -7,8 +7,10 @@ import {
   SelectItem,
 } from "@/modules/crm/components/ui/select";
 import { StatusChip } from "@/modules/crm/components/shared/status-badge/status-chip";
+import { LeadOutcomeChip } from "@/modules/crm/features/leads/components/lead-outcome-chip";
+import { formatDateLong } from "@/modules/crm/lib/formatters";
 import type { LeadStatus } from "@/modules/crm/features/dashboard/types/dashboard-types";
-import type { QuickAction, QuickActionKey } from "@/modules/crm/features/leads/types/lead-detail-types";
+import type { LeadDeal, QuickAction, QuickActionKey } from "@/modules/crm/features/leads/types/lead-detail-types";
 
 const iconMap: Record<string, typeof Mail> = { Mail, Calendar };
 
@@ -39,6 +41,17 @@ type Props = {
   onWon: () => void;
   onLost: () => void;
   outcomePending?: boolean;
+  /**
+   * The lead's Deal, or null when it has none. `wonDeal !== null` IS "is won" — Won is nothing but
+   * the Deal record. Supplies the realized amount and conversion date shown under the chips.
+   */
+  wonDeal: LeadDeal | null;
+  /**
+   * Whether a `lead.lost` Activity exists. Deliberately INDEPENDENT of `wonDeal` rather than a
+   * single resolved outcome: a lead can hold both, and collapsing them (as the header badge does,
+   * Won first) is what hides an existing Lost state on the very card that offers the Lose button.
+   */
+  isLost: boolean;
 };
 
 export function QuickActionsCard({
@@ -50,6 +63,8 @@ export function QuickActionsCard({
   onWon,
   onLost,
   outcomePending,
+  wonDeal,
+  isLost,
 }: Props) {
   return (
     <div className="rounded-2xl border border-border bg-card p-6 shadow-card">
@@ -105,7 +120,33 @@ export function QuickActionsCard({
         })}
       </div>
 
-      {/* Sales outcomes — Won creates a Deal; Lose records a lost opportunity (no Deal). */}
+      {/* Recorded outcome. Rendered ONLY once there is one, so a lead with no outcome keeps the
+          approved card unchanged. Sibling label styling to Lead Status above is the point: the two
+          are separate concepts, and Won/Lost never write the status — a lead can read "New" here
+          and still be both Won and Lost. Both chips show when both apply; no ordering is implied
+          (the payload carries the Deal's date but no timestamp for the loss). */}
+      {wonDeal || isLost ? (
+        <div className="mt-4">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+            Outcome
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {wonDeal ? <LeadOutcomeChip outcome="won" /> : null}
+            {isLost ? <LeadOutcomeChip outcome="lost" /> : null}
+          </div>
+          {wonDeal ? (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {/* Realized revenue, formatted like the sibling Amount field on the Summary card. */}
+              Deal ₱{wonDeal.amount.toLocaleString("en-PH")}
+              {wonDeal.convertedAt ? ` · ${formatDateLong(wonDeal.convertedAt)}` : null}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Sales outcomes — Won creates a Deal; Lose records a lost opportunity (no Deal). Both stay
+          enabled on a lead that already carries the outcome: Won is guarded server-side (one Deal
+          per lead) and a repeat Lost is a legitimate append-only audit entry. */}
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button
           type="button"

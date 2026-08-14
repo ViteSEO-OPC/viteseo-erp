@@ -11,7 +11,10 @@ import type {
   AppNotification,
   NotificationDto,
 } from "@/modules/projects/types/notification";
-import { notificationKeys } from "@/modules/projects/lib/query-keys";
+import {
+  notificationKeys,
+  projectKeys,
+} from "@/modules/projects/lib/query-keys";
 
 /**
  * Live Projects notifications on the user's shared `user.{id}` channel.
@@ -60,6 +63,15 @@ export function useProjectNotifications(): void {
   // connect" rule the old code hand-rolled with a ref now comes from the manager.
   useRealtimeReconnect(() => {
     qc.invalidateQueries({ queryKey: notificationKeys.all });
-    qc.invalidateQueries({ queryKey: ["projects"] });
+    // What a missed frame can have changed WITHOUT a project channel noticing:
+    // the pool (someone claimed a task), the cross-project feed, and the
+    // project list. Boards, statuses and task details are the project
+    // channel's own reconnect handler to refresh — it is subscribed for every
+    // project currently on screen, so repeating that here only refetched the
+    // same queries twice. This used to invalidate ["projects"] outright, i.e.
+    // the entire module, on every socket flap.
+    qc.invalidateQueries({ queryKey: projectKeys.claimableRoot });
+    qc.invalidateQueries({ queryKey: projectKeys.activityFeedRoot });
+    qc.invalidateQueries({ queryKey: projectKeys.projectsRoot });
   });
 }

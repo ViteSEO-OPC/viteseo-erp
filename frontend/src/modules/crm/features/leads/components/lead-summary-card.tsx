@@ -102,7 +102,10 @@ export function LeadSummaryCard({ lead }: Props) {
             </div>
           </div>
         </div>
-        <LeadScoreRing value={lead.score} />
+        {/* A closed lead shows its OUTCOME here instead of a score. The score itself is untouched —
+            still computed, still stored, still on the wire — it is simply no longer what this ring
+            reports once the lead is resolved. Won takes precedence: the Deal is the binding record. */}
+        <LeadScoreRing value={lead.score} outcome={lead.outcome} />
       </div>
 
       <div className="mt-6 border-t border-border-subtle pt-6">

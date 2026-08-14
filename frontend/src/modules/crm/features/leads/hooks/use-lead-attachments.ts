@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
@@ -141,4 +141,71 @@ export function useDownloadAttachment(leadId: string) {
   );
 
   return { downloadAttachment, downloadingId };
+}
+
+/** The attachment currently open in the viewer, with the blob URL its element renders from. */
+export type AttachmentPreview = {
+  id: string;
+  name: string;
+  mimeType: string;
+  url: string;
+};
+
+/**
+ * Open one attachment for inline viewing.
+ *
+ * Fetches the SAME authorized download endpoint as `useDownloadAttachment` — the bytes are on the
+ * private disk, so a bare `<img src>` would arrive without the Bearer token and 401. The response's
+ * `Content-Disposition: attachment` is irrelevant here: that header governs navigation, and reading
+ * the body as a blob bypasses it entirely. No backend change is needed to view a file inline.
+ *
+ * Object-URL lifecycle is the one thing this hook must get right. Unlike the download path — which
+ * revokes immediately after the click — a preview has to hold its URL for as long as the viewer is
+ * open, so the URL is revoked on close, when a different attachment replaces it, and on unmount. The
+ * ref mirrors the state purely so the unmount cleanup can revoke without re-running on every change.
+ */
+export function usePreviewAttachment(leadId: string) {
+  const [preview, setPreview] = useState<AttachmentPreview | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const urlRef = useRef<string | null>(null);
+
+  const release = useCallback(() => {
+    if (urlRef.current) {
+      URL.revokeObjectURL(urlRef.current);
+      urlRef.current = null;
+    }
+  }, []);
+
+  // Revoke on unmount — closing the parent modal unmounts this without a close() call.
+  useEffect(() => release, [release]);
+
+  const openPreview = useCallback(
+    async (attachment: Pick<LeadAttachment, "id" | "name" | "mimeType">) => {
+      setPreviewingId(attachment.id);
+      try {
+        const res = await apiClient.get(
+          `/leads/${leadId}/attachments/${attachment.id}/download`,
+          { responseType: "blob" },
+        );
+
+        // Replacing an open preview must not strand the previous URL.
+        release();
+        const url = URL.createObjectURL(res.data as Blob);
+        urlRef.current = url;
+        setPreview({ id: attachment.id, name: attachment.name, mimeType: attachment.mimeType, url });
+      } catch {
+        toast.error("Could not open the file. Please try again.");
+      } finally {
+        setPreviewingId(null);
+      }
+    },
+    [leadId, release],
+  );
+
+  const closePreview = useCallback(() => {
+    release();
+    setPreview(null);
+  }, [release]);
+
+  return { preview, previewingId, openPreview, closePreview };
 }

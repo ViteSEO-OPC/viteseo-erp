@@ -12,11 +12,13 @@ import {
 } from "@/modules/projects/api/groups";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 export function useGroups(projectId?: string) {
   return useQuery({
     queryKey: projectKeys.groups(projectId),
     queryFn: () => getGroups(projectId),
+    staleTime: STALE.long,
   });
 }
 
@@ -25,6 +27,7 @@ export function useGroup(id: string) {
     queryKey: projectKeys.group(id),
     queryFn: () => getGroup(id),
     enabled: !!id,
+    staleTime: STALE.long,
   });
 }
 
@@ -33,7 +36,7 @@ export function useCreateGroup() {
   return useMutation({
     onError: notifyMutationError("Couldn't create that group"),
     mutationFn: createGroup,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects", "groups"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.groupsRoot }),
   });
 }
 
@@ -49,7 +52,7 @@ export function useUpdateGroup() {
       payload: { name?: string; color?: string; leader_id?: number };
     }) => updateGroup(id, payload),
     onSuccess: (_data, { id }) => {
-      qc.invalidateQueries({ queryKey: ["projects", "groups"] });
+      qc.invalidateQueries({ queryKey: projectKeys.groupsRoot });
       qc.invalidateQueries({ queryKey: projectKeys.group(id) });
     },
   });
@@ -60,7 +63,7 @@ export function useDeleteGroup() {
   return useMutation({
     onError: notifyMutationError("Couldn't delete that group"),
     mutationFn: (id: string) => deleteGroup(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects", "groups"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: projectKeys.groupsRoot }),
   });
 }
 
@@ -75,8 +78,7 @@ export function useGroupMembers(groupId: string) {
   });
   const remove = useMutation({
     onError: notifyMutationError("Couldn't remove that member"),
-    mutationFn: (userId: number) =>
-      removeGroupMember(groupId, userId),
+    mutationFn: (userId: number) => removeGroupMember(groupId, userId),
     onSuccess: invalidate,
   });
   return { add, remove };

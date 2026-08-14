@@ -11,6 +11,7 @@ import { notificationKeys } from "@/modules/projects/lib/query-keys";
 import { fromResource } from "@/modules/projects/lib/notifications";
 import type { AppNotification } from "@/modules/projects/types/notification";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 /**
  * The authenticated user's notifications, mapped to the UI shape. The cache
@@ -26,6 +27,9 @@ export function useNotifications() {
       return page.data.map(fromResource);
     },
     enabled: isAuthenticated,
+    // Arrives over the socket (useProjectNotifications writes straight into
+    // this cache), so a refetch is a backstop, not the delivery mechanism.
+    staleTime: STALE.standard,
   });
 }
 

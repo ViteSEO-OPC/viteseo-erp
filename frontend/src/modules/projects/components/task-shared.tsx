@@ -20,6 +20,9 @@ import type {
 import type { Group } from "@/modules/projects/types/group";
 import type { ProjectStatus } from "@/modules/projects/types/project";
 import type { WorkloadLevel } from "@/modules/projects/types/workload";
+import { cn } from "@/core/lib/utils";
+import { Dialog, DialogContent, DialogTitle } from "@/core/ui/dialog";
+import { Skeleton } from "@/modules/projects/components/skeletons";
 
 export const PRIORITIES: Priority[] = ['Low', 'Medium', 'High'];
 
@@ -124,40 +127,97 @@ export function activityLine(log: ActivityLog): string {
   return field ? `${who} ${verb} ${field}` : `${who} ${verb}`;
 }
 
-/** Standalone 900px modal shell with the project-name pill header. */
+/**
+ * Standalone 900px modal shell with the project-name pill header.
+ *
+ * Built on the shared Radix Dialog, and it has to be. This was a hand-rolled
+ * `fixed inset-0` div, which made it the one modal in the module outside
+ * Radix's layer stack — and the sub-dialogs it contains (ConfirmDialog, on
+ * save / delete task / delete sub-task) ARE Radix. A Radix modal layer sets
+ * `document.body { pointer-events: none }` and exempts only its own layer
+ * nodes, so an open ConfirmDialog killed every click target in this shell,
+ * including its own close button. When the layer's teardown then raced the
+ * parent unmount (`handleDeleteTask` closed both in one tick), the body could
+ * be left unclickable with the modal still on screen — nothing to click, no way
+ * out but Escape. As a real layer, the sub-dialog stacks above this one and
+ * hands pointer-events back on close.
+ *
+ * Escape is Radix's now too, which fixes a smaller bug on the way: the old
+ * window-level listener closed BOTH this shell and the confirm dialog on top of
+ * it. Radix dismisses the highest layer only.
+ *
+ * `loading` swaps the header pill for a placeholder and marks the dialog busy,
+ * so the shell can mount before its contents are known — see the global task
+ * modal, which opens straight into this with a skeleton inside.
+ */
 export function ModalShell({
   open,
   onClose,
   projectName,
+  loading = false,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   projectName: string;
+  loading?: boolean;
   children: React.ReactNode;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
+  // Belt and braces for the failure above. Radix restores the body's
+  // pointer-events from a module-scoped variable shared by every layer, and a
+  // teardown that loses its race leaves the whole page unclickable — a state no
+  // amount of clicking can recover from. On the way out, if this was the last
+  // dialog on screen, make sure the page can be clicked again.
+  useEffect(
+    () => () => {
+      if (typeof document === 'undefined') return;
+      const anotherLayerRemains = document.querySelector(
+        '[data-slot="dialog-content"]',
+      );
+      if (!anotherLayerRemains && document.body.style.pointerEvents === 'none') {
+        document.body.style.pointerEvents = '';
+      }
+    },
+    [],
+  );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={projectName}
-        className="relative z-10 flex max-h-[90vh] w-full max-w-[900px] flex-col overflow-hidden rounded-2xl bg-surface shadow-xl"
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent
+        // The header carries its own close button.
+        showCloseButton={false}
+        aria-busy={loading || undefined}
+        // No description in this layout; without this Radix logs a warning.
+        aria-describedby={undefined}
+        className={cn(
+          "flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 bg-surface p-0 shadow-xl sm:max-w-[900px]",
+          // Matches the module's own overlays rather than the shared Dialog's
+          // 200ms — see lib/motion.ts.
+          "duration-100",
+          // While loading, hold the panel AT its cap instead of letting a
+          // short skeleton size it. ViewTaskBody's content runs past its own
+          // `max-h-[70vh]` for any task with a details panel and sub-tasks, so
+          // the loaded panel lands on this same 90vh — pinning it here is what
+          // makes the two states the same height, not just the same width.
+          loading && "h-[90vh]",
+        )}
       >
+        {/* The accessible name. The visible header is a pill, not a heading,
+            and Radix requires a Title on every dialog. */}
+        <DialogTitle className="sr-only">
+          {loading ? 'Loading task' : projectName}
+        </DialogTitle>
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 sm:px-6 sm:py-4">
-          <NamePill tone="info" title={projectName}>
-            {projectName}
-          </NamePill>
+          {loading ? (
+            // The project name arrives with the task, so there is nothing to
+            // put in the pill yet — a placeholder of the pill's own size keeps
+            // the header from resizing when the real name lands.
+            <Skeleton className="h-[22px] w-40 rounded-full" />
+          ) : (
+            <NamePill tone="info" title={projectName}>
+              {projectName}
+            </NamePill>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -167,9 +227,11 @@ export function ModalShell({
             <XIcon className="h-4 w-4" />
           </button>
         </div>
-        <div className="overflow-y-auto">{children}</div>
-      </div>
-    </div>
+        <div className={cn("overflow-y-auto", loading && "flex-1")}>
+          {children}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

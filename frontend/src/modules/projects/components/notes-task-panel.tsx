@@ -17,6 +17,11 @@ import {
   NotesHeader,
 } from "@/modules/projects/components/notes-body";
 import { NotesSheet } from "@/modules/projects/components/notes-sheet";
+import { cn } from "@/core/lib/utils";
+import {
+  OVERLAY_ENTER,
+  SHEET_FROM_RIGHT_ENTER,
+} from "@/modules/projects/lib/motion";
 
 /**
  * The "Notes" toggle that sits beside Filter in the board toolbar.
@@ -140,9 +145,14 @@ export function NotesTaskPanel({
         type="button"
         aria-label="Close notes"
         onClick={close}
-        className="absolute inset-0 bg-black/30"
+        className={cn("absolute inset-0 bg-black/30", OVERLAY_ENTER)}
       />
-      <aside className="relative flex h-full w-[380px] max-w-[85%] flex-col border-l border-line bg-surface p-4 shadow-xl">
+      <aside
+        className={cn(
+          "relative flex h-full w-[380px] max-w-[85%] flex-col border-l border-line bg-surface p-4 shadow-xl",
+          SHEET_FROM_RIGHT_ENTER,
+        )}
+      >
         {header}
         <div className="mt-2 flex min-h-0 flex-1 flex-col">
           <NotesBody autosave={autosave} scope={target.scope} />

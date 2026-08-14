@@ -122,9 +122,20 @@ export const PAGE_ACCESS: PageAccess[] = [
   // and must NOT be excluded by the allow-list.
   { href: "/zerem/nearby-clients", allowedRoles: ["crm_bd", "super_admin"] },
   { href: "/zerem/follow-ups", allowedRoles: ["crm_bd", "super_admin"] },
+  // Planner History — completed Planner work with no 7-day window. A read-only REPORTING surface, not
+  // a workspace, so unlike the Planner itself it is open to Admin/Super Admin (who review BD output)
+  // as well as the BD who owns the work. It is deliberately its own route rather than a mode inside
+  // /zerem/planner: that keeps Calendar and Board unreachable for Admin/SA at the ROUTE level (the
+  // RoleGuard bounces them off /zerem/planner) instead of merely hiding two tabs in the UI.
+  //
+  // MUST stay listed above /zerem/planner for readability, though correctness no longer depends on it —
+  // accessRuleForPath() resolves the LONGEST matching prefix, so this specific rule wins over the
+  // BD-only parent regardless of array order.
+  { href: "/zerem/planner/history", allowedRoles: ["crm_bd", "crm_admin", "super_admin"] },
   // Planner (personal BD workspace) — first consumer of the `allowedRoles` allow-list: visible
   // ONLY to Business Development Managers; hidden from Admin/Super Admin (who outrank but do not
   // own a Planner). The backend `calendar.*` permissions + PlannerEvent ownership are unchanged.
+  // 🔒 FROZEN — Admin/Super Admin must NOT be added here; they get History only, via the route above.
   { href: "/zerem/planner", allowedRoles: ["crm_bd"] },
   // Temporary backward-compat alias — `/calendar` redirects to `/planner`; gated identically so
   // Admin/SA are bounced before the redirect. Remove with the alias page.
@@ -146,13 +157,23 @@ export const PAGE_ACCESS: PageAccess[] = [
   { href: "/zerem/settings", minRole: "crm_admin" },
 ];
 
-/** The access rule for the page a path belongs to (prefix match), or null if ungated. */
+/**
+ * The access rule for the page a path belongs to (prefix match), or null if ungated.
+ *
+ * Resolves the LONGEST matching prefix, not the first one declared. Nested routes may carry a rule
+ * that differs from their parent's (e.g. `/zerem/planner` is BD-only while `/zerem/planner/history`
+ * also admits Admin/Super Admin); a first-match scan would silently apply the parent's rule to every
+ * child and make the more specific entry dead code depending on array order.
+ */
 export function accessRuleForPath(pathname: string): PageAccess | null {
-  return (
-    PAGE_ACCESS.find(
-      (p) => pathname === p.href || pathname.startsWith(p.href + "/"),
-    ) ?? null
-  );
+  let best: PageAccess | null = null;
+  for (const p of PAGE_ACCESS) {
+    if (pathname !== p.href && !pathname.startsWith(p.href + "/")) continue;
+    if (best === null || p.href.length > best.href.length) {
+      best = p;
+    }
+  }
+  return best;
 }
 
 /** The minRole for the page a path belongs to, or null if ungated / allow-list-based. */

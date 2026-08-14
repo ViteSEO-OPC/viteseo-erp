@@ -10,11 +10,13 @@ import {
 } from "@/modules/projects/api/workspaces";
 import { projectKeys } from "@/modules/projects/lib/query-keys";
 import { notifyMutationError } from "@/modules/projects/lib/api-error";
+import { STALE } from "@/modules/projects/lib/query-freshness";
 
 export function useWorkspaces(params?: Record<string, unknown>) {
   return useQuery({
     queryKey: [...projectKeys.workspaces, params ?? {}],
     queryFn: () => getWorkspaces(params),
+    staleTime: STALE.long,
   });
 }
 
@@ -23,6 +25,7 @@ export function useWorkspace(id: string) {
     queryKey: projectKeys.workspace(id),
     queryFn: () => getWorkspace(id),
     enabled: !!id,
+    staleTime: STALE.long,
   });
 }
 
@@ -61,7 +64,7 @@ export function useDeleteWorkspace() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: projectKeys.workspaces });
       // Projects roll up under workspaces; refresh their lists too.
-      qc.invalidateQueries({ queryKey: ["projects", "projects"] });
+      qc.invalidateQueries({ queryKey: projectKeys.projectsRoot });
     },
   });
 }

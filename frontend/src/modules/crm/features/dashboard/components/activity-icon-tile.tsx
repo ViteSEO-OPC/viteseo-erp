@@ -1,4 +1,4 @@
-import { LogIn, Phone, StickyNote } from "lucide-react";
+import { LogIn, Phone, StickyNote, Trophy } from "lucide-react";
 import type { ComponentProps } from "react";
 import type { ActivityType } from "@/modules/crm/features/dashboard/types/dashboard-types";
 import { cn } from "@/modules/crm/lib/utils";
@@ -42,6 +42,8 @@ const iconMap = {
   auth: LogIn,
   // Internal note events (created / edited / deleted) on a lead.
   note: StickyNote,
+  // Won conversion (`lead.won`) — the deal-closed outcome.
+  won: Trophy,
 };
 
 // Opaque light tiles (bg-*-100) do not flip via the semantic ramp, so dark: variants re-tint
@@ -52,6 +54,9 @@ const bgMap: Record<ActivityType, string> = {
   call: "bg-muted text-secondary-foreground",
   auth: "bg-muted text-secondary-foreground",
   note: "bg-indigo-100 text-indigo-600 dark:bg-indigo-400/10 dark:text-indigo-400",
+  // Same success tint as the Won badge and the "Won — Converted" button, so one outcome reads as
+  // one colour across the page.
+  won: "bg-emerald-100 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-400",
 };
 
 type Props = {

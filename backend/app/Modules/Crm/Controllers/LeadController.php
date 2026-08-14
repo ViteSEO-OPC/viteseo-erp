@@ -24,7 +24,11 @@ use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Notifications\LeadAssignedNotification;
 use App\Models\User;
 use App\Modules\Crm\Services\LeadCreator;
+use App\Modules\Crm\Jobs\ConvertXlsImportJob;
+use App\Modules\Crm\Services\Import\XlsConverter;
+use App\Modules\Crm\Services\Import\XlsImportJobStore;
 use App\Modules\Crm\Services\LeadImportService;
+use Illuminate\Http\UploadedFile;
 use App\Modules\Crm\Services\LeadPdfExporter;
 use App\Modules\Crm\Services\Planner\FollowUpScheduler;
 use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
@@ -348,8 +352,15 @@ class LeadController extends Controller
 
     public function show(Lead $lead): JsonResponse
     {
+        // Both outcome signals are resolved HERE ONLY (not in index/store/update/assign), so the list
+        // keeps its exact current payload and query count. `deals` is eager-loaded because the Won
+        // badge shows the amount and date; Lost needs only a boolean, so it is an EXISTS subquery
+        // rather than a second relation load.
+        $lead->load(['assignedTo', 'deals'])
+            ->loadExists(['activities as is_lost' => fn ($query) => $query->where('event', 'lead.lost')]);
+
         return response()->json([
-            'data' => new LeadResource($lead->load('assignedTo')),
+            'data' => new LeadResource($lead),
         ]);
     }
 
@@ -609,20 +620,124 @@ class LeadController extends Controller
         ]);
     }
 
-    public function import(ImportLeadsRequest $request, LeadImportService $service): JsonResponse
-    {
+    public function import(
+        ImportLeadsRequest $request,
+        LeadImportService $service,
+        XlsConverter $xls,
+        XlsImportJobStore $jobs,
+    ): JsonResponse {
         $user = $request->user();
         // A BD's own import auto-assigns to the importing BD; Admin/SA use the selected BD.
+        // UNCHANGED — every path below funnels through this one assignment decision.
         $assignedTo = $user->hasRole('crm_bd')
             ? $user->id
             : $request->validated('assigned_to');
+        $assignedTo = $assignedTo !== null ? (int) $assignedTo : null;
 
-        $result = $service->import(
-            $request->file('file'),
-            $user->id,
-            $request->isDryRun(),
-            $assignedTo !== null ? (int) $assignedTo : null,
+        // ── Commit of an already-converted large `.xls` ────────────────────────────────────────
+        // The workbook was converted once by the queue; the client sends the job id instead of
+        // re-uploading it. Ownership, readiness and single-use are all enforced by the store.
+        if (($jobId = $request->validated('job_id')) !== null) {
+            return $this->importFromJob((string) $jobId, $request, $service, $jobs, $assignedTo);
+        }
+
+        $file = $request->file('file');
+
+        // ── Large `.xls` → queue ───────────────────────────────────────────────────────────────
+        // Measured BEFORE the workbook is materialized: listWorksheetInfo() reads dimension records
+        // only, so this is safe on a 10 MB file inside a 128 MB worker. Only the dry-run is routed;
+        // a commit always arrives with a job id and is handled above.
+        if (strtolower($file->getClientOriginalExtension()) === 'xls'
+            && $xls->estimateCells((string) $file->getRealPath()) > XlsConverter::SYNC_CELL_THRESHOLD) {
+            return $this->queueXlsConversion($file, $user->id, $assignedTo, $jobs);
+        }
+
+        // ── Everything else: unchanged synchronous path ────────────────────────────────────────
+        // `.xlsx`, CSV, TXT and small `.xls` all land here exactly as before.
+        $result = $service->import($file, $user->id, $request->isDryRun(), $assignedTo);
+
+        return response()->json(['data' => $result]);
+    }
+
+    /**
+     * Hand a large `.xls` to the queue and return 202 with the job id to poll.
+     *
+     * The upload is moved out of PHP's request-scoped temp area first: that file is deleted the
+     * moment the response is sent, and the worker needs it afterwards.
+     */
+    private function queueXlsConversion(
+        UploadedFile $file,
+        int $userId,
+        ?int $assignedTo,
+        XlsImportJobStore $jobs,
+    ): JsonResponse {
+        $jobId = $jobs->create($userId, (string) $file->getClientOriginalName());
+        $source = $jobs->storagePathFor($jobId).'.source.xls';
+        $file->move(dirname($source), basename($source));
+        $jobs->attachSource($jobId, $source);
+
+        ConvertXlsImportJob::dispatch(
+            $jobId,
+            $source,
+            (string) $file->getClientOriginalName(),
+            $userId,
+            $assignedTo,
         );
+
+        return response()->json([
+            'data' => ['jobId' => $jobId, 'status' => XlsImportJobStore::STATUS_PENDING],
+        ], 202);
+    }
+
+    /**
+     * Commit a queued conversion by job id — the workbook is converted ONCE, never twice.
+     *
+     * A missing, foreign, unready or already-committed job all resolve to 404/422 here; the store
+     * makes ownership indistinguishable from non-existence so ids cannot be enumerated. The claim
+     * is a compare-and-set, so two concurrent confirms cannot both import.
+     */
+    private function importFromJob(
+        string $jobId,
+        ImportLeadsRequest $request,
+        LeadImportService $service,
+        XlsImportJobStore $jobs,
+        ?int $assignedTo,
+    ): JsonResponse {
+        $userId = (int) $request->user()->id;
+        $record = $jobs->forUser($jobId, $userId);
+
+        if ($record === null) {
+            return response()->json(['message' => 'Import job not found.'], 404);
+        }
+
+        // A dry-run against a finished job just replays the stored preview — no re-conversion.
+        if ($request->isDryRun()) {
+            if (($record['status'] ?? null) !== XlsImportJobStore::STATUS_READY) {
+                return response()->json(['message' => 'This import is still being prepared.'], 422);
+            }
+
+            return response()->json(['data' => $record['preview']]);
+        }
+
+        // Single-use claim. Returns false for not-ready AND for already-committed.
+        if (! $jobs->markCommitted($jobId, $userId)) {
+            return response()->json([
+                'message' => 'This import has already been completed or is no longer available.',
+            ], 422);
+        }
+
+        try {
+            $result = $service->import(
+                new UploadedFile((string) $record['path'], (string) $record['original_name'], null, null, true),
+                $userId,
+                dryRun: false,
+                assignedTo: $assignedTo,
+                preConvertedPath: (string) $record['path'],
+            );
+        } finally {
+            // Converted file removed on success AND on failure — it is single-use either way.
+            $jobs->forget($jobId);
+        }
 
         return response()->json(['data' => $result]);
     }

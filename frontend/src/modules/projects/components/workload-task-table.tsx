@@ -12,6 +12,9 @@ import {
   CategoryBadge,
   EffortCell,
 } from "@/modules/projects/components/workload-shared";
+import {
+  SkeletonTableRows,
+} from "@/modules/projects/components/skeletons";
 
 /** Effort is scored 0-10 per task, independent of the capacity bands. */
 const TASK_EFFORT_MAX = 10;
@@ -87,8 +90,8 @@ export function WorkloadTaskTable({
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={columns.length} className="py-10 text-center text-ink-soft">
-                    Loading tasks...
+                  <td colSpan={columns.length} className="p-0" aria-busy="true">
+                    <SkeletonTableRows rows={5} columns={columns.length} />
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
@@ -205,8 +208,8 @@ export function WorkloadGroupTable({
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={columns.length} className="py-10 text-center text-ink-soft">
-                  Loading groups...
+                <td colSpan={columns.length} className="p-0" aria-busy="true">
+                  <SkeletonTableRows rows={4} columns={columns.length} />
                 </td>
               </tr>
             ) : groups.length === 0 ? (

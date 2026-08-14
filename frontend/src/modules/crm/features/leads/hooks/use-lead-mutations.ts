@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isCancel } from "axios";
 import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
@@ -87,7 +87,13 @@ export function useAssignLead() {
 }
 
 export type ImportLeadsVars = {
-  file: File;
+  /** Omitted when committing an already-converted large .xls — `jobId` identifies it instead. */
+  file?: File;
+  /**
+   * Job id returned by a queued .xls conversion (HTTP 202). Sending this instead of the file means
+   * a 10 MB workbook is converted ONCE: the server reuses the converted copy it already holds.
+   */
+  jobId?: string;
   /** true = Preview (no writes); false = commit the import. */
   dryRun: boolean;
   /** Owning BD for the imported leads (Admin/SA select in the wizard). */
@@ -104,9 +110,10 @@ export type ImportLeadsVars = {
 export function useImportLeads() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ file, dryRun, assignedTo, onUploadProgress, signal }: ImportLeadsVars) => {
+    mutationFn: async ({ file, jobId, dryRun, assignedTo, onUploadProgress, signal }: ImportLeadsVars) => {
       const form = new FormData();
-      form.append("file", file);
+      if (file) form.append("file", file);
+      if (jobId) form.append("job_id", jobId);
       form.append("dry_run", dryRun ? "true" : "false");
       if (assignedTo) form.append("assigned_to", assignedTo);
       const res = await apiClient.post("/leads/import", form, {
@@ -118,9 +125,16 @@ export function useImportLeads() {
           }
         },
       });
+      // 202 = a large .xls was routed to the queue; the caller polls until the preview is ready.
+      // Every other response is the unchanged synchronous ImportResult.
+      if (res.status === 202) {
+        return { queued: true as const, jobId: res.data.data.jobId as string };
+      }
       return res.data.data as ImportResult;
     },
     onSuccess: (result) => {
+      // A queued conversion has written nothing yet — nothing to invalidate, nothing to announce.
+      if ("queued" in result) return;
       if (!result.dryRun) {
         queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
         // A committed import adds many leads → dashboard counts + Lead Acquisition, My Performance
@@ -354,6 +368,36 @@ export function useBulkAssignLeads() {
     },
     onError: (err) => {
       toast.error(getApiErrorMessage(err, "Failed to assign leads"));
+    },
+  });
+}
+
+/** Status of a queued .xls conversion. Mirrors LeadImportStatusController's payload. */
+export type ImportJobStatus = {
+  jobId: string;
+  status: "pending" | "ready" | "failed" | "committed";
+  originalName: string;
+  result: ImportResult | null;
+  error: string | null;
+};
+
+/**
+ * Poll a queued .xls conversion until it is ready or fails.
+ *
+ * Enabled only while a job id exists, and it stops polling on a terminal status — so the ordinary
+ * synchronous import (every CSV, TXT, XLSX and small .xls) never issues a single extra request.
+ */
+export function useImportJobStatus(jobId: string | null) {
+  return useQuery({
+    queryKey: ["leads", "import-job", jobId],
+    enabled: Boolean(jobId),
+    refetchInterval: (query) => {
+      const s = query.state.data?.status;
+      return s === "ready" || s === "failed" ? false : 2000;
+    },
+    queryFn: async () => {
+      const res = await apiClient.get(`/leads/import/${jobId}/status`);
+      return res.data.data as ImportJobStatus;
     },
   });
 }

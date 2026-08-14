@@ -5,6 +5,9 @@ import { groupSchema, useValidatedForm } from "@/core/forms";
 import { Avatar, Button, Field, Input, Modal, SearchIcon, Select } from "@/core/ui";
 import { useCreateGroup } from "@/modules/projects/hooks/use-groups";
 import { useUsers } from "@/modules/projects/hooks/use-users";
+import {
+  SkeletonList,
+} from "@/modules/projects/components/skeletons";
 
 // Preset swatches the user picks from; the chosen hex is stored on the form.
 const COLOR_PRESETS = [
@@ -163,7 +166,7 @@ export function CreateGroupModal({ open, onClose }: CreateGroupModalProps): Reac
           </div>
           <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-line p-1">
             {usersQuery.isLoading ? (
-              <p className="px-3 py-6 text-center text-sm text-ink-soft">Loading members…</p>
+              <SkeletonList rows={4} className="px-3 py-4" />
             ) : filteredUsers.length === 0 ? (
               <p className="px-3 py-6 text-center text-sm text-ink-soft">No users found.</p>
             ) : (

@@ -14,6 +14,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/zerem/leads": "Leads",
   "/zerem/nearby-clients": "Nearby Clients",
   "/zerem/follow-ups": "Outreach",
+  "/zerem/planner/history": "Planner History",
   "/zerem/planner": "Planner",
   "/zerem/calendar": "Planner",
   "/zerem/reports": "Reports & Performance",
@@ -30,9 +31,13 @@ type AppShellProps = {
 export function AppShell({ children }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
-  const title = Object.entries(PAGE_TITLES).find(([path]) =>
-    pathname.startsWith(path),
-  )?.[1] ?? "Dashboard";
+  // Longest matching prefix, not the first declared: a nested route may have its own title while
+  // still sitting under a titled parent (/zerem/planner/history under /zerem/planner), and a
+  // first-match scan would silently show the parent's title depending on key order.
+  const title =
+    Object.entries(PAGE_TITLES)
+      .filter(([path]) => pathname.startsWith(path))
+      .sort(([a], [b]) => b.length - a.length)[0]?.[1] ?? "Dashboard";
   const isLeadsPage = pathname === "/zerem/leads" || pathname.startsWith("/zerem/leads/");
 
   return (
@@ -61,9 +66,15 @@ export function AppShell({ children }: AppShellProps) {
           title={title}
           onMenuClick={() => setMobileOpen(true)}
         />
+        {/* pb-24 reserves the strip the Copilot FAB floats in. The button is `fixed bottom-6` and
+            48px tall, so it covers the lowest ~72px of the viewport; with the old pb-8 (32px) the
+            last element on any page — most visibly the Files & Downloads rows on mobile, where the
+            rail stacks last — ended up underneath it with its actions unreachable. Scroll padding
+            is what fixes this: the FAB is fixed to the viewport, so only extra room at the end of
+            the scroll can clear it. */}
         <main
           className={cn(
-            "flex-1 overflow-y-auto bg-background px-4 pb-8 lg:px-6",
+            "flex-1 overflow-y-auto bg-background px-4 pb-24 lg:px-6",
             isLeadsPage ? "pt-6" : "pt-8",
           )}
         >

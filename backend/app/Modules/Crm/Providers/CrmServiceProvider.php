@@ -8,6 +8,7 @@ use App\Modules\Crm\Console\Commands\BackfillPlannerOwnershipCommand;
 use App\Modules\Crm\Console\Commands\SyncMailboxesCommand;
 use App\Modules\Crm\Console\Commands\N8nTokenCommand;
 use App\Modules\Crm\Console\Commands\PruneReadNotifications;
+use App\Modules\Crm\Console\Commands\PruneXlsImportsCommand;
 use App\Modules\Crm\Console\Commands\RecomputeLeadScoresCommand;
 use App\Modules\Crm\Events\DealWon;
 use App\Modules\Crm\Events\FollowUpCompleted;
@@ -30,6 +31,7 @@ use App\Modules\Crm\Listeners\BroadcastCrmNotification;
 use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
+use App\Modules\Crm\Listeners\SyncLeadEngagementOnCompletion;
 use App\Modules\Crm\Models\Call;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
@@ -194,6 +196,11 @@ class CrmServiceProvider extends ServiceProvider
         // Planner escalation task for the assigned BD (decided & executed server-side).
         Event::listen(FollowUpCompleted::class, EscalateUnansweredFollowUp::class);
 
+        // Planner → Lead Engagement Status. Completing a CALL or EMAIL activity advances the lead's
+        // engagement column (advance-only), so the Leads table reflects work the BD has actually done.
+        // Communication lifecycle only — `leads.status` stays a manual sales decision.
+        Event::listen(FollowUpCompleted::class, SyncLeadEngagementOnCompletion::class);
+
         // Multi-Channel Internal Notifications — the delivery subsystem for inbound-reply alerts on
         // channels beyond the always-on in-app notification (mail today, gated by
         // `outreach.internal_notifications.mail`; slack/teams/sms later). Internal staff alerts only —
@@ -222,6 +229,8 @@ class CrmServiceProvider extends ServiceProvider
                 // Deliberately NOT scheduled: it is read-only by default and its --apply run is
                 // approved from a printed row list, never automated.
                 BackfillPlannerOwnershipCommand::class,
+                // Hourly cleanup of abandoned .xls import files (scheduled below).
+                PruneXlsImportsCommand::class,
             ]);
         }
 
@@ -245,6 +254,13 @@ class CrmServiceProvider extends ServiceProvider
 
             // Notification retention: prune READ notifications older than 90 days (unread never deleted).
             $schedule->command('notifications:prune-read')->dailyAt('03:00');
+
+            // Temporary-file retention for queued `.xls` imports. Commit and failure clean up
+            // eagerly; this collects the third ending — a conversion previewed and never confirmed,
+            // whose cache record expires but whose file a cache expiry cannot unlink. Hourly because
+            // the job record's own TTL is an hour, and the command is idempotent and silent when
+            // there is nothing to remove.
+            $schedule->command('crm:prune-xls-imports')->hourly()->withoutOverlapping();
         });
     }
 }

@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
-import type { LeadDetail, QuickAction } from "@/modules/crm/features/leads/types/lead-detail-types";
+import type { LeadDeal, LeadDetail, QuickAction } from "@/modules/crm/features/leads/types/lead-detail-types";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
 // Exported so the realtime consumer can patch this exact cached shape in place
@@ -22,6 +22,10 @@ export type LeadApiDetail = {
   updateStatus: "interested" | "awaiting-reply" | "declined" | "call-back-req";
   score: number;
   amount: number | null;
+  // Outcome projections. Both optional because only the DETAIL endpoint resolves them — the list
+  // payload omits the keys entirely (see LeadResource), so they are undefined there.
+  deal?: LeadDeal | null;
+  lost?: boolean;
   acquisitionChannel: string | null;
   website: string | null;
   facebook: string | null;
@@ -55,6 +59,13 @@ function mapToLeadDetail(api: LeadApiDetail): LeadDetail {
     industry: api.industry,
     score: api.score,
     amount: api.amount,
+    deal: api.deal ?? null,
+    // Kept alongside `outcome` on purpose: the outcome below collapses to "won" for a lead that is
+    // both, so only this raw flag can answer "is this lead already lost?".
+    lost: api.lost ?? false,
+    // Won takes precedence over Lost: the Deal is a binding conversion record, a `lead.lost` activity
+    // is an append-only note, and nothing stops a lead that was written off from later being signed.
+    outcome: api.deal ? "won" : api.lost ? "lost" : null,
     priority: api.priority,
     status: api.updateStatus,
     assignedTo: api.assignedTo,

@@ -115,4 +115,55 @@ return [
         'name' => env('MAIL_FROM_NAME', env('APP_NAME', 'Laravel')),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Per-Module Sender Identities
+    |--------------------------------------------------------------------------
+    |
+    | The platform is one application sending as several businesses. The TRANSPORT
+    | above stays shared and centralized — one relay, one set of credentials — while
+    | each module sends under its own identity. Nothing here configures a mailer;
+    | adding a module never means adding SMTP.
+    |
+    | Read through App\Support\Mail\ModuleSenderResolver, never directly. Anything
+    | left unset falls back to the global `from` above, so a deployment that has not
+    | set these keeps sending exactly as it did before.
+    |
+    | The nested env chains are the backward-compatibility contract: CRM shipped with
+    | OUTREACH_FROM_* (see config/outreach.php), so those keep winning over the global
+    | default and a production deployment needs no env change to preserve behaviour.
+    |
+    | ── CRM INVARIANT ────────────────────────────────────────────────────────────
+    | `crm.address` MUST resolve to the same mailbox as `outreach.mailbox` — that is
+    | the inbox Gmail sync polls for prospect replies. Point them at different
+    | addresses and inbound reply threading stops silently. Guarded by
+    | tests/Feature/Mail/ModuleSenderIdentityTest.
+    |
+    */
+
+    'module_senders' => [
+
+        // Zerem CRM — customer outreach and internal staff alerts.
+        'crm' => [
+            'address' => env('CRM_MAIL_FROM_ADDRESS', env('OUTREACH_FROM_ADDRESS', env('MAIL_FROM_ADDRESS'))),
+            'name' => env('CRM_MAIL_FROM_NAME', env('OUTREACH_FROM_NAME', env('MAIL_FROM_NAME'))),
+            'reply_to' => env('CRM_MAIL_REPLY_TO_ADDRESS'),
+        ],
+
+        // HRIS — candidate recruitment mail.
+        'hr' => [
+            'address' => env('HR_MAIL_FROM_ADDRESS', env('MAIL_FROM_ADDRESS')),
+            'name' => env('HR_MAIL_FROM_NAME', env('MAIL_FROM_NAME')),
+            'reply_to' => env('HR_MAIL_REPLY_TO_ADDRESS'),
+        ],
+
+        // PMS/Projects — registered ahead of its first use; the module sends no mail yet.
+        'pms' => [
+            'address' => env('PMS_MAIL_FROM_ADDRESS', env('MAIL_FROM_ADDRESS')),
+            'name' => env('PMS_MAIL_FROM_NAME', env('MAIL_FROM_NAME')),
+            'reply_to' => env('PMS_MAIL_REPLY_TO_ADDRESS'),
+        ],
+
+    ],
+
 ];

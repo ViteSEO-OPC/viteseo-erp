@@ -43,3 +43,62 @@
   color: var(--foreground);
   background-color: var(--background);
 }
+
+/*
+ * ── Shared scrollbar treatment ──────────────────────────────────────────────
+ *
+ * Zerem had no default scrollbar styling: five surfaces (Activity Timeline, Call History, Email
+ * Thread, Leads Table, Copilot) each repeated the same arbitrary-variant Tailwind string, and the
+ * other ~31 scrollable areas fell back to the browser's grey. This promotes that same treatment to
+ * the module default so a new scrollable area is themed without opting in.
+ *
+ * Values are the existing pattern verbatim — 6px (`w-1.5`), fully rounded thumb on `--teal-400`,
+ * transparent track — so the five surfaces above render identically to before.
+ *
+ * SPECIFICITY IS THE POINT. Every rule is wrapped in `:where()`, which contributes ZERO
+ * specificity, leaving these at (0,0,1) — the pseudo-element alone. Any component-level class beats
+ * them — the five inline treatments compile to (0,1,1) Tailwind arbitrary variants and still win.
+ * (The platform's hover-reveal `.sidebar-scroll` in globals.css never enters the picture at all:
+ * it belongs to `core/` chrome that renders OUTSIDE this scope. It is untouched by scope, not by
+ * specificity — the CRM app-shell has its own sidebar.)
+ *
+ * The window scrollbar is untouched: <html>/<body> sit OUTSIDE the scope, so only the app-shell's
+ * inner scrollers are themed — this does not restyle every scrollbar on the platform.
+ *
+ * SCOPE. `.zerem-theme-scope` is the CRM shell wrapper, and this file is imported only from
+ * `app/zerem/layout.tsx`, so nothing here can reach HRIS, Sprintly or Admin. Dialogs, dropdowns and
+ * selects portal INTO that wrapper by design, so their scrollbars are covered by the same rules.
+ */
+
+/* Firefox. Deliberately NOT setting `color-scheme` here: it would also re-skin every native control
+   (inputs, selects, checkboxes, date pickers) in the subtree, and it is redundant for scrollbars
+   anyway — the two properties below fully determine Firefox's rendering, as the ::-webkit- rules do
+   for Blink.
+
+   The two properties need DIFFERENT selectors because they inherit differently (CSS Scrollbars L1):
+   `scrollbar-color` is inherited, so the scope alone covers the subtree; `scrollbar-width` is NOT,
+   so on the scope alone every descendant scroller falls back to `auto` and renders a full-width
+   teal bar. Hence the universal selector — it mirrors the descendant `::-webkit-` rules below. */
+:where(.zerem-theme-scope) {
+  scrollbar-color: var(--teal-400) transparent;
+}
+
+:where(.zerem-theme-scope),
+:where(.zerem-theme-scope) * {
+  scrollbar-width: thin;
+}
+
+/* WebKit/Blink. Pseudo-elements do not inherit, so these need the descendant selector. */
+:where(.zerem-theme-scope) ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+:where(.zerem-theme-scope) ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:where(.zerem-theme-scope) ::-webkit-scrollbar-thumb {
+  background: var(--teal-400);
+  border-radius: 9999px;
+}

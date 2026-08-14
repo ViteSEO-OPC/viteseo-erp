@@ -15,6 +15,7 @@ import { DangerConfirmRegion } from "@/modules/crm/components/shared/confirm-dia
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { Button } from "@/modules/crm/components/ui/button";
 import { NicheSelect } from "@/modules/crm/components/shared/niche-select/niche-select";
+import { SelectShell } from "@/modules/crm/components/shared/select-shell/select-shell";
 import { useUpdateLead, useDeleteLead } from "@/modules/crm/features/leads/hooks/use-lead-mutations";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
@@ -26,7 +27,7 @@ const FIELD_STYLE =
   "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring dark:border-white/8 dark:bg-card";
 
 const SELECT_STYLE =
-  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring dark:border-white/8 dark:bg-card";
+  "h-9 w-full rounded-lg border border-border bg-muted pl-3 pr-9 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring dark:border-white/8 dark:bg-card";
 
 /** Presentation-only grouping wrapper — labels a related cluster of fields for scanability.
     Purely visual; introduces no state, validation, or field changes. */
@@ -282,71 +283,81 @@ function EditLeadForm({
           <FormSection title="Outreach & Status">
             <FormFieldGrid>
               <FormField label="Website Status">
-                <select
-                  value={websiteStatus}
-                  onChange={(e) => setWebsiteStatus(e.target.value as Lead["websiteStatus"])}
-                  className={SELECT_STYLE}
-                  aria-label="Website Status"
-                >
-                  <option value="has-website">Has Website</option>
-                  <option value="no-website">No Website</option>
-                  <option value="needs-redesign">Needs Redesign</option>
-                </select>
+                <SelectShell>
+                  <select
+                    value={websiteStatus}
+                    onChange={(e) => setWebsiteStatus(e.target.value as Lead["websiteStatus"])}
+                    className={SELECT_STYLE}
+                    aria-label="Website Status"
+                  >
+                    <option value="has-website">Has Website</option>
+                    <option value="no-website">No Website</option>
+                    <option value="needs-redesign">Needs Redesign</option>
+                  </select>
+                </SelectShell>
               </FormField>
               <FormField label="Priority">
-                <select
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value as Lead["priority"])}
-                  className={SELECT_STYLE}
-                  aria-label="Priority"
-                >
-                  <option value="high">High</option>
-                  <option value="medium">Medium</option>
-                  <option value="low">Low</option>
-                </select>
+                <SelectShell>
+                  <select
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value as Lead["priority"])}
+                    className={SELECT_STYLE}
+                    aria-label="Priority"
+                  >
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </select>
+                </SelectShell>
               </FormField>
             </FormFieldGrid>
 
             <FormFieldGrid>
               <FormField label="Email Outreach">
-                <select
-                  value={emailOutreach}
-                  onChange={(e) => setEmailOutreach(e.target.value as Lead["emailOutreach"])}
-                  className={SELECT_STYLE}
-                  aria-label="Email Outreach"
-                >
-                  <option value="sent">Sent</option>
-                  <option value="opened">Opened</option>
-                  <option value="replied">Replied</option>
-                  <option value="none">None</option>
-                </select>
+                <SelectShell>
+                  <select
+                    value={emailOutreach}
+                    onChange={(e) => setEmailOutreach(e.target.value as Lead["emailOutreach"])}
+                    className={SELECT_STYLE}
+                    aria-label="Email Outreach"
+                  >
+                    <option value="sent">Sent</option>
+                    <option value="opened">Opened</option>
+                    <option value="replied">Replied</option>
+                    <option value="none">None</option>
+                  </select>
+                </SelectShell>
               </FormField>
               <FormField label="Cold Calling">
-                <select
-                  value={coldCalling}
-                  onChange={(e) => setColdCalling(e.target.value as Lead["coldCalling"])}
-                  className={SELECT_STYLE}
-                  aria-label="Cold Calling"
-                >
-                  <option value="called">Called</option>
-                  <option value="scheduled">Scheduled</option>
-                  <option value="not-called">Not Called</option>
-                </select>
+                <SelectShell>
+                  <select
+                    value={coldCalling}
+                    onChange={(e) => setColdCalling(e.target.value as Lead["coldCalling"])}
+                    className={SELECT_STYLE}
+                    aria-label="Cold Calling"
+                  >
+                    <option value="called">Called</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="not-called">Not Called</option>
+                  </select>
+                </SelectShell>
               </FormField>
             </FormFieldGrid>
 
             <FormField label="Lead Status">
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as Lead["updateStatus"])}
-                className={SELECT_STYLE}
-                aria-label="Lead Status"
-              >
-                <option value="interested">Interested</option>
-                <option value="awaiting-reply">Awaiting Reply</option>
-                <option value="declined">Declined</option>
-                <option value="call-back-req">Call-back Req.</option>
-              </select>
+              <SelectShell>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as Lead["updateStatus"])}
+                  className={SELECT_STYLE}
+                  aria-label="Lead Status"
+                >
+                  <option value="interested">Interested</option>
+                  <option value="awaiting-reply">Awaiting Reply</option>
+                  <option value="declined">Declined</option>
+                  <option value="call-back-req">Call-back Req.</option>
+                </select>
+              </SelectShell>
             </FormField>
           </FormSection>
 
