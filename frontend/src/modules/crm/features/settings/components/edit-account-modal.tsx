@@ -17,6 +17,7 @@ import { ROLE_LABELS, isRole, type Role } from "@/modules/crm/lib/rbac";
 import { FIELD, SELECT } from "@/modules/crm/features/settings/components/form-styles";
 import type { TeamUser, TeamUserStatus } from "@/modules/crm/features/settings/types/user-types";
 import { cn } from "@/modules/crm/lib/utils";
+import { SelectShell } from "@/modules/crm/components/shared/select-shell/select-shell";
 
 const closeButtonClass =
   "flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -73,18 +74,22 @@ export function EditAccountModal({ open, onOpenChange, user, assignableRoles }: 
           </FormField>
           {showRoleSelect ? (
             <FormField label="Role">
-              <select className={SELECT} value={role} onChange={(e) => setRole(e.target.value as Role)}>
-                {assignableRoles.map((r) => (
-                  <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                ))}
-              </select>
+              <SelectShell>
+                <select className={SELECT} value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                  {assignableRoles.map((r) => (
+                    <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                  ))}
+                </select>
+              </SelectShell>
             </FormField>
           ) : null}
           <FormField label="Status">
-            <select className={SELECT} value={status} onChange={(e) => setStatus(e.target.value as TeamUserStatus)}>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
+            <SelectShell>
+              <select className={SELECT} value={status} onChange={(e) => setStatus(e.target.value as TeamUserStatus)}>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </SelectShell>
           </FormField>
         </div>
 

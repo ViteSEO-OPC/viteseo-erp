@@ -1,6 +1,7 @@
 "use client";
 
-import { Download, Loader2, Paperclip, X } from "lucide-react";
+import { useState } from "react";
+import { Loader2, Paperclip } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,12 +12,16 @@ import {
 } from "@/modules/crm/components/ui/dialog";
 import { Button } from "@/modules/crm/components/ui/button";
 import { UploadDropzone } from "@/modules/crm/components/forms/file-upload/upload-dropzone";
+import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { FileTypeIcon } from "@/modules/crm/features/leads/components/file-type-icon";
+import { LeadAttachmentPreviewDialog } from "@/modules/crm/features/leads/components/lead-attachment-preview-dialog";
+import { LeadAttachmentRowActions } from "@/modules/crm/features/leads/components/lead-attachment-row-actions";
 import {
   useLeadAttachments,
   useUploadAttachment,
   useDeleteAttachment,
   useDownloadAttachment,
+  usePreviewAttachment,
   type LeadAttachment,
 } from "@/modules/crm/features/leads/hooks/use-lead-attachments";
 import { formatAttachmentTimestamp } from "@/modules/crm/features/leads/lib/attachment-format";
@@ -35,19 +40,32 @@ type Props = {
 /**
  * Upload and manage files for one lead.
  *
- * This modal is the ONLY surface for attachments — the Lead Details page deliberately shows no
- * Attachments section, so upload, download and delete all live here. Download and delete are
- * offered to every role that can open the lead: Admin and BD have identical rights over a lead's
- * files, so there is no permission-driven variation in what the row renders.
+ * This modal is the only place files are UPLOADED, and it remains the full management surface. The
+ * Lead Details page also shows a read-only Files & Downloads card for quick access; both read the
+ * same per-lead query and share {@link LeadAttachmentRowActions}, so a delete on either surface
+ * updates the other. Download and delete are offered to every role that can open the lead: Admin and
+ * BD have identical rights over a lead's files, so there is no permission-driven variation in what
+ * the row renders.
  */
 export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: Props) {
   const { attachments, isLoading } = useLeadAttachments(leadId);
   const upload = useUploadAttachment(leadId);
   const remove = useDeleteAttachment(leadId);
   const { downloadAttachment, downloadingId } = useDownloadAttachment(leadId);
+  const { preview, previewingId, openPreview, closePreview } = usePreviewAttachment(leadId);
+
+  // The file awaiting confirmation. Deleting destroys the bytes on disk for good, so the row's
+  // control only ever sets this — the mutation is reachable from the dialog's Confirm and nowhere
+  // else, which is what makes an accidental click survivable.
+  const [pendingDelete, setPendingDelete] = useState<LeadAttachment | null>(null);
 
   const files: LeadAttachment[] = attachments ?? [];
   const count = files.length;
+
+  function confirmDelete() {
+    if (!pendingDelete) return;
+    remove.mutate(pendingDelete.id, { onSettled: () => setPendingDelete(null) });
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -110,32 +128,18 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: P
                         {file.sizeLabel} · {formatAttachmentTimestamp(file.createdAt)}
                       </p>
                     </div>
-                    {/* Download sits beside the existing remove control, in the same trailing slot
-                        and with the same padding — the row layout and spacing are unchanged. */}
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => downloadAttachment(file)}
-                        disabled={downloadingId === file.id}
-                        className="rounded-md p-1 text-muted-foreground transition-colors hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                        aria-label={`Download ${file.name}`}
-                      >
-                        {downloadingId === file.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4" />
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => remove.mutate(file.id)}
-                        disabled={remove.isPending}
-                        className="rounded-md p-1 text-muted-foreground transition-colors hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                        aria-label={`Remove ${file.name}`}
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
+                    {/* View · Download · Delete share the trailing slot with the same padding — the
+                        row layout and spacing are unchanged. Shared with the Files & Downloads card
+                        so both surfaces offer identical actions and states. */}
+                    <LeadAttachmentRowActions
+                      file={file}
+                      onPreview={openPreview}
+                      onDownload={downloadAttachment}
+                      onDelete={setPendingDelete}
+                      previewingId={previewingId}
+                      downloadingId={downloadingId}
+                      deleting={remove.isPending}
+                    />
                   </li>
                 ))}
               </ul>
@@ -153,6 +157,30 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: P
           </Button>
           <Button onClick={() => onOpenChange(false)}>Done</Button>
         </DialogFooter>
+
+        <LeadAttachmentPreviewDialog
+          preview={preview}
+          onClose={closePreview}
+          onDownload={() => preview && downloadAttachment(preview)}
+          downloading={preview !== null && downloadingId === preview.id}
+        />
+
+        {/* Deletion removes the bytes from disk for good — only the metadata row is soft-deleted —
+            so the copy says exactly that rather than the softer "this can't be undone". */}
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          onOpenChange={(next) => !next && setPendingDelete(null)}
+          title="Delete attachment?"
+          description={
+            pendingDelete
+              ? `"${pendingDelete.name}" will be permanently deleted from this lead. This is irreversible — the file cannot be recovered or downloaded again.`
+              : undefined
+          }
+          confirmLabel="Delete File"
+          onConfirm={confirmDelete}
+          loading={remove.isPending}
+          destructive
+        />
       </DialogContent>
     </Dialog>
   );

@@ -3,4 +3,4 @@ export const FIELD =
   "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-ring";
 
 export const SELECT =
-  "h-9 w-full rounded-lg border border-border bg-muted px-3 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring";
+  "h-9 w-full rounded-lg border border-border bg-muted pl-3 pr-9 text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-ring";

@@ -347,9 +347,9 @@ export function useLeads() {
   };
 }
 
-// Priority Summary cards now use the Dashboard's live usePriorityBuckets hook
-// (GET /dashboard/priority-buckets). The former hardcoded PRIORITY_BUCKETS mock was
-// removed here to avoid duplicate aggregation logic.
+// Priority Summary cards use the shared live usePrioritySummary hook
+// (GET /leads/priority-summary — the canonical `leads.priority` distribution). The former
+// hardcoded PRIORITY_BUCKETS mock was removed here to avoid duplicate aggregation logic.
 
 // Lead Summary status counts (TOTAL/NEW/CONTACTED/QUALIFIED/DECLINED). Counts are LIVE
 // from the extended /dashboard/kpis response; the tab metadata (order/label/color/active)

@@ -31,6 +31,7 @@ use App\Modules\Crm\Listeners\BroadcastCrmNotification;
 use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
+use App\Modules\Crm\Listeners\SyncLeadEngagementOnCompletion;
 use App\Modules\Crm\Models\Call;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
@@ -194,6 +195,11 @@ class CrmServiceProvider extends ServiceProvider
         // No-Response Escalation (workflow #4) — a follow-up completed without a reply creates a
         // Planner escalation task for the assigned BD (decided & executed server-side).
         Event::listen(FollowUpCompleted::class, EscalateUnansweredFollowUp::class);
+
+        // Planner → Lead Engagement Status. Completing a CALL or EMAIL activity advances the lead's
+        // engagement column (advance-only), so the Leads table reflects work the BD has actually done.
+        // Communication lifecycle only — `leads.status` stays a manual sales decision.
+        Event::listen(FollowUpCompleted::class, SyncLeadEngagementOnCompletion::class);
 
         // Multi-Channel Internal Notifications — the delivery subsystem for inbound-reply alerts on
         // channels beyond the always-on in-app notification (mail today, gated by

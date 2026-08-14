@@ -16,7 +16,6 @@ import type {
   ActivityItem,
   ActivityType,
 } from "@/modules/crm/features/dashboard/types/dashboard-types";
-import type { WebsiteStatus } from "@/modules/crm/features/leads/types/lead-types";
 
 // KPI card metadata (labels + styling preserved from the approved Figma). Values come from the
 // backend; honest static captions replace the previous fabricated trend chips (no invented
@@ -103,31 +102,40 @@ export function useLeadStatusBreakdown() {
   return { data, isLoading: query.isLoading, isError: query.isError };
 }
 
-// Static per-website_status card copy (from the approved Figma); merged with backend metrics.
-// `tone` is the existing colour/chip slot, kept so the cards look identical to before.
-const WEBSITE_STATUS_META: Record<WebsiteStatus, { title: string; description: string; tone: PriorityLevel }> = {
-  "no-website": { title: "No existing website", description: "Businesses with no web presence—ideal for full web and SEO packages.", tone: "high" },
-  "needs-redesign": { title: "Website needs improvement", description: "Outdated or slow sites. Ideal for redesign plus retainer-based SEO offers.", tone: "medium" },
-  "has-website": { title: "Has website, open to a new one", description: "Functional site owners exploring a refresh. Nurture with case studies.", tone: "low" },
+// Static per-priority card copy; merged with the backend's counts/averages.
+const PRIORITY_META: Record<PriorityLevel, { title: string; description: string }> = {
+  high: { title: "High Priority", description: "Leads you've flagged as most urgent." },
+  medium: { title: "Medium Priority", description: "Leads with a standard priority level." },
+  low: { title: "Low Priority", description: "Leads with a lower priority level." },
 };
 
-type PriorityBucketApi = { websiteStatus: WebsiteStatus; count: number; avgScore: number; pipelinePct: number };
+type PriorityBucketApi = { priority: PriorityLevel; count: number; avgScore: number; totalPct: number };
 
 /**
- * Website-opportunity buckets (GET /dashboard/priority-buckets) — the SINGLE source for the Lead
- * Priority Overview cards on BOTH the Dashboard (entry point) and the Leads page (workspace).
+ * Lead Priority buckets (GET /leads/priority-summary) — the SINGLE source for the Lead Priority
+ * Overview cards on BOTH the Dashboard (entry point) and the Leads page (workspace), so the two
+ * surfaces can never mean different things by the word "Priority".
  *
- * `filters` is optional: the Dashboard passes nothing and gets the unfiltered segmentation, while
+ * Aggregates `leads.priority`, the same column the Leads table renders and the same column the
+ * cards' `?priority=` drill-down filters on — so a card's chip, its count, and the rows you land
+ * on are guaranteed to agree.
+ *
+ * These cards previously read GET /dashboard/priority-buckets, which groups by `website_status`.
+ * That endpoint is correct at what it does and is left untouched; it simply answers a different
+ * question (web presence), so a card chipped "High Priority" was counting and filtering
+ * `website_status = no-website` and could list Medium-priority leads. See PDR-001.
+ *
+ * `filters` is optional: the Dashboard passes nothing and gets the unfiltered distribution, while
  * the Leads page passes its current table filters so the cards stay in step with the list. The
- * endpoint deliberately ignores `website_status` itself, so drilling into one bucket never zeroes
- * the other two.
+ * endpoint deliberately ignores `priority` itself (`applyPriority: false`), so drilling into one
+ * bucket never zeroes the other two.
  */
-export function usePriorityBuckets(filters: Record<string, string> = {}) {
+export function usePrioritySummary(filters: Record<string, string> = {}) {
   const query = useQuery<PriorityBucketApi[]>({
-    queryKey: queryKeys.dashboard.priorityBuckets(filters),
+    queryKey: queryKeys.leads.prioritySummary(filters),
     queryFn: () =>
       apiClient
-        .get("/dashboard/priority-buckets", { params: filters })
+        .get("/leads/priority-summary", { params: filters })
         .then((r) => r.data.data),
     // Keep the previous counts on screen while a filter change refetches (no card flicker).
     placeholderData: (prev) => prev,
@@ -135,7 +143,7 @@ export function usePriorityBuckets(filters: Record<string, string> = {}) {
 
   const data: PriorityBucket[] | undefined = query.data?.map((bucket) => ({
     ...bucket,
-    ...WEBSITE_STATUS_META[bucket.websiteStatus],
+    ...PRIORITY_META[bucket.priority],
   }));
 
   return { data, isLoading: query.isLoading, isError: query.isError };

@@ -20,6 +20,7 @@ import { EmailThread } from "@/modules/crm/features/leads/components/email-threa
 import { LeadAttachmentsModal } from "@/modules/crm/features/leads/components/lead-attachments-modal";
 import { ActiveCallPanel } from "@/modules/crm/features/leads/components/active-call-panel";
 import { LeadTimelinePanel } from "@/modules/crm/features/leads/components/lead-timeline-panel";
+import { LeadFilesCard } from "@/modules/crm/features/leads/components/lead-files-card";
 import { EditLeadDrawer } from "@/modules/crm/features/leads/components/edit-lead-drawer";
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
@@ -108,8 +109,8 @@ export function LeadDetailPage() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[76fr_24fr] lg:gap-6">
           <div className="flex flex-col gap-6">
             <LeadSummaryCard lead={lead} />
-            {/* Attachments are deliberately NOT surfaced on the page: the header's Attachment action
-                is the single entry point, and files live inside that modal. */}
+            {/* Uploading stays behind the header's Attachment action; the page surfaces files only
+                as the read-only Files & Downloads card in the right rail. */}
             {/* Internal Notes + the Calling Workspace share a row (reference layout): Notes dominant
                 (~71%), Active Call a narrow console (~29%). Stretches to equal height. Below xl the two
                 stack (Notes above Call) — the tablet layout — and collapse into the single mobile column. */}
@@ -148,6 +149,10 @@ export function LeadDetailPage() {
               activitiesLoading={activities.isLoading}
               activitiesError={activities.isError}
             />
+            {/* Documents get their own box BELOW the timeline panel rather than being folded into
+                it: a file is not an event, and mixing the two would make the Activity feed unusable
+                as a history. Its five-row window keeps the rail's height stable. */}
+            <LeadFilesCard leadId={params.id} />
           </div>
         </div>
       </div>
