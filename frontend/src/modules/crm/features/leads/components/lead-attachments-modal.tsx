@@ -1,6 +1,7 @@
 "use client";
 
-import { Download, Loader2, Paperclip, X } from "lucide-react";
+import { useState } from "react";
+import { Download, Eye, Loader2, Paperclip, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -11,15 +12,19 @@ import {
 } from "@/modules/crm/components/ui/dialog";
 import { Button } from "@/modules/crm/components/ui/button";
 import { UploadDropzone } from "@/modules/crm/components/forms/file-upload/upload-dropzone";
+import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { FileTypeIcon } from "@/modules/crm/features/leads/components/file-type-icon";
+import { LeadAttachmentPreviewDialog } from "@/modules/crm/features/leads/components/lead-attachment-preview-dialog";
 import {
   useLeadAttachments,
   useUploadAttachment,
   useDeleteAttachment,
   useDownloadAttachment,
+  usePreviewAttachment,
   type LeadAttachment,
 } from "@/modules/crm/features/leads/hooks/use-lead-attachments";
 import { formatAttachmentTimestamp } from "@/modules/crm/features/leads/lib/attachment-format";
+import { isPreviewable } from "@/modules/crm/features/leads/lib/attachment-preview";
 
 /** Extensions the backend accepts (StoreLeadAttachmentRequest::ALLOWED_EXTENSIONS). */
 const ACCEPT =
@@ -45,9 +50,20 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: P
   const upload = useUploadAttachment(leadId);
   const remove = useDeleteAttachment(leadId);
   const { downloadAttachment, downloadingId } = useDownloadAttachment(leadId);
+  const { preview, previewingId, openPreview, closePreview } = usePreviewAttachment(leadId);
+
+  // The file awaiting confirmation. Deleting destroys the bytes on disk for good, so the row's
+  // control only ever sets this — the mutation is reachable from the dialog's Confirm and nowhere
+  // else, which is what makes an accidental click survivable.
+  const [pendingDelete, setPendingDelete] = useState<LeadAttachment | null>(null);
 
   const files: LeadAttachment[] = attachments ?? [];
   const count = files.length;
+
+  function confirmDelete() {
+    if (!pendingDelete) return;
+    remove.mutate(pendingDelete.id, { onSettled: () => setPendingDelete(null) });
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -110,9 +126,25 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: P
                         {file.sizeLabel} · {formatAttachmentTimestamp(file.createdAt)}
                       </p>
                     </div>
-                    {/* Download sits beside the existing remove control, in the same trailing slot
-                        and with the same padding — the row layout and spacing are unchanged. */}
+                    {/* View · Download · Delete share the trailing slot with the same padding — the
+                        row layout and spacing are unchanged. View renders only for types the viewer
+                        can actually display, so the control never promises a preview it cannot give. */}
                     <div className="flex shrink-0 items-center gap-1">
+                      {isPreviewable(file.mimeType, file.name) && (
+                        <button
+                          type="button"
+                          onClick={() => openPreview(file)}
+                          disabled={previewingId === file.id}
+                          className="rounded-md p-1 text-muted-foreground transition-colors hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                          aria-label={`View ${file.name}`}
+                        >
+                          {previewingId === file.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => downloadAttachment(file)}
@@ -126,14 +158,17 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: P
                           <Download className="h-4 w-4" />
                         )}
                       </button>
+                      {/* Opens the confirmation and nothing else — no DELETE leaves the client until
+                          the user confirms. Trash2 rather than an X because this destroys the file
+                          on disk permanently; "remove from a list" would understate it. */}
                       <button
                         type="button"
-                        onClick={() => remove.mutate(file.id)}
+                        onClick={() => setPendingDelete(file)}
                         disabled={remove.isPending}
                         className="rounded-md p-1 text-muted-foreground transition-colors hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                        aria-label={`Remove ${file.name}`}
+                        aria-label={`Delete ${file.name}`}
                       >
-                        <X className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
                   </li>
@@ -153,6 +188,30 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: P
           </Button>
           <Button onClick={() => onOpenChange(false)}>Done</Button>
         </DialogFooter>
+
+        <LeadAttachmentPreviewDialog
+          preview={preview}
+          onClose={closePreview}
+          onDownload={() => preview && downloadAttachment(preview)}
+          downloading={preview !== null && downloadingId === preview.id}
+        />
+
+        {/* Deletion removes the bytes from disk for good — only the metadata row is soft-deleted —
+            so the copy says exactly that rather than the softer "this can't be undone". */}
+        <ConfirmDialog
+          open={pendingDelete !== null}
+          onOpenChange={(next) => !next && setPendingDelete(null)}
+          title="Delete attachment?"
+          description={
+            pendingDelete
+              ? `"${pendingDelete.name}" will be permanently deleted from this lead. This is irreversible — the file cannot be recovered or downloaded again.`
+              : undefined
+          }
+          confirmLabel="Delete File"
+          onConfirm={confirmDelete}
+          loading={remove.isPending}
+          destructive
+        />
       </DialogContent>
     </Dialog>
   );
