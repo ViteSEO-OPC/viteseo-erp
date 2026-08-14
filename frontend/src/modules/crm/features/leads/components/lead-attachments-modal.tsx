@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Eye, Loader2, Paperclip, Trash2 } from "lucide-react";
+import { Loader2, Paperclip } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -15,6 +15,7 @@ import { UploadDropzone } from "@/modules/crm/components/forms/file-upload/uploa
 import { ConfirmDialog } from "@/modules/crm/components/shared/confirm-dialog/confirm-dialog";
 import { FileTypeIcon } from "@/modules/crm/features/leads/components/file-type-icon";
 import { LeadAttachmentPreviewDialog } from "@/modules/crm/features/leads/components/lead-attachment-preview-dialog";
+import { LeadAttachmentRowActions } from "@/modules/crm/features/leads/components/lead-attachment-row-actions";
 import {
   useLeadAttachments,
   useUploadAttachment,
@@ -24,7 +25,6 @@ import {
   type LeadAttachment,
 } from "@/modules/crm/features/leads/hooks/use-lead-attachments";
 import { formatAttachmentTimestamp } from "@/modules/crm/features/leads/lib/attachment-format";
-import { isPreviewable } from "@/modules/crm/features/leads/lib/attachment-preview";
 
 /** Extensions the backend accepts (StoreLeadAttachmentRequest::ALLOWED_EXTENSIONS). */
 const ACCEPT =
@@ -40,10 +40,12 @@ type Props = {
 /**
  * Upload and manage files for one lead.
  *
- * This modal is the ONLY surface for attachments — the Lead Details page deliberately shows no
- * Attachments section, so upload, download and delete all live here. Download and delete are
- * offered to every role that can open the lead: Admin and BD have identical rights over a lead's
- * files, so there is no permission-driven variation in what the row renders.
+ * This modal is the only place files are UPLOADED, and it remains the full management surface. The
+ * Lead Details page also shows a read-only Files & Downloads card for quick access; both read the
+ * same per-lead query and share {@link LeadAttachmentRowActions}, so a delete on either surface
+ * updates the other. Download and delete are offered to every role that can open the lead: Admin and
+ * BD have identical rights over a lead's files, so there is no permission-driven variation in what
+ * the row renders.
  */
 export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: Props) {
   const { attachments, isLoading } = useLeadAttachments(leadId);
@@ -127,50 +129,17 @@ export function LeadAttachmentsModal({ open, onOpenChange, leadId, leadName }: P
                       </p>
                     </div>
                     {/* View · Download · Delete share the trailing slot with the same padding — the
-                        row layout and spacing are unchanged. View renders only for types the viewer
-                        can actually display, so the control never promises a preview it cannot give. */}
-                    <div className="flex shrink-0 items-center gap-1">
-                      {isPreviewable(file.mimeType, file.name) && (
-                        <button
-                          type="button"
-                          onClick={() => openPreview(file)}
-                          disabled={previewingId === file.id}
-                          className="rounded-md p-1 text-muted-foreground transition-colors hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                          aria-label={`View ${file.name}`}
-                        >
-                          {previewingId === file.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Eye className="h-4 w-4" />
-                          )}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => downloadAttachment(file)}
-                        disabled={downloadingId === file.id}
-                        className="rounded-md p-1 text-muted-foreground transition-colors hover:text-teal-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                        aria-label={`Download ${file.name}`}
-                      >
-                        {downloadingId === file.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="h-4 w-4" />
-                        )}
-                      </button>
-                      {/* Opens the confirmation and nothing else — no DELETE leaves the client until
-                          the user confirms. Trash2 rather than an X because this destroys the file
-                          on disk permanently; "remove from a list" would understate it. */}
-                      <button
-                        type="button"
-                        onClick={() => setPendingDelete(file)}
-                        disabled={remove.isPending}
-                        className="rounded-md p-1 text-muted-foreground transition-colors hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                        aria-label={`Delete ${file.name}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
+                        row layout and spacing are unchanged. Shared with the Files & Downloads card
+                        so both surfaces offer identical actions and states. */}
+                    <LeadAttachmentRowActions
+                      file={file}
+                      onPreview={openPreview}
+                      onDownload={downloadAttachment}
+                      onDelete={setPendingDelete}
+                      previewingId={previewingId}
+                      downloadingId={downloadingId}
+                      deleting={remove.isPending}
+                    />
                   </li>
                 ))}
               </ul>

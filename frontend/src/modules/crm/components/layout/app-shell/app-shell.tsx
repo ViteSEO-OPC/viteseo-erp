@@ -66,9 +66,15 @@ export function AppShell({ children }: AppShellProps) {
           title={title}
           onMenuClick={() => setMobileOpen(true)}
         />
+        {/* pb-24 reserves the strip the Copilot FAB floats in. The button is `fixed bottom-6` and
+            48px tall, so it covers the lowest ~72px of the viewport; with the old pb-8 (32px) the
+            last element on any page — most visibly the Files & Downloads rows on mobile, where the
+            rail stacks last — ended up underneath it with its actions unreachable. Scroll padding
+            is what fixes this: the FAB is fixed to the viewport, so only extra room at the end of
+            the scroll can clear it. */}
         <main
           className={cn(
-            "flex-1 overflow-y-auto bg-background px-4 pb-8 lg:px-6",
+            "flex-1 overflow-y-auto bg-background px-4 pb-24 lg:px-6",
             isLeadsPage ? "pt-6" : "pt-8",
           )}
         >
