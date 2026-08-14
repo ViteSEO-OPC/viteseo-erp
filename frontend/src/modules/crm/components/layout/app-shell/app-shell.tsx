@@ -14,6 +14,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/zerem/leads": "Leads",
   "/zerem/nearby-clients": "Nearby Clients",
   "/zerem/follow-ups": "Outreach",
+  "/zerem/planner/history": "Planner History",
   "/zerem/planner": "Planner",
   "/zerem/calendar": "Planner",
   "/zerem/reports": "Reports & Performance",
@@ -30,9 +31,13 @@ type AppShellProps = {
 export function AppShell({ children }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
-  const title = Object.entries(PAGE_TITLES).find(([path]) =>
-    pathname.startsWith(path),
-  )?.[1] ?? "Dashboard";
+  // Longest matching prefix, not the first declared: a nested route may have its own title while
+  // still sitting under a titled parent (/zerem/planner/history under /zerem/planner), and a
+  // first-match scan would silently show the parent's title depending on key order.
+  const title =
+    Object.entries(PAGE_TITLES)
+      .filter(([path]) => pathname.startsWith(path))
+      .sort(([a], [b]) => b.length - a.length)[0]?.[1] ?? "Dashboard";
   const isLeadsPage = pathname === "/zerem/leads" || pathname.startsWith("/zerem/leads/");
 
   return (

@@ -6,6 +6,7 @@ import {
   Users,
   Clock,
   CalendarCheck,
+  CalendarClock,
   Target,
   MapPin,
   History,
@@ -46,6 +47,16 @@ const NAV_ITEMS: {
   // shown ONLY to Business Development Managers, hidden from Admin/Super Admin. Badge = real count of
   // actionable (dated, not-completed) Planner items for the current user; no badge when zero.
   { label: "Planner", icon: CalendarCheck, href: "/zerem/planner", allowedRoles: ["crm_bd"] },
+  // Planner History — the Admin/Super Admin entry point to completed Planner work (with the All BD /
+  // per-BD selector). Shown ONLY to them: a BD reaches the identical surface from the History tab
+  // inside their own Planner above, so a second entry would be a duplicate for that role. This is
+  // deliberately NOT the Planner route — Admin/SA get History without the Calendar and Board.
+  {
+    label: "Planner History",
+    icon: CalendarClock,
+    href: "/zerem/planner/history",
+    allowedRoles: ["crm_admin", "super_admin"],
+  },
   // Reports & Performance — Management analytics (Admin/Super Admin only). Reuses the My Performance
   // widgets with an All-Reports / per-BD scope selector.
   { label: "Reports & Performance", icon: BarChart3, href: "/zerem/reports", minRole: "crm_admin" },

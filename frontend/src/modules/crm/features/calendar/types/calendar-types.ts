@@ -51,6 +51,12 @@ export type PlannerEvent = {
   owner: PlannerEventOwner | null;
   description: string | null;
   createdAt: string | null;
+  /**
+   * When the event was actually completed. Null for open work, and null for legacy rows completed
+   * before the column existed. History renders this as the completion date; the Board's rolling
+   * 7-day window is computed from it server-side.
+   */
+  completedAt: string | null;
   updatedAt: string | null;
 };
 
