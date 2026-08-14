@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Services;
 
+use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Requests\StoreLeadRequest;
 use App\Modules\Crm\Services\Import\XlsConverter;
@@ -20,10 +21,45 @@ use OpenSpout\Reader\XLSX\Reader as XlsxReader;
  *
  * Synchronous by design (Sprint 6 MVP): no queues, no jobs, no batch persistence.
  * Activity logging is automatic via the existing LeadObserver on Lead::create.
+ *
+ * ── Accepted header contract (canonical table: `Lead-Import-Contract.md` in the Obsidian KB) ──
+ *
+ * REQUIRED — exactly one column:
+ *   Business Name        business name | business | company | company name | organization
+ *
+ * OPTIONAL — every other column, in any order; unknown headers are reported, never fatal:
+ *   Contact Name         contact name | contact | name | full name | contact person |
+ *                        owner's name | owner name | owner | representative
+ *   Email / Phone / Industry / Address / Acquisition Channel / Website Domain
+ *   Priority             ⚠ a bare "Website" header maps to PRIORITY, not the domain
+ *   Email Outreach / Cold Calling / Update Status  (translated to enums)
+ *   Facebook / Instagram / TikTok / LinkedIn / Shopee / Lazada / TikTok Shop / Other Marketplace
+ *   Lead Note            comment | comments | note | notes | remarks → a crm_notes row, NOT a
+ *                        column on crm_leads; new leads only, truncated at NOTE_MAX_LENGTH
+ *
+ * A missing contact column defaults `contact_name` to '' before validation and persistence — see
+ * the note in import() for why omitting it is a 500 rather than a blank.
  */
 class LeadImportService
 {
-    public function __construct(private readonly XlsConverter $xls = new XlsConverter) {}
+    /**
+     * Hard ceiling for an imported Comment, mirroring StoreLeadRequest's `max:5000` on `note`.
+     * A longer comment is TRUNCATED, never rejected: the column was silently ignored before this
+     * mapping existed, so failing an otherwise-valid row because of it would be a regression in
+     * the name of a new feature (PO decision, 2026-08-14).
+     */
+    private const NOTE_MAX_LENGTH = 5000;
+
+    public function __construct(
+        private readonly XlsConverter $xls = new XlsConverter,
+        private readonly ?LeadNoteCreator $notes = null,
+    ) {}
+
+    /** Resolved lazily so the existing `new LeadImportService` call sites keep working. */
+    private function noteCreator(): LeadNoteCreator
+    {
+        return $this->notes ?? app(LeadNoteCreator::class);
+    }
 
     /**
      * Header aliases → canonical Lead column. Header cells are normalized
@@ -65,6 +101,11 @@ class LeadImportService
         'lazada' => ['lazada', 'lazada store', 'lazada url'],
         'tiktok_shop' => ['tiktok shop', 'tik tok shop', 'tiktok store'],
         'other_marketplace' => ['other marketplace', 'other e commerce', 'other ecommerce', 'other e commerce store'],
+        // Free-text remarks → the lead's FIRST internal note (crm_notes), never a column on
+        // crm_leads. Routed through LeadNoteCreator in persist(), i.e. the same path the Create Lead
+        // wizard and the Lead Details composer use, so the note gets the same author association and
+        // the same `note.created` Activity. Sheets without this column are unaffected.
+        'note' => ['comment', 'comments', 'note', 'notes', 'remarks'],
     ];
 
     /** Human labels for the mapping preview (crmField). */
@@ -89,6 +130,9 @@ class LeadImportService
         'lazada' => 'Lazada',
         'tiktok_shop' => 'TikTok Shop',
         'other_marketplace' => 'Other Marketplace',
+        // Required: mappingPreview() reads this map directly, so an alias without a label here
+        // would fault the preview rather than merely mislabel it.
+        'note' => 'Lead Note',
     ];
 
     /** Columns whose raw text is translated to a CRM enum via the Shared Translation Engine. */
@@ -172,9 +216,14 @@ class LeadImportService
         $header = array_shift($rows);
         $map = $this->mapHeader($header); // canonical column => column index
 
-        if (! isset($map['business_name'], $map['contact_name'])) {
+        // Business Name is the ONLY required header (PO decision, 2026-08-14). Contact information —
+        // including "Contact Name" / "Owner's Name" — is optional, because the overwhelming majority
+        // of prospecting sheets are company-only records: in the workbook that prompted this change,
+        // just 60 of 455 rows carried an owner name, yet the whole file was rejected for a column it
+        // barely used. Every other supported column stays optional exactly as before.
+        if (! isset($map['business_name'])) {
             throw ValidationException::withMessages([
-                'file' => 'The file must contain "Business Name" and "Contact Name" columns.',
+                'file' => 'The file must contain a "Business Name" column.',
             ]);
         }
 
@@ -189,6 +238,12 @@ class LeadImportService
         // unchanged. A blank Owner's Name simply imports with an empty contact_name (column is
         // NOT NULL with no default → stored as '').
         $rules['contact_name'] = ['nullable', 'string', 'max:255'];
+
+        // Import-only relaxation of `note` for the SAME reason: an imported Comment is truncated to
+        // NOTE_MAX_LENGTH in persist(), so keeping StoreLeadRequest's `max:5000` here would reject
+        // the row before the truncation could ever run — the opposite of the approved behaviour.
+        // The `string` check is kept; only the length ceiling moves to persist().
+        $rules['note'] = ['nullable', 'string'];
 
         /** @var list<array<string, string>> $newRows */
         $newRows = [];
@@ -210,6 +265,13 @@ class LeadImportService
             if ($data === null) {
                 continue; // wholly blank row — skip silently
             }
+            // extractRow only emits keys present in the header map, so a sheet WITHOUT any contact
+            // column yields no `contact_name` at all. `crm_leads.contact_name` is NOT NULL with no
+            // default and MySQL runs STRICT_TRANS_TABLES, so Lead::create() would fail with
+            // "Field 'contact_name' doesn't have a default value" — a 500 on commit, after a preview
+            // that looked perfectly clean. Defaulting here keeps the empty-contact behaviour
+            // identical to a present-but-blank column.
+            $data['contact_name'] ??= '';
             $rowNumber = $index + 2; // 1-based, past header
             $data = $this->translateValues($data, $rowNumber, $unknownAgg);
             $parsed[] = ['rowNumber' => $rowNumber, 'data' => $data];
@@ -263,6 +325,10 @@ class LeadImportService
                     $importedCount = $this->persist($newRows, $userId, $assignedTo);
                 }
                 foreach ($toRestore as $lead) {
+                    // Deliberately no note here, even when the row carries a Comment (PO decision,
+                    // 2026-08-14): a restore re-activates an existing lead that already has its own
+                    // note history, and restore has never written anything but the restore itself.
+                    // Comment → Note applies to genuinely NEW leads only.
                     $lead->restore(); // fires LeadObserver::restored → one immutable `lead.restored` Activity
                 }
             });
@@ -691,10 +757,34 @@ class LeadImportService
     {
         return DB::transaction(function () use ($validRows, $userId, $assignedTo): int {
             $count = 0;
+            // Resolved once, outside the loop: every note in one import shares the same author.
+            // Only loaded if a row actually carries a comment.
+            $author = null;
+
             foreach ($validRows as $data) {
+                // The comment is NOT a lead attribute — `crm_leads` has no note column and
+                // LeadCreator documents the same separation for the manual path. Pull it out
+                // before the create so the row inserts exactly as it did before this mapping.
+                $body = trim((string) ($data['note'] ?? ''));
+                unset($data['note']);
+
                 // LeadObserver records the "created" Activity automatically.
-                Lead::create([...$data, 'created_by' => $userId, 'assigned_to' => $assignedTo]);
+                $lead = Lead::create([...$data, 'created_by' => $userId, 'assigned_to' => $assignedTo]);
                 $count++;
+
+                if ($body === '') {
+                    continue;
+                }
+
+                // Truncate rather than reject — see NOTE_MAX_LENGTH. mb_substr so a multibyte
+                // comment can never be cut mid-character.
+                $body = mb_substr($body, 0, self::NOTE_MAX_LENGTH);
+                $author ??= User::find($userId);
+                if ($author !== null) {
+                    // Same service as the wizard and the Lead Details composer → same author
+                    // association and the same `note.created` Activity via NoteObserver.
+                    $this->noteCreator()->create($lead, $body, $author);
+                }
             }
 
             return $count;
