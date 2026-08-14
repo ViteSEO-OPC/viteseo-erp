@@ -174,17 +174,26 @@ export default function HolidaysPage() {
 
       {/* Toolbar: country + year on the left, refresh + add on the right */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        {/*
+          At 375px the page has 343px of content, and `w-56` + gap-3 + `w-28` is
+          348px — with neither select able to shrink, the year dropdown ran off
+          the right edge and took the page's horizontal scrollbar with it.
+
+          On phones the country select takes whatever is left over instead of a
+          fixed 224px, and the year keeps its width (it holds four digits, so it
+          has nothing to spare). From `sm` up both return to the fixed widths.
+        */}
+        <div className="flex w-full items-center gap-3 sm:w-auto">
           <SimpleSelect
             aria-label="Country"
-            className="w-56"
+            className="min-w-0 flex-1 sm:w-56 sm:flex-none"
             value={country}
             onValueChange={setCountry}
             options={COUNTRIES.map((c) => ({ value: c.code, label: `${flagEmoji(c.code)} ${c.name}` }))}
           />
           <SimpleSelect
             aria-label="Year"
-            className="w-28"
+            className="w-28 shrink-0"
             value={String(year)}
             onValueChange={setYear}
             options={YEARS.map((y) => ({ value: String(y), label: String(y) }))}

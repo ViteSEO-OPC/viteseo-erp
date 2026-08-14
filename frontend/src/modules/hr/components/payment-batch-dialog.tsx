@@ -12,7 +12,9 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
+  dialogScrollbar,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/core/ui/badge";
@@ -143,8 +145,14 @@ export function PaymentBatchDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      {/*
+        Capped at `90svh` with the body as the only scroller. Even with the
+        transfers list bounded, a run paid in several batches stacks past the
+        window, and this dialog had no height limit at all — so the overflow was
+        unreachable rather than scrollable.
+      */}
+      <DialogContent className="flex max-h-[90svh] max-w-2xl flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Pay this run</DialogTitle>
           <DialogDescription>
             {runLabel} — net {formatPeso(runTotalNet)}. Amounts come from the payroll run; a batch
@@ -153,7 +161,7 @@ export function PaymentBatchDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className={cn("min-h-0 flex-1 space-y-4 overflow-y-auto pr-1", dialogScrollbar)}>
           {outstanding > 0.01 && batches.length > 0 && (
             <div className="flex items-start gap-2 rounded-lg border border-warning bg-warning-subtle px-3 py-2">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -284,7 +292,7 @@ export function PaymentBatchDialog({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
@@ -406,7 +414,18 @@ function BatchTransfers({ batchId }: { batchId: number }) {
         </Button>
       </div>
 
-      <div className="space-y-1">
+      {/*
+        The transfers scroll inside a fixed height instead of growing the dialog.
+        This is one row per employee in the batch — a payroll run for 80 people
+        is 80 rows — and expanding it used to push the dialog taller than the
+        window, which on a `top-1/2 -translate-y-1/2` dialog means the top and
+        bottom are simply cut off with no way to reach them.
+
+        The upload controls above and the failure-reason panel below stay outside
+        the scroller deliberately: hitting "Failed" on a row near the bottom must
+        not send you hunting for the reason input.
+      */}
+      <div className={cn("max-h-64 space-y-1 overflow-y-auto pr-1", dialogScrollbar)}>
         {data.batch.payments?.map((payment) => (
           <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
             <div className="min-w-0">

@@ -90,11 +90,13 @@ export function EmployeeRecord({
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
       {/* Left: identity + tab rail */}
-      <div className="rounded-card border border-border bg-card p-6">
+      <div className="min-w-0 rounded-card border border-border bg-card p-6">
         <div className="flex flex-col items-center text-center">
           <ProfilePhoto employee={employee} canEdit={canEdit} />
-          <p className="mt-3 text-h3 font-bold text-foreground">{employee.name}</p>
-          <p className="text-caption text-muted-foreground">
+          {/* The rail is a fixed 300px track, so a long name or title has to
+              break rather than run past the card edge. */}
+          <p className="mt-3 text-h3 font-bold break-words text-foreground">{employee.name}</p>
+          <p className="text-caption break-words text-muted-foreground">
             {employee.job_title}
             {employee.department ? ` · ${employee.department.name}` : ""}
           </p>
@@ -134,8 +136,16 @@ export function EmployeeRecord({
         </nav>
       </div>
 
-      {/* Right: tab content. Each editable tab owns its own form + Save/Cancel. */}
-      <div className="rounded-card border border-border bg-card p-6">
+      {/*
+        Right: tab content. Each editable tab owns its own form + Save/Cancel.
+
+        `min-w-0` on both columns: a grid track sized `1fr` is really
+        `minmax(auto, 1fr)`, so its minimum is the content's min-content width.
+        Any wide-and-unbreakable descendant would push this track past its share
+        and carry the whole record off the right edge of the page — the tab
+        content is where that risk lives, so the floor comes off here.
+      */}
+      <div className="min-w-0 rounded-card border border-border bg-card p-6">
         {/* Says why the Edit links are missing, before HR goes looking for them. */}
         {archived && (
           <div className="mb-6 rounded-card border border-border bg-muted/40 p-4">

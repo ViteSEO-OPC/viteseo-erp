@@ -77,7 +77,11 @@ export function SiblingsFields({
             <span className="pt-2.5 text-label font-bold uppercase tracking-wide text-muted-foreground sm:w-20">
               Sibling {i + 1}
             </span>
-            <div className="flex-1 space-y-1.5">
+            {/* `min-w-0`: an `<input>` has an intrinsic width from its default
+                `size`, and a flex item's `min-width: auto` turns that into a
+                floor — the row would overflow rather than let the name field
+                shrink. */}
+            <div className="min-w-0 flex-1 space-y-1.5">
               <Input
                 placeholder="Full name"
                 value={sibling.name}

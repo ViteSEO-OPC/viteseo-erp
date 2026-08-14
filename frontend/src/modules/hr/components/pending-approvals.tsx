@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { Check, ChevronRight, X } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
@@ -101,6 +101,27 @@ const KIND_TONE: Record<Kind, string> = {
 // human looks at the photo before approving it, and a one-click Approve here — with no
 // photo in sight — would quietly defeat the feature. The row links to the queue instead.
 const REVIEWABLE = new Set<Kind>(["leave", "claim", "change", "payslip"]);
+
+/*
+  Approve/Reject collapse to icon-only squares when the card is narrow.
+
+  A labelled pair costs ~170px of the row. On a laptop the card is one of two
+  `lg:grid-cols-2` columns — ~420px of content at a 1280px viewport — so the
+  buttons left the name and the "Pending Xh" age squeezed down to nothing. As
+  icons they cost ~80px, and the request stays readable.
+
+  Keyed off a *container* query, not a breakpoint: this card is half-width from
+  `lg` up but full-width below it, so its own width and the viewport's move in
+  opposite directions at that boundary — a `lg:` rule would put the labels back
+  exactly where they don't fit. The 28rem threshold is where the content box has
+  room for both labels plus a name that isn't truncated on sight.
+
+  The label stays in the DOM as `sr-only` rather than being swapped out, so the
+  buttons keep their accessible names in the icon-only state; `title` gives
+  sighted users the same thing on hover.
+*/
+const ACTION_BTN = "w-8 px-0 @[28rem]/approvals:w-auto @[28rem]/approvals:px-3";
+const ACTION_LABEL = "sr-only @[28rem]/approvals:not-sr-only";
 
 export function PendingApprovals() {
   const { data: leaves } = useLeaveRequests();
@@ -298,11 +319,8 @@ export function PendingApprovals() {
     }
   }
 
-  // Stacked on phones: at 320px the Approve/Reject pair eats ~160px of a ~240px
-  // row, truncating the name and age away to nothing. Below `sm` the buttons
-  // drop onto their own line so the request stays readable.
   const rowClass =
-    "flex flex-col items-stretch gap-2 rounded-lg border border-border px-3.5 py-3 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between sm:gap-3";
+    "flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-3 transition-colors hover:bg-muted/40";
 
   // Chip + name + "Pending Xh" — shared by both row shapes.
   function RowBody({ item }: { item: Item }) {
@@ -324,7 +342,7 @@ export function PendingApprovals() {
   }
 
   return (
-    <div className="rounded-card border border-border bg-card p-4 sm:p-6">
+    <div className="@container/approvals rounded-card border border-border bg-card p-4 sm:p-6">
       <h2 className="text-h3 font-bold text-foreground">Pending Approvals</h2>
 
       <div className="mt-4 h-80 space-y-3 overflow-y-auto pr-1">
@@ -340,21 +358,26 @@ export function PendingApprovals() {
                 <Link href={item.href} className="min-w-0 flex-1">
                   <RowBody item={item} />
                 </Link>
-                <div className="flex shrink-0 gap-2 [&>button]:flex-1 sm:[&>button]:flex-none">
+                <div className="flex shrink-0 gap-2">
                   <Button
                     size="sm"
                     variant="success"
+                    className={ACTION_BTN}
+                    title="Approve"
                     onClick={() => setReview({ mode: "approve", item })}
                   >
-                    Approve
+                    <Check />
+                    <span className={ACTION_LABEL}>Approve</span>
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="border-danger text-danger hover:bg-danger/10 hover:text-danger"
+                    className={`border-danger text-danger hover:bg-danger/10 hover:text-danger ${ACTION_BTN}`}
+                    title="Reject"
                     onClick={() => setReview({ mode: "reject", item })}
                   >
-                    Reject
+                    <X />
+                    <span className={ACTION_LABEL}>Reject</span>
                   </Button>
                 </div>
               </div>

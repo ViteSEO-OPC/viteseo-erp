@@ -84,7 +84,7 @@ export function TeamoraMobileTopBar({
   }, [bellOpen, searchExpanded]);
 
   return (
-    <header className="relative flex h-14 shrink-0 items-center gap-1 border-b border-border bg-card px-4 lg:hidden">
+    <header className="relative flex h-14 shrink-0 items-center gap-1 border-b border-border bg-card px-4 xl:hidden">
       {searchExpanded ? (
         <>
           <div className="relative flex-1">

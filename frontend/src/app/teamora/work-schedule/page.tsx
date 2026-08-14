@@ -394,7 +394,15 @@ export default function TimeOffPage() {
     {
       header: "Reason",
       cell: (r) => (
-        <span className="block max-w-[18rem] truncate" title={r.reason}>
+        // Truncates sooner on small screens. At a flat 18rem this was the widest
+        // column on the table, and since the table scrolls horizontally on a
+        // phone that width came straight out of how far you had to swipe to
+        // reach Status and Cancel. The full text is on the row's detail dialog
+        // (and in `title` on desktop), so an early ellipsis costs nothing.
+        <span
+          className="block max-w-[7rem] truncate sm:max-w-[10rem] lg:max-w-[18rem]"
+          title={r.reason}
+        >
           {r.reason}
         </span>
       ),

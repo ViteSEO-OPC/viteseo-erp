@@ -19,9 +19,21 @@ import { useMyEmployee } from "@/modules/hr/hooks/use-my-employee";
  *
  * `AppShell` renders the sidebar as a permanent 256px column, which leaves a
  * 375px phone ~119px for content. This wraps the shared core `Sidebar` and
- * `TopBar` instead of forking them: below `lg` the sidebar becomes an
- * off-canvas drawer opened by a hamburger, at `lg`+ it is the static column
+ * `TopBar` instead of forking them: below `xl` the sidebar becomes an
+ * off-canvas drawer opened by a hamburger, at `xl`+ it is the static column
  * exactly as before.
+ *
+ * The switch is `xl` (1280px), not `lg`: the sidebar costs a flat 256px, so at
+ * 1024px it was taking a quarter of the window and leaving pages — the employee
+ * record worst of all, since it spends another 300px on its own rail — too
+ * little to lay out in. Every real laptop width (1280, 1366, 1440, 1512, 1536)
+ * still gets the persistent column; the drawer covers iPad-landscape and
+ * half-screen windows, which are tablet-shaped anyway.
+ *
+ * Anything positioned against the sidebar from outside the shell has to move
+ * with this. Today that is the modal offset in `components/ui/dialog.tsx`
+ * (`xl:left-64`) — keep the two breakpoints identical or modals centre on a
+ * sidebar that isn't there.
  *
  * It lives in `modules/hr/` rather than `core/` so the shared shell (which
  * Sprintly/Zerem also render) stays untouched. The drawer mechanics mirror
@@ -85,7 +97,7 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
           than pushing the whole page sideways.) */}
       <div className="fixed inset-0 flex overflow-hidden">
         {/* Desktop: the static column, unchanged from AppShell. */}
-        <div className="hidden lg:flex">
+        <div className="hidden xl:flex">
           <Sidebar
             variant={variant}
             canSwitchView={canSwitch}
@@ -97,7 +109,7 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
         {/* Mobile: backdrop + off-canvas drawer. */}
         {mobileOpen && (
           <div
-            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/50 xl:hidden"
             onClick={() => setMobileOpen(false)}
             aria-hidden="true"
           />
@@ -109,7 +121,7 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
           aria-label="Navigation menu"
           onClick={closeIfNavigating}
           className={cn(
-            "fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out lg:hidden",
+            "fixed inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out xl:hidden",
             // `invisible` (not just the off-screen transform) so the drawer's
             // links leave the tab order while it is closed.
             mobileOpen ? "visible translate-x-0" : "invisible -translate-x-full",
@@ -132,14 +144,14 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Two bars, one at a time: the HR-owned mobile bar below `lg` (it
+          {/* Two bars, one at a time: the HR-owned mobile bar below `xl` (it
               carries the hamburger, and a notification dropdown that fits a
-              320px screen), core's shared bar from `lg` up. */}
+              320px screen), core's shared bar from `xl` up. */}
           <TeamoraMobileTopBar
             variant={variant}
             onOpenNav={() => setMobileOpen(true)}
           />
-          <div className="hidden lg:block">
+          <div className="hidden xl:block">
             <TopBar variant={variant} />
           </div>
 

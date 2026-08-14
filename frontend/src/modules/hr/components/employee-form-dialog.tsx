@@ -18,7 +18,9 @@ import {
   DialogDescription,
   DialogFooter,
   DialogClose,
+  dialogScrollbar,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { useDepartments } from "@/modules/hr/hooks/use-departments";
 import { useCreateEmployee, useEmployees } from "@/modules/hr/hooks/use-employees";
 import { SiblingsFields } from "@/modules/hr/components/siblings-fields";
@@ -244,16 +246,32 @@ export function EmployeeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg">
-        <DialogHeader>
+      {/*
+        One scroller, not two. The dialog used to scroll itself (`max-h-[90svh]
+        overflow-y-auto`) around a body that also scrolled at `max-h-[60vh]`, so
+        a tall form showed a scrollbar inside a scrollbar.
+
+        The dialog is now a flex column capped at `90svh` with a non-scrolling
+        header and footer, and the body is the only thing that moves. Dropping
+        `overflow-x-hidden` here matters as much as dropping `overflow-y-auto`:
+        a non-`visible` value on one axis forces the other to compute to `auto`,
+        so leaving it would have kept the outer scrollbar anyway. The body still
+        carries it, which is where the horizontal clipping was wanted.
+
+        Sizing the body with `flex-1 min-h-0` instead of `max-h-[60vh]` also
+        drops the guess — it takes whatever height is left over after the header
+        and footer, at any viewport height, rather than 60% of the viewport.
+      */}
+      <DialogContent className="flex max-h-[90svh] max-w-[calc(100%-3rem)] flex-col sm:max-w-lg">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Add employee</DialogTitle>
           <DialogDescription>
             Creates the employee, their login (password: password), and leave balances.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} noValidate>
-          <div className="max-h-[60vh] space-y-6 overflow-y-auto overflow-x-hidden px-0.5">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex min-h-0 flex-1 flex-col">
+          <div className={cn("min-h-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden px-0.5", dialogScrollbar)}>
             {/* Personal */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="First name" error={errors.first_name?.message}>
@@ -578,7 +596,7 @@ export function EmployeeFormDialog({
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <DialogClose asChild>
               <Button type="button" variant="outline">Cancel</Button>
             </DialogClose>
