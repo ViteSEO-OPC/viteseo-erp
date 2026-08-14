@@ -41,6 +41,10 @@ class StoreLeadRequest extends FormRequest
             // import never loses a channel that isn't in the canonical dropdown; the wizard supplies
             // canonical values. Participates in NO business computation.
             'acquisition_channel' => ['nullable', 'string', 'max:100'],
+            // Street address. The column and the Fillable entry already existed — it was written only
+            // by discovery ingest, so the wizard's "Business Address" input had nowhere to go and was
+            // silently discarded. Nullable/optional: no existing caller is affected by adding it.
+            'address' => ['nullable', 'string', 'max:255'],
             // Administrative-territory location (Nearby Clients / Target Location +10). Plain strings.
             'region' => ['nullable', 'string', 'max:255'],
             'province' => ['nullable', 'string', 'max:255'],

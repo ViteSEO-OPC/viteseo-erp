@@ -181,4 +181,35 @@ class LeadCreationInitialNoteTest extends TestCase
             'website' => 'https://northwind.example',
         ]);
     }
+
+    public function test_address_is_persisted_from_create(): void
+    {
+        $this->actingAsAdmin();
+
+        // Same shape as `website` above: the column and the Fillable entry already existed and only
+        // discovery ingest ever wrote it, so the wizard's Business Address input had no rule to pass
+        // and was silently dropped.
+        $leadId = $this->postJson('/api/v1/crm/leads', $this->payload([
+            'address' => '12 Rockwell Drive, Makati City',
+        ]))->assertCreated()->json('data.id');
+
+        $this->assertDatabaseHas('crm_leads', [
+            'id' => $leadId,
+            'address' => '12 Rockwell Drive, Makati City',
+        ]);
+    }
+
+    public function test_address_is_optional_so_existing_callers_are_unaffected(): void
+    {
+        $this->actingAsAdmin();
+
+        // The rule is `nullable`, so every caller that never sent an address keeps working.
+        $leadId = $this->postJson('/api/v1/crm/leads', $this->payload())
+            ->assertCreated()->json('data.id');
+
+        $this->assertDatabaseHas('crm_leads', [
+            'id' => $leadId,
+            'address' => null,
+        ]);
+    }
 }
