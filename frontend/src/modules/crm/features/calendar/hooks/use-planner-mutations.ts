@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
@@ -40,6 +40,25 @@ export type PlannerEventDraft = {
 };
 
 const listKey = queryKeys.planner.list();
+
+/**
+ * Every scoped Planner History cache. A prefix, not a single key: History is cached per scope
+ * ("all" / "bd:<id>"), and an Admin may have several of those entries warm at once.
+ */
+const historyKeyPrefix = [...queryKeys.planner.all, "history"] as const;
+
+/**
+ * Refresh both Planner representations after a write.
+ *
+ * The live list is invalidated as before; History is invalidated too because completing an event is
+ * exactly what moves a row INTO it — without this, marking a task done would leave History showing a
+ * stale set until it refetched on its own. Only the list cache is written optimistically; History is
+ * read-only, so a plain invalidation is the whole story there.
+ */
+function invalidatePlanner(qc: QueryClient): void {
+  qc.invalidateQueries({ queryKey: listKey });
+  qc.invalidateQueries({ queryKey: historyKeyPrefix });
+}
 
 /** Map a camelCase draft (full or partial) to the API's snake_case payload. */
 function toApiPayload(d: Partial<PlannerEventDraft>): Record<string, unknown> {
@@ -96,6 +115,8 @@ export function useCreatePlannerEvent(options?: { successMessage?: string }) {
         owner: null,
         description: draft.description,
         createdAt: null,
+        // A provisional row is never a completion; the server's reply carries the real value.
+        completedAt: null,
         updatedAt: null,
       };
       qc.setQueryData<PlannerEvent[]>(listKey, (old = []) => [...old, optimistic]);
@@ -106,7 +127,7 @@ export function useCreatePlannerEvent(options?: { successMessage?: string }) {
       toast.error(getApiErrorMessage(err, "Could not create event"));
     },
     onSuccess: () => toast.success(options?.successMessage ?? "Event created"),
-    onSettled: () => qc.invalidateQueries({ queryKey: listKey }),
+    onSettled: () => invalidatePlanner(qc),
   });
 }
 
@@ -139,7 +160,7 @@ export function useUpdatePlannerEvent() {
     onSuccess: (_data, vars) => {
       if (!vars.silent) toast.success("Event updated");
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: listKey }),
+    onSettled: () => invalidatePlanner(qc),
   });
 }
 
@@ -159,6 +180,6 @@ export function useDeletePlannerEvent() {
       toast.error(getApiErrorMessage(err, "Could not delete event"));
     },
     onSuccess: () => toast.success("Event deleted"),
-    onSettled: () => qc.invalidateQueries({ queryKey: listKey }),
+    onSettled: () => invalidatePlanner(qc),
   });
 }

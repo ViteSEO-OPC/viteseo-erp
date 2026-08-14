@@ -58,6 +58,11 @@ class PlannerEventResource extends JsonResource
 
             'description' => $this->description,
             'createdAt' => $this->created_at?->toIso8601String(),
+            // When the event was actually completed — stamped by PlannerEventObserver on the
+            // transition into `completed` and cleared on reopen, so it is never a stale edit
+            // timestamp. Null for open work and for legacy rows completed before the column existed.
+            // History renders this as the completion date; the Board's rolling window reads it too.
+            'completedAt' => $this->completed_at?->toIso8601String(),
             'updatedAt' => $this->updated_at?->toIso8601String(),
         ];
     }

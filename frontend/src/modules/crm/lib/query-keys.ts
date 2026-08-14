@@ -118,6 +118,13 @@ export const queryKeys = {
     // Board) reads this single cache entry, so all views are presentations of the same dataset and
     // a mutation invalidating it refreshes every view at once (cross-view synchronization).
     list: () => [...queryKeys.planner.all, "list"] as const,
+    /**
+     * Planner History — a SEPARATE key from `list()` on purpose. The live Planner's single shared
+     * list cache is written optimistically by the Board's drag mutation (setQueryData on the exact
+     * key), so parameterising it per scope would silently break those optimistic updates. History is
+     * read-only and cached per scope ("all" | "bd:<id>"), leaving the live cache untouched.
+     */
+    history: (scope: string) => [...queryKeys.planner.all, "history", scope] as const,
     events: (dateRange: { start: string; end: string }) =>
       [...queryKeys.planner.all, "events", dateRange] as const,
   },

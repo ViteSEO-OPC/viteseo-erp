@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 
+use App\Modules\Crm\Requests\IndexPlannerEventRequest;
 use App\Modules\Crm\Requests\StorePlannerEventRequest;
 use App\Modules\Crm\Requests\UpdatePlannerEventRequest;
 use App\Modules\Crm\Resources\PlannerEventResource;
@@ -13,7 +14,6 @@ use App\Modules\Crm\Models\PlannerEvent;
 use App\Modules\Crm\Services\Planner\FollowUpScheduler;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
@@ -41,23 +41,60 @@ class PlannerEventController extends Controller
      * KPI reads completed events through that scope with its OWN period (Completed Follow-ups is
      * month-to-date; Consultations Held has no date bound at all), so a 7-day scope would silently
      * shrink those figures as a month progressed. The Planner view is filtered; reporting is not.
+     *
+     * `?view=history` selects the History representation instead — see {@see applyHistory()}. It is
+     * the SAME endpoint, scope, and policy: History is a different question asked of the same rows,
+     * not a second Planner.
+     *
+     * `?assigned_to` narrows to one BD (the Admin/Super Admin "All BD | <BD>" filter). It is applied
+     * AFTER visibleTo and can therefore only ever intersect what the caller may already see — a BD
+     * passing another BD's id gets an empty list, never a leak. That is why no role check guards the
+     * parameter: one ownership boundary, in one place.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(IndexPlannerEventRequest $request): AnonymousResourceCollection
     {
+        $history = $request->wantsHistory();
+
         $events = PlannerEvent::query()
             ->visibleTo($request->user())
             ->with(['lead', 'owner'])
-            ->tap(fn (Builder $q) => $this->applyCompletedWindow($q, $request->user()))
+            ->when(! $history, fn (Builder $q) => $this->applyCompletedWindow($q, $request->user()))
+            ->when($history, fn (Builder $q) => $this->applyHistory($q))
+            ->when($request->filled('assigned_to'), fn ($q) => $q->where('assigned_to', $request->integer('assigned_to')))
             ->when($request->filled('from'), fn ($q) => $q->where('starts_at', '>=', $request->date('from')))
             ->when($request->filled('to'), fn ($q) => $q->where('starts_at', '<=', $request->date('to')))
-            ->when($request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
+            ->when(! $history && $request->filled('status'), fn ($q) => $q->where('status', $request->string('status')))
             ->when($request->filled('event_type'), fn ($q) => $q->where('event_type', $request->string('event_type')))
-            ->orderByRaw('starts_at IS NULL')       // dated events first, undated (Board backlog) last
-            ->orderBy('starts_at')
-            ->orderByDesc('id')
+            ->when($history, fn (Builder $q) => $q->orderByDesc('completed_at')->orderByDesc('id'))
+            ->when(! $history, fn (Builder $q) => $q
+                ->orderByRaw('starts_at IS NULL')   // dated events first, undated (Board backlog) last
+                ->orderBy('starts_at')
+                ->orderByDesc('id'))
             ->get();
 
         return PlannerEventResource::collection($events);
+    }
+
+    /**
+     * The History representation: completed work, with NO time limit.
+     *
+     * History is the answer to "what has been finished?", which is why it is completed-only and why
+     * {@see applyCompletedWindow()} is skipped rather than widened — that method is untouched and
+     * still governs the live Planner exactly as before, including its KPI-safety property.
+     *
+     * `?status` is deliberately ignored in this mode (see index()): History means completed, and
+     * honouring `?status=todo` here would return an empty list that reads like missing data rather
+     * than a contradiction in terms.
+     *
+     * Ownership still comes from scopeVisibleTo, so a BD's History is their own completed work and
+     * nobody else's. Completed events are never ownership-transferred (a lead reassignment moves
+     * only OPEN work), so History correctly attributes each row to the BD who actually performed it.
+     *
+     * @param  Builder<PlannerEvent>  $query
+     */
+    private function applyHistory(Builder $query): void
+    {
+        $query->where('status', 'completed');
     }
 
     /**

@@ -51,7 +51,10 @@ export const BOARD_COLUMNS: { status: PlannerEventStatus; label: string; dot: st
   { status: "todo", label: "To Do", dot: "#9CA3AF" },
   { status: "scheduled", label: "Scheduled", dot: "#7B9EF9" },
   { status: "in_progress", label: "In Progress", dot: "#F9C74F" },
-  { status: "completed", label: "Completed", dot: "#4FD8D7" },
+  // "Recently Completed", not "Completed": the backend retires a completion from this column 7 days
+  // after completed_at, so the plain label overstated what the column holds. The rest lives in the
+  // History mode, which has no time limit.
+  { status: "completed", label: "Recently Completed", dot: "#4FD8D7" },
 ];
 
 export function isPlannerStatus(s: string): s is PlannerEventStatus {
