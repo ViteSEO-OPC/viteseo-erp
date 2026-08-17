@@ -405,6 +405,8 @@ function AttendancePolicyEditor() {
   const [otRestSpecial, setOtRestSpecial] = useState(String(policy?.overtime_rest_special_pct ?? 169));
   const [otRegHoliday, setOtRegHoliday] = useState(String(policy?.overtime_regular_holiday_pct ?? 260));
   const [nightDiff, setNightDiff] = useState(String(policy?.night_diff_pct ?? 10));
+  const [nightDiffStart, setNightDiffStart] = useState(policy?.night_diff_start_time || "22:00");
+  const [nightDiffEnd, setNightDiffEnd] = useState(policy?.night_diff_end_time || "06:00");
 
   // How lateness is charged: "exact" (precise minutes) or "custom" (a single threshold rule).
   // Custom is stored as a one-row late_tiers ladder — see chargeFields() below.
@@ -469,6 +471,18 @@ function AttendancePolicyEditor() {
     );
     if (err) {
       toast.error(err);
+      return false;
+    }
+    return true;
+  }
+
+  function guardNightWindow(): boolean {
+    if (!nightDiffStart || !nightDiffEnd) {
+      toast.error("Enter both night differential times.");
+      return false;
+    }
+    if (nightDiffStart === nightDiffEnd) {
+      toast.error("Night differential start and end times must be different.");
       return false;
     }
     return true;
@@ -1119,7 +1133,9 @@ function AttendancePolicyEditor() {
             overtime_rest_special_pct: Number(otRestSpecial),
             overtime_regular_holiday_pct: Number(otRegHoliday),
             night_diff_pct: Number(nightDiff),
-          })
+            night_diff_start_time: nightDiffStart,
+            night_diff_end_time: nightDiffEnd,
+          }, guardNightWindow)
         }
       >
         <div className="space-y-3">
@@ -1140,7 +1156,33 @@ function AttendancePolicyEditor() {
         </div>
         <div className="space-y-3">
           <SubHeading>Night differential</SubHeading>
-          <NumberField id="pol-night" label="Night differential (+%)" value={nightDiff} onChange={setNightDiff} min={10} max={100} />
+          <div className="flex flex-wrap items-end gap-4">
+            <NumberField id="pol-night" label="Night differential (+%)" value={nightDiff} onChange={setNightDiff} min={10} max={100} />
+            <div className="space-y-1.5">
+              <Label htmlFor="pol-night-start">Starts at</Label>
+              <Input
+                id="pol-night-start"
+                type="time"
+                value={nightDiffStart}
+                onChange={(event) => setNightDiffStart(event.target.value)}
+                className="w-36"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="pol-night-end">Ends at</Label>
+              <Input
+                id="pol-night-end"
+                type="time"
+                value={nightDiffEnd}
+                onChange={(event) => setNightDiffEnd(event.target.value)}
+                className="w-36"
+              />
+            </div>
+          </div>
+          <Hint>
+            The default is <strong>10:00 PM to 6:00 AM</strong>. If the end is earlier than the
+            start, the window continues through midnight.
+          </Hint>
         </div>
         <div className="rounded-lg border border-warning bg-warning-subtle p-3">
           <p className="text-xs text-foreground">

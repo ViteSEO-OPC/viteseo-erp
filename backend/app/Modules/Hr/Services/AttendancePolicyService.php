@@ -62,6 +62,9 @@ class AttendancePolicyService
         'overtime_rest_special_pct' => 169,
         'overtime_regular_holiday_pct' => 260,
         'night_diff_pct' => 10,
+        // The statutory default remains 22:00–06:00; HR may configure the company window.
+        'night_diff_start_time' => '22:00',
+        'night_diff_end_time' => '06:00',
         'deduction_rounding' => 'exact',
         'deduction_block_minutes' => 60,
         'daily_deduction_cap' => 1.0,
@@ -173,10 +176,17 @@ class AttendancePolicyService
             return $this->asOfMemo[$date] = $this->get();
         }
 
+        $payload = $version->payload;
+        // Versions written before the configurable window keep the exact historical behavior.
+        // The migration backfills these keys, while this fallback also protects imported or
+        // manually restored legacy payloads.
+        $payload['night_diff_start_time'] ??= '22:00:00';
+        $payload['night_diff_end_time'] ??= '06:00:00';
+
         // newFromBuilder(), NOT new/forceFill(): the payload is in database shape, so the casts
         // must apply on the way OUT only. Filling would re-encode every array column.
         // It is an instance method, hence the throwaway model to call it on.
-        return $this->asOfMemo[$date] = (new AttendancePolicy)->newFromBuilder($version->payload);
+        return $this->asOfMemo[$date] = (new AttendancePolicy)->newFromBuilder($payload);
     }
 
     /**
@@ -238,8 +248,8 @@ class AttendancePolicyService
             'Rules',
             ($before === []
                 ? 'Attendance rules saved (no changes)'
-                : 'Attendance rules updated: ' . implode(', ', array_keys($before)))
-                . " — effective {$effectiveFrom}",
+                : 'Attendance rules updated: '.implode(', ', array_keys($before)))
+                ." — effective {$effectiveFrom}",
             $policy,
             $before ?: null,
             $after ?: null,
@@ -275,6 +285,11 @@ class AttendancePolicyService
         // getAttributes() is already in database shape — array columns encoded, booleans as
         // 0/1 — which is exactly what asOf() expects to rehydrate through newFromBuilder().
         $payload = $policy->getAttributes();
+        foreach (['night_diff_start_time', 'night_diff_end_time'] as $field) {
+            if (isset($payload[$field]) && strlen((string) $payload[$field]) === 5) {
+                $payload[$field] .= ':00';
+            }
+        }
         unset($payload['id'], $payload['created_at'], $payload['updated_at']);
 
         AttendancePolicyVersion::updateOrCreate(

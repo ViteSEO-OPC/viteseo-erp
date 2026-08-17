@@ -40,6 +40,9 @@ class WorkScheduleResource extends JsonResource
         [$sh, $sm] = array_map('intval', explode(':', substr((string) $this->start_time, 0, 5)));
         [$eh, $em] = array_map('intval', explode(':', substr((string) $this->end_time, 0, 5)));
         $span = ($eh * 60 + $em) - ($sh * 60 + $sm);
+        if ($span < 0) {
+            $span += 24 * 60; // overnight schedule ends on the following day
+        }
 
         return $span > 0 ? max(0, $span - (int) $this->unpaid_break_minutes) : null;
     }

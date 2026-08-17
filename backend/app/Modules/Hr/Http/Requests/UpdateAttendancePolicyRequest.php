@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Http\Requests;
 
+use App\Modules\Hr\Services\AttendancePolicyService;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -87,6 +88,8 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'overtime_rest_special_pct' => ['sometimes', 'integer', 'min:169', 'max:1000'],
             'overtime_regular_holiday_pct' => ['sometimes', 'integer', 'min:260', 'max:1000'],
             'night_diff_pct' => ['sometimes', 'integer', 'min:10', 'max:100'],
+            'night_diff_start_time' => ['sometimes', 'date_format:H:i'],
+            'night_diff_end_time' => ['sometimes', 'date_format:H:i'],
 
             // `exact` is the legally safe default; the round_* modes are a warned opt-in (§9).
             'deduction_rounding' => ['sometimes', 'in:exact,round_up,round_nearest,round_down'],
@@ -140,6 +143,19 @@ class UpdateAttendancePolicyRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $v) {
+            // Partial card updates are allowed, so compare each supplied value with the live
+            // counterpart too. Equal endpoints are ambiguous (zero minutes vs a full 24 hours).
+            $policy = app(AttendancePolicyService::class)->get();
+            $nightStart = $this->input('night_diff_start_time', substr((string) $policy->night_diff_start_time, 0, 5));
+            $nightEnd = $this->input('night_diff_end_time', substr((string) $policy->night_diff_end_time, 0, 5));
+            if (preg_match('/^\d{2}:\d{2}$/', (string) $nightStart)
+                && preg_match('/^\d{2}:\d{2}$/', (string) $nightEnd)
+                && $nightStart === $nightEnd) {
+                $message = 'Night differential start and end times must be different.';
+                $v->errors()->add('night_diff_start_time', $message);
+                $v->errors()->add('night_diff_end_time', $message);
+            }
+
             foreach (['late', 'absence', 'missed_time_out'] as $category) {
                 $rungs = $this->input("violation_rules.{$category}");
                 if (! is_array($rungs)) {

@@ -1047,7 +1047,7 @@ class AttendanceService
         return $out;
     }
 
-    /** The night-differential window (Manila): 22:00 → 06:00. */
+    /** Statutory fallback; persisted policy defaults use the same 22:00 → 06:00 band. */
     public const NIGHT_START_MIN = 22 * 60;
 
     public const NIGHT_END_MIN = 6 * 60;
@@ -1058,12 +1058,39 @@ class AttendanceService
      * coordinate space the night bands are [00:00–06:00] of the work date and [22:00 → next 06:00].
      * Pure/static so the overlap arithmetic is unit-testable without a DB.
      */
-    public static function nightOverlapMinutes(int $in, int $out): int
-    {
-        $overlap = static fn (int $a0, int $a1, int $b0, int $b1): int => max(0, min($a1, $b1) - max($a0, $b0));
+    public static function nightOverlapMinutes(
+        int $in,
+        int $out,
+        int $nightStart = self::NIGHT_START_MIN,
+        int $nightEnd = self::NIGHT_END_MIN,
+    ): int {
+        if ($out <= $in || $nightStart === $nightEnd) {
+            return 0;
+        }
 
-        return $overlap($in, $out, 0, self::NIGHT_END_MIN)
-            + $overlap($in, $out, self::NIGHT_START_MIN, 24 * 60 + self::NIGHT_END_MIN);
+        $overlap = static fn (int $a0, int $a1, int $b0, int $b1): int => max(0, min($a1, $b1) - max($a0, $b0));
+        $windowEnd = $nightEnd > $nightStart ? $nightEnd : $nightEnd + 24 * 60;
+        $firstBand = (int) floor(($in - $windowEnd) / (24 * 60));
+        $lastBand = (int) ceil(($out - $nightStart) / (24 * 60));
+        $minutes = 0;
+
+        // Repeat the configured daily band across the work-date coordinate space. Starting one
+        // band before the work date is what makes an early-morning 04:00 punch match 22:00–06:00.
+        for ($band = $firstBand; $band <= $lastBand; $band++) {
+            $offset = $band * 24 * 60;
+            $minutes += $overlap($in, $out, $nightStart + $offset, $windowEnd + $offset);
+        }
+
+        return $minutes;
+    }
+
+    /** @return array{0:int, 1:int} */
+    public function nightWindow(AttendancePolicy $policy): array
+    {
+        return [
+            $this->hmToMinutes($policy->night_diff_start_time) ?? self::NIGHT_START_MIN,
+            $this->hmToMinutes($policy->night_diff_end_time) ?? self::NIGHT_END_MIN,
+        ];
     }
 
     /**
@@ -1078,13 +1105,14 @@ class AttendanceService
      *
      * @return array<string, int> date 'Y-m-d' => night minutes
      */
-    public function nightMinutesFor(Employee $employee, string $start, string $end): array
+    public function nightMinutesFor(Employee $employee, string $start, string $end, ?AttendancePolicy $policy = null): array
     {
         if ($employee->isManagement()) {
             return [];
         }
 
         $tz = config('app.timezone_local');
+        [$nightStart, $nightEnd] = $this->nightWindow($policy ?? $this->policy->get());
         $rows = $this->rowsBetween($employee, $start, $end)
             ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
 
@@ -1099,7 +1127,7 @@ class AttendanceService
                 $outMin += 24 * 60; // clocked out after midnight
             }
 
-            $minutes = self::nightOverlapMinutes($inMin, $outMin);
+            $minutes = self::nightOverlapMinutes($inMin, $outMin, $nightStart, $nightEnd);
             if ($minutes > 0) {
                 // Carve out only the unpaid meal that the daytime part of the shift can't account for.
                 $daytime = ($outMin - $inMin) - $minutes;
@@ -1162,12 +1190,14 @@ class AttendanceService
         string $end,
         int $thresholdMinutes = 0,
         int $dailyCapMinutes = 0,
+        ?AttendancePolicy $policy = null,
     ): array {
         if ($employee->isManagement()) {
             return [];
         }
 
         $tz = config('app.timezone_local');
+        [$nightStart, $nightEnd] = $this->nightWindow($policy ?? $this->policy->get());
         $rows = $this->rowsBetween($employee, $start, $end)
             ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
 
@@ -1179,14 +1209,18 @@ class AttendanceService
                 continue; // rest day — see the note above
             }
 
+            $startMin = $this->hmToMinutes($eff['start_time'] ?? null);
             $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
             $inMin = $this->clockToMinutes($row->time_in);
             $outMin = $this->clockToMinutes($row->time_out);
-            if ($endMin === null || $inMin === null || $outMin === null) {
+            if ($startMin === null || $endMin === null || $inMin === null || $outMin === null) {
                 continue;
             }
             if ($outMin < $inMin) {
                 $outMin += 24 * 60; // clocked out after midnight
+            }
+            if ($endMin < $startMin) {
+                $endMin += 24 * 60; // overnight schedule ends on the following day
             }
 
             $minutes = $outMin - $endMin;
@@ -1201,6 +1235,8 @@ class AttendanceService
                     $endMin,
                     $minutes,
                     $dailyCapMinutes > 0 ? $dailyCapMinutes : null,
+                    $nightStart,
+                    $nightEnd,
                 );
             }
         }
@@ -1222,17 +1258,103 @@ class AttendanceService
      *
      * @return array{minutes:int, night:int, raw_minutes:int, excess_minutes:int, window_start:int}
      */
-    private static function autoOvertimeEntry(int $windowStart, int $rawMinutes, ?int $capMinutes): array
-    {
+    private static function autoOvertimeEntry(
+        int $windowStart,
+        int $rawMinutes,
+        ?int $capMinutes,
+        int $nightStart = self::NIGHT_START_MIN,
+        int $nightEnd = self::NIGHT_END_MIN,
+    ): array {
         $paid = $capMinutes === null ? $rawMinutes : max(0, min($rawMinutes, $capMinutes));
 
         return [
             'minutes' => $paid,
-            'night' => self::nightOverlapMinutes($windowStart, $windowStart + $paid),
+            'night' => self::nightOverlapMinutes($windowStart, $windowStart + $paid, $nightStart, $nightEnd),
             'raw_minutes' => $rawMinutes,
             'excess_minutes' => max(0, $rawMinutes - $paid),
             'window_start' => $windowStart,
         ];
+    }
+
+    /**
+     * Release the punch-backed part of a capped auto-OT entry that an approval authorises.
+     * Exact windows remain exact; legacy hours-only approvals retain their total-based fallback.
+     *
+     * @param  array{minutes:int, night:int, raw_minutes:int, excess_minutes:int, window_start:int}  $entry
+     * @param  array{minutes:int, night:int, windows:array<int, array{start:int, end:int}>, legacy_minutes:int}|null  $approval
+     * @return array{minutes:int, night:int, raw_minutes:int, excess_minutes:int, window_start:int}
+     */
+    public static function releaseApprovedOvertimeEntry(
+        array $entry,
+        ?array $approval,
+        int $nightStart = self::NIGHT_START_MIN,
+        int $nightEnd = self::NIGHT_END_MIN,
+    ): array {
+        if ($approval === null || $entry['excess_minutes'] <= 0) {
+            return $entry;
+        }
+
+        $heldStart = $entry['window_start'] + $entry['minutes'];
+        $heldEnd = $entry['window_start'] + $entry['raw_minutes'];
+        $exact = [];
+
+        foreach ($approval['windows'] as $window) {
+            $start = max($heldStart, $window['start']);
+            $end = min($heldEnd, $window['end']);
+            if ($end > $start) {
+                $exact[] = ['start' => $start, 'end' => $end];
+            }
+        }
+        $exact = self::mergeMinuteWindows($exact);
+
+        $exactMinutes = array_sum(array_map(
+            static fn (array $window): int => $window['end'] - $window['start'],
+            $exact,
+        ));
+
+        if ($approval['windows'] !== []) {
+            // Alongside exact approvals, an hours-only row authorises additional held capacity.
+            $legacyTarget = min(
+                max(0, $entry['excess_minutes'] - $exactMinutes),
+                $approval['legacy_minutes'],
+            );
+        } else {
+            // Preserve the historical hours-only meaning: the approval is a total for the day.
+            $legacyTarget = min(
+                $entry['excess_minutes'],
+                max(0, $approval['minutes'] - $entry['minutes']),
+            );
+        }
+
+        $released = self::mergeMinuteWindows([
+            ...$exact,
+            ...self::fillMinuteWindowGaps($heldStart, $heldEnd, $exact, $legacyTarget),
+        ]);
+        $release = min(
+            $entry['excess_minutes'],
+            array_sum(array_map(
+                static fn (array $window): int => $window['end'] - $window['start'],
+                $released,
+            )),
+        );
+
+        if ($release <= 0) {
+            return $entry;
+        }
+
+        $entry['minutes'] += $release;
+        $entry['night'] += array_sum(array_map(
+            static fn (array $window): int => self::nightOverlapMinutes(
+                $window['start'],
+                $window['end'],
+                $nightStart,
+                $nightEnd,
+            ),
+            $released,
+        ));
+        $entry['excess_minutes'] -= $release;
+
+        return $entry;
     }
 
     /**
@@ -1244,9 +1366,9 @@ class AttendanceService
      * creating requests. Here the queue is a question asked of attendance, so it answers the same way
      * however many times HR opens it, and re-running payroll changes nothing.
      *
-     * An APPROVAL REMOVES THE ITEM rather than resolving it, for the same reason. There is no state to
-     * clear: once a request covering the date is approved, the excess pays, so the derivation stops
-     * reporting it. HR's action is the existing approve button on the existing queue, not a new verb.
+     * An APPROVAL REDUCES OR REMOVES THE ITEM rather than resolving it, for the same reason. There is
+     * no separate state to clear: only the approved, punch-backed overlap stops being reported. HR's
+     * action is the existing approve button on the existing queue, not a new verb.
      *
      * Empty while `overtime_mode` is `approved_only` — nothing is auto-paid in that mode, so nothing is
      * being held back. Empty too when both caps are 0, which is the shipped default.
@@ -1256,21 +1378,21 @@ class AttendanceService
      */
     public function autoOvertimeReview(string $start, string $end): array
     {
-        $policy = app(AttendancePolicyService::class)->get();
+        $policy = $this->policy->get();
 
         $dailyCap = (int) $policy->auto_overtime_daily_cap_minutes;
         $periodCap = (int) $policy->auto_overtime_period_cap_minutes;
+        [$nightStart, $nightEnd] = $this->nightWindow($policy);
 
         if ($policy->overtime_mode !== 'auto_after_threshold' || ($dailyCap <= 0 && $periodCap <= 0)) {
             return [];
         }
 
-        // Approved minutes per employee/date, so an item that has already been signed off drops out.
+        // Preload approved requests once; each employee is matched against their punch-backed windows.
         $approved = OvertimeRequest::where('status', 'approved')
             ->whereBetween('work_date', [$start, $end])
-            ->get(['employee_id', 'work_date', 'hours'])
-            ->groupBy(fn (OvertimeRequest $r) => $r->employee_id.'|'.$r->work_date->toDateString())
-            ->map(fn (Collection $rows) => (int) round($rows->sum('hours') * 60));
+            ->get(['employee_id', 'work_date', 'hours', 'time_from', 'time_to'])
+            ->groupBy('employee_id');
 
         $out = [];
 
@@ -1286,20 +1408,35 @@ class AttendanceService
                     $end,
                     (int) $policy->overtime_threshold_minutes,
                     $dailyCap,
+                    $policy,
                 ),
                 $periodCap,
+                $nightStart,
+                $nightEnd,
             );
 
-            foreach ($map as $date => $entry) {
-                $excess = (int) ($entry['excess_minutes'] ?? 0);
-                if ($excess <= 0) {
-                    continue;
-                }
+            $withExcess = array_filter($map, fn (array $entry) => ($entry['excess_minutes'] ?? 0) > 0);
+            if ($withExcess === []) {
+                continue;
+            }
 
-                $approvedMinutes = (int) ($approved[$employee->id.'|'.$date] ?? 0);
-                // Mirrors what the run releases: an approval covers the day's total, so only the part
-                // above what the cap already paid counts against the excess.
-                $stillHeld = $excess - min($excess, max(0, $approvedMinutes - (int) $entry['minutes']));
+            $approvals = $this->approvedOvertimeMinutesFor(
+                $employee,
+                $start,
+                $end,
+                $approved->get($employee->id) ?? new Collection,
+                $policy,
+            );
+
+            foreach ($withExcess as $date => $entry) {
+                $approval = $approvals[$date] ?? null;
+                $released = self::releaseApprovedOvertimeEntry(
+                    $entry,
+                    $approval,
+                    $nightStart,
+                    $nightEnd,
+                );
+                $stillHeld = (int) $released['excess_minutes'];
 
                 if ($stillHeld <= 0) {
                     continue; // already approved — it will pay, so it is not a queue item
@@ -1313,7 +1450,7 @@ class AttendanceService
                     'paid_minutes' => (int) $entry['minutes'],
                     'excess_minutes' => $stillHeld,
                     'raw_minutes' => (int) ($entry['raw_minutes'] ?? $entry['minutes']),
-                    'approved_minutes' => $approvedMinutes,
+                    'approved_minutes' => (int) ($approval['minutes'] ?? 0),
                 ];
             }
         }
@@ -1337,8 +1474,12 @@ class AttendanceService
      * @param  array<string, array<string, int>>  $map
      * @return array<string, array<string, int>>
      */
-    public static function applyAutoOvertimePeriodCap(array $map, int $periodCapMinutes): array
-    {
+    public static function applyAutoOvertimePeriodCap(
+        array $map,
+        int $periodCapMinutes,
+        int $nightStart = self::NIGHT_START_MIN,
+        int $nightEnd = self::NIGHT_END_MIN,
+    ): array {
         if ($periodCapMinutes <= 0 || $map === []) {
             return $map; // 0 = uncapped
         }
@@ -1356,6 +1497,8 @@ class AttendanceService
                 (int) ($entry['window_start'] ?? 0),
                 (int) ($entry['raw_minutes'] ?? $entry['minutes']),
                 $allowed, // a real budget, 0 included — see the null-vs-0 note on autoOvertimeEntry()
+                $nightStart,
+                $nightEnd,
             );
         }
 
@@ -1363,20 +1506,13 @@ class AttendanceService
     }
 
     /**
-     * How many overtime minutes the TIME CLOCK can support on each date (Slice 6) — the ceiling
-     * an approved request is paid against. A date missing from the map supports none.
+     * The punch-backed overtime interval on each date, in work-date minute coordinates. The end
+     * may exceed 1440 when work crosses midnight. A rest-day interval contains only the tail after
+     * eight worked hours and the unpaid meal; the earlier block is rest-day premium time.
      *
-     * Two shapes, because "beyond the shift" means different things:
-     *   - a scheduled WORKDAY → minutes clocked past the schedule's end time;
-     *   - a REST day / non-workday → there is no shift to be beyond, and the first 8 hours are
-     *     the rest-day premium (see PayrollService::REST_DAY_PREMIUM_CAP_MIN), so only the
-     *     excess past 8h can be overtime.
-     *
-     * Both punches are required: a missing clock-out can never become overtime (rule 5).
-     *
-     * @return array<string, int> date 'Y-m-d' => max payable overtime minutes
+     * @return array<string, array{start:int, end:int}>
      */
-    public function overtimeCapacityFor(Employee $employee, string $start, string $end): array
+    public function overtimeWindowsFor(Employee $employee, string $start, string $end): array
     {
         if ($employee->isManagement()) {
             return [];
@@ -1386,7 +1522,7 @@ class AttendanceService
         $rows = $this->rowsBetween($employee, $start, $end)
             ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
 
-        $out = [];
+        $windows = [];
         foreach ($rows as $row) {
             $day = Carbon::parse($row->work_date, $tz);
             $eff = $this->schedule->effectiveFor($employee, $day);
@@ -1401,26 +1537,194 @@ class AttendanceService
             }
 
             if ($eff['is_workday'] ?? false) {
+                $startMin = $this->hmToMinutes($eff['start_time'] ?? null);
                 $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
-                if ($endMin === null) {
+                if ($startMin === null || $endMin === null) {
                     continue;
                 }
-                if ($outMin < $inMin) {
+                if ($endMin < $startMin) {
                     $endMin += 24 * 60;
                 }
-                $capacity = $outMin - $endMin;
+                $windowStart = max($endMin, $inMin);
             } else {
-                // Rest day: worked time minus the unpaid meal, less the 8h premium block.
                 $worked = ($outMin - $inMin) - (int) $row->lunch_minutes;
                 $capacity = $worked - self::REST_DAY_PREMIUM_CAP_MIN;
+                $windowStart = $outMin - max(0, $capacity);
             }
 
-            if ($capacity > 0) {
-                $out[$day->toDateString()] = $capacity;
+            if ($outMin > $windowStart) {
+                $windows[$day->toDateString()] = ['start' => $windowStart, 'end' => $outMin];
+            }
+        }
+
+        return $windows;
+    }
+
+    /**
+     * Approved overtime as the exact intersection of approved and punch-backed windows.
+     *
+     * @param  Collection<int, OvertimeRequest>|null  $requests
+     * @return array<string, array{minutes:int, night:int, windows:array<int, array{start:int, end:int}>, legacy_minutes:int}>
+     */
+    public function approvedOvertimeMinutesFor(
+        Employee $employee,
+        string $start,
+        string $end,
+        ?Collection $requests = null,
+        ?AttendancePolicy $policy = null,
+    ): array {
+        $requests ??= OvertimeRequest::where('employee_id', $employee->id)
+            ->where('status', 'approved')
+            ->whereBetween('work_date', [$start, $end])
+            ->get(['work_date', 'hours', 'time_from', 'time_to']);
+
+        if ($requests->isEmpty()) {
+            return [];
+        }
+
+        [$nightStart, $nightEnd] = $this->nightWindow($policy ?? $this->policy->get());
+        $clocked = $this->overtimeWindowsFor($employee, $start, $end);
+        $approvedWindows = [];
+        $legacyMinutes = [];
+
+        foreach ($requests as $request) {
+            $date = $request->work_date->toDateString();
+            $actual = $clocked[$date] ?? null;
+            if ($actual === null) {
+                continue;
+            }
+
+            if ($request->time_from && $request->time_to) {
+                $from = $this->hmToMinutes((string) $request->time_from);
+                $to = $this->hmToMinutes((string) $request->time_to);
+                if ($to <= $from) {
+                    $to += 24 * 60;
+                }
+
+                $overlap = self::bestWindowOverlap($from, $to, $actual['start'], $actual['end']);
+                if ($overlap !== null) {
+                    $approvedWindows[$date][] = $overlap;
+                }
+
+                continue;
+            }
+
+            $legacyMinutes[$date] = ($legacyMinutes[$date] ?? 0)
+                + (int) round((float) $request->hours * 60);
+        }
+
+        $out = [];
+        foreach ($clocked as $date => $actual) {
+            $minutes = 0;
+            $night = 0;
+            $windows = self::mergeMinuteWindows($approvedWindows[$date] ?? []);
+            foreach ($windows as $window) {
+                $minutes += $window['end'] - $window['start'];
+                $night += self::nightOverlapMinutes($window['start'], $window['end'], $nightStart, $nightEnd);
+            }
+
+            $capacity = $actual['end'] - $actual['start'];
+            $legacy = min(max(0, $capacity - $minutes), $legacyMinutes[$date] ?? 0);
+            $minutes += $legacy;
+
+            if ($minutes > 0) {
+                $out[$date] = [
+                    'minutes' => $minutes,
+                    'night' => min($night, $minutes),
+                    'windows' => $windows,
+                    'legacy_minutes' => $legacy,
+                ];
             }
         }
 
         return $out;
+    }
+
+    /** Align a request clock window to the work-date coordinate space. */
+    private static function bestWindowOverlap(int $requestStart, int $requestEnd, int $actualStart, int $actualEnd): ?array
+    {
+        $best = null;
+        foreach ([-24 * 60, 0, 24 * 60] as $offset) {
+            $start = max($actualStart, $requestStart + $offset);
+            $end = min($actualEnd, $requestEnd + $offset);
+            if ($end > $start && ($best === null || $end - $start > $best['end'] - $best['start'])) {
+                $best = ['start' => $start, 'end' => $end];
+            }
+        }
+
+        return $best;
+    }
+
+    /** @param array<int, array{start:int, end:int}> $windows */
+    private static function mergeMinuteWindows(array $windows): array
+    {
+        usort($windows, static fn (array $a, array $b): int => $a['start'] <=> $b['start']);
+        $merged = [];
+
+        foreach ($windows as $window) {
+            $last = array_key_last($merged);
+            if ($last !== null && $window['start'] <= $merged[$last]['end']) {
+                $merged[$last]['end'] = max($merged[$last]['end'], $window['end']);
+            } else {
+                $merged[] = $window;
+            }
+        }
+
+        return $merged;
+    }
+
+    /**
+     * Fill the earliest gaps in one held interval without overlapping exact approvals.
+     *
+     * @param  array<int, array{start:int, end:int}>  $excluded
+     * @return array<int, array{start:int, end:int}>
+     */
+    private static function fillMinuteWindowGaps(int $start, int $end, array $excluded, int $minutes): array
+    {
+        if ($minutes <= 0 || $end <= $start) {
+            return [];
+        }
+
+        $out = [];
+        $cursor = $start;
+
+        foreach (self::mergeMinuteWindows($excluded) as $window) {
+            if ($window['end'] <= $cursor || $window['start'] >= $end) {
+                continue;
+            }
+
+            $gapEnd = min($end, $window['start']);
+            if ($gapEnd > $cursor) {
+                $take = min($minutes, $gapEnd - $cursor);
+                $out[] = ['start' => $cursor, 'end' => $cursor + $take];
+                $minutes -= $take;
+                if ($minutes <= 0) {
+                    return $out;
+                }
+            }
+
+            $cursor = max($cursor, $window['end']);
+        }
+
+        if ($minutes > 0 && $cursor < $end) {
+            $out[] = ['start' => $cursor, 'end' => min($end, $cursor + $minutes)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * How many overtime minutes the time clock supports on each date. Both punches are required;
+     * a missing clock-out can never become overtime.
+     *
+     * @return array<string, int> date 'Y-m-d' => max payable overtime minutes
+     */
+    public function overtimeCapacityFor(Employee $employee, string $start, string $end): array
+    {
+        return array_map(
+            static fn (array $window): int => $window['end'] - $window['start'],
+            $this->overtimeWindowsFor($employee, $start, $end),
+        );
     }
 
     /** A full 8-hour day in minutes — mirrors PayrollService::REST_DAY_PREMIUM_CAP_MIN. */

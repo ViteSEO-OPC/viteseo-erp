@@ -251,9 +251,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/minimum-wage-adjustments', [PayrollController::class, 'applyMinimumWage'])
             ->middleware('throttle:5,1,payroll-minimum-wage:');
         Route::post('payroll/run', [PayrollController::class, 'run'])->middleware('throttle:5,1,payroll-run:');
-        // FIN-010 — off-cycle corrections. Same tight limit as a regular run: it writes
-        // payslips, and the amounts are typed by a person rather than computed.
-        Route::post('payroll/adjustment', [PayrollController::class, 'runAdjustment'])->middleware('throttle:5,1,payroll-adjustment:');
+        // FIN-010 — a correction added to the period's OWN payslips. Same tight limit as a run: it
+        // changes payslips, and the amounts are typed by a person rather than computed.
+        //
+        // This replaced `POST payroll/adjustment`, which paid a correction by raising a SECOND
+        // payslip in a window HR typed by hand. That route is gone rather than deprecated: it is
+        // the shape being retired, and leaving it reachable meant anything still calling it would
+        // keep producing the documents this endpoint exists to stop.
+        Route::post('payroll/runs/{payrollRun}/amendments', [PayrollController::class, 'amendRun'])
+            ->middleware('throttle:5,1,payroll-amendment:');
+        // Recompute a period that has already run. The preview is read-only but costs a whole run
+        // (it computes for real and rolls back), so both carry the run's own limit.
+        Route::get('payroll/runs/{payrollRun}/rerun-preview', [PayrollController::class, 'rerunPreview'])
+            ->middleware('throttle:5,1,payroll-rerun-preview:');
+        Route::post('payroll/runs/{payrollRun}/rerun', [PayrollController::class, 'rerunRun'])
+            ->middleware('throttle:5,1,payroll-rerun:');
         Route::get('payroll/runs/{payrollRun}', [PayrollController::class, 'show']);
         Route::get('payroll/runs/{payrollRun}/export', [PayrollController::class, 'exportRun'])->middleware('throttle:10,1,payroll-export:');
         Route::post('payroll/runs/{payrollRun}/lock', [PayrollController::class, 'lockRun']);
