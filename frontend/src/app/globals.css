@@ -83,6 +83,24 @@
   --text-label: 0.8125rem; /* 13px — uppercase column headers / small labels */
   --text-label--line-height: 1.3;
 
+  /*
+    The one step the Projects module needs that Tailwind's default ramp has no
+    name for. PMS is built on that default ramp (text-xs … text-4xl), not on the
+    HRIS `text-h1 … text-label` scale above, and it had been spelling this size
+    as `text-[10px]` in nine places — the uppercase micro-label on popover
+    section headings and weekday initials. Naming it puts the module on one
+    scale without changing a single rendered size.
+
+    NOT named here: the 32px page title PMS used to write as `text-[32px]`.
+    `--text-display` would be the obvious name and it is already taken —
+    crm-theme.css owns it at 30px — so PMS page titles use the ramp's own
+    `text-3xl` instead of shadowing a CRM token. Check crm-theme.css before
+    adding any `--text-*` name here; several of its tokens (`--text-body`,
+    `--text-section`, `--text-page-title`) sit in this same namespace.
+  */
+  --text-2xs: 0.625rem; /* 10px */
+  --text-2xs--line-height: 1.4;
+
   /* Radius — controls use --radius; cards use the Style Guide's 21px. */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
@@ -229,6 +247,7 @@
   --color-sidebar-muted: #9ca3af;
   /* Warm off-white the sidebar sets its labels in (Figma 801:22337). */
   --color-sidebar-ink: #fbfbef;
+
   --color-canvas: #ffffff;
   --color-surface: #ffffff;
 

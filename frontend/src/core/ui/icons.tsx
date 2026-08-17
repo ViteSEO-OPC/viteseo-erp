@@ -1,11 +1,42 @@
 import * as React from 'react';
 
+/**
+ * ── Icon scale ──────────────────────────────────────────────────────────────
+ *
+ * An icon beside text is sized from THAT text, one step above it, so the two
+ * read as one object rather than a glyph parked next to a word:
+ *
+ *   text-xs   (12px)  →  h-3.5 w-3.5  (14px)
+ *   text-sm   (14px)  →  h-4 w-4      (16px)   ← the module's common case
+ *   text-base (16px)  →  h-5 w-5      (20px)
+ *   text-lg   (18px)  →  h-5 w-5      (20px)
+ *
+ * One step above, not equal: a stroked glyph reads smaller than its box, so an
+ * icon matched exactly to the font size looks undersized next to the cap height
+ * of the word it labels.
+ *
+ * Two things this scale deliberately does NOT cover:
+ *
+ *  · Icons inside `<Button>`. The button sizes its own icons from its `size`
+ *    variant (`[&_svg]:size-*` in core/ui/button.tsx), which already follows
+ *    this table. Passing `className="h-4 w-4"` there duplicates the rule and
+ *    silently fights it at `size="xs"` — leave the icon unclassed and let the
+ *    button decide.
+ *
+ *  · Standalone icons with no text beside them — a nav rail's glyphs, an empty
+ *    state's illustration, a spinner. Nothing constrains those to the text
+ *    scale, so they are sized for their own composition and say so where they
+ *    are set (see the sidebar's 20px rail icons).
+ *
+ * The 16px default below is the text-sm pairing, so an icon rendered with no
+ * size class lands on the scale instead of at some fourth size.
+ */
 type IconProps = React.SVGProps<SVGSVGElement>;
 
 function base(props: IconProps) {
   return {
-    width: 20,
-    height: 20,
+    width: 16,
+    height: 16,
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
