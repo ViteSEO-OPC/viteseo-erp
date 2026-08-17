@@ -125,6 +125,8 @@ export interface AttendancePolicy {
   overtime_rest_special_pct: number; // floor 169
   overtime_regular_holiday_pct: number; // floor 260
   night_diff_pct: number; // floor 10 (add-on)
+  night_diff_start_time: string; // "HH:MM", defaults to 22:00
+  night_diff_end_time: string; // "HH:MM", defaults to 06:00
 
   // `exact` is proportionate (the legal default); round_* is a warned opt-in.
   deduction_rounding: DeductionRounding;

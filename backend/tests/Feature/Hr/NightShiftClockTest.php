@@ -3,13 +3,17 @@
 namespace Tests\Feature\Hr;
 
 use App\Models\User;
+use App\Modules\Hr\Http\Resources\WorkScheduleResource;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\WorkSchedule;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\AttendanceService;
+use App\Modules\Hr\Services\ManagementAttendanceService;
+use App\Modules\Hr\Services\ScheduleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
@@ -99,6 +103,74 @@ class NightShiftClockTest extends HrTestCase
 
         // 22:00 → 06:00 is entirely inside the 22:00–06:00 window.
         $this->assertSame(['2026-07-01' => 480], $night);
+    }
+
+    /** A completed scheduled graveyard shift ends on time; crossing midnight is not overtime. */
+    public function test_a_normal_overnight_shift_has_no_overtime_capacity(): void
+    {
+        $this->atManila(self::SHIFT_START);
+        $this->svc->clockIn($this->employee);
+        $this->atManila(self::SHIFT_END);
+        $this->svc->clockOut($this->employee);
+
+        $capacity = $this->svc->overtimeCapacityFor($this->employee, '2026-07-01', '2026-07-01');
+
+        $this->assertSame([], $capacity);
+    }
+
+    /** Auto mode uses the next-day shift end too; an on-time graveyard shift earns no OT. */
+    public function test_a_normal_overnight_shift_has_no_automatic_overtime(): void
+    {
+        $this->atManila(self::SHIFT_START);
+        $this->svc->clockIn($this->employee);
+        $this->atManila(self::SHIFT_END);
+        $this->svc->clockOut($this->employee);
+
+        $overtime = $this->svc->autoOvertimeMinutesFor($this->employee, '2026-07-01', '2026-07-01');
+
+        $this->assertSame([], $overtime);
+    }
+
+    /** Only work after the following morning's scheduled end is overtime. */
+    public function test_overnight_overtime_starts_after_the_next_day_shift_end(): void
+    {
+        $this->atManila(self::SHIFT_START);
+        $this->svc->clockIn($this->employee);
+        $this->atManila('2026-07-02 08:00');
+        $this->svc->clockOut($this->employee);
+
+        $capacity = $this->svc->overtimeCapacityFor($this->employee, '2026-07-01', '2026-07-01');
+        $automatic = $this->svc->autoOvertimeMinutesFor($this->employee, '2026-07-01', '2026-07-01');
+
+        $this->assertSame(['2026-07-01' => 120], $capacity);
+        $this->assertSame(120, $automatic['2026-07-01']['minutes']);
+        $this->assertSame(0, $automatic['2026-07-01']['night']);
+    }
+
+    /** An eight-hour graveyard span with a one-hour unpaid meal is a seven-hour paid day. */
+    public function test_an_overnight_schedule_reports_its_expected_paid_minutes(): void
+    {
+        $effective = app(ScheduleService::class)->effectiveFor(
+            $this->employee,
+            Carbon::parse('2026-07-01', config('app.timezone_local')),
+        );
+        $resource = WorkScheduleResource::make(WorkSchedule::firstOrFail())->resolve(new Request);
+
+        $this->assertSame(420, $effective['expected_minutes']);
+        $this->assertSame(420, $resource['expected_minutes']);
+    }
+
+    /** System-generated management attendance must also end on the following morning. */
+    public function test_management_overnight_attendance_ends_on_the_next_day(): void
+    {
+        $this->employee->update(['is_management' => true]);
+
+        app(ManagementAttendanceService::class)->generate('2026-07-01', '2026-07-01');
+
+        $row = Attendance::firstOrFail();
+        $this->assertTrue($row->time_out->gt($row->time_in));
+        $this->assertSame(480, (int) $row->time_in->diffInMinutes($row->time_out));
+        $this->assertSame(7.0, (float) $row->hours_worked);
     }
 
     /** Breaks work mid-shift after midnight too. */

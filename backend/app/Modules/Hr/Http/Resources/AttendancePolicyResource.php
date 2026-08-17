@@ -54,6 +54,9 @@ class AttendancePolicyResource extends JsonResource
             'overtime_rest_special_pct' => (int) $this->overtime_rest_special_pct,
             'overtime_regular_holiday_pct' => (int) $this->overtime_regular_holiday_pct,
             'night_diff_pct' => (int) $this->night_diff_pct,
+            // MySQL TIME values include seconds; Company → Rules edits minute precision.
+            'night_diff_start_time' => substr((string) ($this->night_diff_start_time ?: '22:00'), 0, 5),
+            'night_diff_end_time' => substr((string) ($this->night_diff_end_time ?: '06:00'), 0, 5),
 
             'deduction_rounding' => $this->deduction_rounding,
             'deduction_block_minutes' => (int) $this->deduction_block_minutes,

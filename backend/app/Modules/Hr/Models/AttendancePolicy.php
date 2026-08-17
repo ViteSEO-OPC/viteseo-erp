@@ -36,6 +36,8 @@ class AttendancePolicy extends Model
         'overtime_rest_special_pct',
         'overtime_regular_holiday_pct',
         'night_diff_pct',
+        'night_diff_start_time',
+        'night_diff_end_time',
         'deduction_rounding',
         'deduction_block_minutes',
         'daily_deduction_cap',

@@ -47,4 +47,26 @@ class NightDifferentialTest extends TestCase
         // 22:00–06:00 → the entire 8 hours are night.
         $this->assertSame(480, AttendanceService::nightOverlapMinutes($this->mins('22:00'), $this->mins('06:00') + 1440));
     }
+
+    public function test_a_custom_cross_midnight_window_is_used(): void
+    {
+        // Worked 20:00–06:00; a configured 21:00–03:00 window contributes exactly six hours.
+        $this->assertSame(360, AttendanceService::nightOverlapMinutes(
+            $this->mins('20:00'),
+            $this->mins('06:00') + 1440,
+            $this->mins('21:00'),
+            $this->mins('03:00'),
+        ));
+    }
+
+    public function test_a_custom_same_day_window_is_supported(): void
+    {
+        // A company may expand/relocate the band without forcing it across midnight.
+        $this->assertSame(120, AttendanceService::nightOverlapMinutes(
+            $this->mins('08:00'),
+            $this->mins('17:00'),
+            $this->mins('13:00'),
+            $this->mins('15:00'),
+        ));
+    }
 }

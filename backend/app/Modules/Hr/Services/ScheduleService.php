@@ -208,6 +208,9 @@ class ScheduleService
         [$sh, $sm] = array_map('intval', explode(':', substr($start, 0, 5)));
         [$eh, $em] = array_map('intval', explode(':', substr($end, 0, 5)));
         $span = ($eh * 60 + $em) - ($sh * 60 + $sm);
+        if ($span < 0) {
+            $span += 24 * 60; // overnight schedule ends on the following day
+        }
 
         return $span > 0 ? $span : null;
     }

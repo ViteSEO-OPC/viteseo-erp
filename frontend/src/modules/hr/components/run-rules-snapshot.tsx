@@ -37,6 +37,8 @@ const LABELS: Record<string, string> = {
   overtime_rest_special_pct: "Overtime — rest / special day",
   overtime_regular_holiday_pct: "Overtime — regular holiday",
   night_diff_pct: "Night differential",
+  night_diff_start_time: "Night differential starts",
+  night_diff_end_time: "Night differential ends",
   daily_rate_basis: "Daily rate basis",
   annual_divisor: "Annual divisor",
   hours_per_day_divisor: "Hours per day",

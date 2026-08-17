@@ -7,7 +7,6 @@ use App\Modules\Hr\Http\Resources\PayslipResource;
 use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LoanPayment;
-use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Models\LeaveSetting;
@@ -1870,7 +1869,7 @@ class PayrollService
         }
 
         $policy ??= $this->attendancePolicy->get();
-        $nightByDate = $this->attendance->nightMinutesFor($employee, $start, $end);
+        $nightByDate = $this->attendance->nightMinutesFor($employee, $start, $end, $policy);
         if ($nightByDate === []) {
             return ['pay' => 0.0, 'minutes' => 0];
         }
@@ -1947,19 +1946,19 @@ class PayrollService
      * pay line and the night differential (which compounds onto the OT rate for night OT minutes).
      *
      * @param  array<string, int>  $restByDate  worked rest days, whose first 8h are paid as a premium
-     * @return array<string, array{minutes:int, night:int}>
+     * @return array<string, array{minutes:int, night:int, windows?:array<int, array{start:int, end:int}>, legacy_minutes?:int}>
      */
     private function overtimeMinutesByDate(Employee $employee, string $start, string $end, AttendancePolicy $policy, array $restByDate = []): array
     {
         $map = match ($policy->overtime_mode) {
-            'approved_only' => $this->approvedOvertimeMinutes($employee, $start, $end),
+            'approved_only' => $this->approvedOvertimeMinutes($employee, $start, $end, $policy),
             'auto_after_threshold' => $this->autoOvertimeMinutes($employee, $start, $end, $policy),
             default => [],
         };
 
-        // On a worked rest day the first 8 hours are the rest-day PREMIUM, so only the excess can be
-        // overtime. (A rest day with no attendance row isn't in $restByDate — no premium is paid for
-        // it, so an approved request there still pays in full.)
+        // On a worked rest day the first 8 hours are the rest-day premium, so only the excess can be
+        // overtime. Approved OT already requires a punch-backed window; this remains a final guard
+        // shared with auto mode.
         foreach ($restByDate as $date => $worked) {
             if (! isset($map[$date])) {
                 continue;
@@ -1978,12 +1977,6 @@ class PayrollService
     }
 
     /**
-     * Approved-request overtime as date => minutes (the `approved_only` source), with the portion
-     * falling in the night window derived from the request's own time span.
-     *
-     * @return array<string, array{minutes:int, night:int}>
-     */
-    /**
      * Auto-mode overtime, capped, with the over-cap minutes payable only on an approval (FIN-039).
      *
      * The two caps bound what pays with nobody looking; they are deliberately NOT a pay cut. A day
@@ -1992,9 +1985,8 @@ class PayrollService
      * somebody has to say yes. That is what makes a forgotten clock-out cost a review-queue item
      * instead of five hours at 125%.
      *
-     * The approval is treated as covering the DAY's total overtime, not just the excess, which is how
-     * HR actually files it — they see "7.5 hours worked past shift end" and approve that. Hence
-     * `$approved − $paid`: only the part the cap didn't already pay is added.
+     * Exact-window approvals release only their overlap with the held punch interval. Legacy
+     * hours-only approvals retain the old total-based fallback because their interval is unknowable.
      *
      * @return array<string, array{minutes:int, night:int}>
      */
@@ -2006,11 +1998,15 @@ class PayrollService
             $end,
             (int) $policy->overtime_threshold_minutes,
             (int) $policy->auto_overtime_daily_cap_minutes,
+            $policy,
         );
 
+        [$nightStart, $nightEnd] = $this->attendance->nightWindow($policy);
         $map = AttendanceService::applyAutoOvertimePeriodCap(
             $map,
             (int) $policy->auto_overtime_period_cap_minutes,
+            $nightStart,
+            $nightEnd,
         );
 
         $withExcess = array_filter($map, fn (array $e) => ($e['excess_minutes'] ?? 0) > 0);
@@ -2019,97 +2015,29 @@ class PayrollService
         }
 
         // Only now is the approved-request query worth running.
-        $approved = $this->approvedOvertimeMinutes($employee, $start, $end);
+        $approved = $this->approvedOvertimeMinutes($employee, $start, $end, $policy);
 
         foreach (array_keys($withExcess) as $date) {
-            $entry = $map[$date];
-            $release = min(
-                (int) $entry['excess_minutes'],
-                max(0, (int) ($approved[$date]['minutes'] ?? 0) - (int) $entry['minutes']),
+            $map[$date] = AttendanceService::releaseApprovedOvertimeEntry(
+                $map[$date],
+                $approved[$date] ?? null,
+                $nightStart,
+                $nightEnd,
             );
-
-            if ($release <= 0) {
-                continue;
-            }
-
-            // Extend the paid window rather than adding a bare total, so night differential covers
-            // exactly the minutes that are now being paid.
-            $map[$date]['minutes'] = (int) $entry['minutes'] + $release;
-            $map[$date]['night'] = AttendanceService::nightOverlapMinutes(
-                (int) $entry['window_start'],
-                (int) $entry['window_start'] + $map[$date]['minutes'],
-            );
-            $map[$date]['excess_minutes'] = (int) $entry['excess_minutes'] - $release;
         }
 
         return $map;
     }
 
-    private function approvedOvertimeMinutes(Employee $employee, string $start, string $end): array
+    /**
+     * Approved overtime as the exact intersection of approved and punch-backed windows. Legacy
+     * hours-only rows retain a capacity-limited total and cannot prove a night portion.
+     *
+     * @return array<string, array{minutes:int, night:int, windows:array<int, array{start:int, end:int}>, legacy_minutes:int}>
+     */
+    private function approvedOvertimeMinutes(Employee $employee, string $start, string $end, AttendancePolicy $policy): array
     {
-        $out = [];
-        $requests = OvertimeRequest::where('employee_id', $employee->id)
-            ->where('status', 'approved')
-            ->whereBetween('work_date', [$start, $end])
-            ->get(['work_date', 'hours', 'time_from', 'time_to']);
-
-        if ($requests->isEmpty()) {
-            return [];
-        }
-
-        // What the time clock actually supports per date (Slice 6). An approval is a
-        // permission to work overtime, not proof that it happened: before this, an approved
-        // request paid in full even on a day the employee never clocked in — while that same
-        // day was ALSO docked as an absence.
-        $clocked = $this->attendance->overtimeCapacityFor($employee, $start, $end);
-
-        foreach ($requests as $req) {
-            $date = $req->work_date->toDateString();
-
-            // No attendance that day (or a missing punch) → nothing to pay.
-            $capacity = $clocked[$date] ?? 0;
-            if ($capacity <= 0) {
-                continue;
-            }
-
-            $night = 0;
-            // Requests filed before OT-4 carry hours only — no window, so no night portion.
-            if ($req->time_from && $req->time_to) {
-                $from = self::hmToMinutes((string) $req->time_from);
-                $to = self::hmToMinutes((string) $req->time_to);
-                if ($to <= $from) {
-                    $to += 24 * 60; // crosses midnight
-                }
-                $night = AttendanceService::nightOverlapMinutes($from, $to);
-            }
-
-            $out[$date] = [
-                'minutes' => ($out[$date]['minutes'] ?? 0) + (int) round((float) $req->hours * 60),
-                'night' => ($out[$date]['night'] ?? 0) + $night,
-            ];
-        }
-
-        // Clamp each date to what was actually clocked: asking for 4h and staying 2h past the
-        // shift pays 2h. The night portion is clamped with it so it can never exceed the paid
-        // minutes and inflate the differential.
-        foreach ($out as $date => $entry) {
-            $capacity = $clocked[$date] ?? 0;
-            if ($entry['minutes'] <= $capacity) {
-                continue;
-            }
-            $out[$date]['minutes'] = $capacity;
-            $out[$date]['night'] = min($entry['night'], $capacity);
-        }
-
-        return $out;
-    }
-
-    /** 'HH:MM(:SS)' → minute-of-day. */
-    private static function hmToMinutes(string $hm): int
-    {
-        [$h, $m] = array_map('intval', explode(':', substr($hm, 0, 5)));
-
-        return $h * 60 + $m;
+        return $this->attendance->approvedOvertimeMinutesFor($employee, $start, $end, null, $policy);
     }
 
     /**
