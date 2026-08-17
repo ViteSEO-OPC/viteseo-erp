@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PlayCircle, Zap, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote, Percent, Scale, MoreHorizontal } from "lucide-react";
+import { PlayCircle, Zap, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote, Percent, Scale, MoreHorizontal, RefreshCw } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -29,7 +29,8 @@ import {
   DropdownMenuTrigger,
 } from "@/modules/hr/ui/dropdown-menu";
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
-import { AdjustmentRunDialog } from "@/modules/hr/components/adjustment-run-dialog";
+import { PayslipAmendmentDialog } from "@/modules/hr/components/payslip-amendment-dialog";
+import { RerunRunDialog } from "@/modules/hr/components/rerun-run-dialog";
 import { RetroFlagsDialog } from "@/modules/hr/components/retro-flags-dialog";
 import { TaxTableDialog } from "@/modules/hr/components/tax-table-dialog";
 import { PaymentBatchDialog } from "@/modules/hr/components/payment-batch-dialog";
@@ -78,8 +79,8 @@ export default function PayrollPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [thirteenthOpen, setThirteenthOpen] = useState(false);
-  // FIN-010 / FIN-009 — off-cycle corrections and the queue of differences awaiting one.
-  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
+  // FIN-010 / FIN-009 — payslip corrections and the queue of differences awaiting one.
+  const [amendOpen, setAmendOpen] = useState(false);
   const [retroOpen, setRetroOpen] = useState(false);
   const [taxTableOpen, setTaxTableOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
@@ -87,10 +88,15 @@ export default function PayrollPage() {
   const [minWageOpen, setMinWageOpen] = useState(false);
   const [minWageAck, setMinWageAck] = useState(false);
   const [minWageReason, setMinWageReason] = useState("");
-  const [adjustmentPrefill, setAdjustmentPrefill] = useState<{ employeeId: number | null; reason: string | null }>({
-    employeeId: null,
-    reason: null,
-  });
+  // The period whose recompute is being previewed. Held as the run itself, not an id: the dialog
+  // names the cycle in its own title, and the row it came from already has it.
+  const [rerunRun, setRerunRun] = useState<PayrollRun | null>(null);
+  // A correction now targets a PERIOD, so the prefill carries the run as well as the employee.
+  const [amendPrefill, setAmendPrefill] = useState<{
+    runId: number | null;
+    employeeId: number | null;
+    reason: string | null;
+  }>({ runId: null, employeeId: null, reason: null });
   const { data: retroFlags = [] } = useRetroFlags();
   const { data: deductionArrears = [] } = useDeductionArrears();
   // FIN-009 + FIN-005 — one badge for everything payroll could not settle by itself. Two separate
@@ -156,9 +162,16 @@ export default function PayrollPage() {
     .filter(Boolean);
 
   async function onMarkDone(row: PayrollBreakdownRow) {
+    // The same action settles two different things: a payslip that has never been paid, and the
+    // balance left on one that was corrected after payment. The toast says which.
+    const balance = row.disbursed != null && row.outstanding > 0;
     try {
       await markDoneMut.mutateAsync(row.id);
-      toast.success(`${row.employee} — marked disbursed`);
+      toast.success(
+        balance
+          ? `${row.employee} — ${peso(row.outstanding)} balance paid`
+          : `${row.employee} — marked disbursed`,
+      );
     } catch {
       toast.error("Could not update the payslip.");
     }
@@ -245,7 +258,30 @@ export default function PayrollPage() {
     { header: "Department", cell: (r) => r.department ?? "—" },
     { header: "Gross", cell: (r) => peso(r.gross) },
     { header: "Deductions", cell: (r) => <span className="text-danger">−{peso(r.deductions)}</span> },
-    { header: "Net Pay", cell: (r) => <span className="font-semibold">{peso(r.net)}</span> },
+    {
+      header: "Net Pay",
+      cell: (r) => (
+        <div className="flex flex-col">
+          <span className="font-semibold">{peso(r.net)}</span>
+          {/* Only when the two figures have come apart — a payslip corrected after it was paid.
+              Everywhere else the net IS what was transferred, and restating it under itself on
+              every row would bury the handful where it matters. */}
+          {r.disbursed != null && r.outstanding > 0 && (
+            <span className="text-caption text-warning">
+              {peso(r.disbursed)} paid · {peso(r.outstanding)} to pay
+            </span>
+          )}
+          {/* The other direction: a correction TOOK money off a payslip that was already paid, so
+              the company is out of pocket. No button here — recovering paid wages needs the
+              employee's written consent, so this states it for a person to arrange. */}
+          {r.disbursed != null && r.outstanding < 0 && (
+            <span className="text-caption text-warning">
+              {peso(r.disbursed)} paid · {peso(-r.outstanding)} overpaid
+            </span>
+          )}
+        </div>
+      ),
+    },
     { header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
     {
       header: "Actions",
@@ -267,9 +303,23 @@ export default function PayrollPage() {
           </Button>
           {r.status === "disbursed" ? (
             <>
-              <span className="inline-flex items-center gap-1 text-caption font-medium text-success">
-                <Check className="size-3.5" /> Disbursed
-              </span>
+              {/* A payslip corrected after payment is disbursed AND owes money. The button pays
+                  just the balance — the status does not move, because it is already true. */}
+              {r.outstanding > 0 ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="border-warning text-warning hover:bg-warning/10"
+                  disabled={markDoneMut.isPending}
+                  onClick={() => onMarkDone(r)}
+                >
+                  Pay {peso(r.outstanding)} balance
+                </Button>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-caption font-medium text-success">
+                  <Check className="size-3.5" /> Disbursed
+                </span>
+              )}
               {locked ? null : (
                 <ReopenAction
                   size="xs"
@@ -306,7 +356,54 @@ export default function PayrollPage() {
     { header: "Schedule", cell: (r) => payFrequencyLabel(r.frequency) },
     { header: "Employees", cell: (r) => r.employee_count },
     { header: "Net", cell: (r) => peso(r.total_net) },
-    { header: "Status", align: "right", cell: () => <StatusBadge status="completed" label="Completed" /> },
+    {
+      header: "Status",
+      align: "right",
+      cell: (r) => (
+        <div className="flex flex-col items-end gap-0.5">
+          <StatusBadge status="completed" label="Completed" />
+          {/* An earlier period of this tax year was corrected after this run withheld its tax, so
+              this run's figures are settled against a year-to-date that has since moved. Silent
+              would mean December quietly comes out wrong. */}
+          {r.is_tax_stale && (
+            <span
+              className="inline-flex items-center gap-1 text-caption text-warning"
+              title={r.tax_stale_reason ?? undefined}
+            >
+              <AlertTriangle className="size-3" />
+              Tax needs a re-run
+            </span>
+          )}
+        </div>
+      ),
+    },
+    {
+      header: "",
+      align: "right",
+      cell: (r) => (
+        // The row opens the breakdown, so the control inside it must not.
+        <div onClick={(e) => e.stopPropagation()}>
+          {/* Only an ordinary cycle: a 13th month is recomputed from its own screen and a final pay
+              from the employee it belongs to, because neither is keyed by these dates. */}
+          {r.type === "regular" && (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={r.is_locked}
+              title={
+                r.is_locked
+                  ? "This run is locked — unlock it before recomputing"
+                  : "See what recomputing this period would change"
+              }
+              onClick={() => setRerunRun(r)}
+            >
+              <RefreshCw className="size-3.5" />
+              Re-run
+            </Button>
+          )}
+        </div>
+      ),
+    },
   ];
 
   const thirteenthColumns: Column<ThirteenthMonthRow>[] = [
@@ -397,15 +494,20 @@ export default function PayrollPage() {
 
                 <DropdownMenuSeparator />
 
-                {/* FIN-010 — pay a correction without reopening a closed period. */}
+                {/* FIN-010 — correct a period on its own payslips, without reopening it. Opens on
+                    the period being looked at; any other unlocked run can be chosen inside. */}
                 <DropdownMenuItem
                   onSelect={() => {
-                    setAdjustmentPrefill({ employeeId: null, reason: null });
-                    setAdjustmentOpen(true);
+                    setAmendPrefill({
+                      runId: currentRun?.id ?? null,
+                      employeeId: null,
+                      reason: null,
+                    });
+                    setAmendOpen(true);
                   }}
                 >
                   <Wrench />
-                  Adjustment
+                  Correct a payslip
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setThirteenthOpen(true)}>
                   <Gift />
@@ -584,6 +686,9 @@ export default function PayrollPage() {
         </div>
         {detail?.breakdown ? (
           <>
+            {/* What a correction left behind: a balance owed, or tax settled against figures that
+                have since moved. */}
+            <RunCorrectionNotices run={detail} onRerun={setRerunRun} />
             <DataTable
               columns={makeColumns(!!detail.is_locked)}
               rows={detail.breakdown}
@@ -678,6 +783,13 @@ export default function PayrollPage() {
                   onToggle={() => toggleTotal("net")}
                 />
               </div>
+              <RunCorrectionNotices
+                run={viewRun}
+                onRerun={(run) => {
+                  setViewRunId(null);
+                  setRerunRun(run);
+                }}
+              />
               <div className="max-h-[55vh] overflow-auto">
                 <DataTable
                   columns={makeColumns(!!viewRun.is_locked)}
@@ -691,6 +803,37 @@ export default function PayrollPage() {
             <p className="py-10 text-center text-sm text-muted-foreground">Loading breakdown…</p>
           )}
           <DialogFooter>
+            {/* Correcting an OLD period is the point of the amendment flow, so the entry point is
+                here as well as in the header menu — with this run already chosen. The dialog closes
+                behind it, following the corrections queue: two stacked modals fight for focus. */}
+            {viewRun && !viewRun.is_locked && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAmendPrefill({ runId: viewRun.id, employeeId: null, reason: null });
+                  setViewRunId(null);
+                  setAmendOpen(true);
+                }}
+              >
+                <Wrench />
+                Correct a payslip
+              </Button>
+            )}
+            {/* The same recompute the history row offers, for whoever is already looking at the
+                figures rather than the list of periods. */}
+            {viewRun && viewRun.type === "regular" && !viewRun.is_locked && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const run = viewRun;
+                  setViewRunId(null);
+                  setRerunRun(run);
+                }}
+              >
+                <RefreshCw />
+                Re-run
+              </Button>
+            )}
             {viewRun && (
               <Button variant="outline" onClick={() => onExportCsv(viewRun.id)}>
                 <FileDown />
@@ -957,11 +1100,15 @@ export default function PayrollPage() {
         open={retroOpen}
         onOpenChange={setRetroOpen}
         onSettleWithAdjustment={(flag) => {
-          // Straight from the difference into the run that settles it, carrying the employee and
-          // the reason across so HR does not retype what the system already knows.
-          setAdjustmentPrefill({ employeeId: flag.employee.id, reason: flag.reason });
+          // Straight from the difference onto the payslip that owes it, carrying the period, the
+          // employee and the reason across so HR does not retype what the system already knows.
+          setAmendPrefill({
+            runId: flag.payroll_run_id,
+            employeeId: flag.employee.id,
+            reason: flag.reason,
+          });
           setRetroOpen(false);
-          setAdjustmentOpen(true);
+          setAmendOpen(true);
         }}
       />
 
@@ -976,12 +1123,96 @@ export default function PayrollPage() {
         }
       />
 
-      <AdjustmentRunDialog
-        open={adjustmentOpen}
-        onOpenChange={setAdjustmentOpen}
-        prefillEmployeeId={adjustmentPrefill.employeeId}
-        prefillReason={adjustmentPrefill.reason}
+      <PayslipAmendmentDialog
+        open={amendOpen}
+        onOpenChange={setAmendOpen}
+        prefillRunId={amendPrefill.runId}
+        prefillEmployeeId={amendPrefill.employeeId}
+        prefillReason={amendPrefill.reason}
       />
+
+      {/* Recompute a settled period, after showing what that would change. */}
+      <RerunRunDialog
+        run={rerunRun}
+        open={rerunRun !== null}
+        onOpenChange={(o) => !o && setRerunRun(null)}
+      />
+    </div>
+  );
+}
+
+/**
+ * What a correction left behind on a run: money still owed, and tax that no longer adds up.
+ *
+ * Both are consequences of amending a period rather than re-running it, and neither is visible in
+ * the run's own totals — an amended run reports a larger net and looks entirely settled. Rendered
+ * above the breakdown for the current run and inside the past-run dialog, because a correction on an
+ * old period is the case this exists for.
+ */
+function RunCorrectionNotices({
+  run,
+  onRerun,
+}: {
+  run: PayrollRun;
+  /** Offered on the stale-tax notice, which is the one thing here a recompute actually fixes. */
+  onRerun?: (run: PayrollRun) => void;
+}) {
+  const owing = (run.breakdown ?? []).filter((r) => r.disbursed != null && r.outstanding > 0);
+  const owed = owing.reduce((s, r) => s + r.outstanding, 0);
+  // The mirror image: corrections that TOOK money off payslips already paid out.
+  const overpaid = (run.breakdown ?? []).filter((r) => r.disbursed != null && r.outstanding < 0);
+  const overpaidTotal = overpaid.reduce((s, r) => s - r.outstanding, 0);
+
+  if (owing.length === 0 && overpaid.length === 0 && !run.is_tax_stale) return null;
+
+  return (
+    <div className="mb-3 flex flex-col gap-2">
+      {overpaid.length > 0 && (
+        <div className="rounded-card border border-warning/40 bg-warning/10 px-4 py-3">
+          <p className="text-sm font-medium text-foreground">
+            {overpaid.length} payslip{overpaid.length === 1 ? "" : "s"} in this run{" "}
+            {overpaid.length === 1 ? "was" : "were"} overpaid by {formatPeso(overpaidTotal)}
+          </p>
+          <p className="text-caption text-muted-foreground">
+            A correction reduced what {overpaid.length === 1 ? "it" : "they"} should have paid, after
+            the money had already been transferred. Nothing collects it back automatically —
+            recovering wages already paid needs the employee&rsquo;s written consent, so arrange it
+            with {overpaid.length === 1 ? "them" : "each of them"}.
+          </p>
+        </div>
+      )}
+      {owing.length > 0 && (
+        <div className="rounded-card border border-warning/40 bg-warning/10 px-4 py-3">
+          <p className="text-sm font-medium text-foreground">
+            {owing.length} payslip{owing.length === 1 ? "" : "s"} in this run{" "}
+            {owing.length === 1 ? "was" : "were"} corrected after being paid —{" "}
+            {formatPeso(owed)} still to pay
+          </p>
+          <p className="text-caption text-muted-foreground">
+            The correction did not change what was transferred. Pay the balance on{" "}
+            {owing.length === 1 ? "that row" : "those rows"}; the run cannot be locked until it is
+            settled.
+          </p>
+        </div>
+      )}
+      {run.is_tax_stale && (
+        <div className="rounded-card border border-warning/40 bg-warning/10 px-4 py-3">
+          <p className="text-sm font-medium text-foreground">
+            This run&rsquo;s withholding tax is out of date
+          </p>
+          <p className="text-caption text-muted-foreground">
+            {run.tax_stale_reason ??
+              "An earlier period of this tax year was corrected after this run computed its tax."}{" "}
+            Re-run this period to settle it against the year&rsquo;s current figures.
+          </p>
+          {onRerun && run.type === "regular" && !run.is_locked && (
+            <Button size="xs" variant="outline" className="mt-2" onClick={() => onRerun(run)}>
+              <RefreshCw className="size-3.5" />
+              Re-run this period
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

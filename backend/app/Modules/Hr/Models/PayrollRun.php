@@ -28,6 +28,9 @@ class PayrollRun extends Model
         'locked_at', 'locked_by',
         // Step 4b — the attendance policy as it stood when this run executed.
         'policy_snapshot',
+        // An earlier period of the same tax year was amended, so this run's withholding was settled
+        // against a year-to-date that has since moved. Cleared by recomputing it.
+        'tax_stale_at', 'tax_stale_reason',
     ];
 
     protected $casts = [
@@ -36,6 +39,7 @@ class PayrollRun extends Model
         'scheduled_pay_date' => 'date',
         'run_at' => 'datetime',
         'locked_at' => 'datetime',
+        'tax_stale_at' => 'datetime',
         'policy_snapshot' => 'array',
         'total_gross' => 'decimal:2',
         'total_deductions' => 'decimal:2',
@@ -70,5 +74,17 @@ class PayrollRun extends Model
     public function isLocked(): bool
     {
         return $this->locked_at !== null;
+    }
+
+    /**
+     * Was this run's withholding computed against a year-to-date that has since been amended?
+     *
+     * True only for the run types whose tax depends on the year's earlier payslips — a 13th month, a
+     * final pay, a correction, and the cutoff that closes the tax year. An ordinary mid-year period
+     * annualises its own pay and is unaffected by what happened before it.
+     */
+    public function isTaxStale(): bool
+    {
+        return $this->tax_stale_at !== null;
     }
 }

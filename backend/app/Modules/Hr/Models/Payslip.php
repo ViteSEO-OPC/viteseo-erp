@@ -55,6 +55,10 @@ class Payslip extends Model
         'net_pay', 'status',
         // FIN-033 — who declared this paid, when, and the request key that did it.
         'disbursed_at', 'disbursed_by', 'disbursement_key',
+        // What actually left the company, frozen at disbursement. See the amendments migration:
+        // amending a paid payslip raises its net, and without this the difference would read as
+        // money already transferred.
+        'disbursed_amount',
         // Step 4b — how base_salary was derived, so a payslip can explain itself.
         'working_days', 'daily_rate', 'unpaid_days',
         'late_minutes', 'undertime_minutes', 'late_deduction', 'undertime_deduction',
@@ -118,8 +122,31 @@ class Payslip extends Model
         'arrears_recovered' => 'decimal:2',
         'arrears_recovered_breakdown' => 'array',
         'net_pay' => 'decimal:2',
+        'disbursed_amount' => 'decimal:2',
         'disbursed_at' => 'datetime',
     ];
+
+    /**
+     * WHAT IS STILL OWED ON THIS PAYSLIP — its net less what has actually been paid against it.
+     *
+     * Zero for the ordinary case in both directions: an unpaid payslip owes its whole net and has
+     * disbursed nothing, a paid one disbursed exactly its net. It only becomes non-zero when a
+     * payslip is amended after being paid, which is precisely the case the balance exists to state.
+     *
+     * DERIVED, never stored. A running "remaining" column would have to be decremented by every
+     * path that pays or amends, and the first one that forgot would leave a payslip quietly claiming
+     * the wrong balance for good.
+     */
+    public function amountOutstanding(): float
+    {
+        return round((float) $this->net_pay - (float) ($this->disbursed_amount ?? 0), 2);
+    }
+
+    /** Has money been paid against this payslip and more is now due? */
+    public function isPartiallyPaid(): bool
+    {
+        return $this->disbursed_amount !== null && $this->amountOutstanding() > 0;
+    }
 
     /**
      * THE THREE HEADLINE FIGURES — gross, everything taken off it, and what was paid.
@@ -184,5 +211,16 @@ class Payslip extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * The corrections added to this payslip after it was computed, oldest first.
+     *
+     * The ledger `adjustment_pay` totals — and what a re-run of this period re-applies, so
+     * recomputing from attendance cannot erase a correction. See PayslipAmendment.
+     */
+    public function amendments(): HasMany
+    {
+        return $this->hasMany(PayslipAmendment::class)->orderBy('issued_on')->orderBy('id');
     }
 }

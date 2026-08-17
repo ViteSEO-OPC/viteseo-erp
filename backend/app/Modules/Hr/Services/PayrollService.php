@@ -7,13 +7,13 @@ use App\Modules\Hr\Http\Resources\PayslipResource;
 use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LoanPayment;
-use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\SharedLeaveBalance;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\SalaryHistory;
+use App\Modules\Hr\Models\PayslipAmendment;
 use App\Modules\Hr\Models\PayslipRequest;
 use App\Modules\Hr\Models\Reimbursement;
 use App\Modules\Hr\Models\RetroFlag;
@@ -25,6 +25,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -1870,7 +1871,7 @@ class PayrollService
         }
 
         $policy ??= $this->attendancePolicy->get();
-        $nightByDate = $this->attendance->nightMinutesFor($employee, $start, $end);
+        $nightByDate = $this->attendance->nightMinutesFor($employee, $start, $end, $policy);
         if ($nightByDate === []) {
             return ['pay' => 0.0, 'minutes' => 0];
         }
@@ -1947,19 +1948,19 @@ class PayrollService
      * pay line and the night differential (which compounds onto the OT rate for night OT minutes).
      *
      * @param  array<string, int>  $restByDate  worked rest days, whose first 8h are paid as a premium
-     * @return array<string, array{minutes:int, night:int}>
+     * @return array<string, array{minutes:int, night:int, windows?:array<int, array{start:int, end:int}>, legacy_minutes?:int}>
      */
     private function overtimeMinutesByDate(Employee $employee, string $start, string $end, AttendancePolicy $policy, array $restByDate = []): array
     {
         $map = match ($policy->overtime_mode) {
-            'approved_only' => $this->approvedOvertimeMinutes($employee, $start, $end),
+            'approved_only' => $this->approvedOvertimeMinutes($employee, $start, $end, $policy),
             'auto_after_threshold' => $this->autoOvertimeMinutes($employee, $start, $end, $policy),
             default => [],
         };
 
-        // On a worked rest day the first 8 hours are the rest-day PREMIUM, so only the excess can be
-        // overtime. (A rest day with no attendance row isn't in $restByDate — no premium is paid for
-        // it, so an approved request there still pays in full.)
+        // On a worked rest day the first 8 hours are the rest-day premium, so only the excess can be
+        // overtime. Approved OT already requires a punch-backed window; this remains a final guard
+        // shared with auto mode.
         foreach ($restByDate as $date => $worked) {
             if (! isset($map[$date])) {
                 continue;
@@ -1978,12 +1979,6 @@ class PayrollService
     }
 
     /**
-     * Approved-request overtime as date => minutes (the `approved_only` source), with the portion
-     * falling in the night window derived from the request's own time span.
-     *
-     * @return array<string, array{minutes:int, night:int}>
-     */
-    /**
      * Auto-mode overtime, capped, with the over-cap minutes payable only on an approval (FIN-039).
      *
      * The two caps bound what pays with nobody looking; they are deliberately NOT a pay cut. A day
@@ -1992,9 +1987,8 @@ class PayrollService
      * somebody has to say yes. That is what makes a forgotten clock-out cost a review-queue item
      * instead of five hours at 125%.
      *
-     * The approval is treated as covering the DAY's total overtime, not just the excess, which is how
-     * HR actually files it — they see "7.5 hours worked past shift end" and approve that. Hence
-     * `$approved − $paid`: only the part the cap didn't already pay is added.
+     * Exact-window approvals release only their overlap with the held punch interval. Legacy
+     * hours-only approvals retain the old total-based fallback because their interval is unknowable.
      *
      * @return array<string, array{minutes:int, night:int}>
      */
@@ -2006,11 +2000,15 @@ class PayrollService
             $end,
             (int) $policy->overtime_threshold_minutes,
             (int) $policy->auto_overtime_daily_cap_minutes,
+            $policy,
         );
 
+        [$nightStart, $nightEnd] = $this->attendance->nightWindow($policy);
         $map = AttendanceService::applyAutoOvertimePeriodCap(
             $map,
             (int) $policy->auto_overtime_period_cap_minutes,
+            $nightStart,
+            $nightEnd,
         );
 
         $withExcess = array_filter($map, fn (array $e) => ($e['excess_minutes'] ?? 0) > 0);
@@ -2019,97 +2017,29 @@ class PayrollService
         }
 
         // Only now is the approved-request query worth running.
-        $approved = $this->approvedOvertimeMinutes($employee, $start, $end);
+        $approved = $this->approvedOvertimeMinutes($employee, $start, $end, $policy);
 
         foreach (array_keys($withExcess) as $date) {
-            $entry = $map[$date];
-            $release = min(
-                (int) $entry['excess_minutes'],
-                max(0, (int) ($approved[$date]['minutes'] ?? 0) - (int) $entry['minutes']),
+            $map[$date] = AttendanceService::releaseApprovedOvertimeEntry(
+                $map[$date],
+                $approved[$date] ?? null,
+                $nightStart,
+                $nightEnd,
             );
-
-            if ($release <= 0) {
-                continue;
-            }
-
-            // Extend the paid window rather than adding a bare total, so night differential covers
-            // exactly the minutes that are now being paid.
-            $map[$date]['minutes'] = (int) $entry['minutes'] + $release;
-            $map[$date]['night'] = AttendanceService::nightOverlapMinutes(
-                (int) $entry['window_start'],
-                (int) $entry['window_start'] + $map[$date]['minutes'],
-            );
-            $map[$date]['excess_minutes'] = (int) $entry['excess_minutes'] - $release;
         }
 
         return $map;
     }
 
-    private function approvedOvertimeMinutes(Employee $employee, string $start, string $end): array
+    /**
+     * Approved overtime as the exact intersection of approved and punch-backed windows. Legacy
+     * hours-only rows retain a capacity-limited total and cannot prove a night portion.
+     *
+     * @return array<string, array{minutes:int, night:int, windows:array<int, array{start:int, end:int}>, legacy_minutes:int}>
+     */
+    private function approvedOvertimeMinutes(Employee $employee, string $start, string $end, AttendancePolicy $policy): array
     {
-        $out = [];
-        $requests = OvertimeRequest::where('employee_id', $employee->id)
-            ->where('status', 'approved')
-            ->whereBetween('work_date', [$start, $end])
-            ->get(['work_date', 'hours', 'time_from', 'time_to']);
-
-        if ($requests->isEmpty()) {
-            return [];
-        }
-
-        // What the time clock actually supports per date (Slice 6). An approval is a
-        // permission to work overtime, not proof that it happened: before this, an approved
-        // request paid in full even on a day the employee never clocked in — while that same
-        // day was ALSO docked as an absence.
-        $clocked = $this->attendance->overtimeCapacityFor($employee, $start, $end);
-
-        foreach ($requests as $req) {
-            $date = $req->work_date->toDateString();
-
-            // No attendance that day (or a missing punch) → nothing to pay.
-            $capacity = $clocked[$date] ?? 0;
-            if ($capacity <= 0) {
-                continue;
-            }
-
-            $night = 0;
-            // Requests filed before OT-4 carry hours only — no window, so no night portion.
-            if ($req->time_from && $req->time_to) {
-                $from = self::hmToMinutes((string) $req->time_from);
-                $to = self::hmToMinutes((string) $req->time_to);
-                if ($to <= $from) {
-                    $to += 24 * 60; // crosses midnight
-                }
-                $night = AttendanceService::nightOverlapMinutes($from, $to);
-            }
-
-            $out[$date] = [
-                'minutes' => ($out[$date]['minutes'] ?? 0) + (int) round((float) $req->hours * 60),
-                'night' => ($out[$date]['night'] ?? 0) + $night,
-            ];
-        }
-
-        // Clamp each date to what was actually clocked: asking for 4h and staying 2h past the
-        // shift pays 2h. The night portion is clamped with it so it can never exceed the paid
-        // minutes and inflate the differential.
-        foreach ($out as $date => $entry) {
-            $capacity = $clocked[$date] ?? 0;
-            if ($entry['minutes'] <= $capacity) {
-                continue;
-            }
-            $out[$date]['minutes'] = $capacity;
-            $out[$date]['night'] = min($entry['night'], $capacity);
-        }
-
-        return $out;
-    }
-
-    /** 'HH:MM(:SS)' → minute-of-day. */
-    private static function hmToMinutes(string $hm): int
-    {
-        [$h, $m] = array_map('intval', explode(':', substr($hm, 0, 5)));
-
-        return $h * 60 + $m;
+        return $this->attendance->approvedOvertimeMinutesFor($employee, $start, $end, null, $policy);
     }
 
     /**
@@ -2421,6 +2351,15 @@ class PayrollService
      * RE-RUNNABLE, like every other run here: recomputing replaces this batch's lines. A disbursed
      * payslip is never touched (FIN-012's rule, applied from the start rather than retrofitted).
      *
+     * REPLACED BY `amendRun()`, AND NO LONGER REACHABLE FROM THE API. Paying a correction on a
+     * payslip of its own produced two documents for one period that referenced each other nowhere;
+     * an amendment puts the correction on the payslip it corrects. The route and its request class
+     * are deleted, so nothing new can be created this way.
+     *
+     * The method stays because the adjustment runs already in the database do not: they are real
+     * payslips of real money, and they still have to render, disburse, and re-run. Removing this
+     * would take the only test coverage of that behaviour with it. Do not call it for new work.
+     *
      * @param  array<int, array{employee_id: int, amount: float|int|string, note?: string|null}>  $lines
      */
     public function runAdjustment(
@@ -2493,17 +2432,9 @@ class PayrollService
                     continue;
                 }
 
-                // What this employee has already been taxed on this year, from the regular runs —
-                // the same basis the 13th-month calculation uses, so the two agree.
-                $alreadyTaxed = (float) $this->thirteenthMonthBasisFor($year)
-                    ->where('hr_payslips.employee_id', $employeeId)
-                    ->sum('hr_payslips.taxable_pay');
-
-                $tax = round(
-                    $this->annualWithholdingTax($alreadyTaxed + $amount, $taxAsOf)
-                        - $this->annualWithholdingTax($alreadyTaxed, $taxAsOf),
-                    2,
-                );
+                // Marginal on the year already taxed, from the regular runs — the same basis the
+                // 13th-month calculation uses, so the two agree.
+                $tax = $this->marginalTaxOn($employeeId, $year, $taxAsOf, $amount);
 
                 Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employeeId],
@@ -2556,6 +2487,497 @@ class PayrollService
 
             return $run->fresh();
         });
+    }
+
+    /**
+     * Correct an already-computed period by adding a line to each named employee's OWN payslip.
+     *
+     * THE ONE DOCUMENT RULE. FIN-010 paid a correction by raising a separate run and a second
+     * payslip. The money was right and the audit trail existed, but the employee ended up with a
+     * March payslip stating a wrong figure and an unexplained payslip dated April, neither pointing
+     * at the other. An amendment instead adds a dated line to the March payslip — the way an amended
+     * payslip works everywhere outside this system — so one period has one document.
+     *
+     * IT STILL DOES NOT RECOMPUTE ANYTHING. No attendance is read, nothing is prorated, and no
+     * statutory contribution is taken again: those are monthly and were already charged on this
+     * period. HR states who and how much; this withholds tax on it and records the line. Two engines
+     * that both claim to compute pay is the divergence the payroll audit was about.
+     *
+     * TAX IS MARGINAL, as it was for the adjustment run and for the 13th month's excess over
+     * ₱90,000: the tax due is the annual tax on (what has been taxed this year + this amount) less
+     * the annual tax on what has been taxed already. Taxing the amount in isolation would apply the
+     * lowest bracket to money sitting on top of a year's earnings.
+     *
+     * AMENDING A PAID PAYSLIP IS ALLOWED, and is the case this exists for. The payslip's net grows
+     * while `disbursed_amount` stays at what was actually transferred, so the difference reads as
+     * outstanding rather than as money already sent — see the amendments migration. What is refused
+     * is amending a LOCKED run: locking is the statement that a period is closed for good, and an
+     * amendment is a change to it.
+     *
+     * A CORRECTION CAN ALSO TAKE MONEY, and `$kind` says which of two ways (see the kind migration).
+     * `pay_reversal` unwinds pay that should not have been paid, so it reduces taxable pay and
+     * refunds the tax withheld on it; `deduction` adds a deduction the period missed, which comes
+     * off net only and leaves gross, taxable pay and the tax alone. `$lines` carry POSITIVE
+     * magnitudes in every case — the direction is the kind's, not the line's.
+     *
+     * ON A PAID PAYSLIP, taking money leaves the payslip's net BELOW what was transferred, and the
+     * difference reads as an overpayment on the document and in the run. Nothing collects it
+     * automatically: recovering paid wages is a deduction needing the employee's written consent
+     * under Art. 113, so it is stated for a person to act on rather than taken silently.
+     *
+     * @param  array<int, array{employee_id: int, amount: float|int|string, note?: string|null}>  $lines
+     * @param  'pay'|'pay_reversal'|'deduction'  $kind
+     */
+    public function amendRun(
+        PayrollRun $run,
+        string $reason,
+        array $lines,
+        ?string $issuedOn,
+        User $actor,
+        string $kind = 'pay',
+    ): PayrollRun {
+        if ($run->isLocked()) {
+            throw ValidationException::withMessages([
+                'payroll_run_id' => ['This payroll run is locked. Unlock it before amending its payslips.'],
+            ]);
+        }
+
+        // A `processing` run is mid-write: its payslips have no settled figures to correct, and the
+        // recompute in flight would overwrite the amendment as it went.
+        if ($run->status !== 'completed') {
+            throw ValidationException::withMessages([
+                'payroll_run_id' => ["The {$run->status} payroll run must finish before it can be amended."],
+            ]);
+        }
+
+        $issuedOn ??= now('Asia/Manila')->toDateString();
+        $kind = in_array($kind, ['pay', 'pay_reversal', 'deduction'], true) ? $kind : 'pay';
+
+        return DB::transaction(function () use ($run, $reason, $lines, $issuedOn, $actor, $kind) {
+            $slips = Payslip::where('payroll_run_id', $run->id)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('employee_id');
+
+            // AN EMPLOYEE WITH NO PAYSLIP IN THIS PERIOD IS REFUSED, not silently skipped. There is
+            // nothing to amend, and quietly dropping the line would report the correction as paid
+            // while the money stayed where it was — the exact failure the corrections queue exists
+            // to prevent. Naming them says what to do instead: run the period for them.
+            $missing = collect($lines)
+                ->map(fn (array $line) => (int) $line['employee_id'])
+                ->unique()
+                ->reject(fn (int $id) => $slips->has($id));
+
+            if ($missing->isNotEmpty()) {
+                $names = Employee::withTrashed()
+                    ->with('user')
+                    ->whereIn('id', $missing->all())
+                    ->get()
+                    ->map(fn (Employee $e) => $e->user?->name ?? $e->employee_no)
+                    ->implode(', ');
+
+                throw ValidationException::withMessages([
+                    'lines' => ["This period has no payslip for {$names}, so there is nothing to amend. Run the period for them first."],
+                ]);
+            }
+
+            // The tax year and table are the CORRECTED period's, not today's. A March correction
+            // raised in August is still March's money, and FIN-027's table is dated.
+            $year = (int) $run->cycle_end->year;
+            $taxAsOf = $run->cycle_end->toDateString();
+
+            $applied = 0;
+            $total = 0.0;
+            $employeeIds = [];
+            // The sign lives here and nowhere else: every line arrives as a magnitude, so this is
+            // the single place a correction becomes money in or money out.
+            $sign = $kind === 'pay' ? 1 : -1;
+
+            foreach ($lines as $line) {
+                $employeeId = (int) $line['employee_id'];
+                // A magnitude even if a client sent a sign — the kind decides the direction, and a
+                // "-500" typed into a deduction batch must not quietly become a payment.
+                $magnitude = round(abs((float) $line['amount']), 2);
+
+                if ($magnitude <= 0) {
+                    continue;
+                }
+
+                $slip = $slips->get($employeeId);
+                $signed = round($sign * $magnitude, 2);
+
+                // A missed deduction did not change what was earned, so no tax moves with it. The
+                // other two kinds are compensation, taxed marginally on the year (negative for a
+                // reversal, which refunds what was withheld on pay that is being taken back).
+                $tax = $kind === 'deduction'
+                    ? 0.0
+                    : $this->marginalTaxOn($employeeId, $year, $taxAsOf, $signed);
+
+                // REVERSING MORE PAY THAN THE PAYSLIP HOLDS is a data error, not a correction: the
+                // pay being unwound is not on this period. Refused rather than clamped, because
+                // clamping would silently reverse less than HR asked for. A deduction is different
+                // — it is an obligation, and what pay cannot cover carries to the next period.
+                if ($kind === 'pay_reversal' && $slip->disbursed_amount === null) {
+                    $effect = round($magnitude - abs($tax), 2);
+
+                    if ($effect > round((float) $slip->net_pay, 2) + 0.005) {
+                        $employee = Employee::withTrashed()->with('user')->find($employeeId);
+                        $name = $employee?->user?->name ?? $employee?->employee_no ?? "employee #{$employeeId}";
+
+                        throw ValidationException::withMessages([
+                            'lines' => [
+                                "Reversing ₱" . number_format($magnitude, 2) . " would take more than {$name}'s payslip pays"
+                                    . ' (₱' . number_format((float) $slip->net_pay, 2) . ' net). Reverse at most that,'
+                                    . ' or correct the period the pay was actually on.',
+                            ],
+                        ]);
+                    }
+                }
+
+                PayslipAmendment::create([
+                    'payslip_id' => $slip->id,
+                    'kind' => $kind,
+                    'amount' => $signed,
+                    'tax' => $tax,
+                    'reason' => $reason,
+                    'note' => $line['note'] ?? null,
+                    'issued_on' => $issuedOn,
+                    'created_by' => $actor->id,
+                ]);
+
+                $this->applyAmendmentTo($slip, $kind, $signed, $tax, $line['note'] ?? null, $reason);
+
+                $employeeIds[] = $employeeId;
+                $total = round($total + $magnitude, 2);
+                $applied++;
+            }
+
+            $this->refreshRunTotals($run);
+
+            // The other half of amending a settled period — see flagTaxStaleRuns(). A deduction is
+            // exempt: it moves nothing a later run's annualisation reads, because taxable pay and
+            // the tax withheld are exactly what it leaves alone.
+            $period = $run->cycle_start->format('M j') . '–' . $run->cycle_end->format('M j, Y');
+
+            if ($kind !== 'deduction') {
+                $this->flagTaxStaleRuns($run, $employeeIds, "The {$period} period was amended after this run was computed.");
+            }
+
+            $direction = match ($kind) {
+                'pay_reversal' => 'reversed',
+                'deduction' => 'deducted',
+                default => 'added',
+            };
+
+            $this->audit->log(
+                'updated', 'Payroll',
+                "Amended the {$period} payroll — {$applied} payslip(s), ₱" . number_format($total, 2)
+                    . " {$direction} — {$reason}",
+                $run,
+            );
+
+            return $run->fresh()->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
+        });
+    }
+
+    /**
+     * Withholding on an amount paid ON TOP of what an employee has already earned this year.
+     *
+     * The difference between the annual tax on the year including this amount and the annual tax on
+     * the year without it. Shared by the amendment path and the legacy adjustment run so the two can
+     * never disagree about what a correction costs.
+     */
+    private function marginalTaxOn(int $employeeId, int $year, string $asOf, float $amount): float
+    {
+        $alreadyTaxed = (float) $this->thirteenthMonthBasisFor($year)
+            ->where('hr_payslips.employee_id', $employeeId)
+            ->sum('hr_payslips.taxable_pay');
+
+        // A NEGATIVE AMOUNT REFUNDS, and the arithmetic is the same subtraction read the other way:
+        // the tax on a year without this pay, less the tax on the year with it. The floor matters
+        // only for a reversal larger than everything taxed this year — an income below zero is not
+        // a tax table's input, and the refund is capped at the whole year's tax either way.
+        return round(
+            $this->annualWithholdingTax(max(0.0, $alreadyTaxed + $amount), $asOf)
+                - $this->annualWithholdingTax(max(0.0, $alreadyTaxed), $asOf),
+            2,
+        );
+    }
+
+    /**
+     * Fold one correction into a payslip's stored figures.
+     *
+     * WHAT IT TOUCHES AND WHAT IT POINTEDLY DOES NOT. The amount is earnings on this payslip, so it
+     * raises `gross`, and it is taxable compensation, so it raises `taxable_pay` — which is what
+     * makes a later 13th month, final pay or year-end true-up see it. It does NOT touch
+     * `base_salary` (back pay is not basic salary earned in this period, and the 13th-month basis is
+     * measured on that column) and it does NOT re-charge SSS, PhilHealth or Pag-IBIG, which are
+     * monthly and were already taken on this period.
+     *
+     * `disbursed_amount` is deliberately untouched: raising the net of a paid payslip is exactly how
+     * the outstanding balance comes to exist.
+     *
+     * A `deduction` TAKES A DIFFERENT ROUTE ENTIRELY — see below. It is not negative earnings.
+     */
+    private function applyAmendmentTo(Payslip $slip, string $kind, float $amount, float $tax, ?string $note, string $reason): void
+    {
+        if ($kind === 'deduction') {
+            $this->applyAmendmentDeductionTo($slip, abs($amount), $note ?: $reason);
+
+            return;
+        }
+
+        $slip->update([
+            'adjustment_pay' => round((float) $slip->adjustment_pay + $amount, 2),
+            // The most recent line's note. The full list lives in the ledger; this keeps the single
+            // stored column meaningful for everything that already reads it.
+            'adjustment_note' => $note ?? $slip->adjustment_note,
+            'taxable_pay' => round((float) $slip->taxable_pay + $amount, 2),
+            'gross' => round((float) $slip->gross + $amount, 2),
+            'withholding_tax' => round((float) $slip->withholding_tax + $tax, 2),
+            'total_deductions' => round((float) $slip->total_deductions + $tax, 2),
+            // Floored, as every other net in this service is: a reversal on an already-paid payslip
+            // can exceed what the period computed, and a payslip claiming a negative entitlement is
+            // not a figure any document can print. What was overpaid is the balance, not the net.
+            'net_pay' => round(max(0, (float) $slip->net_pay + $amount - $tax), 2),
+        ]);
+    }
+
+    /**
+     * Fold a MISSED DEDUCTION into a payslip — a benefit share, a uniform, an unrecorded obligation.
+     *
+     * IT GOES WHERE LOANS AND BENEFIT SHARES GO: `other_deductions`, with a named line in its
+     * breakdown. Not into `adjustment_pay` as a negative, which would state that the employee earned
+     * less than they did, move `taxable_pay` and quietly refund tax the BIR is owed. And not into a
+     * column of its own, which would drop out of the document's identity
+     * (`compensation − deductions − government = net_pay`) and out of the arrears machinery.
+     *
+     * WHAT PAY CANNOT COVER CARRIES FORWARD instead of being written off. A deduction is money owed,
+     * so the part a thin payslip cannot take becomes a carryover under the same key the engine
+     * already uses for an uncollected benefit share — and the next run with room recovers it
+     * automatically (FIN-005/FIN-053). The alternative is a deduction that HR entered, the payslip
+     * silently dropped, and nobody ever collected.
+     */
+    private function applyAmendmentDeductionTo(Payslip $slip, float $amount, string $label): void
+    {
+        $available = max(0.0, round((float) $slip->net_pay, 2));
+        $taken = round(min($amount, $available), 2);
+        $short = round($amount - $taken, 2);
+
+        $carryover = $slip->deduction_carryover_breakdown ?? [];
+        if ($short > 0) {
+            $carryover['other_deductions'] = round((float) ($carryover['other_deductions'] ?? 0) + $short, 2);
+        }
+
+        $slip->update([
+            'other_deductions' => round((float) $slip->other_deductions + $taken, 2),
+            // Appended so the breakdown keeps footing to the total (FIN-053) and the employee can
+            // read what was taken off them rather than one larger unexplained figure.
+            'other_deductions_breakdown' => [
+                ...($slip->other_deductions_breakdown ?? []),
+                ['name' => 'Correction — ' . Str::limit($label, 60), 'amount' => $taken],
+            ],
+            'total_deductions' => round((float) $slip->total_deductions + $taken, 2),
+            'net_pay' => round(max(0, (float) $slip->net_pay - $taken), 2),
+            'deduction_carryover' => round((float) $slip->deduction_carryover + $short, 2),
+            'deduction_carryover_breakdown' => $carryover ?: null,
+        ]);
+    }
+
+    /**
+     * The corrections standing against a set of payslips, totalled per EMPLOYEE.
+     *
+     * Keyed by employee rather than by payslip because that is the key `run()` has in hand while it
+     * recomputes, and it fetches the whole run's ledger in one query rather than one per employee.
+     *
+     * Split by KIND, because the two halves reach a payslip by different routes: extra pay and
+     * reversals are earnings (`amount`, signed, with the tax that went with them), a missed
+     * deduction comes off net only (`deductions`, always positive). Summing them into one figure
+     * would recompute a deduction as negative pay and refund tax on it.
+     *
+     * @param  \Illuminate\Database\Eloquent\Collection<int, Payslip>  $slips  keyed by employee_id
+     * @return array<int, array{amount: float, tax: float, deduction_lines: list<array{name: string, amount: float}>, note: string|null}>
+     */
+    private function amendmentTotalsFor(Collection $slips): array
+    {
+        if ($slips->isEmpty()) {
+            return [];
+        }
+
+        $byPayslip = PayslipAmendment::whereIn('payslip_id', $slips->pluck('id')->all())
+            ->orderBy('issued_on')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('payslip_id');
+
+        $totals = [];
+
+        foreach ($slips as $employeeId => $slip) {
+            $rows = $byPayslip->get($slip->id);
+
+            if ($rows === null || $rows->isEmpty()) {
+                continue;
+            }
+
+            [$deductions, $earnings] = $rows->partition(fn (PayslipAmendment $a) => $a->isDeduction());
+
+            $totals[(int) $employeeId] = [
+                'amount' => round((float) $earnings->sum(fn (PayslipAmendment $a) => (float) $a->amount), 2),
+                'tax' => round((float) $earnings->sum(fn (PayslipAmendment $a) => (float) $a->tax), 2),
+                // One line per deduction, in the order they were raised, so a recompute rebuilds the
+                // same named breakdown lines the amendment itself wrote.
+                'deduction_lines' => $deductions
+                    ->map(fn (PayslipAmendment $a) => [
+                        'name' => 'Correction — ' . Str::limit((string) ($a->note ?: $a->reason), 60),
+                        'amount' => abs(round((float) $a->amount, 2)),
+                    ])
+                    ->values()
+                    ->all(),
+                'note' => $earnings->last()?->note ?? $rows->last()->note,
+            ];
+        }
+
+        return $totals;
+    }
+
+    /**
+     * Re-apply a payslip's corrections to a freshly computed set of figures.
+     *
+     * The write-time twin of `applyAmendmentTo()`, working on the array `payslipFor()` returns rather
+     * than on a saved row — which is what lets a recompute account for the corrections BEFORE loans
+     * are collected against the net and before the run's totals are summed.
+     *
+     * `adjustment_pay` is SET to the ledger total, not added to: the ledger is the source of truth
+     * and a recompute that added to the stored column would double it every time the period was run.
+     * The withheld tax comes from the ledger too, so re-running does not re-decide what was withheld
+     * on money that may already have been paid out.
+     *
+     * DEDUCTIONS ARE RE-APPLIED THE SAME WAY THEY WERE TAKEN, and re-capped rather than restored:
+     * a recompute can leave a thinner payslip than the one the deduction was entered against (an
+     * absence found after the fact), so what it can afford is decided again here. The shortfall
+     * becomes a carryover the next run recovers, which is also why nothing is lost when the cap
+     * moves in either direction.
+     *
+     * @param  array<string, mixed>  $slip
+     * @param  array{amount: float, tax: float, deduction_lines: list<array{name: string, amount: float}>, note: string|null}  $totals
+     * @return array<string, mixed>
+     */
+    private function withAmendments(array $slip, array $totals): array
+    {
+        $slip['adjustment_pay'] = $totals['amount'];
+        $slip['adjustment_note'] = $totals['note'];
+        $slip['taxable_pay'] = round((float) $slip['taxable_pay'] + $totals['amount'], 2);
+        $slip['gross'] = round((float) $slip['gross'] + $totals['amount'], 2);
+        $slip['withholding_tax'] = round((float) $slip['withholding_tax'] + $totals['tax'], 2);
+        $slip['total_deductions'] = round((float) $slip['total_deductions'] + $totals['tax'], 2);
+        // Recomputed from the two figures above rather than nudged, so it stays the same arithmetic
+        // `computePayslip()` ends on.
+        $slip['net_pay'] = round(max(0, (float) $slip['gross'] - (float) $slip['total_deductions']), 2);
+
+        foreach ($totals['deduction_lines'] as $line) {
+            $room = max(0.0, round((float) $slip['net_pay'], 2));
+            $taken = round(min((float) $line['amount'], $room), 2);
+            $short = round((float) $line['amount'] - $taken, 2);
+
+            if ($taken > 0) {
+                $slip['other_deductions'] = round((float) $slip['other_deductions'] + $taken, 2);
+                $slip['other_deductions_breakdown'] = [
+                    ...(array) ($slip['other_deductions_breakdown'] ?? []),
+                    ['name' => $line['name'], 'amount' => $taken],
+                ];
+                $slip['total_deductions'] = round((float) $slip['total_deductions'] + $taken, 2);
+                $slip['net_pay'] = round(max(0, (float) $slip['net_pay'] - $taken), 2);
+            }
+
+            if ($short > 0) {
+                $carryover = (array) ($slip['deduction_carryover_breakdown'] ?? []);
+                $carryover['other_deductions'] = round((float) ($carryover['other_deductions'] ?? 0) + $short, 2);
+
+                $slip['deduction_carryover'] = round((float) $slip['deduction_carryover'] + $short, 2);
+                $slip['deduction_carryover_breakdown'] = $carryover;
+            }
+        }
+
+        return $slip;
+    }
+
+    /**
+     * Bring a run's headline totals back in line with the payslips it holds.
+     *
+     * Summed from the rows rather than accumulated, so the run reconciles to its payslips by
+     * construction — the same reason `registerTotals()` derives deductions from gross and net.
+     */
+    private function refreshRunTotals(PayrollRun $run): void
+    {
+        $slips = $run->payslips()->get();
+
+        $run->update([
+            'total_gross' => round((float) $slips->sum(fn (Payslip $s) => (float) $s->gross), 2),
+            'total_deductions' => round((float) $slips->sum(fn (Payslip $s) => (float) $s->total_deductions), 2),
+            'total_net' => round((float) $slips->sum(fn (Payslip $s) => (float) $s->net_pay), 2),
+            'employee_count' => $slips->count(),
+        ]);
+    }
+
+    /**
+     * Mark the later runs whose withholding was settled against a year-to-date that just moved.
+     *
+     * THE SILENT FAILURE THIS MAKES VISIBLE. Four things are computed from the year's earlier
+     * payslips rather than from their own period: the tax on a 13th month's excess over ₱90,000, a
+     * final pay's annualisation, a correction's marginal tax, and December's year-end true-up. Each
+     * reads the year live when it runs, so amending March BEFORE December runs needs no action at
+     * all — December will simply read the new figures. Amending March AFTER December has run leaves
+     * December settled against numbers that no longer exist, and nothing about the run says so.
+     *
+     * SCOPED TO THE RUNS THAT ACTUALLY DEPEND ON IT. An ordinary mid-year cutoff annualises its own
+     * pay and is untouched by what came before it; flagging every later period would make the mark
+     * meaningless. So this flags a later run only when it is one of those four kinds and it holds a
+     * payslip for an affected employee.
+     *
+     * A MARK, NOT A RECOMPUTE. Recomputing December from inside an amendment to March would move
+     * money on a period nobody was looking at, possibly one already disbursed. Recomputing is a
+     * decision, and this is the queue it gets made from.
+     *
+     * @param  list<int>  $employeeIds
+     */
+    private function flagTaxStaleRuns(PayrollRun $amended, array $employeeIds, string $reason): int
+    {
+        if ($employeeIds === []) {
+            return 0;
+        }
+
+        $stale = PayrollRun::query()
+            ->whereKeyNot($amended->id)
+            ->where('status', 'completed')
+            ->whereNull('tax_stale_at')
+            // Same tax year, and after the period that changed. An earlier run cannot have been
+            // computed from a later one.
+            ->whereYear('cycle_end', (int) $amended->cycle_end->year)
+            ->where('cycle_end', '>=', $amended->cycle_end->toDateString())
+            ->whereHas('payslips', fn ($q) => $q->whereIn('employee_id', $employeeIds))
+            ->where(function ($q) use ($employeeIds) {
+                // The three run types whose tax is computed on the year, whatever their dates…
+                $q->whereIn('type', ['thirteenth_month', 'adjustment', 'final_pay'])
+                    // …and any run that settled the tax year, which is what makes an ordinary
+                    // December cutoff depend on every period before it.
+                    ->orWhereHas('payslips', fn ($p) => $p
+                        ->whereIn('employee_id', $employeeIds)
+                        ->where('tax_annualisation', '!=', 0));
+            })
+            ->get();
+
+        foreach ($stale as $run) {
+            $run->update(['tax_stale_at' => now(), 'tax_stale_reason' => $reason]);
+
+            $this->audit->log(
+                'updated', 'Payroll',
+                'The ' . $run->cycle_start->format('M j') . '–' . $run->cycle_end->format('M j, Y')
+                    . ' run needs recomputing: its withholding was settled on year-to-date figures that have since changed',
+                $run,
+            );
+        }
+
+        return $stale->count();
     }
 
     /**
@@ -2884,6 +3306,23 @@ class PayrollService
             ]);
         }
 
+        // AND NOT A PENNY STILL OWED. `disbursed` stopped meaning "paid in full" once a paid payslip
+        // could be amended: the correction raises the net while the transferred amount stays put. The
+        // status test above would happily seal a period — permanently, that being what locking is —
+        // over a balance nobody had paid yet.
+        $owing = $run->payslips()
+            ->whereNotNull('disbursed_amount')
+            ->whereColumn('net_pay', '>', 'disbursed_amount')
+            ->count();
+
+        if ($owing > 0) {
+            throw ValidationException::withMessages([
+                'locked_at' => [
+                    "{$owing} payslip(s) were amended after being paid and still have a balance outstanding. Pay it before locking the run.",
+                ],
+            ]);
+        }
+
         $run->update(['locked_at' => now(), 'locked_by' => $user->id]);
 
         $this->audit->log(
@@ -2940,6 +3379,15 @@ class PayrollService
                 return $payslip->load(['employee.user', 'employee.department']);
             }
 
+            // AMENDED AFTER IT WAS PAID — so this is not a duplicate, it is the rest of the money.
+            // The payslip's net grew past what was actually transferred, and the balance has to be
+            // payable through the same act that paid the original: refusing here would leave the
+            // correction visible on the document and permanently unpayable, which is the dead end
+            // the amendment mechanism exists to remove.
+            if ($payslip->isPartiallyPaid()) {
+                return $this->payOutstanding($payslip, $actor, $idempotencyKey);
+            }
+
             throw ValidationException::withMessages([
                 'status' => ['This payslip has already been marked paid. Reverse it first if that was wrong.'],
             ]);
@@ -2971,6 +3419,10 @@ class PayrollService
                 'disbursed_at' => now(),
                 'disbursed_by' => $actor?->id ?? Auth::id(),
                 'disbursement_key' => $idempotencyKey,
+                // What left the company, frozen here. Everything downstream reads the balance as
+                // `net_pay − disbursed_amount`, so a payslip amended after this point states the
+                // difference instead of claiming it was already transferred.
+                'disbursed_amount' => $payslip->net_pay,
             ]);
 
             $claims = Reimbursement::where('employee_id', $payslip->employee_id)
@@ -2992,6 +3444,42 @@ class PayrollService
             }
 
             return $payslip->load(['employee.user', 'employee.department']);
+        });
+    }
+
+    /**
+     * Pay the balance an amendment left on an already-disbursed payslip.
+     *
+     * NOT a second disbursement — the payslip was and remains paid, and its status does not move.
+     * What changes is how much of it has been transferred, so this brings `disbursed_amount` up to
+     * the amended net and records that it happened. Reimbursements and loans are deliberately not
+     * revisited: they were settled by the original disbursement and a correction does not re-open
+     * them.
+     */
+    private function payOutstanding(Payslip $payslip, ?User $actor, ?string $idempotencyKey): Payslip
+    {
+        $balance = $payslip->amountOutstanding();
+
+        return DB::transaction(function () use ($payslip, $actor, $idempotencyKey, $balance) {
+            $payslip->update([
+                'disbursed_at' => now(),
+                'disbursed_by' => $actor?->id ?? Auth::id(),
+                'disbursement_key' => $idempotencyKey,
+                'disbursed_amount' => $payslip->net_pay,
+            ]);
+
+            $payslip->load(['employee.user', 'employee.department']);
+            $name = $payslip->employee->user?->name ?? $payslip->employee->name;
+
+            $this->audit->log(
+                'updated', 'Payroll',
+                "Paid the ₱" . number_format($balance, 2) . " outstanding on {$name}'s "
+                    . $payslip->payrollRun?->cycle_start?->format('M j') . '–'
+                    . $payslip->payrollRun?->cycle_end?->format('M j, Y') . ' payslip after an amendment',
+                $payslip,
+            );
+
+            return $payslip;
         });
     }
 
@@ -3030,6 +3518,10 @@ class PayrollService
                 'disbursed_at' => null,
                 'disbursed_by' => null,
                 'disbursement_key' => null,
+                // Nothing has been transferred against it any more, so it owes its whole net again.
+                // Left set, a reversed-then-amended payslip would report a balance of only the
+                // amendment while claiming the original had been paid.
+                'disbursed_amount' => null,
             ]);
 
             // Put back only what this payslip paid; a claim HR settled by hand outside
@@ -3075,8 +3567,13 @@ class PayrollService
      * so it's safely repeatable — re-running refreshes the period's payslips with the
      * latest salaries, attendance, reimbursements and timing settings.
      */
-    public function run(string $cycleStart, string $cycleEnd, string $frequency, User $runner): PayrollRun
-    {
+    public function run(
+        string $cycleStart,
+        string $cycleEnd,
+        string $frequency,
+        User $runner,
+        ?string $reason = null,
+    ): PayrollRun {
         $startedAt = microtime(true);
 
         // FIN-035 — refuse before anything is written if an active statutory contribution has no
@@ -3085,7 +3582,7 @@ class PayrollService
         // than a rolled-back run that appears to have done nothing.
         $this->contributions->assertRatesInForce($cycleEnd);
 
-        $run = DB::transaction(function () use ($cycleStart, $cycleEnd, $frequency, $runner) {
+        $run = DB::transaction(function () use ($cycleStart, $cycleEnd, $frequency, $runner, $reason) {
             // FIN-025 — the settings IN FORCE for this period, not whatever they are today.
             // `frequency` drives periodsPerYear (how annual pay is sliced and how the withholding
             // base is annualised) and the timing settings decide which cutoff carries the monthly
@@ -3171,6 +3668,9 @@ class PayrollService
             // Payslips from a previous run of this same period, keyed by employee.
             $priorSlips = $run->payslips()->get()->keyBy('employee_id');
             $priorStatus = $priorSlips->map(fn (Payslip $p) => $p->status);
+            // And the corrections already added to them, so recomputing the period from attendance
+            // does not silently erase money HR has granted — see amendmentTotalsFor().
+            $amendments = $this->amendmentTotalsFor($priorSlips);
             $paidElsewhere = [];
             // Employees whose pay was already disbursed and is therefore left untouched.
             $skippedDisbursed = [];
@@ -3393,6 +3893,15 @@ class PayrollService
 
                 $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
 
+                // A correction added to this period belongs to the period, not to the run that
+                // happened to compute it. `payslipFor()` prices the cutoff from attendance and knows
+                // nothing about amendments, so re-applying the ledger here is what keeps a re-run
+                // from quietly reversing a correction — and the figures below (loans, the run totals)
+                // then see the amended net, as they must.
+                if (isset($amendments[$employee->id])) {
+                    $slip = $this->withAmendments($slip, $amendments[$employee->id]);
+                }
+
                 $payslip = Payslip::updateOrCreate(
                     ['payroll_run_id' => $run->id, 'employee_id' => $employee->id],
                     [...$slip, 'status' => $priorStatus[$employee->id] ?? 'computed'],
@@ -3509,6 +4018,10 @@ class PayrollService
                 // Step 4b / Slice 8 — every rule that priced this run, so an old payslip can
                 // always be explained. A record, not a replay: see policySnapshot().
                 'policy_snapshot' => $this->policySnapshot($setting, $cycleEnd),
+                // Whatever made this run's withholding stale has just been recomputed against the
+                // current year-to-date, which is the only thing that resolves the mark.
+                'tax_stale_at' => null,
+                'tax_stale_reason' => null,
             ]);
 
             // Audit trail: who ran (or re-ran) which pay cycle, for how many people.
@@ -3518,7 +4031,10 @@ class PayrollService
                 'Payroll',
                 ($isRerun ? 'Re-ran' : 'Ran') . " {$freqLabel} payroll for "
                     . "{$cycleStart} – {$cycleEnd} — {$count} employee(s), net ₱"
-                    . number_format(round($totalNet, 2), 2),
+                    . number_format(round($totalNet, 2), 2)
+                    // Recomputing a settled period changes figures an employee may already be
+                    // holding, so the WHY belongs on the same line as the what.
+                    . ($reason ? " — {$reason}" : ''),
                 $run,
             );
 
@@ -3565,6 +4081,189 @@ class PayrollService
         ]);
 
         return $run;
+    }
+
+    /**
+     * WHAT RE-RUNNING THIS PERIOD WOULD CHANGE. Computed for real, saved nowhere.
+     *
+     * WHY A PREVIEW EXISTS AT ALL. Re-running a settled period is not a refresh — it reprices from
+     * attendance, salaries and the rules in force for the cycle, and the figures it lands on are the
+     * ones an employee may already be holding a payslip for. "Recompute" is a button whose effect
+     * nobody can predict, and the only honest way to describe it is to do it and show the result.
+     *
+     * HOW IT IS SAFE. The real `run()` executes inside a transaction this method always rolls back.
+     * That is sound rather than clever because payroll writes nothing outside the database — no
+     * mail, no notifications, no events, no queued jobs, no cache — so a rollback leaves nothing
+     * behind. Two harmless traces do survive: auto-increment ids are consumed, and `run()` writes
+     * its own timing line to the application log, so a preview appears there as a run.
+     *
+     * DISBURSED PAYSLIPS ARE MARKED, NOT DIFFED. A re-run leaves them untouched by design (Slice 5),
+     * which is exactly the fact HR needs before deciding — "recompute" on a period that is 80% paid
+     * out changes far less than the button implies.
+     *
+     * @return array{rows: array<int, array<string, mixed>>, meta: array<string, mixed>}
+     */
+    public function rerunPreview(PayrollRun $run, User $actor): array
+    {
+        $this->assertRerunnable($run);
+
+        $before = $run->payslips()->with('employee.user')->get()->keyBy('employee_id');
+
+        // The rollback is in `finally` rather than after the call: a run that throws part-way
+        // (a missing contribution rate, a minimum-wage refusal) must not leave the savepoint open.
+        try {
+            DB::beginTransaction();
+
+            $fresh = $this->run(
+                $run->cycle_start->toDateString(),
+                $run->cycle_end->toDateString(),
+                $run->frequency,
+                $actor,
+            );
+
+            // Read INSIDE the transaction, then keep only scalars: the models die with the rollback.
+            $after = $fresh->payslips()->with('employee.user')->get()->keyBy('employee_id');
+            $result = $this->rerunDiff($before, $after, $run);
+        } finally {
+            DB::rollBack();
+        }
+
+        // The in-memory model was walked through `processing` → `completed` by the run that has just
+        // been rolled back, so anything serialising it afterwards would read invented state.
+        $run->refresh();
+
+        return $result;
+    }
+
+    /**
+     * Recompute a period that has already been run, with a stated reason.
+     *
+     * Distinct from `POST payroll/run` in two ways that matter. The cycle comes from the run itself,
+     * so a period cannot be recomputed as a different pay group by mistyping the dates; and the
+     * reason is required, because this changes figures that were already settled and "someone
+     * clicked recompute" is not an answer to why they moved.
+     */
+    public function rerunRun(PayrollRun $run, string $reason, User $actor): PayrollRun
+    {
+        $this->assertRerunnable($run);
+
+        return $this->run(
+            $run->cycle_start->toDateString(),
+            $run->cycle_end->toDateString(),
+            $run->frequency,
+            $actor,
+            $reason,
+        );
+    }
+
+    /**
+     * Only an ordinary cycle can be recomputed from its own dates.
+     *
+     * The other three run types are keyed by something else entirely — a 13th month by its year, a
+     * final pay by the employee, an adjustment by the batch it paid — so feeding their dates back
+     * through `run()` would compute an ordinary period that happens to share a window and pay
+     * everybody for it. Each has its own recompute path; this one refuses rather than guesses.
+     */
+    private function assertRerunnable(PayrollRun $run): void
+    {
+        if ($run->isLocked()) {
+            throw ValidationException::withMessages([
+                'run' => [
+                    'This payroll run is locked (' . $run->locked_at->format('M j, Y')
+                        . ') and can no longer be recomputed. Unlock it first.',
+                ],
+            ]);
+        }
+
+        if ($run->type !== 'regular') {
+            throw ValidationException::withMessages([
+                'run' => [match ($run->type) {
+                    'thirteenth_month' => 'A 13th-month run is recomputed from the 13th-month screen, not as a pay period.',
+                    'final_pay' => 'A final pay is recomputed from the employee it belongs to.',
+                    default => 'Only an ordinary pay period can be recomputed.',
+                }],
+            ]);
+        }
+
+        if ($run->status !== 'completed') {
+            throw ValidationException::withMessages([
+                'run' => ['This run has not finished computing yet.'],
+            ]);
+        }
+    }
+
+    /**
+     * One row per employee: what the period says now, what it would say, and why it would not move.
+     *
+     * @param  \Illuminate\Support\Collection<int, Payslip>  $before
+     * @param  \Illuminate\Support\Collection<int, Payslip>  $after
+     * @return array{rows: array<int, array<string, mixed>>, meta: array<string, mixed>}
+     */
+    private function rerunDiff($before, $after, PayrollRun $run): array
+    {
+        $figures = fn (?Payslip $p) => $p === null ? null : [
+            'gross' => round((float) $p->gross, 2),
+            'deductions' => round((float) $p->total_deductions, 2),
+            'net' => round((float) $p->net_pay, 2),
+        ];
+
+        $rows = [];
+
+        foreach ($before->keys()->merge($after->keys())->unique() as $employeeId) {
+            $was = $before->get($employeeId);
+            $now = $after->get($employeeId);
+
+            // The re-run left this one alone because the money has already gone out. Reported from
+            // the STORED status, not from the absence of a difference: a disbursed payslip whose
+            // figures happen to be unchanged is a different statement from one that was skipped.
+            $skipped = $was?->status === 'disbursed';
+
+            $change = match (true) {
+                $skipped => 'skipped',
+                $was === null => 'added',
+                $now === null => 'removed',
+                abs((float) $was->net_pay - (float) $now->net_pay) > 0.005
+                    || abs((float) $was->gross - (float) $now->gross) > 0.005 => 'changed',
+                default => 'unchanged',
+            };
+
+            $rows[] = [
+                'employee_id' => $employeeId,
+                'employee' => ($was ?? $now)?->employee?->user?->name ?? ($was ?? $now)?->employee?->name,
+                'status' => $was?->status,
+                'change' => $change,
+                'before' => $figures($was),
+                'after' => $skipped ? $figures($was) : $figures($now),
+                'delta' => $skipped || $was === null || $now === null
+                    ? 0.0
+                    : round((float) $now->net_pay - (float) $was->net_pay, 2),
+            ];
+        }
+
+        // What moved, first. A period of forty employees where two figures change is the normal
+        // case, and it is the two that the decision rests on.
+        $rank = ['changed' => 0, 'added' => 1, 'removed' => 2, 'skipped' => 3, 'unchanged' => 4];
+        usort($rows, fn ($a, $b) => [$rank[$a['change']], $a['employee'] ?? ''] <=> [$rank[$b['change']], $b['employee'] ?? '']);
+
+        $netAfter = array_sum(array_map(fn ($r) => $r['after']['net'] ?? 0.0, $rows));
+        $netBefore = array_sum(array_map(fn ($r) => $r['before']['net'] ?? 0.0, $rows));
+
+        return [
+            'rows' => $rows,
+            'meta' => [
+                'net_before' => round($netBefore, 2),
+                'net_after' => round($netAfter, 2),
+                'delta' => round($netAfter - $netBefore, 2),
+                'changed' => count(array_filter($rows, fn ($r) => $r['change'] === 'changed')),
+                'added' => count(array_filter($rows, fn ($r) => $r['change'] === 'added')),
+                'removed' => count(array_filter($rows, fn ($r) => $r['change'] === 'removed')),
+                'skipped' => count(array_filter($rows, fn ($r) => $r['change'] === 'skipped')),
+                'unchanged' => count(array_filter($rows, fn ($r) => $r['change'] === 'unchanged')),
+                // Re-running is what clears a stale tax mark, so the dialog can say the recompute
+                // has a second purpose beyond whatever the figures show.
+                'clears_tax_stale' => $run->isTaxStale(),
+            ],
+        ];
     }
 
     /**
@@ -3679,7 +4378,12 @@ class PayrollService
      */
     public function payslipViewData(Payslip $payslip, ?Request $request = null): array
     {
-        $payslip->loadMissing(['payrollRun.runner', 'employee.user', 'employee.department']);
+        // The corrections are loaded HERE, not left to the caller: the resource renders them
+        // `whenLoaded`, so a caller that forgot would produce a PDF whose net silently includes
+        // corrections the document never mentions.
+        $payslip->loadMissing([
+            'payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator',
+        ]);
 
         return [
             // resolve(), not toArray(): the resource's role-gated block is a conditional merge,

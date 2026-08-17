@@ -8,7 +8,10 @@ import type {
   PayslipYtd,
   ThirteenthMonthRow,
   ThirteenthMonthPayRow,
-  AdjustmentLine,
+  AmendmentKind,
+  AmendmentLine,
+  RerunPreviewMeta,
+  RerunPreviewRow,
   RetroFlag,
   DeductionArrear,
   PaymentBatch,
@@ -219,18 +222,53 @@ export async function getHrPayslip(id: number): Promise<Payslip> {
 }
 
 /**
- * Pay an off-cycle correction (FIN-010).
+ * Correct a period on its OWN payslips.
  *
- * The window is when the correction is ISSUED, not a period it prices — what it corrects belongs
- * in `reason`. It does not recompute anything: it pays the stated amounts and withholds tax.
+ * The period comes from the run id rather than from typed dates, which is the difference from the
+ * adjustment run this replaces: a correction is applied to a payslip that exists, so it cannot be
+ * pointed at a window nothing was ever paid for. `issued_on` is when the correction is issued (not
+ * the period being fixed) and defaults to today.
+ *
+ * It recomputes nothing — it adds the stated amounts to the period's payslips and withholds tax.
+ * Amending a payslip already paid out is allowed and expected: its net rises while the amount
+ * actually transferred stays put, so the difference reads as outstanding.
+ *
+ * `kind` decides whether the batch pays, reverses pay or deducts, and the amounts are positive
+ * magnitudes in all three cases — see AmendmentKind. Defaults to extra pay when omitted.
  */
-export async function runAdjustment(input: {
-  cycle_start: string;
-  cycle_end: string;
-  reason: string;
-  lines: AdjustmentLine[];
-}): Promise<PayrollRun> {
-  const res = await apiClient.post("/hr/payroll/adjustment", input);
+export async function amendPayrollRun(
+  runId: number,
+  input: {
+    reason: string;
+    issued_on?: string | null;
+    kind?: AmendmentKind;
+    lines: AmendmentLine[];
+  },
+): Promise<PayrollRun> {
+  const res = await apiClient.post(`/hr/payroll/runs/${runId}/amendments`, input);
+  return res.data.data;
+}
+
+/**
+ * What recomputing a period WOULD change, per employee.
+ *
+ * Read-only, and expensive: the server computes the whole run for real and rolls it back, which is
+ * the only honest way to describe a recompute. Fetch it when the confirmation opens, not on a hover.
+ */
+export async function getRerunPreview(
+  runId: number,
+): Promise<{ rows: RerunPreviewRow[]; meta: RerunPreviewMeta }> {
+  const res = await apiClient.get(`/hr/payroll/runs/${runId}/rerun-preview`);
+  return { rows: res.data.data, meta: res.data.meta };
+}
+
+/**
+ * Recompute a period that has already been run. The reason is required — this replaces figures that
+ * were already settled — and the cycle comes from the run, so the wrong period cannot be recomputed
+ * by mistyping a date.
+ */
+export async function rerunPayrollRun(runId: number, reason: string): Promise<PayrollRun> {
+  const res = await apiClient.post(`/hr/payroll/runs/${runId}/rerun`, { reason });
   return res.data.data;
 }
 

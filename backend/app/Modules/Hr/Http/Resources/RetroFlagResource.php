@@ -22,6 +22,9 @@ class RetroFlagResource extends JsonResource
             // owed = settle with an adjustment run; overpaid = needs consent to recover.
             'direction' => $this->direction,
             'reason' => $this->reason,
+            // The settled run itself, so settling this can open on the period it belongs to rather
+            // than asking HR to find it again from the text of `period`.
+            'payroll_run_id' => $this->payroll_run_id,
             'period' => $this->payrollRun
                 ? $this->payrollRun->cycle_start->format('Y-m-d') . ' – ' . $this->payrollRun->cycle_end->format('Y-m-d')
                 : null,

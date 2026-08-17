@@ -154,8 +154,14 @@ class ManagementAttendanceService
     {
         $tz = config('app.timezone_local');
 
-        $row->time_in = Carbon::parse("{$localDay->toDateString()} {$eff['start_time']}", $tz)->utc();
-        $row->time_out = Carbon::parse("{$localDay->toDateString()} {$eff['end_time']}", $tz)->utc();
+        $timeIn = Carbon::parse("{$localDay->toDateString()} {$eff['start_time']}", $tz);
+        $timeOut = Carbon::parse("{$localDay->toDateString()} {$eff['end_time']}", $tz);
+        if ($timeOut->lt($timeIn)) {
+            $timeOut->addDay(); // overnight schedule ends on the following morning
+        }
+
+        $row->time_in = $timeIn->utc();
+        $row->time_out = $timeOut->utc();
         $row->lunch_minutes = (int) $eff['unpaid_break_minutes'];
         $row->break_minutes = 0;
         $row->hours_worked = round(((int) $eff['expected_minutes']) / 60, 2);

@@ -24,6 +24,10 @@ class PayrollRunResource extends JsonResource
             'cycle_start' => $this->cycle_start?->format('Y-m-d'),
             'cycle_end' => $this->cycle_end?->format('Y-m-d'),
             'frequency' => $this->frequency,
+            // regular · thirteenth_month · adjustment · final_pay. `frequency` carries the internal
+            // key for the last three (`final_pay:{id}`), so it cannot be read as the run's kind —
+            // which the period picker for a correction has to know to label what it is offering.
+            'type' => $this->type,
             'status' => $this->status,
             // Stated the way the PAYSLIP states them — see Payslip::registerTotals() for why the
             // stored columns are not these figures. The stored ones remain the engine's record and
@@ -42,10 +46,21 @@ class PayrollRunResource extends JsonResource
             'locked_at' => $this->locked_at,
             'locked_by' => $this->locker?->name,
             'is_locked' => $this->locked_at !== null,
-            // Whether every payslip has been paid out — the precondition for locking.
+            // Whether every payslip has been paid out IN FULL — the precondition for locking.
+            //
+            // The balance test is not redundant with the status one. A payslip amended after it was
+            // disbursed keeps that status while owing the difference, so status alone would let a run
+            // be sealed — permanently, that being what locking means — over money still outstanding.
             'can_lock' => $this->whenLoaded('payslips', fn () => $this->locked_at === null
                 && $this->payslips->isNotEmpty()
-                && $this->payslips->every(fn ($p) => $p->status === 'disbursed')),
+                && $this->payslips->every(fn (Payslip $p) => $p->status === 'disbursed'
+                    && $p->amountOutstanding() <= 0)),
+            // An earlier period of this tax year was amended after this run computed its withholding,
+            // so the run is settled against year-to-date figures that have since moved. Recomputing
+            // it is the only thing that clears this — see PayrollService::flagTaxStaleRuns().
+            'is_tax_stale' => $this->tax_stale_at !== null,
+            'tax_stale_at' => $this->tax_stale_at,
+            'tax_stale_reason' => $this->tax_stale_reason,
             // Slice 8 — the rules in force when this run executed. Detail view only: it's a
             // sizeable blob and the runs LIST would carry one per row for no reason.
             'policy_snapshot' => $this->whenLoaded('payslips', fn () => $this->policy_snapshot),
@@ -66,12 +81,21 @@ class PayrollRunResource extends JsonResource
 
                 return [
                     'id' => $p->id,
+                    // The EMPLOYEE, not just their name. A correction is addressed to an employee id,
+                    // and the row carrying only a display name meant the amendment form had to fetch
+                    // the whole directory and match on text to find out who this period actually paid.
+                    'employee_id' => $p->employee_id,
                     'employee' => $p->employee->user?->name,
                     'department' => $p->employee->department?->name,
                     'gross' => $row['gross'],
                     'deductions' => $row['deductions'],
                     'net' => $row['net'],
                     'status' => $p->status,
+                    // What has actually been transferred against this row, and what a correction
+                    // raised after payment has left owing. `net` alone stopped being the answer to
+                    // "how much does this person still get" once a paid payslip could be amended.
+                    'disbursed' => $p->disbursed_amount === null ? null : (float) $p->disbursed_amount,
+                    'outstanding' => $p->amountOutstanding(),
                 ];
             })),
         ];

@@ -19,7 +19,9 @@ import {
   previewThirteenthMonth,
   runThirteenthMonth,
   updatePayrollSettings,
-  runAdjustment,
+  amendPayrollRun,
+  getRerunPreview,
+  rerunPayrollRun,
   getRetroFlags,
   resolveRetroFlag,
   createPaymentBatch,
@@ -206,18 +208,61 @@ export function useHrPayslip(id: number | undefined) {
 }
 
 /**
- * Pay an off-cycle correction (FIN-010).
+ * Correct a period on its own payslips.
  *
- * Invalidates the run list AND the retro-flag queue: an adjustment is usually how an `owed`
- * difference gets settled, so the queue is stale the moment one succeeds.
+ * Invalidates more than the adjustment run it replaces, because it changes documents rather than
+ * creating one: the amended payslips (open or not), the run detail whose totals moved, the run list
+ * — where a LATER run in the tax year may now be flagged stale — and the retro-flag queue, since a
+ * correction is usually how an `owed` difference gets settled.
  */
-export function useRunAdjustment() {
+export function useAmendPayrollRun() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: runAdjustment,
+    mutationFn: ({ runId, ...input }: Parameters<typeof amendPayrollRun>[1] & { runId: number }) =>
+      amendPayrollRun(runId, input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "me", "payslip"] });
       qc.invalidateQueries({ queryKey: RETRO_KEY });
+    },
+  });
+}
+
+/**
+ * What recomputing a period would change.
+ *
+ * `enabled` is the caller's, and it should be the dialog's own open state: this costs a full payroll
+ * computation server-side, so it must not be fetched to fill a table nobody has asked to see.
+ * Never cached — the answer depends on attendance and salaries as they are right now, and a stale
+ * diff is worse than a spinner.
+ */
+export function useRerunPreview(runId: number | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["hr", "payroll", "rerun-preview", runId],
+    queryFn: () => getRerunPreview(runId!),
+    enabled: !!runId && enabled,
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+/** Recompute a settled period. Invalidates everything a run does — it IS a run. */
+export function useRerunPayrollRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, reason }: { runId: number; reason: string }) =>
+      rerunPayrollRun(runId, reason),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "me", "payslip"] });
+      // A recompute recovers arrears and can settle claims and loan instalments, exactly as a
+      // first run does.
+      qc.invalidateQueries({ queryKey: ARREARS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "reimbursements"] });
     },
   });
 }

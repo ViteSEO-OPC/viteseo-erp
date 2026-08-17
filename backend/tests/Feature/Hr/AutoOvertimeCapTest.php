@@ -229,6 +229,39 @@ class AutoOvertimeCapTest extends HrTestCase
         $this->assertSame(300, $this->payslipOvertimeMinutes(), '5 approved hours, not 6');
     }
 
+    /** HR may approve only the held tail instead of repeating the four hours auto-pay already covers. */
+    public function test_an_approval_for_only_the_held_window_releases_that_window(): void
+    {
+        $this->policy(['auto_overtime_daily_cap_minutes' => 240]);
+        $this->worked('2026-08-03', '23:00:00'); // 17:00–23:00, with 21:00–23:00 held
+
+        OvertimeRequest::create([
+            'employee_id' => $this->employee->id, 'work_date' => '2026-08-03',
+            'hours' => 2, 'time_from' => '21:00', 'time_to' => '23:00',
+            'reason' => 'Approved held tail', 'status' => 'approved',
+        ]);
+
+        $this->assertSame(360, $this->payslipOvertimeMinutes());
+    }
+
+    /** A disjoint approval pays its exact hour and does not turn the unapproved gap into night OT. */
+    public function test_a_disjoint_night_approval_releases_only_its_exact_interval(): void
+    {
+        $this->policy(['auto_overtime_daily_cap_minutes' => 240]);
+        $this->worked('2026-08-03', '23:00:00'); // 17:00–21:00 auto-paid; 22:00–23:00 approved
+
+        OvertimeRequest::create([
+            'employee_id' => $this->employee->id, 'work_date' => '2026-08-03',
+            'hours' => 1, 'time_from' => '22:00', 'time_to' => '23:00',
+            'reason' => 'Approved night tail', 'status' => 'approved',
+        ]);
+
+        $result = $this->payslipOvertimeResult();
+
+        $this->assertSame(300, $result['overtime_minutes']);
+        $this->assertSame(60, $result['night_diff_minutes']);
+    }
+
     /** A request still awaiting a decision releases nothing. */
     public function test_a_pending_request_releases_nothing(): void
     {
@@ -272,6 +305,78 @@ class AutoOvertimeCapTest extends HrTestCase
             'reason' => 'Month-end close', 'status' => 'approved',
         ]);
 
+        $this->assertSame([], app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'));
+    }
+
+    public function test_approving_only_the_held_tail_removes_the_item_from_the_queue(): void
+    {
+        $this->policy(['auto_overtime_daily_cap_minutes' => 240]);
+        $this->worked('2026-08-03', '23:00:00');
+
+        OvertimeRequest::create([
+            'employee_id' => $this->employee->id, 'work_date' => '2026-08-03',
+            'hours' => 2, 'time_from' => '21:00', 'time_to' => '23:00',
+            'reason' => 'Approved held tail', 'status' => 'approved',
+        ]);
+
+        $this->assertSame([], app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'));
+    }
+
+    public function test_a_non_overlapping_approval_leaves_the_review_item_unchanged(): void
+    {
+        $this->policy(['auto_overtime_daily_cap_minutes' => 240]);
+        $this->worked('2026-08-03', '23:00:00');
+
+        OvertimeRequest::create([
+            'employee_id' => $this->employee->id, 'work_date' => '2026-08-03',
+            'hours' => 2, 'time_from' => '23:00', 'time_to' => '01:00',
+            'reason' => 'Outside the actual punches', 'status' => 'approved',
+        ]);
+
+        $rows = app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15');
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(120, $rows[0]['excess_minutes']);
+        $this->assertSame(0, $rows[0]['approved_minutes']);
+    }
+
+    public function test_duplicate_exact_approvals_do_not_double_clear_the_review_item(): void
+    {
+        $this->policy(['auto_overtime_daily_cap_minutes' => 240]);
+        $this->worked('2026-08-03', '23:00:00');
+
+        foreach ([1, 2] as $copy) {
+            OvertimeRequest::create([
+                'employee_id' => $this->employee->id, 'work_date' => '2026-08-03',
+                'hours' => 1, 'time_from' => '22:00', 'time_to' => '23:00',
+                'reason' => "Duplicate approval {$copy}", 'status' => 'approved',
+            ]);
+        }
+
+        $rows = app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15');
+
+        $this->assertCount(1, $rows);
+        $this->assertSame(60, $rows[0]['excess_minutes']);
+        $this->assertSame(60, $rows[0]['approved_minutes']);
+    }
+
+    public function test_mixed_exact_and_legacy_approvals_release_the_legacy_fallback(): void
+    {
+        $this->policy(['auto_overtime_daily_cap_minutes' => 240]);
+        $this->worked('2026-08-03', '23:00:00');
+
+        OvertimeRequest::create([
+            'employee_id' => $this->employee->id, 'work_date' => '2026-08-03',
+            'hours' => 2, 'time_from' => '17:00', 'time_to' => '19:00',
+            'reason' => 'Exact time already inside auto pay', 'status' => 'approved',
+        ]);
+        OvertimeRequest::create([
+            'employee_id' => $this->employee->id, 'work_date' => '2026-08-03',
+            'hours' => 2, 'time_from' => null, 'time_to' => null,
+            'reason' => 'Legacy approval for held capacity', 'status' => 'approved',
+        ]);
+
+        $this->assertSame(360, $this->payslipOvertimeMinutes());
         $this->assertSame([], app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'));
     }
 
@@ -331,13 +436,23 @@ class AutoOvertimeCapTest extends HrTestCase
     /** What the payslip's overtime_minutes comes to for the first August cycle. */
     private function payslipOvertimeMinutes(): int
     {
+        return $this->payslipOvertimeResult()['overtime_minutes'];
+    }
+
+    /** @return array{overtime_minutes:int, night_diff_minutes:int} */
+    private function payslipOvertimeResult(): array
+    {
         $run = app(PayrollService::class)->run('2026-08-01', '2026-08-15', 'semi_monthly', $this->hrUser());
 
-        $minutes = (int) $run->payslips()->where('employee_id', $this->employee->id)->value('overtime_minutes');
+        $payslip = $run->payslips()->where('employee_id', $this->employee->id)->firstOrFail();
+        $result = [
+            'overtime_minutes' => (int) $payslip->overtime_minutes,
+            'night_diff_minutes' => (int) $payslip->night_diff_minutes,
+        ];
 
         $run->payslips()->forceDelete();
         $run->forceDelete();
 
-        return $minutes;
+        return $result;
     }
 }
