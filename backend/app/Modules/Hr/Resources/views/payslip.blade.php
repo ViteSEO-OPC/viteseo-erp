@@ -641,6 +641,55 @@
     </table>
 @endif
 
+{{-- WHAT WAS ACTUALLY TRANSFERRED, when the net above is no longer that figure.
+
+     Silent on an ordinary payslip, where the net IS what was paid — which is nearly all of them.
+     It appears when a correction landed after payment: the bar above then states an amount larger
+     than the one in the employee's account, and the amount in their account is the one fact on this
+     document they can check independently. Both figures, each with its date, and the difference
+     named rather than left to be inferred. --}}
+@if ($p['disbursed_amount'] !== null && $differs($p['disbursed_amount'], $p['net_pay']))
+    @php $owed = (float) $p['amount_outstanding']; @endphp
+    <div class="note">
+        <strong>{{ $owed < 0 ? 'Paid more than this payslip now shows' : 'Still to be paid' }}
+            {{ $amt(abs($owed)) }}</strong> — {{ $amt($p['disbursed_amount']) }} was paid out on
+        {{ $fmt($p['disbursed_at']) }}, and this payslip was corrected afterwards, so the net above
+        is not the amount that was transferred.
+        {{ $owed < 0
+            ? 'The difference was overpaid and is not recovered automatically.'
+            : 'The difference is still owed.' }}
+    </div>
+@endif
+
+{{-- The corrections themselves. Their amounts are already lines in Compensation above; this is the
+     provenance — when each was issued and why. Capped at three with the remainder counted, for the
+     same reason every other list here is: the page cannot be allowed to grow with data. --}}
+@if (! empty($p['amendments']))
+    @php
+        $shownAmendments = array_slice($p['amendments'], 0, 3);
+        $restAmendments = count($p['amendments']) - count($shownAmendments);
+    @endphp
+    <div class="note" style="border-color: #e5e7eb; background: #f9fafb;">
+        <strong>Corrections to this payslip ({{ count($p['amendments']) }})</strong>
+        @foreach ($shownAmendments as $a)
+            @php
+                // A correction can take money as well as give it, so the sign is spelled out rather
+                // than assumed: "+₱1,000" on a reversal would state the opposite of what happened.
+                $taken = (float) $a['amount'] < 0;
+                $tax = (float) $a['tax'];
+            @endphp
+            <div>
+                {{ $fmt($a['issued_on']) }} — {{ $fitWide($a['note'] ?: $a['reason'], 60) }}
+                · {{ $a['kind_label'] ?? 'Additional pay' }}
+                {{ $taken ? '−' : '+' }}{{ $amt(abs((float) $a['amount'])) }}@if ($tax > 0) less {{ $amt($tax) }} tax @elseif ($tax < 0) plus {{ $amt(abs($tax)) }} tax refunded @endif
+            </div>
+        @endforeach
+        @if ($restAmendments > 0)
+            <div>and {{ $restAmendments }} more — the full list is on the payslip screen.</div>
+        @endif
+    </div>
+@endif
+
 <table class="foot">
     <tr>
         <td style="width: 34%;">

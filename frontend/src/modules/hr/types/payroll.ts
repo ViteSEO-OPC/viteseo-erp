@@ -40,20 +40,37 @@ export interface PayrollSettings {
 }
 
 export interface PayrollBreakdownRow {
+  /** The PAYSLIP id — what the row's actions act on. */
   id: number;
+  /** The employee id, for addressing a correction to this period's payslip. */
+  employee_id: number;
   employee: string | null;
   department: string | null;
   gross: number;
   deductions: number;
   net: number;
   status: string;
+  /** What has actually been transferred. Null until the payslip is marked paid. */
+  disbursed: number | null;
+  /**
+   * What is still owed on this payslip — `net - disbursed`. Equal to `net` while unpaid and zero
+   * once paid, EXCEPT on a payslip amended after payment, which is the case it exists for.
+   */
+  outstanding: number;
 }
+
+export type PayrollRunType = "regular" | "thirteenth_month" | "adjustment" | "final_pay";
 
 export interface PayrollRun {
   id: number;
   cycle_start: string;
   cycle_end: string;
   frequency: string;
+  /**
+   * What KIND of run this is. Distinct from `frequency`, which holds an internal key for
+   * everything but a regular period (`thirteenth_month`, `adjustment`, `final_pay:{id}`).
+   */
+  type: PayrollRunType;
   status: string;
   total_gross: number;
   total_deductions: number;
@@ -65,8 +82,17 @@ export interface PayrollRun {
   locked_at: string | null;
   locked_by: string | null;
   is_locked: boolean;
-  /** Only present when the breakdown is loaded: every payslip is disbursed. */
+  /** Only present when the breakdown is loaded: every payslip is disbursed AND owes nothing. */
   can_lock?: boolean;
+  /**
+   * An earlier period of this tax year was amended after this run computed its withholding, so it
+   * is settled against year-to-date figures that have since moved. Only the runs whose tax depends
+   * on the year are ever marked — a 13th month, a final pay, a correction, or the cutoff that
+   * closed the year. Recomputing the run clears it.
+   */
+  is_tax_stale: boolean;
+  tax_stale_at: string | null;
+  tax_stale_reason: string | null;
   /** Slice 8 — the rules in force when this run executed. Detail view only. */
   policy_snapshot?: PolicySnapshot | null;
   rules_drift?: RulesDriftEntry[];
@@ -415,6 +441,21 @@ export interface Payslip {
   deductions_breakdown: PayslipDeductionRow[];
   total_deductions: number;
   net_pay: number;
+  /**
+   * WHAT ACTUALLY LEFT THE COMPANY for this payslip, frozen when it was marked paid. Null while
+   * unpaid.
+   *
+   * Equal to `net_pay` on every payslip that has not been corrected after being paid, which is
+   * nearly all of them. It differs only when an amendment raised the net afterwards — and without
+   * it the document would claim the correction had already been transferred.
+   */
+  disbursed_amount: number | null;
+  /** `net_pay - disbursed_amount` — what is still to be paid. */
+  amount_outstanding: number;
+  /** When it was paid out. Null while unpaid. */
+  disbursed_at: string | null;
+  /** The corrections on this payslip, oldest first. Also itemised in `earnings_breakdown`. */
+  amendments: PayslipAmendment[];
   totals: PayslipTotals;
   /** Which cutoff of the month this is. Null on non-regular runs. */
   cutoff: PayslipCutoff | null;
@@ -528,12 +569,89 @@ export interface NextPayday {
 }
 
 /**
- * One line of an off-cycle adjustment run (FIN-010) — who is paid a correction, and how much.
+ * Which way a correction moves money, and what it does to the tax.
+ *
+ * `pay` adds taxable pay the period missed. `pay_reversal` unwinds pay that should not have been
+ * paid, so the tax withheld on it is refunded with it. `deduction` adds a deduction the period
+ * missed — it comes off net only, leaving gross, taxable pay and the tax exactly where they are,
+ * which is why it cannot simply be negative pay.
  */
-export interface AdjustmentLine {
+export type AmendmentKind = "pay" | "pay_reversal" | "deduction";
+
+/**
+ * One line of a correction — whose payslip, how much, and what it is for.
+ *
+ * `amount` is ALWAYS POSITIVE. The direction belongs to the batch's `kind`, so a deduction batch
+ * cannot contain a line that quietly pays.
+ */
+export interface AmendmentLine {
   employee_id: number;
   amount: number;
   note?: string | null;
+}
+
+/** The three figures a preview compares, per employee. */
+export interface RerunFigures {
+  gross: number;
+  deductions: number;
+  net: number;
+}
+
+/**
+ * One employee in a re-run preview: what the period says now, and what it would say.
+ *
+ * `skipped` is not "nothing changed" — it means the payslip was already disbursed and the re-run
+ * will refuse to touch it, so `after` restates what was paid rather than what recomputing produced.
+ */
+export interface RerunPreviewRow {
+  employee_id: number;
+  employee: string | null;
+  /** The stored payslip's status. Null when the employee has no payslip in the period yet. */
+  status: string | null;
+  change: "changed" | "added" | "removed" | "skipped" | "unchanged";
+  before: RerunFigures | null;
+  after: RerunFigures | null;
+  /** `after.net - before.net`, and zero on a skipped or one-sided row. */
+  delta: number;
+}
+
+export interface RerunPreviewMeta {
+  net_before: number;
+  net_after: number;
+  delta: number;
+  changed: number;
+  added: number;
+  removed: number;
+  skipped: number;
+  unchanged: number;
+  /** The run's withholding is stale, and recomputing is what clears the mark. */
+  clears_tax_stale: boolean;
+}
+
+/**
+ * One correction already standing against a payslip.
+ *
+ * The ledger the payslip's `adjustment_pay` totals. Each carries the date it was ISSUED, which is
+ * the only thing distinguishing two corrections to the same period — and is not the period itself,
+ * that being the payslip this hangs off.
+ */
+export interface PayslipAmendment {
+  id: number;
+  kind: AmendmentKind;
+  /** How the kind reads on a document — "Additional pay", "Pay reversed", "Deduction added". */
+  kind_label: string;
+  /** Signed: negative for a reversal or a deduction, positive for extra pay. */
+  amount: number;
+  /** Withheld on this amount, marginally on top of the year's earnings. Negative = refunded. */
+  tax: number;
+  /** `amount - tax` — what it added to net pay. */
+  net: number;
+  /** Why the batch existed. */
+  reason: string;
+  /** What this employee's line was for. Null when the batch reason said it all. */
+  note: string | null;
+  issued_on: string | null;
+  issued_by: string | null;
 }
 
 /**
@@ -548,6 +666,8 @@ export interface RetroFlag {
   employee: { id: number | null; name: string | null };
   direction: "owed" | "overpaid";
   reason: string;
+  /** The settled run itself, so settling can open straight onto the period that owes it. */
+  payroll_run_id: number | null;
   /** The settled cutoff the decision reached into, e.g. "2026-03-01 – 2026-03-15". */
   period: string | null;
   /** Which kind of request caused it — OvertimeRequest, LeaveRequest, … */

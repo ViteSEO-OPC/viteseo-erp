@@ -3,10 +3,11 @@
 namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Hr\Http\Requests\AmendPayrollRunRequest;
 use App\Modules\Hr\Http\Requests\ApplyMinimumWageRequest;
 use App\Modules\Hr\Http\Requests\MinimumWageReviewRequest;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
-use App\Modules\Hr\Http\Requests\RunAdjustmentRequest;
+use App\Modules\Hr\Http\Requests\RerunPayrollRunRequest;
 use App\Modules\Hr\Http\Requests\RunFinalPayRequest;
 use App\Modules\Hr\Http\Requests\RunPayrollRequest;
 use App\Modules\Hr\Http\Requests\UpdatePayrollSettingsRequest;
@@ -203,25 +204,58 @@ class PayrollController extends Controller
     }
 
     /**
-     * POST /api/v1/hr/payroll/adjustment — pay an off-cycle correction (FIN-010).
+     * GET /api/v1/hr/payroll/runs/{payrollRun}/rerun-preview — what recomputing would change.
      *
-     * The route every other correction in this module depends on: a back-dated raise, a fixed
-     * attendance record, a late-approved overtime request or reimbursement all produce a
-     * difference that used to have nowhere to go.
+     * Read-only: the computation runs for real and is rolled back (see `rerunPreview()`). It is not
+     * cheap — it is a whole payroll run — so it carries a write endpoint's rate limit rather than a
+     * read's, and the screen asks for it only when HR opens the confirmation.
      */
-    public function runAdjustment(RunAdjustmentRequest $request): JsonResponse
+    public function rerunPreview(PayrollRun $payrollRun, Request $request): JsonResponse
     {
-        $run = $this->service->runAdjustment(
-            $request->validated('cycle_start'),
-            $request->validated('cycle_end'),
+        $preview = $this->service->rerunPreview($payrollRun, $request->user());
+
+        return response()->json(['data' => $preview['rows'], 'meta' => $preview['meta']]);
+    }
+
+    /**
+     * POST /api/v1/hr/payroll/runs/{payrollRun}/rerun — recompute a period that has already run.
+     *
+     * The cycle comes from the run, never from the request: recomputing the wrong period because a
+     * date was mistyped is the one mistake this route can structurally prevent.
+     */
+    public function rerunRun(PayrollRun $payrollRun, RerunPayrollRunRequest $request): JsonResponse
+    {
+        $run = $this->service->rerunRun(
+            $payrollRun,
             $request->validated('reason'),
-            $request->validated('lines'),
             $request->user(),
         );
 
-        return PayrollRunResource::make($run)
-            ->response()
-            ->setStatusCode(Response::HTTP_CREATED);
+        return PayrollRunResource::make($run)->response();
+    }
+
+    /**
+     * POST /api/v1/hr/payroll/runs/{payrollRun}/amendments — correct a period on its own payslips.
+     *
+     * The route every other correction in this module depends on: a back-dated raise, a fixed
+     * attendance record, a late-approved overtime request or reimbursement all produce a difference
+     * that has to be payable without rewriting what a period computed.
+     *
+     * Returns the amended run, so the caller re-reads the period rather than a batch of its own —
+     * the period IS the record now.
+     */
+    public function amendRun(PayrollRun $payrollRun, AmendPayrollRunRequest $request): JsonResponse
+    {
+        $run = $this->service->amendRun(
+            $payrollRun,
+            $request->validated('reason'),
+            $request->validated('lines'),
+            $request->validated('issued_on'),
+            $request->user(),
+            $request->validated('kind') ?? 'pay',
+        );
+
+        return PayrollRunResource::make($run)->response();
     }
 
     /**
@@ -369,7 +403,9 @@ class PayrollController extends Controller
     // downloading its PDF.
     public function showHrPayslip(Payslip $payslip): JsonResponse
     {
-        $payslip->load(['payrollRun.runner', 'employee.user', 'employee.department']);
+        // `amendments` is loaded here, not lazily inside the Resource: the document lists one line
+        // per correction, and a payslip rendered without them falls back to a single lump figure.
+        $payslip->load(['payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator']);
 
         return PayslipResource::make($payslip)->response();
     }
@@ -377,7 +413,7 @@ class PayrollController extends Controller
     // GET /api/v1/hr/payslips/{payslip}/pdf — one employee's payslip as a PDF (HR only).
     public function payslipPdf(Payslip $payslip): SymfonyResponse
     {
-        $payslip->loadMissing(['payrollRun', 'employee.user']);
+        $payslip->loadMissing(['payrollRun', 'employee.user', 'amendments.creator']);
         $slug = str($payslip->employee?->user?->name ?? 'employee')->slug();
 
         return $this->service->payslipPdf($payslip)
@@ -433,7 +469,7 @@ class PayrollController extends Controller
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $payslip->load(['payrollRun.runner', 'employee.user', 'employee.department']);
+        $payslip->load(['payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator']);
         $year = (int) $payslip->payrollRun?->cycle_start?->format('Y');
 
         return PayslipResource::make($payslip)
@@ -457,7 +493,7 @@ class PayrollController extends Controller
             ], Response::HTTP_FORBIDDEN);
         }
 
-        $payslip->loadMissing('payrollRun');
+        $payslip->loadMissing(['payrollRun', 'amendments.creator']);
 
         return $this->service->payslipPdf($payslip)
             ->download("payslip-{$payslip->payrollRun?->cycle_start?->format('Y-m-d')}.pdf");

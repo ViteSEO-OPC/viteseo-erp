@@ -15,7 +15,13 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 
 /**
- * FIN-010 — off-cycle adjustment runs, the correction path the whole audit depends on.
+ * FIN-010 — off-cycle adjustment runs, RETIRED as a feature and kept as a guarantee.
+ *
+ * Corrections are now added to the payslip of the period they correct (PayslipAmendmentTest); the
+ * HTTP route that raised a second payslip in a hand-typed window is gone. What remains is the
+ * service path that produced the adjustment runs already in the database. Those are real payslips
+ * of real money: they must keep rendering, keep being disbursable, and keep declining to freeze
+ * attendance they never priced. That is what this file still protects.
  *
  * There were two write paths into pay: an aligned regular period and the December 13th-month run.
  * Every correction found by FIN-007 (back-dated raise), FIN-008 (attendance fix), FIN-009 (late
@@ -184,23 +190,11 @@ class AdjustmentRunTest extends HrTestCase
 
     // --- the controls ----------------------------------------------------------------------
 
-    public function test_a_reason_is_required(): void
-    {
-        $this->hrPost('/api/v1/hr/payroll/adjustment', [
-            'cycle_start' => '2026-04-01', 'cycle_end' => '2026-04-01',
-            'lines' => [['employee_id' => $this->employee->id, 'amount' => 500]],
-        ])->assertStatus(422)->assertJsonValidationErrors('reason');
-    }
-
-    /** A clawback needs its own consent rules under Art. 113 — it is not this feature. */
-    public function test_a_negative_adjustment_is_rejected(): void
-    {
-        $this->hrPost('/api/v1/hr/payroll/adjustment', [
-            'cycle_start' => '2026-04-01', 'cycle_end' => '2026-04-01',
-            'reason' => 'Recovering an overpayment from March',
-            'lines' => [['employee_id' => $this->employee->id, 'amount' => -500]],
-        ])->assertStatus(422)->assertJsonValidationErrors('lines.0.amount');
-    }
+    /**
+     * The two request-validation tests that were here — a reason is required, a negative amount is
+     * refused — went with `POST payroll/adjustment`. Both rules survive on the endpoint that
+     * replaced it; they are asserted in PayslipAmendmentTest.
+     */
 
     /** The window is free-form on purpose — that constraint is what blocked corrections. */
     public function test_the_window_need_not_be_an_aligned_pay_period(): void

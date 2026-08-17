@@ -332,6 +332,20 @@ export function PayslipDocument({
             both answers — what lands in their account now, and what the month came to. */}
         {month && <NetBar label="Total Month Salary" value={amount(month.total_month)} />}
 
+        {/*
+          WHAT WAS ACTUALLY TRANSFERRED, when the net above is no longer that figure.
+
+          Silent on an ordinary payslip, where the net IS what was paid. It appears when a
+          correction landed after payment: the bar above then states an amount larger than the one
+          in the employee's account, and without this the document would be quietly wrong about the
+          only fact the reader can verify against their bank.
+        */}
+        <SettlementNote payslip={p} />
+
+        {/* The corrections themselves — each with its date, so an employee who has already read
+            this payslip once can see what changed since. */}
+        <AmendmentHistory amendments={p.amendments ?? []} />
+
         {/* HR keeps ONE extra thing the employee has no use for: the employer TOTAL, which is
             what gets filed. The three components are already inline above for both audiences,
             so a standalone "Employer Share (for remittance)" table would repeat them. */}
@@ -548,6 +562,97 @@ function NetBar({ label, value }: { label: string; value: string }) {
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-foreground px-6 py-5 text-background">
       <p className="font-mono text-lg font-bold uppercase">{label}</p>
       <p className="font-mono text-2xl font-extrabold tabular-nums">PHP {value}</p>
+    </div>
+  );
+}
+
+/**
+ * What was transferred versus what the payslip now says — printed only when they differ.
+ *
+ * THE CASE THIS EXISTS FOR. A payslip is paid, and a correction is applied to it afterwards. Its net
+ * rises, but the transfer already happened at the old figure; the amount in the employee's account
+ * is the one thing on this document they can independently check, and the net bar above no longer
+ * matches it. So both figures are stated, each with its date, and the difference is named as a
+ * balance rather than left to be inferred from two numbers that disagree.
+ *
+ * Silent on an unpaid payslip (there is nothing to reconcile yet) and on a paid one that was never
+ * corrected, which is nearly all of them — `disbursed_amount` equals `net_pay` there, and a bar
+ * repeating the figure above it would be noise on every payslip the company issues.
+ */
+function SettlementNote({ payslip }: { payslip: Payslip }) {
+  const paid = payslip.disbursed_amount;
+  const outstanding = payslip.amount_outstanding;
+  if (paid === null || !differs(paid, payslip.net_pay)) return null;
+
+  // Positive is the ordinary direction: a correction added money after the transfer. Negative would
+  // mean the transfer exceeded the net, which is an overpayment — stated, never netted off.
+  const overpaid = outstanding < 0;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-warning bg-warning-subtle px-4 py-3">
+      <div>
+        <p className="text-sm font-semibold">
+          {overpaid ? "Paid more than this payslip now shows" : "Still to be paid"}
+        </p>
+        <p className="text-caption text-muted-foreground">
+          {amount(paid)} was paid out on {longDate(payslip.disbursed_at)}. This payslip was corrected
+          afterwards, so the net above is not the amount that was transferred.
+          {overpaid
+            ? " The difference was overpaid and is not recovered automatically."
+            : " The difference is still owed."}
+        </p>
+      </div>
+      <p className="shrink-0 font-mono text-sm font-bold tabular-nums">
+        {amount(Math.abs(outstanding))}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Every correction on this payslip, in the order they were issued.
+ *
+ * The amounts are already in the Compensation table as their own lines — this is the provenance:
+ * when each was issued, why, and by whom. An employee re-reading a payslip whose figures have moved
+ * is entitled to see that it was corrected rather than to wonder whether they misread it the first
+ * time.
+ */
+function AmendmentHistory({ amendments }: { amendments: Payslip["amendments"] }) {
+  if (!amendments || amendments.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-border px-4 py-3">
+      <p className="text-sm font-semibold">
+        Corrections to this payslip ({amendments.length})
+      </p>
+      <ul className="mt-2 flex flex-col gap-2">
+        {amendments.map((a) => (
+          <li key={a.id} className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-caption text-muted-foreground">
+              <span className="font-medium text-foreground">{longDate(a.issued_on)}</span>
+              {" — "}
+              {a.note ?? a.reason}
+              {` · ${a.kind_label}`}
+              {a.issued_by && ` · ${a.issued_by}`}
+            </span>
+            {/* A correction can take money as well as give it, so the sign is printed rather than
+                assumed — and a reversal's tax comes BACK, which is the opposite footnote. */}
+            <span className="font-mono text-caption tabular-nums">
+              {a.amount < 0 ? "−" : "+"}
+              {amount(Math.abs(a.amount))}
+              {a.tax > 0 && (
+                <span className="text-muted-foreground"> less {amount(a.tax)} tax</span>
+              )}
+              {a.tax < 0 && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  plus {amount(Math.abs(a.tax))} tax refunded
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

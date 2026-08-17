@@ -120,6 +120,40 @@ class PayslipResource extends JsonResource
             'deduction_carryover' => (float) $this->deduction_carryover,
             'net_pay' => (float) $this->net_pay,
 
+            // WHAT HAS ACTUALLY BEEN PAID, AND WHAT IS STILL OWED.
+            //
+            // Equal to `net_pay` and zero respectively on every payslip that has not been corrected
+            // after being paid — which is nearly all of them. They exist for the one case that used
+            // to be unrepresentable: a payslip amended after disbursement, where the document's net
+            // is no longer the amount that left the bank. Without both figures the payslip would
+            // claim the correction had already been transferred.
+            'disbursed_amount' => $this->disbursed_amount === null ? null : (float) $this->disbursed_amount,
+            'amount_outstanding' => $this->amountOutstanding(),
+            // WHEN it was paid. An amended payslip has to date both halves — "paid on the 20th,
+            // corrected on the 27th" is the whole explanation for why the two figures differ.
+            'disbursed_at' => $this->disbursed_at?->toIso8601String(),
+
+            // The corrections on this payslip, each with the date it was issued and why — so an
+            // amended document can show its own history instead of a gross that silently changed.
+            'amendments' => $this->whenLoaded(
+                'amendments',
+                fn () => $this->amendments->map(fn ($a) => [
+                    'id' => $a->id,
+                    // Extra pay, pay reversed, or a deduction the period missed. The sign of
+                    // `amount` follows it; the kind is what says why it moved that way.
+                    'kind' => $a->kind,
+                    'kind_label' => $a->kindLabel(),
+                    'amount' => (float) $a->amount,
+                    'tax' => (float) $a->tax,
+                    'net' => $a->net(),
+                    'reason' => $a->reason,
+                    'note' => $a->note,
+                    'issued_on' => $a->issued_on?->toDateString(),
+                    'issued_by' => $a->creator?->name,
+                ])->values()->all(),
+                [],
+            ),
+
             // The document's own subtotals, derived here rather than in each surface. The UI
             // and the PDF both render them, and the arithmetic below is subtle enough that
             // two independent implementations of it would eventually disagree.
@@ -512,8 +546,38 @@ class PayslipResource extends JsonResource
         // would double the compensation total.
         $add('13th Month Pay', (float) $this->thirteenth_month);
 
-        // --- the off-cycle correction (FIN-010) -------------------------------------------------
-        $add('Adjustment', (float) $this->adjustment_pay, $this->adjustment_note ?: null);
+        // --- corrections to this period ---------------------------------------------------------
+        //
+        // ONE LINE PER AMENDMENT, each carrying the date it was issued, because that date is the
+        // only thing distinguishing two corrections to the same period — and because an amended
+        // payslip whose gross simply grew is indistinguishable from one that was always wrong.
+        //
+        // Falls back to the single stored total when the ledger is not loaded, and for the payslips
+        // of the superseded adjustment runs, which have an `adjustment_pay` and no amendments behind
+        // it. Both must keep rendering: they are real payslips of real money.
+        $amendments = $this->relationLoaded('amendments') ? $this->amendments : null;
+
+        if ($amendments !== null && $amendments->isNotEmpty()) {
+            foreach ($amendments as $amendment) {
+                // A MISSED DEDUCTION IS NOT AN EARNING, negative or otherwise. It reaches the
+                // document through `other_deductions_breakdown` — where the money actually went —
+                // and listing it here as well would count it twice and understate gross.
+                if ($amendment->isDeduction()) {
+                    continue;
+                }
+
+                $add(
+                    // A reversal is a line of its own: "Adjustment −₱1,000" reads as an adjustment
+                    // that was mis-entered, which is exactly what it must not be mistaken for.
+                    (float) $amendment->amount < 0 ? 'Pay Reversed' : 'Adjustment',
+                    (float) $amendment->amount,
+                    trim(($amendment->note ?: $amendment->reason) . ' · issued '
+                        . ($amendment->issued_on?->format('M j, Y') ?? '')),
+                );
+            }
+        } else {
+            $add('Adjustment', (float) $this->adjustment_pay, $this->adjustment_note ?: null);
+        }
 
         // --- final pay (FIN-014) ---------------------------------------------------------------
         $add('Separation Pay', (float) $this->separation_pay,
