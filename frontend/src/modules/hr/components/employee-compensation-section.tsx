@@ -21,15 +21,14 @@ import {
 } from "@/modules/hr/components/record-fields";
 import {
   optionalChoice,
-  optionalMoney,
   optionalText,
   orNull,
   requiredMoney,
 } from "@/modules/hr/lib/employee-validation";
 import { useRecordSection } from "@/modules/hr/lib/use-record-section";
-import { StatutoryOverridesBlock } from "@/modules/hr/components/statutory-overrides-block";
 import { ContributionEnrolmentBlock } from "@/modules/hr/components/contribution-enrolment-block";
 import { EmployeeAllowancesBlock } from "@/modules/hr/components/employee-allowances-block";
+import { MyAllowancesBlock } from "@/modules/hr/components/my-allowances-block";
 import { MinimumWageBlock } from "@/modules/hr/components/minimum-wage-block";
 import {
   BANK_ACCOUNT_TYPES,
@@ -53,9 +52,6 @@ const schema = z.object({
   bank_account_type: optionalChoice(BANK_ACCOUNT_TYPES, "Bank type"),
   bank_account: optionalText(100),
   bank_account_name: optionalText(),
-  sss_contribution: optionalMoney("SSS"),
-  pagibig_contribution: optionalMoney("Pag-IBIG"),
-  philhealth_contribution: optionalMoney("PhilHealth"),
   tin: optionalText(32),
   sss_number: optionalText(32),
   philhealth_number: optionalText(32),
@@ -84,9 +80,6 @@ function toValues(employee: Employee): Values {
     bank_account_type: employee.bank_account_type ?? "",
     bank_account: employee.bank_account ?? "",
     bank_account_name: employee.bank_account_name ?? "",
-    sss_contribution: employee.sss_contribution ?? "",
-    pagibig_contribution: employee.pagibig_contribution ?? "",
-    philhealth_contribution: employee.philhealth_contribution ?? "",
     tin: employee.tin ?? "",
     sss_number: employee.sss_number ?? "",
     philhealth_number: employee.philhealth_number ?? "",
@@ -110,9 +103,6 @@ function toPayload(v: Values): EmployeeUpdateInput {
     bank_account: orNull(v.bank_account),
     bank_account_name: orNull(v.bank_account_name),
     // Sent as strings; the API validates them as numeric and the columns are decimal.
-    sss_contribution: orNull(v.sss_contribution),
-    pagibig_contribution: orNull(v.pagibig_contribution),
-    philhealth_contribution: orNull(v.philhealth_contribution),
     tin: orNull(v.tin),
     sss_number: orNull(v.sss_number),
     philhealth_number: orNull(v.philhealth_number),
@@ -131,10 +121,17 @@ function toPayload(v: Values): EmployeeUpdateInput {
 export function EmployeeCompensationSection({
   employee,
   canEdit,
+  isHr = false,
   children,
 }: {
   employee: Employee;
   canEdit: boolean;
+  /**
+   * Distinct from `canEdit`, which is false in TWO different situations: an employee looking at
+   * their own record, and HR looking at an archived one. The blocks below need to tell those
+   * apart — the first wants a self-service read-only view, the second wants nothing at all.
+   */
+  isHr?: boolean;
   /** Leave credits, history and loans — their own editors, below the fields. */
   children?: React.ReactNode;
 }) {
@@ -214,6 +211,43 @@ export function EmployeeCompensationSection({
       <div className="space-y-8">
         <FieldGrid specs={pay} editing={editing} form={form} />
 
+        {/* Why the pay moved — recorded on the compensation-history timeline. */}
+        {salaryChanged && (
+          <div className="rounded-card border border-border bg-muted/40 p-4">
+            <p className="mb-3 text-sm font-semibold text-foreground">
+              You changed the base salary — log the reason
+            </p>
+            <FieldGrid
+              specs={[
+                {
+                  name: "salary_change_type",
+                  label: "Salary change type",
+                  kind: "select",
+                  clearable: true,
+                  options: SALARY_CHANGE_TYPES.map((t) => ({ value: t.value, label: t.label })),
+                  hint: "Leave as None to log a generic adjustment.",
+                },
+                {
+                  name: "salary_change_reason",
+                  label: "Reason for change",
+                  placeholder: "e.g. Annual increase",
+                },
+                {
+                  // FIN-007 — a raise agreed for 1 August but entered on 5 September used to
+                  // price August at the OLD salary, permanently. The date is now recorded as it
+                  // really is; leaving it blank keeps the previous behaviour (effective today).
+                  name: "salary_effective_date",
+                  label: "Effective from",
+                  kind: "date",
+                  hint: "Leave blank for today. A past date may affect payroll already run.",
+                },
+              ]}
+              editing={editing}
+              form={form}
+            />
+          </div>
+        )}
+
         {/* FIN-030 / FIN-030b — the derived daily rate, always, with the floor beside it when one
             is configured. Advisory and never blocking: the floor varies by region, industry and
             establishment size, and this system does not know which apply. It is shown at all
@@ -223,24 +257,24 @@ export function EmployeeCompensationSection({
         <MinimumWageBlock employee={employee} editing={editing} form={form} />
 
         {/* Slice B14 — what replaces the three fixed allowance boxes B9 removed. Rendered from
-            the catalogue, so it follows however many allowances the company has. */}
-        <EmployeeAllowancesBlock employeeId={employee.id} />
-
-        <StatutoryOverridesBlock
-          employeeId={employee.id}
-          employee={{
-            sss_contribution: employee.sss_contribution,
-            philhealth_contribution: employee.philhealth_contribution,
-            pagibig_contribution: employee.pagibig_contribution,
-          }}
-          editing={editing}
-          form={form}
-        />
+            the catalogue, so it follows however many allowances the company has.
+            
+            Three states, not two. HR editing gets the catalogue block; an employee gets their own
+            read-only figures from a self-service endpoint; HR looking at an ARCHIVED record gets
+            neither, because the HR reader does not resolve a soft-deleted employee and would only
+            render a load error. */}
+        {isHr ? (
+          canEdit && <EmployeeAllowancesBlock employeeId={employee.id} />
+        ) : (
+          <MyAllowancesBlock />
+        )}
 
         {/* Slice B9 item 3 — who pays into what. Sits under the overrides on purpose: this is
             the honest way to express "this person is exempt", and the block above is the one
             that cannot express it without breaking the remittance. */}
-        <ContributionEnrolmentBlock employeeId={employee.id} />
+        {(isHr ? canEdit : true) && (
+          <ContributionEnrolmentBlock employeeId={employee.id} canEdit={canEdit} />
+        )}
 
         <div className="border-t border-border pt-6">
           <p className="mb-1 text-label font-semibold uppercase tracking-wide text-brand">
@@ -286,43 +320,6 @@ export function EmployeeCompensationSection({
               exempt from attendance.
             </p>
           )
-        )}
-
-        {/* Why the pay moved — recorded on the compensation-history timeline. */}
-        {salaryChanged && (
-          <div className="rounded-card border border-border bg-muted/40 p-4">
-            <p className="mb-3 text-sm font-semibold text-foreground">
-              You changed the base salary — log the reason
-            </p>
-            <FieldGrid
-              specs={[
-                {
-                  name: "salary_change_type",
-                  label: "Salary change type",
-                  kind: "select",
-                  clearable: true,
-                  options: SALARY_CHANGE_TYPES.map((t) => ({ value: t.value, label: t.label })),
-                  hint: "Leave as None to log a generic adjustment.",
-                },
-                {
-                  name: "salary_change_reason",
-                  label: "Reason for change",
-                  placeholder: "e.g. Annual increase",
-                },
-                {
-                  // FIN-007 — a raise agreed for 1 August but entered on 5 September used to
-                  // price August at the OLD salary, permanently. The date is now recorded as it
-                  // really is; leaving it blank keeps the previous behaviour (effective today).
-                  name: "salary_effective_date",
-                  label: "Effective from",
-                  kind: "date",
-                  hint: "Leave blank for today. A past date may affect payroll already run.",
-                },
-              ]}
-              editing={editing}
-              form={form}
-            />
-          </div>
         )}
 
         {children}

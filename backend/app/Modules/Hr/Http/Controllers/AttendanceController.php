@@ -26,7 +26,18 @@ class AttendanceController extends Controller
                 'data' => [
                     'today' => null,
                     'week' => [],
-                    'clock_in' => ['strict' => false, 'opens_at' => null, 'geofence' => false],
+                    // Shape must match clockInWindowFor()'s — a caller with no employee record
+                    // reads this branch, and a short object here means the panel's optional
+                    // chaining silently decides the rules instead of the server.
+                    'clock_in' => [
+                        'mode' => 'allow',
+                        'opens_at' => null,
+                        'defers_to' => null,
+                        'geofence' => false,
+                        'is_workday' => true,
+                        'rest_day_request' => null,
+                        'suspension' => null,
+                    ],
                 ],
             ]);
         }

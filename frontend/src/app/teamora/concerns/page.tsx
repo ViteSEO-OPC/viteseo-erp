@@ -8,6 +8,7 @@ import {
   FileText,
   ShieldCheck,
   ShieldAlert,
+  ShieldQuestion,
   UploadCloud,
   User,
   X,
@@ -28,6 +29,8 @@ import {
   useMyConcerns,
   useCreateConcern,
   useCancelConcern,
+  useAcceptConcernReveal,
+  useDeclineConcernReveal,
 } from "@/modules/hr/hooks/use-concerns";
 import {
   CONCERN_CATEGORIES,
@@ -291,10 +294,26 @@ function MyConcernsCard() {
   const cancelTarget = all.find((c) => c.id === cancelId) ?? null;
   const cancelConcernMut = useCancelConcern();
 
+  /** HR is waiting on an answer from this employee about who they are. */
+  const awaitingAnswer = (c: Concern) => c.reveal_request?.status === "pending";
+
   const columns: Column<Concern>[] = [
     {
       header: "Ref",
-      cell: (c) => <span className="font-semibold text-foreground">{c.reference_no}</span>,
+      cell: (c) => (
+        <span className="inline-flex items-center gap-2">
+          <span className="font-semibold text-foreground">{c.reference_no}</span>
+          {/* The row IS the notification. A pending ask expires by being answered, so it
+              needs to be visible without opening anything — but the decision itself lives
+              in the detail, where the employee can read what they are answering about. */}
+          {awaitingAnswer(c) && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-warning px-2 py-0.5 text-[11px] font-semibold text-white">
+              <span className="size-1.5 rounded-full bg-white" />
+              HR asked
+            </span>
+          )}
+        </span>
+      ),
     },
     {
       header: "Category",
@@ -336,6 +355,8 @@ function MyConcernsCard() {
         rows={all}
         rowKey={(c) => c.id}
         onRowClick={(c) => setDetailId(c.id)}
+        // Floats a concern HR is waiting on to the top of the list.
+        needsAction={awaitingAnswer}
         // Privacy: search on reference/category/visibility/status only — never identity.
         getSearchText={(c) =>
           [
@@ -431,15 +452,7 @@ function MyConcernsCard() {
             </div>
           )}
 
-          {detail.is_anonymous && (
-            <div className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
-              <EyeOff className="mt-0.5 size-3.5 shrink-0" />
-              <span>
-                Filed anonymously. HR can see who submitted it to prevent abuse, but is
-                required to keep your identity private.
-              </span>
-            </div>
-          )}
+          {detail.is_anonymous && <AnonymityPanel concern={detail} />}
         </RequestDetailDialog>
       )}
 
@@ -462,5 +475,166 @@ function MyConcernsCard() {
         }}
       />
     </>
+  );
+}
+
+/**
+ * HR has asked this employee to identify themselves on an anonymous concern.
+ *
+ * Lives inside the concern's own detail dialog, reached by clicking the flagged row. The table
+ * carries the notice; the decision belongs next to the thing being decided about, so the
+ * employee reads what they reported before choosing whether to put their name to it.
+ *
+ * Both answers are offered with
+ * equal weight and neither is styled as the correct one — a decline is a complete answer here,
+ * and a UI that made "Yes" the obvious button would quietly undo the protection the whole
+ * feature exists to give.
+ */
+function RevealRequestCard({ concern }: { concern: Concern }) {
+  const ask = concern.reveal_request;
+  const acceptMut = useAcceptConcernReveal();
+  const declineMut = useDeclineConcernReveal();
+  const [declining, setDeclining] = useState(false);
+  const [reason, setReason] = useState("");
+  const busy = acceptMut.isPending || declineMut.isPending;
+
+  if (!ask || ask.status !== "pending") return null;
+
+  async function accept() {
+    if (!ask) return;
+    try {
+      await acceptMut.mutateAsync(ask.id);
+      toast.success("HR can now see your name", `Only on ${concern.reference_no}.`);
+    } catch {
+      toast.error("Could not send your answer.");
+    }
+  }
+
+  async function decline() {
+    if (!ask || !reason.trim()) return;
+    try {
+      await declineMut.mutateAsync({ id: ask.id, reason: reason.trim() });
+      toast.success("You stayed anonymous", "HR sees your reason instead of your name.");
+      setDeclining(false);
+      setReason("");
+    } catch {
+      toast.error("Could not send your answer.");
+    }
+  }
+
+  return (
+    <div className="rounded-card border border-warning bg-warning-subtle p-4">
+      <div className="flex items-start gap-2">
+        <ShieldQuestion className="mt-0.5 size-4 shrink-0 text-warning" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">
+            HR asked to know who filed this
+          </p>
+          <p className="mt-0.5 text-caption text-muted-foreground">
+            {ask.requested_by ?? "HR"} asked on {formatDate(ask.requested_at)}. It&apos;s your
+            call — saying no keeps you anonymous and your concern carries on either way.
+          </p>
+          <p className="mt-2 rounded-lg bg-card px-3 py-2 text-sm text-foreground">
+            “{ask.reason}”
+          </p>
+
+          {declining ? (
+            <div className="mt-3 space-y-2">
+              <label htmlFor={`decline-${ask.id}`} className="text-sm font-medium text-foreground">
+                Why would you rather stay anonymous?
+              </label>
+              <textarea
+                id={`decline-${ask.id}`}
+                rows={2}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                maxLength={1000}
+                className="w-full rounded-lg border border-input bg-card px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                placeholder="HR sees this instead of your name."
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={busy || !reason.trim()}
+                  onClick={decline}
+                >
+                  {declineMut.isPending ? "Sending…" : "Send my answer"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    setDeclining(false);
+                    setReason("");
+                  }}
+                >
+                  Back
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" disabled={busy} onClick={accept}>
+                Let HR see my name
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={() => setDeclining(true)}>
+                Stay anonymous
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What the employee is told about their own anonymity, inside the concern detail.
+ *
+ * The old copy said HR could see them all along. It was accurate and it was the problem: the
+ * only assurance on the page was that the protection did not really exist. Now the plain state
+ * is the reassuring one, and the exceptions are the ones that need explaining.
+ */
+function AnonymityPanel({ concern }: { concern: Concern }) {
+  const ask = concern.reveal_request;
+
+  if (concern.identity_revealed_at) {
+    return (
+      <div className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
+        <User className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          You agreed to be named on this concern on {formatDate(concern.identity_revealed_at)}, so
+          HR can see it here. Your other concerns are unaffected.
+        </span>
+      </div>
+    );
+  }
+
+  if (ask?.status === "pending") {
+    return <RevealRequestCard concern={concern} />;
+  }
+
+  if (ask?.status === "declined") {
+    return (
+      <div className="flex items-start gap-2 rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground">
+        <EyeOff className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+        <span>
+          You chose to stay anonymous on {formatDate(ask.responded_at ?? ask.requested_at)}. HR
+          still cannot see who you are, and they were given your reason.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
+      <EyeOff className="mt-0.5 size-3.5 shrink-0" />
+      <span>
+        Filed anonymously. HR cannot see who you are. If they ever need to know, they have to ask
+        you here and say why — and you can say no.
+      </span>
+    </div>
   );
 }

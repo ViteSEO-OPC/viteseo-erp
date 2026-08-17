@@ -15,15 +15,15 @@ class LeaveRequestResource extends JsonResource
         return [
             'id' => $this->id,
             'employee' => [
-                'id' => $this->employee->id,
-                'name' => $this->employee->user?->name,
-                'photo_url' => $this->employee->photo_url,
+                'id' => $this->employee?->id,
+                'name' => $this->employee?->user?->name,
+                'photo_url' => $this->employee?->photo_url,
             ],
             'leave_type' => [
-                'id' => $this->leaveType->id,
-                'name' => $this->leaveType->name,
-                'code' => $this->leaveType->code,
-                'color' => $this->leaveType->color,
+                'id' => $this->leaveType?->id,
+                'name' => $this->leaveType?->name,
+                'code' => $this->leaveType?->code,
+                'color' => $this->leaveType?->color,
             ],
             'start_date' => $this->start_date?->format('Y-m-d'),
             'end_date' => $this->end_date?->format('Y-m-d'),

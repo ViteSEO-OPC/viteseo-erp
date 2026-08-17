@@ -42,10 +42,10 @@ class PaymentResource extends JsonResource
             'failure_reason' => $this->failure_reason,
 
             'employee' => $this->whenLoaded('employee', fn () => [
-                'id' => $this->employee->id,
-                'employee_no' => $this->employee->employee_no,
-                'name' => $this->employee->user?->name,
-                'department' => $this->employee->department?->name,
+                'id' => $this->employee?->id,
+                'employee_no' => $this->employee?->employee_no,
+                'name' => $this->employee?->user?->name,
+                'department' => $this->employee?->department?->name,
             ]),
         ];
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Eye, EyeOff, Paperclip } from "lucide-react";
+import { Check, Clock, Eye, EyeOff, Paperclip, ShieldQuestion, X } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
+  DialogClose,
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
@@ -31,6 +33,7 @@ import {
   useSetConcernStatus,
   useScheduleMeeting,
   useReopenConcern,
+  useRequestConcernReveal,
 } from "@/modules/hr/hooks/use-concerns";
 import { concernCategoryLabel, type Concern } from "@/modules/hr/types/concern";
 import { DateTimePicker } from "@/modules/hr/ui/date-time-picker";
@@ -50,6 +53,11 @@ export default function ConcernsPage() {
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(rows ?? [], status);
   const selected = (rows ?? []).find((c) => c.id === selectedId) ?? null;
+  // The concern HR is asking about. Held at page level so the ask can be started from the
+  // list row OR from inside the detail modal without two copies of the dialog.
+  const [askTargetId, setAskTargetId] = useState<number | null>(null);
+  const askTarget = (rows ?? []).find((c) => c.id === askTargetId) ?? null;
+  const setAskTarget = (c: Concern | null) => setAskTargetId(c?.id ?? null);
 
   const columns: Column<Concern>[] = [
     {
@@ -60,7 +68,7 @@ export default function ConcernsPage() {
       header: "Submitter",
       cell: (c) =>
         c.is_anonymous ? (
-          <AnonymousSubmitter name={c.employee?.name ?? null} />
+          <AnonymousSubmitter concern={c} onAsk={() => setAskTarget(c)} />
         ) : (
           <span className="text-sm font-semibold text-foreground">{c.employee?.name ?? "—"}</span>
         ),
@@ -97,8 +105,9 @@ export default function ConcernsPage() {
             rowKey={(c) => c.id}
             onRowClick={(c) => setSelectedId(c.id)}
             needsAction={(c) => c.status !== "resolved"}
-            // HR sees the submitter (even anonymous), so name is searchable here — this
-            // data is HR-only. The 'anonymous' keyword still matches anonymous concerns.
+            // `employee.name` is null for an anonymous concern unless its reporter has agreed
+            // to be named, so searching by name finds only the concerns HR is entitled to
+            // find. The 'anonymous' keyword still matches the rest.
             getSearchText={(c) =>
               `${c.reference_no} ${concernCategoryLabel(c.category)} ${c.status} ${c.employee?.name ?? ""} ${c.is_anonymous ? "anonymous" : ""}`
             }
@@ -109,37 +118,164 @@ export default function ConcernsPage() {
         )}
       </div>
 
-      <ConcernDetail concern={selected} onOpenChange={(o) => !o && setSelectedId(null)} />
+      <ConcernDetail
+        concern={selected}
+        onOpenChange={(o) => !o && setSelectedId(null)}
+        onAsk={() => selected && setAskTarget(selected)}
+      />
+
+      <RevealRequestDialog
+        concern={askTarget}
+        onOpenChange={(o) => !o && setAskTarget(null)}
+      />
     </div>
   );
 }
 
 /**
- * Anonymous submitter, masked by default. HR may reveal it (eye toggle) to deter abuse,
- * but must keep it private. The toggle stops row-click propagation so it won't open the
- * detail modal.
+ * HR asking an anonymous reporter to identify themselves.
+ *
+ * The copy does the work the old eye toggle pretended to do. Pressing this reveals nothing —
+ * it sends a question the reporter can refuse, and the refusal is a complete answer. Saying so
+ * plainly is what stops HR reading a decline as obstruction.
  */
-function AnonymousSubmitter({ name }: { name: string | null }) {
-  const [shown, setShown] = useState(false);
+function RevealRequestDialog({
+  concern,
+  onOpenChange,
+}: {
+  concern: Concern | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const askMut = useRequestConcernReveal();
+  const empty = reason.trim() === "";
+
+  async function submit() {
+    if (!concern || empty) return;
+    try {
+      await askMut.mutateAsync({ concernId: concern.id, reason: reason.trim() });
+      toast.success(
+        "Request sent",
+        "The reporter decides. You will see their answer here — their name only if they agree.",
+      );
+      setReason("");
+      onOpenChange(false);
+    } catch (err) {
+      const m = (err as { response?: { data?: { message?: string } } }).response?.data;
+      toast.error(m?.message ?? "Could not send the request.");
+    }
+  }
+
+  return (
+    <Dialog
+      open={!!concern}
+      onOpenChange={(o) => {
+        if (!o) setReason("");
+        onOpenChange(o);
+      }}
+    >
+      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
+        {concern && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Ask who filed {concern.reference_no}?</DialogTitle>
+              <DialogDescription>
+                This sends a request to the reporter — it does not reveal anything. They can
+                refuse, and if they do you will see their reason instead of their name.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="reveal-reason">Why do you need to know?</Label>
+              <textarea
+                id="reveal-reason"
+                rows={3}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                maxLength={1000}
+                className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                placeholder="e.g. We cannot verify the leave records in this report without knowing whose they are."
+              />
+              <p className="text-xs text-muted-foreground">
+                The reporter reads this and decides on it.
+              </p>
+            </div>
+
+            <div className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
+              <ShieldQuestion className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                Every request is recorded and the reporter sees who asked. Declining costs them
+                nothing and does not stall the case.
+              </span>
+            </div>
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline">Cancel</Button>
+              </DialogClose>
+              <Button disabled={askMut.isPending || empty} onClick={submit}>
+                {askMut.isPending ? "Sending…" : "Send request"}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * The submitter cell for an anonymous concern.
+ *
+ * The eye used to toggle a name the browser already had — the masking was decoration over a
+ * payload that carried the identity regardless. Now there is no name to toggle: the button
+ * ASKS, and what it shows afterwards is the state of that question. `stopPropagation` keeps a
+ * press off the row-click that opens the detail modal.
+ */
+function AnonymousSubmitter({ concern, onAsk }: { concern: Concern; onAsk: () => void }) {
+  const ask = concern.reveal_request;
+  const revealed = concern.identity_revealed_at !== null;
+
+  if (revealed) {
+    return (
+      <span className="inline-flex items-center gap-2 text-sm">
+        <span className="flex flex-col leading-tight">
+          <span className="font-semibold text-foreground">{concern.employee?.name ?? "Unknown"}</span>
+          <span className="text-[11px] font-medium text-warning">Shared with you — keep private</span>
+        </span>
+        <Eye className="size-4 text-muted-foreground" />
+      </span>
+    );
+  }
+
   return (
     <span className="inline-flex items-center gap-2 text-sm">
       <span className="flex flex-col leading-tight">
-        <span className={cn("font-semibold", shown ? "text-foreground" : "text-muted-foreground")}>
-          {shown ? name ?? "Unknown" : "Anonymous"}
-        </span>
-        <span className="text-[11px] font-medium text-warning">Keep private</span>
+        <span className="font-semibold text-muted-foreground">Anonymous</span>
+        {ask?.status === "pending" ? (
+          <span className="text-[11px] font-medium text-warning">Waiting on their answer</span>
+        ) : ask?.status === "declined" ? (
+          <span className="text-[11px] font-medium text-muted-foreground">Declined to be named</span>
+        ) : (
+          <span className="text-[11px] font-medium text-muted-foreground">Identity protected</span>
+        )}
       </span>
       <button
         type="button"
+        disabled={ask?.status === "pending"}
         onClick={(e) => {
           e.stopPropagation();
-          setShown((v) => !v);
+          onAsk();
         }}
-        className="text-muted-foreground transition-colors hover:text-foreground"
-        aria-label={shown ? "Hide submitter" : "Reveal submitter"}
-        title={shown ? "Hide submitter" : "Reveal submitter — keep it private"}
+        className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40 disabled:hover:text-muted-foreground"
+        aria-label="Ask the reporter to identify themselves"
+        title={
+          ask?.status === "pending"
+            ? "Already asked — waiting on their answer"
+            : "Ask the reporter to identify themselves"
+        }
       >
-        {shown ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
+        {ask?.status === "pending" ? <Clock className="size-4" /> : <EyeOff className="size-4" />}
       </button>
     </span>
   );
@@ -148,9 +284,11 @@ function AnonymousSubmitter({ name }: { name: string | null }) {
 function ConcernDetail({
   concern,
   onOpenChange,
+  onAsk,
 }: {
   concern: Concern | null;
   onOpenChange: (open: boolean) => void;
+  onAsk: () => void;
 }) {
   const statusMut = useSetConcernStatus();
   const scheduleMut = useScheduleMeeting();
@@ -161,8 +299,6 @@ function ConcernDetail({
   const [when, setWhen] = useState("");
   const [location, setLocation] = useState("");
   const [agenda, setAgenda] = useState("");
-  // Anonymous submitter stays masked until HR reveals it; re-mask on close.
-  const [showName, setShowName] = useState(false);
 
   function handleOpenChange(open: boolean) {
     if (!open) {
@@ -170,7 +306,6 @@ function ConcernDetail({
       setWhen("");
       setLocation("");
       setAgenda("");
-      setShowName(false);
     }
     onOpenChange(open);
   }
@@ -220,16 +355,31 @@ function ConcernDetail({
               <DialogDescription className="flex items-center gap-1.5 text-[13px]">
                 {concern.is_anonymous ? (
                   <>
-                    <span>{showName ? concern.employee?.name ?? "Unknown" : "Anonymous"}</span>
-                    <button
-                      type="button"
-                      onClick={() => setShowName((v) => !v)}
-                      className="text-muted-foreground transition-colors hover:text-foreground"
-                      aria-label={showName ? "Hide submitter" : "Reveal submitter"}
-                      title={showName ? "Hide submitter" : "Reveal submitter — keep it private"}
-                    >
-                      {showName ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
-                    </button>
+                    <span>
+                      {concern.identity_revealed_at
+                        ? concern.employee?.name ?? "Unknown"
+                        : "Anonymous"}
+                    </span>
+                    {!concern.identity_revealed_at && (
+                      <button
+                        type="button"
+                        disabled={concern.reveal_request?.status === "pending"}
+                        onClick={onAsk}
+                        className="text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                        aria-label="Ask the reporter to identify themselves"
+                        title={
+                          concern.reveal_request?.status === "pending"
+                            ? "Already asked — waiting on their answer"
+                            : "Ask the reporter to identify themselves"
+                        }
+                      >
+                        {concern.reveal_request?.status === "pending" ? (
+                          <Clock className="size-3.5" />
+                        ) : (
+                          <EyeOff className="size-3.5" />
+                        )}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <span>{concern.employee?.name ?? "—"}</span>
@@ -238,15 +388,7 @@ function ConcernDetail({
               </DialogDescription>
             </DialogHeader>
 
-            {concern.is_anonymous && (
-              <div className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
-                <EyeOff className="mt-0.5 size-3.5 shrink-0" />
-                <span>
-                  Submitted anonymously. You can see the submitter to prevent abuse — keep their
-                  identity private and don&apos;t disclose it to others.
-                </span>
-              </div>
-            )}
+            {concern.is_anonymous && <AnonymityPanel concern={concern} onAsk={onAsk} />}
 
             <DetailFields
               fields={[
@@ -386,5 +528,88 @@ function ConcernDetail({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Where the anonymity of a concern is explained to HR, and where the negotiation over it is
+ * shown once one has started.
+ *
+ * Four states, each a different sentence rather than a different shade of the same one: nobody
+ * has asked; an ask is waiting; the reporter refused, and here is why in their words; the
+ * reporter agreed, and the name above is now real. The refusal is given the most room on
+ * purpose — it is the state most likely to be misread as the system failing.
+ */
+function AnonymityPanel({ concern, onAsk }: { concern: Concern; onAsk: () => void }) {
+  const ask = concern.reveal_request;
+
+  if (concern.identity_revealed_at) {
+    return (
+      <div className="flex items-start gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
+        <Eye className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          The reporter agreed to be identified on {formatDate(concern.identity_revealed_at)}. Keep
+          their identity to this case — they gave it for this reason, not generally.
+        </span>
+      </div>
+    );
+  }
+
+  if (ask?.status === "pending") {
+    return (
+      <div className="space-y-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
+        <div className="flex items-start gap-2">
+          <Clock className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            You asked to know who filed this on {formatDate(ask.requested_at)}. They decide — you
+            will see their answer here, and their name only if they agree.
+          </span>
+        </div>
+        <p className="pl-5 text-[11px] text-foreground/70">Your reason: “{ask.reason}”</p>
+      </div>
+    );
+  }
+
+  if (ask?.status === "declined") {
+    return (
+      <div className="space-y-2 rounded-lg border border-border bg-muted px-3 py-2 text-xs">
+        <div className="flex items-start gap-2 text-foreground">
+          <X className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+          <span>
+            The reporter declined to be named on {formatDate(ask.responded_at ?? ask.requested_at)}.
+            The concern stands and should be handled on what it says.
+          </span>
+        </div>
+        <p className="pl-5 text-[11px] text-muted-foreground">
+          Their reason: “{ask.decline_reason}”
+        </p>
+        <button
+          type="button"
+          onClick={onAsk}
+          className="pl-5 text-[11px] font-medium text-brand hover:underline"
+        >
+          Ask again
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-2 rounded-lg bg-warning-subtle px-3 py-2 text-xs text-warning">
+      <span className="flex items-start gap-2">
+        <EyeOff className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          Submitted anonymously. You cannot see who filed it — if the case genuinely needs their
+          identity, ask them and say why.
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={onAsk}
+        className="shrink-0 font-semibold whitespace-nowrap hover:underline"
+      >
+        Ask
+      </button>
+    </div>
   );
 }

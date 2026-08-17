@@ -22,9 +22,9 @@ class ReimbursementResource extends JsonResource
         return [
             'id' => $this->id,
             'employee' => [
-                'id' => $this->employee->id,
-                'name' => $this->employee->user?->name,
-                'photo_url' => $this->employee->photo_url,
+                'id' => $this->employee?->id,
+                'name' => $this->employee?->user?->name,
+                'photo_url' => $this->employee?->photo_url,
             ],
             'category' => $this->category,
             'amount' => $this->amount,

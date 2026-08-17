@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { Check, ChevronRight, X } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
@@ -29,10 +29,20 @@ import {
   usePayrollInquiries,
 } from "@/modules/hr/hooks/use-requests";
 import { useConcerns } from "@/modules/hr/hooks/use-concerns";
+import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
+import { useEarlyOutRequests } from "@/modules/hr/hooks/use-early-out";
+import { useOvertimeRequests } from "@/modules/hr/hooks/use-overtime";
+import { useRestDayRequests } from "@/modules/hr/hooks/use-rest-day";
+import { useAllLoans } from "@/modules/hr/hooks/use-employees";
 import { useRemoteCheckins } from "@/modules/hr/hooks/use-remote-checkins";
 
 type Kind =
   | "leave"
+  | "half_day"
+  | "early_out"
+  | "overtime"
+  | "rest_day"
+  | "loan"
   | "claim"
   | "change"
   | "payslip"
@@ -53,6 +63,11 @@ interface Item {
 // Chip label = the *type of request* (so "Expense", not "supplies").
 const KIND_TAG: Record<Kind, string> = {
   leave: "Leave",
+  half_day: "Half-day",
+  early_out: "Early-out",
+  overtime: "Overtime",
+  rest_day: "Rest-day",
+  loan: "Loan",
   claim: "Expense",
   change: "Profile",
   payslip: "Payslip",
@@ -65,6 +80,11 @@ const KIND_TAG: Record<Kind, string> = {
 // Chip colours mapped to the semantic status tokens (no raw hexes).
 const KIND_TONE: Record<Kind, string> = {
   leave: "bg-success-subtle text-success",
+  half_day: "bg-success-subtle text-success",
+  early_out: "bg-warning-subtle text-warning",
+  overtime: "bg-info-subtle text-info",
+  rest_day: "bg-info-subtle text-info",
+  loan: "bg-warning-subtle text-warning",
   claim: "bg-warning-subtle text-warning",
   change: "bg-brand-subtle text-brand-foreground",
   payslip: "bg-severity-orange-subtle text-severity-orange",
@@ -82,6 +102,27 @@ const KIND_TONE: Record<Kind, string> = {
 // photo in sight — would quietly defeat the feature. The row links to the queue instead.
 const REVIEWABLE = new Set<Kind>(["leave", "claim", "change", "payslip"]);
 
+/*
+  Approve/Reject collapse to icon-only squares when the card is narrow.
+
+  A labelled pair costs ~170px of the row. On a laptop the card is one of two
+  `lg:grid-cols-2` columns — ~420px of content at a 1280px viewport — so the
+  buttons left the name and the "Pending Xh" age squeezed down to nothing. As
+  icons they cost ~80px, and the request stays readable.
+
+  Keyed off a *container* query, not a breakpoint: this card is half-width from
+  `lg` up but full-width below it, so its own width and the viewport's move in
+  opposite directions at that boundary — a `lg:` rule would put the labels back
+  exactly where they don't fit. The 28rem threshold is where the content box has
+  room for both labels plus a name that isn't truncated on sight.
+
+  The label stays in the DOM as `sr-only` rather than being swapped out, so the
+  buttons keep their accessible names in the icon-only state; `title` gives
+  sighted users the same thing on hover.
+*/
+const ACTION_BTN = "w-8 px-0 @[28rem]/approvals:w-auto @[28rem]/approvals:px-3";
+const ACTION_LABEL = "sr-only @[28rem]/approvals:not-sr-only";
+
 export function PendingApprovals() {
   const { data: leaves } = useLeaveRequests();
   const { data: claims } = useReimbursements();
@@ -90,6 +131,17 @@ export function PendingApprovals() {
   const { data: documents } = useDocumentRequests();
   const { data: inquiries } = usePayrollInquiries();
   const { data: concerns } = useConcerns();
+  // The four that were reviewable from the day they shipped and appeared in no aggregate:
+  // half-day, early-out and overtime (decided on the work-schedule page) and loan requests
+  // (decided on the employee's record). They are navigate-only here — see REVIEWABLE.
+  const { data: halfDays } = useHalfDayRequests();
+  const { data: earlyOuts } = useEarlyOutRequests();
+  const { data: overtimes } = useOvertimeRequests();
+  // Rest-day work. Navigate-only like the other three: approving one WRITES an attendance
+  // row stamped at the employee's punch, which is not a decision to take from a feed row
+  // that shows neither the day nor the time it would stamp.
+  const { data: restDays } = useRestDayRequests();
+  const { data: loans } = useAllLoans();
   // Already filtered to pending by the endpoint's default.
   const { data: checkins } = useRemoteCheckins();
 
@@ -114,6 +166,59 @@ export function PendingApprovals() {
         name: l.employee.name ?? "—",
         createdAt: l.created_at,
         href: "/teamora/requests/work-schedule",
+      })),
+    ...(halfDays ?? [])
+      .filter((h) => h.status === "pending")
+      .map((h) => ({
+        key: `half_day-${h.id}`,
+        kind: "half_day" as const,
+        id: h.id,
+        name: h.employee?.name ?? "—",
+        createdAt: h.created_at,
+        href: "/teamora/requests/work-schedule",
+      })),
+    ...(earlyOuts ?? [])
+      .filter((e) => e.status === "pending")
+      .map((e) => ({
+        key: `early_out-${e.id}`,
+        kind: "early_out" as const,
+        id: e.id,
+        name: e.employee?.name ?? "—",
+        createdAt: e.created_at,
+        href: "/teamora/requests/work-schedule",
+      })),
+    ...(overtimes ?? [])
+      .filter((o) => o.status === "pending")
+      .map((o) => ({
+        key: `overtime-${o.id}`,
+        kind: "overtime" as const,
+        id: o.id,
+        name: o.employee?.name ?? "—",
+        createdAt: o.created_at,
+        href: "/teamora/requests/work-schedule",
+      })),
+    ...(restDays ?? [])
+      .filter((r) => r.status === "pending")
+      .map((r) => ({
+        key: `rest_day-${r.id}`,
+        kind: "rest_day" as const,
+        id: r.id,
+        name: r.employee?.name ?? "—",
+        createdAt: r.created_at,
+        href: "/teamora/requests/work-schedule",
+      })),
+    ...(loans ?? [])
+      .filter((l) => l.status === "requested")
+      .map((l) => ({
+        key: `loan-${l.id}`,
+        kind: "loan" as const,
+        id: l.id,
+        name: l.employee?.name ?? "—",
+        // `requested_at` is when the employee asked; `start_date` is the fallback for a
+        // loan HR issued directly, which has no request moment.
+        createdAt: l.requested_at ?? l.start_date,
+        // Decided on the record's Compensation tab, where the amounts and their consent state are.
+        href: `/teamora/people/employees/${l.employee?.id ?? ""}`,
       })),
     ...(claims ?? [])
       .filter((c) => c.status === "pending")
@@ -214,11 +319,8 @@ export function PendingApprovals() {
     }
   }
 
-  // Stacked on phones: at 320px the Approve/Reject pair eats ~160px of a ~240px
-  // row, truncating the name and age away to nothing. Below `sm` the buttons
-  // drop onto their own line so the request stays readable.
   const rowClass =
-    "flex flex-col items-stretch gap-2 rounded-lg border border-border px-3.5 py-3 transition-colors hover:bg-muted/40 sm:flex-row sm:items-center sm:justify-between sm:gap-3";
+    "flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-3 transition-colors hover:bg-muted/40";
 
   // Chip + name + "Pending Xh" — shared by both row shapes.
   function RowBody({ item }: { item: Item }) {
@@ -240,7 +342,7 @@ export function PendingApprovals() {
   }
 
   return (
-    <div className="rounded-card border border-border bg-card p-4 sm:p-6">
+    <div className="@container/approvals rounded-card border border-border bg-card p-4 sm:p-6">
       <h2 className="text-h3 font-bold text-foreground">Pending Approvals</h2>
 
       <div className="mt-4 h-80 space-y-3 overflow-y-auto pr-1">
@@ -256,21 +358,26 @@ export function PendingApprovals() {
                 <Link href={item.href} className="min-w-0 flex-1">
                   <RowBody item={item} />
                 </Link>
-                <div className="flex shrink-0 gap-2 [&>button]:flex-1 sm:[&>button]:flex-none">
+                <div className="flex shrink-0 gap-2">
                   <Button
                     size="sm"
                     variant="success"
+                    className={ACTION_BTN}
+                    title="Approve"
                     onClick={() => setReview({ mode: "approve", item })}
                   >
-                    Approve
+                    <Check />
+                    <span className={ACTION_LABEL}>Approve</span>
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="border-danger text-danger hover:bg-danger/10 hover:text-danger"
+                    className={`border-danger text-danger hover:bg-danger/10 hover:text-danger ${ACTION_BTN}`}
+                    title="Reject"
                     onClick={() => setReview({ mode: "reject", item })}
                   >
-                    Reject
+                    <X />
+                    <span className={ACTION_LABEL}>Reject</span>
                   </Button>
                 </div>
               </div>

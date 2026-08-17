@@ -18,10 +18,10 @@ class LeaveTypeAllotmentResource extends JsonResource
             'employment_status' => $this->employment_status,
             'days_per_year' => (float) $this->days_per_year,
             'leave_type' => $this->whenLoaded('leaveType', fn () => [
-                'id' => $this->leaveType->id,
-                'name' => $this->leaveType->name,
-                'code' => $this->leaveType->code,
-                'color' => $this->leaveType->color,
+                'id' => $this->leaveType?->id,
+                'name' => $this->leaveType?->name,
+                'code' => $this->leaveType?->code,
+                'color' => $this->leaveType?->color,
             ]),
         ];
     }

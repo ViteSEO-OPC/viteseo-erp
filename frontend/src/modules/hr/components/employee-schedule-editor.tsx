@@ -196,7 +196,7 @@ function Editor({
       </div>
       <p className="text-xs text-muted-foreground">Leave break fields blank to use the assigned schedule&apos;s breaks. Half-day windows are set on the schedule, not per employee.</p>
 
-      <Button size="sm" onClick={save} disabled={update.isPending}>
+      <Button type="button" size="sm" onClick={save} disabled={update.isPending}>
         {update.isPending ? "Saving…" : "Save schedule"}
       </Button>
     </div>

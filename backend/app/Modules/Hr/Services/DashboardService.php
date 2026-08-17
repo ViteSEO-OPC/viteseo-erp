@@ -3,8 +3,12 @@
 namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\Attendance;
+use App\Modules\Hr\Models\EarlyOutRequest;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Models\EmployeeLoan;
+use App\Modules\Hr\Models\HalfDayRequest;
 use App\Modules\Hr\Models\LeaveRequest;
+use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\Reimbursement;
 use App\Modules\Hr\Models\Requisition;
@@ -73,12 +77,23 @@ class DashboardService
 
         return $months->map(function (Carbon $start) {
             $end = $start->copy()->endOfMonth();
+            $range = [$start->toDateString(), $end->toDateString()];
+
+            // withTrashed on BOTH counts. A separation soft-deletes the record, so the default
+            // scope hides leavers entirely — and it hides the month they were HIRED too, which
+            // made past joiners quietly disappear from the chart as people left.
+            $joiners = Employee::withTrashed()->whereBetween('hire_date', $range)->count();
+
+            // `leavers` was hardcoded to 0 with a "no termination data yet" note that stopped being
+            // true when MF-18 shipped: separations write `separation_date`, and the chart has been
+            // reporting a company nobody ever leaves ever since.
+            $leavers = Employee::withTrashed()->whereBetween('separation_date', $range)->count();
 
             return [
                 'month' => $start->format('M'),
-                'joiners' => Employee::whereBetween('hire_date', [$start->toDateString(), $end->toDateString()])->count(),
-                'leavers' => 0, // No termination data yet
-                'net' => Employee::whereBetween('hire_date', [$start->toDateString(), $end->toDateString()])->count(),
+                'joiners' => $joiners,
+                'leavers' => $leavers,
+                'net' => $joiners - $leavers,
             ];
         })->values()->all();
     }
@@ -112,7 +127,16 @@ class DashboardService
     }
 
     /**
-     * Latest real status changes across leave, reimbursements, and new hires.
+     * The latest real status changes across the module.
+     *
+     * It read three sources — leave, reimbursements and new hires — out of the dozen things that
+     * actually happen, so a day spent approving overtime and early-outs left a feed insisting the
+     * only recent events were two claims and a hire. Every decision type that carries a timestamp
+     * is here now, and separations are included: someone leaving is the single most significant
+     * change to a headcount and it was the one event the dashboard could not show at all.
+     *
+     * Each source takes a few rows and the merged list is cut to 6, so adding types widens the
+     * CHOICE rather than the query cost.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -136,6 +160,38 @@ class DashboardService
                 'at' => $r->reviewed_at,
             ]));
 
+        HalfDayRequest::with('employee.user')->whereNotNull('reviewed_at')
+            ->latest('reviewed_at')->take(4)->get()
+            ->each(fn ($h) => $items->push([
+                'type' => 'half_day',
+                'text' => "Half-day {$h->status} — {$h->employee->user?->name}",
+                'at' => $h->reviewed_at,
+            ]));
+
+        EarlyOutRequest::with('employee.user')->whereNotNull('reviewed_at')
+            ->latest('reviewed_at')->take(4)->get()
+            ->each(fn ($e) => $items->push([
+                'type' => 'early_out',
+                'text' => "Early-out {$e->status} — {$e->employee->user?->name}",
+                'at' => $e->reviewed_at,
+            ]));
+
+        OvertimeRequest::with('employee.user')->whereNotNull('reviewed_at')
+            ->latest('reviewed_at')->take(4)->get()
+            ->each(fn ($o) => $items->push([
+                'type' => 'overtime',
+                'text' => "Overtime {$o->status} — {$o->employee->user?->name}",
+                'at' => $o->reviewed_at,
+            ]));
+
+        EmployeeLoan::with('employee.user')->whereNotNull('approved_at')
+            ->latest('approved_at')->take(4)->get()
+            ->each(fn ($l) => $items->push([
+                'type' => 'loan',
+                'text' => ucfirst($l->type) . " {$l->status} — {$l->employee->user?->name}",
+                'at' => $l->approved_at,
+            ]));
+
         Employee::with('user')->latest()->take(3)->get()
             ->each(fn ($e) => $items->push([
                 'type' => 'hire',
@@ -143,6 +199,17 @@ class DashboardService
                 'at' => $e->created_at,
             ]));
 
-        return $items->sortByDesc('at')->take(6)->values()->all();
+        // Leavers. `onlyTrashed` because a separation archives the record — without it the feed
+        // cannot see the one event that changes a headcount most.
+        Employee::onlyTrashed()->with('user')->whereNotNull('separation_date')
+            ->latest('separation_date')->take(3)->get()
+            ->each(fn ($e) => $items->push([
+                'type' => 'separation',
+                'text' => "Left the company — {$e->user?->name}",
+                'at' => $e->separation_date,
+            ]));
+
+        return $items->filter(fn ($i) => $i['at'] !== null)
+            ->sortByDesc('at')->take(6)->values()->all();
     }
 }

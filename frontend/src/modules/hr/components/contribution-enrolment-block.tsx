@@ -3,7 +3,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 
 import { notify as toast } from "@/core/lib/notify";
-import { useEmployeeBenefits, useUpdateEmployeeBenefits } from "@/modules/hr/hooks/use-benefits";
+import {
+  useEmployeeBenefits,
+  useMyContributions,
+  useUpdateEmployeeBenefits,
+} from "@/modules/hr/hooks/use-benefits";
 import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
 
 /** The three the engine knows about, in display order. */
@@ -24,8 +28,24 @@ const TYPES = ["sss", "philhealth", "pagibig"] as const;
  * endpoint from the profile fields, and a toggle that silently waits for a Save button two
  * headings away is how people end up believing they changed something they did not.
  */
-export function ContributionEnrolmentBlock({ employeeId }: { employeeId: number }) {
-  const { data: rows, isLoading } = useEmployeeBenefits(employeeId);
+export function ContributionEnrolmentBlock({
+  employeeId,
+  canEdit = true,
+}: {
+  employeeId: number;
+  /**
+   * False on the employee's own Compensation tab. Two things change, and both are needed:
+   * the toggles become plain read-only rows, AND the data comes from the caller's own endpoint —
+   * the HR reader is hr_officer-only, so an employee got a 403, no rows, and `enrolledOf()`
+   * fell back to its "enrolled" default, drawing three ticked and clickable checkboxes for a
+   * change the server was always going to refuse.
+   */
+  canEdit?: boolean;
+}) {
+  const hrQuery = useEmployeeBenefits(canEdit ? employeeId : null);
+  const myQuery = useMyContributions(!canEdit);
+  const rows = canEdit ? hrQuery.data : myQuery.data;
+  const isLoading = canEdit ? hrQuery.isLoading : myQuery.isLoading;
   const update = useUpdateEmployeeBenefits(employeeId);
   const qc = useQueryClient();
 
@@ -35,9 +55,10 @@ export function ContributionEnrolmentBlock({ employeeId }: { employeeId: number 
   async function toggle(type: string, next: boolean) {
     try {
       await update.mutateAsync([{ contribution_type: type, enrolled: next }]);
-      // The override fields above caption themselves with "Not enrolled — nothing is deducted",
-      // so that preview has to be refetched or the two blocks contradict each other on screen.
-      qc.invalidateQueries({ queryKey: ["hr", "employees", employeeId, "statutory-preview"] });
+      // The record carries the enrolment state, so the tab above has to refetch or the two
+      // disagree on screen. (The statutory-override preview this used to refresh is gone: there
+      // are no per-employee amounts any more.)
+      qc.invalidateQueries({ queryKey: ["hr", "employees", employeeId] });
       toast.success(
         next
           ? `${CONTRIBUTION_LABELS[type] ?? type} enrolled`
@@ -54,9 +75,18 @@ export function ContributionEnrolmentBlock({ employeeId }: { employeeId: number 
         Enrolled contributions
       </p>
       <p className="mb-4 text-caption text-muted-foreground">
-        Everyone is enrolled in all three by default. Switching one off removes it from this
-        employee&apos;s payslip entirely — <strong>both</strong> their share and the employer&apos;s
-        — from the next payroll run. Saved as soon as you change it.
+        {canEdit ? (
+          <>
+            Everyone is enrolled in all three by default. Switching one off removes it from this
+            employee&apos;s payslip entirely — <strong>both</strong> their share and the
+            employer&apos;s — from the next payroll run. Saved as soon as you change it.
+          </>
+        ) : (
+          <>
+            The government contributions deducted from your pay. Each one is itemised on your
+            payslip. Contact HR if something here looks wrong.
+          </>
+        )}
       </p>
 
       {isLoading ? (
@@ -73,10 +103,11 @@ export function ContributionEnrolmentBlock({ employeeId }: { employeeId: number 
               >
                 <input
                   type="checkbox"
-                  className="size-4 rounded border-input accent-brand"
+                  className="size-4 rounded border-input accent-brand disabled:opacity-100"
                   checked={enrolled}
-                  disabled={update.isPending}
-                  onChange={(e) => toggle(type, e.target.checked)}
+                  disabled={!canEdit || update.isPending}
+                  readOnly={!canEdit}
+                  onChange={(e) => canEdit && toggle(type, e.target.checked)}
                 />
                 <span className="text-sm font-medium text-foreground">
                   {CONTRIBUTION_LABELS[type] ?? type}

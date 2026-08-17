@@ -12,8 +12,10 @@ import {
   moveCandidate,
   hireCandidate,
   sendCandidateEmail,
+  getCandidateEmailDraft,
+  getCandidateEmails,
   rejectCandidate,
-  type AssessmentCompose,
+  type CandidateEmailInput,
   type RequisitionInput,
 } from "@/modules/hr/api/recruitment";
 import type { Candidate } from "@/modules/hr/types/recruitment";
@@ -89,16 +91,43 @@ export function useMoveCandidate() {
   });
 }
 
+/**
+ * The compose modal's starting content. Only fetched while the modal is open — a draft
+ * is a snapshot of the last send, so caching it past the dialog would hand the next open
+ * something stale.
+ */
+export function useCandidateEmailDraft(
+  id: number | undefined,
+  type: string | undefined,
+) {
+  return useQuery({
+    queryKey: ["hr", "candidate-email-draft", id, type],
+    queryFn: () => getCandidateEmailDraft(id!, type!),
+    enabled: id !== undefined && type !== undefined,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useCandidateEmails(id: number | undefined) {
+  return useQuery({
+    queryKey: ["hr", "candidate-emails", id],
+    queryFn: () => getCandidateEmails(id!),
+    enabled: id !== undefined,
+  });
+}
+
 export function useSendCandidateEmail() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      type,
-      ...compose
-    }: { id: number; type: string } & AssessmentCompose) =>
-      sendCandidateEmail(id, type, compose),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["hr", "candidates"] }),
+    mutationFn: ({ id, ...input }: { id: number } & CandidateEmailInput) =>
+      sendCandidateEmail(id, input),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ["hr", "candidates"] });
+      qc.invalidateQueries({ queryKey: ["hr", "candidate-emails", id] });
+      // The next open of this type should start from what was just sent.
+      qc.invalidateQueries({ queryKey: ["hr", "candidate-email-draft", id] });
+    },
   });
 }
 
@@ -109,13 +138,11 @@ export function useRejectCandidate() {
       id,
       reason,
       note,
-      send_email,
     }: {
       id: number;
       reason: string;
       note: string | null;
-      send_email: boolean;
-    }) => rejectCandidate(id, { reason, note, send_email }),
+    }) => rejectCandidate(id, { reason, note }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hr", "candidates"] });
       qc.invalidateQueries({ queryKey: REQS_KEY });

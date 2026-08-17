@@ -3,11 +3,13 @@
 namespace Tests\Feature\Hr;
 
 use App\Models\User;
+use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\WorkSchedule;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\AttendanceService;
+use App\Modules\Hr\Services\RestDayRequestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -165,16 +167,38 @@ class EarlyClockInModeTest extends HrTestCase
     /**
      * No shift that day ⇒ nothing to be early for, so the punch is recorded as-is. Moving
      * it to a start time that doesn't exist would be inventing data.
+     *
+     * RD-2 changed how the punch GETS there — a rest day now goes through an HR approval
+     * rather than straight into attendance — but not this rule: the stamped time is the
+     * moment the employee pressed the button, whatever the early-clock-in mode says.
      */
-    public function test_defer_does_not_touch_a_punch_on_a_non_workday(): void
+    public function test_defer_does_not_touch_an_approved_rest_day_punch(): void
     {
         WorkSchedule::query()->update(['workdays' => json_encode([1, 2, 3, 4, 5])]);
         $this->mode('defer');
         $this->atManila('2026-07-04 07:30'); // a Saturday
 
-        $att = $this->clock()->clockIn($this->employee);
+        $request = app(RestDayRequestService::class)->create($this->employee, '2026-07-04');
+        // Approved two hours later, to prove the stamp follows the press and not the decision.
+        $this->atManila('2026-07-04 09:30');
+        app(RestDayRequestService::class)->approve($request, $this->hrUser());
+
+        $att = Attendance::where('employee_id', $this->employee->id)
+            ->where('work_date', '2026-07-04')
+            ->firstOrFail();
 
         $this->assertSame('07:30', $this->manilaTimeOf($att->time_in));
+    }
+
+    /** A rest day is not the employee's to start — the punch becomes a request instead. */
+    public function test_clocking_in_on_a_non_workday_is_refused(): void
+    {
+        WorkSchedule::query()->update(['workdays' => json_encode([1, 2, 3, 4, 5])]);
+        $this->mode('defer');
+        $this->atManila('2026-07-04 07:30'); // a Saturday
+
+        $this->expectException(ValidationException::class);
+        $this->clock()->clockIn($this->employee);
     }
 
     // --- what the panel is told ---------------------------------------------------------

@@ -4,9 +4,9 @@ import type {
   EmployeeInput,
   EmployeeUpdateInput,
   EmployeeDocument,
+  EmploymentHistoryEntry,
   MyDocument,
   SalaryHistoryEntry,
-  StatutoryPreviewRow,
 } from "@/modules/hr/types/employee";
 
 /**
@@ -91,19 +91,80 @@ export async function deleteEmployeePhoto(id: number): Promise<Employee> {
   return res.data.data;
 }
 
-/**
- * What the government rates would charge this employee, beside any per-employee override on
- * their profile (Slice B7). Its own request rather than a field on the employee record: it
- * resolves the dated rate versions, which the employee LIST has no reason to pay for.
- */
-export async function getStatutoryPreview(id: number): Promise<StatutoryPreviewRow[]> {
-  const res = await apiClient.get(`/hr/employees/${id}/statutory-preview`);
-  return res.data.data;
-}
 
 export async function getSalaryHistory(id: number): Promise<SalaryHistoryEntry[]> {
   const res = await apiClient.get(`/hr/employees/${id}/salary-history`);
   return res.data.data;
+}
+
+/* -------------------------------------------------------------------------------------------
+ * Hand-corrections to the two timelines on the record.
+ *
+ * Both are still written automatically — the employment one by a job-title change, the
+ * compensation one by a salary change. These are the escape hatch for what automation cannot fix.
+ *
+ * The compensation writes are gated server-side and their errors are meaningful: a 422 on
+ * `effective_date` is a QUESTION (confirm and resend with `acknowledge_repricing`), while a 422 on
+ * `id` is a refusal with no override. See SalaryHistoryService on the backend.
+ * ------------------------------------------------------------------------------------------- */
+
+export interface EmploymentHistoryInput {
+  title: string;
+  start_date: string;
+  /** null = still in this role. Only one row may be open at a time. */
+  end_date: string | null;
+  status?: string;
+  reason?: string | null;
+}
+
+export async function createEmploymentHistory(
+  employeeId: number,
+  input: EmploymentHistoryInput,
+): Promise<EmploymentHistoryEntry> {
+  const res = await apiClient.post(`/hr/employees/${employeeId}/employment-histories`, input);
+  return res.data.data;
+}
+
+export async function updateEmploymentHistory(
+  id: number,
+  input: EmploymentHistoryInput,
+): Promise<EmploymentHistoryEntry> {
+  const res = await apiClient.patch(`/hr/employment-histories/${id}`, input);
+  return res.data.data;
+}
+
+export async function deleteEmploymentHistory(id: number): Promise<void> {
+  await apiClient.delete(`/hr/employment-histories/${id}`);
+}
+
+export interface SalaryHistoryInput {
+  /** MONTHLY — the unit stored, the unit payroll prices from, and the unit displayed. */
+  base_salary: number;
+  effective_date: string;
+  change_type?: string;
+  reason?: string | null;
+  /** Second-call confirmation when the entry prices completed payroll runs. */
+  acknowledge_repricing?: boolean;
+}
+
+export async function createSalaryHistory(
+  employeeId: number,
+  input: SalaryHistoryInput,
+): Promise<SalaryHistoryEntry> {
+  const res = await apiClient.post(`/hr/employees/${employeeId}/salary-histories`, input);
+  return res.data.data;
+}
+
+export async function updateSalaryHistory(
+  id: number,
+  input: SalaryHistoryInput,
+): Promise<SalaryHistoryEntry> {
+  const res = await apiClient.patch(`/hr/salary-histories/${id}`, input);
+  return res.data.data;
+}
+
+export async function deleteSalaryHistory(id: number): Promise<void> {
+  await apiClient.delete(`/hr/salary-histories/${id}`);
 }
 
 export async function activateEmployee(id: number): Promise<Employee> {
@@ -169,6 +230,8 @@ export async function getMyEmployee(): Promise<Employee> {
 export interface EmployeeLoan {
   id: number;
   employee_id: number;
+  /** Only on the cross-employee list (`getAllLoans`) — null on the per-record one. */
+  employee?: { id: number; name: string | null } | null;
   type: "loan" | "cash_advance" | "other";
   reference: string | null;
   principal: number;
@@ -235,6 +298,19 @@ export interface EmployeeLoanInput {
 
 export async function getEmployeeLoans(id: number): Promise<EmployeeLoan[]> {
   const res = await apiClient.get(`/hr/employees/${id}/loans`);
+  return res.data.data;
+}
+
+/**
+ * Every employee's loans, optionally by status — the approvals queue.
+ *
+ * Without this a loan sitting at `requested` was reachable only from the record it belongs to,
+ * so no dashboard or queue could show that it was waiting on HR.
+ */
+export async function getAllLoans(status?: string): Promise<EmployeeLoan[]> {
+  const res = await apiClient.get("/hr/loans", {
+    params: status ? { status } : undefined,
+  });
   return res.data.data;
 }
 

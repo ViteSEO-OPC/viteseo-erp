@@ -9,78 +9,87 @@
     render it as a blank box.
 
     One document for both audiences: HR's download and the employee's are byte-identical. That
-    now includes the employer's share, disclosed under the net-pay bar (reversed 2026-08-07) —
-    it is never a term in any total.
+    includes the employer's share, shown under each statutory line — it is never a term in any total.
 
-    ONE PAGE, ALWAYS. See `$capped` and `$fit` below: the two variable-length lists are bounded
-    and long names are trimmed, so the document's height cannot grow with data. Overflow does not
-    truncate the top — it pushes the net pay and signatures onto page two.
+    THE 2026-08-14 REBUILD. The document was re-cut to the four-step walk the screen now prints
+    (earnings → deductions → contributions → allowances) and the workings were dropped with it: the
+    computation-basis table, the per-contribution derivations, and the identity block's government
+    numbers and address are all gone. What remains is what was earned, what was taken, and what was
+    paid.
+
+    THE COLUMNS CARRY THAT WALK, they do not interrupt it. Left is the period on its own — earned,
+    charged, and the subtotal those two produce. Right is what happens to that subtotal — the month
+    restated, the government's share, and the allowances paid on top. The conclusions run full width
+    beneath both, so the figure the reader is looking for is never in a column.
+
+    ONE PAGE, ALWAYS. See `$capped`, `$fit` and `$fitDates` below: every variable-length list is
+    bounded and anything that could wrap is trimmed, so the document's height cannot grow with data.
+    Overflow does not truncate the top — it pushes the net pay and signatures onto page two.
 --}}
 @php
     $t = $p['totals'];
-    $hrs = fn ($minutes) => number_format($minutes / 60, 1);
-    $dayCount = fn ($n) => rtrim(rtrim(number_format((float) $n, 2), '0'), '.');
+    $month = $p['month_summary'] ?? null;
+    $cutoff = $p['cutoff'] ?? null;
+
     $orDash = fn ($v) => ($v === null || $v === '') ? '—' : $v;
 
+    /** A header rate, or an em dash when the employee is not paid on one (management staff). */
+    $rate = fn ($n) => (float) $n > 0 ? $amt($n) : '—';
+
+    /** Two peso figures that differ by more than rounding. */
+    $differs = fn ($a, $b) => abs((float) $a - (float) $b) > 0.005;
+
     /**
-     * FIN-049 — the one-line derivation under a statutory deduction, matching the on-screen
-     * document word for word. Kept here rather than in the resource because the screen builds the
-     * same sentence from the same fields; duplicating the DATA would drift, duplicating the
-     * WORDING is what the two surfaces are for.
+     * The rows the Compensation table shows even at zero, in the order it shows them — matching
+     * the screen. A reader checking a payslip is checking a list they already expect, and a
+     * missing "Overtime" row is indistinguishable from overtime that was silently dropped.
      *
-     * Null (no note printed) whenever the payslip predates the snapshot or the rate cannot
-     * describe the figure — never a guessed derivation.
+     * ONLY AN ORDINARY PERIOD HAS A SKELETON. A 13th-month, adjustment or final-pay run has no
+     * basic pay and no overtime; five zero rows above the one line carrying the money would
+     * describe it as an ordinary period that paid nothing, which is the exact defect FIN-011 fixed.
      */
-    $basisNote = function (string $type) use ($p) {
-        $b = $p['contribution_basis'][$type] ?? null;
+    $skeleton = ['Basic Pay', 'Overtime', 'Night Differential', 'Rest Day', 'Holiday'];
 
-        if ($b === null) {
-            return null;
+    $earningLines = array_values(array_filter(
+        $p['earnings_breakdown'],
+        fn ($l) => ($l['kind'] ?? 'earning') !== 'allowance',
+    ));
+
+    if ($p['run_type'] === 'regular') {
+        $bySkeleton = [];
+        foreach ($skeleton as $name) {
+            $found = null;
+            foreach ($earningLines as $l) {
+                if ($l['name'] === $name) { $found = $l; break; }
+            }
+            $bySkeleton[] = $found ?? ['name' => $name, 'amount' => 0.0, 'note' => null];
         }
 
-        if (! empty($b['overridden'])) {
-            return 'Fixed amount set on this employee — the government rate was not applied';
-        }
+        $extra = array_values(array_filter(
+            $earningLines,
+            fn ($l) => ! in_array($l['name'], $skeleton, true),
+        ));
 
-        if (! isset($b['rate'], $b['charged_on'])) {
-            return null;
-        }
+        $earningLines = array_merge($bySkeleton, $extra);
+    }
 
-        $rate = rtrim(rtrim(number_format($b['rate'] * 100, 3), '0'), '.') . '%';
-        $on = '₱' . number_format((float) $b['charged_on'], 2);
-
-        if (($b['basis'] ?? null) === 'bracket') {
-            return "{$rate} of {$on} — the salary bracket for ₱" . number_format((float) ($b['salary'] ?? 0), 2);
-        }
-
-        if (! empty($b['capped'])) {
-            return "{$rate} of {$on} — the maximum this contribution is charged on";
-        }
-
-        if (! empty($b['floored'])) {
-            return "{$rate} of {$on} — the minimum this contribution is charged on";
-        }
-
-        return "{$rate} of {$on}";
-    };
+    $allowanceLines = array_values(array_filter(
+        $p['earnings_breakdown'],
+        fn ($l) => ($l['kind'] ?? null) === 'allowance',
+    ));
 
     /**
-     * ONE PAGE, GUARANTEED — the two things that can make this document unbounded (2026-08-07).
+     * ONE PAGE, GUARANTEED — the lists whose length comes from configuration rather than layout.
      *
-     * Every other block on the page has a fixed height. These two are lists whose length comes
-     * from configuration: an allowance line per programme the employee is on, a deduction line per
-     * benefit share and loan. Nothing caps them, so with enough of either the payslip runs onto a
-     * second page — and it takes the net pay and the signature block with it, which is the half
-     * that matters. Measured: it already did, at six allowances and six deductions.
+     * An allowance line per programme the employee is on, a deduction line per benefit share and
+     * loan, an earnings line per premium. Nothing caps them, so with enough of any the payslip runs
+     * onto a second page — and it takes the net pay and the signature block with it, which is the
+     * half that matters.
      *
      * `$capped` keeps the first few and ROLLS THE REMAINDER INTO ONE LABELLED LINE. It is not a
      * truncation: the rolled line carries the summed amount and says how many items it covers, so
      * the column still adds up to the same total and no peso goes unaccounted for. The full
      * itemisation is always on screen, where there is no page boundary.
-     *
-     * The caps are set ABOVE what this company can currently produce (four allowance programmes,
-     * so eleven earnings rows) — the roll-up is a backstop for a configuration that does not exist
-     * yet, not something an ordinary payslip hits.
      */
     $capped = function (array $lines, int $max, string $label) {
         if (count($lines) <= $max) {
@@ -93,6 +102,11 @@
         $keep[] = [
             'name' => $label . ' (' . count($rest) . ' items)',
             'amount' => array_sum(array_map(fn ($l) => (float) $l['amount'], $rest)),
+            'note' => null,
+            'key' => 'other',
+            'count' => 0,
+            'minutes' => null,
+            'dates' => [],
         ];
 
         return $keep;
@@ -100,134 +114,187 @@
 
     /**
      * A name long enough to wrap adds a row's height and defeats the caps above. The screen has
-     * room to show it in full; the printed column is ~45 characters wide, so this trims to fit.
+     * room to show it in full; a printed half-width column is ~34 characters, so this trims to fit.
      */
-    $fit = fn (string $name) => mb_strlen($name) > 40 ? mb_substr($name, 0, 39) . '…' : $name;
+    $fit = fn (string $name) => mb_strlen($name) > 32 ? mb_substr($name, 0, 31) . '…' : $name;
 
-    /**
-     * The same guard for the employee card's free text. A long address is the realistic one — it
-     * gets the full page width, so it wraps at around a hundred characters and costs a row. Name,
-     * role and department share a half-width column. These are the last unbounded things on the
-     * page; with them fixed the document's height cannot vary with data at all.
-     */
     $fitWide = fn ($v, int $max) => ($v === null || $v === '')
         ? '—'
         : (mb_strlen((string) $v) > $max ? mb_substr((string) $v, 0, $max - 1) . '…' : (string) $v);
 
-    $earnings = $capped($p['earnings_breakdown'], 11, 'Other earnings');
-    $otherDeductions = $capped($p['other_deductions_breakdown'], 4, 'Other deductions');
+    /**
+     * The dates behind a deduction row, as one grey line — "Aug 5, Aug 10", or "Aug 1 180m ·
+     * Aug 5 120m" once minutes are what varies.
+     *
+     * TRIMMED BY DATE COUNT, not by characters: cutting mid-date reads as a rendering fault, and
+     * a period with twenty absences is exactly the period whose row must not wrap onto four lines.
+     * The count badge beside the label already states how many there were, so the tail is
+     * summarised rather than silently dropped.
+     */
+    $fitDates = function (array $row) {
+        $dates = $row['dates'] ?? [];
+
+        if ($dates === []) {
+            return null;
+        }
+
+        $isTime = ($row['minutes'] ?? null) !== null;
+        $max = 6;
+        $shown = array_slice($dates, 0, $max);
+        $parts = [];
+
+        foreach ($shown as $d) {
+            $day = empty($d['date'])
+                ? '—'
+                : \Illuminate\Support\Carbon::parse($d['date'])->format('M j');
+
+            if ($isTime && preg_match('/^(\d+)\s*min/', (string) ($d['detail'] ?? ''), $m)) {
+                $day .= ' ' . $m[1] . 'm';
+            }
+
+            $parts[] = $day;
+        }
+
+        $text = implode($isTime ? ' · ' : ', ', $parts);
+        $rest = count($dates) - count($shown);
+
+        return $rest > 0 ? $text . ' +' . $rest . ' more' : $text;
+    };
+
+    // Attendance reasons are bounded by the number of charge kinds; benefit shares and loans are
+    // not, so only those are capped.
+    $rows = $p['deductions_breakdown'] ?? [];
+
+    if ($p['run_type'] !== 'regular') {
+        $rows = array_values(array_filter($rows, fn ($r) => (float) $r['amount'] != 0.0));
+    }
+
+    $attendanceRows = array_values(array_filter($rows, fn ($r) => $r['key'] !== 'other'));
+    $otherRows = $capped(
+        array_values(array_filter($rows, fn ($r) => $r['key'] === 'other')),
+        4,
+        'Other deductions',
+    );
+
+    $earningLines = $capped($earningLines, 9, 'Other earnings');
+    $allowanceLines = $capped($allowanceLines, 5, 'Other allowances');
 
     /**
      * The employer's counterpart contributions — DISCLOSED, NEVER A TERM IN ANY TOTAL.
      *
-     * Only used to decide whether the sub-lines and their footnote appear at all: a run that takes
-     * no statutory contributions (13th month, final pay, an adjustment) has nothing to show.
-     * The figures themselves are read per line beside the employee's own.
+     * Only used to decide whether the footnote appears at all: a run that takes no statutory
+     * contributions (13th month, final pay, an adjustment) has nothing to say. The figures
+     * themselves are read per line beside the employee's own.
      */
     $erTotal = (float) ($p['employer_sss'] ?? 0)
         + (float) ($p['employer_philhealth'] ?? 0)
         + (float) ($p['employer_pagibig'] ?? 0);
+
+    // On the month's last cutoff the walk continues from the MONTH's figures, not this period's.
+    $initialNet = $month ? $month['initial_net'] : $t['initial_net'];
+    $netLabel = ! empty($cutoff['label']) ? 'Total Net (' . $cutoff['label'] . ')' : 'Total Net';
 @endphp
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <style>
-        @page { margin: 36px 40px; }
+        @page { margin: 26px 30px; }
 
-        body { font-family: 'DejaVu Sans', sans-serif; color: #141414; font-size: 11px; margin: 0; }
+        body { font-family: 'DejaVu Sans', sans-serif; color: #141414; font-size: 9px; margin: 0; }
         table { width: 100%; border-collapse: collapse; }
         td { vertical-align: top; }
 
-        .mono { font-family: 'DejaVu Sans Mono', monospace; }
         .amt { text-align: right; white-space: nowrap; font-family: 'DejaVu Sans Mono', monospace; }
         .muted { color: #6b7280; }
-        .cap { font-family: 'DejaVu Sans Mono', monospace; font-size: 8px;
-               text-transform: uppercase; color: #6b7280; }
+        .cap { font-family: 'DejaVu Sans Mono', monospace; font-size: 6.5px;
+               text-transform: uppercase; color: #6b7280; letter-spacing: 0.2px; }
 
         /* Header */
-        .company { text-align: center; font-size: 17px; font-weight: bold; }
-        .address { text-align: center; font-size: 9.5px; color: #6b7280; padding-top: 2px; }
+        .company { text-align: center; font-size: 13px; font-weight: bold; }
+        .address { text-align: center; font-size: 7px; color: #6b7280; padding-top: 1px; }
 
-        .title { font-family: 'DejaVu Sans Mono', monospace; font-size: 22px; font-weight: bold; }
-        .paydate { font-size: 12px; font-weight: bold; text-align: right; }
-        .rule { border-bottom: 1px solid #e5e7eb; height: 1px; font-size: 0; margin: 8px 0; }
+        .title { font-family: 'DejaVu Sans Mono', monospace; font-size: 17px; font-weight: bold; }
+        .paydate { font-size: 10px; font-weight: bold; text-align: right; }
+        .rule { border-bottom: 1px solid #e5e7eb; height: 1px; font-size: 0; margin: 5px 0; }
 
-        .val { font-size: 10.5px; font-weight: bold; padding-top: 1px; }
+        .val { font-size: 8.5px; font-weight: bold; padding-top: 1px; }
 
         /* Employee card */
-        .card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 14px; }
-        .card td { padding-bottom: 6px; }
+        .card { border: 1px solid #e5e7eb; border-radius: 4px; padding: 6px 9px; }
+        .card td { padding-bottom: 4px; }
         .card .last td { padding-bottom: 0; }
 
-        /* Money tables. Tighter than the on-screen document on purpose: print has a page
-           boundary to respect.
+        /* Money tables.
 
-           BALANCED AGAINST TWO DOCUMENTS, not one (2026-08-07). Tightened first, because the
-           measured worst case — six allowances, all four premium lines, six benefit deductions,
-           an uncollected note — ran onto a second page and took the net pay and signatures with
-           it. Then loosened again, because that left an ORDINARY payslip ending barely two
-           thirds down the page and reading as cramped.
-
-           PER-ROW SPACING IS THE EXPENSIVE KIND: the tallest column runs to about twenty rows at
-           the caps, so a point of row padding costs twenty. Fixed blocks — the card, the net bar,
-           the footer, the gaps between sections — cost the same on every payslip and are where
-           the air actually comes from. That is why the padding below is modest and the margins
-           around it are not.
-
-           Measured at these values: an ordinary payslip ends ~612pt and the bounded worst case
-           ~794pt, against a usable ~815pt. Change any of it against BOTH documents. */
-        .sect { margin-top: 10px; }
-        /* The second table inside a column cell. Each column flows on its own, so this is the
-           only thing separating one section from the next within a column. */
-        .stack { margin-top: 12px; }
-        /* Section titles carry the document's structure, so they are a shade larger and heavier
-           than the rows beneath them — enough to scan by, not enough to compete with the net-pay
-           bar. The bottom rule gives the band a floor so the heading reads as a header. */
+           SMALL ON PURPOSE (2026-08-14, Joshua's brief). The screen document grew a Salary Summary
+           and an Allowances table on top of what was already here, and print has a page boundary
+           the screen does not. PER-ROW SPACING IS THE EXPENSIVE KIND: the tallest column runs to
+           about twenty rows at the caps, so a point of row padding costs twenty points of page.
+           That is why the padding below is minimal and the caps above are set where they are. */
+        .sect { margin-top: 7px; }
+        /* The next table inside a column cell. Each column flows on its own, so this is the only
+           thing separating one section from the next within a column. */
+        .stack { margin-top: 8px; }
         .thead td { background: #f4f5f7; border-bottom: 1px solid #e5e7eb;
                     font-family: 'DejaVu Sans Mono', monospace;
-                    font-size: 9.5px; font-weight: bold; text-transform: uppercase;
-                    letter-spacing: 0.3px; padding: 5px 8px; }
-        .line td { border-bottom: 1px solid #e5e7eb; padding: 3px 8px; font-size: 10.5px; }
-        .sum td { padding: 5.5px 8px; font-size: 10.5px; font-weight: bold; }
+                    font-size: 7.5px; font-weight: bold; text-transform: uppercase;
+                    letter-spacing: 0.2px; padding: 3px 6px; }
+        .line td { border-bottom: 1px solid #e5e7eb; padding: 2px 6px; font-size: 8.5px; }
+        .sum td { padding: 3px 6px; font-size: 8.5px; font-weight: bold; }
 
         .cols td { vertical-align: top; }
-        .cols .gap { width: 18px; }
+        .cols .gap { width: 12px; }
 
-        .note { border: 1px solid #f0a608; background: #fdf1d6; border-radius: 6px;
-                padding: 4px 9px; margin-top: 5px; font-size: 9.5px; }
+        /* A subtotal the walk pauses on — quieter than the net bars, louder than a row. */
+        .bar { background: #f4f5f7; border-radius: 4px; margin-top: 7px; }
+        .bar td { padding: 5px 8px; font-family: 'DejaVu Sans Mono', monospace;
+                  font-size: 8.5px; font-weight: bold; text-transform: uppercase; }
+        .bar .v { text-align: right; font-size: 10px; }
 
-        .net { background: #141414; color: #ffffff; border-radius: 6px; margin-top: 10px; }
-        .net td { padding: 10px 14px; font-family: 'DejaVu Sans Mono', monospace; font-weight: bold; }
-        .net .lbl { font-size: 13px; text-transform: uppercase; }
-        .net .val { font-size: 17px; text-align: right; color: #ffffff; padding-top: 10px; }
+        .note { border: 1px solid #f0a608; background: #fdf1d6; border-radius: 4px;
+                padding: 3px 7px; margin-top: 5px; font-size: 8px; }
 
-        /* The employer's counterpart, tucked under each statutory line. Indented, two points
-           smaller, italic and grey — four signals at once that it belongs to the row above and
-           is not a deduction. It is never in `Total Gov`; `documentTotals()` cannot see it. */
+        .net { background: #141414; color: #ffffff; border-radius: 4px; margin-top: 6px; }
+        .net td { padding: 6px 10px; font-family: 'DejaVu Sans Mono', monospace; font-weight: bold; }
+        .net .lbl { font-size: 10px; text-transform: uppercase; }
+        .net .v { font-size: 13px; text-align: right; color: #ffffff; }
+
+        /* The count beside a deduction reason — how many dated occurrences it covers. */
+        .badge { font-family: 'DejaVu Sans Mono', monospace; font-size: 7px; font-weight: bold;
+                 color: #ffffff; background: #f34444; padding: 0 3px; border-radius: 2px; }
+
+        /* The employer's counterpart, tucked under each statutory line. Indented, smaller, italic
+           and grey — four signals at once that it belongs to the row above and is not a deduction.
+           It is never in the government total; `documentTotals()` cannot see it. */
         .line.pair td { border-bottom: none; padding-bottom: 0; }
-        .ersub td { border-bottom: 1px solid #e5e7eb; padding: 0 8px 3.5px;
-                    font-size: 8px; font-style: italic; color: #6b7280; }
-        .ersub .erlbl { padding-left: 16px; }
-        .ersub .eramt { font-style: italic; }
+        .ersub td { border-bottom: 1px solid #e5e7eb; padding: 0 6px 2px;
+                    font-size: 7px; font-style: italic; color: #6b7280; }
+        .ersub .erlbl { padding-left: 12px; }
 
         /* Said once, under the total it is deliberately absent from. */
-        .ernote td { padding: 3px 8px 0; font-size: 7.5px; font-style: italic; color: #6b7280; }
+        .ernote td { padding: 2px 6px 0; font-size: 6.5px; font-style: italic; color: #6b7280; }
+
+        /* The dates behind a count, and the tax derivation. Spans both columns because it is a
+           sentence, not an amount. */
+        .why td { border-bottom: 1px solid #e5e7eb; padding: 0 6px 2px 6px;
+                  font-size: 6.5px; color: #6b7280; }
+        .why.open td { border-bottom: none; padding-bottom: 1px; }
 
         /* Footer */
-        .foot { margin-top: 14px; page-break-inside: avoid; }
+        .foot { margin-top: 9px; page-break-inside: avoid; }
         .foot td { vertical-align: bottom; }
         .sig { text-align: center; }
-        .sig .rule { border-bottom: 1px solid #141414; margin: 0 0 3px; }
-        .sig .who { font-size: 8px; text-transform: uppercase; }
+        .sig .rule { border-bottom: 1px solid #141414; margin: 0 0 2px; }
+        .sig .who { font-size: 7px; text-transform: uppercase; }
     </style>
 </head>
 <body>
 
-<div class="company">VITE SEO</div>
-<div class="address">Makati City, Metro Manila, Philippines</div>
+<div class="company">VITE SEO DIGITAL ADVERTISING OPC</div>
+<div class="address">26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines</div>
 
-<table style="margin-top: 18px;">
+<table style="margin-top: 10px;">
     <tr>
         <td class="title">PAYSLIP</td>
         <td style="text-align: right;">
@@ -254,7 +321,9 @@
     </tr>
 </table>
 
-<div class="card" style="margin-top: 14px;">
+{{-- Name, role and the three rates the deduction arithmetic is quoted in. The government numbers,
+     employee id, department and address were removed on 2026-08-14 (Joshua's call). --}}
+<div class="card" style="margin-top: 8px;">
     <table>
         <tr>
             <td style="width: 50%;">
@@ -262,28 +331,12 @@
                 <div class="val">{{ $fitWide($p['employee']['name'], 44) }}</div>
             </td>
             <td>
-                <div class="cap">Employee ID</div>
-                <div class="val">{{ $orDash($p['employee']['employee_no']) }}</div>
-            </td>
-        </tr>
-        <tr>
-            <td>
                 <div class="cap">Job Role</div>
                 <div class="val">{{ $fitWide($p['employee']['job_title'], 44) }}</div>
             </td>
-            <td>
-                <div class="cap">Department</div>
-                <div class="val">{{ $fitWide($p['employee']['department'], 44) }}</div>
-            </td>
         </tr>
         <tr>
-            <td colspan="2">
-                <div class="cap">Address</div>
-                <div class="val">{{ $fitWide($p['employee']['address'], 95) }}</div>
-            </td>
-        </tr>
-        <tr>
-            <td colspan="2" style="padding-bottom: 5px;">
+            <td colspan="2" style="padding-bottom: 4px;">
                 <div style="border-bottom: 1px solid #e5e7eb; height: 1px; font-size: 0;"></div>
             </td>
         </tr>
@@ -291,21 +344,19 @@
             <td colspan="2">
                 <table>
                     <tr>
-                        <td style="width: 25%;">
-                            <div class="cap">TIN</div>
-                            <div class="val">{{ $orDash($p['employee']['tin']) }}</div>
+                        {{-- Em dashes, not zeroes: management staff are not paid by the day, and
+                             "Per Day 0.00" states that a day of their time is worth nothing. --}}
+                        <td style="width: 34%;">
+                            <div class="cap">Per Day</div>
+                            <div class="val">{{ $rate($p['rates']['daily']) }}</div>
                         </td>
-                        <td style="width: 25%;">
-                            <div class="cap">SSS #</div>
-                            <div class="val">{{ $orDash($p['employee']['sss_number']) }}</div>
-                        </td>
-                        <td style="width: 25%;">
-                            <div class="cap">PhilHealth</div>
-                            <div class="val">{{ $orDash($p['employee']['philhealth_number']) }}</div>
+                        <td style="width: 33%;">
+                            <div class="cap">Per Hour</div>
+                            <div class="val">{{ $rate($p['rates']['hourly']) }}</div>
                         </td>
                         <td>
-                            <div class="cap">Pag-IBIG</div>
-                            <div class="val">{{ $orDash($p['employee']['pagibig_number']) }}</div>
+                            <div class="cap">Half Day</div>
+                            <div class="val">{{ $rate($p['rates']['half_day']) }}</div>
                         </td>
                     </tr>
                 </table>
@@ -315,34 +366,22 @@
 </div>
 
 {{--
-    TWO INDEPENDENT COLUMNS (2026-08-07, revised).
+    TWO INDEPENDENT COLUMNS.
 
-    WHY COLUMNS AT ALL. Stacked, these four blocks are the tallest thing on the page: a payslip
-    with six allowances and all four premium lines runs to thirteen compensation rows, and the
-    basis table adds nine more. Measured before changing anything, that payslip rendered on TWO
-    pages — the second carrying the net pay and the signature block, which is the half that matters.
-
-    WHY ONE TABLE AND NOT TWO. The first version was two `cols` tables stacked: Compensation |
-    Basis, then Deductions | Gov. A table row is as tall as its tallest cell, so Gov could not
-    start until Deductions did — and Deductions could not start until Compensation finished. A
-    short Computation Basis therefore left a band of dead space above Gov Contributions, growing
-    with every allowance line on the left.
-
-    One row, one cell per column, each holding its two tables: the columns now flow independently
-    and Gov starts as soon as Basis ends. It is also never taller — max(a,b) + max(c,d) is always
-    greater than or equal to max(a+c, b+d) — so the one-page guarantee can only improve.
-
-    FIN-011 — one loop over `earnings_breakdown`, which the resource builds, instead of a hardcoded
-    ordinary-period list. The old list rendered "Basic Pay ₱0" for a 13th-month, adjustment or
-    final-pay slip and showed no line for what those runs actually paid.
+    WHY ONE TABLE AND NOT TWO STACKED. A table row is as tall as its tallest cell, so a second
+    `cols` table could not start until the first finished on BOTH sides — leaving a band of dead
+    space under whichever column was shorter, growing with every allowance line opposite it. One
+    row, one cell per column, each holding its own stack of tables: the columns flow independently.
+    It is also never taller — max(a,b) + max(c,d) >= max(a+c, b+d) — so the one-page guarantee can
+    only improve.
 --}}
 <table class="sect cols">
     <tr>
-        {{-- LEFT COLUMN: what was earned, then what was taken off it. --}}
+        {{-- LEFT: the period on its own — earned, charged, and the subtotal those two produce. --}}
         <td style="width: 49%;">
             <table>
                 <tr class="thead"><td>Compensation</td><td class="amt">Amount</td></tr>
-                @foreach ($earnings as $line)
+                @foreach ($earningLines as $line)
                     <tr class="line">
                         <td>
                             {{ $fit($line['name']) }}
@@ -353,87 +392,92 @@
                         <td class="amt">{{ $amt($line['amount']) }}</td>
                     </tr>
                 @endforeach
-                <tr class="sum"><td>Total Compensation</td><td class="amt">{{ $amt($t['compensation']) }}</td></tr>
+                <tr class="sum"><td>Total Compensation</td><td class="amt">{{ $amt($t['earnings']) }}</td></tr>
             </table>
 
             <table class="stack">
                 <tr class="thead"><td>Deductions</td><td class="amt">Amount</td></tr>
-                @if ($t['absences'] > 0)
-                    <tr class="line"><td>Absences</td><td class="amt">{{ $amt($t['absences']) }}</td></tr>
-                @endif
-                @if ($t['late_undertime'] > 0)
-                    <tr class="line"><td>Late / Undertime</td><td class="amt">{{ $amt($t['late_undertime']) }}</td></tr>
-                @endif
-                @foreach ($otherDeductions as $line)
-                    <tr class="line"><td>{{ $fit($line['name']) }}</td><td class="amt">{{ $amt($line['amount']) }}</td></tr>
+                @foreach (array_merge($attendanceRows, $otherRows) as $row)
+                    @php
+                        // Assembled here rather than with inline directives. Blade's directive
+                        // scanner is unreliable when a conditional opens or closes flush against
+                        // adjacent text, and it fails the whole VIEW rather than the line — which
+                        // is how the first draft of this loop 500'd every payslip download.
+                        $dates = $fitDates($row);
+                        $minutes = empty($row['minutes']) ? '' : $row['minutes'] . ' min';
+                    @endphp
+                    {{-- The count badge and the date line are the point of the row: "Absences
+                         1,316.00" has to be taken on trust; "Absences (2) Aug 5, Aug 10" can be
+                         checked against the reader's own memory of the month. --}}
+                    <tr class="line{{ $dates ? ' pair' : '' }}">
+                        <td>
+                            {{ $fit($row['name']) }}
+                            @if (! empty($row['count']))
+                                <span class="badge">{{ $row['count'] }}</span>
+                            @endif
+                        </td>
+                        <td class="amt">{{ $amt($row['amount']) }}</td>
+                    </tr>
+                    @if ($dates)
+                        <tr class="why">
+                            <td>{{ $dates }}</td>
+                            <td class="amt">{{ $minutes }}</td>
+                        </tr>
+                    @endif
                 @endforeach
-                @if ($t['deductions'] == 0)
-                    <tr class="line"><td>None</td><td class="amt">{{ $amt(0) }}</td></tr>
-                @endif
-                <tr class="sum"><td>Total Deductions</td><td class="amt">{{ $amt($t['deductions']) }}</td></tr>
+                <tr class="sum"><td>Total Deduction</td><td class="amt">{{ $amt($t['deductions']) }}</td></tr>
+            </table>
+
+            <table class="bar">
+                <tr>
+                    <td>Total Current Amount</td>
+                    <td class="v">{{ $amt($t['current']) }}</td>
+                </tr>
             </table>
         </td>
 
         <td class="gap"></td>
 
-        {{-- RIGHT COLUMN: how the left was arrived at, then what went to the government.
-             Both live in ONE cell so Gov starts where Basis ends — see the note above. --}}
+        {{-- RIGHT: what happens to that subtotal — the month restated, the government's share,
+             and the allowances paid on top of a salary that was already taxed. --}}
         <td>
-            {{-- Counts and rates, not money — how the figures beside this were arrived at. --}}
-            @if ($p['working_days'] > 0)
+            {{-- THE MONTH, RESTATED — carried by its last cutoff only. Each earlier cutoff is
+                 restated by its Total Current Amount rather than its net pay: the two are equal
+                 only on a cutoff that took no contributions, which is exactly what this must not
+                 silently depend on. --}}
+            @if ($month)
                 <table>
-                    <tr class="thead"><td>Computation Basis</td><td class="amt">Amount</td></tr>
-                    <tr class="line"><td>Working days in period</td><td class="amt">{{ $p['working_days'] }}</td></tr>
-                    <tr class="line"><td>Daily rate</td><td class="amt">{{ $amt($p['daily_rate']) }}</td></tr>
-                    @if ($p['unpaid_days'] > 0)
-                        <tr class="line"><td>Unpaid days</td><td class="amt">{{ $dayCount($p['unpaid_days']) }}</td></tr>
-                    @endif
-                    @if ($p['late_minutes'] > 0)
-                        <tr class="line"><td>Late</td><td class="amt">{{ $p['late_minutes'] }} min</td></tr>
-                    @endif
-                    @if ($p['undertime_minutes'] > 0)
-                        <tr class="line"><td>Undertime</td><td class="amt">{{ $p['undertime_minutes'] }} min</td></tr>
-                    @endif
-                    @if ($p['late_penalty_days'] > 0)
-                        <tr class="line"><td>Tardiness penalty</td><td class="amt">{{ $dayCount($p['late_penalty_days']) }} day</td></tr>
-                    @endif
-                    @if ($p['overtime_minutes'] > 0)
-                        <tr class="line"><td>Overtime rendered</td><td class="amt">{{ $hrs($p['overtime_minutes']) }} hrs</td></tr>
-                    @endif
-                    @if ($p['night_diff_minutes'] > 0)
-                        <tr class="line"><td>Night hours</td><td class="amt">{{ $hrs($p['night_diff_minutes']) }} hrs</td></tr>
-                    @endif
-                    @if ($p['rest_day_minutes'] > 0)
-                        <tr class="line"><td>Rest day worked</td><td class="amt">{{ $hrs($p['rest_day_minutes']) }} hrs</td></tr>
-                    @endif
+                    <tr class="thead"><td>Salary Summary</td><td class="amt">Amount</td></tr>
+                    @foreach ($month['periods'] as $period)
+                        <tr class="line">
+                            <td>{{ $period['is_current'] ? 'Current Salary' : 'Last Salary' }} ({{ $period['label'] }})</td>
+                            <td class="amt">{{ $amt($period['current_amount']) }}</td>
+                        </tr>
+                    @endforeach
+                    <tr class="sum"><td>Total Amount</td><td class="amt">{{ $amt($month['total_current']) }}</td></tr>
                 </table>
             @endif
 
-            {{-- `stack` only when something precedes it: on a run with no working days the basis
-                 table is absent entirely and Gov must sit flush at the top of the column. --}}
-            <table class="{{ $p['working_days'] > 0 ? 'stack' : '' }}">
-                <tr class="thead"><td>Gov Contributions &amp; Tax</td><td class="amt">Amount</td></tr>
+            <table class="{{ $month ? 'stack' : '' }}">
+                <tr class="thead"><td>Government Benefits &amp; Tax</td><td class="amt">Amount</td></tr>
                 {{--
-                    Each statutory line carries the EMPLOYER's counterpart directly beneath it
-                    (2026-08-07) — indented, smaller, italic and grey, so it reads as a note on
-                    the line above rather than as another deduction.
+                    Each statutory line carries the EMPLOYER's counterpart directly beneath it —
+                    indented, smaller, italic and grey, so it reads as a note on the line above
+                    rather than as another deduction.
 
-                    WHY HERE AND NOT AS ITS OWN BLOCK. It was a standalone strip under the net-pay
-                    bar first. Beside the employee's own figure it actually means something: the
-                    employee can see that P875 of their pay went to SSS and the company put in
-                    P1,765 alongside it. Detached from that comparison it was just another number.
+                    Beside the employee's own figure it means something: they can see that P875 of
+                    their pay went to SSS and the company put P1,765 in alongside it. Detached from
+                    that comparison it was just another number.
 
-                    IT IS NEVER IN `Total Gov`. That row is `$t['government']`, computed by
+                    IT IS NEVER IN THE TOTAL. That row is `$t['government']`, computed by
                     `documentTotals()` from the employee's deductions alone — there is no code path
                     by which these rows reach it. The styling says so and the arithmetic enforces it.
                 --}}
                 @foreach ([
-                    ['SSS Contribution', 'sss', $p['sss'], $p['employer_sss'] ?? 0],
-                    ['PhilHealth', 'philhealth', $p['philhealth'], $p['employer_philhealth'] ?? 0],
-                    ['Pag-IBIG', 'pagibig', $p['pagibig'], $p['employer_pagibig'] ?? 0],
-                ] as [$label, $type, $employeeShare, $employerShare])
-                    {{-- The pair reads as one unit: the employee row drops its own rule when a
-                         sub-line follows, and the sub-line carries it instead. --}}
+                    ['SSS', $p['sss'], $p['employer_sss'] ?? 0],
+                    ['PhilHealth', $p['philhealth'], $p['employer_philhealth'] ?? 0],
+                    ['Pag-IBIG', $p['pagibig'], $p['employer_pagibig'] ?? 0],
+                ] as [$label, $employeeShare, $employerShare])
                     <tr class="line{{ $employerShare > 0 ? ' pair' : '' }}">
                         <td>{{ $label }}</td>
                         <td class="amt">{{ $amt($employeeShare) }}</td>
@@ -441,36 +485,101 @@
                     @if ($employerShare > 0)
                         <tr class="ersub">
                             <td class="erlbl">+ employer share</td>
-                            <td class="amt eramt">{{ $amt($employerShare) }}</td>
+                            <td class="amt">{{ $amt($employerShare) }}</td>
                         </tr>
                     @endif
-                    {{-- FIN-049 — what the rate was applied to. The printed payslip is the copy
-                         an employee keeps and queries against, so it must explain the figure on
-                         the same terms the screen does. --}}
-                    @if ($basisNote($type) !== null)
-                        <tr class="ernote"><td colspan="2">{{ $basisNote($type) }}</td></tr>
-                    @endif
                 @endforeach
-                <tr class="line"><td>Withholding Tax</td><td class="amt">{{ $amt($p['withholding_tax']) }}</td></tr>
+                @php
+                    // Built here rather than with inline directives: Blade will not parse a
+                    // conditional that directly follows a digit ("÷ 12" then a directive compiles
+                    // the closing tag and leaves the opener literal), and the sentence reads
+                    // better assembled than stitched out of six template fragments.
+                    $taxWhy = $p['tax_basis'] ?? null;
+                    $taxWhyLines = [];
+
+                    if ($taxWhy) {
+                        $taxWhyLines[] = '(' . $amt($taxWhy['taxable_monthly']) . ' taxable − '
+                            . $amt($taxWhy['contributions_monthly']) . ' contributions) × 12 = '
+                            . $amt($taxWhy['annual_taxable']) . ' a year';
+
+                        if (! empty($taxWhy['band'])) {
+                            $bandRate = rtrim(rtrim(number_format($taxWhy['band']['rate'] * 100, 3), '0'), '.');
+                            $over = $taxWhy['band']['base'] > 0
+                                ? ' plus ' . $amt($taxWhy['band']['base'])
+                                : '';
+                            $split = $taxWhy['timing_factor'] != 1
+                                ? ' × ' . $taxWhy['timing_factor']
+                                : '';
+
+                            $taxWhyLines[] = $bandRate . '% over ' . $amt($taxWhy['band']['min']) . $over
+                                . ' = ' . $amt($taxWhy['annual_tax']) . ' a year ÷ 12' . $split;
+                        }
+                    }
+                @endphp
+                <tr class="line {{ $taxWhyLines ? 'pair' : '' }}"><td>Withholding Tax</td><td class="amt">{{ $amt($p['withholding_tax']) }}</td></tr>
+                {{-- The least checkable figure on the document: an annualised projection of one
+                     period, net of contributions, against a dated bracket table. Four steps, none
+                     of them visible, ending in a peso amount the reader was expected to trust.
+                     Kept when the other derivations were dropped, because December's tax line can
+                     go NEGATIVE and nothing else on the page would account for that. --}}
+                @foreach ($taxWhyLines as $line)
+                    <tr class="why {{ $loop->last ? '' : 'open' }}"><td colspan="2">{{ $line }}</td></tr>
+                @endforeach
                 {{-- FIN-054 — the year-end settlement, shown as its derivation. On the common case
                      the line above is NEGATIVE and net pay exceeds gross; the printed payslip is
-                     the copy an employee keeps and queries against, so it must explain that on the
-                     same terms the screen does. Absent on every other payslip. --}}
+                     the copy an employee keeps and queries against. Absent on every other payslip. --}}
                 @if (($p['tax_annualisation_basis'] ?? null) !== null)
                     @php $tb = $p['tax_annualisation_basis']; $isRefund = $tb['settled_this_period'] < 0; @endphp
                     <tr class="ernote"><td colspan="2"><strong>Year-end tax settlement · {{ $tb['year'] }}</strong></td></tr>
-                    <tr class="ersub"><td class="erlbl">Taxable pay for the year</td><td class="amt eramt">{{ $amt($tb['year_taxable']) }}</td></tr>
-                    <tr class="ersub"><td class="erlbl">Tax due on that</td><td class="amt eramt">{{ $amt($tb['annual_tax_due']) }}</td></tr>
-                    <tr class="ersub"><td class="erlbl">Already withheld this year</td><td class="amt eramt">{{ $amt($tb['previously_withheld']) }}</td></tr>
-                    <tr class="ersub"><td class="erlbl">{{ $isRefund ? 'Refunded on this payslip' : 'Collected on this payslip' }}</td><td class="amt eramt">{{ $amt(abs($tb['settled_this_period'])) }}</td></tr>
+                    <tr class="ersub"><td class="erlbl">Taxable pay for the year</td><td class="amt">{{ $amt($tb['year_taxable']) }}</td></tr>
+                    <tr class="ersub"><td class="erlbl">Tax due on that</td><td class="amt">{{ $amt($tb['annual_tax_due']) }}</td></tr>
+                    <tr class="ersub"><td class="erlbl">Already withheld this year</td><td class="amt">{{ $amt($tb['previously_withheld']) }}</td></tr>
+                    <tr class="ersub"><td class="erlbl">{{ $isRefund ? 'Refunded on this payslip' : 'Collected on this payslip' }}</td><td class="amt">{{ $amt(abs($tb['settled_this_period'])) }}</td></tr>
                     <tr class="ernote"><td colspan="2">Tax is withheld each period on an estimate of the year. Yours came out {{ $isRefund ? 'higher' : 'lower' }} than the year needed, so the difference is {{ $isRefund ? 'paid back' : 'collected' }} here.</td></tr>
                 @endif
-                <tr class="sum"><td>Total Gov</td><td class="amt">{{ $amt($t['government']) }}</td></tr>
+                {{-- When the month's contributions did not all land here, BOTH figures are printed:
+                     the rows above sum to the first, and the walk continues from the second. One
+                     row labelled "monthly" sitting under rows that do not add up to it would be
+                     the one error a payslip cannot make. --}}
+                @if ($month && $differs($month['government'], $t['government']))
+                    <tr class="sum"><td>Total Benefits (This Cut-Off)</td><td class="amt">{{ $amt($t['government']) }}</td></tr>
+                @endif
+                <tr class="sum">
+                    <td>{{ $month ? 'Total Monthly Benefits' : 'Total Benefits' }}</td>
+                    <td class="amt">{{ $amt($month ? $month['government'] : $t['government']) }}</td>
+                </tr>
                 @if ($erTotal > 0)
                     <tr class="ernote">
                         <td colspan="2">Not deducted from your pay — the company&rsquo;s own cost.</td>
                     </tr>
                 @endif
+            </table>
+
+            <table class="bar">
+                <tr>
+                    <td>Initial Net Salary</td>
+                    <td class="v">{{ $amt($initialNet) }}</td>
+                </tr>
+            </table>
+
+            {{-- Allowances sit BELOW the contributions rather than among the earnings: they are
+                 paid on top of a salary that was already taxed, and printing them inside
+                 Compensation made them look like part of the base the deductions came out of. --}}
+            <table class="stack">
+                <tr class="thead"><td>Non-Taxable Allowance</td><td class="amt">Amount</td></tr>
+                @foreach ($allowanceLines as $line)
+                    <tr class="line"><td>{{ $fit($line['name']) }}</td><td class="amt">{{ $amt($line['amount']) }}</td></tr>
+                @endforeach
+                @if ($t['allowances'] == 0 && ! $month)
+                    <tr class="line"><td>None</td><td class="amt">{{ $amt(0) }}</td></tr>
+                @endif
+                @if ($month && $differs($month['allowances'], $t['allowances']))
+                    <tr class="sum"><td>Total Allowance (This Cut-Off)</td><td class="amt">{{ $amt($t['allowances']) }}</td></tr>
+                @endif
+                <tr class="sum">
+                    <td>{{ $month ? 'Total Monthly Allowance' : 'Total Allowance' }}</td>
+                    <td class="amt">{{ $amt($month ? $month['allowances'] : $t['allowances']) }}</td>
+                </tr>
             </table>
         </td>
     </tr>
@@ -478,7 +587,7 @@
 
 {{--
     Disclosure, NOT a term in the total (FIN-053). The government and deduction figures above are
-    now what was actually collected, so this is no longer credited back — it is shown because the
+    what was actually collected, so this is no longer credited back — it is shown because the
     employee is entitled to know a deduction they owe went unpaid, and which one.
 --}}
 @if ($t['uncollected'] > 0)
@@ -487,7 +596,7 @@
             <tr>
                 <td>
                     <div style="font-weight: bold;">Not collected this period</div>
-                    <div class="muted" style="font-size: 9px; padding-top: 1px;">
+                    <div class="muted" style="font-size: 7px; padding-top: 1px;">
                         Pay did not cover the full deductions, so this amount was not taken.
                         The figures above show what was collected.
                         @if (! empty($t['uncollected_breakdown']))
@@ -501,8 +610,8 @@
                                 ];
                             @endphp
                             <br>
-                            @foreach ($t['uncollected_breakdown'] as $key => $amount)
-                                {{ $labels[$key] ?? $key }} {{ $amt($amount) }}@if (! $loop->last) · @endif
+                            @foreach ($t['uncollected_breakdown'] as $key => $shortfall)
+                                {{ $labels[$key] ?? $key }} {{ $amt($shortfall) }}@if (! $loop->last) · @endif
                             @endforeach
                         @endif
                     </div>
@@ -513,29 +622,41 @@
     </div>
 @endif
 
+{{-- The conclusions run FULL WIDTH beneath both columns: the figure the reader is looking for is
+     never in a column. The month total sits below this cutoff's net rather than instead of it —
+     the employee is owed both answers, what lands in their account now and what the month came to. --}}
 <table class="net">
     <tr>
-        <td class="lbl">Total Net Pay</td>
-        <td class="val">PHP {{ $amt($p['net_pay']) }}</td>
+        <td class="lbl">{{ $netLabel }}</td>
+        <td class="v">PHP {{ $amt($p['net_pay']) }}</td>
     </tr>
 </table>
+
+@if ($month)
+    <table class="net">
+        <tr>
+            <td class="lbl">Total Month Salary</td>
+            <td class="v">PHP {{ $amt($month['total_month']) }}</td>
+        </tr>
+    </table>
+@endif
 
 <table class="foot">
     <tr>
         <td style="width: 34%;">
             <div class="cap">Issued Date</div>
-            <div style="font-size: 9.5px; padding-top: 1px;">{{ $stamp($p['issued_at']) }}</div>
-            <div class="cap" style="padding-top: 6px;">Verified By</div>
-            <div style="font-size: 9.5px; padding-top: 1px;">System Automated Check</div>
+            <div style="font-size: 8px; padding-top: 1px;">{{ $stamp($p['issued_at']) }}</div>
+            <div class="cap" style="padding-top: 4px;">Verified By</div>
+            <div style="font-size: 8px; padding-top: 1px;">System Automated Check</div>
         </td>
         <td class="sig" style="width: 33%;">
-            <div style="height: 12px;"></div>
+            <div style="height: 10px;"></div>
             <div class="rule"></div>
             <div class="who">{{ $p['processed_by'] ?? '' }}</div>
-            <div class="cap">Human Resource</div>
+            <div class="cap">HR Manager</div>
         </td>
         <td class="sig">
-            <div style="height: 12px;"></div>
+            <div style="height: 10px;"></div>
             <div class="rule"></div>
             <div class="who">{{ $p['employee']['name'] ?? '' }}</div>
             <div class="cap">Employee</div>

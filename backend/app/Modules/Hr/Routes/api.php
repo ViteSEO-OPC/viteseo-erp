@@ -17,10 +17,14 @@ use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
 use App\Modules\Hr\Http\Controllers\TaxTableController;
+use App\Modules\Hr\Http\Controllers\RestDayRequestController;
+use App\Modules\Hr\Http\Controllers\WorkSuspensionController;
 use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
 use App\Modules\Hr\Http\Controllers\EmployeeLoanController;
 use App\Modules\Hr\Http\Controllers\EmployeeSensitiveController;
+use App\Modules\Hr\Http\Controllers\EmploymentHistoryController;
+use App\Modules\Hr\Http\Controllers\SalaryHistoryController;
 use App\Modules\Hr\Http\Controllers\LeaveConfigController;
 use App\Modules\Hr\Http\Controllers\HalfDayRequestController;
 use App\Modules\Hr\Http\Controllers\EarlyOutRequestController;
@@ -73,6 +77,17 @@ Route::middleware('auth:sanctum')->group(function () {
     // Withdraw your own, pending only. Ownership + status enforced in the service.
     Route::post('half-day-requests/{halfDayRequest}/cancel', [HalfDayRequestController::class, 'cancel']);
 
+    // Rest-day work requests — filed by pressing Time in on a non-workday, so there is no
+    // date in the body: the server uses the caller's Manila today. Caller files + views own.
+    Route::get('rest-day-requests', [RestDayRequestController::class, 'index']);
+    Route::post('rest-day-requests', [RestDayRequestController::class, 'store']);
+    Route::post('rest-day-requests/{restDayRequest}/cancel', [RestDayRequestController::class, 'cancel']);
+
+    // HR-declared non-working days (typhoon, shutdown). Readable by everyone: the time
+    // clock tells the employee work is suspended today, and a rule they cannot see is one
+    // they discover by being marked absent. Writes are HR-only, below.
+    Route::get('work-suspensions', [WorkSuspensionController::class, 'index']);
+
     // Early-out (undertime) requests — separate from leave (always unpaid). Caller
     // files + views own; service scopes by role.
     Route::get('early-out-requests', [EarlyOutRequestController::class, 'index']);
@@ -123,6 +138,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('me/concerns', [ConcernController::class, 'meIndex']);
     Route::post('me/concerns', [ConcernController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
     Route::post('me/concerns/{concern}/cancel', [ConcernController::class, 'cancel']);
+    // Answering HR's request to be identified. NOT role-gated on purpose — this decision
+    // belongs to the reporter, and the service checks the caller IS them.
+    Route::post('me/concern-reveal-requests/{revealRequest}/accept', [ConcernController::class, 'acceptReveal']);
+    Route::post('me/concern-reveal-requests/{revealRequest}/decline', [ConcernController::class, 'declineReveal']);
     Route::get('me/meetings', [MeetingController::class, 'meIndex']);
     Route::post('me/meetings/{meeting}/respond', [MeetingController::class, 'respond']);
 
@@ -150,6 +169,18 @@ Route::middleware('auth:sanctum')->group(function () {
       the dated version history.
     */
     Route::get('contribution-settings', [BenefitController::class, 'settingsIndex']);
+
+    // Which contributions the caller pays into, READ-ONLY (identity from token). The hr_officer
+    // reader for the same data stays where it is: an employee may see what is deducted from them —
+    // every payslip itemises it — but deciding it is HR's. Without this the Compensation tab
+    // rendered the enrolment block against a 403, which drew three ticked, clickable checkboxes
+    // for a change the server was always going to refuse.
+    //
+    // No matching `me/allowances`: `me/benefit-programs` already serves the caller their own
+    // allowance amounts, in a shape that deliberately omits the programme's standard figure and
+    // who set an exception (MyBenefitResource) — a self-service page must not tell someone they
+    // are paid above or below their colleagues.
+    Route::get('me/benefits', [BenefitController::class, 'myBenefits']);
 
     // Payslips — the caller's own (identity from token).
     Route::get('me/next-payday', [PayrollController::class, 'myNextPayday']);
@@ -253,6 +284,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('candidates', [RecruitmentController::class, 'storeCandidate'])->middleware('throttle:20,1,hr-upload:');
         Route::post('candidates/{candidate}/move', [RecruitmentController::class, 'moveCandidate']);
         Route::post('candidates/{candidate}/hire', [RecruitmentController::class, 'hireCandidate']);
+        Route::get('candidates/{candidate}/email/draft', [RecruitmentController::class, 'emailDraft']);
+        Route::get('candidates/{candidate}/emails', [RecruitmentController::class, 'emailHistory']);
+        // Attachments push this past a plain JSON POST, so it shares the upload throttle's spirit
+        // while keeping the tighter send limit.
         Route::post('candidates/{candidate}/email', [RecruitmentController::class, 'sendEmail'])->middleware('throttle:10,1,hr-email:');
         Route::post('candidates/{candidate}/reject', [RecruitmentController::class, 'reject']);
         Route::post('reimbursements/{reimbursement}/approve', [ReimbursementController::class, 'approve']);
@@ -267,6 +302,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('half-day-requests/{halfDayRequest}/approve', [HalfDayRequestController::class, 'approve']);
         Route::post('half-day-requests/{halfDayRequest}/reject', [HalfDayRequestController::class, 'reject']);
         Route::post('half-day-requests/{halfDayRequest}/reopen', [HalfDayRequestController::class, 'reopen']);
+        // Approve/decline rest-day work requests (HR only). Approving WRITES the attendance
+        // row, stamped at the moment the employee pressed the button.
+        Route::post('rest-day-requests/{restDayRequest}/approve', [RestDayRequestController::class, 'approve']);
+        Route::post('rest-day-requests/{restDayRequest}/reject', [RestDayRequestController::class, 'reject']);
+        Route::post('rest-day-requests/{restDayRequest}/reopen', [RestDayRequestController::class, 'reopen']);
         // Approve/decline early-out requests (HR only).
         Route::post('early-out-requests/{earlyOutRequest}/approve', [EarlyOutRequestController::class, 'approve']);
         Route::post('early-out-requests/{earlyOutRequest}/reject', [EarlyOutRequestController::class, 'reject']);
@@ -284,9 +324,30 @@ Route::middleware('auth:sanctum')->group(function () {
         // Employee directory + records (HR only).
         Route::get('employees', [EmployeeController::class, 'index']);
         Route::post('employees', [EmployeeController::class, 'store']);
-        Route::get('employees/{employee}', [EmployeeController::class, 'show']);
+        // `withTrashed()` on the READ only. The directory's "Former staff" roster links every card
+        // here, and a separated employee is soft-deleted, so without it those cards were dead links —
+        // and with them the only route to Reinstate/Rehire, which live on the record's Job tab.
+        // Deliberately not on the update below: an archived record is read-only (the record page
+        // drops its edit affordances for a leaver), so a Save that resolved would be a Save the rest
+        // of the record's endpoints could not honour anyway.
+        Route::get('employees/{employee}', [EmployeeController::class, 'show'])->withTrashed();
         Route::match(['put', 'patch'], 'employees/{employee}', [EmployeeController::class, 'update']);
         Route::get('employees/{employee}/salary-history', [EmployeeController::class, 'salaryHistory']);
+
+        // Hand-corrections to the two timelines on the record. Both are also written automatically —
+        // the employment one by a job-title change, the compensation one by a salary change — and
+        // that stays as it is; these exist for the mistakes automation cannot fix.
+        //
+        // The compensation writes are NOT the same risk as the employment ones: every salary row
+        // prices a payroll run, so SalaryHistoryService refuses a delete that a completed run
+        // depends on and demands an acknowledgement before correcting one. See its docblock.
+        Route::get('employees/{employee}/employment-histories', [EmploymentHistoryController::class, 'index']);
+        Route::post('employees/{employee}/employment-histories', [EmploymentHistoryController::class, 'store']);
+        Route::match(['put', 'patch'], 'employment-histories/{employmentHistory}', [EmploymentHistoryController::class, 'update']);
+        Route::delete('employment-histories/{employmentHistory}', [EmploymentHistoryController::class, 'destroy']);
+        Route::post('employees/{employee}/salary-histories', [SalaryHistoryController::class, 'store']);
+        Route::match(['put', 'patch'], 'salary-histories/{salaryHistory}', [SalaryHistoryController::class, 'update']);
+        Route::delete('salary-histories/{salaryHistory}', [SalaryHistoryController::class, 'destroy']);
         // Profile picture: set/replace or clear (falls back to initials).
         Route::post('employees/{employee}/photo', [EmployeeController::class, 'updatePhoto'])->middleware('throttle:20,1,hr-upload:');
         Route::delete('employees/{employee}/photo', [EmployeeController::class, 'destroyPhoto']);
@@ -305,6 +366,9 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('throttle:5,1,final-pay:');
         Route::get('employees/{employee}/sensitive', [EmployeeSensitiveController::class, 'show'])
             ->middleware('throttle:20,1,employee-sensitive:');
+        // Every employee's loans, for the approvals queue. Declared before `loans/{loan}` so the
+        // literal path is never read as an id.
+        Route::get('loans', [EmployeeLoanController::class, 'all']);
         Route::get('employees/{employee}/loans', [EmployeeLoanController::class, 'index']);
         Route::post('employees/{employee}/loans', [EmployeeLoanController::class, 'store']);
         Route::match(['put', 'patch'], 'loans/{loan}', [EmployeeLoanController::class, 'update']);
@@ -384,7 +448,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('employees/{employee}/benefits', [BenefitController::class, 'employeeBenefitsIndex']);
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);
         // Slice B7 — what the rates would charge, beside any per-employee override.
-        Route::get('employees/{employee}/statutory-preview', [BenefitController::class, 'statutoryPreview']);
 
         // Company → Rules: work schedules + per-employee assignment + attendance policy.
         Route::get('work-schedules', [WorkScheduleController::class, 'index']);
@@ -421,6 +484,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('concerns/{concern}/status', [ConcernController::class, 'status']);
         Route::post('concerns/{concern}/reopen', [ConcernController::class, 'reopen']);
         Route::post('concerns/{concern}/meetings', [ConcernController::class, 'scheduleMeeting']);
+        // Ask an anonymous reporter to identify themselves. Asking only — the identity is not
+        // emitted until they accept, and the answer is theirs to give.
+        Route::post('concerns/{concern}/reveal-requests', [ConcernController::class, 'requestReveal']);
 
         // Finance → Office Expenses (HR only).
         Route::get('office-expenses', [OfficeExpenseController::class, 'index']);
@@ -440,6 +506,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('holiday-sets/{holidaySet}/holidays', [HolidayController::class, 'storeHoliday']);
         Route::match(['put', 'patch'], 'holidays/{holiday}', [HolidayController::class, 'updateHoliday']);
         Route::delete('holidays/{holiday}', [HolidayController::class, 'destroyHoliday']);
+        // Work suspensions — deliberately NOT holidays: a holiday is a legal, classified
+        // calendar date; this is the company cancelling one day and saying whether it is paid.
+        Route::post('work-suspensions', [WorkSuspensionController::class, 'store']);
+        Route::match(['put', 'patch'], 'work-suspensions/{workSuspension}', [WorkSuspensionController::class, 'update']);
+        Route::delete('work-suspensions/{workSuspension}', [WorkSuspensionController::class, 'destroy']);
 
         // Company → FAQ authoring (HR only).
         Route::post('faqs', [FaqController::class, 'store']);

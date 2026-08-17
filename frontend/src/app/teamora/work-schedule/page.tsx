@@ -7,7 +7,7 @@ import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { notify as toast } from "@/core/lib/notify";
-import { formatDate, formatDateTime } from "@/core/lib/format";
+import { formatDate, formatDateTime, formatTimeManila } from "@/core/lib/format";
 import {
   RequestDetailDialog,
   type DetailField,
@@ -37,6 +37,10 @@ import {
   useOvertimeRequests,
   useCancelOvertimeRequest,
 } from "@/modules/hr/hooks/use-overtime";
+import {
+  useRestDayRequests,
+  useCancelRestDayRequest,
+} from "@/modules/hr/hooks/use-rest-day";
 
 type RequestTab = "leave" | "half" | "early" | "overtime";
 
@@ -78,7 +82,7 @@ function formatDateRange(start: string, end: string): string {
 interface HistItem {
   key: string;
   id: number;
-  kind: "leave" | "half" | "early" | "overtime";
+  kind: "leave" | "half" | "early" | "overtime" | "rest";
   title: string;
   dates: string;
   /** null where a day count is meaningless — an early-out or an overtime window. */
@@ -159,11 +163,15 @@ export default function TimeOffPage() {
   const { data: types } = useLeaveTypes();
   const { data: requests } = useLeaveRequests();
   const { data: halfDays } = useHalfDayRequests();
+  // Rest-day work. No tab and no form: these are filed from the time clock, by pressing
+  // Time in on a rest day. They appear here only so the employee can follow the decision.
+  const { data: restDays } = useRestDayRequests();
   const { data: earlyOuts } = useEarlyOutRequests();
   const { data: overtimes } = useOvertimeRequests();
   // One dialog, four endpoints — `handleCancel` dispatches on the row's kind.
   const cancelMut = useCancelLeaveRequest();
   const cancelHalfDayMut = useCancelHalfDayRequest();
+  const cancelRestDayMut = useCancelRestDayRequest();
   const cancelEarlyOutMut = useCancelEarlyOutRequest();
   const cancelOvertimeMut = useCancelOvertimeRequest();
   const [tab, setTab] = useState<RequestTab>("leave");
@@ -228,7 +236,8 @@ export default function TimeOffPage() {
     (requests ?? []).filter((r) => r.status === "pending").length +
     (halfDays ?? []).filter((h) => h.status === "pending").length +
     (earlyOuts ?? []).filter((e) => e.status === "pending").length +
-    (overtimes ?? []).filter((o) => o.status === "pending").length;
+    (overtimes ?? []).filter((o) => o.status === "pending").length +
+    (restDays ?? []).filter((r) => r.status === "pending").length;
 
   // Combined leave / half-day / early-out / overtime history, newest first.
   const history: HistItem[] = [
@@ -342,6 +351,29 @@ export default function TimeOffPage() {
       // so the service keeps that with HR — offering the button here would only 422.
       cancellable: o.status === "pending",
     })),
+    ...(restDays ?? []).map((r) => ({
+      key: `r${r.id}`,
+      id: r.id,
+      kind: "rest" as const,
+      title: "Rest-day work",
+      dates: formatDate(r.work_date),
+      days: null,
+      status: r.status,
+      at: r.created_at,
+      reason: r.reason ?? "—",
+      decision: { at: r.reviewed_at, by: r.reviewed_by, note: r.review_note },
+      fields: [
+        { label: "Rest day", value: formatDate(r.work_date) },
+        // The whole point of the feature, so it is stated as the promise it is rather than
+        // left for the employee to infer from a timestamp column.
+        { label: "Times you in at", value: formatTimeManila(r.requested_at) },
+        { label: "Pay", value: <span className="text-success">Paid · rest-day premium</span> },
+      ],
+      cancelled: r.cancelled_at
+        ? { at: r.cancelled_at, by: r.cancelled_by, reason: r.cancel_reason }
+        : null,
+      cancellable: r.status === "pending",
+    })),
   ].sort((a, b) => +new Date(b.at) - +new Date(a.at));
 
   // A day count is only meaningful for leave and half-days; an early-out or an
@@ -362,7 +394,15 @@ export default function TimeOffPage() {
     {
       header: "Reason",
       cell: (r) => (
-        <span className="block max-w-[18rem] truncate" title={r.reason}>
+        // Truncates sooner on small screens. At a flat 18rem this was the widest
+        // column on the table, and since the table scrolls horizontally on a
+        // phone that width came straight out of how far you had to swipe to
+        // reach Status and Cancel. The full text is on the row's detail dialog
+        // (and in `title` on desktop), so an early ellipsis costs nothing.
+        <span
+          className="block max-w-[7rem] truncate sm:max-w-[10rem] lg:max-w-[18rem]"
+          title={r.reason}
+        >
           {r.reason}
         </span>
       ),
@@ -406,6 +446,7 @@ export default function TimeOffPage() {
       half: { mutation: cancelHalfDayMut, label: "half-day request" },
       early: { mutation: cancelEarlyOutMut, label: "early-out request" },
       overtime: { mutation: cancelOvertimeMut, label: "overtime request" },
+      rest: { mutation: cancelRestDayMut, label: "rest-day work request" },
     }[cancelTarget.kind];
 
     try {

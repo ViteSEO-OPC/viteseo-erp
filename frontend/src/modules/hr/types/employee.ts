@@ -90,10 +90,8 @@ export interface Employee {
   currency: string | null;
   bank_account_type: string | null;
   bank_account_name: string | null;
-  sss_contribution: string | null;
-  pagibig_contribution: string | null;
-  philhealth_contribution: string | null;
-  // Government membership NUMBERS for the payslip header — not the peso overrides above.
+  // Government membership NUMBERS for the payslip header. There are no per-employee
+  // contribution AMOUNTS — everyone is charged the company rates for their bracket.
   tin: string | null;
   sss_number: string | null;
   philhealth_number: string | null;
@@ -131,7 +129,9 @@ export interface EmploymentHistoryEntry {
   title: string;
   start_date: string;
   end_date: string | null; // null = current
-  status: string; // current | promoted | transferred | hired
+  status: string; // current | promoted | transferred | lateral | role_change | separated
+  /** Why the role ended — the note from the title change, separation, or a hand-correction. */
+  reason: string | null;
 }
 
 export interface EmployeeInput {
@@ -179,9 +179,6 @@ export interface EmployeeInput {
   currency?: string;
   bank_account_type?: string;
   bank_account_name?: string;
-  sss_contribution?: string;
-  pagibig_contribution?: string;
-  philhealth_contribution?: string;
   tin?: string;
   sss_number?: string;
   philhealth_number?: string;
@@ -299,27 +296,3 @@ export function statusLabel(status: string): string {
   );
 }
 
-/**
- * One statutory contribution for an employee: what the government rates would charge, and the
- * per-employee override (if any) that is replacing it (Slice B7).
- *
- * `calculated_employer` is here because it does NOT move with the override — the mismatch between
- * the two halves is the whole reason this is shown.
- */
-export interface StatutoryPreviewRow {
-  type: "sss" | "philhealth" | "pagibig";
-  /** False ⇒ nothing is deducted at all and an override on it is inert. */
-  enrolled: boolean;
-  override: number | null;
-  calculated_employee: number;
-  calculated_employer: number;
-  basis: string | null;
-  /** Slice B19 — which salary figure this is charged on: `basic` or `earnings`. */
-  salary_basis: string | null;
-  /**
-   * True when `salary_basis` is `earnings`, in which case the two figures above are a PERFECT
-   * MONTH — no absences, no lates, no overtime — because this preview has only the profile salary
-   * to work from. The real payslip will rarely match, and the form has to say so.
-   */
-  is_estimate: boolean;
-}

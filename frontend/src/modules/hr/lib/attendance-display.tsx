@@ -60,6 +60,13 @@ export function hrStatusBadge(status: string): { label: string; tone: Tone } {
       return { label: "Rest day", tone: "muted" };
     case "holiday":
       return { label: "Holiday", tone: "info" };
+    // Work HR cancelled. Two labels rather than one, because the pay consequence is the
+    // whole decision and a single "Suspended" badge would hide it — but never `danger`:
+    // nobody was expected in, so this must not read like a mark against the employee.
+    case "suspended_paid":
+      return { label: "Suspended · paid", tone: "info" };
+    case "suspended_unpaid":
+      return { label: "Suspended · unpaid", tone: "warning" };
     default:
       return {
         label: status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),

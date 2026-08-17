@@ -97,6 +97,31 @@ class BenefitController extends Controller
     }
 
     /**
+     * GET /api/v1/hr/me/benefits — which contributions the CALLER pays into, read-only.
+     *
+     * The reader above is hr_officer-only, and without this the employee's own Compensation tab
+     * rendered the enrolment block against a 403: with no rows, every toggle fell back to its
+     * "enrolled" default and drew three ticked, clickable checkboxes for a change the server was
+     * always going to refuse. Seeing which contributions come off your pay is reasonable; deciding
+     * it is HR's.
+     *
+     * Identity comes from the token, never a client-sent id.
+     */
+    public function myBenefits(Request $request): JsonResponse
+    {
+        $employee = $request->user()->employee;
+
+        if (! $employee) {
+            return response()->json(
+                ['message' => 'No employee record for this account.'],
+                Response::HTTP_NOT_FOUND,
+            );
+        }
+
+        return $this->employeeBenefitsIndex($employee);
+    }
+
+    /**
      * POST /hr/contribution-versions/import-schedule — Slice B8.
      *
      * Reads the agency's own published spreadsheet and returns the bands it found, the columns it
@@ -156,15 +181,6 @@ class BenefitController extends Controller
         $this->service->deleteVersion($contributionVersion);
 
         return response()->json(['data' => ['deleted' => true]]);
-    }
-
-    // GET /hr/employees/{employee}/statutory-preview — Slice B7.
-    // What the government rates would charge this employee, beside any per-employee override.
-    // Its own endpoint rather than a field on EmployeeResource: this resolves rate versions per
-    // employee, and hanging it off the list resource would be three extra lookups per row.
-    public function statutoryPreview(Employee $employee): JsonResponse
-    {
-        return response()->json(['data' => $this->service->overridePreviewFor($employee)]);
     }
 
     // PUT/PATCH /hr/employees/{employee}/benefits

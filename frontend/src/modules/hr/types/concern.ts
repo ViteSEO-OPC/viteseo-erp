@@ -36,6 +36,23 @@ export interface ConcernAttachment {
   mime: string | null;
 }
 
+/**
+ * HR asking an anonymous reporter to identify themselves — and their answer.
+ *
+ * Both sides see the same object: the reporter needs the reason and the asker's name to decide,
+ * and HR needs the refusal and ITS reason rather than a silence to interpret. Nothing here
+ * carries the reporter's identity; that lives on the concern behind `identity_revealed_at`.
+ */
+export interface ConcernRevealRequest {
+  id: number;
+  status: "pending" | "accepted" | "declined";
+  reason: string;
+  requested_by: string | null;
+  requested_at: string;
+  responded_at: string | null;
+  decline_reason: string | null;
+}
+
 export interface Concern {
   id: number;
   reference_no: string;
@@ -44,6 +61,11 @@ export interface Concern {
   reported_person: string | null;
   attachments: ConcernAttachment[];
   is_anonymous: boolean;
+  /**
+   * When the reporter agreed to be named. Null means HR sees `Anonymous` — including when
+   * nobody has asked yet, and when the reporter said no.
+   */
+  identity_revealed_at: string | null;
   is_safety: boolean;
   status: string;
   submitted_at: string;
@@ -51,8 +73,13 @@ export interface Concern {
   cancelled_at: string | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
-  // null for anonymous concerns — the backend never emits identity for them.
+  /**
+   * Null for an anonymous concern until its reporter has ACCEPTED a reveal request. The old
+   * rule handed every anonymous identity to HR for free; now the eye asks rather than reveals.
+   */
   employee: { id: number; name: string | null } | null;
+  /** The newest ask on this concern, or null — for a named concern, or one nobody has asked about. */
+  reveal_request: ConcernRevealRequest | null;
   meetings: Meeting[];
   created_at: string;
 }

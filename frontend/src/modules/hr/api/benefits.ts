@@ -29,6 +29,17 @@ export async function getEmployeeBenefits(
   return res.data.data;
 }
 
+/**
+ * Which government contributions the CALLER pays into, read-only. Identity from the token.
+ *
+ * Named for contributions, not "benefits": `api/benefit-programs.ts` already has a `getMyBenefits`
+ * for the caller's allowance PROGRAMMES, and the two return different shapes.
+ */
+export async function getMyContributions(): Promise<EmployeeBenefit[]> {
+  const res = await apiClient.get("/hr/me/benefits");
+  return res.data.data;
+}
+
 export async function updateEmployeeBenefits(
   employeeId: number,
   benefits: { contribution_type: string; enrolled: boolean }[],

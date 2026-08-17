@@ -67,7 +67,6 @@ class EmployeeService
         'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
         'bank_name', 'bank_account', 'height', 'weight', 'health_condition',
         'pay_frequency', 'currency', 'bank_account_type', 'bank_account_name',
-        'sss_contribution', 'pagibig_contribution', 'philhealth_contribution',
         // Slice B9 — the three allowance columns are gone from here. Payroll stopped reading them
         // in B1 and Company → Benefits is the catalogue now, so writing them only produced a
         // number on the profile that no payslip agreed with.
@@ -209,6 +208,98 @@ class EmployeeService
             'employee_id' => $employee->id,
             'title' => $newTitle,
             'start_date' => $today,
+            'end_date' => null,
+            'status' => 'current',
+            'reason' => $reason,
+            'changed_by' => Auth::id(),
+        ]);
+    }
+
+    /**
+     * Close the open role on the employment-history timeline when the employment itself ends (MF-18).
+     *
+     * The timeline says what someone did here and until when, so a separation that does not touch it
+     * leaves the record contradicting itself: the header reads "Left on 30 June" while the role below
+     * it still reads "Present · current". Only a job-title change used to move this timeline, which
+     * meant the one transition that ends every employment was the one it did not record.
+     *
+     * Stamped with the LAST WORKING DAY, not today, for the same reason payroll prorates on it — the
+     * date HR fills the form in is not the date the employment ended.
+     */
+    private function closeTimelineOnSeparation(Employee $employee, string $lastDay, ?string $reason): void
+    {
+        $current = $employee->employmentHistories()
+            ->whereNull('end_date')
+            ->orderByDesc('start_date')
+            ->first();
+
+        if (! $current) {
+            return; // nothing open — a record that predates the timeline, or already closed
+        }
+
+        // A backdated last day can land before the current role started (the title changed after the
+        // date now being recorded as the exit). A row that ends before it begins is worse than an
+        // imprecise one, so the role collapses to its start date rather than inverting.
+        $end = Carbon::parse($lastDay, config('app.timezone_local'))->startOfDay();
+        if ($current->start_date && $end->lt($current->start_date)) {
+            $end = $current->start_date->copy();
+        }
+
+        $current->update([
+            'end_date' => $end->toDateString(),
+            'status' => 'separated',
+            'reason' => $reason,
+            'changed_by' => Auth::id(),
+        ]);
+    }
+
+    /**
+     * Undo that close — reinstatement's whole claim is that the ending never happened, so the role it
+     * closed goes back to being the current one rather than the timeline keeping a phantom exit.
+     *
+     * Only a row this service closed is reopened: anything else is a role change or a hand-corrected
+     * timeline, and reopening that would resurrect a job the person genuinely no longer holds.
+     */
+    private function reopenTimelineOnReinstatement(Employee $employee): void
+    {
+        $last = $employee->employmentHistories()
+            ->orderByDesc('start_date')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($last?->status !== 'separated') {
+            return;
+        }
+
+        $last->update([
+            'end_date' => null,
+            'status' => 'current',
+            'changed_by' => Auth::id(),
+        ]);
+    }
+
+    /**
+     * Open a fresh role for a rehire — a new employment relationship is a new entry, not a resumption
+     * of the old one, which is what keeps the break in service visible on the timeline.
+     *
+     * @param  string|Carbon|null  $previousLastDay
+     */
+    private function openTimelineOnRehire(Employee $employee, string $hireDate, $previousLastDay, ?string $reason): void
+    {
+        // Records separated before separations closed the timeline still have an open row. Close it at
+        // the old last day first, or the two stints overlap and both claim to be current.
+        if ($previousLastDay) {
+            $this->closeTimelineOnSeparation(
+                $employee,
+                Carbon::parse($previousLastDay, config('app.timezone_local'))->toDateString(),
+                null,
+            );
+        }
+
+        EmploymentHistory::create([
+            'employee_id' => $employee->id,
+            'title' => $employee->job_title,
+            'start_date' => $hireDate,
             'end_date' => null,
             'status' => 'current',
             'reason' => $reason,
@@ -527,6 +618,12 @@ class EmployeeService
                 'separation_date' => $data['separation_date'],
             ]);
 
+            $this->closeTimelineOnSeparation(
+                $employee,
+                $data['separation_date'],
+                $data['reason'] ?? null,
+            );
+
             $employee->delete();
 
             // Archive stamp = last working day, so the attrition report and payroll agree.
@@ -545,7 +642,9 @@ class EmployeeService
                 $employee,
             );
 
-            return $employee->fresh(['user', 'department', 'manager.user']);
+            // The timeline moves on all three of these, so the response the record page re-reads
+            // has to carry it — an unloaded relation serialises as an empty history.
+            return $employee->fresh(['user', 'department', 'manager.user', 'employmentHistories']);
         });
     }
 
@@ -575,6 +674,8 @@ class EmployeeService
                 'separation_date' => null,
             ]);
 
+            $this->reopenTimelineOnReinstatement($employee);
+
             $employee->load('user');
             $this->audit->log(
                 'reopened',
@@ -584,7 +685,9 @@ class EmployeeService
                 $employee,
             );
 
-            return $employee->fresh(['user', 'department', 'manager.user']);
+            // The timeline moves on all three of these, so the response the record page re-reads
+            // has to carry it — an unloaded relation serialises as an empty history.
+            return $employee->fresh(['user', 'department', 'manager.user', 'employmentHistories']);
         });
     }
 
@@ -633,7 +736,7 @@ class EmployeeService
             ]);
         }
 
-        return DB::transaction(function () use ($employee, $hireDate, $reason) {
+        return DB::transaction(function () use ($employee, $hireDate, $reason, $lastDay) {
             $previousHire = $employee->hire_date?->toDateString();
 
             $employee->restore();
@@ -643,6 +746,8 @@ class EmployeeService
                 'previous_hire_date' => $previousHire,
                 'hire_date' => $hireDate,
             ]);
+
+            $this->openTimelineOnRehire($employee, $hireDate, $lastDay, $reason);
 
             $this->seedLeaveBalances($employee);
 
@@ -669,7 +774,9 @@ class EmployeeService
                 $employee,
             );
 
-            return $employee->fresh(['user', 'department', 'manager.user']);
+            // The timeline moves on all three of these, so the response the record page re-reads
+            // has to carry it — an unloaded relation serialises as an empty history.
+            return $employee->fresh(['user', 'department', 'manager.user', 'employmentHistories']);
         });
     }
 

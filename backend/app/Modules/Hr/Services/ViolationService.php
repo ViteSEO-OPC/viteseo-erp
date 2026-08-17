@@ -28,6 +28,7 @@ class ViolationService
         private readonly ScheduleService $schedule,
         private readonly AttendancePolicyService $policy,
         private readonly HolidayService $holidays,
+        private readonly WorkSuspensionService $suspensions,
     ) {}
 
     /**
@@ -165,6 +166,15 @@ class ViolationService
             fn ($type) => in_array($type, HolidayService::NON_WORKING_TYPES, true),
         );
 
+        // HR-declared non-working days in the same window. Kept separate from the holiday map
+        // rather than merged into it: the two answer different questions downstream (a holiday
+        // has a legal class and a premium; a suspension has neither), and one map serving both
+        // is how a suspension eventually gets priced as a holiday by accident.
+        $suspensions = $this->suspensions->betweenAsMap(
+            $monthStart->toDateString(),
+            $scanEnd->toDateString(),
+        );
+
         // Approved leaves overlapping the scanned range, grouped by employee.
         $leaves = LeaveRequest::where('status', 'approved')
             ->whereDate('end_date', '>=', $monthStart->toDateString())
@@ -226,6 +236,15 @@ class ViolationService
                 // resets it nor extends it). Someone who DID work falls through, so a late
                 // arrival on a worked holiday is still flagged.
                 if (isset($holidays[$dateStr]) && ! ($row && $row->time_in !== null)) {
+                    continue;
+                }
+
+                // A day HR cancelled — typhoon, shutdown — behaves exactly the same way, and
+                // for both halves of the decision: PAID or UNPAID, nobody was expected in, so
+                // not coming in is not a violation. (The unpaid half costs a day's pay in
+                // payroll; that is a pay consequence, not a disciplinary one.) Whoever DID work
+                // falls through, so a late arrival on a skeleton crew is still flagged.
+                if (isset($suspensions[$dateStr]) && ! ($row && $row->time_in !== null)) {
                     continue;
                 }
 

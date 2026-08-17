@@ -63,6 +63,33 @@ class TaxService
     }
 
     /**
+     * The band an annual taxable income falls in, or null when it is below the first floor
+     * (the exempt tier) or no table exists.
+     *
+     * Exposed so a payslip can CITE the bracket it was priced under rather than restate a peso
+     * figure the reader has no way to check. Same selection as annualTax() — deliberately the
+     * same loop rather than a second reading of the table, because a citation that disagrees
+     * with the charge is worse than no citation.
+     *
+     * @return array{min: float, base: float, rate: float}|null
+     */
+    public function bandFor(float $annualTaxable, ?string $asOf = null): ?array
+    {
+        if ($annualTaxable <= 0) {
+            return null;
+        }
+
+        $band = null;
+        foreach ($this->bandsAsOf($asOf ?? now(config('app.timezone_local'))->toDateString()) as $candidate) {
+            if ($annualTaxable > $candidate['min']) {
+                $band = $candidate;
+            }
+        }
+
+        return $band;
+    }
+
+    /**
      * The bands of the table in force on a date, ascending by floor.
      *
      * @return array<int, array{min: float, base: float, rate: float}>

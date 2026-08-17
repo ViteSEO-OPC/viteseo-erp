@@ -86,10 +86,8 @@ class EmployeeResource extends JsonResource
             'currency' => $this->currency ?? 'PHP',
             'bank_account_type' => $this->bank_account_type,
             'bank_account_name' => Employee::maskSensitive($this->bank_account_name),
-            'sss_contribution' => $this->sss_contribution,
-            'pagibig_contribution' => $this->pagibig_contribution,
-            'philhealth_contribution' => $this->philhealth_contribution,
-            // Membership numbers (payslip header) — distinct from the *_contribution overrides.
+            // Membership numbers for the payslip header. There are no per-employee contribution
+            // AMOUNTS any more — every employee is charged the company rates for their bracket.
             'tin' => Employee::maskSensitive($this->tin),
             'sss_number' => Employee::maskSensitive($this->sss_number),
             'philhealth_number' => Employee::maskSensitive($this->philhealth_number),

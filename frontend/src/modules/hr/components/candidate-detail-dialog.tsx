@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatDate } from "@/core/lib/format";
+import { CandidateEmailHistory } from "@/modules/hr/components/candidate-email-history";
 import { sourceLabel, type Candidate } from "@/modules/hr/types/recruitment";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -90,35 +91,16 @@ export function CandidateDetailDialog({
               </Row>
             </dl>
 
-            {/* What HR actually sent, so the assessment email can be answered for later. */}
-            {candidate.assessment_sent_at && (
-              <div className="space-y-1.5">
-                <p className="text-label font-semibold uppercase tracking-wide text-brand">
-                  Assessment sent
-                </p>
-                <p className="text-caption text-muted-foreground">
-                  {formatDate(candidate.assessment_sent_at)}
-                  {candidate.assessment_deadline
-                    ? ` · due ${formatDate(candidate.assessment_deadline)}`
-                    : ""}
-                </p>
-                {candidate.assessment_link && (
-                  <a
-                    href={candidate.assessment_link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block truncate text-sm font-medium text-brand hover:underline"
-                  >
-                    {candidate.assessment_link}
-                  </a>
-                )}
-                {candidate.assessment_instructions && (
-                  <p className="whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3.5 py-3 text-sm text-foreground">
-                    {candidate.assessment_instructions}
-                  </p>
-                )}
-              </div>
+            {/* The assessment deadline is the one email detail the board itself shows,
+                so it stays on the record; everything else about what was sent lives in
+                the history below, message by message. */}
+            {candidate.assessment_deadline && (
+              <p className="text-caption text-muted-foreground">
+                Assessment due {formatDate(candidate.assessment_deadline)}
+              </p>
             )}
+
+            <CandidateEmailHistory candidateId={candidate.id} />
           </>
         )}
       </DialogContent>

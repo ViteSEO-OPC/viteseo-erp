@@ -56,6 +56,36 @@ export interface ClockInWindow {
    * demands a location that is about to be ignored.
    */
   geofence: boolean;
+  /**
+   * Is today one of this employee's scheduled workdays? `false` turns Time in into a REQUEST
+   * to work a rest day — the server refuses the punch and files one instead. Read from the
+   * server rather than derived from the weekday: the effective schedule resolves override →
+   * assigned → default, and a second copy of that in the browser would drift.
+   */
+  is_workday: boolean;
+  /**
+   * The employee's latest rest-day request for today, when today is a rest day. Null on a
+   * workday, for management, and before anything is filed. `requested_at` is the time-in an
+   * approval will stamp — the panel quotes it so the promise is visible before HR decides.
+   */
+  rest_day_request: {
+    id: number;
+    status: "pending" | "approved" | "rejected" | "cancelled" | "expired";
+    requested_at: string | null;
+    review_note: string | null;
+  } | null;
+  /**
+   * HR has cancelled work today (typhoon, shutdown). Null on an ordinary day and on the
+   * employee's own rest day, where saying "work is cancelled" would be noise.
+   *
+   * It does NOT disable the time clock: a skeleton crew still comes in, and blocking them
+   * would leave the people who actually worked with no record of it.
+   */
+  suspension: {
+    name: string;
+    is_paid: boolean;
+    status: "suspended_paid" | "suspended_unpaid";
+  } | null;
 }
 
 /**

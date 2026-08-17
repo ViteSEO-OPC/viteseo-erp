@@ -75,6 +75,12 @@ export function useRecordSection<TValues extends FieldValues>({
   };
 
   const submit = form.handleSubmit(async (values) => {
+    // A section is read-only until Edit is pressed, so a submit arriving now did not come from
+    // the Save button — it is a stray `type="submit"` default from some control nested inside
+    // this section's <form> (lifecycle, schedule, loans…). Saving there would PATCH the record
+    // and toast "Changes saved" for a click that meant something else entirely.
+    if (!editing) return;
+
     try {
       await save(values);
     } catch (err) {

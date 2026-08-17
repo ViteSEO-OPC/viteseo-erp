@@ -92,7 +92,7 @@ function SharedPoolEditor({ employeeId }: { employeeId: number }) {
             onBlur={save}
           />
         </div>
-        <Button size="sm" onClick={save} disabled={upsert.isPending}>
+        <Button type="button" size="sm" onClick={save} disabled={upsert.isPending}>
           {upsert.isPending ? "Saving…" : "Save"}
         </Button>
       </div>
@@ -154,6 +154,7 @@ function PerTypeCreditsEditor({ employeeId }: { employeeId: number }) {
       align: "right",
       cell: (b) => (
         <Button
+          type="button"
           size="icon-sm"
           variant="ghost"
           onClick={() => setRemoving(b)}
@@ -219,7 +220,7 @@ function PerTypeCreditsEditor({ employeeId }: { employeeId: number }) {
             value={addDays}
             onChange={(e) => setAddDays(e.target.value)}
           />
-          <Button size="sm" onClick={addType} disabled={!addTypeId || addDays === ""}>
+          <Button type="button" size="sm" onClick={addType} disabled={!addTypeId || addDays === ""}>
             Add
           </Button>
         </div>

@@ -18,7 +18,9 @@ import {
   DialogDescription,
   DialogFooter,
   DialogClose,
+  dialogScrollbar,
 } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { useDepartments } from "@/modules/hr/hooks/use-departments";
 import { useCreateEmployee, useEmployees } from "@/modules/hr/hooks/use-employees";
 import { SiblingsFields } from "@/modules/hr/components/siblings-fields";
@@ -101,9 +103,6 @@ const schema = z
       .string()
       .trim()
       .refine((v) => v === "" || /^[A-Za-z]{3}$/.test(v), "Use a 3-letter code, e.g. PHP"),
-    sss_contribution: optionalMoney("SSS"),
-    pagibig_contribution: optionalMoney("Pag-IBIG"),
-    philhealth_contribution: optionalMoney("PhilHealth"),
     tin: optionalText(32),
     sss_number: optionalText(32),
     philhealth_number: optionalText(32),
@@ -139,8 +138,7 @@ const EMPTY: FormValues = {
   hire_date: "", base_salary: "", is_management: false, bank_name: "",
   bank_account: "", height: "", weight: "", health_condition: "",
   pay_frequency: "semi_monthly", currency: "PHP", bank_account_type: "",
-  bank_account_name: "", sss_contribution: "", pagibig_contribution: "",
-  philhealth_contribution: "",
+  bank_account_name: "",
   tin: "", sss_number: "", philhealth_number: "", pagibig_number: "",
 };
 
@@ -217,9 +215,6 @@ export function EmployeeFormDialog({
       currency: s(v.currency)?.toUpperCase(),
       bank_account_type: s(v.bank_account_type),
       bank_account_name: s(v.bank_account_name),
-      sss_contribution: s(v.sss_contribution),
-      pagibig_contribution: s(v.pagibig_contribution),
-      philhealth_contribution: s(v.philhealth_contribution),
       tin: s(v.tin),
       sss_number: s(v.sss_number),
       philhealth_number: s(v.philhealth_number),
@@ -251,16 +246,32 @@ export function EmployeeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg">
-        <DialogHeader>
+      {/*
+        One scroller, not two. The dialog used to scroll itself (`max-h-[90svh]
+        overflow-y-auto`) around a body that also scrolled at `max-h-[60vh]`, so
+        a tall form showed a scrollbar inside a scrollbar.
+
+        The dialog is now a flex column capped at `90svh` with a non-scrolling
+        header and footer, and the body is the only thing that moves. Dropping
+        `overflow-x-hidden` here matters as much as dropping `overflow-y-auto`:
+        a non-`visible` value on one axis forces the other to compute to `auto`,
+        so leaving it would have kept the outer scrollbar anyway. The body still
+        carries it, which is where the horizontal clipping was wanted.
+
+        Sizing the body with `flex-1 min-h-0` instead of `max-h-[60vh]` also
+        drops the guess — it takes whatever height is left over after the header
+        and footer, at any viewport height, rather than 60% of the viewport.
+      */}
+      <DialogContent className="flex max-h-[90svh] max-w-[calc(100%-3rem)] flex-col sm:max-w-lg">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Add employee</DialogTitle>
           <DialogDescription>
             Creates the employee, their login (password: password), and leave balances.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} noValidate>
-          <div className="max-h-[60vh] space-y-6 overflow-y-auto overflow-x-hidden px-0.5">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex min-h-0 flex-1 flex-col">
+          <div className={cn("min-h-0 flex-1 space-y-6 overflow-y-auto overflow-x-hidden px-0.5", dialogScrollbar)}>
             {/* Personal */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="First name" error={errors.first_name?.message}>
@@ -538,15 +549,10 @@ export function EmployeeFormDialog({
               <Field label="Bank account name" error={errors.bank_account_name?.message}>
                 <Input placeholder="Juan Dela Cruz" {...register("bank_account_name")} />
               </Field>
-              <Field label="SSS (₱ / mo)" error={errors.sss_contribution?.message}>
-                <Input type="number" min="0" step="0.01" {...register("sss_contribution")} />
-              </Field>
-              <Field label="Pag-IBIG (₱ / mo)" error={errors.pagibig_contribution?.message}>
-                <Input type="number" min="0" step="0.01" {...register("pagibig_contribution")} />
-              </Field>
-              <Field label="PhilHealth (₱ / mo)" error={errors.philhealth_contribution?.message}>
-                <Input type="number" min="0" step="0.01" {...register("philhealth_contribution")} />
-              </Field>
+              {/* No per-employee SSS / Pag-IBIG / PhilHealth amounts. They replaced the
+                  EMPLOYEE side of the deduction while the employer side kept following the
+                  brackets, so one payslip could carry a pair on no government table. Everyone
+                  is charged the company rates; un-enrolling is how someone stops paying one. */}
               {/* Slice B9 — no allowance boxes here. Allowances are programmes in
                   Company → Benefits: the catalogue grows and shrinks, so three fixed fields
                   could never describe it, and payroll stopped reading these columns in B1. */}
@@ -590,7 +596,7 @@ export function EmployeeFormDialog({
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <DialogClose asChild>
               <Button type="button" variant="outline">Cancel</Button>
             </DialogClose>

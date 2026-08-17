@@ -28,6 +28,7 @@ import {
   useMyRemoteCheckin,
   useSubmitRemoteCheckin,
 } from "@/modules/hr/hooks/use-remote-checkins";
+import { useCreateRestDayRequest } from "@/modules/hr/hooks/use-rest-day";
 import { TimeOutDialog } from "@/modules/hr/components/time-out-dialog";
 import { ClockInLocationDialog } from "@/modules/hr/components/clock-in-location-dialog";
 import { SEVERITY_LABEL, SEVERITY_RANK } from "@/modules/hr/types/attendance";
@@ -137,6 +138,26 @@ export function TimeClockPanel() {
   // panel never asks a question whose answer would be ignored.
   const geofenced = data?.clock_in?.geofence ?? false;
 
+  // Rest-day work (RD-2). Today isn't a scheduled workday, so the server refuses a punch and
+  // takes a REQUEST instead — approving it stamps the time-in at the moment of the press, so
+  // nothing is lost waiting for HR. Both facts come from the server: re-deriving "is today a
+  // workday" from the weekday would ignore custom workdays and daily overrides.
+  const isWorkday = data?.clock_in?.is_workday ?? true;
+  const restReq = data?.clock_in?.rest_day_request ?? null;
+  const restDayPending = restReq?.status === "pending";
+  // Only worth saying while they are still not clocked in — once HR has approved something
+  // else, or the day moved on, a stale refusal on screen is just noise.
+  const restDayRejected = restReq?.status === "rejected" && state === "not_clocked_in";
+  const restDayExpired = restReq?.status === "expired" && state === "not_clocked_in";
+  // The button files a request rather than punching in.
+  const needsRestDayRequest = !isWorkday && state === "not_clocked_in";
+  const restDayMut = useCreateRestDayRequest();
+
+  // Work suspended today (Slice B). Shown, never enforced: the button stays live because a
+  // skeleton crew does come in, and someone who works a cancelled day must still be able to
+  // record it. What changes is what the panel SAYS — nobody has to time in.
+  const suspension = data?.clock_in?.suspension ?? null;
+
   // `defer` mode: they pressed Time in before their shift, so the punch is stamped at the
   // shift start and is still in the future. Derived against the ticking clock rather than
   // read from the server, so it flips to a real clocked-in state on the minute — the same
@@ -196,6 +217,8 @@ export function TimeClockPanel() {
   const [confirm, setConfirm] = useState<"time_in" | "lunch" | "break" | null>(null);
   const [timeOutOpen, setTimeOutOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
+  const [restDayOpen, setRestDayOpen] = useState(false);
+  const [restDayReason, setRestDayReason] = useState("");
   const lunchActive = state === "on_lunch";
   const breakActive = state === "on_break";
 
@@ -273,6 +296,20 @@ export function TimeClockPanel() {
     if (ok) setLocationOpen(false);
   }
 
+  // Rest-day work: this is the punch, even though nothing is written to attendance yet. The
+  // toast quotes the time back so the promise ("you keep this moment") is visible immediately,
+  // not only after HR gets round to it.
+  async function onRestDayRequest() {
+    const ok = await run(
+      () => restDayMut.mutateAsync(restDayReason.trim() || undefined),
+      "Sent to HR for approval",
+    );
+    if (ok) {
+      setRestDayOpen(false);
+      setRestDayReason("");
+    }
+  }
+
   async function onTimeOut(tasks: DayTask[]) {
     const ok = await run(() => clockOutMut.mutateAsync(tasks), "Clocked out");
     if (ok) setTimeOutOpen(false);
@@ -305,10 +342,23 @@ export function TimeClockPanel() {
         <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 lg:pr-5">
           <div className="flex items-center gap-2">
             <span
-              className={cn("size-2.5 rounded-full", queuedUntil ? "bg-warning" : meta.dot)}
+              className={cn(
+                "size-2.5 rounded-full",
+                queuedUntil
+                  ? "bg-warning"
+                  : // A red "Clocked out" dot on a day work was cancelled reads as a mark
+                    // against the employee. Amber, and named for what actually happened.
+                    suspension && state === "not_clocked_in"
+                    ? "bg-warning"
+                    : meta.dot,
+              )}
             />
             <span className="text-sm font-semibold">
-              {queuedUntil ? "Queued" : meta.label}
+              {queuedUntil
+                ? "Queued"
+                : suspension && state === "not_clocked_in"
+                  ? "Work suspended"
+                  : meta.label}
             </span>
           </div>
           {alertFlag && <AttendanceAlertBanner violation={alertFlag} />}
@@ -322,7 +372,25 @@ export function TimeClockPanel() {
         </p>
 
         <p className="mt-3 text-sm text-white/70">
-          {state === "not_clocked_in" &&
+          {/* Rest-day branches come FIRST: on a day the schedule doesn't cover, "you haven't
+              clocked in yet today" is not merely unhelpful, it implies they still can. */}
+          {state === "not_clocked_in" && !isWorkday &&
+            (restDayPending
+              ? `Sent to HR at ${formatTimeManila(restReq?.requested_at)} — you'll be timed in at that moment once they approve it.`
+              : restDayRejected
+                ? `HR declined your request to work today: ${restReq?.review_note ?? "no reason given"}.`
+                : restDayExpired
+                  ? "Your earlier request for today lapsed without a decision — ask HR to add the day on the Attendance screen."
+                  : "Today isn't one of your workdays. Ask HR to work it — you'll be timed in from the moment you ask, not when they approve.")}
+          {/* A cancelled day outranks every ordinary not-clocked-in message: "you haven't
+              clocked in yet today" is actively wrong when nobody was asked to. */}
+          {state === "not_clocked_in" && isWorkday && suspension &&
+            `${suspension.name} — work is suspended today, so you don't need to time in. ${
+              suspension.is_paid
+                ? "The day is paid."
+                : "The day is unpaid; coming in anyway is paid normally."
+            }`}
+          {state === "not_clocked_in" && isWorkday && !suspension &&
             (awaitingReview
               ? `Sent to HR at ${formatTimeManila(myCheckin?.submitted_at)} — you'll be timed in at that moment once they approve it.`
               : wasRejected
@@ -335,7 +403,9 @@ export function TimeClockPanel() {
           {state === "clocked_in" &&
             (queuedUntil
               ? `You're queued — your time in counts from ${formatTimeManila(queuedUntil)}, when your shift starts.`
-              : `Clocked in at ${formatTimeManila(today?.time_in)}.`)}
+              : `Clocked in at ${formatTimeManila(today?.time_in)}.${
+                  !isWorkday ? " HR approved this rest day — it earns a rest-day premium." : ""
+                }`)}
           {state === "on_lunch" && "You're on your lunch break."}
           {state === "on_break" && "You're on a short break."}
           {state === "clocked_out" && "You've clocked out for today."}
@@ -347,13 +417,31 @@ export function TimeClockPanel() {
         <div className="mt-5 grid gap-3 sm:flex sm:flex-wrap sm:gap-2">
           <button
             // Awaiting review disables it too: a second submission would be refused by the
-            // server anyway, and the button offering it reads as "that didn't work".
-            disabled={busy || state !== "not_clocked_in" || tooEarly || awaitingReview}
-            onClick={() => (geofenced ? setLocationOpen(true) : setConfirm("time_in"))}
+            // server anyway, and the button offering it reads as "that didn't work". A pending
+            // rest-day request is the same case with a different queue.
+            disabled={
+              busy ||
+              restDayMut.isPending ||
+              state !== "not_clocked_in" ||
+              tooEarly ||
+              awaitingReview ||
+              restDayPending
+            }
+            onClick={() =>
+              needsRestDayRequest
+                ? setRestDayOpen(true)
+                : geofenced
+                  ? setLocationOpen(true)
+                  : setConfirm("time_in")
+            }
             title={tooEarly ? `Opens at ${format12Hour(opensAt)}` : undefined}
             className="rounded-lg bg-brand px-4 py-3 sm:py-2 text-sm font-semibold text-brand-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
           >
-            {awaitingReview ? "Waiting for HR" : "Time in"}
+            {awaitingReview || restDayPending
+              ? "Waiting for HR"
+              : needsRestDayRequest
+                ? "Request to work today"
+                : "Time in"}
           </button>
           <button
             disabled={busy || !!queuedUntil || !(state === "clocked_in" || state === "on_lunch")}
@@ -431,6 +519,54 @@ export function TimeClockPanel() {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Rest-day work request — replaces the plain confirm when today isn't a workday.
+          Its own dialog rather than a fourth `confirm` mode: this one takes an input and
+          promises something the others don't. */}
+      <Dialog
+        open={restDayOpen}
+        onOpenChange={(o) => {
+          setRestDayOpen(o);
+          if (!o) setRestDayReason("");
+        }}
+      >
+        <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto lg:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Ask to work today?</DialogTitle>
+            <DialogDescription>
+              Today isn&apos;t one of your scheduled workdays, so HR has to agree to it. Sending
+              this records your time in at <strong>right now</strong> — you keep this moment even
+              if they approve it later. The day earns a rest-day premium once approved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <label htmlFor="rest-day-reason" className="text-sm font-medium">
+              Reason <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <textarea
+              id="rest-day-reason"
+              rows={2}
+              value={restDayReason}
+              onChange={(e) => setRestDayReason(e.target.value)}
+              maxLength={1000}
+              className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+              placeholder="e.g. client deadline, coverage for a teammate"
+            />
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Cancel</Button>
+            </DialogClose>
+            <Button
+              className="bg-brand text-brand-foreground hover:bg-brand/90"
+              disabled={restDayMut.isPending}
+              onClick={onRestDayRequest}
+            >
+              {restDayMut.isPending ? "Sending…" : "Send to HR"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

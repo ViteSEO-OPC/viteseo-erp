@@ -27,7 +27,22 @@ class AttendanceService
         private readonly HolidayService $holidays,
         private readonly GeofenceService $geofence,
         private readonly PayrollFreezeService $freeze,
+        private readonly RestDayRequestService $restDays,
+        private readonly WorkSuspensionService $suspensions,
     ) {}
+
+    /**
+     * HR-declared non-working days in an inclusive range, as 'Y-m-d' => is_paid.
+     *
+     * Thin wrapper so every reader in this file goes through one name, the way
+     * nonWorkingHolidays() already does — the service memoizes the query itself.
+     *
+     * @return array<string, bool>
+     */
+    private function suspensionsBetween(string $start, string $end): array
+    {
+        return $this->suspensions->betweenAsMap($start, $end);
+    }
 
     /**
      * Non-working holidays in an inclusive range, as date 'Y-m-d' => type. Fetched ONCE per
@@ -216,7 +231,9 @@ class AttendanceService
      * Computed here rather than in the panel so these rules have exactly one reader —
      * a client that re-derived them could offer a button the server would refuse.
      *
-     * @return array{mode: string, opens_at: ?string, defers_to: ?string, geofence: bool}
+     * @return array{mode: string, opens_at: ?string, defers_to: ?string, geofence: bool,
+     *               is_workday: bool, rest_day_request: array{id: int, status: string, requested_at: ?string, review_note: ?string}|null,
+     *               suspension: array{name: string, is_paid: bool, status: string}|null}
      *                                   both times are Manila "HH:MM"
      */
     public function clockInWindowFor(Employee $employee): array
@@ -224,6 +241,22 @@ class AttendanceService
         $local = $this->localNow();
         $eff = $this->schedule->effectiveFor($employee, $local);
         $mode = $this->policy->get()->early_clock_in_mode;
+
+        // Rest-day work (RD-2): today is not a scheduled workday, so pressing the button files a
+        // request instead of punching in. The panel needs BOTH facts — that the day is a rest day,
+        // and how the current request stands — because the same button has three meanings
+        // depending on the answer, and re-deriving "is today a workday" client-side would put a
+        // second, drifting copy of the schedule rules in the browser.
+        $isWorkday = (bool) ($eff['is_workday'] ?? true);
+        $restDayRequest = $isWorkday || $employee->isManagement()
+            ? null
+            : $this->restDays->forDate($employee, $local->toDateString());
+
+        // Only meaningful on a day they would otherwise be expected in — telling someone work
+        // is cancelled on their rest day is noise.
+        $suspension = $isWorkday
+            ? $this->suspensions->forDate($local->toDateString())
+            : null;
 
         // Only meaningful right now, and only in defer mode: the time this punch WOULD be
         // recorded at if they pressed the button this second. Null once the shift has
@@ -239,6 +272,21 @@ class AttendanceService
             // unconfigured fails open server-side, so making the employee answer a question
             // whose answer will be ignored would be theatre.
             'geofence' => $this->geofence->enforcing(),
+            'is_workday' => $isWorkday,
+            // Work cancelled today. Deliberately does NOT disable the button: a skeleton crew
+            // still comes in during a suspension, and blocking them would leave the people who
+            // actually worked with no record of it. The panel says they need not clock in.
+            'suspension' => $suspension === null ? null : [
+                'name' => $suspension->name,
+                'is_paid' => (bool) $suspension->is_paid,
+                'status' => $suspension->status(),
+            ],
+            'rest_day_request' => $restDayRequest === null ? null : [
+                'id' => $restDayRequest->id,
+                'status' => $restDayRequest->status,
+                'requested_at' => $restDayRequest->requested_at?->toIso8601String(),
+                'review_note' => $restDayRequest->review_note,
+            ],
         ];
     }
 
@@ -270,6 +318,33 @@ class AttendanceService
     ): Attendance {
         $this->assertNotManagement($employee);
 
+        $local = $this->localNow();
+        // Lateness is measured against the employee's EFFECTIVE schedule (start +
+        // grace), resolved from override → assigned → default — not a fixed cutoff.
+        $eff = $this->schedule->effectiveFor($employee, $local);
+
+        // Rest-day work (RD-2). A day the schedule does not cover is not the employee's to
+        // start: it earns a rest-day premium, so somebody has to agree to spend it. The punch
+        // is not lost — RestDayRequestService records this moment and an approval stamps
+        // attendance at it — but it is not attendance until then.
+        //
+        // Deliberately BEFORE the open-shift and already-clocked-in checks: on an approved
+        // request the row already exists, and "you have already clocked in today" is the right
+        // answer to a second press. This gate is only ever reached without one.
+        if (! ($eff['is_workday'] ?? true)) {
+            $pending = $this->restDays->forDate($employee, $this->today());
+
+            throw ValidationException::withMessages([
+                'time_in' => [
+                    $pending?->status === 'pending'
+                        ? 'Your request to work today is still with HR — you will be timed in at '
+                            . $pending->requested_at?->timezone(config('app.timezone_local'))->format('g:i A')
+                            . ', when you asked, once they approve it.'
+                        : 'Today is not one of your scheduled workdays. Send HR a request to work it — you will be timed in at the moment you asked, not when they approve.',
+                ],
+            ]);
+        }
+
         // An overnight shift from a previous date is still running — starting a second one
         // would leave the first permanently open and silently unpaid.
         $open = $this->openRow($employee);
@@ -292,11 +367,6 @@ class AttendanceService
                 'time_in' => ['You have already clocked in today.'],
             ]);
         }
-
-        $local = $this->localNow();
-        // Lateness is measured against the employee's EFFECTIVE schedule (start +
-        // grace), resolved from override → assigned → default — not a fixed cutoff.
-        $eff = $this->schedule->effectiveFor($employee, $local);
 
         // Strict clock-in (Company → Rules): the shift can't be started before it begins.
         $opensAt = $this->clockInOpensAt($eff, $local);
@@ -751,6 +821,9 @@ class AttendanceService
         $onLeaveIds = $this->onLeaveIds($date);
         // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
         $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
+        // Neither is a day HR cancelled — paid or unpaid, nobody was expected in. Counting
+        // the whole company "absent" on a typhoon day is the exact failure this prevents.
+        $isSuspended = array_key_exists($date, $this->suspensionsBetween($date, $date));
 
         $s = [
             'checked_in' => 0, 'not_checked_in' => 0, 'on_leave' => 0,
@@ -782,7 +855,7 @@ class AttendanceService
                 $s['checked_in']++;
                 $cat = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)['category'];
                 $s[$cat === 'early' ? 'early_arrivals' : ($cat === 'late' ? 'late_arrivals' : 'on_time')]++;
-            } elseif (! $isOnLeave && $eff['is_workday'] && ! $isHoliday) {
+            } elseif (! $isOnLeave && $eff['is_workday'] && ! $isHoliday && ! $isSuspended) {
                 // No clock-in on a workday: it's a true absence only once the day has
                 // passed (or HR explicitly marked it absent). During today the employee
                 // can still clock in, so it's "not checked in" — mirrors allForDate().
@@ -819,10 +892,14 @@ class AttendanceService
         $leaveMap = $this->onLeaveMap($date);
         // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
         $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
+        // HR cancelled work on this date. Null = an ordinary day; true/false = paid/unpaid.
+        // Derived here rather than stored per employee, so flipping the declaration moves the
+        // whole roster at once instead of leaving rows asserting yesterday's answer.
+        $suspendedPaid = $this->suspensionsBetween($date, $date)[$date] ?? null;
 
         return Employee::with(['user', 'department', 'workSchedule'])
             ->get()
-            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday) {
+            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday, $suspendedPaid) {
                 $att = $rows->get($emp->id);
                 $eff = $this->schedule->effectiveFor($emp, $dateCarbon);
                 $leaveName = $leaveMap->get($emp->id);
@@ -840,6 +917,12 @@ class AttendanceService
                 } elseif ($isHoliday && ($eff['is_workday'] ?? false)) {
                     // Non-working holiday on what would have been a workday — not an absence.
                     $status = 'holiday';
+                } elseif ($suspendedPaid !== null && ($eff['is_workday'] ?? false)) {
+                    // HR cancelled work on what would have been a workday. Ranked BELOW the
+                    // holiday branch on purpose: a holiday already pays and already carries a
+                    // statutory premium, so a suspension declared over one changes nothing and
+                    // must not overwrite the classification payroll prices from.
+                    $status = $suspendedPaid ? 'suspended_paid' : 'suspended_unpaid';
                 } elseif ($emp->isManagement()) {
                     // Management is exempt from attendance — auto-present on a scheduled
                     // workday, rest day otherwise. Never absent/not-checked-in.
@@ -1503,6 +1586,8 @@ class AttendanceService
 
         // Non-working holidays in the cycle (Slice 1). One query for the whole range.
         $holidays = $this->nonWorkingHolidays($start, $end);
+        // HR-declared non-working days, date => is_paid. Same shape, same one-query rule.
+        $suspensions = $this->suspensionsBetween($start, $end);
 
         // The employment window (Slice 4). The DIVISOR deliberately stays the full period's
         // scheduled workdays — under the `period_workdays` basis, shrinking it would raise the
@@ -1518,6 +1603,24 @@ class AttendanceService
         $lateDays = 0.0;
         $undertimeDays = 0.0;
         $flags = [];
+
+        /**
+         * The per-date ledger behind the totals — what the payslip shows when someone asks
+         * "which days?".
+         *
+         * Every charge below records a line, so the ledger always sums to `$unpaid`. That
+         * property is the whole point: a breakdown that does not reconcile with the figure it
+         * explains is worse than no breakdown, because it invites the reader to trust it.
+         */
+        $lines = [];
+        $charge = function (string $date, string $kind, float $days = 0.0, ?string $detail = null) use (&$lines) {
+            $lines[] = [
+                'date' => $date,
+                'kind' => $kind,
+                'days' => round($days, 4),
+                'detail' => $detail,
+            ];
+        };
         // DOLE: holiday pay for a REGULAR holiday is forfeited when the employee was absent
         // without pay on the workday immediately before it. Null = no prior workday seen yet
         // in this range, in which case we don't know and pay the holiday (employee-favourable).
@@ -1540,11 +1643,13 @@ class AttendanceService
             // and also correct for a cycle that has not finished.
             if ($employmentStart !== null && $dateStr < $employmentStart) {
                 $unpaid += 1.0;
+                $charge($dateStr, 'not_employed', 1.0, 'Before hire date');
 
                 continue;
             }
             if ($employmentEnd !== null && $dateStr > $employmentEnd) {
                 $unpaid += 1.0;
+                $charge($dateStr, 'not_employed', 1.0, 'After last working day');
 
                 continue;
             }
@@ -1565,10 +1670,46 @@ class AttendanceService
                     // before; special non-working days carry no such condition.
                     if ($holidayType === 'regular' && $prevWorkdayUnpaid === true) {
                         $unpaid += 1.0;
+                        $charge($dateStr, 'holiday_forfeited', 1.0, 'Absent without pay the workday before');
                     }
 
                     // A holiday is not a workday for this purpose — it can neither break nor
                     // extend the "absent the day before" chain, so leave the flag as it was.
+                    continue;
+                }
+            }
+
+            // --- HR-declared work suspension (Slice B) -----------------------------------
+            // The company cancelled the day. Whether it still costs anyone a day's pay is the
+            // single decision HR recorded, and it is priced here and nowhere else.
+            //
+            // Ranked AFTER the holiday branch: a holiday is already covered by salary, so a
+            // suspension declared over one must not be able to turn a paid statutory day into
+            // an unpaid one.
+            //
+            // Someone who WORKED through it falls through to the ordinary paid-day path — they
+            // are paid for the day they worked, with no premium: this is the company's own
+            // cancellation, not a legal holiday, so no statutory rate attaches to it.
+            $suspensionIsPaid = $suspensions[$dateStr] ?? null;
+            if ($suspensionIsPaid !== null) {
+                $suspensionRow = $rows->get($dateStr);
+                // An HR override on this one person's day beats the company-wide declaration —
+                // that is what an override IS, and it is how the two exceptions get expressed:
+                // the skeleton crew who worked a suspended day, and the one person docked on a
+                // day everybody else was paid for. Falls through to the override switch below.
+                if ($suspensionRow?->status_override) {
+                    // no-op: let the override decide
+                } elseif (! ($suspensionRow && $suspensionRow->time_in)) {
+                    if ($suspensionIsPaid === false) {
+                        $unpaid += 1.0;
+                        $charge($dateStr, 'suspended_unpaid', 1.0, 'Work suspended (unpaid)');
+                    }
+
+                    // `$prevWorkdayUnpaid` is deliberately left ALONE, even on an unpaid
+                    // suspension. That flag exists to forfeit a following regular holiday after
+                    // the employee was absent without pay — and a day the company cancelled is
+                    // not the employee's absence. Charging them for the day AND taking the next
+                    // holiday off them would punish them twice for someone else's decision.
                     continue;
                 }
             }
@@ -1584,18 +1725,29 @@ class AttendanceService
                 switch ($row->status) {
                     case 'absent':
                         $unpaid += 1.0;
+                        $charge($dateStr, 'absent', 1.0, 'Marked absent by HR');
                         $prevWorkdayUnpaid = true;
 
                         continue 2;
                     case 'half_day':
                         $unpaid += 0.5;
+                        $charge($dateStr, 'half_day', 0.5, 'Marked half day by HR');
                         $prevWorkdayUnpaid = false;
 
                         continue 2;
                     case 'rest_day':
                     case 'holiday':
+                    case 'suspended_paid':
                         // Not a working day at all — it can neither be unpaid nor break the
                         // "absent the day before" chain.
+                        continue 2;
+                    case 'suspended_unpaid':
+                        // HR cancelled this one person's day without pay. Costs a day, but it
+                        // is still not their absence, so the following-holiday chain is left
+                        // alone for the same reason as the company-wide branch above.
+                        $unpaid += 1.0;
+                        $charge($dateStr, 'suspended_unpaid', 1.0, 'Work suspended (unpaid)');
+
                         continue 2;
                     case 'on_leave':
                         // Defer to the leave that covers it; unpaid leave still costs a day.
@@ -1606,7 +1758,9 @@ class AttendanceService
                             // FIN-034 — a HALF day of LWOP costs half a day. HR stamping the row
                             // `on_leave` must not turn it into a whole one; that would charge double
                             // for the same absence and disagree with the half-day branch below.
-                            $unpaid += ($covering && $covering->is_half_day) ? 0.5 : 1.0;
+                            $days = ($covering && $covering->is_half_day) ? 0.5 : 1.0;
+                            $unpaid += $days;
+                            $charge($dateStr, 'leave_unpaid', $days, 'Leave without pay');
                         }
                         // Half a day is never a full absence, so it can't forfeit a holiday either.
                         $prevWorkdayUnpaid = $isUnpaidLeave && ! ($covering && $covering->is_half_day);
@@ -1641,6 +1795,9 @@ class AttendanceService
             if ($leave && $leave->is_half_day) {
                 $halfUnpaid = ($leave->leaveType && ! $leave->leaveType->is_paid) ? 0.5 : 0.0;
                 $unpaid += $halfUnpaid;
+                if ($halfUnpaid > 0) {
+                    $charge($dateStr, 'leave_unpaid', $halfUnpaid, 'Half day leave without pay');
+                }
 
                 if ($row && $row->status === 'late') {
                     $lateCount++;
@@ -1652,6 +1809,9 @@ class AttendanceService
                 }
                 $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 $unpaid += $eoFrac;
+                if ($eoFrac > 0) {
+                    $charge($dateStr, 'early_out', $eoFrac, 'Approved early-out');
+                }
 
                 if ($deductionsActive && $row && $row->time_in) {
                     $ded = $this->deduction->forDay(
@@ -1671,6 +1831,19 @@ class AttendanceService
                     $lateDays += $ded->lateFraction;
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
+                    // Recorded per DAY, unlike the running totals above.
+                    //
+                    // These sit inside the deduction block deliberately, which means no `late`
+                    // line exists when no late-deduction mode is on. That is the correct scope,
+                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
+                    // policy that charges nothing prints no minutes either. The note explains the
+                    // figure beside it, and the two can never disagree about whether it exists.
+                    if ($ded->lateMinutes > 0) {
+                        $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
+                    }
+                    if ($ded->undertimeMinutes > 0) {
+                        $charge($dateStr, 'undertime', $ded->undertimeFraction, $ded->undertimeMinutes . ' min undertime');
+                    }
                 }
 
                 // Half a day worked is not an absence, so a following regular holiday stands.
@@ -1684,6 +1857,7 @@ class AttendanceService
                 $isUnpaidLeave = $leave->leaveType && ! $leave->leaveType->is_paid;
                 if ($isUnpaidLeave) {
                     $unpaid += 1.0;
+                    $charge($dateStr, 'leave_unpaid', 1.0, 'Leave without pay');
                 }
                 // LWOP the day before a regular holiday forfeits the holiday pay; paid leave
                 // does not.
@@ -1702,6 +1876,7 @@ class AttendanceService
                 // can both pass. Cheap defence against that and against direct inserts.
                 $halfUnpaid = min(1.0, 0.5 * $dayHalves->count());
                 $unpaid += $halfUnpaid;
+                $charge($dateStr, 'half_day', $halfUnpaid, 'Approved half-day request');
 
                 // Item 8 — a late arrival on a half-day used to escape the per-N-lates penalty
                 // entirely, because this branch never touched the tally.
@@ -1719,6 +1894,9 @@ class AttendanceService
                 }
                 $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 $unpaid += $eoFrac;
+                if ($eoFrac > 0) {
+                    $charge($dateStr, 'early_out', $eoFrac, 'Approved early-out');
+                }
 
                 if ($deductionsActive && $dayHalves->count() === 1 && $row && $row->time_in) {
                     $ded = $this->deduction->forDay(
@@ -1731,6 +1909,19 @@ class AttendanceService
                     $lateDays += $ded->lateFraction;
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
+                    // Recorded per DAY, unlike the running totals above.
+                    //
+                    // These sit inside the deduction block deliberately, which means no `late`
+                    // line exists when no late-deduction mode is on. That is the correct scope,
+                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
+                    // policy that charges nothing prints no minutes either. The note explains the
+                    // figure beside it, and the two can never disagree about whether it exists.
+                    if ($ded->lateMinutes > 0) {
+                        $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
+                    }
+                    if ($ded->undertimeMinutes > 0) {
+                        $charge($dateStr, 'undertime', $ded->undertimeFraction, $ded->undertimeMinutes . ' min undertime');
+                    }
                 }
 
                 // Half a day worked is not an absence, so it doesn't forfeit a following
@@ -1766,6 +1957,19 @@ class AttendanceService
                     $lateDays += $ded->lateFraction;
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
+                    // Recorded per DAY, unlike the running totals above.
+                    //
+                    // These sit inside the deduction block deliberately, which means no `late`
+                    // line exists when no late-deduction mode is on. That is the correct scope,
+                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
+                    // policy that charges nothing prints no minutes either. The note explains the
+                    // figure beside it, and the two can never disagree about whether it exists.
+                    if ($ded->lateMinutes > 0) {
+                        $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
+                    }
+                    if ($ded->undertimeMinutes > 0) {
+                        $charge($dateStr, 'undertime', $ded->undertimeFraction, $ded->undertimeMinutes . ' min undertime');
+                    }
                 }
 
                 $prevWorkdayUnpaid = false; // they showed up
@@ -1774,6 +1978,7 @@ class AttendanceService
             }
             if ($row && $row->status === 'absent') {
                 $unpaid += 1.0;
+                $charge($dateStr, 'absent', 1.0, 'Absent');
                 $prevWorkdayUnpaid = true;
 
                 continue;
@@ -1781,6 +1986,7 @@ class AttendanceService
             // No usable record: unpaid only once the workday is in the past.
             if ($d->lt($today)) {
                 $unpaid += 1.0;
+                $charge($dateStr, 'absent', 1.0, 'No time in recorded');
                 $prevWorkdayUnpaid = true;
             } else {
                 $prevWorkdayUnpaid = false; // today/future — not an absence yet
@@ -1795,6 +2001,13 @@ class AttendanceService
             // days disappearing into `unpaid_days` alongside genuine absences.
             $latePenaltyDays = (float) intdiv($lateCount, (int) $policy->lates_per_deduction);
             $unpaid += $latePenaltyDays;
+
+            if ($latePenaltyDays > 0) {
+                // Dated to the period end, not to a day: it is charged for a COUNT of lates
+                // across the range, so pinning it on one of them would misattribute it.
+                $charge($last->toDateString(), 'late_penalty', $latePenaltyDays,
+                    "{$lateCount} lates × 1 day per {$policy->lates_per_deduction}");
+            }
         }
 
         return new UnpaidDaysResult(
@@ -1805,6 +2018,7 @@ class AttendanceService
             undertimeDays: round($undertimeDays, 6),
             latePenaltyDays: $latePenaltyDays,
             flags: array_values(array_unique($flags)),
+            lines: $lines,
         );
     }
 

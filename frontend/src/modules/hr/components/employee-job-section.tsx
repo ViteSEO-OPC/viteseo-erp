@@ -7,6 +7,7 @@ import { formatDate } from "@/core/lib/format";
 import { useDepartments } from "@/modules/hr/hooks/use-departments";
 import { useEmployees } from "@/modules/hr/hooks/use-employees";
 import {
+  Detail,
   FieldGrid,
   RecordSectionShell,
   type FieldSpec,
@@ -173,12 +174,9 @@ export function EmployeeJobSection({
         {/* The employee ID is assigned by the system and never edited. */}
         {!editing && (
           <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
-                Employee ID number
-              </p>
-              <p className="mt-1 text-sm text-foreground">{employee.employee_no}</p>
-            </div>
+            {/* Was a hand-rolled copy of `Detail`; using the real one keeps it on
+                the shared label/value styling and its overflow guards. */}
+            <Detail label="Employee ID number" value={employee.employee_no} />
           </div>
         )}
 

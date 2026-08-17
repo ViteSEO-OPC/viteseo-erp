@@ -30,8 +30,8 @@ class OvertimeRequestResource extends JsonResource
             'cancel_reason' => $this->cancel_reason,
             'employee' => [
                 'id' => $this->employee_id,
-                'name' => $this->whenLoaded('employee', fn () => $this->employee->user?->name),
-                'photo_url' => $this->whenLoaded('employee', fn () => $this->employee->photo_url),
+                'name' => $this->whenLoaded('employee', fn () => $this->employee?->user?->name),
+                'photo_url' => $this->whenLoaded('employee', fn () => $this->employee?->photo_url),
             ],
             'created_at' => $this->created_at,
         ];

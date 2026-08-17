@@ -423,7 +423,9 @@ class PayslipDocumentTest extends HrTestCase
         // It appears as a sub-line under each statutory row, not as a block of its own.
         $this->assertSame(3, substr_count($html, '+ employer share'), 'one under each of the three');
         $this->assertStringContainsString('Not deducted from your pay', $html);
-        $this->assertStringContainsString('Total Net Pay', $html); // the render actually happened
+        // The net bar names its cutoff since the 2026-08-14 rebuild ("Total Net (1st Cut-Off)"),
+        // so this matches the stem — it is here to prove the render actually happened.
+        $this->assertStringContainsString('Total Net', $html);
 
         // THE ASSERTION THAT MATTERS: `Total Gov` is the employee's own contributions and tax,
         // and nothing else. Computed here from the payslip's columns rather than read off the

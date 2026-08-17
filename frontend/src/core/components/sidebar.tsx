@@ -168,7 +168,24 @@ export function Sidebar({
   const items = navByVariant[variant];
 
   return (
-    <aside className="flex h-screen w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+    /*
+      `h-full`, never `h-screen`. This used to be `h-screen` (= `height: 100vh`),
+      which is measured against the LARGE viewport — the height the page would
+      have if the browser's URL bar were retracted — and does not shrink while
+      that bar is on screen. The shell puts this inside `fixed inset-0` (desktop)
+      or `fixed inset-y-0` (the drawer), both of which are the *visible* height,
+      so on a real phone the column was ~50-110px taller than its container and
+      `overflow-hidden` cut off the bottom of it: the user card and its menu.
+
+      It never reproduced in devtools device emulation, which has no URL bar, and
+      "Request desktop site" did not help either — that changes the user agent and
+      the layout width, not the browser chrome.
+
+      Filling the parent also removes the duplicate source of truth: the shell
+      already decides how tall this column is, and the two answers only ever
+      disagreed. Both parents give a definite height, so `100%` resolves in each.
+    */
+    <aside className="flex h-full w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground">
       {/* Brand block */}
       <div className="flex items-center gap-2.5 px-5 py-5">
         <span className="flex size-8 items-center justify-center rounded-lg bg-brand text-brand-foreground">

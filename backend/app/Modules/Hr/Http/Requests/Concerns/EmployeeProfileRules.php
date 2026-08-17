@@ -64,9 +64,10 @@ trait EmployeeProfileRules
             'currency' => ['nullable', 'string', 'size:3'],
             'bank_account_type' => ['nullable', Rule::in(EmployeeService::BANK_ACCOUNT_TYPES)],
             'bank_account_name' => ['nullable', 'string', 'max:255'],
-            'sss_contribution' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
-            'pagibig_contribution' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
-            'philhealth_contribution' => ['nullable', 'numeric', 'min:0', 'max:999999.99'],
+            // No per-employee statutory amounts. They overrode the EMPLOYEE side of a
+            // contribution while the employer side kept following the brackets, so one payslip
+            // could carry a pair that exists on no SSS table. Enrolment is the supported way to
+            // say someone does not pay one.
             // No allowance rules — Slice B9. An allowance is a programme in Company → Benefits,
             // and three fixed columns could never express a catalogue that grows and shrinks.
             // Government membership numbers for the payslip header. Free-form strings on

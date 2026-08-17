@@ -59,6 +59,9 @@ class Payslip extends Model
         'working_days', 'daily_rate', 'unpaid_days',
         'late_minutes', 'undertime_minutes', 'late_deduction', 'undertime_deduction',
         'late_penalty_days',
+        // Why those figures are what they are: the per-date charge ledger, and the withholding
+        // derivation. Snapshots — see the migration for why neither is derived at read time.
+        'attendance_lines', 'tax_basis',
     ];
 
     protected $casts = [
@@ -74,6 +77,8 @@ class Payslip extends Model
         'late_deduction' => 'decimal:2',
         'undertime_deduction' => 'decimal:2',
         'late_penalty_days' => 'decimal:2',
+        'attendance_lines' => 'array',
+        'tax_basis' => 'array',
         'reimbursements' => 'decimal:2',
         'adjustment_pay' => 'decimal:2',
         'separation_pay' => 'decimal:2',
@@ -116,14 +121,57 @@ class Payslip extends Model
         'disbursed_at' => 'datetime',
     ];
 
+    /**
+     * THE THREE HEADLINE FIGURES — gross, everything taken off it, and what was paid.
+     *
+     * WHY THIS EXISTS. The stored `gross` column is ALREADY NET OF ABSENCES: payroll subtracts the
+     * absence charge before writing it, and `total_deductions` therefore holds only what was taken
+     * AFTER that point (the statutory contributions and any benefit shares or loans). The payroll
+     * register printed those two columns raw, so a period that cost an employee ₱14,000 in absences
+     * read as "Gross ₱69,889.20 · Deductions ₱2,162.50" — a near-full-pay period with the single
+     * largest thing that happened to it invisible, while the payslip beside it showed the charge in
+     * full. Both were internally consistent and they described different months.
+     *
+     * So the register now states gross the way the document does — the FULL period earnings, before
+     * the absence charge — and counts that charge among the deductions where the reader can see it.
+     * `deductions` is derived as `gross − net` rather than summed from the components, which makes
+     * the row reconcile by construction; it comes to exactly
+     * `absence_deduction + other_deductions + SSS + PhilHealth + Pag-IBIG + withholding tax`.
+     *
+     * NOT a replacement for the stored columns, which stay as the engine's own record and are what
+     * the BIR reports and the reconciliation report read. This is how the figures are PRESENTED.
+     *
+     * @return array{gross: float, deductions: float, net: float}
+     */
+    public function registerTotals(): array
+    {
+        $gross = round((float) $this->gross + (float) $this->absence_deduction, 2);
+        $net = round((float) $this->net_pay, 2);
+
+        return [
+            'gross' => $gross,
+            'deductions' => round($gross - $net, 2),
+            'net' => $net,
+        ];
+    }
+
     public function payrollRun(): BelongsTo
     {
         return $this->belongsTo(PayrollRun::class);
     }
 
+    /**
+     * The employee this belongs to — `withTrashed()` because a SEPARATION SOFT-DELETES THEM.
+     *
+     * Without it the default scope resolves this to null the moment somebody leaves, and every
+     * Resource that reads a name through it throws, taking the whole list endpoint down with it —
+     * one 500 for the entire page because one row belonged to a leaver. Their history does not
+     * stop being theirs when they go, and a record that cannot say whose it is is worse than one
+     * that names someone who has left.
+     */
     public function employee(): BelongsTo
     {
-        return $this->belongsTo(Employee::class);
+        return $this->belongsTo(Employee::class)->withTrashed();
     }
 
     /**

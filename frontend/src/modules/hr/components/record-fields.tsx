@@ -31,19 +31,58 @@ export interface FieldSpec<T extends FieldValues> {
   hint?: string;
 }
 
+/*
+  `min-w-0` + `break-words` is the pair that keeps a value inside its card.
+
+  These render as grid items, and a grid item's automatic minimum is its
+  min-content width. An unbreakable token — an email address, a long URL, a
+  no-spaces address line — therefore widens its own column, and the grid pushes
+  past the card instead of wrapping. `min-w-0` drops that floor so the column
+  takes its `1fr` share, and `break-words` lets the token break rather than
+  spill out of the narrower column. Neither alone is enough: without `min-w-0`
+  the column still inflates (`overflow-wrap: break-word` deliberately does not
+  change intrinsic size), and without `break-words` the text just overflows a
+  correctly-sized column.
+*/
 export function Detail({ label, value }: { label: string; value?: string | null }) {
   return (
-    <div>
-      <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">
+    <div className="min-w-0">
+      {/* The label breaks too, not just the value: "University/College" and
+          "Health concern/condition" are ~160px at 13px uppercase, and nothing in
+          them is a break opportunity a browser will take on its own. */}
+      <p className="text-label font-bold uppercase tracking-wide break-words text-muted-foreground">
         {label}
       </p>
-      <p className="mt-1 text-sm text-foreground">{value || "—"}</p>
+      <p className="mt-1 text-sm break-words text-foreground">{value || "—"}</p>
     </div>
   );
 }
 
-// A titled subsection (teal header) with a 3-column detail grid, matching the
-// expanded personal record. `divider` adds a top rule to separate stacked sections.
+/*
+  Column counts come from the *card's* width, not the viewport's.
+
+  `sm:grid-cols-2 lg:grid-cols-3` was the bug behind labels escaping their card.
+  These grids sit in the record's right-hand panel, beside a fixed 300px rail —
+  so the panel is always the viewport minus a constant, and the two widths are
+  not proportional. `lg:grid-cols-3` fired at a 1024px viewport, where the card
+  is 332px wide and each of the three columns gets 89px. "University/College" is
+  ~160px at 13px uppercase, so it had nowhere to go but out.
+
+  A container query asks the question that actually matters — "is this card wide
+  enough for three columns?" — so the grid can never outrun its own box. The
+  thresholds hold every column to 208px or wider, against a ~160px worst-case
+  label. They are also picked so the two dialogs that render `Section` keep the
+  counts they have today; only the broken 1024–1500px range on the record
+  changes.
+
+  The `@container` wrapper pays a second dividend: `container-type: inline-size`
+  applies size containment, so the grid's contents can no longer inflate the
+  wrapper's own width either.
+*/
+const FIELD_GRID = "grid grid-cols-1 gap-x-8 gap-y-5 @md/fields:grid-cols-2";
+
+// A titled subsection (teal header) with a detail grid, matching the expanded
+// personal record. `divider` adds a top rule to separate stacked sections.
 export function Section({
   title,
   divider,
@@ -56,8 +95,8 @@ export function Section({
   return (
     <div className={cn(divider && "border-t border-border pt-6")}>
       <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">{title}</p>
-      <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-        {children}
+      <div className="@container/fields">
+        <div className={cn(FIELD_GRID, "@3xl/fields:grid-cols-3")}>{children}</div>
       </div>
     </div>
   );
@@ -76,15 +115,19 @@ export function FieldGrid<T extends FieldValues>({
   columns?: 3 | 4;
 }) {
   return (
-    <div
-      className={cn(
-        "grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2",
-        columns === 3 ? "lg:grid-cols-3" : "lg:grid-cols-4",
-      )}
-    >
-      {specs.map((spec) => (
-        <RecordField key={String(spec.name)} spec={spec} editing={editing} form={form} />
-      ))}
+    // See FIELD_GRID above for why these are container queries.
+    <div className="@container/fields">
+      <div
+        className={cn(
+          FIELD_GRID,
+          "@3xl/fields:grid-cols-3",
+          columns === 4 && "@5xl/fields:grid-cols-4",
+        )}
+      >
+        {specs.map((spec) => (
+          <RecordField key={String(spec.name)} spec={spec} editing={editing} form={form} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -108,8 +151,11 @@ export function RecordField<T extends FieldValues>({
   const error = errorFor(form, spec.name);
 
   return (
-    <div className="space-y-1.5">
-      <label className="block text-label font-bold uppercase tracking-wide text-muted-foreground">
+    // `min-w-0` for the same reason as `Detail`: an `<input>` carries an
+    // intrinsic width from its default `size`, which would otherwise set a floor
+    // under the column and widen the grid past the card while editing.
+    <div className="min-w-0 space-y-1.5">
+      <label className="block text-label font-bold uppercase tracking-wide break-words text-muted-foreground">
         {spec.label}
       </label>
       {spec.kind === "select" ? (

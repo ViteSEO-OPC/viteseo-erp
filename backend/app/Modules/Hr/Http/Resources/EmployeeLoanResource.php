@@ -15,6 +15,13 @@ class EmployeeLoanResource extends JsonResource
         return [
             'id' => $this->id,
             'employee_id' => $this->employee_id,
+            // Only on the cross-employee list, where a row has to say WHOSE loan it is. The
+            // per-record list leaves it unloaded and the key resolves to null, so that payload
+            // is byte-identical to before.
+            'employee' => $this->whenLoaded('employee', fn () => [
+                'id' => $this->employee?->id,
+                'name' => $this->employee?->user?->name,
+            ]),
             'type' => $this->type,
             'reference' => $this->reference,
             'principal' => (float) $this->principal,

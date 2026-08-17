@@ -121,10 +121,6 @@ export default function PayrollRequestsPage() {
       <section className="mt-6">
         <h2 className="mb-3 text-h3 font-bold text-foreground">Signed hard copy requests</h2>
         <PayslipQueue />
-        <p className="mt-3 text-sm text-muted-foreground">
-          Employees can already view and download their payslips. These are requests for a
-          printed, signed copy — approve to prepare one, or decline with a reason.
-        </p>
       </section>
 
       {/* Payroll inquiries */}
@@ -354,11 +350,6 @@ function InquiryQueue() {
     <section className="mt-10">
       <div className="flex items-center gap-3">
         <h2 className="text-h3 font-bold text-foreground">Payroll inquiry queue</h2>
-        {hasHighPriority && (
-          <span className="inline-flex items-center rounded-full bg-danger px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-white">
-            High priority
-          </span>
-        )}
       </div>
       <p className="mt-1 mb-4 text-sm text-muted-foreground">
         Employees raise inquiries from a specific payslip — the pay period shows in the table.

@@ -30,6 +30,25 @@ class LoanService
     public function __construct(private readonly AuditService $audit) {}
 
     /** @return Collection<int, EmployeeLoan> */
+    /**
+     * Loans across ALL employees, optionally by status — the queue HR decides from.
+     *
+     * There was no such list. `forEmployee()` is per-record, so a loan sitting at `requested`
+     * could only be found by opening the employee it belonged to and scrolling the Compensation
+     * tab, which meant the dashboard could not show one and nobody knew it was waiting.
+     *
+     * @return Collection<int, EmployeeLoan>
+     */
+    public function all(?string $status = null): Collection
+    {
+        return EmployeeLoan::query()
+            ->when($status !== null, fn ($q) => $q->where('status', $status))
+            ->with(['employee.user', 'policy'])
+            ->orderByDesc('requested_at')
+            ->orderByDesc('id')
+            ->get();
+    }
+
     public function forEmployee(Employee $employee): Collection
     {
         return EmployeeLoan::where('employee_id', $employee->id)

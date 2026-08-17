@@ -137,17 +137,19 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
         <div className="flex flex-wrap gap-2">
           {employee.is_separated ? (
             <>
-              <Button variant="outline" onClick={() => setMode("reinstate")}>
+              <Button type="button" variant="outline" onClick={() => setMode("reinstate")}>
                 <UserCheck />
                 Reinstate
               </Button>
-              <Button variant="outline" onClick={() => setMode("rehire")}>
+              <Button type="button" variant="outline" onClick={() => setMode("rehire")}>
                 <UserPlus />
                 Rehire
               </Button>
             </>
           ) : (
-            <Button variant="outline" onClick={() => setMode("separate")}>
+            /* type="button" matters: this section renders inside the Job tab's <form>, and a
+               bare button would default to submit — opening the dialog AND silently saving. */
+            <Button type="button" variant="outline" onClick={() => setMode("separate")}>
               <UserMinus />
               End employment
             </Button>
