@@ -1,5 +1,7 @@
 """Website Intelligence detector + audit tests (pure, no network)."""
 
+import pytest
+import scrapy
 from parsel import Selector
 
 from scraper.website_intelligence import detectors
@@ -108,3 +110,182 @@ def test_normalize_rejects_longer_word_with_no_dot():
 
 def test_normalize_rejects_freeform_text_with_whitespace():
     assert normalize_website_url("This is just a Test") is None
+
+
+# ── Scheme-bearing values that scrapy.Request cannot parse ──────────────────────────────────────
+#
+# A scheme alone does not make a value requestable. These inputs all start with http(s) and would
+# reach scrapy.Request, where they raise ValueError *inside* the spider's start() generator and
+# abort the whole crawl. Each one below is a value that really did crash before this was fixed.
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://example.com [old site]",  # a note appended in the free-text field
+        "https://[example.com](https://example.com)",  # a pasted markdown link
+        "http://[www.site.com",  # stray opening bracket
+        "http://exa]mple.com",  # stray closing bracket
+        "http://[",  # bracket alone
+    ],
+)
+def test_normalize_rejects_unparseable_bracket_values(value):
+    """Unmatched brackets make urlsplit raise 'Invalid IPv6 URL' — reject before Scrapy sees it."""
+    assert normalize_website_url(value) is None
+
+
+@pytest.mark.parametrize("value", ["https://example.com:99999", "https://example.com:abc"])
+def test_normalize_rejects_malformed_port(value):
+    """A bad port parses cleanly and only raises when read — urlsplit succeeding is not enough."""
+    assert normalize_website_url(value) is None
+
+
+@pytest.mark.parametrize("value", ["https://", "http://", "https://:80"])
+def test_normalize_rejects_scheme_with_no_host(value):
+    """Parseable but nothing to request."""
+    assert normalize_website_url(value) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://[::1]:8000/",  # genuine IPv6 literal — the bracket check must not overreach
+        "https://[2001:db8::1]/",
+        "https://example.com:8080/path?q=1",  # a valid port still passes
+        "https://user:pw@example.com/x",
+    ],
+)
+def test_normalize_keeps_valid_parseable_urls_unchanged(value):
+    """The guard rejects only what Scrapy cannot construct — real URLs pass through untouched."""
+    assert normalize_website_url(value) == value
+
+
+def test_every_normalized_url_can_build_a_scrapy_request():
+    """The invariant behind the fix: a non-None return is always requestable.
+
+    This is the assertion that would have caught the original bug — it calls the real
+    scrapy.Request, so any value the normalizer lets through must survive request construction.
+    """
+    candidates = [
+        "https://example.com [old site]",
+        "https://[example.com](https://example.com)",
+        "http://[",
+        "http://exa]mple.com",
+        "https://example.com:99999",
+        "https://example.com:abc",
+        "https://",
+        "www.example.com",
+        "https://[::1]:8000/",
+        "google.com",
+        "ASD",
+        "This is just a Test",
+    ]
+
+    for raw in candidates:
+        url = normalize_website_url(raw)
+        if url is None:
+            continue
+        scrapy.Request(url)  # must not raise
+
+
+# ── A malformed value must not stop the rest of the queue ───────────────────────────────────────
+#
+# The original bug was not just "one lead fails". scrapy.Request is called inside the spider's
+# start() async generator, so a raise there aborts the ENTIRE crawl: every lead queued after the
+# bad one is silently never audited. These tests pin valid -> malformed -> valid ordering.
+
+
+class _RecordingCrawlerProcess:
+    """Stands in for Scrapy's CrawlerProcess — records the queue instead of crawling."""
+
+    instances: list["_RecordingCrawlerProcess"] = []
+
+    def __init__(self, settings=None):
+        self.settings = settings or {}
+        self.queue = None
+        self.started = False
+        _RecordingCrawlerProcess.instances.append(self)
+
+    def crawl(self, spider_cls, queue=None, user_agent=""):
+        self.queue = queue
+
+    def start(self):
+        self.started = True
+
+
+class _QueueOnlyClient:
+    """CRM client stand-in: serves the queue, records any write attempt."""
+
+    writes: list = []
+
+    def __init__(self, *, base_url, token, user_agent):
+        pass
+
+    def fetch_enrichment_queue(self, limit):
+        return [
+            {"id": "1", "website": "https://good-one.com"},
+            {"id": "2", "website": "https://example.com [old site]"},  # crashed the crawl before
+            {"id": "3", "website": "https://good-two.com"},
+        ]
+
+    def close(self):
+        pass
+
+
+def _audit_config():
+    from scraper.config import Config
+
+    return Config(
+        discovery_provider="openstreetmap",
+        crm_base_url="http://localhost:8001/api/v1/crm",
+        crm_token="test-token-not-real",
+        overpass_url="",
+        nominatim_url="",
+        user_agent="test",
+        request_timeout=30.0,
+    )
+
+
+def test_run_audit_skips_malformed_and_keeps_the_following_valid_lead(monkeypatch):
+    """valid -> malformed -> valid: lead 2 is dropped, lead 3 still reaches the crawl."""
+    from scraper.website_intelligence import runner
+
+    _RecordingCrawlerProcess.instances = []
+    monkeypatch.setattr(runner, "CrmIngestClient", _QueueOnlyClient)
+    monkeypatch.setattr(runner, "CrawlerProcess", _RecordingCrawlerProcess)
+
+    rc = runner.run_audit(_audit_config(), limit=50, commit=False)
+
+    assert rc == 0
+    process = _RecordingCrawlerProcess.instances[0]
+    assert [item["id"] for item in process.queue] == ["1", "3"]  # lead 3 survived lead 2
+    assert [item["website"] for item in process.queue] == [
+        "https://good-one.com",
+        "https://good-two.com",
+    ]
+    # The dry-run contract is unchanged by this fix.
+    assert process.settings["CRM_COMMIT"] is False
+
+
+def test_spider_start_yields_every_request_after_a_malformed_value_is_filtered():
+    """Draining the real spider generator over the filtered queue must not raise."""
+    import asyncio
+
+    from scraper.website_intelligence.spider import WebsiteAuditSpider
+
+    raw = [
+        {"id": "1", "website": "https://good-one.com"},
+        {"id": "2", "website": "https://example.com [old site]"},
+        {"id": "3", "website": "https://good-two.com"},
+    ]
+    # Same filter run_audit applies before the crawl starts.
+    queue = [
+        {**item, "website": normalize_website_url(item["website"])}
+        for item in raw
+        if normalize_website_url(item["website"])
+    ]
+
+    async def drain():
+        return [request.url async for request in WebsiteAuditSpider(queue=queue).start()]
+
+    assert asyncio.run(drain()) == ["https://good-one.com", "https://good-two.com"]
