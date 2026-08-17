@@ -1,0 +1,20 @@
+{
+  "type": "node",
+  "id": 255068024,
+  "lat": 14.563184,
+  "lon": 121.0373402,
+  "tags": {
+    "addr:city": "Makati",
+    "addr:housename": "West Tower, One Rockwell",
+    "addr:street": "Rockwell Drive",
+    "amenity": "cafe",
+    "brand": "Starbucks",
+    "brand:wikidata": "Q37158",
+    "brand:wikipedia": "en:Starbucks",
+    "cuisine": "coffee_shop",
+    "name": "Starbucks",
+    "official_name": "Starbucks Coffee",
+    "takeaway": "yes",
+    "website": "https://www.starbucks.com/"
+  }
+}
