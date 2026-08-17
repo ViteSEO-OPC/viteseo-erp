@@ -14,6 +14,7 @@ from scrapy.crawler import CrawlerProcess
 from scraper.config import Config
 from scraper.ingest import CrmIngestClient
 from scraper.website_intelligence.spider import WebsiteAuditSpider
+from scraper.website_intelligence.urls import normalize_website_url
 
 
 def run_audit(config: Config, limit: int, *, commit: bool = False) -> int:
@@ -38,6 +39,31 @@ def run_audit(config: Config, limit: int, *, commit: bool = False) -> int:
         print("No businesses with a website URL to audit — nothing to do.", file=sys.stderr)
         return 0
 
+    # The CRM stores `website` as unvalidated free text (see urls.py), so the queue can contain
+    # values `scrapy.Request` cannot use at all ("ASD", "This is just a Test") or that are missing
+    # a scheme ("www.example.com"). Filtering here — before the crawl starts — means a bad value
+    # never reaches Scrapy's request/retry machinery, so it can't interrupt the rest of the queue.
+    valid_queue = []
+    skipped = 0
+    for item in queue:
+        url = normalize_website_url(str(item.get("website", "")))
+        if url is None:
+            skipped += 1
+            print(
+                f"Skipping lead {item.get('id')} — invalid website URL: {item.get('website')!r}",
+                file=sys.stderr,
+            )
+            continue
+        valid_queue.append({**item, "website": url})
+
+    if skipped:
+        print(f"Skipped {skipped} lead(s) with an unusable website value.", file=sys.stderr)
+
+    if not valid_queue:
+        print("No businesses with a usable website URL to audit — nothing to do.", file=sys.stderr)
+        return 0
+
+    queue = valid_queue
     mode = "COMMIT" if commit else "DRY RUN"
     print(f"[{mode}] Auditing {len(queue)} website(s)...", file=sys.stderr)
 

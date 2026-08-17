@@ -4,6 +4,7 @@ from parsel import Selector
 
 from scraper.website_intelligence import detectors
 from scraper.website_intelligence.audit import build_audit, unreachable_audit
+from scraper.website_intelligence.urls import normalize_website_url
 
 SAMPLE_HTML = """
 <html><head>
@@ -72,3 +73,38 @@ def test_unreachable_audit():
     assert payload["website_reachable"] is False
     assert payload["https_enabled"] is False
     assert payload["audit"]["unreachable"] is True
+
+
+# ── normalize_website_url — the queue's `website` field is unvalidated free text ────────────────
+
+
+def test_normalize_https_url_passes_through_unchanged():
+    assert normalize_website_url("https://example.com") == "https://example.com"
+
+
+def test_normalize_http_url_passes_through_unchanged():
+    # http is preserved, never rewritten to https — a bad host behind either scheme is a
+    # network-layer failure Scrapy already handles via on_error(), not this function's job.
+    assert normalize_website_url("http://example.com") == "http://example.com"
+
+
+def test_normalize_schemeless_hostname_gets_https():
+    assert normalize_website_url("www.example.com") == "https://www.example.com"
+
+
+def test_normalize_schemeless_bare_domain_gets_https():
+    # A real domain shape (dot-separated labels) is enough, even without a "www." prefix — this is
+    # the same shape as "google.com" appearing (incorrectly, but validly-shaped) in real lead data.
+    assert normalize_website_url("google.com") == "https://google.com"
+
+
+def test_normalize_rejects_word_with_no_dot():
+    assert normalize_website_url("ASD") is None
+
+
+def test_normalize_rejects_longer_word_with_no_dot():
+    assert normalize_website_url("ASDASDSAD") is None
+
+
+def test_normalize_rejects_freeform_text_with_whitespace():
+    assert normalize_website_url("This is just a Test") is None
