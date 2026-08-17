@@ -1,0 +1,4 @@
+httpx>=0.27,<1.0
+pydantic>=2.6,<3.0
+scrapy>=2.13,<3.0
+parsel>=1.9

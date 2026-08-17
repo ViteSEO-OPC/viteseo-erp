@@ -1,0 +1,35 @@
+{
+  "place_id": 260287639,
+  "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+  "osm_type": "node",
+  "osm_id": 4507869188,
+  "lat": "14.5548860",
+  "lon": "121.0221378",
+  "category": "amenity",
+  "type": "restaurant",
+  "place_rank": 30,
+  "importance": 5.8607614251880943e-05,
+  "addresstype": "amenity",
+  "name": "Sizzlin' Steak",
+  "display_name": "Sizzlin' Steak, Dela Rosa Street, Legazpi Village, San Lorenzo, District I, Makati, Southern Manila District, Metro Manila, 1229, Philippines",
+  "address": {
+    "amenity": "Sizzlin' Steak",
+    "road": "Dela Rosa Street",
+    "neighbourhood": "Legazpi Village",
+    "quarter": "San Lorenzo",
+    "city_district": "District I",
+    "city": "Makati",
+    "state_district": "Southern Manila District",
+    "region": "Metro Manila",
+    "ISO3166-2-lvl3": "PH-00",
+    "postcode": "1229",
+    "country": "Philippines",
+    "country_code": "ph"
+  },
+  "boundingbox": [
+    "14.5548360",
+    "14.5549360",
+    "121.0220878",
+    "121.0221878"
+  ]
+}
