@@ -109,7 +109,7 @@ export function DashboardProjectCard({
             {formatDate(project.created_at)}
           </span>
         </div>
-        <h3 className="mt-4 line-clamp-2 text-lg font-bold tracking-heading text-ink">
+        <h3 className="mt-4 line-clamp-2 text-lg font-bold text-ink">
           {project.name}
         </h3>
         <div className="mt-4 flex items-center gap-4">

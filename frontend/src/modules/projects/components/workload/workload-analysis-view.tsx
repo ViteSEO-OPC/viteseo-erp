@@ -97,7 +97,7 @@ export function WorkloadAnalysisView() {
     <div className="px-4 py-6 sm:px-6 lg:px-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Workload Analysis</h1>
+          <h1 className="text-2xl font-bold text-ink sm:text-3xl">Workload Analysis</h1>
           <p className="mt-2 text-base text-ink-soft">
             {isManager
               ? "Monitor workload distribution and task effort across your team"
@@ -224,7 +224,7 @@ export function WorkloadAnalysisView() {
       {isManager ? (
         <Card className="mt-6 p-4 sm:p-6">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-bold tracking-heading text-ink">
+            <h2 className="text-lg font-bold text-ink">
               {scope === "group" ? "Group Workload" : "Employee Workload"}
             </h2>
             <CategoryLegend />
@@ -306,7 +306,7 @@ function MemberWorkloadPanel({
   return (
     <Card className="mt-6 grid grid-cols-1 gap-8 p-4 sm:p-6 lg:grid-cols-2">
       <div>
-        <h2 className="text-lg font-bold tracking-heading text-ink">My Workload</h2>
+        <h2 className="text-lg font-bold text-ink">My Workload</h2>
         {isLoading ? (
           <div className="mt-4 flex flex-col items-center gap-6 sm:flex-row sm:gap-8">
             <Skeleton className="h-32 w-32 shrink-0 rounded-full" />
@@ -341,7 +341,7 @@ function MemberWorkloadPanel({
 
       <div>
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold tracking-heading text-ink">Completed Tasks</h2>
+          <h2 className="text-lg font-bold text-ink">Completed Tasks</h2>
           <span className="text-xl font-bold text-ink">{completion?.percent ?? 0}%</span>
         </div>
         <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-line">

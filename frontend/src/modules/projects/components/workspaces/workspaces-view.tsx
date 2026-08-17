@@ -115,7 +115,7 @@ export function WorkspacesView() {
     <div className="px-4 py-6 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Work Spaces</h1>
+          <h1 className="text-2xl font-bold text-ink sm:text-3xl">Work Spaces</h1>
           <p className="mt-1 text-ink-soft">Organize projects and teams by workspace.</p>
         </div>
         <Button onClick={() => setModalOpen(true)}>
@@ -152,7 +152,7 @@ export function WorkspacesView() {
 
         {!isLoading && !isError && workspaces.length === 0 && (
           <Card className="p-10 text-center">
-            <p className="text-lg font-bold tracking-heading text-ink">No workspaces yet</p>
+            <p className="text-lg font-bold text-ink">No workspaces yet</p>
             <p className="mt-1 text-ink-soft">Create your first workspace to get started.</p>
             <Button className="mt-4" onClick={() => setModalOpen(true)}>
               <PlusIcon />
@@ -197,7 +197,7 @@ export function WorkspacesView() {
                   <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-soft text-lg font-bold text-brand-mid">
                     {ws.name.charAt(0).toUpperCase()}
                   </span>
-                  <h3 className="mt-4 text-lg font-bold tracking-heading text-ink">{ws.name}</h3>
+                  <h3 className="mt-4 text-lg font-bold text-ink">{ws.name}</h3>
                   <p className="mt-1 line-clamp-2 text-sm text-ink-soft">
                     {ws.description || 'No description'}
                   </p>

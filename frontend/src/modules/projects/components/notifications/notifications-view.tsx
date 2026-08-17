@@ -33,7 +33,7 @@ export function NotificationsView() {
     <div className="px-4 py-6 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Notifications</h1>
+        <h1 className="text-2xl font-bold text-ink sm:text-3xl">Notifications</h1>
         <button
           type="button"
           onClick={markAllRead}

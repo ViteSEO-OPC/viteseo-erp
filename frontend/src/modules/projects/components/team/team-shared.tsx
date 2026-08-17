@@ -412,7 +412,7 @@ export function GroupsPanel({
     <section className="min-w-0 lg:relative">
       <div className="flex flex-col lg:absolute lg:inset-0">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-bold tracking-heading text-ink">Groups</h2>
+          <h2 className="text-lg font-bold text-ink">Groups</h2>
           <div className="flex items-center gap-2">
             <Button asChild variant="link" size="sm">
               <Link href="/sprintly/groups">View all groups</Link>
@@ -478,7 +478,7 @@ export function GroupCard({ group }: { group: Group }) {
   return (
     <Card className="rounded-xl p-6">
       <h3
-        className="truncate text-lg font-bold tracking-heading text-ink"
+        className="truncate text-lg font-bold text-ink"
         title={group.name}
       >
         {group.name}

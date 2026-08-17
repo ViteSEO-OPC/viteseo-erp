@@ -83,7 +83,7 @@ function ProjectCard({
           </span>
         </div>
 
-        <h3 className="mt-4 line-clamp-2 text-lg font-bold tracking-heading text-ink">
+        <h3 className="mt-4 line-clamp-2 text-lg font-bold text-ink">
           {project.name}
         </h3>
 
@@ -349,7 +349,7 @@ export function WorkspaceDetailView({
               !projectsQuery.isError &&
               projects.length === 0 && (
                 <Card className="mt-4 p-10 text-center">
-                  <p className="text-lg font-bold tracking-heading text-ink">No projects yet</p>
+                  <p className="text-lg font-bold text-ink">No projects yet</p>
                   <p className="mt-1 text-ink-soft">
                     {isManager
                       ? "Create your first project in this workspace."

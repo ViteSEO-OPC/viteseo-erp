@@ -78,7 +78,7 @@ export function NotesSheet({
         ref={panelRef}
         tabIndex={-1}
         className={cn(
-          "relative flex h-[90dvh] w-full flex-col rounded-t-2xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-elevated outline-none",
+          "relative flex h-[90dvh] w-full flex-col rounded-t-2xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-2xl outline-none",
           SHEET_FROM_BOTTOM_ENTER,
         )}
       >

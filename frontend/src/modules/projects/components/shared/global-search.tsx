@@ -224,7 +224,7 @@ export function GlobalSearch() {
           id={listboxId}
           role="listbox"
           aria-label="Search results"
-          className="absolute left-0 top-[calc(100%+8px)] z-20 w-full overflow-hidden rounded-2xl border border-line bg-surface shadow-lift"
+          className="absolute left-0 top-[calc(100%+8px)] z-20 w-full overflow-hidden rounded-2xl border border-line bg-surface shadow-xl"
         >
           <div className="max-h-[380px] overflow-y-auto py-1">
             {!isTermLongEnough ? (

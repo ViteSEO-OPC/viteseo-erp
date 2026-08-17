@@ -71,7 +71,7 @@ export function MemberTeamView() {
     <div className="px-4 py-6 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Team</h1>
+        <h1 className="text-2xl font-bold text-ink sm:text-3xl">Team</h1>
       </div>
 
       {/* Stat cards — two wide cards (Total Members, Groups) */}
@@ -130,7 +130,7 @@ export function MemberTeamView() {
               heading lines up with the Groups heading beside it. */}
           <div className="min-w-0">
             <div className="flex min-h-9 items-center">
-              <h2 className="text-lg font-bold tracking-heading text-ink">
+              <h2 className="text-lg font-bold text-ink">
                 Members
               </h2>
             </div>

@@ -453,7 +453,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               fit side by side. Measuring the card itself does. */}
           <Card className="@container/progress gap-3 p-6">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-lg font-bold tracking-heading text-ink">Overall Progress</h2>
+              <h2 className="text-lg font-bold text-ink">Overall Progress</h2>
               <span className="text-sm font-bold text-ink">
                 {donePct}% complete
               </span>
@@ -506,7 +506,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           <section className="mt-6 flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold tracking-heading text-ink">
+                <h2 className="text-lg font-bold text-ink">
                   {isManager ? "Tasks" : "My Tasks"}
                 </h2>
                 <span className="text-xs font-bold text-ink-faint">
@@ -589,7 +589,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
           )}
           <Card className="gap-3 p-6">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-lg font-bold tracking-heading text-ink">Team Members</h2>
+              <h2 className="text-lg font-bold text-ink">Team Members</h2>
               <span className="text-xs font-bold text-ink-faint">
                 {members.length}
               </span>
@@ -642,7 +642,7 @@ export function ProjectDetailView({ projectId }: ProjectDetailViewProps) {
               managed on the Groups page. */}
           <Card className="gap-3 p-6">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-lg font-bold tracking-heading text-ink">Groups</h2>
+              <h2 className="text-lg font-bold text-ink">Groups</h2>
               <span className="text-xs font-bold text-ink-faint">
                 {(project?.groups ?? []).length}
               </span>

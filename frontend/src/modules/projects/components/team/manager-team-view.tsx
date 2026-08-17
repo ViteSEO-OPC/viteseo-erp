@@ -77,7 +77,7 @@ export function ManagerTeamView() {
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
       {/* Header */}
-      <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Team</h1>
+      <h1 className="text-2xl font-bold text-ink sm:text-3xl">Team</h1>
 
       {/* Stat cards — 2-up on phones so they stay glanceable instead of a
           three-card vertical stack pushing the table below the fold. */}
@@ -142,7 +142,7 @@ export function ManagerTeamView() {
               lines up with the Groups heading beside it. */}
           <div className="min-w-0">
             <div className="flex min-h-9 items-center">
-              <h2 className="text-lg font-bold tracking-heading text-ink">
+              <h2 className="text-lg font-bold text-ink">
                 Members
               </h2>
             </div>

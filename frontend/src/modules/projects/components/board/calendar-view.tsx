@@ -170,7 +170,7 @@ function DayCell({
 
       {open && pos && (
         <div
-          className="fixed z-40 w-60 rounded-xl border border-line bg-surface p-2 shadow-lift"
+          className="fixed z-40 w-60 rounded-xl border border-line bg-surface p-2 shadow-xl"
           style={{
             left: pos.left,
             top: pos.above ? undefined : pos.top + 4,
@@ -244,7 +244,7 @@ export function CalendarView({
   return (
     <Card className="overflow-hidden p-4 sm:p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-lg font-bold tracking-heading text-ink">{monthLabel}</h3>
+        <h3 className="text-lg font-bold text-ink">{monthLabel}</h3>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"

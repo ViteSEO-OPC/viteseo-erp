@@ -149,7 +149,7 @@ export function NotesTaskPanel({
       />
       <aside
         className={cn(
-          "relative flex h-full w-[380px] max-w-[85%] flex-col border-l border-line bg-surface p-4 shadow-elevated",
+          "relative flex h-full w-[380px] max-w-[85%] flex-col border-l border-line bg-surface p-4 shadow-xl",
           SHEET_FROM_RIGHT_ENTER,
         )}
       >

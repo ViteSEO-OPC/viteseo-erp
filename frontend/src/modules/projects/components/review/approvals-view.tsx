@@ -174,7 +174,7 @@ export function ApprovalsView() {
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Approvals</h1>
+      <h1 className="text-2xl font-bold text-ink sm:text-3xl">Approvals</h1>
       <p className="mt-2 text-base text-ink-soft">
         Work submitted by members. Edit it if it needs scoping, then approve it
         onto the board or send it back with a reason.

@@ -138,7 +138,7 @@ export function ArchivesView() {
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
       {/* Header */}
-      <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Archives</h1>
+      <h1 className="text-2xl font-bold text-ink sm:text-3xl">Archives</h1>
       <p className="mt-2 text-base text-ink-soft">
         View and restore soft-deleted items.
       </p>

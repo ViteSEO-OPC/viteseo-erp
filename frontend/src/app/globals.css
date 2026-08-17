@@ -233,37 +233,6 @@
 }
 
 /*
-  ── Projects-only shape scale (DESIGN-notion.md § Shapes) ──────────────────
-
-  Notion's radii are tighter than the platform's: 12px feature cards, 16px large
-  containers, 8px utility buttons, 4–5px for fields and list rows. The platform
-  sits at a 10px control radius, which puts cards at 14px and modals at 18px.
-
-  Every radius utility compiles to `calc(var(--radius) * n)` — `.rounded-xl` is
-  `calc(var(--radius) * 1.4)`, `.rounded-2xl` is `* 1.8` — so the whole scale
-  moves from this one variable. At 8.75px it lands on cards ≈12px and modals
-  ≈16px (Notion's `lg` and `xl`) with buttons and fields at ~7px, close enough
-  to the 8px utility step that splitting them is not worth touching core for.
-
-  ON <html>, NOT ON THE LAYOUT DIV. Radix portals its dialogs, dropdowns and
-  popovers to document.body, outside the module's own tree — a scope on the
-  shell would re-skin the page and leave every modal on the platform radius. The
-  attribute is set and removed by <PaperTheme> in the Projects layout, so it
-  exists only while a Projects route is mounted and HR/CRM never see it.
-
-  Two things this deliberately does NOT do, both from the same reasoning — the
-  doc describes a MARKETING site and this is app chrome:
-    · No pill CTAs. `{rounded.full}` is specified for "Get Notion free", not for
-      the buttons in a product UI; Notion's own app chrome uses small radii.
-    · No 4px field radius split. Button, Input and Select all compile from
-      `rounded-md` in the shared kit, so fields cannot go tighter than buttons
-      without editing core.
-*/
-[data-design="paper"] {
-  --radius: 8.75px;
-}
-
-/*
   Projects (PMS) module design tokens — ported from Sprintly's style guide.
   Only names NOT already defined by the platform are added here (brand, info and
   radius-card already exist and are shared). This gives the Projects components
@@ -279,31 +248,15 @@
   /* Warm off-white the sidebar sets its labels in (Figma 801:22337). */
   --color-sidebar-ink: #fbfbef;
 
-  /*
-    ── Paper-calm surfaces (DESIGN-notion.md) ──────────────────────────────
-    The page canvas is a warm off-white and cards are pure white, so figure and
-    ground separate without a single heavy frame. This is the one structural
-    idea the whole language rests on: "a well-organized desk in good daylight".
-
-    Scope: these names are the Projects module's own. HR uses none of them, and
-    the only outside consumer is `bg-surface` in five CRM files — which is why
-    surface stays #ffffff (the value Notion specifies for cards anyway) while
-    the canvas moves. The brand palette below is untouched.
-  */
-  --color-canvas: #f6f5f4;
+  --color-canvas: #ffffff;
   --color-surface: #ffffff;
 
-  /*
-    Ink and hairlines warm to match the paper. Same near-black head, same
-    contrast ladder — the greys just stop being blue. #141414 stays: it is the
-    brand's ink and reads as Notion's "soft true black" already.
-  */
   --color-ink: #141414;
-  --color-ink-soft: #615d59;
-  --color-ink-faint: #a39e98;
+  --color-ink-soft: #6b7280;
+  --color-ink-faint: #9ca3af;
   --color-offwhite: #ffffff;
 
-  --color-line: #e6e6e6;
+  --color-line: #ececec;
   --color-line-dark: #262626;
 
   --color-success-soft: #dcfce7;
@@ -340,37 +293,4 @@
 
   /* Warm border that pairs with the cream surfaces (--color-line is cooler). */
   --color-line-warm: #e4e4d8;
-
-  /*
-    ── Display tracking (DESIGN-notion.md § Typography) ────────────────────
-    "Tight, heavy, quiet-confident": headlines carry negative tracking that
-    grows with size, so display copy reads as set rather than stretched. The
-    SIZE ramp is left alone — these are the module's existing headings, just
-    pulled in — and so is the family: Exo 2 is the brand's typeface, where
-    Notion's Inter is not ours to adopt.
-
-    Kept as em rather than px so a heading that steps up at `sm:` keeps its
-    tracking proportional instead of over-tightening at the larger size.
-  */
-  --tracking-display: -0.03em;
-  --tracking-heading: -0.02em;
-
-  /*
-    ── Elevation (DESIGN-notion.md § Elevation & Depth) ────────────────────
-    "Barely-there": many near-transparent layers so a surface lifts off the
-    paper instead of being dropped onto it. Level 0 is a hairline and no shadow
-    at all — the default for a card sitting on the canvas — so it needs no
-    token. Use `shadow-lift` for something genuinely floating (a popover, a
-    raised card) and `shadow-elevated` for modals.
-
-    These replace `shadow-xl`/`shadow-2xl` on Projects surfaces, which cast one
-    hard shadow the language explicitly rules out.
-  */
-  --shadow-lift:
-    0 0.175px 1.041px rgba(0, 0, 0, 0.01), 0 0.8px 2.925px rgba(0, 0, 0, 0.02),
-    0 2.025px 7.847px rgba(0, 0, 0, 0.027), 0 4px 18px rgba(0, 0, 0, 0.04);
-  --shadow-elevated:
-    0 0.5px 1.4px rgba(0, 0, 0, 0.012), 0 1.4px 3.9px rgba(0, 0, 0, 0.021),
-    0 3.4px 9.4px rgba(0, 0, 0, 0.028), 0 8px 22px rgba(0, 0, 0, 0.035),
-    0 23px 52px rgba(0, 0, 0, 0.05);
 }

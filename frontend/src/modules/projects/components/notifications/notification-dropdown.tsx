@@ -25,7 +25,7 @@ export function NotificationDropdown({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-[min(380px,calc(100vw_-_2rem))] overflow-hidden rounded-2xl border border-line bg-surface shadow-lift">
+    <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-[min(380px,calc(100vw_-_2rem))] overflow-hidden rounded-2xl border border-line bg-surface shadow-xl">
       <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-4 sm:px-5">
         <h3 className="text-base font-bold text-ink">Notifications</h3>
         <button

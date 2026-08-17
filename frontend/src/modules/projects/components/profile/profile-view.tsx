@@ -61,7 +61,7 @@ export function ProfileView() {
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Profile</h1>
+      <h1 className="text-2xl font-bold text-ink sm:text-3xl">Profile</h1>
 
       {/* Identity card */}
       <Card className="mt-8 p-6">
@@ -79,7 +79,7 @@ export function ProfileView() {
 
       {/* Edit form */}
       <Card className="mt-6 p-6">
-        <h3 className="text-lg font-bold tracking-heading text-ink">Edit profile</h3>
+        <h3 className="text-lg font-bold text-ink">Edit profile</h3>
         <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-5">
           {error && (
             <div className="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">

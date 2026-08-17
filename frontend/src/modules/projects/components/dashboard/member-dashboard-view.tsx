@@ -104,7 +104,7 @@ export function MemberDashboardView(): React.ReactElement {
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">Dashboard</h1>
+      <h1 className="text-2xl font-bold text-ink sm:text-3xl">Dashboard</h1>
 
       <div className="mt-6">
         <Tabs
@@ -185,7 +185,7 @@ export function MemberDashboardView(): React.ReactElement {
 
           {/* My upcoming deadlines */}
           <section className="mt-10">
-            <h2 className="text-lg font-bold tracking-heading text-ink">
+            <h2 className="text-lg font-bold text-ink">
               My Upcoming Deadlines
             </h2>
             {loading ? (
@@ -207,7 +207,7 @@ export function MemberDashboardView(): React.ReactElement {
           {/* Open tasks — unassigned work anyone may take, across every project
               (not just this member's). Claiming one puts them on that project. */}
           <section className="mt-10">
-            <h2 className="text-lg font-bold tracking-heading text-ink">Open Tasks</h2>
+            <h2 className="text-lg font-bold text-ink">Open Tasks</h2>
             <p className="mt-1 text-sm text-ink-soft">
               Unassigned work up for grabs. Claim one and it lands on your board.
             </p>

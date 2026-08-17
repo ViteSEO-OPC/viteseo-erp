@@ -83,7 +83,7 @@ export function ManagerDashboardView(): React.ReactElement {
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-8">
-      <h1 className="text-2xl font-bold tracking-display text-ink sm:text-3xl">
+      <h1 className="text-2xl font-bold text-ink sm:text-3xl">
         Overview
       </h1>
 
@@ -176,7 +176,7 @@ export function ManagerDashboardView(): React.ReactElement {
           {/* Upcoming + Activity */}
           <div className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
             <section>
-              <h2 className="text-lg font-bold tracking-heading text-ink">Upcoming Deadlines</h2>
+              <h2 className="text-lg font-bold text-ink">Upcoming Deadlines</h2>
               <div className="mt-4 space-y-4">
                 {loading ? (
                   <SkeletonList rows={3} />
@@ -223,7 +223,7 @@ export function ManagerDashboardView(): React.ReactElement {
             </section>
 
             <section>
-              <h2 className="text-lg font-bold tracking-heading text-ink">Activity Feed</h2>
+              <h2 className="text-lg font-bold text-ink">Activity Feed</h2>
               {/* Platform-wide: task and sub-task events from every project. */}
               <ActivityFeed className="mt-4 -mx-4" limit={6} showProject />
             </section>
@@ -235,7 +235,7 @@ export function ManagerDashboardView(): React.ReactElement {
                 isn't a failure — and red here competed with the genuine OVERDUE
                 badges further up the page. */}
             <div className="flex w-full items-center gap-2 rounded-lg bg-warning-soft px-4 py-2">
-              <h2 className="text-lg font-bold tracking-heading text-ink">Unassigned Tasks</h2>
+              <h2 className="text-lg font-bold text-ink">Unassigned Tasks</h2>
               <CountBubble tone="warning">{unassigned.length}</CountBubble>
             </div>
             {loading ? (

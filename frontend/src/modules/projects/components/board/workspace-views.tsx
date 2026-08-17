@@ -416,7 +416,7 @@ function WorkspaceViewsInner({
           <SkeletonBoard />
         ) : sorted.length === 0 ? (
           <Card className="p-10 text-center">
-            <p className="text-lg font-bold tracking-heading text-ink">
+            <p className="text-lg font-bold text-ink">
               No tasks match these filters
             </p>
             <p className="mt-1 text-ink-soft">

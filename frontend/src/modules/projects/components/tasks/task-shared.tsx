@@ -201,7 +201,7 @@ export function ModalShell({
         // No description in this layout; without this Radix logs a warning.
         aria-describedby={undefined}
         className={cn(
-          "flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 bg-surface p-0 shadow-elevated sm:max-w-[900px]",
+          "flex max-h-[90vh] w-full flex-col gap-0 overflow-hidden rounded-2xl border-0 bg-surface p-0 shadow-xl sm:max-w-[900px]",
           // Matches the module's own overlays rather than the shared Dialog's
           // 200ms — see lib/motion.ts.
           "duration-100",
