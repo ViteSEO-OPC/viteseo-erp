@@ -39,6 +39,10 @@ class AttendancePolicyService
         'late_tiers' => null,
         'undertime_deduction_mode' => 'none',
         'missing_clockout_mode' => 'no_deduction_flag_for_review',
+        // Item 5 — how long past the scheduled end an open punch is still "in progress". Past
+        // it the shift is abandoned and pay resolves it to the scheduled end. A DURATION, so
+        // each employee's cutoff is their own; see the migration for why not a clock time.
+        'missing_timeout_allowance_minutes' => 180,
         'early_arrival_mode' => 'none',
         // How an early punch is handled: allow (recorded as-is — today's behaviour),
         // defer (accepted, but stamped at the shift's start time), block (refused).

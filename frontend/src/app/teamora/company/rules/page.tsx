@@ -415,6 +415,10 @@ function AttendancePolicyEditor() {
   const [thresholdOver, setThresholdOver] = useState(String(th.over));
   const [thresholdCharge, setThresholdCharge] = useState(String(th.charge));
   const [lateFrom, setLateFrom] = useState(policy?.late_minutes_from ?? "start_time");
+  // Item 5 — how long past someone's own shift end an open punch is still "in progress".
+  const [timeoutAllowance, setTimeoutAllowance] = useState(
+    String(policy?.missing_timeout_allowance_minutes ?? 180),
+  );
   // daily_deduction_cap is fixed at 1.0 (a day can never cost more than a day's pay) and not
   // HR-editable — a sub-1 cap only ever mattered with rounding and just confused users.
 
@@ -471,6 +475,15 @@ function AttendancePolicyEditor() {
     );
     if (err) {
       toast.error(err);
+      return false;
+    }
+    return true;
+  }
+
+  function guardTimeoutAllowance(): boolean {
+    const n = Number(timeoutAllowance);
+    if (!Number.isInteger(n) || n < 30 || n > 720) {
+      toast.error("The wait after the shift ends must be between 30 minutes and 12 hours.");
       return false;
     }
     return true;
@@ -801,8 +814,9 @@ function AttendancePolicyEditor() {
             late_penalty_enabled: latePenaltyEnabled,
             lates_per_deduction: Number(latesPerDeduction),
             undertime_deduction_mode: undertimeMode,
+            missing_timeout_allowance_minutes: Number(timeoutAllowance),
             daily_deduction_cap: 1,
-          })
+          }, guardTimeoutAllowance)
         }
       >
         {/* Lateness — two switches that can BOTH be on. */}
@@ -866,10 +880,40 @@ function AttendancePolicyEditor() {
             ]}
           />
         </div>
+        <Hint>Leaving early is billed to the exact minute.</Hint>
+
+        <SubDivider />
+
+        {/* Item 5 — the missing time-out policy. */}
+        <SubHeading>When someone forgets to clock out</SubHeading>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-foreground">Wait</span>
+          <Input
+            id="pol-timeout-allowance"
+            type="number"
+            min={30}
+            max={720}
+            step={30}
+            value={timeoutAllowance}
+            onChange={(e) => setTimeoutAllowance(e.target.value)}
+            className="w-24"
+          />
+          <span className="text-sm text-foreground">
+            minutes after their shift ends, then treat the shift as finished.
+          </span>
+        </div>
         <Hint>
-          Leaving early is billed to the exact minute. A <strong>forgotten clock-out</strong> is
-          auto-credited to the scheduled end time — it never docks pay and never counts as overtime; it&apos;s
-          flagged in Violation history (set its alert levels under <strong>Violation flags</strong>).
+          Counted from <strong>each person&apos;s own shift end</strong>, never a fixed hour — so a
+          9-to-6 shift is settled at 9 PM and a 10 PM–6 AM shift at 9 AM the next morning. Anyone
+          who clocks out themselves before then is untouched, so there is no rush while they finish
+          their task list.
+        </Hint>
+        <Hint>
+          The shift is then paid up to its <strong>scheduled end</strong>: a full ordinary day,
+          night differential included, with <strong>no overtime and no undertime</strong>. An
+          approved overtime request does not extend it — overtime needs a real clock-out, so those
+          minutes only pay once HR corrects the record. It stays flagged in Violation history (set
+          its alert levels under <strong>Violation flags</strong>).
         </Hint>
       </SettingsDialog>
 

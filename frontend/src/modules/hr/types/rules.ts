@@ -94,6 +94,9 @@ export interface AttendancePolicy {
 
   undertime_deduction_mode: UndertimeDeductionMode;
   missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct
+  // Minutes past the scheduled end before an open punch counts as abandoned rather than still
+  // running. A DURATION, so each employee's cutoff is their own shift end + this. 30–720.
+  missing_timeout_allowance_minutes: number;
 
   early_arrival_mode: EarlyArrivalMode; // what early minutes are WORTH (inert for now)
   early_clock_in_mode: EarlyClockInMode; // what happens to an early punch

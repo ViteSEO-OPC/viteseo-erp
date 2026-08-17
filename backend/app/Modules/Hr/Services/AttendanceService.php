@@ -1047,6 +1047,89 @@ class AttendanceService
         return $out;
     }
 
+    /** Fallback allowance when a policy row predates the column (item 5). */
+    public const MISSING_TIMEOUT_ALLOWANCE_MIN = 180;
+
+    /**
+     * One row's worked window in work-date minute coordinates — the single place that decides
+     * what a shift's punches MEAN, including the one that never got closed (item 5).
+     *
+     * ABANDONED SHIFTS ARE DERIVED, NEVER STAMPED. A row with a time-in and no time-out, whose
+     * scheduled end passed more than the policy's allowance ago, resolves to the SCHEDULED END.
+     * Nothing is written: deriving is idempotent, cannot rewrite a paid period, and needs no
+     * scheduler — which this project does not have. The employee is paid a full ordinary shift
+     * including the night differential, and:
+     *
+     *   • OVERTIME IS STRUCTURALLY ZERO, not merely absent. Overtime is `out − scheduled end`,
+     *     and the derived `out` IS the scheduled end, so the subtraction cannot be positive.
+     *     That is the safety property: auto-resolution can never manufacture overtime.
+     *   • AN APPROVED OT REQUEST DOES NOT EXTEND IT. Approval is permission, not proof — deriving
+     *     an end from one would pay overtime nobody clocked, which is the exact failure the
+     *     approved-vs-punched overlap match exists to prevent. Such a day belongs in HR's queue.
+     *
+     * THE ALLOWANCE IS WHAT MAKES THIS SAFE. Without it a mid-cycle preview would resolve an end
+     * for someone who is on shift RIGHT NOW and pay hours not yet worked. Past `scheduled end +
+     * allowance` they are not still working, they forgot.
+     *
+     * NO SCHEDULED END, NO DERIVATION: a rest day or non-workday has no shift to be the end of,
+     * and an employee with no schedule has nothing to resolve against. Those rows stay unpriced
+     * and surface in the review queue instead of being guessed at.
+     *
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for the row's date
+     * @return array{in:int, out:int, derived:bool}|null null when the row cannot be priced
+     */
+    private function workedWindowFor(Attendance $row, array $eff, ?AttendancePolicy $policy = null): ?array
+    {
+        $inMin = $this->clockToMinutes($row->time_in);
+        if ($inMin === null) {
+            return null;
+        }
+
+        $outMin = $this->clockToMinutes($row->time_out);
+        if ($outMin !== null) {
+            if ($outMin < $inMin) {
+                $outMin += 24 * 60; // clocked out after midnight
+            }
+
+            return ['in' => $inMin, 'out' => $outMin, 'derived' => false];
+        }
+
+        // --- open punch: only an ABANDONED one resolves, and only to the scheduled end ---
+        if (! ($eff['is_workday'] ?? false)) {
+            return null; // rest day — no shift to be the end of
+        }
+
+        $startMin = $this->hmToMinutes($eff['start_time'] ?? null);
+        $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
+        if ($startMin === null || $endMin === null) {
+            return null; // no schedule to resolve against
+        }
+        if ($endMin < $startMin) {
+            $endMin += 24 * 60; // overnight schedule ends on the following day
+        }
+        if ($endMin <= $inMin) {
+            return null; // clocked in at or after their own end — nothing coherent to derive
+        }
+
+        $allowance = (int) (($policy ?? $this->policy->get())->missing_timeout_allowance_minutes
+            ?? self::MISSING_TIMEOUT_ALLOWANCE_MIN);
+
+        // The cutoff is a wall-clock moment on the row's own date, so a graveyard shift's
+        // cutoff lands the following morning without any special-casing here.
+        $tz = config('app.timezone_local');
+        // `setTimezone` is NOT redundant: Carbon::parse() ignores its $tz argument when handed a
+        // Carbon (which the `date` cast makes work_date), so without it the cutoff would be built
+        // at midnight UTC and land eight hours late — the whole comparison silently wrong.
+        $cutoff = Carbon::parse($row->work_date, $tz)->setTimezone($tz)
+            ->startOfDay()
+            ->addMinutes($endMin + $allowance);
+        if ($this->localNow()->lt($cutoff)) {
+            return null; // still within the allowance — they may simply still be working
+        }
+
+        return ['in' => $inMin, 'out' => $endMin, 'derived' => true];
+    }
+
     /** Statutory fallback; persisted policy defaults use the same 22:00 → 06:00 band. */
     public const NIGHT_START_MIN = 22 * 60;
 
@@ -1112,20 +1195,23 @@ class AttendanceService
         }
 
         $tz = config('app.timezone_local');
-        [$nightStart, $nightEnd] = $this->nightWindow($policy ?? $this->policy->get());
-        $rows = $this->rowsBetween($employee, $start, $end)
-            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
+        $policy ??= $this->policy->get();
+        [$nightStart, $nightEnd] = $this->nightWindow($policy);
+        // NOT filtered on `time_out`: an abandoned shift resolves to its scheduled end (item 5),
+        // and a graveyard worker who forgets to punch out has still worked all night.
+        $rows = $this->rowsBetween($employee, $start, $end)->filter(fn (Attendance $r) => (bool) $r->time_in);
 
         $out = [];
         foreach ($rows as $row) {
-            $inMin = $this->clockToMinutes($row->time_in);
-            $outMin = $this->clockToMinutes($row->time_out);
-            if ($inMin === null || $outMin === null) {
+            $window = $this->workedWindowFor(
+                $row,
+                $this->schedule->effectiveFor($employee, Carbon::parse($row->work_date, $tz)),
+                $policy,
+            );
+            if ($window === null) {
                 continue;
             }
-            if ($outMin < $inMin) {
-                $outMin += 24 * 60; // clocked out after midnight
-            }
+            [$inMin, $outMin] = [$window['in'], $window['out']];
 
             $minutes = self::nightOverlapMinutes($inMin, $outMin, $nightStart, $nightEnd);
             if ($minutes > 0) {
@@ -1197,9 +1283,9 @@ class AttendanceService
         }
 
         $tz = config('app.timezone_local');
-        [$nightStart, $nightEnd] = $this->nightWindow($policy ?? $this->policy->get());
-        $rows = $this->rowsBetween($employee, $start, $end)
-            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
+        $policy ??= $this->policy->get();
+        [$nightStart, $nightEnd] = $this->nightWindow($policy);
+        $rows = $this->rowsBetween($employee, $start, $end)->filter(fn (Attendance $r) => (bool) $r->time_in);
 
         $out = [];
         foreach ($rows as $row) {
@@ -1211,14 +1297,13 @@ class AttendanceService
 
             $startMin = $this->hmToMinutes($eff['start_time'] ?? null);
             $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
-            $inMin = $this->clockToMinutes($row->time_in);
-            $outMin = $this->clockToMinutes($row->time_out);
-            if ($startMin === null || $endMin === null || $inMin === null || $outMin === null) {
+            // An abandoned shift resolves to the scheduled end, so `out − end` below is exactly
+            // zero and no overtime can be manufactured out of a missing punch (item 5).
+            $window = $this->workedWindowFor($row, $eff, $policy);
+            if ($startMin === null || $endMin === null || $window === null) {
                 continue;
             }
-            if ($outMin < $inMin) {
-                $outMin += 24 * 60; // clocked out after midnight
-            }
+            [$inMin, $outMin] = [$window['in'], $window['out']];
             if ($endMin < $startMin) {
                 $endMin += 24 * 60; // overnight schedule ends on the following day
             }
@@ -1519,22 +1604,20 @@ class AttendanceService
         }
 
         $tz = config('app.timezone_local');
-        $rows = $this->rowsBetween($employee, $start, $end)
-            ->filter(fn (Attendance $r) => $r->time_in && $r->time_out);
+        $rows = $this->rowsBetween($employee, $start, $end)->filter(fn (Attendance $r) => (bool) $r->time_in);
 
         $windows = [];
         foreach ($rows as $row) {
             $day = Carbon::parse($row->work_date, $tz);
             $eff = $this->schedule->effectiveFor($employee, $day);
 
-            $inMin = $this->clockToMinutes($row->time_in);
-            $outMin = $this->clockToMinutes($row->time_out);
-            if ($inMin === null || $outMin === null) {
+            // An abandoned shift resolves to the scheduled end (item 5), which makes the interval
+            // below empty — a missing punch can never back an overtime window.
+            $window = $this->workedWindowFor($row, $eff);
+            if ($window === null) {
                 continue;
             }
-            if ($outMin < $inMin) {
-                $outMin += 24 * 60; // clocked out after midnight
-            }
+            [$inMin, $outMin] = [$window['in'], $window['out']];
 
             if ($eff['is_workday'] ?? false) {
                 $startMin = $this->hmToMinutes($eff['start_time'] ?? null);

@@ -23,6 +23,7 @@ class AttendancePolicyResource extends JsonResource
 
             'undertime_deduction_mode' => $this->undertime_deduction_mode,
             'missing_clockout_mode' => $this->missing_clockout_mode,
+            'missing_timeout_allowance_minutes' => (int) ($this->missing_timeout_allowance_minutes ?? 180),
 
             'early_arrival_mode' => $this->early_arrival_mode,
             'early_clock_in_mode' => $this->early_clock_in_mode,

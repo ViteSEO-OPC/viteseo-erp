@@ -46,6 +46,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // silently does nothing is worse than rejecting it — HR would believe a forgotten
             // punch was being charged. Widen this again when the modes are built.
             'missing_clockout_mode' => ['sometimes', 'in:no_deduction_flag_for_review'],
+            // Item 5 — minutes past the scheduled end before an open punch is abandoned. Floored
+            // at 30 so a preview can never resolve someone who is genuinely still on shift, and
+            // capped at 12h so the setting cannot be turned into "never".
+            'missing_timeout_allowance_minutes' => ['sometimes', 'integer', 'min:30', 'max:720'],
 
             // Slice 14 — same: `offset_undertime` and `overtime_eligible` have NO reader
             // anywhere in the codebase. The Rules page already shows this control disabled;

@@ -17,6 +17,8 @@ class AttendancePolicy extends Model
         'late_tiers',
         'undertime_deduction_mode',
         'missing_clockout_mode',
+        // Item 5 — minutes past the scheduled end before an open punch counts as abandoned.
+        'missing_timeout_allowance_minutes',
         'early_arrival_mode',
         'early_clock_in_mode',
         'geofence_enabled',
@@ -53,6 +55,7 @@ class AttendancePolicy extends Model
     protected $casts = [
         'monthly_late_reset' => 'boolean',
         'lates_per_deduction' => 'integer',
+        'missing_timeout_allowance_minutes' => 'integer',
         'late_penalty_enabled' => 'boolean',
         'late_tiers' => 'array',
         'geofence_enabled' => 'boolean',
