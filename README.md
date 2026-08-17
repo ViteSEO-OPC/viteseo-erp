@@ -50,6 +50,7 @@ Open **http://localhost:3000** → you'll see the full platform (login → launc
 **Optional services** (only for specific features):
 - Queue worker (CRM mail / jobs): `php artisan queue:work`
 - Realtime (Sprintly live tasks): needs a Reverb server — off by default (`BROADCAST_CONNECTION=log`); the app runs fine without it.
+- Lead Enrichment scraper (Zerem/CRM discovery + Website Intelligence): a standalone Python 3.12 CLI in `scraper/` — independently run, not part of `docker-compose.yml`, and not scheduled (every CRM write is opt-in via `--commit`). It talks to the CRM only through the existing `/api/v1/crm/leads/discovered`, `/api/v1/crm/website-enrichment/queue`, and `/api/v1/crm/leads/{lead}/website-enrichment` endpoints. See `scraper/README.md`.
 
 ---
 
