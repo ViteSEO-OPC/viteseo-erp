@@ -29,6 +29,7 @@ class AttendanceService
         private readonly PayrollFreezeService $freeze,
         private readonly RestDayRequestService $restDays,
         private readonly WorkSuspensionService $suspensions,
+        private readonly HalfDayWindowService $halfDays,
     ) {}
 
     /**
@@ -199,15 +200,20 @@ class AttendanceService
      * schedule has no start time at all — FALLBACK_START is a guess, and a guess must never
      * lock someone out of their own time clock, nor silently move their punch.
      *
+     * On an approved half day this is the worked half's start, so `block` mode holds an
+     * afternoon-only employee to 1:00 PM rather than waving them in at 8:00 AM, and `defer`
+     * re-stamps an early punch to the half they are actually there for.
+     *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
+     * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      */
-    private function shiftStartFor(array $eff, Carbon $local): ?Carbon
+    private function shiftStartFor(array $eff, Carbon $local, ?string $offHalf = null): ?Carbon
     {
         if (! ($eff['is_workday'] ?? false) || ($eff['start_time'] ?? null) === null) {
             return null;
         }
 
-        return $this->scheduleStart($local, $eff);
+        return $this->expectedStart($local, $eff, $offHalf);
     }
 
     /**
@@ -217,13 +223,13 @@ class AttendanceService
      *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
      */
-    private function clockInOpensAt(array $eff, Carbon $local): ?Carbon
+    private function clockInOpensAt(array $eff, Carbon $local, ?string $offHalf = null): ?Carbon
     {
         if ($this->policy->get()->early_clock_in_mode !== 'block') {
             return null;
         }
 
-        return $this->shiftStartFor($eff, $local);
+        return $this->shiftStartFor($eff, $local, $offHalf);
     }
 
     /**
@@ -241,6 +247,9 @@ class AttendanceService
         $local = $this->localNow();
         $eff = $this->schedule->effectiveFor($employee, $local);
         $mode = $this->policy->get()->early_clock_in_mode;
+        // An approved half day moves the shift the panel is describing — telling somebody with
+        // the morning off that their shift opens at 8:00 AM is describing a day they don't have.
+        $offHalf = $this->halfDays->offHalfFor($employee->id, $local->toDateString());
 
         // Rest-day work (RD-2): today is not a scheduled workday, so pressing the button files a
         // request instead of punching in. The panel needs BOTH facts — that the day is a rest day,
@@ -261,11 +270,11 @@ class AttendanceService
         // Only meaningful right now, and only in defer mode: the time this punch WOULD be
         // recorded at if they pressed the button this second. Null once the shift has
         // started, because from then on the punch is stamped normally.
-        $deferTo = $mode === 'defer' ? $this->deferredStartFor($eff, $local) : null;
+        $deferTo = $mode === 'defer' ? $this->deferredStartFor($eff, $local, $offHalf) : null;
 
         return [
             'mode' => $mode,
-            'opens_at' => $this->clockInOpensAt($eff, $local)?->format('H:i'),
+            'opens_at' => $this->clockInOpensAt($eff, $local, $offHalf)?->format('H:i'),
             'defers_to' => $deferTo?->format('H:i'),
             // Whether the panel should ask WHERE the employee is before clocking in. This
             // is "actually enforcing", not the raw toggle: a policy that is switched on but
@@ -297,9 +306,9 @@ class AttendanceService
      *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
      */
-    private function deferredStartFor(array $eff, Carbon $local): ?Carbon
+    private function deferredStartFor(array $eff, Carbon $local, ?string $offHalf = null): ?Carbon
     {
-        $start = $this->shiftStartFor($eff, $local);
+        $start = $this->shiftStartFor($eff, $local, $offHalf);
 
         return $start !== null && $local->lt($start) ? $start : null;
     }
@@ -368,8 +377,12 @@ class AttendanceService
             ]);
         }
 
+        // The half of the day this employee has approved off, if any — the shift they are
+        // expected for, and therefore the one their arrival is judged against, is the other one.
+        $offHalf = $this->halfDays->offHalfFor($employee->id, $this->today());
+
         // Strict clock-in (Company → Rules): the shift can't be started before it begins.
-        $opensAt = $this->clockInOpensAt($eff, $local);
+        $opensAt = $this->clockInOpensAt($eff, $local, $offHalf);
         if ($opensAt && $local->lt($opensAt)) {
             throw ValidationException::withMessages([
                 'time_in' => [
@@ -394,7 +407,7 @@ class AttendanceService
         // apply later: the shift start is already known, so the two produce an identical
         // record, and one of them can't fail to run.
         $deferredTo = $this->policy->get()->early_clock_in_mode === 'defer'
-            ? $this->deferredStartFor($eff, $local)
+            ? $this->deferredStartFor($eff, $local, $offHalf)
             : null;
 
         // Both branches store UTC. $deferredTo is a Manila-tz Carbon, so it must be
@@ -403,7 +416,7 @@ class AttendanceService
         $att->time_in = $deferredTo?->copy()->utc() ?? now();
         // Judged at the time it will COUNT as, so a deferred punch is never late: the
         // arrival being re-stamped to the shift start is exactly what "on time" means.
-        $att->status = $this->arrivalStatus($eff, $deferredTo ?? $local);
+        $att->status = $this->arrivalStatus($eff, $deferredTo ?? $local, $offHalf);
         $att->location_verified_by = $verifiedBy;
         $att->save();
 
@@ -423,11 +436,22 @@ class AttendanceService
      * approval of a field time-in, so an approved selfie is marked late on exactly the
      * same rule as a punch at the same minute would have been.
      *
+     * On an approved half day this is judged against the half they were expected to work, not
+     * against the whole shift: somebody with the morning off who walks in at 1:00 PM is on time,
+     * and calling that five hours late used to cost them a violation and — with the per-N-lates
+     * penalty on — a full day's pay.
+     *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
+     * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      */
-    private function arrivalStatus(array $eff, Carbon $local): string
+    private function arrivalStatus(array $eff, Carbon $local, ?string $offHalf = null): string
     {
-        $cutoff = $this->scheduleStart($local, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
+        $start = $this->expectedStart($local, $eff, $offHalf);
+        if ($start === null) {
+            return 'present'; // the whole day is off — there is no shift to have missed
+        }
+
+        $cutoff = $start->addMinutes($eff['grace_minutes'] ?? 0);
 
         return $local->gt($cutoff) ? 'late' : 'present';
     }
@@ -469,7 +493,11 @@ class AttendanceService
         $eff = $this->schedule->effectiveFor($employee, $local);
 
         $att->time_in = $at;
-        $att->status = $this->arrivalStatus($eff, $local);
+        $att->status = $this->arrivalStatus(
+            $eff,
+            $local,
+            $this->halfDays->offHalfFor($employee->id, $local->toDateString()),
+        );
         $att->location_verified_by = $verifiedBy;
         $att->save();
 
@@ -658,8 +686,14 @@ class AttendanceService
                 ? Carbon::parse("{$workDate} {$data['time_out']}", $tz)->utc() : null;
 
             $eff = $this->schedule->effectiveFor($employee, $day);
-            $cutoff = $this->scheduleStart($day, $eff)->addMinutes($eff['grace_minutes'] ?? 0);
-            $att->status = $timeIn->gt($cutoff) ? 'late' : 'present';
+            // Same half-day rule the live clock uses. Without it HR "correcting" an afternoon-only
+            // day re-stamped it `late`, so the only way to record the truth was the manual status
+            // override — a workaround for a derivation that was simply wrong.
+            $att->status = $this->arrivalStatus(
+                $eff,
+                $timeIn,
+                $this->halfDays->offHalfFor($employee->id, $workDate),
+            );
 
             if ($att->time_in && $att->time_out) {
                 $gross = ($att->time_out->getTimestamp() - $att->time_in->getTimestamp()) / 60;
@@ -954,6 +988,9 @@ class AttendanceService
         // Neither is a day HR cancelled — paid or unpaid, nobody was expected in. Counting
         // the whole company "absent" on a typhoon day is the exact failure this prevents.
         $isSuspended = array_key_exists($date, $this->suspensionsBetween($date, $date));
+        // Approved half days for the whole roster, memoized by range — the "Late arrivals" tile
+        // counted them as lateness, so the number HR reads off the dashboard was inflated by them.
+        $offHalves = $this->halfDays->offHalvesBetween($date, $date);
 
         $s = [
             'checked_in' => 0, 'not_checked_in' => 0, 'on_leave' => 0,
@@ -983,7 +1020,12 @@ class AttendanceService
 
             if ($row && $row->time_in) {
                 $s['checked_in']++;
-                $cat = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)['category'];
+                $cat = $this->arrivalCategory(
+                    $row->time_in->copy()->setTimezone($tz),
+                    $eff,
+                    $dateCarbon,
+                    $offHalves["{$emp->id}|{$date}"] ?? null,
+                )['category'];
                 $s[$cat === 'early' ? 'early_arrivals' : ($cat === 'late' ? 'late_arrivals' : 'on_time')]++;
             } elseif (! $isOnLeave && $eff['is_workday'] && ! $isHoliday && ! $isSuspended) {
                 // No clock-in on a workday: it's a true absence only once the day has
@@ -1026,16 +1068,24 @@ class AttendanceService
         // Derived here rather than stored per employee, so flipping the declaration moves the
         // whole roster at once instead of leaving rows asserting yesterday's answer.
         $suspendedPaid = $this->suspensionsBetween($date, $date)[$date] ?? null;
+        // Approved half days for the whole roster, fetched once rather than per employee: this
+        // map is read for every row on the board.
+        $offHalves = $this->halfDays->offHalvesBetween($date, $date);
 
         return Employee::with(['user', 'department', 'workSchedule'])
             ->get()
-            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday, $suspendedPaid) {
+            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday, $suspendedPaid, $offHalves) {
                 $att = $rows->get($emp->id);
                 $eff = $this->schedule->effectiveFor($emp, $dateCarbon);
                 $leaveName = $leaveMap->get($emp->id);
 
+                // Which half (if any) this employee has approved off — the roster judges
+                // punctuality against the half they were expected for, and SHOWS the fact so a
+                // 1:00 PM arrival on the board reads as a half day rather than an unexplained one.
+                $offHalf = $offHalves["{$emp->id}|{$date}"] ?? null;
+
                 $timing = ($att && $att->time_in)
-                    ? $this->arrivalCategory($att->time_in->copy()->setTimezone($tz), $eff, $dateCarbon)
+                    ? $this->arrivalCategory($att->time_in->copy()->setTimezone($tz), $eff, $dateCarbon, $offHalf)
                     : null;
 
                 if ($att && $att->status_override) {
@@ -1093,6 +1143,11 @@ class AttendanceService
                     // Slice 16 — lets the UI show HR that this status was set by hand.
                     'status_override' => (bool) ($att?->status_override),
                     'leave_type' => $leaveName,
+                    // 'AM' | 'PM' | 'BOTH' | null — the half taken OFF (approved half-day request
+                    // or half-day leave). The board showed "Late · 5h 0m" with nothing beside it
+                    // explaining that the morning was approved off, which is how a correct badge
+                    // still misleads the person reading it.
+                    'half_day_off' => $offHalf,
                     'timing' => $timing,
                     'flag' => $flags[$emp->id] ?? null,
                     'tasks' => $att?->tasks ?? [],
@@ -1208,9 +1263,9 @@ class AttendanceService
      * @param  array<string, mixed>  $eff  the employee's effective schedule for the row's date
      * @return array{in:int, out:int, derived:bool}|null null when the row cannot be priced
      */
-    private function workedWindowFor(Attendance $row, array $eff, ?AttendancePolicy $policy = null): ?array
+    private function workedWindowFor(Attendance $row, array $eff, ?AttendancePolicy $policy = null, ?string $offHalf = null): ?array
     {
-        return $this->resolveWorkedWindow($row, $eff, $policy)['window'];
+        return $this->resolveWorkedWindow($row, $eff, $policy, $offHalf)['window'];
     }
 
     /**
@@ -1240,10 +1295,18 @@ class AttendanceService
      * when the cutoff falls — and deriving that a second time somewhere else is how a queue starts
      * disagreeing with the payslip it is supposed to be about.
      *
+     * AN APPROVED HALF DAY MOVES THE END. Somebody who worked the morning and forgot to punch
+     * out went home at noon, not at 5 — resolving to the full-day end credited them five hours
+     * they were not there for, and handed the night-differential window the same five hours to
+     * price. The overtime baseline deliberately does NOT move with it (see
+     * autoOvertimeMinutesFor): overtime is still measured against the full scheduled end, so
+     * working into a half you filed off earns no premium on top of the half-day deduction.
+     *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for the row's date
+     * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      * @return array{window: array{in:int, out:int, derived:bool}|null, reason: string, cutoff: ?Carbon}
      */
-    private function resolveWorkedWindow(Attendance $row, array $eff, ?AttendancePolicy $policy = null): array
+    private function resolveWorkedWindow(Attendance $row, array $eff, ?AttendancePolicy $policy = null, ?string $offHalf = null): array
     {
         $inMin = $this->clockToMinutes($row->time_in);
         if ($inMin === null) {
@@ -1269,8 +1332,14 @@ class AttendanceService
             return ['window' => null, 'reason' => self::RESOLVE_REST_DAY, 'cutoff' => null];
         }
 
-        $startMin = $this->hmToMinutes($eff['start_time'] ?? null);
-        $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
+        // The half they were expected to work, or the whole shift on an ordinary day.
+        // `pricingWindowFor` rather than `windowFor`: a day with BOTH halves off keeps the full
+        // window, because refusing to derive an end there would strand a priceable row in the
+        // exception queue instead of merely leaving it unjudged.
+        [$startTime, $endTime] = $this->halfDays->pricingWindowFor($eff, $offHalf);
+
+        $startMin = $this->hmToMinutes($startTime);
+        $endMin = $this->hmToMinutes($endTime);
         if ($startMin === null || $endMin === null) {
             // no schedule to resolve against
             return ['window' => null, 'reason' => self::RESOLVE_NO_SCHEDULE, 'cutoff' => null];
@@ -1376,6 +1445,9 @@ class AttendanceService
         // answers "what should HR look at now". Payroll still resolves its own version at cycle end.
         $policy = $this->policy->get();
         $now = $this->localNow();
+        // Fetched once for the window: an abandoned punch on an approved half day resolves to
+        // that half's end, not to the full shift's.
+        $offHalves = $this->halfDays->offHalvesBetween($start, $end);
         $out = [];
 
         foreach ($rows as $row) {
@@ -1390,7 +1462,11 @@ class AttendanceService
 
             $date = $row->work_date->toDateString();
             $eff = $this->schedule->effectiveFor($employee, Carbon::parse($date, $tz));
-            $resolved = $this->resolveWorkedWindow($row, $eff, $policy);
+            $offHalf = $offHalves["{$employee->id}|{$date}"] ?? null;
+            $resolved = $this->resolveWorkedWindow($row, $eff, $policy, $offHalf);
+            // The window the queue REPORTS has to be the one it resolved against, or a half day
+            // shows "scheduled_end 17:00" beside "resolved_time_out 12:00" and reads like a bug.
+            [$scheduledStart, $scheduledEnd] = $this->halfDays->pricingWindowFor($eff, $offHalf);
 
             if ($resolved['reason'] === self::RESOLVE_WITHIN_ALLOWANCE) {
                 continue; // they may still be working — not HR's problem yet
@@ -1406,8 +1482,10 @@ class AttendanceService
                 'department' => $employee->department?->name,
                 'work_date' => $date,
                 'time_in' => $row->time_in?->toIso8601String(),
-                'scheduled_start' => $eff['start_time'] ?? null,
-                'scheduled_end' => $eff['end_time'] ?? null,
+                'scheduled_start' => $scheduledStart,
+                'scheduled_end' => $scheduledEnd,
+                // 'AM' | 'PM' | 'BOTH' | null — why the window above is shorter than the roster's.
+                'half_day_off' => $offHalf,
                 'reason' => $resolved['reason'],
                 // An approval nobody punched for outranks a clean auto-closure: the money is
                 // settled but contradicted, which is a decision rather than a tidy-up.
@@ -1505,11 +1583,14 @@ class AttendanceService
         // NOT filtered on `time_out`: an abandoned shift resolves to its scheduled end (item 5),
         // and a graveyard worker who forgets to punch out has still worked all night.
         $rows = $this->rowsBetween($employee, $start, $end)->filter(fn (Attendance $r) => (bool) $r->time_in);
+        // Memoized by range, so walking employees in a payroll loop costs nothing extra: an
+        // approved half day moves where an abandoned punch resolves to.
+        $offHalves = $this->halfDays->offHalvesBetween($start, $end);
 
         $out = [];
         foreach ($rows as $row) {
             $eff = $this->schedule->effectiveFor($employee, Carbon::parse($row->work_date, $tz));
-            $window = $this->workedWindowFor($row, $eff, $policy);
+            $window = $this->workedWindowFor($row, $eff, $policy, $offHalves["{$employee->id}|{$row->work_date->toDateString()}"] ?? null);
             if ($window === null) {
                 continue;
             }
@@ -1596,6 +1677,9 @@ class AttendanceService
         $policy ??= $this->policy->get();
         [$nightStart, $nightEnd] = $this->nightWindow($policy);
         $rows = $this->rowsBetween($employee, $start, $end)->filter(fn (Attendance $r) => (bool) $r->time_in);
+        // Memoized by range, so walking employees in a payroll loop costs nothing extra: an
+        // approved half day moves where an abandoned punch resolves to.
+        $offHalves = $this->halfDays->offHalvesBetween($start, $end);
 
         $out = [];
         foreach ($rows as $row) {
@@ -1609,7 +1693,7 @@ class AttendanceService
             $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
             // An abandoned shift resolves to the scheduled end, so `out − end` below is exactly
             // zero and no overtime can be manufactured out of a missing punch (item 5).
-            $window = $this->workedWindowFor($row, $eff, $policy);
+            $window = $this->workedWindowFor($row, $eff, $policy, $offHalves["{$employee->id}|{$row->work_date->toDateString()}"] ?? null);
             if ($startMin === null || $endMin === null || $window === null) {
                 continue;
             }
@@ -1945,6 +2029,9 @@ class AttendanceService
 
         $tz = config('app.timezone_local');
         $out = [];
+        // Memoized by range. This feeds the overtime review queue's "late AND overtime" reason,
+        // which was firing on afternoons the employee had legitimately been given off.
+        $offHalves = $this->halfDays->offHalvesBetween($start, $end);
 
         foreach ($this->rowsBetween($employee, $start, $end) as $row) {
             if (! $row->time_in) {
@@ -1953,19 +2040,24 @@ class AttendanceService
 
             // `->toDateString()` is NOT redundant. Carbon::parse() IGNORES its $tz argument when
             // handed a DateTimeInterface, which the `date` cast makes work_date — so parsing the
-            // Carbon directly builds midnight UTC, and scheduleStart() below would place an 08:00
+            // Carbon directly builds midnight UTC, and expectedStart() below would place an 08:00
             // shift at 16:00 Manila. Every arrival would then look early and nobody would ever be
             // late. Round-tripping through the string is what makes the timezone apply.
             $day = Carbon::parse($row->work_date->toDateString(), $tz);
             $eff = $this->schedule->effectiveFor($employee, $day);
             // No scheduled start to be late for. The null check is not redundant with the workday
-            // one: scheduleStart() falls back to 09:00 for a missing time, and inventing a baseline
+            // one: expectedStart() falls back to 09:00 for a missing time, and inventing a baseline
             // would report an employee with no schedule at all as late every morning.
             if (! ($eff['is_workday'] ?? false) || ($eff['start_time'] ?? null) === null) {
                 continue;
             }
 
-            $arrival = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $day);
+            $arrival = $this->arrivalCategory(
+                $row->time_in->copy()->setTimezone($tz),
+                $eff,
+                $day,
+                $offHalves["{$employee->id}|{$day->toDateString()}"] ?? null,
+            );
             if (($arrival['late_minutes'] ?? 0) > 0) {
                 $out[$day->toDateString()] = (int) $arrival['late_minutes'];
             }
@@ -2032,6 +2124,9 @@ class AttendanceService
 
         $tz = config('app.timezone_local');
         $rows = $this->rowsBetween($employee, $start, $end)->filter(fn (Attendance $r) => (bool) $r->time_in);
+        // Memoized by range, so walking employees in a payroll loop costs nothing extra: an
+        // approved half day moves where an abandoned punch resolves to.
+        $offHalves = $this->halfDays->offHalvesBetween($start, $end);
 
         $windows = [];
         foreach ($rows as $row) {
@@ -2040,7 +2135,7 @@ class AttendanceService
 
             // An abandoned shift resolves to the scheduled end (item 5), which makes the interval
             // below empty — a missing punch can never back an overtime window.
-            $window = $this->workedWindowFor($row, $eff);
+            $window = $this->workedWindowFor($row, $eff, null, $offHalves["{$employee->id}|{$row->work_date->toDateString()}"] ?? null);
             if ($window === null) {
                 continue;
             }
@@ -2893,7 +2988,11 @@ class AttendanceService
 
                 $eoFrac = 0.0;
                 foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
-                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                    $eoFrac += $this->earlyOutFraction(
+                        (string) $eo->early_out_time,
+                        $eff,
+                        (string) $leave->half_day_period,
+                    );
                 }
                 $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 $unpaid += $eoFrac;
@@ -2976,9 +3075,16 @@ class AttendanceService
                 // never added earlyOutFraction, while `governed_by_early_out` told
                 // DeductionService not to price the undertime either. Charge it here, capped by
                 // whatever of the day is still payable.
+                //
+                // Two halves off is the whole day, which earlyOutFraction() prices at zero:
+                // nothing is left for an early departure to shorten.
+                $offHalf = $dayHalves->count() > 1
+                    ? HalfDayWindowService::BOTH
+                    : (string) $dayHalves->first()->period;
+
                 $eoFrac = 0.0;
                 foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
-                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff, $offHalf);
                 }
                 $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 $unpaid += $eoFrac;
@@ -3177,9 +3283,22 @@ class AttendanceService
      * scheduled span (end − start), clamped to [0, 1]. Returns 0.5 when the schedule
      * window is unknown (a sane, non-zero fallback rather than free undertime).
      *
+     * THE SHORTFALL IS MEASURED AGAINST THE HALF ACTUALLY WORKED. Leaving at 10:00 on a day whose
+     * afternoon is already approved off is two hours short of a noon finish, not seven hours short
+     * of a five o'clock one — and the old reading charged the seven: half a day on top of the half
+     * already unpaid, so a two-hour early departure cost the WHOLE day. The `1.0 − halfUnpaid` cap
+     * at the call sites hid how big the error was by clamping a wrong number instead of computing
+     * a right one.
+     *
+     * THE DENOMINATOR IS DELIBERATELY UNCHANGED — still the full scheduled span, the same basis
+     * every ordinary early-out is priced on. Pricing the shortfall against the HALF instead (so
+     * half a morning costs 0.25 of a day rather than 0.222) is a different pay model, not a bug
+     * fix, and that is HR's call rather than this method's.
+     *
      * @param  array<string, mixed>  $eff
+     * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      */
-    private function earlyOutFraction(string $time, array $eff): float
+    private function earlyOutFraction(string $time, array $eff, ?string $offHalf = null): float
     {
         $toMinutes = static function (?string $hm): ?int {
             if (! $hm) {
@@ -3190,6 +3309,8 @@ class AttendanceService
             return $h * 60 + $m;
         };
 
+        // The span the day is PRICED over stays the full shift; the moment the employee was due
+        // to leave comes from the half they were actually expected to work.
         $start = $toMinutes($eff['start_time'] ?? null);
         $end = $toMinutes($eff['end_time'] ?? null);
         $chosen = $toMinutes($time);
@@ -3198,16 +3319,43 @@ class AttendanceService
             return 0.5;
         }
 
+        // Whole day off: there is no worked window left for an early departure to shorten.
+        // Zeroed here rather than left to the caller's `1.0 − halfUnpaid` cap, so the value this
+        // returns is right on its own terms instead of only after somebody clamps it.
+        if ($offHalf === HalfDayWindowService::BOTH) {
+            return 0.0;
+        }
+
+        [, $workedEndTime] = $this->halfDays->windowFor($eff, $offHalf);
+        $workedEnd = $toMinutes($workedEndTime) ?? $end;
+
         $span = $end - $start;
-        $undertime = max(0, min($span, $end - $chosen));
+        $undertime = max(0, min($span, $workedEnd - $chosen));
 
         return $undertime / $span;
     }
 
-    /** The schedule's start time as a Carbon on the given local day. */
-    private function scheduleStart(Carbon $localDay, array $eff): Carbon
+    /**
+     * The start of the window the employee was ACTUALLY expected to work on $localDay — the
+     * worked half's start on an approved half day, the schedule's start otherwise.
+     *
+     * NULL MEANS THERE IS NO START TO BE LATE FOR, which happens only when both halves are off.
+     * Every caller has to treat that as "not late" rather than falling back to the schedule:
+     * measuring someone against a shift they had entirely off is the bug this replaces, in its
+     * most extreme form.
+     *
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for $localDay
+     * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
+     */
+    private function expectedStart(Carbon $localDay, array $eff, ?string $offHalf): ?Carbon
     {
-        [$h, $m] = explode(':', $eff['start_time'] ?? self::FALLBACK_START);
+        if ($offHalf === HalfDayWindowService::BOTH) {
+            return null;
+        }
+
+        [$start] = $this->halfDays->windowFor($eff, $offHalf);
+
+        [$h, $m] = explode(':', $start ?? self::FALLBACK_START);
 
         return $localDay->copy()->setTime((int) $h, (int) $m, 0);
     }
@@ -3216,12 +3364,20 @@ class AttendanceService
      * Classify an arrival against the schedule: early (before start), on_time
      * (within grace), or late (past grace) with minutes past start.
      *
+     * Half-day aware, for the same reason arrivalStatus() is: the badge on the roster and the
+     * status stored on the row are two renderings of one fact, and they must not disagree.
+     *
      * @param  array<string, mixed>  $eff
+     * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      * @return array{category:string, late_minutes:int}
      */
-    private function arrivalCategory(Carbon $timeInLocal, array $eff, Carbon $dateCarbon): array
+    private function arrivalCategory(Carbon $timeInLocal, array $eff, Carbon $dateCarbon, ?string $offHalf = null): array
     {
-        $start = $this->scheduleStart($dateCarbon, $eff);
+        $start = $this->expectedStart($dateCarbon, $eff, $offHalf);
+        if ($start === null) {
+            return ['category' => 'on_time', 'late_minutes' => 0];
+        }
+
         $graceEnd = $start->copy()->addMinutes($eff['grace_minutes'] ?? 0);
 
         if ($timeInLocal->lt($start)) {

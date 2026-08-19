@@ -193,6 +193,16 @@ export interface HrAttendanceRow {
   /** Slice 16 — a human asserted this status; it beats the clock and the leave table. */
   status_override: boolean;
   leave_type: string | null;
+  /**
+   * Which half of the day is approved OFF — an unpaid half-day request or half-day leave,
+   * the two being the same shape with different funding. `'BOTH'` is a whole day reached by
+   * filing each half separately. Null on an ordinary day.
+   *
+   * The board shows it because the shift on such a day is genuinely shorter: without it a
+   * 1:00 PM arrival read as an unexplained one, and the person reading the row had no way to
+   * tell an approved afternoon from someone who simply turned up late.
+   */
+  half_day_off: "AM" | "PM" | "BOTH" | null;
   timing: AttendanceTiming | null;
   flag: ViolationFlag | null;
   tasks: DayTask[];
@@ -247,9 +257,15 @@ export interface OpenShiftRow {
   department: string | null;
   work_date: string;
   time_in: string | null;
-  /** Manila 'HH:MM' for the day, or null when the employee has no schedule at all. */
+  /**
+   * Manila 'HH:MM' for the day, or null when the employee has no schedule at all. On a day with
+   * an approved half day this is the HALF the employee was expected to work — the same window
+   * `resolved_time_out` was derived against, so the two cannot appear to contradict each other.
+   */
   scheduled_start: string | null;
   scheduled_end: string | null;
+  /** Which half was approved off, and hence why the window above is shorter than usual. */
+  half_day_off: "AM" | "PM" | "BOTH" | null;
   reason: OpenShiftReason;
   /**
    * `needs_fix` — the day cannot be priced and is being paid wrongly until HR corrects it.

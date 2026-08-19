@@ -25,6 +25,7 @@ class LeaveService
         private readonly PayrollFreezeService $freeze,
         private readonly RetroFlagService $retro,
         private readonly AttendanceService $attendance,
+        private readonly HalfDayWindowService $windows,
     ) {}
 
     /**
@@ -360,6 +361,10 @@ class LeaveService
                 'deducted_from' => $bucket,
             ]);
 
+            // A half-day leave narrows that day's shift the moment it is approved, and this
+            // method goes on to re-read attendance in the same transaction.
+            $this->windows->forget();
+
             if ($bucket === 'pool') {
                 SharedLeaveBalance::where('employee_id', $request->employee_id)
                     ->where('year', $request->start_date->year)
@@ -471,6 +476,8 @@ class LeaveService
                 'cancel_reason' => $reason,
             ]);
 
+            $this->windows->forget();
+
             $request->load(['employee.user', 'leaveType']);
             $this->audit->log(
                 'cancelled',
@@ -578,6 +585,8 @@ class LeaveService
                 'cancel_reason' => null,
             ]);
 
+            $this->windows->forget();
+
             $request->load(['employee.user', 'leaveType']);
             $employeeName = $request->employee->user?->name ?? $request->employee->name;
             $this->audit->log(
@@ -607,6 +616,8 @@ class LeaveService
                 'reviewed_at' => now(),
                 'review_note' => $reason,
             ]);
+
+            $this->windows->forget();
 
             $request->load(['employee.user', 'leaveType']);
             $employeeName = $request->employee->user?->name ?? $request->employee->name;

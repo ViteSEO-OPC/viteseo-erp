@@ -25,6 +25,7 @@ class EarlyOutRequestService
         private readonly ScheduleService $schedule,
         private readonly PayrollFreezeService $freeze,
         private readonly RetroFlagService $retro,
+        private readonly HalfDayWindowService $halfDays,
     ) {}
 
     /** HR sees all; an employee sees only their own. */
@@ -166,6 +167,11 @@ class EarlyOutRequestService
      * The date must be a scheduled workday and the time must fall strictly inside
      * that day's shift (after start, before end) — an early-out only makes sense
      * against hours the person was expected to work.
+     *
+     * ON AN APPROVED HALF DAY THAT SHIFT IS THE HALF, not the whole thing. A morning-only day
+     * used to accept an early-out at 3:00 PM — a time the employee was already off — and payroll
+     * then charged them for leaving during it. Filing against hours you do not owe is not an
+     * early departure, so it is refused here rather than priced later.
      */
     private function assertWithinShift(Employee $employee, string $workDate, string $time): void
     {
@@ -188,8 +194,18 @@ class EarlyOutRequestService
             return $h * 60 + $m;
         };
 
-        $start = $toMinutes($eff['start_time']);
-        $end = $toMinutes($eff['end_time']);
+        $offHalf = $this->halfDays->offHalfFor($employee->id, $day->toDateString());
+
+        if ($offHalf === HalfDayWindowService::BOTH) {
+            throw ValidationException::withMessages([
+                'work_date' => ['You already have the whole of that day off.'],
+            ]);
+        }
+
+        [$startTime, $endTime] = $this->halfDays->windowFor($eff, $offHalf);
+
+        $start = $toMinutes($startTime);
+        $end = $toMinutes($endTime);
         $chosen = $toMinutes($time);
 
         if ($start === null || $end === null || $end <= $start) {
@@ -199,7 +215,7 @@ class EarlyOutRequestService
         if ($chosen <= $start || $chosen >= $end) {
             throw ValidationException::withMessages([
                 'early_out_time' => [
-                    "Pick a time within your shift ({$eff['start_time']}–{$eff['end_time']}).",
+                    "Pick a time within your shift ({$startTime}–{$endTime}).",
                 ],
             ]);
         }

@@ -22,6 +22,7 @@ class HalfDayRequestService
         private readonly AuditService $audit,
         private readonly PayrollFreezeService $freeze,
         private readonly RetroFlagService $retro,
+        private readonly HalfDayWindowService $windows,
     ) {}
 
     /** HR sees all; an employee sees only their own. */
@@ -69,6 +70,9 @@ class HalfDayRequestService
             'reviewed_at' => now(),
         ]);
 
+        // This date is now a half day: whatever already read it as a whole one is stale.
+        $this->windows->forget();
+
         $request->load(['employee.user', 'reviewer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log(
@@ -104,6 +108,8 @@ class HalfDayRequestService
             'reviewed_by' => $reviewer->id,
             'reviewed_at' => now(),
         ]);
+
+        $this->windows->forget();
 
         $request->load(['employee.user', 'reviewer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
@@ -145,6 +151,8 @@ class HalfDayRequestService
             'reviewed_at' => null,
         ]);
 
+        $this->windows->forget();
+
         $request->load(['employee.user', 'reviewer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log(
@@ -175,6 +183,7 @@ class HalfDayRequestService
     public function cancel(HalfDayRequest $request, User $actor, string $reason): HalfDayRequest
     {
         $this->applyCancellation($request, $actor, $reason, 'half-day request');
+        $this->windows->forget();
 
         $request->load(['employee.user', 'reviewer', 'canceller']);
         $name = $request->employee?->user?->name ?? 'an employee';
