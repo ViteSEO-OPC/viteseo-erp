@@ -1858,8 +1858,19 @@ class PayrollService
      * overtime rate — hourly × OT% × night% — matching the PH rule that night pay is a percentage of the
      * applicable (overtime) hourly rate, not of the base. Ordinary night hours get hourly × night%.
      *
-     * Remaining nuance: night hours on a holiday/rest day are premiumed at the base rate here; the day's
-     * own premium is paid separately by holidayPremiumFor(). Compounding those is a Phase-3 refinement.
+     * HOLIDAY AND REST-DAY NIGHT HOURS COMPOUND TOO (item 9). The differential is a percentage of the
+     * APPLICABLE hourly rate, and on a regular holiday that rate is 200%, not 100% — so plain night
+     * hours there earn hourly × 200% × 10%, which is what the DOLE handbook's own worked examples
+     * show. Paying hourly × 10% regardless of the day was under-paying every night hour on a holiday
+     * or rest day by exactly the day's premium.
+     *
+     * NOT DOUBLE-COUNTING the day premium: holidayPremiumFor()/restDayPremiumFor() pay the day's own
+     * add-on and this line pays only the +10%. Multiplying that 10% by the day's rate raises the
+     * PREMIUM to the right base; it does not add the holiday rate a second time.
+     *
+     * Known limitation: a regular holiday falling on a rest day is priced at the holiday rate rather
+     * than the statutory 260% combination. Strictly better than the flat 100% it replaced, and the
+     * combined-rate question is the same one holidayPremiumFor() leaves open — fix both together.
      *
      * @param  array<string, array{minutes:int, night:int}>|null  $otByDate  shared with overtimePayFor
      * @return array{pay: float, minutes: int}
@@ -1889,10 +1900,17 @@ class PayrollService
             $otNight = min($nightMins, (int) ($otByDate[$date]['night'] ?? 0));
             $plainNight = $nightMins - $otNight;
 
-            $pay += ($plainNight / 60) * $hourly * $nightRate;
+            // Needed by BOTH branches now: the ordinary-hours rate is what the plain differential
+            // is a percentage of, and on a rest day or holiday that is not 100%.
+            $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
+            $holidayType = $holidayMap[$date] ?? null;
+
+            if ($plainNight > 0) {
+                $dayRate = self::dayRateMultiplierPct($holidayType, $isWorkday, $policy) / 100;
+                $pay += ($plainNight / 60) * $hourly * $dayRate * $nightRate;
+            }
             if ($otNight > 0) {
-                $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
-                $otRate = self::overtimeMultiplierPct($holidayMap[$date] ?? null, $isWorkday, $policy) / 100;
+                $otRate = self::overtimeMultiplierPct($holidayType, $isWorkday, $policy) / 100;
                 $pay += ($otNight / 60) * $hourly * $otRate * $nightRate;
             }
             $minutes += $nightMins;
@@ -2055,6 +2073,28 @@ class PayrollService
             default => $isWorkday
                 ? (int) $policy->overtime_ordinary_pct
                 : (int) $policy->overtime_rest_special_pct, // rest day (non-workday, non-holiday)
+        };
+    }
+
+    /**
+     * The ORDINARY-HOURS rate (whole percent) for a day — the sibling of overtimeMultiplierPct(),
+     * and the base the night differential is a percentage of (item 9).
+     *
+     * Reads the same editable premium columns the holiday and rest-day lines use, so raising a rate
+     * on the Rules page moves the differential with it. An ordinary workday is a plain 100%: there
+     * is no `premium_ordinary_pct` column because there is nothing to configure — 100% of the rate
+     * is the rate. `special_working` also lands on 100%, which is exactly what it means.
+     *
+     * Pure + static so the arithmetic is unit-testable without a DB.
+     */
+    public static function dayRateMultiplierPct(?string $holidayType, bool $isWorkday, AttendancePolicy $policy): int
+    {
+        return match ($holidayType) {
+            'regular' => (int) $policy->premium_regular_holiday_pct,
+            'special_non_working' => (int) $policy->premium_special_day_pct,
+            default => $isWorkday
+                ? 100
+                : (int) $policy->premium_rest_day_pct, // rest day (non-workday, non-holiday)
         };
     }
 

@@ -1508,11 +1508,8 @@ class AttendanceService
 
         $out = [];
         foreach ($rows as $row) {
-            $window = $this->workedWindowFor(
-                $row,
-                $this->schedule->effectiveFor($employee, Carbon::parse($row->work_date, $tz)),
-                $policy,
-            );
+            $eff = $this->schedule->effectiveFor($employee, Carbon::parse($row->work_date, $tz));
+            $window = $this->workedWindowFor($row, $eff, $policy);
             if ($window === null) {
                 continue;
             }
@@ -1520,9 +1517,17 @@ class AttendanceService
 
             $minutes = self::nightOverlapMinutes($inMin, $outMin, $nightStart, $nightEnd);
             if ($minutes > 0) {
+                // THE SCHEDULED BREAK IS THE FLOOR, not the recorded one (item 9). A meal period is
+                // not work, so it earns no differential — and the day's expected paid minutes are
+                // `span − unpaid_break` whether or not anybody pressed the lunch button. Reading
+                // only `lunch_minutes` meant a graveyard worker who never toggles lunch collected
+                // the premium on a full eight hours while being paid for seven, purely because the
+                // button went unpressed. `max()` rather than a straight swap so a LONGER recorded
+                // meal is still carved in full.
+                $unpaidBreak = max((int) $row->lunch_minutes, (int) ($eff['unpaid_break_minutes'] ?? 0));
                 // Carve out only the unpaid meal that the daytime part of the shift can't account for.
                 $daytime = ($outMin - $inMin) - $minutes;
-                $minutes = max(0, $minutes - max(0, (int) $row->lunch_minutes - $daytime));
+                $minutes = max(0, $minutes - max(0, $unpaidBreak - $daytime));
             }
             if ($minutes > 0) {
                 $out[Carbon::parse($row->work_date, $tz)->toDateString()] = $minutes;
@@ -2130,6 +2135,14 @@ class AttendanceService
 
             $capacity = $actual['end'] - $actual['start'];
             $legacy = min(max(0, $capacity - $minutes), $legacyMinutes[$date] ?? 0);
+            if ($legacy > 0) {
+                // Item 9 — an hours-only approval CAN prove a night portion after all. It has no
+                // clock window of its own, but the punch-backed overtime interval is known, so the
+                // approved hours are placed inside it and their night overlap read off. Reporting
+                // night = 0 sent those minutes down the plain-differential path, paying
+                // hourly × 10% for work that had earned hourly × OT% × 10%.
+                $night += self::legacyNightMinutes($actual, $windows, $legacy, $nightStart, $nightEnd);
+            }
             $minutes += $legacy;
 
             if ($minutes > 0) {
@@ -2138,6 +2151,272 @@ class AttendanceService
                     'night' => min($night, $minutes),
                     'windows' => $windows,
                     'legacy_minutes' => $legacy,
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Night minutes an hours-only ("legacy") approval earns, by placing its hours inside the
+     * overtime the employee actually clocked.
+     *
+     * CHRONOLOGICAL, EARLIEST FIRST, and that choice is the whole answer. Overtime accrues from the
+     * scheduled end forward, so an approval covering 2 of the 6 hours clocked authorises the FIRST
+     * two — "you may stay until 20:00", not "you may stay from midnight". It also matches how every
+     * other partial allocation in this module already behaves: `autoOvertimeEntry` caps a day from
+     * its window start, and the period cap is spent oldest-date first. The alternative, back-loading
+     * the hours to maximise the night overlap, would pay the most for the least evidence.
+     *
+     * Minutes already covered by exact approvals are skipped — those windows counted their own night
+     * portion, and counting them twice would inflate the differential.
+     *
+     * @param  array{start:int, end:int}  $actual  the punch-backed overtime interval
+     * @param  array<int, array{start:int, end:int}>  $windows  merged exact approvals, sorted
+     */
+    private static function legacyNightMinutes(
+        array $actual,
+        array $windows,
+        int $minutes,
+        int $nightStart,
+        int $nightEnd,
+    ): int {
+        if ($minutes <= 0) {
+            return 0;
+        }
+
+        $night = 0;
+        $cursor = $actual['start'];
+        $remaining = $minutes;
+
+        // Walk the gaps between the exact windows, then the tail after the last one.
+        foreach ([...$windows, ['start' => $actual['end'], 'end' => $actual['end']]] as $covered) {
+            if ($remaining <= 0) {
+                break;
+            }
+
+            $gapEnd = min($covered['start'], $actual['end']);
+            if ($gapEnd > $cursor) {
+                $take = min($remaining, $gapEnd - $cursor);
+                $night += self::nightOverlapMinutes($cursor, $cursor + $take, $nightStart, $nightEnd);
+                $remaining -= $take;
+            }
+
+            $cursor = max($cursor, min($covered['end'], $actual['end']));
+        }
+
+        return $night;
+    }
+
+    /**
+     * Everything about this cycle's attendance that a human should see BEFORE payroll prices it
+     * (item 12).
+     *
+     * WHY A SUMMARY AND NOT A SIXTH QUEUE. Every check below already exists and already has a
+     * screen — open shifts on Attendance, held and flagged overtime on the Overtime page. What did
+     * not exist was anyone asking them at the moment it matters. HR runs payroll from a different
+     * page entirely, so the queues were only found by whoever happened to visit; this puts the
+     * counts in front of the person about to turn attendance into money.
+     *
+     * COUNTS AND A DESTINATION, NOT ROWS. Each entry says how many and where to fix them, and the
+     * fixing happens on the screen that owns it. Restating the rows here would be a second place to
+     * keep in step with the first, and the queues already explain their own consequences far better
+     * than a strip on the payroll page can.
+     *
+     * ORDERED BY WHAT INACTION COSTS: days that cannot be priced at all, then overtime being
+     * withheld from someone, then approvals that will pay nothing, then things that merely look
+     * odd. `blocking` marks the ones where running now produces a payslip somebody will dispute —
+     * it does NOT stop the run, because a cutoff that cannot close is worse than one that closes
+     * with a known exception on the record.
+     *
+     * @return list<array{key:string, label:string, count:int, blocking:bool, detail:string, where:string}>
+     */
+    public function exceptionsForCycle(string $start, string $end): array
+    {
+        $openShifts = $this->openShiftReview($start, $end);
+        $needsFix = array_filter($openShifts, fn (array $r) => $r['status'] === 'needs_fix');
+
+        $overtime = $this->autoOvertimeReview($start, $end);
+        $held = array_filter($overtime, fn (array $r) => $r['kind'] === 'held');
+        $flagged = array_filter($overtime, fn (array $r) => $r['kind'] === 'flagged');
+
+        $unbacked = $this->approvedOvertimeWithoutPunch($start, $end);
+        $longShifts = $this->longShiftsBetween($start, $end);
+
+        $all = [
+            [
+                'key' => 'unpriced_days',
+                'label' => 'Days that cannot be priced',
+                'count' => count($needsFix),
+                'blocking' => true,
+                'detail' => 'Someone clocked in and never out on a rest day, with no schedule assigned, '
+                    .'or after their own shift end. These days pay nothing until the record is corrected.',
+                'where' => 'Attendance → Open shifts',
+            ],
+            [
+                'key' => 'overtime_held',
+                'label' => 'Overtime waiting on approval',
+                'count' => count($held),
+                'blocking' => true,
+                'detail' => 'Overtime past your auto-pay cap. Running now pays the capped part only — '
+                    .'the rest stays unpaid until an overtime request for that date is approved.',
+                'where' => 'Overtime → Waiting on your approval',
+            ],
+            [
+                'key' => 'approved_without_punch',
+                'label' => 'Approved overtime with no punches behind it',
+                'count' => count($unbacked),
+                'blocking' => true,
+                'detail' => 'These requests were approved but the time clock has no overtime on that '
+                    .'date to match them, so they pay nothing. The employee sees "approved" and will ask why.',
+                'where' => 'Attendance → correct the record, or cancel the request',
+            ],
+            [
+                'key' => 'long_shifts',
+                'label' => 'Unusually long shifts',
+                'count' => count($longShifts),
+                'blocking' => false,
+                'detail' => 'A closed shift spanning 16 hours or more. Usually a time-out corrected to '
+                    .'the wrong day — nothing flags it, because the record looks complete.',
+                'where' => 'Attendance → the employee\'s day',
+            ],
+            [
+                'key' => 'overtime_flagged',
+                'label' => 'Automatic overtime worth a look',
+                'count' => count($flagged),
+                'blocking' => false,
+                'detail' => 'Already paying in full, listed because the amount is unusual or the day was '
+                    .'also late. Nothing is being withheld.',
+                'where' => 'Overtime → Paid automatically',
+            ],
+        ];
+
+        // Only what actually fired. A strip of five permanent zeroes is the fastest way to teach
+        // somebody that this panel never means anything.
+        return array_values(array_filter($all, fn (array $e) => $e['count'] > 0));
+    }
+
+    /**
+     * A shift long enough to be worth a human look before payroll prices it (item 12).
+     *
+     * 16 HOURS IS NOT AN INVENTED FIGURE — it is the same ceiling `StoreOvertimeRequestRequest`
+     * already puts on a single overtime filing. If the company will not let anyone REQUEST more
+     * than 16 hours of overtime, a punch pair claiming more than 16 hours of work is by the
+     * system's own reckoning implausible, and pricing it silently is the thing to avoid.
+     */
+    public const LONG_SHIFT_MINUTES = 16 * 60;
+
+    /**
+     * Closed shifts in the period whose punches span an implausible stretch (item 12).
+     *
+     * CLOSED ONLY, deliberately. An OPEN punch of 30 hours is item 6's business and is already
+     * listed there; repeating it here would double-count the same day under two headings. What
+     * this catches is different and quieter: a shift that WAS closed, so nothing flags it, whose
+     * two punches are 18 hours apart because the time-out was corrected to the wrong day.
+     *
+     * @return list<array{employee_id:int, name:string|null, work_date:string, minutes:int}>
+     */
+    public function longShiftsBetween(string $start, string $end): array
+    {
+        $tz = config('app.timezone_local');
+        $out = [];
+
+        $rows = Attendance::with('employee.user')
+            ->whereNotNull('time_in')
+            ->whereNotNull('time_out')
+            ->whereBetween('work_date', [$start, $end])
+            ->orderBy('work_date')
+            ->get();
+
+        foreach ($rows as $row) {
+            $employee = $row->employee;
+            if (! $employee || $employee->isManagement()) {
+                continue;
+            }
+
+            $in = $this->clockToMinutes($row->time_in);
+            $outMin = $this->clockToMinutes($row->time_out);
+            if ($in === null || $outMin === null) {
+                continue;
+            }
+            if ($outMin < $in) {
+                $outMin += 24 * 60; // clocked out after midnight
+            }
+
+            $minutes = $outMin - $in;
+            if ($minutes >= self::LONG_SHIFT_MINUTES) {
+                $out[] = [
+                    'employee_id' => $employee->id,
+                    'name' => $employee->user?->name,
+                    'work_date' => Carbon::parse($row->work_date->toDateString(), $tz)->toDateString(),
+                    'minutes' => $minutes,
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Approved overtime in the period that the punches cannot back — so it pays NOTHING (item 12).
+     *
+     * THE SILENT FAILURE THIS CATCHES. Since item 2, approved overtime pays only the overlap
+     * between the approved window and the overtime actually clocked. That is correct — an approval
+     * is permission, not proof — but it fails QUIETLY: the employee sees "approved" in their list,
+     * HR sees "approved" in theirs, and the payslip carries nothing. Nobody is told, because from
+     * every screen's point of view the request was granted.
+     *
+     * Legacy hours-only rows are excluded: they have no window to compare, and their capacity is
+     * already bounded by the punches, so they cannot claim time nobody worked in the first place.
+     *
+     * @return list<array{employee_id:int, name:string|null, work_date:string, window:string}>
+     */
+    public function approvedOvertimeWithoutPunch(string $start, string $end): array
+    {
+        $requests = OvertimeRequest::with('employee.user')
+            ->where('status', 'approved')
+            ->whereNull('cancelled_at')
+            ->whereNotNull('time_from')
+            ->whereNotNull('time_to')
+            ->whereBetween('work_date', [$start, $end])
+            ->orderBy('work_date')
+            ->get();
+
+        $out = [];
+        $clockedByEmployee = [];
+
+        foreach ($requests as $request) {
+            $employee = $request->employee;
+            if (! $employee || $employee->isManagement()) {
+                continue;
+            }
+
+            $clockedByEmployee[$employee->id] ??= $this->overtimeWindowsFor($employee, $start, $end);
+
+            $date = $request->work_date->toDateString();
+            $actual = $clockedByEmployee[$employee->id][$date] ?? null;
+
+            $from = $this->hmToMinutes((string) $request->time_from);
+            $to = $this->hmToMinutes((string) $request->time_to);
+            if ($from === null || $to === null) {
+                continue;
+            }
+            if ($to <= $from) {
+                $to += 24 * 60;
+            }
+
+            // No clocked overtime at all on that date, or none of it overlaps what was approved.
+            $overlap = $actual === null
+                ? null
+                : self::bestWindowOverlap($from, $to, $actual['start'], $actual['end']);
+
+            if ($overlap === null) {
+                $out[] = [
+                    'employee_id' => $employee->id,
+                    'name' => $employee->user?->name,
+                    'work_date' => $date,
+                    'window' => substr((string) $request->time_from, 0, 5).'–'.substr((string) $request->time_to, 0, 5),
                 ];
             }
         }

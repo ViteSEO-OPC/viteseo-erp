@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PlayCircle, Zap, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Banknote, Percent, Scale, MoreHorizontal, RefreshCw } from "lucide-react";
+import { PlayCircle, Zap, Check, History, Gift, FileDown, Lock, LockOpen, Wrench, AlertTriangle, Eye, Banknote, Percent, Scale, MoreHorizontal, RefreshCw } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 import { AxiosError } from "axios";
 
@@ -55,6 +55,7 @@ import {
   useThirteenthMonthPreview,
   useRunThirteenthMonth,
   useHrPayslip,
+  useAttendanceExceptions,
   useMinimumWageCheck,
 } from "@/modules/hr/hooks/use-payroll";
 import type {
@@ -155,6 +156,13 @@ export default function PayrollPage() {
   // profile page is seen by whoever opens that profile, which for a compliant-looking employee is
   // nobody; this is the moment the money is about to be committed for the period.
   const { data: minWageCheck } = useMinimumWageCheck(cycle);
+
+  // Item 12 — what is wrong with this cycle's ATTENDANCE, asked here because here is where it
+  // becomes money. Each of these already has a screen; none of them was ever put in front of the
+  // person about to run the payroll.
+  const { data: attendanceExceptions } = useAttendanceExceptions(period?.start, period?.end);
+  const exceptions = attendanceExceptions ?? [];
+  const blockingExceptions = exceptions.filter((e) => e.blocking);
   const minWageFlagged = minWageCheck?.meta.flagged_count ?? 0;
   const minWageNames = (minWageCheck?.rows ?? [])
     .filter((r) => !r.exempt)
@@ -593,6 +601,50 @@ export default function PayrollPage() {
               Review wages
             </Button>
           )}
+        </div>
+      )}
+
+      {/* Item 12 — attendance problems this cycle, gathered from the queues that already own them.
+          Same rule as the strip above: it renders only when something actually fired, so its
+          presence is the signal. Amber only when something is BLOCKING; the merely-odd entries are
+          neutral, because five permanent yellow bars is how a warning stops being read. */}
+      {exceptions.length > 0 && (
+        <div
+          className={cn(
+            "mt-4 rounded-card border px-4 py-3",
+            blockingExceptions.length > 0
+              ? "border-warning/40 bg-warning-subtle"
+              : "border-border bg-muted/40",
+          )}
+        >
+          <div className="flex items-start gap-3">
+            {blockingExceptions.length > 0 ? (
+              <AlertTriangle className="mt-0.5 size-5 shrink-0 text-warning" />
+            ) : (
+              <Eye className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">
+                {blockingExceptions.length > 0
+                  ? "Check the attendance for this period before running it"
+                  : "Attendance notes for this period"}
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {exceptions.map((e) => (
+                  <li key={e.key} className="text-sm text-foreground">
+                    <span className="font-semibold">{e.count}</span> · {e.label}
+                    <span className="block text-caption text-muted-foreground">
+                      {e.detail} <span className="italic">{e.where}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-caption text-muted-foreground">
+                None of these stops the run — a cutoff that cannot close is worse than one that
+                closes with a known problem on the record.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 

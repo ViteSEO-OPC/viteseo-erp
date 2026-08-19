@@ -856,3 +856,25 @@ export interface MinimumWageApplyResult {
   /** Periods already settled when the raise takes effect — recorded as back pay owed (FIN-009). */
   back_pay_flagged: number;
 }
+
+/**
+ * One attendance problem worth seeing before a cycle is priced (item 12).
+ *
+ * Counts and a destination, never rows: each exception is listed in full on the screen that owns
+ * it, and the fixing happens there. `blocking` marks the ones where running now produces a payslip
+ * somebody will dispute — it does not stop the run, because a cutoff that cannot close is worse
+ * than one that closes with a known exception on the record.
+ */
+export interface AttendanceException {
+  key:
+    | "unpriced_days"
+    | "overtime_held"
+    | "approved_without_punch"
+    | "long_shifts"
+    | "overtime_flagged";
+  label: string;
+  count: number;
+  blocking: boolean;
+  detail: string;
+  where: string;
+}

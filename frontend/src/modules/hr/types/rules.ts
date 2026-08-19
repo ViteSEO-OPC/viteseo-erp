@@ -37,11 +37,24 @@ export interface WorkScheduleInput {
 export type LateDeductionMode = "none" | "per_hour" | "tiered";
 export type LateMinutesFrom = "start_time" | "after_grace";
 export type UndertimeDeductionMode = "none" | "per_hour";
-export type MissingClockoutMode =
-  | "no_deduction_flag_for_review"
-  | "treat_as_undertime_to_now"
-  | "treat_as_absent";
-export type EarlyArrivalMode = "none" | "offset_undertime" | "overtime_eligible";
+/**
+ * SINGLE-VALUED ON PURPOSE (item 8). These two columns once accepted several values apiece, none
+ * of which any engine ever read — `treat_as_undertime_to_now` / `treat_as_absent` and
+ * `offset_undertime` / `overtime_eligible` were settings that silently did nothing, which is worse
+ * than an absent feature because HR believed a forgotten punch was being charged.
+ *
+ * The server now rejects everything else (`UpdateAttendancePolicyRequest`) and migration
+ * `2026_07_28_000012_normalise_inert_policy_modes` collapsed the stored rows, so a union listing
+ * the old values was the last place in the codebase still claiming they were reachable.
+ *
+ * WIDEN THESE AGAIN, don't add a fourth mode elsewhere, if the behaviour is ever built — and widen
+ * the request rule in the same change, or the UI will offer what the API refuses.
+ *
+ * A missing clock-out is handled by `missing_timeout_allowance_minutes` instead: it resolves to the
+ * employee's own scheduled end rather than being deducted or treated as an absence.
+ */
+export type MissingClockoutMode = "no_deduction_flag_for_review";
+export type EarlyArrivalMode = "none";
 /**
  * What happens when someone punches in before their shift starts.
  *  allow — recorded at the time they actually pressed it

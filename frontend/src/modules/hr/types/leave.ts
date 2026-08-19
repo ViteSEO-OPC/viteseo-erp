@@ -105,6 +105,11 @@ export interface OvertimeRequest {
   cancelled_at: string | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
+  /**
+   * Item 10 — the HR user who filed this on the employee's behalf, for a date that had already
+   * passed. `null` is the ordinary case and means the employee filed it themselves.
+   */
+  filed_by: string | null;
   employee: EmployeeRef;
   created_at: string;
 }
@@ -156,6 +161,12 @@ export interface OvertimeClassification {
   label: string;
   rate_pct: number;
   is_workday: boolean;
+  /**
+   * That day's shift start (HH:MM), null on a rest day. Needed to tell an overnight shift from a
+   * day one: on 22:00–06:00 the end is a SMALLER number than the start, so comparing against the
+   * end alone answers nonsense.
+   */
+  schedule_start: string | null;
   /** That day's shift end (HH:MM) — overtime can only start after it. Null on a rest day. */
   schedule_end: string | null;
 }

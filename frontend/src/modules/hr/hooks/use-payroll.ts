@@ -30,6 +30,7 @@ import {
   settlePayment,
   reconcilePaymentBatch,
   getDeductionArrears,
+  getAttendanceExceptions,
   getMinimumWageCheck,
   applyMinimumWageAdjustments,
 } from "@/modules/hr/api/payroll";
@@ -70,6 +71,20 @@ export function useMinimumWageCheck(
     queryKey: [...MINIMUM_WAGE_KEY, input],
     queryFn: () => getMinimumWageCheck(input!),
     enabled: !!input?.frequency,
+  });
+}
+
+/**
+ * Item 12 — attendance exceptions for the cycle about to be priced.
+ *
+ * Read at the moment the money is committed, not on whichever screen owns each queue: HR runs
+ * payroll from here, so this is where the counts have to appear.
+ */
+export function useAttendanceExceptions(start?: string, end?: string) {
+  return useQuery({
+    queryKey: ["hr", "payroll", "attendance-exceptions", start ?? "", end ?? ""],
+    queryFn: () => getAttendanceExceptions(start!, end!),
+    enabled: !!start && !!end,
   });
 }
 

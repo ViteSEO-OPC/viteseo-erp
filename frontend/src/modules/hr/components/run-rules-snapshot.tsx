@@ -25,6 +25,11 @@ const LABELS: Record<string, string> = {
   lates_per_deduction: "Lates per deduction",
   monthly_late_reset: "Late count resets monthly",
   late_minutes_from: "Late counted from",
+  // Item 8 — a real pay rule that was missing here. Payroll resolves the DATED policy at cycle
+  // end and prices an abandoned shift to the scheduled end using this allowance, so it genuinely
+  // is one of the rules this run was computed under. (Its siblings `missing_clockout_mode` and
+  // `early_arrival_mode` stay out: no engine reads either, so neither priced anything.)
+  missing_timeout_allowance_minutes: "Wait after shift end before closing a missing time-out (minutes)",
   undertime_deduction_mode: "Undertime deduction",
   overtime_mode: "Overtime",
   overtime_threshold_minutes: "Minimum overtime (min)",

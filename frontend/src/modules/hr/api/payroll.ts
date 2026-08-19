@@ -1,5 +1,6 @@
 import { apiClient } from "@/core/api-client";
 import type {
+  AttendanceException,
   NextPayday,
   PayrollRun,
   PayrollSettings,
@@ -371,5 +372,20 @@ export async function reconcilePaymentBatch(
 /** Deductions a thin payslip could not collect, still outstanding (FIN-005). */
 export async function getDeductionArrears(): Promise<DeductionArrear[]> {
   const res = await apiClient.get("/hr/deduction-arrears");
+  return res.data.data;
+}
+
+/**
+ * Item 12 — attendance exceptions for a cycle, read before the run turns them into money.
+ * Derived on every call, so there is nothing to resolve here: an entry disappears when the record
+ * behind it is corrected on its own screen.
+ */
+export async function getAttendanceExceptions(
+  start: string,
+  end: string,
+): Promise<AttendanceException[]> {
+  const res = await apiClient.get("/hr/payroll/attendance-exceptions", {
+    params: { start, end },
+  });
   return res.data.data;
 }

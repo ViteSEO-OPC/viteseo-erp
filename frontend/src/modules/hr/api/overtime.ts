@@ -50,6 +50,23 @@ export async function createOvertimeRequest(input: {
   return res.data.data;
 }
 
+/**
+ * Item 10 — HR files overtime for an employee on a date that has already passed. HR only.
+ *
+ * Lands PENDING, not approved: the ordinary approve action still has to rule on it, which is what
+ * keeps the audit entry and the settled-period retro flag in the path.
+ */
+export async function createOvertimeRequestForEmployee(input: {
+  employee_id: number;
+  work_date: string;
+  time_from: string;
+  time_to: string;
+  reason: string;
+}): Promise<OvertimeRequest> {
+  const res = await apiClient.post("/hr/overtime-requests/for-employee", input);
+  return res.data.data;
+}
+
 export async function approveOvertimeRequest(id: number): Promise<OvertimeRequest> {
   const res = await apiClient.post(`/hr/overtime-requests/${id}/approve`);
   return res.data.data;

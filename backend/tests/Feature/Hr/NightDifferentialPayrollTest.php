@@ -198,7 +198,10 @@ class NightDifferentialPayrollTest extends HrTestCase
         $this->approved('2026-08-03', '06:00', '08:00');
 
         $abandoned = $this->payrollResult();
-        $this->assertSame(480, $abandoned['night_diff_minutes'], '22:00–06:00 resolves to a full night');
+        // 420, not 480: the scheduled 60-minute meal is carved out (item 9). A graveyard shift's
+        // daytime portion is zero, so nothing can absorb the break, and the differential is
+        // paid on exactly the day's expected paid minutes (480 span − 60 unpaid meal).
+        $this->assertSame(420, $abandoned['night_diff_minutes'], '22:00–06:00 resolves to a full paid night');
         $this->assertSame(0, $abandoned['overtime_minutes'], 'an approval cannot pay unclocked overtime');
         $this->assertGreaterThan(0.0, $abandoned['night_diff_pay']);
 
@@ -229,7 +232,10 @@ class NightDifferentialPayrollTest extends HrTestCase
 
         // 09:30 — past the cutoff, so the shift is now abandoned and resolves.
         $this->travelTo(Carbon::parse('2026-08-04 09:30', config('app.timezone_local')));
-        $this->assertSame(480, $this->nightMinutes('2026-08-03'));
+        // 420, not 480: the scheduled 60-minute meal is carved out (item 9). A graveyard shift's
+        // daytime portion is zero, so nothing can absorb the break, and the differential is
+        // paid on exactly the day's expected paid minutes (480 span − 60 unpaid meal).
+        $this->assertSame(420, $this->nightMinutes('2026-08-03'));
     }
 
     /**
@@ -250,7 +256,9 @@ class NightDifferentialPayrollTest extends HrTestCase
         $result = $this->payrollResult();
 
         $this->assertSame(0, $result['overtime_minutes'], 'auto mode must not pay an unclocked overrun');
-        $this->assertSame(480, $result['night_diff_minutes']);
+        // 420: a pure graveyard shift has no daytime portion to absorb the scheduled 60-minute
+        // meal, so the differential is paid on the day's expected paid minutes (item 9).
+        $this->assertSame(420, $result['night_diff_minutes']);
         $this->assertSame([], app(AttendanceService::class)
             ->overtimeCapacityFor($this->employee, '2026-08-03', '2026-08-03'));
     }
@@ -333,7 +341,9 @@ class NightDifferentialPayrollTest extends HrTestCase
 
         $result = $this->payrollResult();
 
-        $this->assertSame(480, $result['night_diff_minutes']);
+        // 420: a pure graveyard shift has no daytime portion to absorb the scheduled 60-minute
+        // meal, so the differential is paid on the day's expected paid minutes (item 9).
+        $this->assertSame(420, $result['night_diff_minutes']);
         $this->assertSame(0, $result['overtime_minutes'], 'the first 8 rest-day hours are premium, not OT');
         $this->assertGreaterThan(0.0, $result['night_diff_pay']);
     }

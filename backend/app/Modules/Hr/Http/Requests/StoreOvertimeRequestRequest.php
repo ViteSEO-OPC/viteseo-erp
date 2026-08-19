@@ -30,9 +30,37 @@ class StoreOvertimeRequestRequest extends FormRequest
     }
 
     /**
-     * One live overtime request per date (blocked while pending or approved), and the derived
-     * duration must be sane — 0.25h to 16h. A window ending at/before its start counts as
-     * crossing midnight, so only a zero-length window is rejected outright.
+     * Does this window collide with one the employee already has live on that date?
+     *
+     * Rejected and cancelled rows are ignored — they authorise nothing, so they cannot
+     * double-pay anything. Rows with no window at all (legacy hours-only approvals) are skipped
+     * too: with nothing to compare against, blocking on them would forbid filing on a date the
+     * employee cannot see the shape of.
+     *
+     * Shared with the HR retroactive form via a static so the two filing paths cannot drift.
+     */
+    public static function overlapsExisting(int $employeeId, string $workDate, string $from, string $to, ?int $ignoreId = null): bool
+    {
+        return OvertimeRequest::where('employee_id', $employeeId)
+            ->where('work_date', $workDate)
+            ->whereIn('status', ['pending', 'approved'])
+            ->whereNull('cancelled_at')
+            ->whereNotNull('time_from')
+            ->whereNotNull('time_to')
+            ->when($ignoreId !== null, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->get(['time_from', 'time_to'])
+            ->contains(fn (OvertimeRequest $existing) => OvertimeRequestService::windowsOverlap(
+                $from,
+                $to,
+                (string) $existing->time_from,
+                (string) $existing->time_to,
+            ));
+    }
+
+    /**
+     * Several overtime requests per date are allowed as long as their WINDOWS do not overlap
+     * (item 10), and the derived duration must be sane — 0.25h to 16h. A window ending at/before
+     * its start counts as crossing midnight, so only a zero-length window is rejected outright.
      */
     public function withValidator(Validator $validator): void
     {
@@ -67,15 +95,17 @@ class StoreOvertimeRequestRequest extends FormRequest
                 return;
             }
 
-            $duplicate = OvertimeRequest::where('employee_id', $employeeId)
-                ->where('work_date', $this->input('work_date'))
-                ->whereIn('status', ['pending', 'approved'])
-                ->exists();
-
-            if ($duplicate) {
+            // Item 10 — OVERLAP, not "one per date". A split evening (17:00–19:00, dinner, then
+            // 22:00–01:00) is two genuine windows and the pay engine has always merged several
+            // windows on one date. What must never happen is the same minutes being approved
+            // twice, and that is exactly what this now blocks.
+            $wellFormed = is_string($from) && is_string($to)
+                && preg_match('/^\d{2}:\d{2}$/', $from) && preg_match('/^\d{2}:\d{2}$/', $to)
+                && $from !== $to;
+            if ($wellFormed && self::overlapsExisting($employeeId, (string) $this->input('work_date'), $from, $to)) {
                 $validator->errors()->add(
-                    'work_date',
-                    'You already have a pending or approved overtime request for this date.',
+                    'time_from',
+                    'This overlaps an overtime request you have already filed for this date.',
                 );
             }
         });

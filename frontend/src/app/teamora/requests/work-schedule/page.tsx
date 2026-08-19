@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Zap, Check, X, Ban } from "lucide-react";
+import { Zap, Check, X, Ban, CalendarPlus } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
   type Column,
 } from "@/core/components/data-table";
 import { AutoOvertimeReview } from "@/modules/hr/components/auto-overtime-review";
+import { OvertimeCorrectionDialog } from "@/modules/hr/components/overtime-correction-dialog";
 import {
   StatusFilter,
   filterByStatus,
@@ -890,6 +891,8 @@ function OvertimeSection() {
     );
   }
 
+  const [filingFor, setFilingFor] = useState(false);
+
   const columns: Column<OvertimeRequest>[] = [
     {
       header: "Employee",
@@ -902,7 +905,17 @@ function OvertimeSection() {
     },
     { header: "Hours", cell: (r) => `${r.hours.toFixed(1)} hrs` },
     { header: "Pay", cell: () => <span className="text-success">Paid · overtime</span> },
-    { header: "Reason", cell: (r) => <span className="text-muted-foreground">{r.reason}</span> },
+    {
+      header: "Reason",
+      cell: (r) => (
+        <span className="text-muted-foreground">
+          {r.reason}
+          {/* Item 10 — a request HR filed on someone's behalf must say so. Without it the row is
+              indistinguishable from one the employee sent, which credits the wrong person. */}
+          {r.filed_by && <span className="block text-xs italic">Filed by {r.filed_by}</span>}
+        </span>
+      ),
+    },
     { header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
     {
       header: "Action",
@@ -917,11 +930,25 @@ function OvertimeSection() {
           table below is where it gets resolved: approving a request for that date releases it. */}
       <AutoOvertimeReview />
 
-      <h2 className="mt-10 text-h3 font-bold text-foreground">Overtime Requests</h2>
-      <p className="mt-1 text-caption text-muted-foreground">
-        Hours worked beyond the schedule. Approving ADDS pay for that period, at the company&apos;s
-        overtime rate for that day (regular / rest day / special day / regular holiday).
-      </p>
+      <OvertimeCorrectionDialog open={filingFor} onOpenChange={setFilingFor} />
+
+      <div className="mt-10 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-h3 font-bold text-foreground">Overtime Requests</h2>
+          <p className="mt-1 max-w-2xl text-caption text-muted-foreground">
+            Hours worked beyond the schedule. Approving ADDS pay for that period, at the
+            company&apos;s overtime rate for that day (regular / rest day / special day / regular
+            holiday).
+          </p>
+        </div>
+        {/* Item 10 — the correction path for overtime that was worked but never filed. Employees
+            cannot back-date their own, so without this the only remedies were editing the
+            attendance record or paying it outside the system. */}
+        <Button variant="outline" onClick={() => setFilingFor(true)}>
+          <CalendarPlus />
+          File for an employee
+        </Button>
+      </div>
       <div className="mt-4">
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading overtime requests…</p>

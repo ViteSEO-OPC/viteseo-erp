@@ -18,6 +18,7 @@ use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Services\AuditService;
+use App\Modules\Hr\Services\AttendanceService;
 use App\Modules\Hr\Services\PayrollService;
 use App\Modules\Hr\Services\PayScheduleService;
 use Illuminate\Http\JsonResponse;
@@ -132,6 +133,25 @@ class PayrollController extends Controller
      * before offering the run button, which is the point — a compliance warning is only worth
      * anything at the moment money is about to be committed.
      */
+    /**
+     * GET /api/v1/hr/payroll/attendance-exceptions?start=&end= — what to look at before pricing
+     * this cycle (item 12). HR only, read-only, derived on every call.
+     *
+     * Returns counts and destinations, not rows: each exception is already listed in full on the
+     * screen that owns it, and a second copy here would be the one that drifts.
+     */
+    public function attendanceExceptions(Request $request, AttendanceService $attendance): JsonResponse
+    {
+        $data = $request->validate([
+            'start' => ['required', 'date_format:Y-m-d'],
+            'end' => ['required', 'date_format:Y-m-d', 'after_or_equal:start'],
+        ]);
+
+        return response()->json([
+            'data' => $attendance->exceptionsForCycle($data['start'], $data['end']),
+        ]);
+    }
+
     public function minimumWageCheck(MinimumWageReviewRequest $request): JsonResponse
     {
         $cycle = $request->cycle();

@@ -35,7 +35,6 @@ import { PAY_FREQUENCIES, payFrequencyLabel } from "@/modules/hr/types/employee"
 import {
   formatWorkdays,
   type DailyRateBasis,
-  type EarlyArrivalMode,
   type EarlyClockInMode,
   type LateDeductionMode,
   type LateTier,
@@ -377,7 +376,6 @@ function AttendancePolicyEditor() {
   const [undertimeMode, setUndertimeMode] = useState<UndertimeDeductionMode>(policy?.undertime_deduction_mode ?? "none");
 
   // Early arrival & overtime.
-  const [earlyArrival, setEarlyArrival] = useState<EarlyArrivalMode>(policy?.early_arrival_mode ?? "none");
   const [earlyClockIn, setEarlyClockIn] = useState<EarlyClockInMode>(
     policy?.early_clock_in_mode ?? "allow",
   );
@@ -946,6 +944,13 @@ function AttendancePolicyEditor() {
           minutes only pay once HR corrects the record. It stays flagged in Violation history (set
           its alert levels under <strong>Violation flags</strong>).
         </Hint>
+        {/* Item 11 — the rule was stated but not where its consequences land. HR reading this
+            should not have to discover the queue that lists the days it could not settle. */}
+        <Hint>
+          Days this <em>cannot</em> settle — someone who clocked in on a rest day, has no schedule
+          assigned, or has an approved overtime request with no clock-out behind it — are listed
+          under <strong>Open shifts</strong> on the Attendance page, where you can correct them.
+        </Hint>
       </SettingsDialog>
 
       {/* Early arrival & overtime. */}
@@ -954,8 +959,8 @@ function AttendancePolicyEditor() {
         open={openCard === "early_ot"}
         onOpenChange={(o) => !o && setOpenCard(null)}
         pending={saving === "early_ot"}
-        // Slice 14 — early_arrival_mode is deliberately NOT sent: the control is disabled
-        // (no engine reads it) and the API now rejects anything but "none", so echoing a
+        // Slice 14 / item 8 — early_arrival_mode is deliberately NOT sent, and no longer has a
+        // control at all: no engine reads it and the API rejects anything but "none", so echoing a
         // stored value back would 422 and block HR from saving the overtime settings.
         onSave={() =>
           saveCard(
@@ -1011,20 +1016,12 @@ function AttendancePolicyEditor() {
         </Hint>
         <SubDivider />
 
-        <SubHeading>What early minutes are worth</SubHeading>
+        {/* Item 8 — the disabled "Early arrival" select that used to head this row is GONE. It
+            offered three ways to value early minutes, no engine read any of them, and a control
+            that cannot be operated still reads as a feature that exists. Early minutes are simply
+            ignored; the sentence below says so, which is the honest version of the same fact. */}
+        <SubHeading>How extra time is paid</SubHeading>
         <div className="flex flex-wrap items-end gap-4">
-          <FieldSelect
-            id="pol-early"
-            label="Early arrival"
-            value={earlyArrival}
-            onChange={(v) => setEarlyArrival(v as EarlyArrivalMode)}
-            disabled
-            options={[
-              { value: "none", label: "Ignore early minutes" },
-              { value: "offset_undertime", label: "Offset same-day undertime" },
-              { value: "overtime_eligible", label: "Count toward overtime (with approval)" },
-            ]}
-          />
           <FieldSelect
             id="pol-ot"
             label="Overtime"
@@ -1120,10 +1117,10 @@ function AttendancePolicyEditor() {
           </div>
         )}
         <Hint>
-          Early-arrival handling isn&apos;t active yet — early minutes are always ignored for now, whatever
-          this shows. Overtime is live: <strong>Only when approved</strong> pays each approved overtime
-          request; <strong>No overtime</strong> switches it off. Rest-day work is paid only through an
-          approved request, never auto-detected.
+          <strong>Arriving early is never paid.</strong> Turning up at 7:30 for an 8:00 shift earns
+          nothing extra and cannot offset leaving early later the same day — only time past the
+          scheduled <em>end</em> can become overtime. Rest-day work is paid only through an approved
+          request, never auto-detected.
         </Hint>
       </SettingsDialog>
 
@@ -1315,6 +1312,16 @@ function AttendancePolicyEditor() {
           <strong>All of these move money now.</strong> Holiday premium, overtime, the rest-day
           premium and the night differential each read their rate here on the next payroll run —
           changing one changes what people are paid.
+        </Hint>
+        {/* Item 9 — the differential compounds, so raising a DAY rate raises the night pay on that
+            day too. Worth saying outright: HR would otherwise read these as five independent
+            numbers and be surprised when moving one moved another line on the payslip. */}
+        <Hint>
+          <strong>The night differential stacks on the day&apos;s own rate.</strong> It is a
+          percentage of what the hour is already worth, not of the basic rate — so a night hour on
+          a regular holiday earns 10% of the <em>200%</em> rate, and a night hour of overtime earns
+          10% of the overtime rate. Raising a holiday, rest-day or overtime rate above therefore
+          raises the night pay on those days with it.
         </Hint>
       </SettingsDialog>
 

@@ -250,6 +250,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth'])->middleware('throttle:5,1,payroll-13th:');
         // FIN-030b — who this run would pay below the regional floor, and the one-click fix.
         // The check is read-only; the adjustment writes salaries, so it carries a run-sized limit.
+        // Item 12 — attendance exceptions for a cycle, read before the run turns them into money.
+        Route::get('payroll/attendance-exceptions', [PayrollController::class, 'attendanceExceptions']);
         Route::get('payroll/minimum-wage-check', [PayrollController::class, 'minimumWageCheck']);
         Route::post('payroll/minimum-wage-adjustments', [PayrollController::class, 'applyMinimumWage'])
             ->middleware('throttle:5,1,payroll-minimum-wage:');
@@ -326,6 +328,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('early-out-requests/{earlyOutRequest}/approve', [EarlyOutRequestController::class, 'approve']);
         Route::post('early-out-requests/{earlyOutRequest}/reject', [EarlyOutRequestController::class, 'reject']);
         Route::post('early-out-requests/{earlyOutRequest}/reopen', [EarlyOutRequestController::class, 'reopen']);
+        // Item 10 — HR files overtime for an employee on a date that has passed. Above the
+        // `{overtimeRequest}` routes below so "for-employee" is never read as an id.
+        Route::post('overtime-requests/for-employee', [OvertimeRequestController::class, 'storeForEmployee']);
         Route::post('overtime-requests/{overtimeRequest}/approve', [OvertimeRequestController::class, 'approve']);
         Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
         Route::post('overtime-requests/{overtimeRequest}/reopen', [OvertimeRequestController::class, 'reopen']);
