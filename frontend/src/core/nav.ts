@@ -103,6 +103,7 @@ export const hrNav: NavEntry[] = [
 export const employeeNav: NavEntry[] = [
   { label: "Overview", href: "/teamora", icon: LayoutGrid },
   { label: "Work Schedule", href: "/teamora/work-schedule", icon: CalendarDays },
+  { label: "My Attendance", href: "/teamora/my-attendance", icon: Clock },
   { label: "Payslips", href: "/teamora/payslips", icon: FileText },
   { label: "Claims", href: "/teamora/claims", icon: Wallet },
   { label: "Concerns", href: "/teamora/concerns", icon: ShieldAlert },

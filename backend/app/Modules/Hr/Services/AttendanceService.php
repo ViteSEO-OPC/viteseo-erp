@@ -2067,6 +2067,77 @@ class AttendanceService
     }
 
     /**
+     * Undertime minutes per date — how far short of the expected end the employee clocked out.
+     *
+     * DELIBERATELY NOT the deduction ledger's figure, for the same reason lateMinutesFor() is not:
+     * DeductionService reports 0 undertime whenever `undertime_deduction_mode` is `none`, because
+     * there it is answering "how much do we charge for this". The question here is "did this person
+     * leave early", which is true or false whether or not the company docks anyone for it — an
+     * employee reading their own month has to see the shortfall even at a company that never
+     * charges it.
+     *
+     * The expected end is the HALF actually owed on a day with an approved half-day (mirroring
+     * DeductionService::workedWindow via HalfDayWindowService), a whole day off is skipped, and a
+     * missing clock-out is skipped rather than treated as leaving at midnight — an abandoned punch
+     * is auto-closed at the scheduled end (item 6), never undertime.
+     *
+     * @return array<string, int> date 'Y-m-d' => undertime minutes, omitted on days that ran full
+     */
+    public function undertimeMinutesFor(Employee $employee, string $start, string $end): array
+    {
+        if ($employee->isManagement()) {
+            return []; // exempt from the clock entirely
+        }
+
+        $tz = config('app.timezone_local');
+        $out = [];
+        // Memoized by range, like every other per-day map here.
+        $offHalves = $this->halfDays->offHalvesBetween($start, $end);
+
+        foreach ($this->rowsBetween($employee, $start, $end) as $row) {
+            if (! $row->time_in || ! $row->time_out) {
+                continue;
+            }
+
+            // `->toDateString()` is NOT redundant — see lateMinutesFor() for why parsing the
+            // `date`-cast Carbon directly would build midnight UTC and move the whole shift.
+            $day = Carbon::parse($row->work_date->toDateString(), $tz);
+            $eff = $this->schedule->effectiveFor($employee, $day);
+            if (! ($eff['is_workday'] ?? false)) {
+                continue; // a rest day has no scheduled end to fall short of
+            }
+
+            $offHalf = $offHalves["{$employee->id}|{$day->toDateString()}"] ?? null;
+            [$startHm, $endHm] = $this->halfDays->windowFor($eff, $offHalf);
+            $startMin = $this->hmToMinutes($startHm);
+            $endMin = $this->hmToMinutes($endHm);
+            if ($startMin === null || $endMin === null) {
+                continue; // whole day off, or no window configured — nothing to measure against
+            }
+
+            $outMin = $this->clockToMinutes($row->time_out);
+
+            // Item 15 — an overnight shift needs the end and any post-midnight punch rolled past
+            // 24h before these minute-of-day values can be compared, or a 05:00 finish on a
+            // 22:00–06:00 shift reads as sixteen hours of undertime instead of one.
+            if ($endMin < $startMin) {
+                $boundary = intdiv($endMin + $startMin, 2);
+                if ($outMin !== null && $outMin <= $boundary) {
+                    $outMin += 24 * 60;
+                }
+                $endMin += 24 * 60;
+            }
+
+            $minutes = max(0, $endMin - (int) $outMin);
+            if ($minutes > 0) {
+                $out[$day->toDateString()] = $minutes;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * The cycle-wide ceiling on auto overtime, applied after the daily one (FIN-039).
      *
      * Spent CHRONOLOGICALLY. The earliest dates in the cycle consume the budget and later ones fall to

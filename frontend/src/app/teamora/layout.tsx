@@ -25,6 +25,7 @@ import { ViewModeProvider } from "@/modules/hr/components/view-mode-context";
 const EMPLOYEE_PATHS = new Set([
   "/teamora",
   "/teamora/work-schedule",
+  "/teamora/my-attendance",
   "/teamora/payslips",
   "/teamora/claims",
   "/teamora/concerns",

@@ -8,13 +8,17 @@ use App\Modules\Hr\Http\Requests\ClockInRequest;
 use App\Modules\Hr\Http\Resources\AttendanceResource;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\AttendanceService;
+use App\Modules\Hr\Services\MyAttendanceReportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
 class AttendanceController extends Controller
 {
-    public function __construct(private readonly AttendanceService $service) {}
+    public function __construct(
+        private readonly AttendanceService $service,
+        private readonly MyAttendanceReportService $myReport,
+    ) {}
 
     // GET /api/v1/hr/me/attendance — today's row (for the clock panel) + this week.
     public function me(Request $request): JsonResponse
@@ -53,6 +57,33 @@ class AttendanceController extends Controller
                 'clock_in' => $this->service->clockInWindowFor($employee),
             ],
         ]);
+    }
+
+    /**
+     * GET /api/v1/hr/me/attendance-report?month=YYYY-MM — the caller's OWN month, day by day,
+     * with the twelve-month context around it.
+     *
+     * The employee is resolved from the token, never from the query string: this returns one
+     * person's punches, lateness and leave, and a client-supplied id would make it everyone's.
+     */
+    public function myReport(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            // A malformed month is not an error worth a red toast — the service falls back to the
+            // current one — but a month that is not a month should never reach the date parser.
+            'month' => ['nullable', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
+        ]);
+
+        $employee = $request->user()->employee;
+
+        if (! $employee) {
+            return response()->json(
+                ['message' => 'Only employees have an attendance record.'],
+                Response::HTTP_FORBIDDEN,
+            );
+        }
+
+        return response()->json(['data' => $this->myReport->build($employee, $validated)]);
     }
 
     public function clockIn(ClockInRequest $request): JsonResponse
