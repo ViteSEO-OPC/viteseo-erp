@@ -242,6 +242,7 @@ type PolicyCardKey =
   | "violation"
   | "time_deductions"
   | "early_ot"
+  | "rest_day_work"
   | "geofence"
   | "premium_rates"
   | "basis"
@@ -271,6 +272,12 @@ const POLICY_CARDS: PolicyCard[] = [
     key: "early_ot",
     title: "Early arrival & overtime",
     description: "Clocking in early, and how extra time past the schedule is treated.",
+  },
+  {
+    key: "rest_day_work",
+    title: "Working a rest day",
+    description:
+      "Whether someone can time in on a day their schedule doesn't cover, or has to ask you first. The day is paid the same either way.",
   },
   {
     key: "geofence",
@@ -378,6 +385,11 @@ function AttendancePolicyEditor() {
   // Early arrival & overtime.
   const [earlyClockIn, setEarlyClockIn] = useState<EarlyClockInMode>(
     policy?.early_clock_in_mode ?? "allow",
+  );
+
+  // Working a rest day. On (the default) = the work-request queue; off = an ordinary punch.
+  const [restDayNeedsRequest, setRestDayNeedsRequest] = useState(
+    policy?.rest_day_work_requires_request ?? true,
   );
 
   // Geofenced clock-in. lat/lng are kept as STRINGS so an empty box stays empty ("no pin
@@ -1119,8 +1131,59 @@ function AttendancePolicyEditor() {
         <Hint>
           <strong>Arriving early is never paid.</strong> Turning up at 7:30 for an 8:00 shift earns
           nothing extra and cannot offset leaving early later the same day — only time past the
-          scheduled <em>end</em> can become overtime. Rest-day work is paid only through an approved
-          request, never auto-detected.
+          scheduled <em>end</em> can become overtime.
+        </Hint>
+      </SettingsDialog>
+
+      {/* Working a rest day. Its own card rather than a line in "Early arrival & overtime":
+          this decides whether a whole request queue exists, and HR looks for it by name. */}
+      <SettingsDialog
+        card={CARD.rest_day_work}
+        open={openCard === "rest_day_work"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "rest_day_work"}
+        onSave={() =>
+          saveCard("rest_day_work", { rest_day_work_requires_request: restDayNeedsRequest })
+        }
+      >
+        <SubHeading>When someone times in on a day that isn&apos;t theirs</SubHeading>
+        <CheckBox
+          checked={restDayNeedsRequest}
+          onChange={setRestDayNeedsRequest}
+          label="They have to ask HR first"
+        />
+        <Hint>
+          {restDayNeedsRequest ? (
+            <>
+              <strong>Time in</strong> becomes <strong>Request to work today</strong>, and the
+              request lands under <strong>Work Requests</strong> on the Work Schedule requests
+              page. Approving it times them in at <strong>the moment they pressed the button</strong>
+              , not the moment you approve — so however long you take costs them nothing. A request
+              nobody decides lapses after 24 hours, because approving it later would back-date a
+              shift.
+            </>
+          ) : (
+            <>
+              They time in as they would on any other day and the punch is recorded straight away.
+              Nothing reaches your queue.
+            </>
+          )}
+        </Hint>
+        <Hint>
+          <strong>The pay is the same either way.</strong> A rest day that gets worked earns the
+          rest-day premium off the attendance record itself, not off an approval — so this only
+          decides who has to agree before the day is recorded. There is no lateness on a rest day
+          under either setting: there is no shift to be late for.
+        </Hint>
+        <Hint>
+          Turn it off when weekend or rota coverage is routine and the queue would only ever be
+          rubber-stamped. Leave it on when a worked rest day is exceptional and someone should be
+          choosing to spend the premium.
+        </Hint>
+        <Hint>
+          This does not cover <strong>work suspensions</strong> — a typhoon or a shutdown. Whether
+          people may time in on one of those is set per declaration, on{" "}
+          <strong>Company → Holidays &amp; Suspensions</strong>.
         </Hint>
       </SettingsDialog>
 

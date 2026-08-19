@@ -93,7 +93,7 @@ export const hrNav: NavEntry[] = [
       { label: "Departments", href: "/teamora/company/departments", icon: Network },
       { label: "Leave Type", href: "/teamora/company/leave-types", icon: Tag, stub: true },
       { label: "Rules", href: "/teamora/company/rules", icon: ScrollText, stub: true },
-      { label: "Holiday List", href: "/teamora/company/holidays", icon: CalendarRange },
+      { label: "Holidays & Suspensions", href: "/teamora/company/holidays", icon: CalendarRange },
       { label: "FAQ", href: "/teamora/company/faq", icon: HelpCircle },
     ],
   },

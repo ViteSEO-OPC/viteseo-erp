@@ -21,6 +21,8 @@ class AttendancePolicy extends Model
         'missing_timeout_allowance_minutes',
         'early_arrival_mode',
         'early_clock_in_mode',
+        // Whether working a rest day needs HR's permission first.
+        'rest_day_work_requires_request',
         'geofence_enabled',
         'office_lat',
         'office_lng',
@@ -59,6 +61,7 @@ class AttendancePolicy extends Model
         'lates_per_deduction' => 'integer',
         'missing_timeout_allowance_minutes' => 'integer',
         'late_penalty_enabled' => 'boolean',
+        'rest_day_work_requires_request' => 'boolean',
         'late_tiers' => 'array',
         'geofence_enabled' => 'boolean',
         // float, not decimal:7 — these are fed straight into haversine trigonometry and

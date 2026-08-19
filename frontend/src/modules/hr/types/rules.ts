@@ -113,6 +113,10 @@ export interface AttendancePolicy {
 
   early_arrival_mode: EarlyArrivalMode; // what early minutes are WORTH (inert for now)
   early_clock_in_mode: EarlyClockInMode; // what happens to an early punch
+  // Does working a rest day need HR's permission first? On (the default) turns Time in on a
+  // non-workday into a work request; off records the punch straight away. Pay is identical
+  // either way — the rest-day premium is priced off the attendance row, not off an approval.
+  rest_day_work_requires_request: boolean;
 
   // Geofenced clock-in. Off = today's clock-in, untouched; it doubles as the kill switch.
   // On but half-configured (no pin, or no IPs) deliberately behaves as OFF — the server

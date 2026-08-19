@@ -47,6 +47,12 @@ class AttendancePolicyService
         // How an early punch is handled: allow (recorded as-is — today's behaviour),
         // defer (accepted, but stamped at the shift's start time), block (refused).
         'early_clock_in_mode' => 'allow',
+        // Working a day the schedule doesn't cover needs HR to agree first — the rest-day work
+        // request. On is today's behaviour and the sensible default: a rest day worked earns a
+        // premium, so somebody should be choosing to spend it. Off suits companies whose
+        // weekend coverage is routine, where a queue that is always approved is a queue nobody
+        // reads; the punch is then simply recorded, and pays exactly the same either way.
+        'rest_day_work_requires_request' => true,
         // Geofenced clock-in — off is today's behaviour. Also the kill switch: turning it
         // off puts everyone back on the normal clock instantly, with no deploy.
         'geofence_enabled' => false,

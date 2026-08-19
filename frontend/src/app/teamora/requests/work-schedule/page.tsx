@@ -54,17 +54,17 @@ import {
   useReopenOvertimeRequest,
 } from "@/modules/hr/hooks/use-overtime";
 import {
-  useRestDayRequests,
-  useApproveRestDayRequest,
-  useRejectRestDayRequest,
-  useReopenRestDayRequest,
-} from "@/modules/hr/hooks/use-rest-day";
+  useWorkRequests,
+  useApproveWorkRequest,
+  useRejectWorkRequest,
+  useReopenWorkRequest,
+} from "@/modules/hr/hooks/use-work-request";
 import type {
   LeaveRequest,
   HalfDayRequest,
   EarlyOutRequest,
   OvertimeRequest,
-  RestDayRequest,
+  WorkRequest,
 } from "@/modules/hr/types/leave";
 
 // Pending / Approved / Rejected are the leave + half-day lifecycle states.
@@ -244,7 +244,7 @@ export default function TimeLeavePage() {
     <div className="p-4 sm:p-8">
       <PageHeader
         title="Work Schedule"
-        subtitle="Review and decide on leave, half-day, early-out, overtime and rest-day work requests."
+        subtitle="Review and decide on leave, half-day, early-out, overtime and work requests."
       />
 
       {/* Automation explainer */}
@@ -346,19 +346,19 @@ export default function TimeLeavePage() {
 
       <OvertimeSection />
 
-      <RestDaySection />
+      <WorkRequestSection />
     </div>
   );
 }
 
-// ---- Rest-day work requests (filed by pressing Time in on a non-workday) ----
+// ---- Work requests (filed by pressing Time in on a day nobody was expected in on) ----
 
 /**
  * `expired` is in the filter and nowhere else: a pending request goes stale 24h after the punch
  * it would stamp, and HR needs to be able to find the ones that lapsed — a request that silently
  * vanishes from every view is indistinguishable from one that was never filed.
  */
-const REST_DAY_STATUS_OPTIONS: StatusFilterOption[] = [
+const WORK_REQUEST_STATUS_OPTIONS: StatusFilterOption[] = [
   { value: "all", label: "All" },
   { value: "pending", label: "Pending" },
   { value: "approved", label: "Approved" },
@@ -366,12 +366,26 @@ const REST_DAY_STATUS_OPTIONS: StatusFilterOption[] = [
   { value: "expired", label: "Expired" },
 ];
 
-function RestDaySection() {
-  const { data: requests, isLoading } = useRestDayRequests();
-  const approveMut = useApproveRestDayRequest();
-  const rejectMut = useRejectRestDayRequest();
-  const reopenMut = useReopenRestDayRequest();
-  const [review, setReview] = useState<{ mode: "approve" | "reject"; r: RestDayRequest } | null>(null);
+/** What the day was, in the words the row and every toast use. */
+function dayLabel(r: WorkRequest): string {
+  return r.type === "suspension" ? "suspended day" : "rest day";
+}
+
+/** How the day pays once worked — the only thing the two types price differently. */
+function payLabel(r: WorkRequest) {
+  return r.type === "suspension" ? (
+    <span className="text-success">Paid · ordinary day</span>
+  ) : (
+    <span className="text-success">Paid · rest-day premium</span>
+  );
+}
+
+function WorkRequestSection() {
+  const { data: requests, isLoading } = useWorkRequests();
+  const approveMut = useApproveWorkRequest();
+  const rejectMut = useRejectWorkRequest();
+  const reopenMut = useReopenWorkRequest();
+  const [review, setReview] = useState<{ mode: "approve" | "reject"; r: WorkRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -384,12 +398,12 @@ function RestDaySection() {
       if (mode === "approve") {
         await approveMut.mutateAsync(r.id);
         toast.success(
-          `Approved ${r.employee.name}'s rest-day work`,
+          `Approved ${r.employee.name}'s work on the ${dayLabel(r)}`,
           `Timed in at ${formatTimeManila(r.requested_at)}, when they asked.`,
         );
       } else {
         await rejectMut.mutateAsync({ id: r.id, reason });
-        toast.error(`Declined ${r.employee.name}'s rest-day work`);
+        toast.error(`Declined ${r.employee.name}'s request to work the ${dayLabel(r)}`);
       }
     } catch (err) {
       // Unlike the other four, this one has decisions that legitimately fail — an expired
@@ -404,7 +418,7 @@ function RestDaySection() {
     (rejectMut.isPending && rejectMut.variables?.id) ||
     null;
 
-  function restDayActions(r: RestDayRequest) {
+  function workRequestActions(r: WorkRequest) {
     if (r.status === "pending") {
       return (
         <>
@@ -426,7 +440,7 @@ function RestDaySection() {
     }
     return (
       <ReopenAction
-        subject={`${r.employee.name}'s rest-day work`}
+        subject={`${r.employee.name}'s work on the ${dayLabel(r)}`}
         consequence={
           r.status === "approved"
             ? "The attendance this approval created is removed with it. Refused once the shift has been clocked out."
@@ -437,12 +451,22 @@ function RestDaySection() {
     );
   }
 
-  const columns: Column<RestDayRequest>[] = [
+  const columns: Column<WorkRequest>[] = [
     {
       header: "Employee",
       cell: (r) => <EmployeeCell employee={r.employee} />,
     },
-    { header: "Rest day", cell: (r) => formatDate(r.work_date) },
+    // The two types are the same row with different reasons for existing, and the reason is
+    // what decides the premium — so it is a column, not a footnote in the detail modal.
+    {
+      header: "Day",
+      cell: (r) => (
+        <div>
+          <p className="font-medium text-foreground">{formatDate(r.work_date)}</p>
+          <p className="text-caption text-muted-foreground capitalize">{dayLabel(r)}</p>
+        </div>
+      ),
+    },
     {
       header: "Asked at",
       cell: (r) => (
@@ -451,7 +475,7 @@ function RestDaySection() {
         </span>
       ),
     },
-    { header: "Pay", cell: () => <span className="text-success">Paid · rest-day premium</span> },
+    { header: "Pay", cell: (r) => payLabel(r) },
     {
       header: "Reason",
       cell: (r) => (
@@ -462,21 +486,22 @@ function RestDaySection() {
     {
       header: "Action",
       align: "right",
-      cell: (r) => <RowActions>{restDayActions(r)}</RowActions>,
+      cell: (r) => <RowActions>{workRequestActions(r)}</RowActions>,
     },
   ];
 
   return (
     <div className="mt-10">
-      <h2 className="text-h3 font-bold text-foreground">Rest-Day Work Requests</h2>
+      <h2 className="text-h3 font-bold text-foreground">Work Requests</h2>
       <p className="mt-1 text-caption text-muted-foreground">
-        Filed when someone presses Time in on a day their schedule calls a rest day — there is no
-        form to fill in. Approving times them in at the moment they asked, not now, and the day
-        earns the rest-day premium. Requests lapse 24 hours after that moment.
+        Filed when someone presses Time in on a day nobody was expected in on — a rest day, or a
+        suspension you marked as needing permission. There is no form to fill in. Approving times
+        them in at the moment they asked, not now; a rest day earns the rest-day premium and a
+        suspended day is paid as an ordinary one. Requests lapse 24 hours after that moment.
       </p>
       <div className="mt-4">
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading rest-day requests…</p>
+          <p className="text-sm text-muted-foreground">Loading work requests…</p>
         ) : (
           <DataTable
             columns={columns}
@@ -484,12 +509,12 @@ function RestDaySection() {
             rowKey={(r) => r.id}
             onRowClick={(r) => setDetailId(r.id)}
             needsAction={(r) => r.status === "pending"}
-            getSearchText={(r) => `${r.employee.name ?? ""} ${r.reason ?? ""} ${r.status}`}
+            getSearchText={(r) => `${r.employee.name ?? ""} ${r.reason ?? ""} ${dayLabel(r)} ${r.status}`}
             searchPlaceholder="Search employee, reason…"
             toolbar={
-              <StatusFilter options={REST_DAY_STATUS_OPTIONS} value={status} onChange={setStatus} />
+              <StatusFilter options={WORK_REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
             }
-            empty="No rest-day work requests yet. They appear here when someone times in on a rest day."
+            empty="No work requests yet. They appear here when someone times in on a rest day, or on a suspended day that needs your permission."
           />
         )}
       </div>
@@ -500,7 +525,7 @@ function RestDaySection() {
         mode={review?.mode ?? "approve"}
         subject={
           review
-            ? `${review.r.employee.name}'s rest-day work (${formatDate(review.r.work_date)}, asked at ${formatTimeManila(review.r.requested_at)})`
+            ? `${review.r.employee.name}'s work on the ${dayLabel(review.r)} of ${formatDate(review.r.work_date)} (asked at ${formatTimeManila(review.r.requested_at)})`
             : ""
         }
         onConfirm={onConfirm}
@@ -510,14 +535,17 @@ function RestDaySection() {
         <RequestDetailDialog
           open
           onOpenChange={(o) => !o && setDetailId(null)}
-          title="Rest-Day Work"
+          title="Work Request"
           status={detail.status}
           employee={detail.employee}
           submitted={detail.created_at}
           fields={[
-            { label: "Rest day", value: formatDate(detail.work_date) },
+            {
+              label: detail.type === "suspension" ? "Suspended day" : "Rest day",
+              value: formatDate(detail.work_date),
+            },
             { label: "Times in at", value: formatTimeManila(detail.requested_at) },
-            { label: "Pay", value: <span className="text-success">Paid · rest-day premium</span> },
+            { label: "Pay", value: payLabel(detail) },
           ]}
           note={{ label: "Reason", text: detail.reason ?? "—" }}
           decision={{
@@ -525,7 +553,7 @@ function RestDaySection() {
             at: detail.reviewed_at,
             note: detail.review_note,
           }}
-          actions={restDayActions(detail)}
+          actions={workRequestActions(detail)}
         />
       )}
     </div>

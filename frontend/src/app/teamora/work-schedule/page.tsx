@@ -38,9 +38,9 @@ import {
   useCancelOvertimeRequest,
 } from "@/modules/hr/hooks/use-overtime";
 import {
-  useRestDayRequests,
-  useCancelRestDayRequest,
-} from "@/modules/hr/hooks/use-rest-day";
+  useWorkRequests,
+  useCancelWorkRequest,
+} from "@/modules/hr/hooks/use-work-request";
 
 type RequestTab = "leave" | "half" | "early" | "overtime";
 
@@ -82,7 +82,7 @@ function formatDateRange(start: string, end: string): string {
 interface HistItem {
   key: string;
   id: number;
-  kind: "leave" | "half" | "early" | "overtime" | "rest";
+  kind: "leave" | "half" | "early" | "overtime" | "work";
   title: string;
   dates: string;
   /** null where a day count is meaningless — an early-out or an overtime window. */
@@ -163,15 +163,16 @@ export default function TimeOffPage() {
   const { data: types } = useLeaveTypes();
   const { data: requests } = useLeaveRequests();
   const { data: halfDays } = useHalfDayRequests();
-  // Rest-day work. No tab and no form: these are filed from the time clock, by pressing
-  // Time in on a rest day. They appear here only so the employee can follow the decision.
-  const { data: restDays } = useRestDayRequests();
+  // Work requests. No tab and no form: these are filed from the time clock, by pressing Time
+  // in on a day nobody was expected in on. They appear here only so the employee can follow
+  // the decision.
+  const { data: workRequests } = useWorkRequests();
   const { data: earlyOuts } = useEarlyOutRequests();
   const { data: overtimes } = useOvertimeRequests();
   // One dialog, four endpoints — `handleCancel` dispatches on the row's kind.
   const cancelMut = useCancelLeaveRequest();
   const cancelHalfDayMut = useCancelHalfDayRequest();
-  const cancelRestDayMut = useCancelRestDayRequest();
+  const cancelWorkRequestMut = useCancelWorkRequest();
   const cancelEarlyOutMut = useCancelEarlyOutRequest();
   const cancelOvertimeMut = useCancelOvertimeRequest();
   const [tab, setTab] = useState<RequestTab>("leave");
@@ -237,7 +238,7 @@ export default function TimeOffPage() {
     (halfDays ?? []).filter((h) => h.status === "pending").length +
     (earlyOuts ?? []).filter((e) => e.status === "pending").length +
     (overtimes ?? []).filter((o) => o.status === "pending").length +
-    (restDays ?? []).filter((r) => r.status === "pending").length;
+    (workRequests ?? []).filter((r) => r.status === "pending").length;
 
   // Combined leave / half-day / early-out / overtime history, newest first.
   const history: HistItem[] = [
@@ -351,11 +352,11 @@ export default function TimeOffPage() {
       // so the service keeps that with HR — offering the button here would only 422.
       cancellable: o.status === "pending",
     })),
-    ...(restDays ?? []).map((r) => ({
+    ...(workRequests ?? []).map((r) => ({
       key: `r${r.id}`,
       id: r.id,
-      kind: "rest" as const,
-      title: "Rest-day work",
+      kind: "work" as const,
+      title: r.type === "suspension" ? "Work on a suspended day" : "Rest-day work",
       dates: formatDate(r.work_date),
       days: null,
       status: r.status,
@@ -363,11 +364,22 @@ export default function TimeOffPage() {
       reason: r.reason ?? "—",
       decision: { at: r.reviewed_at, by: r.reviewed_by, note: r.review_note },
       fields: [
-        { label: "Rest day", value: formatDate(r.work_date) },
+        {
+          label: r.type === "suspension" ? "Suspended day" : "Rest day",
+          value: formatDate(r.work_date),
+        },
         // The whole point of the feature, so it is stated as the promise it is rather than
         // left for the employee to infer from a timestamp column.
         { label: "Times you in at", value: formatTimeManila(r.requested_at) },
-        { label: "Pay", value: <span className="text-success">Paid · rest-day premium</span> },
+        {
+          label: "Pay",
+          value:
+            r.type === "suspension" ? (
+              <span className="text-success">Paid · ordinary day</span>
+            ) : (
+              <span className="text-success">Paid · rest-day premium</span>
+            ),
+        },
       ],
       cancelled: r.cancelled_at
         ? { at: r.cancelled_at, by: r.cancelled_by, reason: r.cancel_reason }
@@ -446,7 +458,7 @@ export default function TimeOffPage() {
       half: { mutation: cancelHalfDayMut, label: "half-day request" },
       early: { mutation: cancelEarlyOutMut, label: "early-out request" },
       overtime: { mutation: cancelOvertimeMut, label: "overtime request" },
-      rest: { mutation: cancelRestDayMut, label: "rest-day work request" },
+      work: { mutation: cancelWorkRequestMut, label: "work request" },
     }[cancelTarget.kind];
 
     try {

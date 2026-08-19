@@ -9,7 +9,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\WorkSchedule;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\AttendanceService;
-use App\Modules\Hr\Services\RestDayRequestService;
+use App\Modules\Hr\Services\WorkRequestService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -178,10 +178,10 @@ class EarlyClockInModeTest extends HrTestCase
         $this->mode('defer');
         $this->atManila('2026-07-04 07:30'); // a Saturday
 
-        $request = app(RestDayRequestService::class)->create($this->employee, '2026-07-04');
+        $request = app(WorkRequestService::class)->create($this->employee, '2026-07-04');
         // Approved two hours later, to prove the stamp follows the press and not the decision.
         $this->atManila('2026-07-04 09:30');
-        app(RestDayRequestService::class)->approve($request, $this->hrUser());
+        app(WorkRequestService::class)->approve($request, $this->hrUser());
 
         $att = Attendance::where('employee_id', $this->employee->id)
             ->where('work_date', '2026-07-04')

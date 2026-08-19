@@ -168,8 +168,8 @@ export default function HolidaysPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Holiday List"
-        subtitle="Manage company holidays by country and year. Holidays are customizable, country-based, and refreshed annually."
+        title="Holidays and Suspensions"
+        subtitle="The legal holiday calendar, by country and year, plus the days the company itself cancelled. Holidays are customizable, country-based, and refreshed annually."
       />
 
       {/* Toolbar: country + year on the left, refresh + add on the right */}
@@ -324,6 +324,17 @@ function WorkSuspensionsSection({ year }: { year: string }) {
       ),
     },
     {
+      header: "Time clock",
+      cell: (s) =>
+        s.work_requires_request ? (
+          <span className="inline-flex rounded-full bg-warning-subtle px-2.5 py-0.5 text-xs font-semibold text-warning">
+            Ask first
+          </span>
+        ) : (
+          <span className="text-muted-foreground">Open</span>
+        ),
+    },
+    {
       header: "Declared by",
       cell: (s) => <span className="text-muted-foreground">{s.declared_by ?? "—"}</span>,
     },
@@ -358,8 +369,10 @@ function WorkSuspensionsSection({ year }: { year: string }) {
           <p className="mt-1 mb-4 max-w-2xl text-sm text-muted-foreground">
             Days the company cancelled — a typhoon, a flood, a shutdown. Nobody has to time in
             and nobody is flagged absent. Paid means the day costs no one a day&apos;s pay;
-            unpaid deducts one day from everyone who didn&apos;t work it. These are separate from
-            holidays, which are set by law and carry their own premium.
+            unpaid deducts one day from everyone who didn&apos;t work it. Set{" "}
+            <strong>Ask first</strong> on a day you need to know who is in the building — then
+            timing in files a work request for you to decide. These are separate from holidays,
+            which are set by law and carry their own premium.
           </p>
         </div>
         <Button

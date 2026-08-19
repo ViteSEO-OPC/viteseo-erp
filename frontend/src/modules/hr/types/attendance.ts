@@ -1,3 +1,5 @@
+import type { WorkRequestType } from "@/modules/hr/types/leave";
+
 export type ClockState =
   | "not_clocked_in"
   | "clocked_in"
@@ -57,19 +59,29 @@ export interface ClockInWindow {
    */
   geofence: boolean;
   /**
-   * Is today one of this employee's scheduled workdays? `false` turns Time in into a REQUEST
-   * to work a rest day — the server refuses the punch and files one instead. Read from the
-   * server rather than derived from the weekday: the effective schedule resolves override →
-   * assigned → default, and a second copy of that in the browser would drift.
+   * Is today one of this employee's scheduled workdays? Read from the server rather than
+   * derived from the weekday: the effective schedule resolves override → assigned → default,
+   * and a second copy of that in the browser would drift.
    */
   is_workday: boolean;
   /**
-   * The employee's latest rest-day request for today, when today is a rest day. Null on a
-   * workday, for management, and before anything is filed. `requested_at` is the time-in an
-   * approval will stamp — the panel quotes it so the promise is visible before HR decides.
+   * Non-null means Time in files a REQUEST rather than punching in, and names why — a rest day
+   * with the company rule on, or a suspension HR marked as needing permission. Null means the
+   * ordinary punch, including on a rest day when HR has turned that rule off.
+   *
+   * The server's answer, never re-derived here: it combines the effective schedule with two
+   * switches, and a browser copy of either would go stale the moment HR changed one.
    */
-  rest_day_request: {
+  work_request_required: WorkRequestType | null;
+  /**
+   * The employee's latest work request for today. Null on an ordinary workday, for management,
+   * and before anything is filed. Present even once the day no longer requires asking, so a
+   * decision already made still gets explained. `requested_at` is the time-in an approval will
+   * stamp — the panel quotes it so the promise is visible before HR decides.
+   */
+  work_request: {
     id: number;
+    type: WorkRequestType;
     status: "pending" | "approved" | "rejected" | "cancelled" | "expired";
     requested_at: string | null;
     review_note: string | null;
@@ -78,13 +90,16 @@ export interface ClockInWindow {
    * HR has cancelled work today (typhoon, shutdown). Null on an ordinary day and on the
    * employee's own rest day, where saying "work is cancelled" would be noise.
    *
-   * It does NOT disable the time clock: a skeleton crew still comes in, and blocking them
-   * would leave the people who actually worked with no record of it.
+   * On its own it does NOT disable the time clock: a skeleton crew still comes in, and blocking
+   * them would leave the people who actually worked with no record of it. `work_requires_request`
+   * is HR's per-declaration exception — on it, the button asks instead of punching, which is
+   * what `work_request_required` reports.
    */
   suspension: {
     name: string;
     is_paid: boolean;
     status: "suspended_paid" | "suspended_unpaid";
+    work_requires_request: boolean;
   } | null;
 }
 

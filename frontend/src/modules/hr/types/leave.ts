@@ -52,18 +52,26 @@ export interface HalfDayRequest {
   created_at: string;
 }
 
+/** Which question a work request answered — see {@link WorkRequest}. */
+export type WorkRequestType = "rest_day" | "suspension";
+
 /**
- * Rest-day work requests — permission to work a day the employee's schedule calls a rest day.
+ * Work requests — permission to work a day nobody was expected in on.
  *
- * Unlike every other request here, there is no form: it is filed by pressing Time in on a rest
- * day. `requested_at` is that press, and approving stamps attendance at it — so the field is the
+ * Two kinds, one lifecycle. `rest_day` is a day the employee's own schedule doesn't cover;
+ * `suspension` is an ordinary workday HR cancelled and marked as needing permission to come in
+ * on. Which one applies is the server's call, from the company rule and the declaration.
+ *
+ * Unlike every other request here, there is no form: it is filed by pressing Time in.
+ * `requested_at` is that press, and approving stamps attendance at it — so the field is the
  * paid time-in, not metadata about the row.
  *
  * `expired` is its own status: a pending request goes stale 24h after `requested_at`, because
  * approving one later would back-date a shift.
  */
-export interface RestDayRequest {
+export interface WorkRequest {
   id: number;
+  type: WorkRequestType;
   work_date: string;
   requested_at: string;
   reason: string | null;

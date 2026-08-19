@@ -28,7 +28,7 @@ import {
   useMyRemoteCheckin,
   useSubmitRemoteCheckin,
 } from "@/modules/hr/hooks/use-remote-checkins";
-import { useCreateRestDayRequest } from "@/modules/hr/hooks/use-rest-day";
+import { useCreateWorkRequest } from "@/modules/hr/hooks/use-work-request";
 import { TimeOutDialog } from "@/modules/hr/components/time-out-dialog";
 import { ClockInLocationDialog } from "@/modules/hr/components/clock-in-location-dialog";
 import { SEVERITY_LABEL, SEVERITY_RANK } from "@/modules/hr/types/attendance";
@@ -138,24 +138,27 @@ export function TimeClockPanel() {
   // panel never asks a question whose answer would be ignored.
   const geofenced = data?.clock_in?.geofence ?? false;
 
-  // Rest-day work (RD-2). Today isn't a scheduled workday, so the server refuses a punch and
-  // takes a REQUEST instead — approving it stamps the time-in at the moment of the press, so
-  // nothing is lost waiting for HR. Both facts come from the server: re-deriving "is today a
-  // workday" from the weekday would ignore custom workdays and daily overrides.
+  // Work requests. Today is a day nobody was expected in on — a rest day, or a suspension HR
+  // marked as needing permission — so the server refuses a punch and takes a REQUEST instead;
+  // approving it stamps the time-in at the moment of the press, so nothing is lost waiting for
+  // HR. Every fact here comes from the server: `work_request_required` folds the effective
+  // schedule together with two switches HR can flip, and a browser copy of any of it would drift.
   const isWorkday = data?.clock_in?.is_workday ?? true;
-  const restReq = data?.clock_in?.rest_day_request ?? null;
-  const restDayPending = restReq?.status === "pending";
+  const requiredType = data?.clock_in?.work_request_required ?? null;
+  const workReq = data?.clock_in?.work_request ?? null;
+  const workReqPending = workReq?.status === "pending";
   // Only worth saying while they are still not clocked in — once HR has approved something
   // else, or the day moved on, a stale refusal on screen is just noise.
-  const restDayRejected = restReq?.status === "rejected" && state === "not_clocked_in";
-  const restDayExpired = restReq?.status === "expired" && state === "not_clocked_in";
+  const workReqRejected = workReq?.status === "rejected" && state === "not_clocked_in";
+  const workReqExpired = workReq?.status === "expired" && state === "not_clocked_in";
   // The button files a request rather than punching in.
-  const needsRestDayRequest = !isWorkday && state === "not_clocked_in";
-  const restDayMut = useCreateRestDayRequest();
+  const needsWorkRequest = requiredType !== null && state === "not_clocked_in";
+  const workReqMut = useCreateWorkRequest();
 
-  // Work suspended today (Slice B). Shown, never enforced: the button stays live because a
-  // skeleton crew does come in, and someone who works a cancelled day must still be able to
-  // record it. What changes is what the panel SAYS — nobody has to time in.
+  // Work suspended today (Slice B). Usually shown and not enforced: the button stays live
+  // because a skeleton crew does come in, and someone who works a cancelled day must still be
+  // able to record it. What changes is what the panel SAYS. The exception is a declaration HR
+  // marked `work_requires_request`, which routes the same press through the queue above.
   const suspension = data?.clock_in?.suspension ?? null;
 
   // `defer` mode: they pressed Time in before their shift, so the punch is stamped at the
@@ -217,8 +220,8 @@ export function TimeClockPanel() {
   const [confirm, setConfirm] = useState<"time_in" | "lunch" | "break" | null>(null);
   const [timeOutOpen, setTimeOutOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
-  const [restDayOpen, setRestDayOpen] = useState(false);
-  const [restDayReason, setRestDayReason] = useState("");
+  const [workReqOpen, setWorkReqOpen] = useState(false);
+  const [workReqReason, setWorkReqReason] = useState("");
   const lunchActive = state === "on_lunch";
   const breakActive = state === "on_break";
 
@@ -296,17 +299,17 @@ export function TimeClockPanel() {
     if (ok) setLocationOpen(false);
   }
 
-  // Rest-day work: this is the punch, even though nothing is written to attendance yet. The
+  // A work request: this is the punch, even though nothing is written to attendance yet. The
   // toast quotes the time back so the promise ("you keep this moment") is visible immediately,
   // not only after HR gets round to it.
-  async function onRestDayRequest() {
+  async function onWorkRequest() {
     const ok = await run(
-      () => restDayMut.mutateAsync(restDayReason.trim() || undefined),
+      () => workReqMut.mutateAsync(workReqReason.trim() || undefined),
       "Sent to HR for approval",
     );
     if (ok) {
-      setRestDayOpen(false);
-      setRestDayReason("");
+      setWorkReqOpen(false);
+      setWorkReqReason("");
     }
   }
 
@@ -372,25 +375,31 @@ export function TimeClockPanel() {
         </p>
 
         <p className="mt-3 text-sm text-white/70">
-          {/* Rest-day branches come FIRST: on a day the schedule doesn't cover, "you haven't
-              clocked in yet today" is not merely unhelpful, it implies they still can. */}
-          {state === "not_clocked_in" && !isWorkday &&
-            (restDayPending
-              ? `Sent to HR at ${formatTimeManila(restReq?.requested_at)} — you'll be timed in at that moment once they approve it.`
-              : restDayRejected
-                ? `HR declined your request to work today: ${restReq?.review_note ?? "no reason given"}.`
-                : restDayExpired
+          {/* The request branch comes FIRST: on a day that needs asking, "you haven't clocked
+              in yet today" is not merely unhelpful, it implies they still can. */}
+          {state === "not_clocked_in" && needsWorkRequest &&
+            (workReqPending
+              ? `Sent to HR at ${formatTimeManila(workReq?.requested_at)} — you'll be timed in at that moment once they approve it.`
+              : workReqRejected
+                ? `HR declined your request to work today: ${workReq?.review_note ?? "no reason given"}.`
+                : workReqExpired
                   ? "Your earlier request for today lapsed without a decision — ask HR to add the day on the Attendance screen."
-                  : "Today isn't one of your workdays. Ask HR to work it — you'll be timed in from the moment you ask, not when they approve.")}
+                  : requiredType === "suspension"
+                    ? `${suspension?.name ?? "Work is suspended today"} — work is suspended and HR is keeping track of who comes in. Ask to work it and you'll be timed in from the moment you ask, not when they approve.`
+                    : "Today isn't one of your workdays. Ask HR to work it — you'll be timed in from the moment you ask, not when they approve.")}
+          {/* A rest day nobody has to ask about: the day still isn't theirs, so say so rather
+              than implying an ordinary shift is waiting. */}
+          {state === "not_clocked_in" && !needsWorkRequest && !isWorkday &&
+            "Today isn't one of your workdays. You can still time in — the day is paid at the rest-day rate."}
           {/* A cancelled day outranks every ordinary not-clocked-in message: "you haven't
               clocked in yet today" is actively wrong when nobody was asked to. */}
-          {state === "not_clocked_in" && isWorkday && suspension &&
+          {state === "not_clocked_in" && !needsWorkRequest && isWorkday && suspension &&
             `${suspension.name} — work is suspended today, so you don't need to time in. ${
               suspension.is_paid
                 ? "The day is paid."
                 : "The day is unpaid; coming in anyway is paid normally."
             }`}
-          {state === "not_clocked_in" && isWorkday && !suspension &&
+          {state === "not_clocked_in" && !needsWorkRequest && isWorkday && !suspension &&
             (awaitingReview
               ? `Sent to HR at ${formatTimeManila(myCheckin?.submitted_at)} — you'll be timed in at that moment once they approve it.`
               : wasRejected
@@ -404,7 +413,7 @@ export function TimeClockPanel() {
             (queuedUntil
               ? `You're queued — your time in counts from ${formatTimeManila(queuedUntil)}, when your shift starts.`
               : `Clocked in at ${formatTimeManila(today?.time_in)}.${
-                  !isWorkday ? " HR approved this rest day — it earns a rest-day premium." : ""
+                  !isWorkday ? " This is a rest day — it earns a rest-day premium." : ""
                 }`)}
           {state === "on_lunch" && "You're on your lunch break."}
           {state === "on_break" && "You're on a short break."}
@@ -421,15 +430,15 @@ export function TimeClockPanel() {
             // rest-day request is the same case with a different queue.
             disabled={
               busy ||
-              restDayMut.isPending ||
+              workReqMut.isPending ||
               state !== "not_clocked_in" ||
               tooEarly ||
               awaitingReview ||
-              restDayPending
+              workReqPending
             }
             onClick={() =>
-              needsRestDayRequest
-                ? setRestDayOpen(true)
+              needsWorkRequest
+                ? setWorkReqOpen(true)
                 : geofenced
                   ? setLocationOpen(true)
                   : setConfirm("time_in")
@@ -437,9 +446,9 @@ export function TimeClockPanel() {
             title={tooEarly ? `Opens at ${format12Hour(opensAt)}` : undefined}
             className="rounded-lg bg-brand px-4 py-3 sm:py-2 text-sm font-semibold text-brand-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
           >
-            {awaitingReview || restDayPending
+            {awaitingReview || workReqPending
               ? "Waiting for HR"
-              : needsRestDayRequest
+              : needsWorkRequest
                 ? "Request to work today"
                 : "Time in"}
           </button>
@@ -522,34 +531,46 @@ export function TimeClockPanel() {
         </DialogContent>
       </Dialog>
 
-      {/* Rest-day work request — replaces the plain confirm when today isn't a workday.
-          Its own dialog rather than a fourth `confirm` mode: this one takes an input and
-          promises something the others don't. */}
+      {/* Work request — replaces the plain confirm when today needs HR's permission. Its own
+          dialog rather than a fourth `confirm` mode: this one takes an input and promises
+          something the others don't. */}
       <Dialog
-        open={restDayOpen}
+        open={workReqOpen}
         onOpenChange={(o) => {
-          setRestDayOpen(o);
-          if (!o) setRestDayReason("");
+          setWorkReqOpen(o);
+          if (!o) setWorkReqReason("");
         }}
       >
         <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto lg:max-w-lg">
           <DialogHeader>
             <DialogTitle>Ask to work today?</DialogTitle>
             <DialogDescription>
-              Today isn&apos;t one of your scheduled workdays, so HR has to agree to it. Sending
-              this records your time in at <strong>right now</strong> — you keep this moment even
-              if they approve it later. The day earns a rest-day premium once approved.
+              {requiredType === "suspension" ? (
+                <>
+                  Work is suspended today and HR is keeping track of who comes in, so they have
+                  to agree to it. Sending this records your time in at <strong>right now</strong>{" "}
+                  — you keep this moment even if they approve it later, and the day is paid as an
+                  ordinary one once approved.
+                </>
+              ) : (
+                <>
+                  Today isn&apos;t one of your scheduled workdays, so HR has to agree to it.
+                  Sending this records your time in at <strong>right now</strong> — you keep this
+                  moment even if they approve it later. The day earns a rest-day premium once
+                  approved.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5">
-            <label htmlFor="rest-day-reason" className="text-sm font-medium">
+            <label htmlFor="work-request-reason" className="text-sm font-medium">
               Reason <span className="font-normal text-muted-foreground">(optional)</span>
             </label>
             <textarea
-              id="rest-day-reason"
+              id="work-request-reason"
               rows={2}
-              value={restDayReason}
-              onChange={(e) => setRestDayReason(e.target.value)}
+              value={workReqReason}
+              onChange={(e) => setWorkReqReason(e.target.value)}
               maxLength={1000}
               className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               placeholder="e.g. client deadline, coverage for a teammate"
@@ -561,10 +582,10 @@ export function TimeClockPanel() {
             </DialogClose>
             <Button
               className="bg-brand text-brand-foreground hover:bg-brand/90"
-              disabled={restDayMut.isPending}
-              onClick={onRestDayRequest}
+              disabled={workReqMut.isPending}
+              onClick={onWorkRequest}
             >
-              {restDayMut.isPending ? "Sending…" : "Send to HR"}
+              {workReqMut.isPending ? "Sending…" : "Send to HR"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -5,26 +5,34 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\Employee;
-use App\Modules\Hr\Models\RestDayRequest;
 use App\Modules\Hr\Models\RetroFlag;
+use App\Modules\Hr\Models\WorkRequest;
 use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Rest-day work requests — permission to work a day the schedule says is a rest day.
+ * Work requests — permission to work a day nobody was expected in on.
  *
  * The flow is deliberately unlike every other request in this module: the employee does not fill
- * in a form, they press Time in on a Saturday. The server refuses to write attendance and files
- * this instead, stamped with the moment of the press. HR approving it writes the attendance row at
- * THAT moment — not at the moment of approval — so the review delay costs the employee nothing.
+ * in a form, they press Time in. The server refuses to write attendance and files this instead,
+ * stamped with the moment of the press. HR approving it writes the attendance row at THAT moment
+ * — not at the moment of approval — so the review delay costs the employee nothing.
+ *
+ * TWO DAYS ASK THE SAME QUESTION, hence one table:
+ *   rest_day    the employee's schedule does not cover the day, and the company rule
+ *               `rest_day_work_requires_request` is on.
+ *   suspension  an ordinary workday HR cancelled, on a declaration whose
+ *               `work_requires_request` is set.
+ * Either switch turned off means the punch is simply recorded and nothing is filed here.
  *
  * Nothing downstream needed teaching. Rest-day premium already prices any attendance row landing
- * on a non-workday (AttendanceService::restDayWorkedMinutesFor), and violations already skip rest
- * days entirely. This service is only the gate on such a row existing.
+ * on a non-workday (AttendanceService::restDayWorkedMinutesFor), a suspended day with a time-in
+ * is already paid as worked, and violations already skip both. This service is only the gate on
+ * such a row existing.
  */
-class RestDayRequestService
+class WorkRequestService
 {
     use CancelsOwnRequest;
 
@@ -33,6 +41,8 @@ class RestDayRequestService
         private readonly AuditService $audit,
         private readonly PayrollFreezeService $freeze,
         private readonly RetroFlagService $retro,
+        private readonly AttendancePolicyService $policy,
+        private readonly WorkSuspensionService $suspensions,
     ) {}
 
     /** HR sees all; an employee sees only their own. Stale pending rows expire on the way past. */
@@ -40,7 +50,7 @@ class RestDayRequestService
     {
         $this->expireStale();
 
-        $query = RestDayRequest::with(['employee.user', 'reviewer', 'canceller'])
+        $query = WorkRequest::with(['employee.user', 'reviewer', 'canceller'])
             ->orderByDesc('work_date')
             ->latest();
 
@@ -58,21 +68,50 @@ class RestDayRequestService
      * Includes decided requests for the day so the panel can explain a rejection rather than
      * silently re-offering the same button.
      */
-    public function forDate(Employee $employee, string $date): ?RestDayRequest
+    public function forDate(Employee $employee, string $date): ?WorkRequest
     {
         $this->expireStale($employee);
 
-        return RestDayRequest::where('employee_id', $employee->id)
+        return WorkRequest::where('employee_id', $employee->id)
             ->where('work_date', $date)
             ->latest('id')
             ->first();
     }
 
     /**
-     * File one. `$date` is always the caller's today — a rest-day request IS the press of the
-     * time-in button, so there is no version of it that can be filed in advance.
+     * Which kind of request a date calls for, or null when the employee may simply time in.
+     *
+     * The single reader of both switches, so the clock panel, the clock-in gate and this
+     * service's own `create()` can never disagree about whether a day needs asking. A rest day
+     * wins over a suspension declared on the same date: the employee was never expected in, so
+     * the company's decision to cancel work says nothing about them.
      */
-    public function create(Employee $employee, string $date, ?string $reason = null): RestDayRequest
+    public function requiredTypeFor(Employee $employee, string $date): ?string
+    {
+        if ($employee->isManagement()) {
+            return null;
+        }
+
+        $day = Carbon::parse($date, config('app.timezone_local'))->startOfDay();
+
+        if (! ($this->schedule->effectiveFor($employee, $day)['is_workday'] ?? true)) {
+            return $this->policy->get()->rest_day_work_requires_request
+                ? WorkRequest::TYPE_REST_DAY
+                : null;
+        }
+
+        $suspension = $this->suspensions->forDate($date);
+
+        return $suspension && $suspension->work_requires_request
+            ? WorkRequest::TYPE_SUSPENSION
+            : null;
+    }
+
+    /**
+     * File one. `$date` is always the caller's today — a work request IS the press of the time-in
+     * button, so there is no version of it that can be filed in advance.
+     */
+    public function create(Employee $employee, string $date, ?string $reason = null): WorkRequest
     {
         if ($employee->isManagement()) {
             throw ValidationException::withMessages([
@@ -80,12 +119,11 @@ class RestDayRequestService
             ]);
         }
 
-        $tz = config('app.timezone_local');
-        $day = Carbon::parse($date, $tz)->startOfDay();
+        $type = $this->requiredTypeFor($employee, $date);
 
-        if ($this->schedule->effectiveFor($employee, $day)['is_workday'] ?? true) {
+        if ($type === null) {
             throw ValidationException::withMessages([
-                'work_date' => ['This is one of your scheduled workdays — just time in as usual.'],
+                'work_date' => ['You can work this day without asking — just time in as usual.'],
             ]);
         }
 
@@ -104,7 +142,7 @@ class RestDayRequestService
 
         $this->expireStale($employee);
 
-        $live = RestDayRequest::where('employee_id', $employee->id)
+        $live = WorkRequest::where('employee_id', $employee->id)
             ->where('work_date', $date)
             ->whereIn('status', ['pending', 'approved'])
             ->first();
@@ -119,8 +157,9 @@ class RestDayRequestService
             ]);
         }
 
-        $req = RestDayRequest::create([
+        $req = WorkRequest::create([
             'employee_id' => $employee->id,
+            'type' => $type,
             'work_date' => $date,
             // The punch. Written here and never recomputed — this column is the whole point
             // of the feature, and an approval that stamped `now()` instead would silently
@@ -133,7 +172,7 @@ class RestDayRequestService
         $this->audit->log(
             'submitted',
             'Attendance',
-            'Rest-day work request (' . $req->work_date->format('M j') . ')',
+            'Work request — ' . $req->dayLabel() . ' (' . $req->work_date->format('M j') . ')',
             $req,
         );
 
@@ -147,7 +186,7 @@ class RestDayRequestService
      * The employee then clocks OUT through the ordinary time clock: `openRow()` resolves a row
      * with a time-in and no time-out, so no special case is needed on the way back out.
      */
-    public function approve(RestDayRequest $request, User $reviewer): RestDayRequest
+    public function approve(WorkRequest $request, User $reviewer): WorkRequest
     {
         $this->assertPending($request, 'approve');
         $this->assertFresh($request);
@@ -190,9 +229,11 @@ class RestDayRequestService
         // `requested_at` is already UTC (stamped with now()), so it is stored as-is — unlike
         // the Manila-tz Carbons elsewhere in the module, which must be converted first.
         $attendance->time_in = $request->requested_at;
-        // Present, not `rest_day`: `rest_day` is the status for a rest day NOT worked. There is
-        // no shift to be late against on a day the schedule does not cover, so no lateness is
-        // computed either.
+        // Present, and never `late`, for BOTH types. On a rest day there is no shift to be late
+        // against at all. On a suspended day there nominally is one, but work was cancelled —
+        // holding a volunteer to the punctuality of a shift the company called off would charge
+        // them for coming in. `rest_day` is not used either: that status means a rest day NOT
+        // worked.
         $attendance->status = 'present';
         $attendance->source = Attendance::SOURCE_MANUAL;
         $attendance->save();
@@ -209,27 +250,29 @@ class RestDayRequestService
         $this->audit->log(
             'approved',
             'Attendance',
-            "Approved {$name}'s rest-day work on " . $request->work_date->format('M j')
+            "Approved {$name}'s work on the " . $request->dayLabel() . ' of '
+                .$request->work_date->format('M j')
                 . ' — timed in at ' . $request->requested_at->timezone(config('app.timezone_local'))->format('g:i A'),
             $request,
         );
 
-        // A worked rest day earns a premium, so approving one for a period payroll has already
-        // settled means the employee is OWED money that run did not pay. The approval stands;
-        // the difference is recorded instead of being left to somebody's memory.
+        // A worked rest day earns a premium and a worked suspended day is paid as an ordinary
+        // day, so approving either for a period payroll has already settled means the employee
+        // is OWED money that run did not pay. The approval stands; the difference is recorded
+        // instead of being left to somebody's memory.
         $this->retro->flagIfSettled(
             $request,
             $request->employee_id,
             $date,
             null,
             RetroFlag::OWED,
-            'Rest-day work approved after the period was paid',
+            ucfirst($request->dayLabel()) . ' work approved after the period was paid',
         );
 
         return $request;
     }
 
-    public function reject(RestDayRequest $request, User $reviewer, string $reason): RestDayRequest
+    public function reject(WorkRequest $request, User $reviewer, string $reason): WorkRequest
     {
         $this->assertPending($request, 'reject');
 
@@ -246,7 +289,8 @@ class RestDayRequestService
         $this->audit->log(
             'declined',
             'Attendance',
-            "Declined {$name}'s rest-day work request",
+            "Declined {$name}'s request to work the " . $request->dayLabel() . ' of '
+                .$request->work_date->format('M j'),
             $request,
         );
 
@@ -261,7 +305,7 @@ class RestDayRequestService
      * and its hours are real, so deleting the row would erase attendance rather than undo an
      * approval. That correction belongs on the Attendance screen, where it is visible as one.
      */
-    public function reopen(RestDayRequest $request, ?string $reason = null): RestDayRequest
+    public function reopen(WorkRequest $request, ?string $reason = null): WorkRequest
     {
         if ($request->status === 'pending') {
             throw ValidationException::withMessages([
@@ -276,7 +320,7 @@ class RestDayRequestService
                 $request->employee_id,
                 $date,
                 null,
-                'reopen this rest-day request',
+                'reopen this work request',
             );
 
             $attendance = Attendance::where('employee_id', $request->employee_id)
@@ -311,7 +355,7 @@ class RestDayRequestService
         $this->audit->log(
             'reopened',
             'Attendance',
-            "Reopened {$name}'s rest-day work request" . ($reason ? " — {$reason}" : ''),
+            "Reopened {$name}'s work request".($reason ? " — {$reason}" : ''),
             $request,
         );
 
@@ -319,9 +363,9 @@ class RestDayRequestService
     }
 
     /** The employee withdraws their own request while HR has yet to decide it. */
-    public function cancel(RestDayRequest $request, User $actor, string $reason): RestDayRequest
+    public function cancel(WorkRequest $request, User $actor, string $reason): WorkRequest
     {
-        $this->applyCancellation($request, $actor, $reason, 'rest-day request');
+        $this->applyCancellation($request, $actor, $reason, 'work request');
 
         $request->load(['employee.user', 'reviewer', 'canceller']);
         $name = $request->employee?->user?->name ?? 'an employee';
@@ -329,14 +373,14 @@ class RestDayRequestService
         $this->audit->log(
             'cancelled',
             'Attendance',
-            "Cancelled {$name}'s rest-day work request for " . $request->work_date->format('M j') . " — {$reason}",
+            "Cancelled {$name}'s work request for ".$request->work_date->format('M j')." — {$reason}",
             $request,
         );
 
         return $request;
     }
 
-    private function assertPending(RestDayRequest $request, string $action): void
+    private function assertPending(WorkRequest $request, string $action): void
     {
         if ($request->status !== 'pending') {
             throw ValidationException::withMessages([
@@ -345,8 +389,8 @@ class RestDayRequestService
         }
     }
 
-    /** Approving a stale request would back-date a shift — see RestDayRequest::EXPIRES_AFTER_HOURS. */
-    private function assertFresh(RestDayRequest $request): void
+    /** Approving a stale request would back-date a shift — see WorkRequest::EXPIRES_AFTER_HOURS. */
+    private function assertFresh(WorkRequest $request): void
     {
         if (! $request->isStale()) {
             return;
@@ -356,7 +400,7 @@ class RestDayRequestService
 
         throw ValidationException::withMessages([
             'status' => [
-                'This request expired — it was filed more than ' . RestDayRequest::EXPIRES_AFTER_HOURS
+                'This request expired — it was filed more than ' . WorkRequest::EXPIRES_AFTER_HOURS
                     . ' hours ago. Approving it now would back-date a shift; add the day on the Attendance screen instead.',
             ],
         ]);
@@ -371,15 +415,15 @@ class RestDayRequestService
      */
     private function expireStale(?Employee $employee = null): void
     {
-        $cutoff = now()->subHours(RestDayRequest::EXPIRES_AFTER_HOURS);
+        $cutoff = now()->subHours(WorkRequest::EXPIRES_AFTER_HOURS);
 
-        RestDayRequest::where('status', 'pending')
+        WorkRequest::where('status', 'pending')
             ->where('requested_at', '<', $cutoff)
             ->when($employee, fn ($q) => $q->where('employee_id', $employee->id))
             ->update(['status' => 'expired']);
     }
 
-    private function markExpired(RestDayRequest $request): void
+    private function markExpired(WorkRequest $request): void
     {
         $request->update(['status' => 'expired']);
     }

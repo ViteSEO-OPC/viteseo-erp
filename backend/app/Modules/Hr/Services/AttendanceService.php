@@ -9,6 +9,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\HalfDayRequest;
 use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\OvertimeRequest;
+use App\Modules\Hr\Models\WorkRequest;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -27,7 +28,7 @@ class AttendanceService
         private readonly HolidayService $holidays,
         private readonly GeofenceService $geofence,
         private readonly PayrollFreezeService $freeze,
-        private readonly RestDayRequestService $restDays,
+        private readonly WorkRequestService $workRequests,
         private readonly WorkSuspensionService $suspensions,
         private readonly HalfDayWindowService $halfDays,
     ) {}
@@ -238,8 +239,9 @@ class AttendanceService
      * a client that re-derived them could offer a button the server would refuse.
      *
      * @return array{mode: string, opens_at: ?string, defers_to: ?string, geofence: bool,
-     *               is_workday: bool, rest_day_request: array{id: int, status: string, requested_at: ?string, review_note: ?string}|null,
-     *               suspension: array{name: string, is_paid: bool, status: string}|null}
+     *               is_workday: bool, work_request_required: ?string,
+     *               work_request: array{id: int, type: string, status: string, requested_at: ?string, review_note: ?string}|null,
+     *               suspension: array{name: string, is_paid: bool, status: string, work_requires_request: bool}|null}
      *                                   both times are Manila "HH:MM"
      */
     public function clockInWindowFor(Employee $employee): array
@@ -251,21 +253,32 @@ class AttendanceService
         // the morning off that their shift opens at 8:00 AM is describing a day they don't have.
         $offHalf = $this->halfDays->offHalfFor($employee->id, $local->toDateString());
 
-        // Rest-day work (RD-2): today is not a scheduled workday, so pressing the button files a
-        // request instead of punching in. The panel needs BOTH facts — that the day is a rest day,
-        // and how the current request stands — because the same button has three meanings
-        // depending on the answer, and re-deriving "is today a workday" client-side would put a
-        // second, drifting copy of the schedule rules in the browser.
         $isWorkday = (bool) ($eff['is_workday'] ?? true);
-        $restDayRequest = $isWorkday || $employee->isManagement()
-            ? null
-            : $this->restDays->forDate($employee, $local->toDateString());
+        $today = $local->toDateString();
 
         // Only meaningful on a day they would otherwise be expected in — telling someone work
         // is cancelled on their rest day is noise.
         $suspension = $isWorkday
-            ? $this->suspensions->forDate($local->toDateString())
+            ? $this->suspensions->forDate($today)
             : null;
+
+        // Work requests: today is a day nobody was expected in on — a rest day, or a suspension
+        // HR marked as needing permission — so pressing the button files a request instead of
+        // punching in. The panel needs BOTH facts, whether the button asks and how the current
+        // request stands, because the same button has three meanings depending on the answer.
+        //
+        // `requiredTypeFor` is the single reader of the two switches that decide this. The panel
+        // never re-derives it: a browser copy of "is today a workday" would ignore custom
+        // workdays and daily overrides, and a browser copy of the switches would go stale the
+        // moment HR changed one.
+        $requiredType = $this->workRequests->requiredTypeFor($employee, $today);
+
+        // Fetched whenever the day COULD have produced one, not only when it currently requires
+        // one: a decided request still needs explaining, and HR flipping a switch mid-day must
+        // not make yesterday's rejection vanish off the panel.
+        $workRequest = $employee->isManagement() || ($isWorkday && $suspension === null)
+            ? null
+            : $this->workRequests->forDate($employee, $today);
 
         // Only meaningful right now, and only in defer mode: the time this punch WOULD be
         // recorded at if they pressed the button this second. Null once the shift has
@@ -282,19 +295,26 @@ class AttendanceService
             // whose answer will be ignored would be theatre.
             'geofence' => $this->geofence->enforcing(),
             'is_workday' => $isWorkday,
-            // Work cancelled today. Deliberately does NOT disable the button: a skeleton crew
+            // `rest_day` | `suspension` | null. Non-null means the Time in button files a
+            // request rather than punching in, and names which sentence to say while doing it.
+            'work_request_required' => $requiredType,
+            // Work cancelled today. On its own this does NOT disable the button: a skeleton crew
             // still comes in during a suspension, and blocking them would leave the people who
             // actually worked with no record of it. The panel says they need not clock in.
+            // `work_requires_request` is the per-declaration exception — see the column's
+            // migration for why that is HR's choice per day rather than a company rule.
             'suspension' => $suspension === null ? null : [
                 'name' => $suspension->name,
                 'is_paid' => (bool) $suspension->is_paid,
                 'status' => $suspension->status(),
+                'work_requires_request' => (bool) $suspension->work_requires_request,
             ],
-            'rest_day_request' => $restDayRequest === null ? null : [
-                'id' => $restDayRequest->id,
-                'status' => $restDayRequest->status,
-                'requested_at' => $restDayRequest->requested_at?->toIso8601String(),
-                'review_note' => $restDayRequest->review_note,
+            'work_request' => $workRequest === null ? null : [
+                'id' => $workRequest->id,
+                'type' => $workRequest->type,
+                'status' => $workRequest->status,
+                'requested_at' => $workRequest->requested_at?->toIso8601String(),
+                'review_note' => $workRequest->review_note,
             ],
         ];
     }
@@ -332,16 +352,26 @@ class AttendanceService
         // grace), resolved from override → assigned → default — not a fixed cutoff.
         $eff = $this->schedule->effectiveFor($employee, $local);
 
-        // Rest-day work (RD-2). A day the schedule does not cover is not the employee's to
-        // start: it earns a rest-day premium, so somebody has to agree to spend it. The punch
-        // is not lost — RestDayRequestService records this moment and an approval stamps
-        // attendance at it — but it is not attendance until then.
+        $isWorkday = (bool) ($eff['is_workday'] ?? true);
+
+        // Work requests. A day nobody was expected in on is not the employee's to start when the
+        // company says permission is needed for it — a rest day earns a premium somebody has to
+        // agree to spend, and a suspension HR flagged this way is a safety decision about who is
+        // in the building. The punch is not lost: WorkRequestService records this moment and an
+        // approval stamps attendance at it. It is simply not attendance until then.
+        //
+        // Both switches are read through requiredTypeFor(), the same call the clock panel uses,
+        // so the button can never offer something this gate would refuse. A null answer means the
+        // day needs no asking — either it is an ordinary workday, or HR has turned the gate off —
+        // and the punch falls through to be recorded normally.
         //
         // Deliberately BEFORE the open-shift and already-clocked-in checks: on an approved
         // request the row already exists, and "you have already clocked in today" is the right
         // answer to a second press. This gate is only ever reached without one.
-        if (! ($eff['is_workday'] ?? true)) {
-            $pending = $this->restDays->forDate($employee, $this->today());
+        $requiredType = $this->workRequests->requiredTypeFor($employee, $this->today());
+
+        if ($requiredType !== null) {
+            $pending = $this->workRequests->forDate($employee, $this->today());
 
             throw ValidationException::withMessages([
                 'time_in' => [
@@ -349,7 +379,9 @@ class AttendanceService
                         ? 'Your request to work today is still with HR — you will be timed in at '
                             . $pending->requested_at?->timezone(config('app.timezone_local'))->format('g:i A')
                             . ', when you asked, once they approve it.'
-                        : 'Today is not one of your scheduled workdays. Send HR a request to work it — you will be timed in at the moment you asked, not when they approve.',
+                        : ($requiredType === WorkRequest::TYPE_SUSPENSION
+                            ? 'Work is suspended today and HR is keeping track of who comes in. Send them a request to work it — you will be timed in at the moment you asked, not when they approve.'
+                            : 'Today is not one of your scheduled workdays. Send HR a request to work it — you will be timed in at the moment you asked, not when they approve.'),
                 ],
             ]);
         }
@@ -416,7 +448,14 @@ class AttendanceService
         $att->time_in = $deferredTo?->copy()->utc() ?? now();
         // Judged at the time it will COUNT as, so a deferred punch is never late: the
         // arrival being re-stamped to the shift start is exactly what "on time" means.
-        $att->status = $this->arrivalStatus($eff, $deferredTo ?? $local, $offHalf);
+        //
+        // A rest day only reaches this line with the work-request gate turned OFF, and it has no
+        // shift to be judged against — expectedStart() would fall back to FALLBACK_START and
+        // call a lunchtime start on a Saturday five hours late. `present` is the same status an
+        // approved work request writes, so the two routes onto a rest day agree.
+        $att->status = $isWorkday
+            ? $this->arrivalStatus($eff, $deferredTo ?? $local, $offHalf)
+            : 'present';
         $att->location_verified_by = $verifiedBy;
         $att->save();
 

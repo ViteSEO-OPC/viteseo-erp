@@ -59,6 +59,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // minutes are WORTH (early_arrival_mode above). AttendanceService::clockIn reads
             // this one. `defer` accepts the punch but stamps it at the shift start.
             'early_clock_in_mode' => ['sometimes', 'in:allow,defer,block'],
+            // Whether a rest day may be worked without asking. Not cross-validated against
+            // anything: pay is identical either way (rest-day premium is priced off the
+            // attendance row, not off an approval), so this only moves who has to agree first.
+            'rest_day_work_requires_request' => ['sometimes', 'boolean'],
 
             // Geofenced clock-in. Deliberately NOT cross-validated against
             // `geofence_enabled` — a half-configured policy must be SAVEABLE (HR pins the

@@ -32,6 +32,10 @@ import type { WorkSuspension } from "@/modules/hr/types/holiday";
  * is preselected on a new declaration. It is the only thing on this form that moves money, and
  * a default is how it gets chosen by not being read — the server refuses a create without it
  * for the same reason.
+ *
+ * The time-clock choice below it is a checkbox instead, and deliberately: it HAS a safe default
+ * (leave the clock alone, which is what every suspension meant before the option existed) and
+ * it moves no money either way, so unlike paid/unpaid it can be left unread.
  */
 export function WorkSuspensionFormDialog({
   open,
@@ -73,6 +77,10 @@ function Body({
   const [note, setNote] = useState(suspension?.note ?? "");
   // null on a new declaration — nothing is chosen until HR chooses it.
   const [isPaid, setIsPaid] = useState<boolean | null>(suspension?.is_paid ?? null);
+  // Off = the time clock behaves as it always has and the skeleton crew simply times in.
+  const [requiresRequest, setRequiresRequest] = useState(
+    suspension?.work_requires_request ?? false,
+  );
 
   const pending = declareMut.isPending || updateMut.isPending;
   const valid = name.trim() !== "" && (isEdit || date !== "") && isPaid !== null;
@@ -86,20 +94,27 @@ function Body({
             id: suspension.id,
             name: name.trim(),
             is_paid: isPaid as boolean,
+            work_requires_request: requiresRequest,
             note: note.trim() || null,
           })
         : await declareMut.mutateAsync({
             date,
             name: name.trim(),
             is_paid: isPaid as boolean,
+            work_requires_request: requiresRequest,
             note: note.trim() || null,
           });
 
       toast.success(
         isEdit ? "Suspension updated" : "Day declared non-working",
-        isPaid
-          ? "Nobody needs to time in, and the day costs no one a day's pay."
-          : "Nobody needs to time in. The day is deducted as one unpaid day.",
+        [
+          isPaid
+            ? "Nobody needs to time in, and the day costs no one a day's pay."
+            : "Nobody needs to time in. The day is deducted as one unpaid day.",
+          requiresRequest ? "Anyone coming in has to ask you first." : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
       );
 
       // The period was already priced without this day. Surfaced as its own warning toast
@@ -187,6 +202,32 @@ function Body({
               </span>
             </button>
           </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Can people still time in?</Label>
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-input p-3 transition-colors hover:bg-muted has-[:checked]:border-warning has-[:checked]:bg-warning-subtle">
+            <input
+              type="checkbox"
+              checked={requiresRequest}
+              onChange={(e) => setRequiresRequest(e.target.checked)}
+              className="mt-0.5 size-4 shrink-0 accent-warning"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-foreground">
+                They have to ask me first
+              </span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Time in files a work request instead of a punch, and you decide. They keep the
+                moment they pressed it — approving times them in then, not when you get to it.
+              </span>
+            </span>
+          </label>
+          <p className="text-xs text-muted-foreground">
+            {requiresRequest
+              ? "Use this when you need to know who is in the building — a storm, a flood, an evacuation."
+              : "Left off, the time clock works as normal: a skeleton crew can come in and be recorded without asking."}
+          </p>
         </div>
 
         <div className="space-y-1.5">
