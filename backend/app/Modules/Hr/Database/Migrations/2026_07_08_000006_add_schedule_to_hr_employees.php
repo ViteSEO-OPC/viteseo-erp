@@ -4,10 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 14. Assign each employee a work schedule, plus optional per-person
-// overrides ("Miss Chris can adjust working hours per employee", e.g. someone who
-// works Saturdays). NULL work_schedule_id → the default schedule; any custom_*
-// field set → it overrides the assigned schedule for that field (ScheduleService).
+
 return new class extends Migration
 {
     public function up(): void

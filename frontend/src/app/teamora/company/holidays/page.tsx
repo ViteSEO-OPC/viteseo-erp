@@ -218,8 +218,7 @@ export default function HolidaysPage() {
         </h2>
         <p className="mt-1 mb-4 text-sm text-muted-foreground">
           Showing regular holidays (excludes weekends). Selecting a country auto-loads its national
-          holidays. Miss Chris can add, edit, or remove entries. Holiday sets are maintained per
-          country per year.
+          holidays.
         </p>
 
         {/* Payroll prices a day off the holiday TYPE, so an un-typed date blocks the run. */}

@@ -28,7 +28,9 @@ class HalfDayRequestService
     /** HR sees all; an employee sees only their own. */
     public function list(User $user): Collection
     {
-        $query = HalfDayRequest::with(['employee.user', 'reviewer', 'canceller'])
+        // `employee.workSchedule` so the resource can resolve each row's worked window without
+        // one schedule query per request.
+        $query = HalfDayRequest::with(['employee.user', 'employee.workSchedule', 'reviewer', 'canceller'])
             ->orderByDesc('work_date')
             ->latest();
 

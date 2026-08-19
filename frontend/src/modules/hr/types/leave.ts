@@ -41,6 +41,14 @@ export interface HalfDayRequest {
   cancelled_by: string | null;
   cancel_reason: string | null;
   employee: EmployeeRef;
+  /**
+   * The hours the employee is left owing once this half is off, from their own effective
+   * schedule. NULL IS A WARNING, not "no data": their schedule has no window for the half they
+   * WOULD work, so the platform will decline to judge that day's lateness rather than measure it
+   * against a shift nobody defined. Fixed by filling the half-day windows on the schedule, or
+   * overriding them on the employee's Job tab.
+   */
+  worked_window: { start: string; end: string } | null;
   created_at: string;
 }
 

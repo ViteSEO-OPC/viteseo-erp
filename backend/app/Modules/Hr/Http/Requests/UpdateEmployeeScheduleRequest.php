@@ -26,6 +26,13 @@ class UpdateEmployeeScheduleRequest extends FormRequest
             'custom_workdays.*' => ['integer', 'between:1,7'],
             'custom_start_time' => ['nullable', 'date_format:H:i'],
             'custom_end_time' => ['nullable', 'date_format:H:i'],
+            // Half-day windows. Null means INHERIT, per field — the same contract as every
+            // override above, so overriding an afternoon start without its end keeps the
+            // template's end rather than being refused.
+            'custom_am_start_time' => ['nullable', 'date_format:H:i'],
+            'custom_am_end_time' => ['nullable', 'date_format:H:i'],
+            'custom_pm_start_time' => ['nullable', 'date_format:H:i'],
+            'custom_pm_end_time' => ['nullable', 'date_format:H:i'],
             'custom_grace_minutes' => ['nullable', 'integer', 'min:0', 'max:240'],
             'custom_unpaid_break_minutes' => ['nullable', 'integer', 'min:0', 'max:480'],
             'custom_paid_break_minutes' => ['nullable', 'integer', 'min:0', 'max:480'],

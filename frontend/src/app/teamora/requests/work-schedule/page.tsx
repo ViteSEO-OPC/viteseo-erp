@@ -566,6 +566,26 @@ function HalfDaySection() {
     (rejectMut.isPending && rejectMut.variables?.id) ||
     null;
 
+  /**
+   * The hours the employee still owes on a half day. Shown because approving one is a decision
+   * about the OTHER half: null means their schedule cannot say what that half is, and the
+   * platform will then decline to judge the day's lateness at all.
+   */
+  function workedWindow(r: HalfDayRequest) {
+    if (!r.worked_window) {
+      return (
+        <span className="text-warning">
+          No {r.period === "AM" ? "afternoon" : "morning"} hours set on their schedule
+        </span>
+      );
+    }
+    return (
+      <span className="text-muted-foreground">
+        {r.worked_window.start}–{r.worked_window.end}
+      </span>
+    );
+  }
+
   function halfDayActions(r: HalfDayRequest) {
     if (r.status === "pending") {
       return (
@@ -599,6 +619,7 @@ function HalfDaySection() {
     },
     { header: "Date", cell: (r) => formatDate(r.work_date) },
     { header: "Half", cell: (r) => r.period },
+    { header: "Still works", cell: (r) => workedWindow(r) },
     { header: "Pay", cell: () => <span className="text-danger">Unpaid · 0.5 day</span> },
     { header: "Reason", cell: (r) => <span className="text-muted-foreground">{r.reason}</span> },
     { header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
@@ -656,6 +677,7 @@ function HalfDaySection() {
           fields={[
             { label: "Date", value: formatDate(detail.work_date) },
             { label: "Half", value: detail.period },
+            { label: "Still works", value: workedWindow(detail) },
             { label: "Pay", value: <span className="text-danger">Unpaid · 0.5 day</span> },
           ]}
           note={{ label: "Reason", text: detail.reason }}

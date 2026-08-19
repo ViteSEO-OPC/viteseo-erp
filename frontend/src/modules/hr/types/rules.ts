@@ -201,6 +201,15 @@ export interface EmployeeSchedule {
   custom_workdays: number[] | null;
   custom_start_time: string | null;
   custom_end_time: string | null;
+  /**
+   * Half-day windows. Null means INHERIT the assigned schedule's value, per field — so an
+   * employee whose afternoons start at 13:30 sets only `custom_pm_start_time` and keeps the
+   * template's end. These are what an approved half day is judged against.
+   */
+  custom_am_start_time: string | null;
+  custom_am_end_time: string | null;
+  custom_pm_start_time: string | null;
+  custom_pm_end_time: string | null;
   custom_grace_minutes: number | null;
   custom_unpaid_break_minutes: number | null;
   custom_paid_break_minutes: number | null;
@@ -212,6 +221,10 @@ export interface EmployeeScheduleInput {
   custom_workdays?: number[] | null;
   custom_start_time?: string | null;
   custom_end_time?: string | null;
+  custom_am_start_time?: string | null;
+  custom_am_end_time?: string | null;
+  custom_pm_start_time?: string | null;
+  custom_pm_end_time?: string | null;
   custom_grace_minutes?: number | null;
   custom_unpaid_break_minutes?: number | null;
   custom_paid_break_minutes?: number | null;

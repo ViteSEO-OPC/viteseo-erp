@@ -130,14 +130,25 @@ class HalfDayWindowService
     /**
      * The window an employee was expected to work on a day whose off-half is $offHalf.
      *
-     * Mirrors DeductionService::workedWindow() deliberately — same precedence, same fallback —
-     * because the badge and the payslip disagreeing about which minutes were owed is exactly the
-     * bug this service exists to end. THE FALLBACK MATTERS: a company that never filled in the
-     * AM/PM columns keeps its full-day window, so this stays a no-op for them instead of silently
-     * narrowing the day to times nobody configured.
+     * A HALF DAY WITH NO CONFIGURED WINDOW RETURNS NOTHING, and that is the important case.
+     * Falling back to the full shift there — which is what this did, mirroring DeductionService —
+     * measures an afternoon arrival against an 8:00 AM start and calls it five hours late: the
+     * original bug, resurrected for any schedule whose AM/PM columns were left blank.
+     *
+     * The split CANNOT be derived. `hr_work_schedules` stores the unpaid break's LENGTH but never
+     * when it falls, and the two seeded schedules prove no arithmetic rule fits: Office
+     * (08:00–18:00, 60m break) splits 4h/5h at noon while Field (08:00–17:00, 60m) splits 4h/4h.
+     * Any midpoint formula reproduces one and breaks the other. So the honest answer to a missing
+     * window is "no window", and callers judge nothing rather than judging against a guess — you
+     * cannot hold somebody to a shift nobody defined, and a wrong 300-minute figure is worse than
+     * no figure because it looks actionable.
+     *
+     * Note this is NOT the same as the no-half-day case, which correctly keeps the full shift.
      *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for the date
-     * @return array{0: ?string, 1: ?string}  ['HH:MM' start, 'HH:MM' end]; [null, null] whole day off
+     * @return array{0: ?string, 1: ?string}  ['HH:MM' start, 'HH:MM' end]; [null, null] when there
+     *                                        is no window to judge: the whole day off, or a half
+     *                                        day whose worked half is unconfigured
      */
     public function windowFor(array $eff, ?string $offHalf): array
     {
@@ -145,15 +156,25 @@ class HalfDayWindowService
             return [null, null];
         }
 
-        if ($offHalf === self::AM && isset($eff['pm_start_time'], $eff['pm_end_time'])) {
-            return [$eff['pm_start_time'], $eff['pm_end_time']];
+        if ($offHalf === self::AM) {
+            return isset($eff['pm_start_time'], $eff['pm_end_time'])
+                ? [$eff['pm_start_time'], $eff['pm_end_time']]
+                : [null, null];
         }
 
-        if ($offHalf === self::PM && isset($eff['am_start_time'], $eff['am_end_time'])) {
-            return [$eff['am_start_time'], $eff['am_end_time']];
+        if ($offHalf === self::PM) {
+            return isset($eff['am_start_time'], $eff['am_end_time'])
+                ? [$eff['am_start_time'], $eff['am_end_time']]
+                : [null, null];
         }
 
         return [$eff['start_time'] ?? null, $eff['end_time'] ?? null];
+    }
+
+    /** Does this day have a usable window for the half the employee is expected to work? */
+    public function hasConfiguredWindow(array $eff, ?string $offHalf): bool
+    {
+        return $this->windowFor($eff, $offHalf)[0] !== null;
     }
 
     /**
@@ -162,16 +183,18 @@ class HalfDayWindowService
      * For the places where a null window would leave a day UNPRICEABLE rather than merely
      * unjudged. The open-shift resolver needs an end to auto-close an abandoned punch against;
      * refusing to derive one would strand a day that pays perfectly well in HR's exception queue.
-     * Somebody who punched in on a day they had entirely off is a question for a human — not a
-     * reason to drop the record on the floor.
+     * Somebody who punched in on a day they had entirely off — or on a half day nobody configured
+     * a window for — is a question for a human, not a reason to drop the record on the floor.
      *
      * @param  array<string, mixed>  $eff
      * @return array{0: ?string, 1: ?string}
      */
     public function pricingWindowFor(array $eff, ?string $offHalf): array
     {
-        return $offHalf === self::BOTH
+        [$start, $end] = $this->windowFor($eff, $offHalf);
+
+        return $start === null
             ? [$eff['start_time'] ?? null, $eff['end_time'] ?? null]
-            : $this->windowFor($eff, $offHalf);
+            : [$start, $end];
     }
 }

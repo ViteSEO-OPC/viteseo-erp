@@ -94,6 +94,10 @@ function Editor({
   const [paidBreak, setPaidBreak] = useState(
     initial.custom_paid_break_minutes != null ? String(initial.custom_paid_break_minutes) : "",
   );
+  const [amStart, setAmStart] = useState(initial.custom_am_start_time ?? "");
+  const [amEnd, setAmEnd] = useState(initial.custom_am_end_time ?? "");
+  const [pmStart, setPmStart] = useState(initial.custom_pm_start_time ?? "");
+  const [pmEnd, setPmEnd] = useState(initial.custom_pm_end_time ?? "");
 
   if (readOnly) {
     return (
@@ -119,6 +123,10 @@ function Editor({
         custom_grace_minutes: grace !== "" ? Number(grace) : null,
         custom_unpaid_break_minutes: unpaidBreak !== "" ? Number(unpaidBreak) : null,
         custom_paid_break_minutes: paidBreak !== "" ? Number(paidBreak) : null,
+        custom_am_start_time: amStart || null,
+        custom_am_end_time: amEnd || null,
+        custom_pm_start_time: pmStart || null,
+        custom_pm_end_time: pmEnd || null,
       });
       toast.success("Schedule updated");
     } catch {
@@ -194,7 +202,43 @@ function Editor({
           <Input id="ov-paid-break" type="number" min="0" max="480" value={paidBreak} onChange={(e) => setPaidBreak(e.target.value)} />
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">Leave break fields blank to use the assigned schedule&apos;s breaks. Half-day windows are set on the schedule, not per employee.</p>
+      <p className="text-xs text-muted-foreground">Leave break fields blank to use the assigned schedule&apos;s breaks.</p>
+
+      {/*
+        Half-day windows. These are what an approved half day is JUDGED against — lateness,
+        undertime and the early-out fraction all measure from them — so an employee whose
+        afternoons really start at 13:30 needs it said here, or the template's 13:00 turns the
+        difference into billable lateness every time they take a morning off.
+      */}
+      <div className="space-y-1.5">
+        <Label>Override half-day windows</Label>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="ov-am-start" className="text-xs font-normal text-muted-foreground">AM start</Label>
+            <TimePicker id="ov-am-start" value={amStart} onChange={setAmStart} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ov-am-end" className="text-xs font-normal text-muted-foreground">AM end</Label>
+            <TimePicker id="ov-am-end" value={amEnd} onChange={setAmEnd} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ov-pm-start" className="text-xs font-normal text-muted-foreground">PM start</Label>
+            <TimePicker id="ov-pm-start" value={pmStart} onChange={setPmStart} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ov-pm-end" className="text-xs font-normal text-muted-foreground">PM end</Label>
+            <TimePicker id="ov-pm-end" value={pmEnd} onChange={setPmEnd} />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Blank fields fall back to the assigned schedule, one field at a time — set only the PM
+          start and the PM end stays the schedule&apos;s. Effective now:{" "}
+          <span className="font-medium text-foreground">
+            AM {initial.effective.am_start_time ?? "—"}–{initial.effective.am_end_time ?? "—"} · PM{" "}
+            {initial.effective.pm_start_time ?? "—"}–{initial.effective.pm_end_time ?? "—"}
+          </span>
+        </p>
+      </div>
 
       <Button type="button" size="sm" onClick={save} disabled={update.isPending}>
         {update.isPending ? "Saving…" : "Save schedule"}

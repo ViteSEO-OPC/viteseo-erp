@@ -3390,14 +3390,15 @@ class AttendanceService
             return 0.5;
         }
 
-        // Whole day off: there is no worked window left for an early departure to shorten.
-        // Zeroed here rather than left to the caller's `1.0 − halfUnpaid` cap, so the value this
-        // returns is right on its own terms instead of only after somebody clamps it.
-        if ($offHalf === HalfDayWindowService::BOTH) {
+        // No window to leave early FROM — the whole day is off, or the worked half has no times
+        // configured. Zeroed here rather than left to the caller's `1.0 − halfUnpaid` cap, so the
+        // value is right on its own terms instead of only after somebody clamps it, and so an
+        // unconfigured half cannot be billed against the full shift's 5 o'clock end.
+        [$workedStartTime, $workedEndTime] = $this->halfDays->windowFor($eff, $offHalf);
+        if ($workedStartTime === null) {
             return 0.0;
         }
 
-        [, $workedEndTime] = $this->halfDays->windowFor($eff, $offHalf);
         $workedEnd = $toMinutes($workedEndTime) ?? $end;
 
         $span = $end - $start;
@@ -3410,23 +3411,31 @@ class AttendanceService
      * The start of the window the employee was ACTUALLY expected to work on $localDay — the
      * worked half's start on an approved half day, the schedule's start otherwise.
      *
-     * NULL MEANS THERE IS NO START TO BE LATE FOR, which happens only when both halves are off.
-     * Every caller has to treat that as "not late" rather than falling back to the schedule:
-     * measuring someone against a shift they had entirely off is the bug this replaces, in its
-     * most extreme form.
+     * NULL MEANS THERE IS NO START TO BE LATE FOR — both halves off, or a half day whose worked
+     * half has no window configured. Every caller has to treat that as "not late" rather than
+     * falling back to the schedule: measuring someone against a shift nobody defined for them is
+     * the bug this replaces, and the full-day start is the most wrong answer available.
      *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $localDay
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      */
     private function expectedStart(Carbon $localDay, array $eff, ?string $offHalf): ?Carbon
     {
-        if ($offHalf === HalfDayWindowService::BOTH) {
-            return null;
-        }
-
         [$start] = $this->halfDays->windowFor($eff, $offHalf);
 
-        [$h, $m] = explode(':', $start ?? self::FALLBACK_START);
+        if ($start === null) {
+            // No window to judge against. On a HALF DAY that is an answer, not a gap — the whole
+            // day is off, or the worked half has no times configured — and guessing one is the
+            // bug this replaces. On an ordinary day a missing start_time still falls back to
+            // FALLBACK_START exactly as it always did.
+            if ($offHalf !== null) {
+                return null;
+            }
+
+            $start = self::FALLBACK_START;
+        }
+
+        [$h, $m] = explode(':', $start);
 
         return $localDay->copy()->setTime((int) $h, (int) $m, 0);
     }
