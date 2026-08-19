@@ -201,8 +201,36 @@ export interface PayslipSummary {
   hardcopy_status: HardcopyStatus;
 }
 
+/**
+ * WHAT A CORRECTION LEAVES ON A LINE.
+ *
+ * HR can overrule the engine on any leaf line of a payslip — the engine said ₱500 for Late, HR says
+ * ₱300 — and the document then prints the original struck through beside the figure that replaced
+ * it. These fields are how the line says so. Absent on every line nobody has corrected, which is
+ * almost all of them.
+ */
+export interface PayslipLineCorrection {
+  /** The engine's own figure, struck through beside the corrected one. */
+  original_amount?: number | null;
+  /** The line's original wording, when HR renamed it as well. */
+  original_name?: string | null;
+  overridden?: boolean;
+  /** The correction's id — what "remove this edit" is addressed to. */
+  override_id?: number | null;
+  override_reason?: string | null;
+  override_issued_on?: string | null;
+  override_by?: string | null;
+}
+
 /** One named money line on the payslip (allowance component, benefit share, loan). */
-export interface PayslipLine {
+export interface PayslipLine extends PayslipLineCorrection {
+  /**
+   * WHICH LINE THIS IS, in the payslip's own vocabulary — `basic`, `overtime`, `sss`,
+   * `allowance:transport-allowance`. Stable across re-runs and independent of the wording, which is
+   * what makes a correction to a line survive one. Absent on `allowances_breakdown` and
+   * `other_deductions_breakdown`, which are raw lists rather than document lines.
+   */
+  key?: string;
   name: string;
   amount: number;
   /**
@@ -264,8 +292,11 @@ export interface PayslipTotals {
  * multiplied figures each look defensible and their column does not add up to the total printed
  * beneath it. See PayslipResource::deductionsBreakdown.
  */
-export interface PayslipDeductionRow {
-  /** `absent` · `undertime` · `half_day` · `late` · `suspended_unpaid` · … · `other`. */
+export interface PayslipDeductionRow extends PayslipLineCorrection {
+  /**
+   * `absent` · `undertime` · `half_day` · `late` · `suspended_unpaid` · …, or `other:<name slug>`
+   * for a benefit share, a loan repayment or a deduction added by a correction.
+   */
   key: string;
   name: string;
   /** How many dated occurrences — the red badge beside the label. 0 hides it. */
@@ -419,6 +450,10 @@ export interface Payslip {
   thirteenth_month: number;
   other_benefits: number;
   taxable_pay: number;
+  /** The run this payslip belongs to — adding a line to it is a run-level call. */
+  payroll_run_id: number;
+  /** A locked period refuses every correction. Said before HR types one, not after. */
+  run_is_locked: boolean;
   /** Which kind of run produced this slip, and the words the header prints for it. */
   run_type: "regular" | "thirteenth_month" | "adjustment" | "final_pay";
   run_type_label: string;
@@ -640,6 +675,20 @@ export interface PayslipAmendment {
   kind: AmendmentKind;
   /** How the kind reads on a document — "Additional pay", "Pay reversed", "Deduction added". */
   kind_label: string;
+  /**
+   * WHICH LINE THIS CORRECTED, when it corrected one rather than adding one. Null on an added
+   * line — that is the whole difference between the two, and it decides whether the correction is
+   * printed ON a line or as a line of its own.
+   */
+  target_key: string | null;
+  /** That line's name on the document, HR's wording included. Null on an added line. */
+  target_label: string | null;
+  /** What HR says the line is. Null on a correction to the wording alone. */
+  override_amount: number | null;
+  /** What the engine computed — the struck-through figure, refreshed on every run. */
+  original_amount: number | null;
+  /** The wording HR gave the line. Display only: the line keeps its key. */
+  label_override: string | null;
   /** Signed: negative for a reversal or a deduction, positive for extra pay. */
   amount: number;
   /** Withheld on this amount, marginally on top of the year's earnings. Negative = refunded. */

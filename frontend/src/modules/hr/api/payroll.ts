@@ -223,6 +223,69 @@ export async function getHrPayslip(id: number): Promise<Payslip> {
 }
 
 /**
+ * Set ONE line to ONE figure across a whole period — a charge waived for everybody.
+ *
+ * `employee_ids` omitted means everyone the period pays. Payslips without that line are skipped
+ * and named in `meta.skipped` rather than failing the batch: half a run having no late charge is
+ * the normal case, not an error.
+ */
+export async function correctRunLine(
+  runId: number,
+  input: {
+    target_key: string;
+    amount?: number | null;
+    label?: string | null;
+    reason: string;
+    issued_on?: string | null;
+    employee_ids?: number[] | null;
+  },
+): Promise<{ run: PayrollRun; applied: number; skipped: string[] }> {
+  const res = await apiClient.post(`/hr/payroll/runs/${runId}/line-corrections`, input);
+
+  return {
+    run: res.data.data,
+    applied: res.data.meta?.applied ?? 0,
+    skipped: res.data.meta?.skipped ?? [],
+  };
+}
+
+/**
+ * Correct ONE line on ONE payslip — the engine said ₱500 for Late, HR says ₱300.
+ *
+ * NO KIND, and that is the difference from `amendPayrollRun`. A line appended to the bottom of a
+ * document carries no clue about what it is, so that call has to ask whether it is pay, reversed
+ * pay or a deduction. A correction to `late` or to `sss` does not: the line's own class decides
+ * what moves and what happens to the tax, so the question is not asked and cannot be answered
+ * wrongly.
+ *
+ * `amount` may be omitted for a correction to the WORDING alone — the figure was right and what it
+ * was called was not. Sending the same `target_key` again REPLACES the correction rather than
+ * stacking a second one on it, and the struck-through figure stays the engine's.
+ */
+export async function correctPayslipLine(
+  payslipId: number,
+  input: {
+    target_key: string;
+    amount?: number | null;
+    label?: string | null;
+    reason: string;
+    issued_on?: string | null;
+  },
+): Promise<Payslip> {
+  const res = await apiClient.post(`/hr/payslips/${payslipId}/line-corrections`, input);
+  return res.data.data;
+}
+
+/** Put a corrected line back to what the engine computed. */
+export async function removePayslipLineCorrection(
+  payslipId: number,
+  correctionId: number,
+): Promise<Payslip> {
+  const res = await apiClient.delete(`/hr/payslips/${payslipId}/line-corrections/${correctionId}`);
+  return res.data.data;
+}
+
+/**
  * Correct a period on its OWN payslips.
  *
  * The period comes from the run id rather than from typed dates, which is the difference from the

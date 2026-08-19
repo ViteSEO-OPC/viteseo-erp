@@ -4,6 +4,8 @@ namespace App\Modules\Hr\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\AmendPayrollRunRequest;
+use App\Modules\Hr\Http\Requests\CorrectPayslipLineRequest;
+use App\Modules\Hr\Http\Requests\CorrectRunLineRequest;
 use App\Modules\Hr\Http\Requests\ApplyMinimumWageRequest;
 use App\Modules\Hr\Http\Requests\MinimumWageReviewRequest;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
@@ -15,6 +17,7 @@ use App\Modules\Hr\Http\Resources\PayrollRunResource;
 use App\Modules\Hr\Http\Resources\PayslipResource;
 use App\Modules\Hr\Http\Resources\PayslipSummaryResource;
 use App\Modules\Hr\Models\Payslip;
+use App\Modules\Hr\Models\PayslipAmendment;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Services\AuditService;
@@ -279,6 +282,39 @@ class PayrollController extends Controller
     }
 
     /**
+     * POST /api/v1/hr/payroll/runs/{payrollRun}/line-corrections — one line, the whole period.
+     *
+     * The whole-payroll form of a correction: a system outage that made everyone late, a charge
+     * that should not have run this cutoff. See PayrollService::overrideLineForRun() for why it
+     * sets a figure rather than nudging one, and why a payslip without that line is named in the
+     * response instead of failing the batch.
+     */
+    public function overrideRunLine(PayrollRun $payrollRun, CorrectRunLineRequest $request): JsonResponse
+    {
+        $result = $this->service->overrideLineForRun(
+            $payrollRun,
+            $request->validated('target_key'),
+            $request->validated('amount') === null ? null : (float) $request->validated('amount'),
+            $request->validated('label'),
+            $request->validated('reason'),
+            $request->validated('issued_on'),
+            $request->validated('employee_ids'),
+            $request->user(),
+        );
+
+        return PayrollRunResource::make($result['run'])
+            ->additional([
+                'meta' => [
+                    'applied' => $result['applied'],
+                    // Whose payslip this could not touch, and why. Reported rather than swallowed:
+                    // "corrected 12 payslips" reads as "corrected everyone" when it was 12 of 15.
+                    'skipped' => $result['skipped'],
+                ],
+            ])
+            ->response();
+    }
+
+    /**
      * POST /api/v1/hr/employees/{employee}/final-pay — the terminal payslip a leaver is owed.
      *
      * FIN-014 — deliberately separate from the regular run, which already prorates the leaver's last
@@ -428,6 +464,54 @@ class PayrollController extends Controller
         $payslip->load(['payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator']);
 
         return PayslipResource::make($payslip)->response();
+    }
+
+    /**
+     * POST /api/v1/hr/payslips/{payslip}/line-corrections — overrule the engine on ONE line.
+     *
+     * The correction lands ON the line it corrects, and the payslip prints the engine's figure
+     * struck through beside it. See PayrollService::overrideLine() for what each kind of line does
+     * to the tax, and why HR is not asked.
+     *
+     * `updateOrCreate` semantics: correcting the same line twice replaces the correction rather
+     * than stacking a second one on it, and the struck-through figure stays the ENGINE's — an edit
+     * is always a correction of the computation, never of the previous edit.
+     */
+    public function overridePayslipLine(Payslip $payslip, CorrectPayslipLineRequest $request): JsonResponse
+    {
+        $payslip->loadMissing('payrollRun');
+
+        $slip = $this->service->overrideLine(
+            $payslip,
+            $request->validated('target_key'),
+            $request->validated('amount') === null ? null : (float) $request->validated('amount'),
+            $request->validated('label'),
+            $request->validated('reason'),
+            $request->validated('issued_on'),
+            $request->user(),
+        );
+
+        $slip->load(['payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator']);
+
+        return PayslipResource::make($slip)->response();
+    }
+
+    /**
+     * DELETE /api/v1/hr/payslips/{payslip}/line-corrections/{amendment} — put a line back.
+     *
+     * Restores the figure the engine computed, from the snapshot taken before anyone corrected it.
+     * The correction itself is soft-deleted rather than erased: "who changed this payslip, and who
+     * changed it back" has to stay answerable.
+     */
+    public function removePayslipLineCorrection(Payslip $payslip, PayslipAmendment $amendment): JsonResponse
+    {
+        $payslip->loadMissing('payrollRun');
+
+        $slip = $this->service->removeLineOverride($payslip, $amendment, request()->user());
+
+        $slip->load(['payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator']);
+
+        return PayslipResource::make($slip)->response();
     }
 
     // GET /api/v1/hr/payslips/{payslip}/pdf — one employee's payslip as a PDF (HR only).

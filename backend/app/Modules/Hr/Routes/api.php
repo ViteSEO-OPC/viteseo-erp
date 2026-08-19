@@ -269,6 +269,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // keep producing the documents this endpoint exists to stop.
         Route::post('payroll/runs/{payrollRun}/amendments', [PayrollController::class, 'amendRun'])
             ->middleware('throttle:5,1,payroll-amendment:');
+        // The same correction applied to ONE LINE across the whole period — a charge waived for
+        // everybody after an outage. Run-sized limit: it rewrites every payslip in the run.
+        Route::post('payroll/runs/{payrollRun}/line-corrections', [PayrollController::class, 'overrideRunLine'])
+            ->middleware('throttle:5,1,payroll-amendment:');
         // Recompute a period that has already run. The preview is read-only but costs a whole run
         // (it computes for real and rolls back), so both carry the run's own limit.
         Route::get('payroll/runs/{payrollRun}/rerun-preview', [PayrollController::class, 'rerunPreview'])
@@ -281,6 +285,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
         Route::post('payslips/{payslip}/reopen', [PayrollController::class, 'reopenPayslip']);
+        // Correcting ONE LINE on one payslip — the engine said ₱500, HR says ₱300, and the
+        // document prints both. A higher limit than the batch routes above because this is how a
+        // payslip is now corrected at all: a person walking a document and fixing three lines on
+        // it is the ordinary case, not a burst worth refusing.
+        Route::post('payslips/{payslip}/line-corrections', [PayrollController::class, 'overridePayslipLine'])
+            ->middleware('throttle:30,1,payslip-correction:');
+        Route::delete('payslips/{payslip}/line-corrections/{amendment}', [PayrollController::class, 'removePayslipLineCorrection'])
+            ->middleware('throttle:30,1,payslip-correction:');
         Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf'])->middleware('throttle:20,1,hr-pdf:');
 

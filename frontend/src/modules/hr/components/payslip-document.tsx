@@ -8,6 +8,7 @@ import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
 import { formatPeso } from "@/core/lib/format";
 import type {
   Payslip,
+  PayslipAmendment,
   PayslipDeductionKey,
   PayslipDeductionRow,
   PayslipLine,
@@ -124,15 +125,78 @@ function rate(n: number): string | null {
   return n > 0 ? amount(n) : null;
 }
 
+/**
+ * TURNING THE DOCUMENT INTO THE FORM.
+ *
+ * HR corrects a payslip by editing the line that is wrong, on the payslip itself — not by filling
+ * in a separate correction box underneath it. So the document IS the editor: every leaf line
+ * becomes selectable, and the editor opens directly beneath the line it belongs to.
+ *
+ * The document owns none of that. It says which line was clicked and renders whatever the caller
+ * hands back, because the mutation, the validation and the pending state belong to the screen that
+ * has the payslip's id — and because the employee's copy of this component must have no way to
+ * reach any of it.
+ */
+export interface PayslipEditMode {
+  /** The line currently open for correction. */
+  selected: string | null;
+  onSelect: (key: string | null) => void;
+  /** Rendered immediately beneath the selected line. */
+  editor: ReactNode;
+  /** Rendered at the foot of the Compensation table — "add a line the engine never priced". */
+  addEarning?: ReactNode;
+  /** The same at the foot of the Deductions table. */
+  addDeduction?: ReactNode;
+}
+
+/**
+ * WHAT THE ENGINE SAID, on a line HR has since corrected.
+ *
+ * Struck and muted, immediately before the figure that replaced it. This is the whole reason a
+ * correction now lands ON its line instead of as a note under the total: the reader can see both
+ * what the payroll engine computed and what a person decided it should be, on the row the question
+ * is actually about.
+ */
+function Struck({ children }: { children: ReactNode }) {
+  return (
+    <span className="mr-1.5 font-normal text-muted-foreground line-through decoration-muted-foreground/70">
+      {children}
+    </span>
+  );
+}
+
+/**
+ * The corrections HR has made, keyed by the line each one names.
+ *
+ * The earnings and deduction rows already carry their own correction, stamped on by the API. The
+ * government lines do not — they are printed straight from their columns, in a table of their own —
+ * so those are looked up here.
+ */
+function correctionsByLine(p: Payslip): Record<string, PayslipAmendment> {
+  const out: Record<string, PayslipAmendment> = {};
+
+  for (const amendment of p.amendments ?? []) {
+    if (amendment.target_key) out[amendment.target_key] = amendment;
+  }
+
+  return out;
+}
+
 export function PayslipDocument({
   payslip,
   variant = "employee",
   className,
+  edit,
 }: {
   payslip: Payslip;
   /** HR additionally sees the employer's counterpart contributions. */
   variant?: "employee" | "hr";
   className?: string;
+  /**
+   * Present only when HR is correcting this payslip. Absent — which is every employee-facing
+   * render — the document has no clickable line and no editor in it at all.
+   */
+  edit?: PayslipEditMode;
 }) {
   const p = payslip;
   // Derived by the API, not here — the PDF renders the same figures and the arithmetic is
@@ -146,6 +210,26 @@ export function PayslipDocument({
   // Slice B7 — snapshotted on the payslip at run time, not read from the profile now: the
   // override may since have been cleared, and this payslip still charged what it charged.
   const overridden = p.contribution_overrides ?? [];
+  // The government lines are printed from their columns rather than from a breakdown, so their
+  // corrections are looked up rather than carried on the row.
+  const fixes = correctionsByLine(p);
+
+  /**
+   * What a line needs to be selectable, or nothing at all when this is not an edit.
+   *
+   * Clicking the open line CLOSES it, so the same click both opens and dismisses the editor — a
+   * document where every row is a control needs a way out that is not hunting for a Cancel button.
+   */
+  const pick = (key?: string) =>
+    edit && key
+      ? {
+          onSelect: () => edit.onSelect(edit.selected === key ? null : key),
+          active: edit.selected === key,
+        }
+      : {};
+
+  /** The editor itself, rendered beneath the line it belongs to and nowhere else. */
+  const editorFor = (key?: string) => (edit && key && edit.selected === key ? edit.editor : null);
   // On the month's last cutoff the walk continues from the MONTH's figures, not this period's —
   // that is the whole point of the summary. Everywhere else the two are the same thing.
   const initialNet = month ? month.initial_net : t.initial_net;
@@ -212,20 +296,33 @@ export function PayslipDocument({
       <div className="flex flex-col gap-6">
         <Table heading="Compensation">
           {earningRows(p).map((line) => (
-            <Row
-              key={line.name}
-              label={line.name}
-              note={line.note ?? undefined}
-              value={amount(line.amount)}
-            />
+            <Fragment key={line.key ?? line.name}>
+              <Row
+                label={line.name}
+                note={line.note ?? undefined}
+                value={amount(line.amount)}
+                originalValue={line.original_amount == null ? null : amount(line.original_amount)}
+                originalLabel={line.original_name}
+                {...pick(line.key)}
+              />
+              {editorFor(line.key)}
+            </Fragment>
           ))}
+          {edit?.addEarning}
+          {/* The total is NOT selectable, here or anywhere. It is the sum of the lines above it,
+              and a payslip whose parts do not add up to its own total is the one error a payslip
+              cannot make — so there is no control that could produce one. */}
           <Row label="Total Compensation" value={amount(t.earnings)} total />
         </Table>
 
         <Table heading="Deductions">
           {deductionRows(p).map((row, i) => (
-            <DeductionRow key={`${row.key}-${row.name}-${i}`} row={row} />
+            <Fragment key={`${row.key}-${row.name}-${i}`}>
+              <DeductionRow row={row} {...pick(row.key)} />
+              {editorFor(row.key)}
+            </Fragment>
           ))}
+          {edit?.addDeduction}
           <Row label="Total Deduction" value={amount(t.deductions)} total />
         </Table>
 
@@ -241,19 +338,43 @@ export function PayslipDocument({
               rather than in a detached block of its own. Never in the total. */}
           {(
             [
-              ["SSS", p.sss, p.employer_sss],
-              ["PhilHealth", p.philhealth, p.employer_philhealth],
-              ["Pag-IBIG", p.pagibig, p.employer_pagibig],
+              ["sss", "SSS", p.sss, p.employer_sss],
+              ["philhealth", "PhilHealth", p.philhealth, p.employer_philhealth],
+              ["pagibig", "Pag-IBIG", p.pagibig, p.employer_pagibig],
             ] as const
-          ).map(([label, employee, employer]) => (
-            <Fragment key={label}>
-              <Row label={label} value={amount(employee)} pair={(employer ?? 0) > 0} />
+          ).map(([key, label, employee, employer]) => (
+            <Fragment key={key}>
+              <Row
+                label={fixes[key]?.label_override ?? label}
+                value={amount(employee)}
+                originalValue={
+                  fixes[key]?.original_amount == null
+                    ? null
+                    : amount(fixes[key]!.original_amount as number)
+                }
+                originalLabel={fixes[key]?.label_override ? label : null}
+                pair={(employer ?? 0) > 0}
+                {...pick(key)}
+              />
               {(employer ?? 0) > 0 && (
                 <SubRow label="+ employer share" value={amount(employer ?? 0)} />
               )}
+              {editorFor(key)}
             </Fragment>
           ))}
-          <Row label="Withholding Tax" value={amount(p.withholding_tax)} pair={!!p.tax_basis} />
+          <Row
+            label={fixes.withholding_tax?.label_override ?? "Withholding Tax"}
+            value={amount(p.withholding_tax)}
+            originalValue={
+              fixes.withholding_tax?.original_amount == null
+                ? null
+                : amount(fixes.withholding_tax.original_amount as number)
+            }
+            originalLabel={fixes.withholding_tax?.label_override ? "Withholding Tax" : null}
+            pair={!!p.tax_basis}
+            {...pick("withholding_tax")}
+          />
+          {editorFor("withholding_tax")}
           {/* FIN-055 — the least checkable figure on the document: an annualised projection of
               one period, net of contributions, against a dated bracket table. Four steps, none
               of them visible, ending in a peso amount the reader was expected to accept. */}
@@ -284,7 +405,16 @@ export function PayslipDocument({
           {p.earnings_breakdown
             .filter((line) => line.kind === "allowance")
             .map((line) => (
-              <Row key={line.name} label={line.name} value={amount(line.amount)} />
+              <Fragment key={line.key ?? line.name}>
+                <Row
+                  label={line.name}
+                  value={amount(line.amount)}
+                  originalValue={line.original_amount == null ? null : amount(line.original_amount)}
+                  originalLabel={line.original_name}
+                  {...pick(line.key)}
+                />
+                {editorFor(line.key)}
+              </Fragment>
             ))}
           {t.allowances === 0 && !month && <Row label="None" value={amount(0)} />}
           {month && differs(month.allowances, t.allowances) && (
@@ -342,9 +472,6 @@ export function PayslipDocument({
         */}
         <SettlementNote payslip={p} />
 
-        {/* The corrections themselves — each with its date, so an employee who has already read
-            this payslip once can see what changed since. */}
-        <AmendmentHistory amendments={p.amendments ?? []} />
 
         {/* HR keeps ONE extra thing the employee has no use for: the employer TOTAL, which is
             what gets filed. The three components are already inline above for both audiences,
@@ -395,6 +522,7 @@ export function PayslipDocument({
           <Meta label="Verified By">
             <span className="text-xs font-normal">System Automated Check</span>
           </Meta>
+          <AmendedNote amendments={p.amendments ?? []} />
         </div>
         <Signature name={p.processed_by} role="HR Manager" />
         <Signature name={p.employee.name} role="Employee" />
@@ -444,31 +572,58 @@ function deductionRows(p: Payslip): PayslipDeductionRow[] {
  * figure the reader has to take on trust, and "Absences ②, Aug 5, Aug 10" is one they can check
  * against their own memory of the month.
  */
-function DeductionRow({ row }: { row: PayslipDeductionRow }) {
+function DeductionRow({
+  row,
+  onSelect,
+  active = false,
+}: {
+  row: PayslipDeductionRow;
+  /** Present only while HR is correcting this payslip — see PayslipEditMode. */
+  onSelect?: () => void;
+  active?: boolean;
+}) {
   const dates = row.dates ?? [];
   const isTime = row.minutes !== null && row.minutes !== undefined;
+  // The dates line belongs to the row above it, so the whole pair highlights and responds as one
+  // unit — a charge and the days behind it are one thing to correct, not two.
+  const Cell = onSelect ? "button" : "div";
 
   return (
     <>
-      <div
+      <Cell
+        {...(onSelect ? { type: "button" as const, onClick: onSelect } : {})}
         className={cn(
-          "flex items-center justify-between gap-4 px-4 py-3 text-sm",
+          "flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm",
           dates.length === 0 && "border-b border-border",
           dates.length > 0 && "pb-1",
+          onSelect &&
+            "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          active && "bg-muted",
         )}
       >
         <span className="flex items-center gap-2">
-          {row.name}
+          <span>
+            {row.original_name && <Struck>{row.original_name}</Struck>}
+            {row.name}
+          </span>
           {row.count > 0 && (
             <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded bg-destructive px-1 font-mono text-[11px] font-semibold text-white tabular-nums">
               {row.count}
             </span>
           )}
         </span>
-        <span className="shrink-0 font-mono font-medium tabular-nums">{amount(row.amount)}</span>
-      </div>
+        <span className="shrink-0 font-mono font-medium tabular-nums">
+          {row.original_amount != null && <Struck>{amount(row.original_amount)}</Struck>}
+          {amount(row.amount)}
+        </span>
+      </Cell>
       {dates.length > 0 && (
-        <div className="flex items-baseline justify-between gap-4 border-b border-border px-4 pb-2.5 text-caption text-muted-foreground">
+        <div
+          className={cn(
+            "flex items-baseline justify-between gap-4 border-b border-border px-4 pb-2.5 text-caption text-muted-foreground",
+            active && "bg-muted",
+          )}
+        >
           <span>{describeDates(row)}</span>
           {/* The minute total belongs beside the dates, not on the money row — it is what the
               dates add up to, and the money row already carries what the minutes cost. */}
@@ -610,50 +765,33 @@ function SettlementNote({ payslip }: { payslip: Payslip }) {
 }
 
 /**
- * Every correction on this payslip, in the order they were issued.
+ * THAT THIS DOCUMENT WAS AMENDED, AND WHEN — one sentence, in with the rest of the provenance.
  *
- * The amounts are already in the Compensation table as their own lines — this is the provenance:
- * when each was issued, why, and by whom. An employee re-reading a payslip whose figures have moved
- * is entitled to see that it was corrected rather than to wonder whether they misread it the first
- * time.
+ * WHAT THIS REPLACED. The corrections used to be listed in a block of their own at the foot of the
+ * payslip, because that was the only place they existed: the figures above were the engine's, and
+ * the block was where a person's disagreement with them lived. Now the disagreement is ON the line
+ * it is about, struck through beside the corrected figure, so the block would be the same
+ * information said twice — and the second telling is the one that made the reader do arithmetic.
+ *
+ * The DATE does not survive on the line, though, and a payslip someone has already read once is a
+ * document they are entitled to know has changed since. So the fact of it stays, beside the issue
+ * date, where a reader looks to find out where a document came from.
  */
-function AmendmentHistory({ amendments }: { amendments: Payslip["amendments"] }) {
-  if (!amendments || amendments.length === 0) return null;
+function AmendedNote({ amendments }: { amendments: Payslip["amendments"] }) {
+  const corrections = (amendments ?? []).filter((a) => a.target_key !== null);
+
+  if (corrections.length === 0) return null;
+
+  const latest = corrections.reduce((a, b) => ((a.issued_on ?? "") > (b.issued_on ?? "") ? a : b));
 
   return (
-    <div className="rounded-lg border border-border px-4 py-3">
-      <p className="text-sm font-semibold">
-        Corrections to this payslip ({amendments.length})
-      </p>
-      <ul className="mt-2 flex flex-col gap-2">
-        {amendments.map((a) => (
-          <li key={a.id} className="flex flex-wrap items-baseline justify-between gap-2">
-            <span className="text-caption text-muted-foreground">
-              <span className="font-medium text-foreground">{longDate(a.issued_on)}</span>
-              {" — "}
-              {a.note ?? a.reason}
-              {` · ${a.kind_label}`}
-              {a.issued_by && ` · ${a.issued_by}`}
-            </span>
-            {/* A correction can take money as well as give it, so the sign is printed rather than
-                assumed — and a reversal's tax comes BACK, which is the opposite footnote. */}
-            <span className="font-mono text-caption tabular-nums">
-              {a.amount < 0 ? "−" : "+"}
-              {amount(Math.abs(a.amount))}
-              {a.tax > 0 && (
-                <span className="text-muted-foreground"> less {amount(a.tax)} tax</span>
-              )}
-              {a.tax < 0 && (
-                <span className="text-muted-foreground">
-                  {" "}
-                  plus {amount(Math.abs(a.tax))} tax refunded
-                </span>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Meta label="Amended">
+      <span className="text-xs font-normal">
+        {corrections.length} line{corrections.length === 1 ? "" : "s"} corrected
+        {latest.issued_on ? ` · ${longDate(latest.issued_on)}` : null}
+        {latest.issued_by ? ` · ${latest.issued_by}` : null}
+      </span>
+    </Meta>
   );
 }
 
@@ -661,6 +799,10 @@ function Row({
   label,
   note,
   value,
+  originalValue,
+  originalLabel,
+  onSelect,
+  active = false,
   total = false,
   pair = false,
 }: {
@@ -668,27 +810,56 @@ function Row({
   /** Qualifier shown beside the label, e.g. the hours behind an overtime figure. */
   note?: string;
   value: string;
+  /** The engine's own figure, struck through beside the corrected one. */
+  originalValue?: string | null;
+  /** The line's own wording, when HR renamed it as well as re-priced it. */
+  originalLabel?: string | null;
+  /** Present only while HR is correcting this payslip — see PayslipEditMode. */
+  onSelect?: () => void;
+  active?: boolean;
   total?: boolean;
   /** A `SubRow` follows: drop this row's rule so the two read as one unit. */
   pair?: boolean;
 }) {
-  return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-4 px-4 py-3 text-sm",
-        !total && !pair && "border-b border-border",
-        pair && "pb-0",
-        total && "font-bold",
-      )}
-    >
+  const body = (
+    <>
       <span>
+        {originalLabel && <Struck>{originalLabel}</Struck>}
         {label}
         {note && <span className="ml-1.5 text-muted-foreground">({note})</span>}
       </span>
       <span className={cn("shrink-0 font-mono tabular-nums", total ? "font-bold" : "font-medium")}>
+        {originalValue && <Struck>{originalValue}</Struck>}
         {value}
       </span>
-    </div>
+    </>
+  );
+
+  const shape = cn(
+    "flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm",
+    !total && !pair && "border-b border-border",
+    pair && "pb-0",
+    total && "font-bold",
+  );
+
+  // A row is a BUTTON only while HR is correcting the payslip. On the employee's copy — and on
+  // every total — it stays a div, so there is nothing to tab onto and nothing to click.
+  if (!onSelect) {
+    return <div className={shape}>{body}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        shape,
+        "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active && "bg-muted",
+      )}
+    >
+      {body}
+    </button>
   );
 }
 

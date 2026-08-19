@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
-import { PayslipDocument } from "@/modules/hr/components/payslip-document";
+import { PayslipCorrections } from "@/modules/hr/components/payslip-corrections";
+import { RunLineWaiverDialog } from "@/modules/hr/components/run-line-waiver-dialog";
 import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import {
   DropdownMenu,
@@ -110,6 +111,10 @@ export default function PayrollPage() {
   const [viewRunId, setViewRunId] = useState<number | null>(null);
   // The payslip opened from a breakdown row — the same document the employee sees.
   const [payslipId, setPayslipId] = useState<number | null>(null);
+  /** Whether the open payslip is being corrected rather than read. */
+  const [correcting, setCorrecting] = useState(false);
+  /** The run whose charge is being waived across every payslip in it. */
+  const [waiveRunId, setWaiveRunId] = useState<number | null>(null);
   /**
    * FIN-043 — SHOULDER-SURFING PROTECTION, and the UI says so.
    *
@@ -137,6 +142,9 @@ export default function PayrollPage() {
   const [selectedFreq, setSelectedFreq] = useState<string>();
 
   const { data: openPayslip } = useHrPayslip(payslipId ?? undefined);
+  /** The period a whole-payroll waiver would apply to, in the words the dialog prints. */
+  const waiveRun = (runs ?? []).find((r) => r.id === waiveRunId);
+  const waiveRunLabel = waiveRun ? `${waiveRun.cycle_start} – ${waiveRun.cycle_end}` : "this period";
 
   // Masking is per-card now, so everything outside the three totals formats plainly.
   const peso = (v: number) => formatPeso(v);
@@ -502,8 +510,10 @@ export default function PayrollPage() {
 
                 <DropdownMenuSeparator />
 
-                {/* FIN-010 — correct a period on its own payslips, without reopening it. Opens on
-                    the period being looked at; any other unlocked run can be chosen inside. */}
+                {/* ADDING a line to payslips — back pay, a missed HMO share, an amount the engine
+                    never priced. CHANGING a line that is already there happens on the payslip
+                    itself, where the wrong figure is; this is for the money that has no line yet,
+                    and it can reach several employees at once. */}
                 <DropdownMenuItem
                   onSelect={() => {
                     setAmendPrefill({
@@ -515,7 +525,7 @@ export default function PayrollPage() {
                   }}
                 >
                   <Wrench />
-                  Correct a payslip
+                  Add a line to payslips
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setThirteenthOpen(true)}>
                   <Gift />
@@ -862,13 +872,12 @@ export default function PayrollPage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  setAmendPrefill({ runId: viewRun.id, employeeId: null, reason: null });
+                  setWaiveRunId(viewRun.id);
                   setViewRunId(null);
-                  setAmendOpen(true);
                 }}
               >
                 <Wrench />
-                Correct a payslip
+                Waive a charge for everyone
               </Button>
             )}
             {/* The same recompute the history row offers, for whoever is already looking at the
@@ -901,7 +910,17 @@ export default function PayrollPage() {
 
       {/* One employee's payslip — opened by clicking a breakdown row. Identical to what the
           employee sees, plus the employer share (which their own copy omits). */}
-      <Dialog open={payslipId != null} onOpenChange={(o) => !o && setPayslipId(null)}>
+      <Dialog
+        open={payslipId != null}
+        onOpenChange={(o) => {
+          if (!o) {
+            setPayslipId(null);
+            // Every payslip opens read-only. Leaving edit mode on would mean the NEXT payslip HR
+            // clicked opened as a form, with every row a button, without anyone asking for it.
+            setCorrecting(false);
+          }
+        }}
+      >
         <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto p-0 sm:max-w-3xl">
           <DialogHeader className="sr-only">
             <DialogTitle>
@@ -913,8 +932,28 @@ export default function PayrollPage() {
           </DialogHeader>
           {openPayslip ? (
             <>
-              <PayslipDocument payslip={openPayslip} variant="hr" />
-              <div className="flex justify-end gap-2 border-t border-border px-6 py-4">
+              {/* CORRECTING A PAYSLIP HAPPENS ON THE PAYSLIP. Switched on here rather than in a
+                  dialog of its own: the figure HR wants to change is on this document, and a
+                  second modal over the top of it would hide the thing being corrected. Off by
+                  default — reading a payslip is far more common than rewriting one. */}
+              <PayslipCorrections
+                // Remounted on every toggle, so switching out of edit mode and back in starts
+                // clean rather than resuming a half-typed correction.
+                key={correcting ? "correcting" : "reading"}
+                payslip={openPayslip}
+                editing={correcting}
+              />
+              <div className="flex flex-wrap justify-end gap-2 border-t border-border px-6 py-4">
+                {!openPayslip.run_is_locked && (
+                  <Button
+                    variant={correcting ? "default" : "outline"}
+                    className="mr-auto"
+                    onClick={() => setCorrecting((on) => !on)}
+                  >
+                    <Wrench />
+                    {correcting ? "Done correcting" : "Correct lines"}
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => onPayslipPdf(openPayslip.id)}>
                   <FileDown />
                   Download PDF
@@ -1181,6 +1220,16 @@ export default function PayrollPage() {
         prefillRunId={amendPrefill.runId}
         prefillEmployeeId={amendPrefill.employeeId}
         prefillReason={amendPrefill.reason}
+      />
+
+      {/* The whole-payroll form of a correction: one charge, waived for everybody who carried it.
+          Separate from correcting a payslip because it is a judgement about the PERIOD — an
+          outage, a closure — rather than about one person's month. */}
+      <RunLineWaiverDialog
+        runId={waiveRunId}
+        runLabel={waiveRunLabel}
+        open={waiveRunId !== null}
+        onOpenChange={(o) => !o && setWaiveRunId(null)}
       />
 
       {/* Recompute a settled period, after showing what that would change. */}
