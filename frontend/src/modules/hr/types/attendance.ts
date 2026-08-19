@@ -227,3 +227,46 @@ export interface DailyOverride {
   date: string;
   grace_minutes: number | null;
 }
+
+/**
+ * Why an open shift is in the review queue — mirrors AttendanceService's RESOLVE_* constants.
+ * These are the branches the pay engine took, not a label: `auto_closed` means pay DID resolve
+ * the day at the scheduled end, the other three mean it could not price the day at all.
+ */
+export type OpenShiftReason =
+  | "auto_closed"
+  | "rest_day"
+  | "no_schedule"
+  | "in_after_end";
+
+/** One row of the stale-attendance review queue (item 6). */
+export interface OpenShiftRow {
+  attendance_id: number;
+  employee_id: number;
+  name: string | null;
+  department: string | null;
+  work_date: string;
+  time_in: string | null;
+  /** Manila 'HH:MM' for the day, or null when the employee has no schedule at all. */
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  reason: OpenShiftReason;
+  /**
+   * `needs_fix` — the day cannot be priced and is being paid wrongly until HR corrects it.
+   * `auto_closed` — the money is already right; the record is just still open.
+   * Note an approved overtime request forces `needs_fix` even on an auto-closed day, because
+   * the approval says overtime happened and the auto-close paid none.
+   */
+  status: "needs_fix" | "auto_closed";
+  /** Manila 'HH:MM' where pay placed the end of the shift; null when it could not. */
+  resolved_time_out: string | null;
+  /** The resolved end falls on the day after work_date (an overnight schedule). */
+  resolved_next_day: boolean;
+  /** Approved overtime on this date that the auto-close pays nothing for. */
+  approved_overtime_hours: number | null;
+  hours_open: number;
+  /** Under the 18h self-close limit — the employee can still close it from their own clock. */
+  employee_can_fix: boolean;
+  /** ISO instant the allowance expired and pay stopped waiting. */
+  auto_closes_at: string | null;
+}

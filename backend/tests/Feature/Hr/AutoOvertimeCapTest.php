@@ -63,6 +63,11 @@ class AutoOvertimeCapTest extends HrTestCase
         app(AttendancePolicyService::class)->get()->update(array_merge([
             'overtime_mode' => 'auto_after_threshold',
             'overtime_threshold_minutes' => 0,
+            // Item 7's review flag OFF for this file. Every case here works a six-hour overrun,
+            // which would otherwise also trip the "unusually long" flag and put a `flagged` row
+            // next to the `held` one under test — these are the CAP tests, and the flag has its
+            // own file. Individual cases override this where the interaction is the point.
+            'auto_overtime_review_minutes' => 0,
         ], $attrs));
     }
 

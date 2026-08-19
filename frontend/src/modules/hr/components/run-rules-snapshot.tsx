@@ -84,7 +84,10 @@ const GATES: Record<string, (p: Record<string, unknown>) => boolean> = {
   // off, "Lates per deduction: 3" describes a rule that charged nobody anything.
   lates_per_deduction: (p) => p.late_penalty_enabled === true,
   monthly_late_reset: (p) => p.late_penalty_enabled === true,
-  // AttendanceService::autoOvertimeReview() — bails unless auto mode AND a positive cap.
+  // A 0 cap is UNCAPPED, so it changes no money and does not belong in a run's rules snapshot.
+  // (Item 7's `auto_overtime_review_minutes` is absent from LABELS entirely and must stay that
+  // way — it only raises a flag for HR and never moves a peso, so it is not a rule this run was
+  // computed under.)
   auto_overtime_daily_cap_minutes: (p) =>
     p.overtime_mode === "auto_after_threshold" && Number(p.auto_overtime_daily_cap_minutes ?? 0) > 0,
   auto_overtime_period_cap_minutes: (p) =>

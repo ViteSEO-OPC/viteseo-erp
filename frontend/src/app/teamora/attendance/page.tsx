@@ -15,12 +15,13 @@ import { AttendanceAdjustDialog } from "@/modules/hr/components/attendance-adjus
 import { AttendanceMeetingDialog } from "@/modules/hr/components/attendance-meeting-dialog";
 import { AttendanceSummaryTiles } from "@/modules/hr/components/attendance-summary-tiles";
 import { FieldTimeInQueue } from "@/modules/hr/components/field-timein-queue";
+import { OpenShiftQueue } from "@/modules/hr/components/open-shift-queue";
 import {
   SoftBadge,
   deriveAttendanceStatus,
   deriveAttendanceTiming,
 } from "@/modules/hr/lib/attendance-display";
-import type { HrAttendanceRow, Severity } from "@/modules/hr/types/attendance";
+import type { HrAttendanceRow, OpenShiftRow, Severity } from "@/modules/hr/types/attendance";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
 
 function manilaToday(): string {
@@ -57,9 +58,32 @@ export default function AttendancePage() {
   const [editing, setEditing] = useState<HrAttendanceRow | null>(null);
   const [scheduling, setScheduling] = useState<HrAttendanceRow | null>(null);
 
+  /**
+   * An open shift the review queue asked us to correct. The queue spans many dates while this
+   * page shows one, so fixing a row moves the whole page to that date and reuses the ordinary
+   * correction dialog — corrections have to work the same way whichever list started them.
+   */
+  const [pendingFix, setPendingFix] = useState<OpenShiftRow | null>(null);
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [timingFilter, setTimingFilter] = useState("all");
+
+  /**
+   * The row the correction dialog is on. DERIVED rather than stashed by an effect: the queue's
+   * pick can't be resolved until the roster for its date has loaded, and waiting for that in an
+   * effect is a render cascade for an answer that is already available one pass earlier.
+   */
+  const editingRow =
+    editing ??
+    (pendingFix && pendingFix.work_date === date
+      ? ((rows ?? []).find((r) => r.employee_id === pendingFix.employee_id) ?? null)
+      : null);
+
+  const closeEditor = () => {
+    setEditing(null);
+    setPendingFix(null);
+  };
 
   const filtered = useMemo(() => {
     return (rows ?? []).filter((r) => {
@@ -129,6 +153,18 @@ export default function AttendancePage() {
         <FieldTimeInQueue />
       </div>
 
+      {/* Forgotten clock-outs. Also above the roster, and for the same reason: these are days
+          whose pay is wrong or unsettled, which outranks reading today's list. Hides itself
+          when nothing needs fixing. */}
+      <div className="mt-4 empty:mt-0">
+        <OpenShiftQueue
+          onFix={(r) => {
+            setPendingFix(r);
+            setDate(r.work_date);
+          }}
+        />
+      </div>
+
       <div className="mt-4">
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading attendance…</p>
@@ -146,10 +182,10 @@ export default function AttendancePage() {
       </div>
 
       <AttendanceAdjustDialog
-        open={!!editing}
-        onOpenChange={(o) => !o && setEditing(null)}
-        row={editing}
-        onScheduleMeeting={() => { setScheduling(editing); setEditing(null); }}
+        open={!!editingRow}
+        onOpenChange={(o) => !o && closeEditor()}
+        row={editingRow}
+        onScheduleMeeting={() => { setScheduling(editingRow); closeEditor(); }}
       />
 
       <AttendanceMeetingDialog

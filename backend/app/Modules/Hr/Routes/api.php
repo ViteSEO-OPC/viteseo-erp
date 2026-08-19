@@ -202,6 +202,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('attendance/remote-checkins', [RemoteCheckinController::class, 'index']);
         Route::post('attendance/remote-checkins/{remoteCheckin}/approve', [RemoteCheckinController::class, 'approve']);
         Route::post('attendance/remote-checkins/{remoteCheckin}/reject', [RemoteCheckinController::class, 'reject']);
+        // Stale-attendance review queue (item 6). Same "keep it above any attendance/{param}"
+        // caveat as the field time-ins above.
+        Route::get('attendance/open-shifts', [AttendanceController::class, 'openShifts']);
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).

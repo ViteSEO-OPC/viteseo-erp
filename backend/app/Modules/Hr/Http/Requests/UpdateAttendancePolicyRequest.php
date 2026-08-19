@@ -81,6 +81,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // Philippines, so any figure here is the company's own control, not a legal one.
             'auto_overtime_daily_cap_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
             'auto_overtime_period_cap_minutes' => ['sometimes', 'integer', 'min:0', 'max:65535'],
+            // Item 7 — the review threshold, NOT a cap: it flags a day, it never holds pay back.
+            // 0 turns the flag off. Floored at 30 so it cannot be set to "flag every overrun",
+            // which would bury the queue in the twenty-minute days nobody needs to see.
+            'auto_overtime_review_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
 
             // Premium & overtime rates (Premium Pay epic, Phase 0). Whole-percent multipliers of the
             // hourly/daily rate; each HARD-FLOORED at its DOLE minimum (editable UP, never below).

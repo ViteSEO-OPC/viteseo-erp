@@ -117,6 +117,8 @@ export interface AttendancePolicy {
   // Minutes past a cap are not lost: they queue for review and pay once approved.
   auto_overtime_daily_cap_minutes: number;
   auto_overtime_period_cap_minutes: number;
+  /** Item 7 — a day's overtime worth flagging for review. Flags only; withholds nothing. 0 = off. */
+  auto_overtime_review_minutes: number;
 
   // Premium & overtime rates (whole-percent multipliers; HR-editable, hard-floored at the DOLE
   // minimum). night_diff_pct is the add-on percent (10 = +10%). Consumers land in later phases;

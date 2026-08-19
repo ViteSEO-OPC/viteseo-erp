@@ -10,6 +10,7 @@ import {
   getHrAttendance,
   adjustAttendance,
   getAttendanceSummary,
+  getOpenShifts,
   getViolations,
   getMyViolations,
   resolveViolation,
@@ -66,6 +67,21 @@ export function useAdjustAttendance() {
   return useMutation({
     mutationFn: adjustAttendance,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["hr", "attendance"] }),
+  });
+}
+
+/**
+ * The stale-attendance review queue (item 6).
+ *
+ * Keyed UNDER ["hr","attendance"] deliberately: `useAdjustAttendance` invalidates that prefix,
+ * so correcting a row makes it leave the queue with no extra wiring. The queue also has to be
+ * re-read after a correction rather than patched, because fixing one day can change whether a
+ * neighbouring overnight row still counts as open.
+ */
+export function useOpenShifts(from?: string, to?: string) {
+  return useQuery({
+    queryKey: ["hr", "attendance", "open-shifts", from ?? "", to ?? ""],
+    queryFn: () => getOpenShifts(from, to),
   });
 }
 

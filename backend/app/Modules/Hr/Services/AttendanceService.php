@@ -1210,9 +1210,44 @@ class AttendanceService
      */
     private function workedWindowFor(Attendance $row, array $eff, ?AttendancePolicy $policy = null): ?array
     {
+        return $this->resolveWorkedWindow($row, $eff, $policy)['window'];
+    }
+
+    /**
+     * Why a row resolved the way it did. Every value except `closed` and `auto_closed` describes an
+     * open punch the pay paths deliberately refused to price — which is exactly the review queue
+     * (item 6). Kept as constants so the queue, the API and the tests cannot drift from the engine.
+     */
+    public const RESOLVE_NO_TIME_IN = 'no_time_in';
+
+    public const RESOLVE_CLOSED = 'closed';
+
+    public const RESOLVE_AUTO_CLOSED = 'auto_closed';
+
+    public const RESOLVE_REST_DAY = 'rest_day';
+
+    public const RESOLVE_NO_SCHEDULE = 'no_schedule';
+
+    public const RESOLVE_IN_AFTER_END = 'in_after_end';
+
+    public const RESOLVE_WITHIN_ALLOWANCE = 'within_allowance';
+
+    /**
+     * `workedWindowFor` with its reasoning exposed.
+     *
+     * The pay paths only ever need the window, so they use the wrapper above and this stays the one
+     * implementation. The review queue needs the DISCARDED branch — which of the refusals fired, and
+     * when the cutoff falls — and deriving that a second time somewhere else is how a queue starts
+     * disagreeing with the payslip it is supposed to be about.
+     *
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for the row's date
+     * @return array{window: array{in:int, out:int, derived:bool}|null, reason: string, cutoff: ?Carbon}
+     */
+    private function resolveWorkedWindow(Attendance $row, array $eff, ?AttendancePolicy $policy = null): array
+    {
         $inMin = $this->clockToMinutes($row->time_in);
         if ($inMin === null) {
-            return null;
+            return ['window' => null, 'reason' => self::RESOLVE_NO_TIME_IN, 'cutoff' => null];
         }
 
         $outMin = $this->clockToMinutes($row->time_out);
@@ -1221,24 +1256,31 @@ class AttendanceService
                 $outMin += 24 * 60; // clocked out after midnight
             }
 
-            return ['in' => $inMin, 'out' => $outMin, 'derived' => false];
+            return [
+                'window' => ['in' => $inMin, 'out' => $outMin, 'derived' => false],
+                'reason' => self::RESOLVE_CLOSED,
+                'cutoff' => null,
+            ];
         }
 
         // --- open punch: only an ABANDONED one resolves, and only to the scheduled end ---
         if (! ($eff['is_workday'] ?? false)) {
-            return null; // rest day — no shift to be the end of
+            // rest day — no shift to be the end of
+            return ['window' => null, 'reason' => self::RESOLVE_REST_DAY, 'cutoff' => null];
         }
 
         $startMin = $this->hmToMinutes($eff['start_time'] ?? null);
         $endMin = $this->hmToMinutes($eff['end_time'] ?? null);
         if ($startMin === null || $endMin === null) {
-            return null; // no schedule to resolve against
+            // no schedule to resolve against
+            return ['window' => null, 'reason' => self::RESOLVE_NO_SCHEDULE, 'cutoff' => null];
         }
         if ($endMin < $startMin) {
             $endMin += 24 * 60; // overnight schedule ends on the following day
         }
         if ($endMin <= $inMin) {
-            return null; // clocked in at or after their own end — nothing coherent to derive
+            // clocked in at or after their own end — nothing coherent to derive
+            return ['window' => null, 'reason' => self::RESOLVE_IN_AFTER_END, 'cutoff' => null];
         }
 
         $allowance = (int) (($policy ?? $this->policy->get())->missing_timeout_allowance_minutes
@@ -1254,10 +1296,143 @@ class AttendanceService
             ->startOfDay()
             ->addMinutes($endMin + $allowance);
         if ($this->localNow()->lt($cutoff)) {
-            return null; // still within the allowance — they may simply still be working
+            // still within the allowance — they may simply still be working
+            return ['window' => null, 'reason' => self::RESOLVE_WITHIN_ALLOWANCE, 'cutoff' => $cutoff];
         }
 
-        return ['in' => $inMin, 'out' => $endMin, 'derived' => true];
+        return [
+            'window' => ['in' => $inMin, 'out' => $endMin, 'derived' => true],
+            'reason' => self::RESOLVE_AUTO_CLOSED,
+            'cutoff' => $cutoff,
+        ];
+    }
+
+    /** How far back the review queue looks when the caller does not say. */
+    private const OPEN_SHIFT_REVIEW_DAYS = 30;
+
+    /**
+     * Open shifts HR should look at — the stale-attendance review queue (item 6).
+     *
+     * WHAT IT IS FOR. Auto-closing a forgotten punch at the scheduled end (item 5) settles the pay
+     * for the ordinary case and nothing else. This lists what is left, and it is deliberately two
+     * different kinds of row rather than one undifferentiated pile:
+     *
+     *   • `needs_fix` — the day CANNOT be priced. A rest day has no shift to be the end of, an
+     *     employee with no schedule has nothing to resolve against, and a punch after the person's
+     *     own end is incoherent. These days are being paid wrongly RIGHT NOW and only an HR
+     *     correction fixes them. This is the whole point of the queue.
+     *   • `auto_closed` — the day IS priced, at the scheduled end, and the money is right. The
+     *     record is merely still open, which is untidy and leaves the employee's dashboard saying
+     *     they are clocked in. Hygiene, not an error.
+     *
+     * Mixing the two would bury the handful that cost money under the routine ones, which is the
+     * failure mode the queue exists to avoid, so the status is on every row and the UI defaults to
+     * `needs_fix`.
+     *
+     * TWO DIFFERENT CLOCKS, deliberately. The policy allowance decides when PAY stops waiting;
+     * `MAX_OPEN_SHIFT_HOURS` decides when the EMPLOYEE can no longer close the shift themselves and
+     * the correction must come from HR. They answer different questions and are both reported.
+     *
+     * AN APPROVED OVERTIME REQUEST PROMOTES A ROW. Auto-closure caps the day at the scheduled end,
+     * so an approved request on that date pays nothing — by design (approval is permission, not
+     * proof). But someone approved it, which is evidence the overtime happened, and that
+     * contradiction is exactly what a human should adjudicate. Such a row is never `auto_closed`.
+     *
+     * NOT LISTED: shifts still inside their allowance. Their cutoff has not passed, so the person
+     * may simply still be at work — putting them here would ask HR to chase people who are fine.
+     * The window is short and self-clearing: a cutoff sits on the row's own date, so anything older
+     * than today has necessarily passed it.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function openShiftReview(?string $start = null, ?string $end = null): array
+    {
+        $tz = config('app.timezone_local');
+        $end ??= $this->today();
+        $start ??= Carbon::parse($end, $tz)->subDays(self::OPEN_SHIFT_REVIEW_DAYS)->toDateString();
+
+        $rows = Attendance::with(['employee.user', 'employee.department', 'employee.workSchedule'])
+            ->whereNotNull('time_in')
+            ->whereNull('time_out')
+            ->whereBetween('work_date', [$start, $end])
+            ->orderBy('work_date')
+            ->get();
+
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        // Approved overtime on the same (employee, date) — the contradiction described above.
+        // Cancelled requests are excluded: HR already withdrew the permission.
+        $approvedOt = OvertimeRequest::where('status', 'approved')
+            ->whereNull('cancelled_at')
+            ->whereIn('employee_id', $rows->pluck('employee_id')->unique()->all())
+            ->whereBetween('work_date', [$start, $end])
+            ->get()
+            ->keyBy(fn (OvertimeRequest $r) => $r->employee_id.'|'.$r->work_date->toDateString());
+
+        // The LIVE policy, not the dated version for each row's date. Deliberate: the allowance is
+        // an operational "has this person forgotten yet" threshold, not a pay rate, and this list
+        // answers "what should HR look at now". Payroll still resolves its own version at cycle end.
+        $policy = $this->policy->get();
+        $now = $this->localNow();
+        $out = [];
+
+        foreach ($rows as $row) {
+            // `employee()` is withTrashed, so a separated employee's unresolved day still shows —
+            // that is precisely when it matters, since their final pay is about to be computed.
+            $employee = $row->employee;
+            // Management attendance is synthetic (`hr:generate-management-attendance`) and exempt
+            // from the clock entirely, so an open row of theirs is not something HR can act on.
+            if (! $employee || $employee->isManagement()) {
+                continue;
+            }
+
+            $date = $row->work_date->toDateString();
+            $eff = $this->schedule->effectiveFor($employee, Carbon::parse($date, $tz));
+            $resolved = $this->resolveWorkedWindow($row, $eff, $policy);
+
+            if ($resolved['reason'] === self::RESOLVE_WITHIN_ALLOWANCE) {
+                continue; // they may still be working — not HR's problem yet
+            }
+
+            $ot = $approvedOt->get($row->employee_id.'|'.$date);
+            $window = $resolved['window'];
+
+            $out[] = [
+                'attendance_id' => $row->id,
+                'employee_id' => $employee->id,
+                'name' => $employee->user?->name,
+                'department' => $employee->department?->name,
+                'work_date' => $date,
+                'time_in' => $row->time_in?->toIso8601String(),
+                'scheduled_start' => $eff['start_time'] ?? null,
+                'scheduled_end' => $eff['end_time'] ?? null,
+                'reason' => $resolved['reason'],
+                // An approval nobody punched for outranks a clean auto-closure: the money is
+                // settled but contradicted, which is a decision rather than a tidy-up.
+                'status' => ($window !== null && $ot === null) ? 'auto_closed' : 'needs_fix',
+                // Where pay put the end of this shift, in the employee's own local clock. Null
+                // means pay could not place it at all — the `needs_fix` reasons.
+                'resolved_time_out' => $window !== null ? $this->minutesToHm($window['out']) : null,
+                'resolved_next_day' => $window !== null && $window['out'] >= 24 * 60,
+                'approved_overtime_hours' => $ot !== null ? (float) $ot->hours : null,
+                // Two different clocks — see the docblock. Hours open is measured from the punch,
+                // not from the scheduled end, because that is what the self-close limit uses.
+                'hours_open' => round($row->time_in->copy()->setTimezone($tz)->diffInMinutes($now) / 60, 1),
+                'employee_can_fix' => $row->time_in->diffInHours(now()) < self::MAX_OPEN_SHIFT_HOURS,
+                'auto_closes_at' => $resolved['cutoff']?->toIso8601String(),
+            ];
+        }
+
+        // Worst first: unpriced days before tidy-ups, then oldest, so the money-losing rows sit at
+        // the top of the table whichever filter HR has on.
+        usort($out, function (array $a, array $b) {
+            return [$a['status'] === 'auto_closed', $a['work_date']]
+                <=> [$b['status'] === 'auto_closed', $b['work_date']];
+        });
+
+        return $out;
     }
 
     /** Statutory fallback; persisted policy defaults use the same 22:00 → 06:00 band. */
@@ -1572,8 +1747,34 @@ class AttendanceService
         return $entry;
     }
 
+    /** Held back by a cap: it does NOT pay until an overtime request for that date is approved. */
+    public const OT_REVIEW_CAP = 'cap';
+
+    /** More overtime in one day than the review threshold. It pays; somebody should look at it. */
+    public const OT_REVIEW_LONG = 'long_overtime';
+
+    /** The same day was both late and overtime. Both are paid/charged in full — Art. 88. */
+    public const OT_REVIEW_LATE = 'late_and_overtime';
+
     /**
-     * The overtime the caps held back and nobody has approved yet (FIN-039).
+     * Auto-mode overtime that wants a human's attention (FIN-039, extended by item 7).
+     *
+     * TWO KINDS OF ROW, and the difference is what INACTION costs:
+     *
+     *   • `held` (reason `cap`) — a cap withheld these minutes and they do not pay until an overtime
+     *     request for that date is approved. Doing nothing means the employee is not paid.
+     *   • `flagged` (reasons `long_overtime` / `late_and_overtime`) — the day pays in full, already,
+     *     automatically. It is listed because it looks unusual. Doing nothing means it pays anyway.
+     *
+     * They must never be presented as one list: the first is a decision that withholds someone's
+     * money, the second is a notification, and a reader who confuses them will either sit on wages or
+     * assume a payment is still pending. `kind` exists so the UI cannot blur them.
+     *
+     * WHY THE FLAGGED KIND EXISTS AT ALL. Both caps ship as 0 and this used to return nothing in that
+     * configuration, so a stock install reviewed no overtime whatsoever — and 0 does not mean "no
+     * overtime", it means UNLIMITED. A clock-out corrected to the next morning paid nine hours at
+     * 125% with nobody notified. The review threshold is the version of a cap that cannot underpay
+     * anyone: it raises a flag and touches no money.
      *
      * DERIVED ON READ, and writing nothing, which is the whole design. The obvious alternative — having
      * the payroll run file a pending overtime request for each over-cap day — is the FIN-038 mistake:
@@ -1581,15 +1782,17 @@ class AttendanceService
      * creating requests. Here the queue is a question asked of attendance, so it answers the same way
      * however many times HR opens it, and re-running payroll changes nothing.
      *
-     * An APPROVAL REDUCES OR REMOVES THE ITEM rather than resolving it, for the same reason. There is
-     * no separate state to clear: only the approved, punch-backed overlap stops being reported. HR's
-     * action is the existing approve button on the existing queue, not a new verb.
+     * An APPROVAL REDUCES OR REMOVES A HELD ITEM rather than resolving it, for the same reason. There
+     * is no separate state to clear: only the approved, punch-backed overlap stops being reported. HR's
+     * action is the existing approve button on the existing queue, not a new verb. A FLAGGED row has
+     * nothing to approve — it is already paying — so it stays until the attendance behind it changes.
      *
-     * Empty while `overtime_mode` is `approved_only` — nothing is auto-paid in that mode, so nothing is
-     * being held back. Empty too when both caps are 0, which is the shipped default.
+     * Still empty while `overtime_mode` is not `auto_after_threshold`: nothing is paid from the clock
+     * alone in those modes, so there is nothing here that a human did not already authorise.
      *
      * @return list<array{employee_id:int, employee_no:string|null, name:string|null, work_date:string,
-     *                    paid_minutes:int, excess_minutes:int, raw_minutes:int, approved_minutes:int}>
+     *                    paid_minutes:int, excess_minutes:int, raw_minutes:int, approved_minutes:int,
+     *                    late_minutes:int, kind:string, reasons:list<string>}>
      */
     public function autoOvertimeReview(string $start, string $end): array
     {
@@ -1597,9 +1800,13 @@ class AttendanceService
 
         $dailyCap = (int) $policy->auto_overtime_daily_cap_minutes;
         $periodCap = (int) $policy->auto_overtime_period_cap_minutes;
+        $reviewMinutes = (int) ($policy->auto_overtime_review_minutes ?? 0);
         [$nightStart, $nightEnd] = $this->nightWindow($policy);
 
-        if ($policy->overtime_mode !== 'auto_after_threshold' || ($dailyCap <= 0 && $periodCap <= 0)) {
+        // NOT also gated on the caps any more — that gate is exactly what made the queue silent on
+        // the shipped configuration. The mode gate stays: in `approved_only` and `none` every paid
+        // overtime minute was authorised by a person, so there is nothing to review.
+        if ($policy->overtime_mode !== 'auto_after_threshold') {
             return [];
         }
 
@@ -1630,20 +1837,28 @@ class AttendanceService
                 $nightEnd,
             );
 
-            $withExcess = array_filter($map, fn (array $entry) => ($entry['excess_minutes'] ?? 0) > 0);
-            if ($withExcess === []) {
+            if ($map === []) {
                 continue;
             }
 
-            $approvals = $this->approvedOvertimeMinutesFor(
-                $employee,
-                $start,
-                $end,
-                $approved->get($employee->id) ?? new Collection,
-                $policy,
-            );
+            $anyExcess = array_filter($map, fn (array $entry) => ($entry['excess_minutes'] ?? 0) > 0) !== [];
 
-            foreach ($withExcess as $date => $entry) {
+            // Only worth deriving when it can change an answer: an approval either releases held
+            // minutes or supplies the "of which N were approved" figure on a flagged row.
+            $approvals = ($anyExcess || $approved->has($employee->id))
+                ? $this->approvedOvertimeMinutesFor(
+                    $employee,
+                    $start,
+                    $end,
+                    $approved->get($employee->id) ?? new Collection,
+                    $policy,
+                )
+                : [];
+
+            // Lateness from the punches, NOT from the deduction ledger — see lateMinutesFor().
+            $lateByDate = $this->lateMinutesFor($employee, $start, $end);
+
+            foreach ($map as $date => $entry) {
                 $approval = $approvals[$date] ?? null;
                 $released = self::releaseApprovedOvertimeEntry(
                     $entry,
@@ -1652,9 +1867,28 @@ class AttendanceService
                     $nightEnd,
                 );
                 $stillHeld = (int) $released['excess_minutes'];
+                $rawMinutes = (int) ($entry['raw_minutes'] ?? $entry['minutes']);
+                $lateMinutes = (int) ($lateByDate[$date] ?? 0);
 
-                if ($stillHeld <= 0) {
-                    continue; // already approved — it will pay, so it is not a queue item
+                $reasons = [];
+                if ($stillHeld > 0) {
+                    // Anything already approved has stopped being held, so it is not a queue item.
+                    $reasons[] = self::OT_REVIEW_CAP;
+                }
+                // Measured against the RAW overrun, not the capped figure: the question is how long
+                // the person stayed, which is what looks wrong, and a cap trimming the paid number
+                // does not make a nine-hour overrun ordinary. 0 disables the flag.
+                if ($reviewMinutes > 0 && $rawMinutes >= $reviewMinutes) {
+                    $reasons[] = self::OT_REVIEW_LONG;
+                }
+                // Art. 88 forbids netting the two, so this day both docks the late minutes AND pays
+                // the overtime at a premium. That is correct and it surprises people, so show it.
+                if ($lateMinutes > 0 && $rawMinutes > 0) {
+                    $reasons[] = self::OT_REVIEW_LATE;
+                }
+
+                if ($reasons === []) {
+                    continue;
                 }
 
                 $out[] = [
@@ -1662,17 +1896,75 @@ class AttendanceService
                     'employee_no' => $employee->employee_no,
                     'name' => $employee->user?->name,
                     'work_date' => $date,
-                    'paid_minutes' => (int) $entry['minutes'],
+                    'paid_minutes' => (int) $released['minutes'],
                     'excess_minutes' => $stillHeld,
-                    'raw_minutes' => (int) ($entry['raw_minutes'] ?? $entry['minutes']),
+                    'raw_minutes' => $rawMinutes,
                     'approved_minutes' => (int) ($approval['minutes'] ?? 0),
+                    'late_minutes' => $lateMinutes,
+                    // `cap` decides the kind whenever it is present: money being withheld outranks a
+                    // notification, because it is the only one of the two that HR must act on.
+                    'kind' => $stillHeld > 0 ? 'held' : 'flagged',
+                    'reasons' => $reasons,
                 ];
             }
         }
 
-        // Largest overrun first — a five-hour excess is the forgotten clock-out worth looking at, a
-        // twenty-minute one usually is not.
-        usort($out, fn (array $a, array $b) => $b['excess_minutes'] <=> $a['excess_minutes']);
+        // Held money first, then the largest overrun. Sorting purely by size would let a nine-hour
+        // flagged day that is already paid outrank a two-hour one that is not being paid at all.
+        usort($out, fn (array $a, array $b) => [$a['kind'] === 'flagged', -$a['excess_minutes'], -$a['raw_minutes']]
+            <=> [$b['kind'] === 'flagged', -$b['excess_minutes'], -$b['raw_minutes']]);
+
+        return $out;
+    }
+
+    /**
+     * Late minutes per date, measured from the scheduled start once the grace period is exhausted.
+     *
+     * DELIBERATELY NOT the deduction ledger's figure. DeductionService reports 0 late minutes
+     * whenever `late_deduction_mode` is `none`, because there it is answering "how much do we
+     * charge for this". The question here is "did this person arrive late", which is true or false
+     * regardless of whether the company charges for it — the review queue has to flag the
+     * late-plus-overtime day at a company that never docks anyone, since the surprising half of
+     * that pairing is the overtime being paid, not the lateness being charged.
+     *
+     * Grace is honoured so a two-minute arrival inside a fifteen-minute grace is not "late"; the
+     * minutes reported are counted from the scheduled start, matching the roster's own badge.
+     *
+     * @return array<string, int> date 'Y-m-d' => late minutes, omitted on days that were not late
+     */
+    public function lateMinutesFor(Employee $employee, string $start, string $end): array
+    {
+        if ($employee->isManagement()) {
+            return []; // exempt from the clock entirely
+        }
+
+        $tz = config('app.timezone_local');
+        $out = [];
+
+        foreach ($this->rowsBetween($employee, $start, $end) as $row) {
+            if (! $row->time_in) {
+                continue;
+            }
+
+            // `->toDateString()` is NOT redundant. Carbon::parse() IGNORES its $tz argument when
+            // handed a DateTimeInterface, which the `date` cast makes work_date — so parsing the
+            // Carbon directly builds midnight UTC, and scheduleStart() below would place an 08:00
+            // shift at 16:00 Manila. Every arrival would then look early and nobody would ever be
+            // late. Round-tripping through the string is what makes the timezone apply.
+            $day = Carbon::parse($row->work_date->toDateString(), $tz);
+            $eff = $this->schedule->effectiveFor($employee, $day);
+            // No scheduled start to be late for. The null check is not redundant with the workday
+            // one: scheduleStart() falls back to 09:00 for a missing time, and inventing a baseline
+            // would report an employee with no schedule at all as late every morning.
+            if (! ($eff['is_workday'] ?? false) || ($eff['start_time'] ?? null) === null) {
+                continue;
+            }
+
+            $arrival = $this->arrivalCategory($row->time_in->copy()->setTimezone($tz), $eff, $day);
+            if (($arrival['late_minutes'] ?? 0) > 0) {
+                $out[$day->toDateString()] = (int) $arrival['late_minutes'];
+            }
+        }
 
         return $out;
     }
@@ -2567,6 +2859,14 @@ class AttendanceService
             'break_minutes' => (int) $row->break_minutes,
             'lunch_minutes' => (int) $row->lunch_minutes,
         ];
+    }
+
+    /** Minute-of-day → 'HH:MM'. Values past 1440 wrap, so an overnight end reads as its own clock. */
+    private function minutesToHm(int $minutes): string
+    {
+        $minutes %= 24 * 60;
+
+        return sprintf('%02d:%02d', intdiv($minutes, 60), $minutes % 60);
     }
 
     /** 'HH:MM' → minute-of-day, or null. */

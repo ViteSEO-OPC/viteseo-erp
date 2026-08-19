@@ -8,6 +8,7 @@ import type {
   Violation,
   DailyOverride,
   LocationFix,
+  OpenShiftRow,
 } from "@/modules/hr/types/attendance";
 
 export async function getMyAttendance(): Promise<MyAttendance> {
@@ -45,6 +46,16 @@ export async function getHrAttendance(date?: string): Promise<HrAttendanceRow[]>
 export async function getAttendanceSummary(date?: string): Promise<AttendanceSummary> {
   const res = await apiClient.get("/hr/attendance/summary", {
     params: date ? { date } : undefined,
+  });
+  return res.data.data;
+}
+
+export async function getOpenShifts(
+  from?: string,
+  to?: string,
+): Promise<OpenShiftRow[]> {
+  const res = await apiClient.get("/hr/attendance/open-shifts", {
+    params: { from: from || undefined, to: to || undefined },
   });
   return res.data.data;
 }

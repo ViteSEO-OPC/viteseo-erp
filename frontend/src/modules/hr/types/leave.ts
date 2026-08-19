@@ -124,6 +124,12 @@ export interface OvertimeSettings {
  * waiting for somebody to say yes, which is usually either a genuine long evening or a forgotten
  * clock-out. `raw_minutes` is the whole overrun, so the two cases are easy to tell apart.
  */
+/**
+ * Why a day is in the overtime review queue — mirrors AttendanceService's OT_REVIEW_* constants.
+ * `cap` withholds money; the other two do not. See {@link AutoOvertimeReviewItem.kind}.
+ */
+export type AutoOvertimeReviewReason = "cap" | "long_overtime" | "late_and_overtime";
+
 export interface AutoOvertimeReviewItem {
   employee_id: number;
   employee_no: string | null;
@@ -133,6 +139,15 @@ export interface AutoOvertimeReviewItem {
   excess_minutes: number;
   raw_minutes: number;
   approved_minutes: number;
+  /** Minutes past the scheduled start, after grace. 0 unless the day is also flagged late. */
+  late_minutes: number;
+  /**
+   * What inaction costs. `held` — a cap is withholding `excess_minutes` and they do NOT pay until
+   * an overtime request for that date is approved. `flagged` — the day already pays in full and is
+   * listed only because it looks unusual. Never render the two the same way.
+   */
+  kind: "held" | "flagged";
+  reasons: AutoOvertimeReviewReason[];
 }
 
 /** How a date's overtime is priced: regular day / rest day / special day / regular holiday. */

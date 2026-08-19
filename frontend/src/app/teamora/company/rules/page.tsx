@@ -396,6 +396,12 @@ function AttendancePolicyEditor() {
   // so an existing company's pay does not move until HR deliberately sets a figure.
   const [otDailyCap, setOtDailyCap] = useState(String(policy?.auto_overtime_daily_cap_minutes ?? 0));
   const [otPeriodCap, setOtPeriodCap] = useState(String(policy?.auto_overtime_period_cap_minutes ?? 0));
+  // Item 7 — flags a long day for review WITHOUT withholding any of it. Deliberately not a third
+  // cap: the caps above decide what pays, this decides what HR gets told about.
+  const [otReviewMinutes, setOtReviewMinutes] = useState(String(policy?.auto_overtime_review_minutes ?? 240));
+  // Ticked to confirm "0 = unlimited" when saving auto mode with both caps off. One-shot by
+  // construction: once saved, the stored policy already IS uncapped auto and the box stops asking.
+  const [capsAcknowledged, setCapsAcknowledged] = useState(false);
 
   // Premium & overtime rates (Phase 0) — whole-percent, floored at the DOLE minimum (UI + server).
   const [premRestDay, setPremRestDay] = useState(String(policy?.premium_rest_day_pct ?? 130));
@@ -484,6 +490,21 @@ function AttendancePolicyEditor() {
     const n = Number(timeoutAllowance);
     if (!Number.isInteger(n) || n < 30 || n > 720) {
       toast.error("The wait after the shift ends must be between 30 minutes and 12 hours.");
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Auto mode with both caps at 0 means overtime pays from the clock with NO ceiling — and 0 is
+   * the shipped default, so this is reached by leaving fields alone rather than by typing a number.
+   * Confirmed once, on the save that ENTERS that state; editing anything else in the card later
+   * does not ask again, because nagging about a setting the company has already chosen is how a
+   * confirmation stops being read.
+   */
+  function guardOvertimeCaps(): boolean {
+    if (needsCapAck && !capsAcknowledged) {
+      toast.error("Tick the box to confirm overtime should pay with no ceiling.");
       return false;
     }
     return true;
@@ -666,6 +687,16 @@ function AttendancePolicyEditor() {
 
   // On, but with nothing to check against. The server fails OPEN on this (§2.5) — better a
   // normal clock-in than a company locked out — but HR must be told it isn't enforcing.
+  const formUncappedAuto =
+    overtimeMode === "auto_after_threshold" &&
+    Number(otDailyCap) === 0 &&
+    Number(otPeriodCap) === 0;
+  const storedUncappedAuto =
+    policy?.overtime_mode === "auto_after_threshold" &&
+    (policy?.auto_overtime_daily_cap_minutes ?? 0) === 0 &&
+    (policy?.auto_overtime_period_cap_minutes ?? 0) === 0;
+  const needsCapAck = formUncappedAuto && !storedUncappedAuto;
+
   const geofenceIncomplete =
     geofenceOn && (cleanIps().length === 0 || officeLat.trim() === "" || officeLng.trim() === "");
 
@@ -927,13 +958,18 @@ function AttendancePolicyEditor() {
         // (no engine reads it) and the API now rejects anything but "none", so echoing a
         // stored value back would 422 and block HR from saving the overtime settings.
         onSave={() =>
-          saveCard("early_ot", {
-            early_clock_in_mode: earlyClockIn,
-            overtime_mode: overtimeMode,
-            overtime_threshold_minutes: Number(overtimeThreshold),
-            auto_overtime_daily_cap_minutes: Number(otDailyCap),
-            auto_overtime_period_cap_minutes: Number(otPeriodCap),
-          })
+          saveCard(
+            "early_ot",
+            {
+              early_clock_in_mode: earlyClockIn,
+              overtime_mode: overtimeMode,
+              overtime_threshold_minutes: Number(overtimeThreshold),
+              auto_overtime_daily_cap_minutes: Number(otDailyCap),
+              auto_overtime_period_cap_minutes: Number(otPeriodCap),
+              auto_overtime_review_minutes: Number(otReviewMinutes),
+            },
+            guardOvertimeCaps,
+          )
         }
       >
         <SubHeading>When someone times in before their shift starts</SubHeading>
@@ -1021,9 +1057,28 @@ function AttendancePolicyEditor() {
                 min={0}
                 max={65535}
               />
+              {/* Item 7 — the one number here that touches no money. It puts a day in front of HR
+                  and pays it in full either way, which is why it can be on by default while the
+                  caps above are off. */}
+              <NumberField
+                id="pol-ot-review"
+                label="Flag a day for review over (minutes, 0 = never)"
+                value={otReviewMinutes}
+                onChange={setOtReviewMinutes}
+                min={0}
+                max={1440}
+              />
             </>
           )}
         </div>
+        {overtimeMode === "auto_after_threshold" && (
+          <Hint>
+            <strong>Flag for review</strong> is not a cap. A day over it is still paid in full and
+            automatically — it just appears under <strong>Overtime to review</strong> on the
+            Overtime page so somebody sees it. Days that were both late and overtime are listed
+            there too, whatever this is set to.
+          </Hint>
+        )}
         {overtimeMode === "auto_after_threshold" && (
           <div className="rounded-lg border border-warning bg-warning-subtle p-3">
             <p className="text-xs text-foreground">
@@ -1036,12 +1091,32 @@ function AttendancePolicyEditor() {
             {/* The late-arrival case surprises people, so say it outright rather than let HR
                 discover it on a payslip. See AttendanceService::autoOvertimeMinutesFor. */}
             <p className="mt-2 text-xs text-foreground">
-              <strong>Arriving late does not cancel out overtime.</strong> Someone who comes in an hour
+              <strong>Arriving late does not cancel out overtime.</strong>{" "}
+              Someone who comes in an hour
               late and stays an hour past the shift is paid that overtime, and the late hour is deducted
               separately. The two are never netted off — Philippine law (Art. 88) forbids offsetting
               undertime with overtime, because overtime is worth more per hour. If that trade looks
               wrong for your company, use &ldquo;Only when approved&rdquo; instead.
             </p>
+          </div>
+        )}
+        {/* 0 caps = UNLIMITED, and 0 is what the fields start on — so this state is reached by
+            leaving them alone, not by choosing it. Confirmed once, on the save that enters it. */}
+        {needsCapAck && (
+          <div className="rounded-lg border border-danger bg-danger-subtle p-3">
+            <p className="text-xs text-foreground">
+              <strong>Both auto-pay caps are 0, which means no ceiling.</strong> Every minute
+              anyone clocks past their shift will be paid at the overtime rate with nobody
+              approving it. A clock-out corrected to the next morning would pay the whole night.
+              Set a cap to hold the excess for approval instead.
+            </p>
+            <div className="mt-2">
+              <CheckBox
+                checked={capsAcknowledged}
+                onChange={setCapsAcknowledged}
+                label="I understand — pay automatic overtime with no ceiling"
+              />
+            </div>
           </div>
         )}
         <Hint>

@@ -58,6 +58,10 @@ class AttendancePolicyService
         'overtime_threshold_minutes' => 0,
         'auto_overtime_daily_cap_minutes' => 0, // uncapped — FIN-039
         'auto_overtime_period_cap_minutes' => 0,
+        // Item 7 — flags a day for review without withholding a peso of it. Non-zero by default
+        // precisely BECAUSE the caps above are 0: something has to notice a runaway overrun on a
+        // stock install, and a notification is the version of that which cannot underpay anyone.
+        'auto_overtime_review_minutes' => 240,
         // Premium & overtime rates (Phase 0) — seeded to the DOLE legal minimums (no-op).
         'premium_rest_day_pct' => 130,
         'premium_special_day_pct' => 130,

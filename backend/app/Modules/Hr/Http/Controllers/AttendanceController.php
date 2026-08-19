@@ -106,6 +106,27 @@ class AttendanceController extends Controller
         return response()->json(['data' => $this->service->summary($request->query('date'))]);
     }
 
+    /**
+     * GET /api/v1/hr/attendance/open-shifts?from=&to= — the stale-attendance review queue (item 6).
+     *
+     * Shifts with a punch in and none out, split into the ones auto-closure could not price
+     * (`needs_fix`, the pay is wrong until HR corrects it) and the ones it could (`auto_closed`,
+     * tidy-up only). Corrections go back through `attendance/adjust` below — this only finds them.
+     */
+    public function openShifts(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            // No `after_or_equal:from`: an inverted range returns nothing rather than erroring,
+            // which is what a date-picker mid-edit produces and is not worth a red toast.
+            'to' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
+        return response()->json([
+            'data' => $this->service->openShiftReview($data['from'] ?? null, $data['to'] ?? null),
+        ]);
+    }
+
     // POST /api/v1/hr/attendance/adjust — HR sets/corrects a row (HR only).
     public function adjust(AdjustAttendanceRequest $request): JsonResponse
     {
