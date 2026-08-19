@@ -49,6 +49,53 @@ class OvertimeRequestService
     }
 
     /**
+     * Do two overtime windows on the same work date collide? (Item 10.)
+     *
+     * WHY THIS REPLACED "ONE REQUEST PER DATE". The pay engine has always handled several windows
+     * on one date — `approvedOvertimeMinutesFor` collects every matched window and merges them —
+     * so the single-request rule was a filing restriction with no calculation behind it. A split
+     * evening (17:00–19:00, then back at 22:00–01:00 after dinner) simply could not be filed, and
+     * the employee's only recourse was to claim the whole span including hours nobody worked.
+     *
+     * What the rule actually needs to prevent is the SAME minutes being approved twice, which is
+     * an overlap, not a second row.
+     *
+     * The ±24h sweep is not paranoia: a window whose end is at or before its start crosses
+     * midnight, so 23:00→02:00 and 00:30→01:30 describe overlapping real time while their raw
+     * minute-of-day ranges look disjoint. Checking the neighbouring day alignments catches that.
+     * Erring toward "overlapping" is the safe direction for a guard on double pay.
+     */
+    public static function windowsOverlap(string $aFrom, string $aTo, string $bFrom, string $bTo): bool
+    {
+        $toMinutes = static function (string $hm): int {
+            [$h, $m] = array_map('intval', explode(':', substr($hm, 0, 5)));
+
+            return $h * 60 + $m;
+        };
+
+        $span = static function (string $from, string $to) use ($toMinutes): array {
+            $start = $toMinutes($from);
+            $end = $toMinutes($to);
+            if ($end <= $start) {
+                $end += 24 * 60;
+            }
+
+            return [$start, $end];
+        };
+
+        [$aStart, $aEnd] = $span($aFrom, $aTo);
+        [$bStart, $bEnd] = $span($bFrom, $bTo);
+
+        foreach ([-24 * 60, 0, 24 * 60] as $offset) {
+            if (min($aEnd, $bEnd + $offset) > max($aStart, $bStart + $offset)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * How a date's overtime is classified for pay, resolved from the employee's schedule + the
      * holiday calendar + the HR-editable OT rates. The filing form shows this live so the employee
      * sees the rate BEFORE submitting; payroll re-derives it independently at run time (OT-3), so
@@ -69,6 +116,10 @@ class OvertimeRequestService
         $isWorkday = (bool) ($eff['is_workday'] ?? true);
         $ratePct = PayrollService::overtimeMultiplierPct($holidayType, $isWorkday, $this->policy->get());
         $scheduleEnd = $isWorkday && ! empty($eff['end_time']) ? substr((string) $eff['end_time'], 0, 5) : null;
+        // Item 11 — the START is needed to tell an overnight shift from a day one. Without it
+        // "before the end" is meaningless on a 22:00–06:00 schedule, where the end is a smaller
+        // number than the start.
+        $scheduleStart = $isWorkday && ! empty($eff['start_time']) ? substr((string) $eff['start_time'], 0, 5) : null;
 
         $code = match (true) {
             $holidayType === 'regular' => 'regular_holiday',
@@ -87,6 +138,7 @@ class OvertimeRequestService
             },
             'rate_pct' => $ratePct,
             'is_workday' => $isWorkday,
+            'schedule_start' => $scheduleStart,
             'schedule_end' => $scheduleEnd,
         ];
     }
@@ -94,11 +146,34 @@ class OvertimeRequestService
     /**
      * Overtime is time worked BEYOND the shift, so on a scheduled workday it cannot start before
      * that day's end time. A rest day / non-workday has no shift to be beyond, so it's unrestricted.
+     *
+     * THE OVERNIGHT ROLL (item 11). This was the one place the fix from item 1 never reached: it
+     * compared raw minute-of-day, and on a 22:00–06:00 schedule the end (360) is a SMALLER number
+     * than the start (1320), so "is the filing before the end" answered nonsense. A 23:00 start —
+     * squarely inside the shift — passed, and so did a 19:00 one three hours before the employee
+     * had even clocked in. Both were then approved and paid nothing, because item 2 only pays the
+     * overlap with real punches: an approved request worth zero, with nothing to explain it.
+     *
+     * A BARE `HH:MM` HAS NO DAY, so it has to be placed on one. The alignment chosen is the one
+     * NEAREST THE SHIFT END, which is not an arbitrary tiebreak — it is the same choice
+     * `bestWindowOverlap()` makes when payroll later matches this request against the punches. A
+     * rule that resolved the time differently from the engine would accept filings the engine then
+     * refuses to pay, which is the exact failure being fixed. Worked through:
+     *
+     *   22:00–06:00 (start 1320, end 1740 after the roll)
+     *     19:00 → nearest alignment 1140, before the end          → rejected (pre-shift)
+     *     23:00 → nearest alignment 1380, before the end          → rejected (mid-shift)
+     *     06:00 → nearest alignment 1800, at/after the end        → allowed
+     *   08:00–17:00 (start 480, end 1020)
+     *     06:00 → nearest alignment 360, before the end           → rejected
+     *     01:00 → nearest alignment 1500 (the following morning)  → allowed, overtime past midnight
      */
     private function assertAfterShift(Employee $employee, string $workDate, string $timeFrom): void
     {
-        $end = $this->classify($employee, $workDate)['schedule_end'];
-        if ($end === null) {
+        $shift = $this->classify($employee, $workDate);
+        $start = $shift['schedule_start'];
+        $end = $shift['schedule_end'];
+        if ($start === null || $end === null) {
             return;
         }
 
@@ -108,7 +183,21 @@ class OvertimeRequestService
             return $h * 60 + $m;
         };
 
-        if ($toMinutes($timeFrom) < $toMinutes($end)) {
+        $startMin = $toMinutes($start);
+        $endMin = $toMinutes($end);
+        if ($endMin <= $startMin) {
+            $endMin += 24 * 60; // the shift ends on the following day
+        }
+
+        $raw = $toMinutes($timeFrom);
+        $nearest = $raw;
+        foreach ([-24 * 60, 0, 24 * 60] as $offset) {
+            if (abs(($raw + $offset) - $endMin) < abs($nearest - $endMin)) {
+                $nearest = $raw + $offset;
+            }
+        }
+
+        if ($nearest < $endMin) {
             throw ValidationException::withMessages([
                 'time_from' => ["Overtime starts after your shift ends at {$end}."],
             ]);
@@ -141,7 +230,7 @@ class OvertimeRequestService
     /** HR sees all; an employee sees only their own. */
     public function list(User $user): Collection
     {
-        $query = OvertimeRequest::with(['employee.user', 'reviewer', 'canceller'])
+        $query = OvertimeRequest::with(['employee.user', 'reviewer', 'canceller', 'filer'])
             ->orderByDesc('work_date')
             ->latest();
 
@@ -193,6 +282,61 @@ class OvertimeRequestService
         return $req;
     }
 
+    /**
+     * HR files overtime for an employee on a date that has already passed (item 10).
+     *
+     * THE CORRECTION PATH. Somebody worked late, never filed, and the cutoff is closing — until
+     * now the only remedies were to edit the attendance record (which changes what was clocked,
+     * not what was authorised) or to pay it outside the system. This records the authorisation
+     * where every other overtime authorisation lives, so the same pay math prices it.
+     *
+     * PENDING, NOT APPROVED, even though HR is the one filing. Filing and approving stay two
+     * separate acts: `approve()` is where the audit entry and the FIN-009 retro flag live, and
+     * short-circuiting into "approved" would skip both and quietly create pay for a settled
+     * period with no record of the decision. It also keeps a four-eyes route open — the officer
+     * who files need not be the one who signs it off.
+     *
+     * `assertAfterShift` still applies. A correction is allowed to be late, not to be incoherent:
+     * overtime that starts before the employee's shift ended is not overtime whoever files it.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function createFor(Employee $employee, array $data, User $filedBy): OvertimeRequest
+    {
+        // Same mode gate as ordinary filing: in `auto_after_threshold` the clock already records
+        // overtime and in `none` there is none to record, so a request would authorise nothing.
+        $settings = $this->settings();
+        if (! $settings['requests_enabled']) {
+            throw ValidationException::withMessages(['work_date' => [$settings['note']]]);
+        }
+
+        $this->assertAfterShift($employee, $data['work_date'], $data['time_from']);
+
+        $req = OvertimeRequest::create([
+            'employee_id' => $employee->id,
+            'filed_by' => $filedBy->id,
+            'work_date' => $data['work_date'],
+            'time_from' => $data['time_from'],
+            'time_to' => $data['time_to'],
+            // Derived server-side, exactly as on the employee path — the client never supplies
+            // the number that becomes pay.
+            'hours' => self::hoursBetween($data['time_from'], $data['time_to']),
+            'reason' => $data['reason'],
+            'status' => 'pending',
+        ])->load(['employee.user', 'filer']);
+
+        $hours = rtrim(rtrim((string) $req->hours, '0'), '.');
+        $employeeName = $req->employee->user?->name ?? $req->employee->name;
+        $this->audit->log(
+            'submitted',
+            'Overtime',
+            "Filed {$employeeName}'s overtime for ".$req->work_date->format('M j')." ({$hours}h) after the fact",
+            $req,
+        );
+
+        return $req;
+    }
+
     public function approve(OvertimeRequest $request, User $reviewer): OvertimeRequest
     {
         $this->assertPending($request, 'approve');
@@ -203,7 +347,7 @@ class OvertimeRequestService
             'reviewed_at' => now(),
         ]);
 
-        $request->load(['employee.user', 'reviewer']);
+        $request->load(['employee.user', 'reviewer', 'filer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log('approved', 'Overtime', "Approved {$employeeName}'s overtime request", $request);
 
@@ -235,7 +379,7 @@ class OvertimeRequestService
             'reviewed_at' => now(),
         ]);
 
-        $request->load(['employee.user', 'reviewer']);
+        $request->load(['employee.user', 'reviewer', 'filer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log('declined', 'Overtime', "Declined {$employeeName}'s overtime request", $request);
 
@@ -308,7 +452,7 @@ class OvertimeRequestService
             );
         }
 
-        $request->load(['employee.user', 'reviewer', 'canceller']);
+        $request->load(['employee.user', 'reviewer', 'canceller', 'filer']);
         $name = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log(
             'cancelled',
@@ -354,7 +498,7 @@ class OvertimeRequestService
             'cancel_reason' => null,
         ]);
 
-        $request->load(['employee.user', 'reviewer', 'canceller']);
+        $request->load(['employee.user', 'reviewer', 'canceller', 'filer']);
         $name = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log(
             'reopened',

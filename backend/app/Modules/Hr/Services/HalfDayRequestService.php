@@ -22,12 +22,15 @@ class HalfDayRequestService
         private readonly AuditService $audit,
         private readonly PayrollFreezeService $freeze,
         private readonly RetroFlagService $retro,
+        private readonly HalfDayWindowService $windows,
     ) {}
 
     /** HR sees all; an employee sees only their own. */
     public function list(User $user): Collection
     {
-        $query = HalfDayRequest::with(['employee.user', 'reviewer', 'canceller'])
+        // `employee.workSchedule` so the resource can resolve each row's worked window without
+        // one schedule query per request.
+        $query = HalfDayRequest::with(['employee.user', 'employee.workSchedule', 'reviewer', 'canceller'])
             ->orderByDesc('work_date')
             ->latest();
 
@@ -69,6 +72,9 @@ class HalfDayRequestService
             'reviewed_at' => now(),
         ]);
 
+        // This date is now a half day: whatever already read it as a whole one is stale.
+        $this->windows->forget();
+
         $request->load(['employee.user', 'reviewer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log(
@@ -104,6 +110,8 @@ class HalfDayRequestService
             'reviewed_by' => $reviewer->id,
             'reviewed_at' => now(),
         ]);
+
+        $this->windows->forget();
 
         $request->load(['employee.user', 'reviewer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
@@ -145,6 +153,8 @@ class HalfDayRequestService
             'reviewed_at' => null,
         ]);
 
+        $this->windows->forget();
+
         $request->load(['employee.user', 'reviewer']);
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log(
@@ -175,6 +185,7 @@ class HalfDayRequestService
     public function cancel(HalfDayRequest $request, User $actor, string $reason): HalfDayRequest
     {
         $this->applyCancellation($request, $actor, $reason, 'half-day request');
+        $this->windows->forget();
 
         $request->load(['employee.user', 'reviewer', 'canceller']);
         $name = $request->employee?->user?->name ?? 'an employee';

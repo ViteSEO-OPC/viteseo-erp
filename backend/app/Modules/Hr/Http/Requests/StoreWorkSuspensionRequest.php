@@ -29,6 +29,11 @@ class StoreWorkSuspensionRequest extends FormRequest
             'date' => [$amending ? 'prohibited' : 'required', 'date'],
             'name' => [$amending ? 'sometimes' : 'required', 'string', 'max:255'],
             'is_paid' => [$amending ? 'sometimes' : 'required', 'boolean'],
+            // Unlike `is_paid`, this one HAS a safe default (false = the time clock behaves as
+            // it always has), so it is optional on create rather than required: HR declaring a
+            // shutdown in a hurry should not be stopped to answer a question whose omission
+            // changes nothing.
+            'work_requires_request' => ['sometimes', 'boolean'],
             'note' => ['nullable', 'string', 'max:1000'],
         ];
     }

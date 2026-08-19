@@ -186,7 +186,7 @@ export function LeaveRequestForm({
               than left on screen for the user to keep in sync with the start. */}
           {isHalfDay ? (
             <div className="space-y-1.5">
-              <Label>Which half</Label>
+              <Label>Which half are you taking off</Label>
               <Controller
                 control={control}
                 name="half_day_period"
@@ -195,8 +195,12 @@ export function LeaveRequestForm({
                     value={field.value}
                     onValueChange={field.onChange}
                     options={[
-                      { value: "AM", label: "Morning (AM)" },
-                      { value: "PM", label: "Afternoon (PM)" },
+                      // The half taken OFF, not the half worked — the backend reads this as
+                      // `half_day_off` and judges lateness against the OTHER half. "Morning (AM)"
+                      // alone read either way, and picking it backwards spends the credit on the
+                      // wrong half of the day.
+                      { value: "AM", label: "Morning (AM) off — I work the afternoon" },
+                      { value: "PM", label: "Afternoon (PM) off — I work the morning" },
                     ]}
                   />
                 )}

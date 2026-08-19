@@ -41,21 +41,37 @@ export interface HalfDayRequest {
   cancelled_by: string | null;
   cancel_reason: string | null;
   employee: EmployeeRef;
+  /**
+   * The hours the employee is left owing once this half is off, from their own effective
+   * schedule. NULL IS A WARNING, not "no data": their schedule has no window for the half they
+   * WOULD work, so the platform will decline to judge that day's lateness rather than measure it
+   * against a shift nobody defined. Fixed by filling the half-day windows on the schedule, or
+   * overriding them on the employee's Job tab.
+   */
+  worked_window: { start: string; end: string } | null;
   created_at: string;
 }
 
+/** Which question a work request answered — see {@link WorkRequest}. */
+export type WorkRequestType = "rest_day" | "suspension";
+
 /**
- * Rest-day work requests — permission to work a day the employee's schedule calls a rest day.
+ * Work requests — permission to work a day nobody was expected in on.
  *
- * Unlike every other request here, there is no form: it is filed by pressing Time in on a rest
- * day. `requested_at` is that press, and approving stamps attendance at it — so the field is the
+ * Two kinds, one lifecycle. `rest_day` is a day the employee's own schedule doesn't cover;
+ * `suspension` is an ordinary workday HR cancelled and marked as needing permission to come in
+ * on. Which one applies is the server's call, from the company rule and the declaration.
+ *
+ * Unlike every other request here, there is no form: it is filed by pressing Time in.
+ * `requested_at` is that press, and approving stamps attendance at it — so the field is the
  * paid time-in, not metadata about the row.
  *
  * `expired` is its own status: a pending request goes stale 24h after `requested_at`, because
  * approving one later would back-date a shift.
  */
-export interface RestDayRequest {
+export interface WorkRequest {
   id: number;
+  type: WorkRequestType;
   work_date: string;
   requested_at: string;
   reason: string | null;
@@ -105,6 +121,11 @@ export interface OvertimeRequest {
   cancelled_at: string | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
+  /**
+   * Item 10 — the HR user who filed this on the employee's behalf, for a date that had already
+   * passed. `null` is the ordinary case and means the employee filed it themselves.
+   */
+  filed_by: string | null;
   employee: EmployeeRef;
   created_at: string;
 }
@@ -124,6 +145,12 @@ export interface OvertimeSettings {
  * waiting for somebody to say yes, which is usually either a genuine long evening or a forgotten
  * clock-out. `raw_minutes` is the whole overrun, so the two cases are easy to tell apart.
  */
+/**
+ * Why a day is in the overtime review queue — mirrors AttendanceService's OT_REVIEW_* constants.
+ * `cap` withholds money; the other two do not. See {@link AutoOvertimeReviewItem.kind}.
+ */
+export type AutoOvertimeReviewReason = "cap" | "long_overtime" | "late_and_overtime";
+
 export interface AutoOvertimeReviewItem {
   employee_id: number;
   employee_no: string | null;
@@ -133,6 +160,15 @@ export interface AutoOvertimeReviewItem {
   excess_minutes: number;
   raw_minutes: number;
   approved_minutes: number;
+  /** Minutes past the scheduled start, after grace. 0 unless the day is also flagged late. */
+  late_minutes: number;
+  /**
+   * What inaction costs. `held` — a cap is withholding `excess_minutes` and they do NOT pay until
+   * an overtime request for that date is approved. `flagged` — the day already pays in full and is
+   * listed only because it looks unusual. Never render the two the same way.
+   */
+  kind: "held" | "flagged";
+  reasons: AutoOvertimeReviewReason[];
 }
 
 /** How a date's overtime is priced: regular day / rest day / special day / regular holiday. */
@@ -141,6 +177,12 @@ export interface OvertimeClassification {
   label: string;
   rate_pct: number;
   is_workday: boolean;
+  /**
+   * That day's shift start (HH:MM), null on a rest day. Needed to tell an overnight shift from a
+   * day one: on 22:00–06:00 the end is a SMALLER number than the start, so comparing against the
+   * end alone answers nonsense.
+   */
+  schedule_start: string | null;
   /** That day's shift end (HH:MM) — overtime can only start after it. Null on a rest day. */
   schedule_end: string | null;
 }

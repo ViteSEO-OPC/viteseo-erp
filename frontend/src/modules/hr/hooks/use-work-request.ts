@@ -3,26 +3,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  getRestDayRequests,
-  createRestDayRequest,
-  approveRestDayRequest,
-  rejectRestDayRequest,
-  reopenRestDayRequest,
-  cancelRestDayRequest,
-} from "@/modules/hr/api/rest-day";
+  getWorkRequests,
+  createWorkRequest,
+  approveWorkRequest,
+  rejectWorkRequest,
+  reopenWorkRequest,
+  cancelWorkRequest,
+} from "@/modules/hr/api/work-request";
 
-const KEY = ["hr", "rest-day-requests"] as const;
+const KEY = ["hr", "work-requests"] as const;
 /** The employee's own clock panel — every decision here changes what it may offer. */
 const MY_ATTENDANCE_KEY = ["hr", "me", "attendance"] as const;
 
-export function useRestDayRequests() {
-  return useQuery({ queryKey: KEY, queryFn: getRestDayRequests });
+export function useWorkRequests() {
+  return useQuery({ queryKey: KEY, queryFn: getWorkRequests });
 }
 
-export function useCreateRestDayRequest() {
+export function useCreateWorkRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (reason?: string) => createRestDayRequest(reason),
+    mutationFn: (reason?: string) => createWorkRequest(reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
       // The panel's button must flip to "Waiting for HR" immediately — it reads the live
@@ -33,10 +33,10 @@ export function useCreateRestDayRequest() {
 }
 
 /** Approving writes an attendance row, so the HR roster moves too. */
-export function useApproveRestDayRequest() {
+export function useApproveWorkRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => approveRestDayRequest(id),
+    mutationFn: (id: number) => approveWorkRequest(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
       qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
@@ -45,11 +45,10 @@ export function useApproveRestDayRequest() {
   });
 }
 
-export function useRejectRestDayRequest() {
+export function useRejectWorkRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
-      rejectRestDayRequest(id, reason),
+    mutationFn: ({ id, reason }: { id: number; reason: string }) => rejectWorkRequest(id, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
       qc.invalidateQueries({ queryKey: MY_ATTENDANCE_KEY });
@@ -58,11 +57,10 @@ export function useRejectRestDayRequest() {
 }
 
 /** Reopening an approved one DELETES the attendance row it created. */
-export function useReopenRestDayRequest() {
+export function useReopenWorkRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason?: string }) =>
-      reopenRestDayRequest(id, reason),
+    mutationFn: ({ id, reason }: { id: number; reason?: string }) => reopenWorkRequest(id, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
       qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
@@ -71,11 +69,10 @@ export function useReopenRestDayRequest() {
   });
 }
 
-export function useCancelRestDayRequest() {
+export function useCancelWorkRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
-      cancelRestDayRequest(id, reason),
+    mutationFn: ({ id, reason }: { id: number; reason: string }) => cancelWorkRequest(id, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
       qc.invalidateQueries({ queryKey: MY_ATTENDANCE_KEY });

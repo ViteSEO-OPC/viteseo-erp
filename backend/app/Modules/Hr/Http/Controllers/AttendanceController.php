@@ -8,13 +8,17 @@ use App\Modules\Hr\Http\Requests\ClockInRequest;
 use App\Modules\Hr\Http\Resources\AttendanceResource;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\AttendanceService;
+use App\Modules\Hr\Services\MyAttendanceReportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
 class AttendanceController extends Controller
 {
-    public function __construct(private readonly AttendanceService $service) {}
+    public function __construct(
+        private readonly AttendanceService $service,
+        private readonly MyAttendanceReportService $myReport,
+    ) {}
 
     // GET /api/v1/hr/me/attendance — today's row (for the clock panel) + this week.
     public function me(Request $request): JsonResponse
@@ -35,7 +39,8 @@ class AttendanceController extends Controller
                         'defers_to' => null,
                         'geofence' => false,
                         'is_workday' => true,
-                        'rest_day_request' => null,
+                        'work_request_required' => null,
+                        'work_request' => null,
                         'suspension' => null,
                     ],
                 ],
@@ -53,6 +58,33 @@ class AttendanceController extends Controller
                 'clock_in' => $this->service->clockInWindowFor($employee),
             ],
         ]);
+    }
+
+    /**
+     * GET /api/v1/hr/me/attendance-report?month=YYYY-MM — the caller's OWN month, day by day,
+     * with the twelve-month context around it.
+     *
+     * The employee is resolved from the token, never from the query string: this returns one
+     * person's punches, lateness and leave, and a client-supplied id would make it everyone's.
+     */
+    public function myReport(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            // A malformed month is not an error worth a red toast — the service falls back to the
+            // current one — but a month that is not a month should never reach the date parser.
+            'month' => ['nullable', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
+        ]);
+
+        $employee = $request->user()->employee;
+
+        if (! $employee) {
+            return response()->json(
+                ['message' => 'Only employees have an attendance record.'],
+                Response::HTTP_FORBIDDEN,
+            );
+        }
+
+        return response()->json(['data' => $this->myReport->build($employee, $validated)]);
     }
 
     public function clockIn(ClockInRequest $request): JsonResponse
@@ -104,6 +136,27 @@ class AttendanceController extends Controller
     public function summary(Request $request): JsonResponse
     {
         return response()->json(['data' => $this->service->summary($request->query('date'))]);
+    }
+
+    /**
+     * GET /api/v1/hr/attendance/open-shifts?from=&to= — the stale-attendance review queue (item 6).
+     *
+     * Shifts with a punch in and none out, split into the ones auto-closure could not price
+     * (`needs_fix`, the pay is wrong until HR corrects it) and the ones it could (`auto_closed`,
+     * tidy-up only). Corrections go back through `attendance/adjust` below — this only finds them.
+     */
+    public function openShifts(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            // No `after_or_equal:from`: an inverted range returns nothing rather than erroring,
+            // which is what a date-picker mid-edit produces and is not worth a red toast.
+            'to' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
+        return response()->json([
+            'data' => $this->service->openShiftReview($data['from'] ?? null, $data['to'] ?? null),
+        ]);
     }
 
     // POST /api/v1/hr/attendance/adjust — HR sets/corrects a row (HR only).

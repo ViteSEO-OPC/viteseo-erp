@@ -23,9 +23,11 @@ class AttendancePolicyResource extends JsonResource
 
             'undertime_deduction_mode' => $this->undertime_deduction_mode,
             'missing_clockout_mode' => $this->missing_clockout_mode,
+            'missing_timeout_allowance_minutes' => (int) ($this->missing_timeout_allowance_minutes ?? 180),
 
             'early_arrival_mode' => $this->early_arrival_mode,
             'early_clock_in_mode' => $this->early_clock_in_mode,
+            'rest_day_work_requires_request' => (bool) $this->rest_day_work_requires_request,
 
             // Geofenced clock-in. lat/lng stay nullable — "no pin set yet" is a real state
             // the Rules form has to distinguish from 0,0 (a valid point in the Atlantic).
@@ -46,6 +48,7 @@ class AttendancePolicyResource extends JsonResource
             // FIN-039 — 0 = uncapped. See the migration for why that is the default.
             'auto_overtime_daily_cap_minutes' => (int) $this->auto_overtime_daily_cap_minutes,
             'auto_overtime_period_cap_minutes' => (int) $this->auto_overtime_period_cap_minutes,
+            'auto_overtime_review_minutes' => (int) ($this->auto_overtime_review_minutes ?? 240),
 
             'premium_rest_day_pct' => (int) $this->premium_rest_day_pct,
             'premium_special_day_pct' => (int) $this->premium_special_day_pct,

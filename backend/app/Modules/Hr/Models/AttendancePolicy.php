@@ -17,8 +17,12 @@ class AttendancePolicy extends Model
         'late_tiers',
         'undertime_deduction_mode',
         'missing_clockout_mode',
+        // Item 5 — minutes past the scheduled end before an open punch counts as abandoned.
+        'missing_timeout_allowance_minutes',
         'early_arrival_mode',
         'early_clock_in_mode',
+        // Whether working a rest day needs HR's permission first.
+        'rest_day_work_requires_request',
         'geofence_enabled',
         'office_lat',
         'office_lng',
@@ -29,6 +33,8 @@ class AttendancePolicy extends Model
         // FIN-039 — how much auto-mode overtime pays without anyone approving it. 0 = uncapped.
         'auto_overtime_daily_cap_minutes',
         'auto_overtime_period_cap_minutes',
+        // Item 7 — a day's auto overtime worth flagging for review. Notifies, never withholds.
+        'auto_overtime_review_minutes',
         'premium_rest_day_pct',
         'premium_special_day_pct',
         'premium_regular_holiday_pct',
@@ -53,7 +59,9 @@ class AttendancePolicy extends Model
     protected $casts = [
         'monthly_late_reset' => 'boolean',
         'lates_per_deduction' => 'integer',
+        'missing_timeout_allowance_minutes' => 'integer',
         'late_penalty_enabled' => 'boolean',
+        'rest_day_work_requires_request' => 'boolean',
         'late_tiers' => 'array',
         'geofence_enabled' => 'boolean',
         // float, not decimal:7 — these are fed straight into haversine trigonometry and
@@ -66,6 +74,7 @@ class AttendancePolicy extends Model
         'overtime_threshold_minutes' => 'integer',
         'auto_overtime_daily_cap_minutes' => 'integer',
         'auto_overtime_period_cap_minutes' => 'integer',
+        'auto_overtime_review_minutes' => 'integer',
         'premium_rest_day_pct' => 'integer',
         'premium_special_day_pct' => 'integer',
         'premium_regular_holiday_pct' => 'integer',

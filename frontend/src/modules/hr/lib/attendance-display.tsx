@@ -24,13 +24,31 @@ export function SoftBadge({ tone, children }: { tone: Tone; children: React.Reac
   );
 }
 
+/** Which half is approved off, in the words HR reads on the board. */
+function halfDayLabel(off: HrAttendanceRow["half_day_off"]): string | null {
+  if (off === "AM") return "AM off";
+  if (off === "PM") return "PM off";
+  if (off === "BOTH") return "day off";
+  return null;
+}
+
 /**
  * Presence — did the employee show up? Checked in / Not checked in / Absent /
  * On leave / Rest day. Punctuality lives in {@link deriveAttendanceTiming}, not here.
  */
 export function deriveAttendanceStatus(row: HrAttendanceRow): { label: string; tone: Tone } {
+  const half = halfDayLabel(row.half_day_off);
+
+  // A CLOCK-IN OUTRANKS THE LEAVE TABLE, and half-day leave is what forced the order. The
+  // employee is *supposed* to come in and work the other half, so a row with a time-in that
+  // read "On leave · Vacation" was describing a day they did not actually take.
+  if (row.time_in) {
+    return { label: half ? `Checked in · ${half}` : "Checked in", tone: "success" };
+  }
+  // Approved off and not in yet: the shift is short, not missed. Ranked above the leave name
+  // because "which half" is the fact that explains the rest of the row.
+  if (half) return { label: `Half day · ${half}`, tone: "warning" };
   if (row.leave_type) return { label: `On leave · ${row.leave_type}`, tone: "warning" };
-  if (row.time_in) return { label: "Checked in", tone: "success" };
   // Management is exempt from attendance — the backend reports them `present` on a
   // scheduled workday with no clock-in row, so HR/CEO see them as present (auto).
   if (row.status === "present") return { label: "Present (auto)", tone: "success" };

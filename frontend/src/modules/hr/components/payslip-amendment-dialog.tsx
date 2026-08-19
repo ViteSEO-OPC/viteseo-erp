@@ -128,11 +128,12 @@ export function PayslipAmendmentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Correct a payslip</DialogTitle>
+          <DialogTitle>Add a line to payslips</DialogTitle>
           <DialogDescription>
-            Adds a dated correction to the period&rsquo;s existing payslips — no new payslip, no
-            re-run. It can pay more, take back pay, or add a deduction the payslip missed, and it
-            takes no statutory contributions, which were already taken on the period being corrected.
+            Adds a dated line to the period&rsquo;s existing payslips — no new payslip, no re-run.
+            For money the payroll engine never priced: back pay, an allowance it missed, a deduction
+            that should have been taken. To change a figure that is <em>already</em> on a payslip,
+            open that payslip and correct the line itself.
           </DialogDescription>
         </DialogHeader>
 

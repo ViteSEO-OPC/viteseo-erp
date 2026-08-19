@@ -26,10 +26,16 @@ class StoreWorkScheduleRequest extends FormRequest
             'grace_minutes' => ['nullable', 'integer', 'min:0', 'max:240'],
             'unpaid_break_minutes' => ['nullable', 'integer', 'min:0', 'max:480'],
             'paid_break_minutes' => ['nullable', 'integer', 'min:0', 'max:480'],
-            'am_start_time' => ['nullable', 'date_format:H:i'],
-            'am_end_time' => ['nullable', 'date_format:H:i'],
-            'pm_start_time' => ['nullable', 'date_format:H:i'],
-            'pm_end_time' => ['nullable', 'date_format:H:i'],
+            // REQUIRED, no longer optional. A blank half-day window is not a neutral "unset" —
+            // it is the state in which an approved half day cannot be judged at all: lateness,
+            // undertime and the early-out fraction all measure against these, and with nothing
+            // here the platform has to decline to judge (see HalfDayWindowService::windowFor).
+            // The split cannot be computed from the shift either — the schedule stores the break's
+            // length but never when it falls. So it is asked for once, here, where someone knows.
+            'am_start_time' => ['required', 'date_format:H:i'],
+            'am_end_time' => ['required', 'date_format:H:i'],
+            'pm_start_time' => ['required', 'date_format:H:i'],
+            'pm_end_time' => ['required', 'date_format:H:i'],
             'is_default' => ['boolean'],
         ];
     }

@@ -17,6 +17,8 @@ class WorkSuspensionResource extends JsonResource
             'date' => $this->date?->format('Y-m-d'),
             'name' => $this->name,
             'is_paid' => (bool) $this->is_paid,
+            // Whether the time clock refuses a punch today and files a work request instead.
+            'work_requires_request' => (bool) $this->work_requires_request,
             'note' => $this->note,
             // The attendance status this day carries, computed by the same method the roster
             // uses — so a screen never has to re-derive it from the boolean and get it wrong.

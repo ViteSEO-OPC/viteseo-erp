@@ -14,6 +14,8 @@ use App\Modules\Hr\Models\SharedLeaveBalance;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\SalaryHistory;
 use App\Modules\Hr\Models\PayslipAmendment;
+use App\Modules\Hr\Support\PayslipDocument;
+use App\Modules\Hr\Support\PayslipLines;
 use App\Modules\Hr\Models\PayslipRequest;
 use App\Modules\Hr\Models\Reimbursement;
 use App\Modules\Hr\Models\RetroFlag;
@@ -21,6 +23,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -1858,8 +1861,19 @@ class PayrollService
      * overtime rate — hourly × OT% × night% — matching the PH rule that night pay is a percentage of the
      * applicable (overtime) hourly rate, not of the base. Ordinary night hours get hourly × night%.
      *
-     * Remaining nuance: night hours on a holiday/rest day are premiumed at the base rate here; the day's
-     * own premium is paid separately by holidayPremiumFor(). Compounding those is a Phase-3 refinement.
+     * HOLIDAY AND REST-DAY NIGHT HOURS COMPOUND TOO (item 9). The differential is a percentage of the
+     * APPLICABLE hourly rate, and on a regular holiday that rate is 200%, not 100% — so plain night
+     * hours there earn hourly × 200% × 10%, which is what the DOLE handbook's own worked examples
+     * show. Paying hourly × 10% regardless of the day was under-paying every night hour on a holiday
+     * or rest day by exactly the day's premium.
+     *
+     * NOT DOUBLE-COUNTING the day premium: holidayPremiumFor()/restDayPremiumFor() pay the day's own
+     * add-on and this line pays only the +10%. Multiplying that 10% by the day's rate raises the
+     * PREMIUM to the right base; it does not add the holiday rate a second time.
+     *
+     * Known limitation: a regular holiday falling on a rest day is priced at the holiday rate rather
+     * than the statutory 260% combination. Strictly better than the flat 100% it replaced, and the
+     * combined-rate question is the same one holidayPremiumFor() leaves open — fix both together.
      *
      * @param  array<string, array{minutes:int, night:int}>|null  $otByDate  shared with overtimePayFor
      * @return array{pay: float, minutes: int}
@@ -1889,10 +1903,17 @@ class PayrollService
             $otNight = min($nightMins, (int) ($otByDate[$date]['night'] ?? 0));
             $plainNight = $nightMins - $otNight;
 
-            $pay += ($plainNight / 60) * $hourly * $nightRate;
+            // Needed by BOTH branches now: the ordinary-hours rate is what the plain differential
+            // is a percentage of, and on a rest day or holiday that is not 100%.
+            $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
+            $holidayType = $holidayMap[$date] ?? null;
+
+            if ($plainNight > 0) {
+                $dayRate = self::dayRateMultiplierPct($holidayType, $isWorkday, $policy) / 100;
+                $pay += ($plainNight / 60) * $hourly * $dayRate * $nightRate;
+            }
             if ($otNight > 0) {
-                $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
-                $otRate = self::overtimeMultiplierPct($holidayMap[$date] ?? null, $isWorkday, $policy) / 100;
+                $otRate = self::overtimeMultiplierPct($holidayType, $isWorkday, $policy) / 100;
                 $pay += ($otNight / 60) * $hourly * $otRate * $nightRate;
             }
             $minutes += $nightMins;
@@ -2055,6 +2076,28 @@ class PayrollService
             default => $isWorkday
                 ? (int) $policy->overtime_ordinary_pct
                 : (int) $policy->overtime_rest_special_pct, // rest day (non-workday, non-holiday)
+        };
+    }
+
+    /**
+     * The ORDINARY-HOURS rate (whole percent) for a day — the sibling of overtimeMultiplierPct(),
+     * and the base the night differential is a percentage of (item 9).
+     *
+     * Reads the same editable premium columns the holiday and rest-day lines use, so raising a rate
+     * on the Rules page moves the differential with it. An ordinary workday is a plain 100%: there
+     * is no `premium_ordinary_pct` column because there is nothing to configure — 100% of the rate
+     * is the rate. `special_working` also lands on 100%, which is exactly what it means.
+     *
+     * Pure + static so the arithmetic is unit-testable without a DB.
+     */
+    public static function dayRateMultiplierPct(?string $holidayType, bool $isWorkday, AttendancePolicy $policy): int
+    {
+        return match ($holidayType) {
+            'regular' => (int) $policy->premium_regular_holiday_pct,
+            'special_non_working' => (int) $policy->premium_special_day_pct,
+            default => $isWorkday
+                ? 100
+                : (int) $policy->premium_rest_day_pct, // rest day (non-workday, non-holiday)
         };
     }
 
@@ -2805,6 +2848,10 @@ class PayrollService
         }
 
         $byPayslip = PayslipAmendment::whereIn('payslip_id', $slips->pluck('id')->all())
+            // ADDED LINES ONLY. An override changes a line the recompute has just produced for
+            // itself, and is re-applied by `withLineOverrides()` against that fresh figure. Summing
+            // it in here as well would add the correction to a line that already carries it.
+            ->whereNull('target_key')
             ->orderBy('issued_on')
             ->orderBy('id')
             ->get()
@@ -2899,6 +2946,784 @@ class PayrollService
         }
 
         return $slip;
+    }
+
+    /**
+     * CORRECT A LINE THAT IS ALREADY ON A PAYSLIP — the engine said ₱500, HR says ₱300.
+     *
+     * WHY THIS REPLACED APPENDING A CORRECTION. `amendRun()` adds a line underneath the document:
+     * "Late ₱500" with "Correction +₱200" below it. Both figures are true and the payslip is still
+     * wrong about the only thing its reader wants to know, which is what the late charge actually
+     * was. An override changes the line itself and prints the engine's figure struck through beside
+     * it, which is how an amended payslip reads everywhere outside this system.
+     *
+     * WHAT MOVES IS DECIDED BY THE LINE, NOT BY HR. The old dialog asked whether a correction was
+     * extra pay, reversed pay or a deduction — a question about TAX dressed as a question about
+     * direction, and one the line already knows the answer to. Cutting overtime reduces taxable pay
+     * and refunds the tax withheld on it; changing an HMO share comes off net and leaves the tax
+     * alone. See PayslipLines for the classes and what each one does.
+     *
+     * THE VALUE IS ABSOLUTE. HR states what the line IS, not how much to move it — so a re-run that
+     * recomputes the underlying figure does not silently re-decide the answer. See the migration.
+     *
+     * TOTALS ARE NOT EDITABLE, and there is no code path here that could make them so: gross, total
+     * deductions and net are recomputed from the lines every time one moves. A payslip whose parts
+     * do not foot to its total is the one error a payslip cannot make.
+     *
+     * `$value` MAY BE NULL — a label-only correction, where the figure was right and its wording
+     * was not. The line keeps its key, so the payroll register, the remittance report and BIR 2316
+     * all still group by what the line IS rather than by what HR has called it.
+     */
+    public function overrideLine(
+        Payslip $payslip,
+        string $key,
+        ?float $value,
+        ?string $label,
+        string $reason,
+        ?string $issuedOn,
+        User $actor,
+    ): Payslip {
+        $run = $payslip->payrollRun;
+
+        $this->assertCorrectable($run);
+
+        if (! PayslipLines::exists($key)) {
+            throw ValidationException::withMessages([
+                'target_key' => ['That is not a line on a payslip.'],
+            ]);
+        }
+
+        $issuedOn ??= now('Asia/Manila')->toDateString();
+
+        return DB::transaction(function () use ($payslip, $run, $key, $value, $label, $reason, $issuedOn, $actor) {
+            // Null when the figure and the wording are already what HR asked for — the payslip is
+            // returned unchanged rather than gaining a correction that corrects nothing.
+            $slip = $this->writeOverride($payslip, $run, $key, $value, $label, $reason, $issuedOn, $actor)
+                ?? $payslip;
+
+            $this->refreshRunTotals($run);
+
+            return $slip->fresh()->load(['amendments.creator', 'employee.user', 'payrollRun']);
+        });
+    }
+
+    /**
+     * ONE LINE, MANY PAYSLIPS — the correction that is one decision rather than N identical ones.
+     *
+     * WHAT THIS IS FOR, and what it deliberately is not. A rule applied to a whole payroll can be
+     * wrong for the whole payroll: a system outage that made everyone late, a charge that should
+     * not have run this cutoff. Waiving it employee by employee is the same decision retyped
+     * fifteen times, and the fifteenth is where the typo lives.
+     *
+     * IT SETS A LINE TO ONE FIGURE, which is only ever sensible for waiving. "Set everyone's late
+     * charge to ₱300" is nonsense — each person's is a different number — while "waive everyone's
+     * late charge this period" is a real instruction, and it is ₱0 for all of them. The API takes a
+     * value rather than assuming zero, because the rule is the caller's to state; the screen offers
+     * the only form of it that means anything.
+     *
+     * A PAYSLIP WITHOUT THAT LINE IS SKIPPED AND NAMED, not refused. Half the run having no late
+     * charge is the normal case, not an error — and failing the batch over it would mean the only
+     * way to waive a charge for the people who have one is to list them by hand.
+     *
+     * @param  list<int>|null  $employeeIds  null for everyone this run pays
+     * @return array{run: PayrollRun, applied: int, skipped: list<string>}
+     */
+    public function overrideLineForRun(
+        PayrollRun $run,
+        string $key,
+        ?float $value,
+        ?string $label,
+        string $reason,
+        ?string $issuedOn,
+        ?array $employeeIds,
+        User $actor,
+    ): array {
+        $this->assertCorrectable($run);
+
+        if (! PayslipLines::exists($key)) {
+            throw ValidationException::withMessages([
+                'target_key' => ['That is not a line on a payslip.'],
+            ]);
+        }
+
+        $issuedOn ??= now('Asia/Manila')->toDateString();
+
+        return DB::transaction(function () use ($run, $key, $value, $label, $reason, $issuedOn, $employeeIds, $actor) {
+            $slips = $run->payslips()
+                ->when($employeeIds !== null, fn ($q) => $q->whereIn('employee_id', $employeeIds))
+                ->with('employee.user')
+                ->lockForUpdate()
+                ->get();
+
+            if ($slips->isEmpty()) {
+                throw ValidationException::withMessages([
+                    'employee_ids' => ['This period has no payslips for the employees named.'],
+                ]);
+            }
+
+            $applied = 0;
+            $skipped = [];
+
+            foreach ($slips as $slip) {
+                try {
+                    if ($this->writeOverride($slip, $run, $key, $value, $label, $reason, $issuedOn, $actor) !== null) {
+                        $applied++;
+                    }
+                } catch (ValidationException $e) {
+                    $skipped[] = ($slip->employee?->user?->name ?? $slip->employee?->employee_no ?? "employee #{$slip->employee_id}")
+                        . ' — ' . collect($e->errors())->flatten()->first();
+                }
+            }
+
+            if ($applied === 0) {
+                throw ValidationException::withMessages([
+                    'target_key' => [
+                        $skipped === []
+                            ? 'Every payslip in this period already reads that way, so nothing was corrected.'
+                            : 'None of the payslips in this period have that line, so nothing was corrected.',
+                    ],
+                ]);
+            }
+
+            $this->refreshRunTotals($run);
+
+            $this->audit->log(
+                'updated', 'Payroll',
+                "Corrected " . (PayslipLines::labelFor($key) ?? $key) . " on {$applied} payslip(s) of the "
+                    . $run->cycle_start->format('M j') . '–' . $run->cycle_end->format('M j, Y')
+                    . ' period — ' . $reason,
+                $run,
+            );
+
+            return [
+                'run' => $run->fresh()->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']),
+                'applied' => $applied,
+                'skipped' => $skipped,
+            ];
+        });
+    }
+
+    /**
+     * Write ONE correction to ONE payslip, inside a transaction the caller already owns.
+     *
+     * Shared by the single-payslip route and the whole-run one so the two can never disagree about
+     * what correcting a line does — the batch is the same act repeated, not a second implementation
+     * of it. The run's totals are refreshed by the caller, once, rather than per payslip.
+     */
+    private function writeOverride(
+        Payslip $payslip,
+        PayrollRun $run,
+        string $key,
+        ?float $value,
+        ?string $label,
+        string $reason,
+        string $issuedOn,
+        User $actor,
+    ): ?Payslip {
+        $slip = Payslip::whereKey($payslip->id)->lockForUpdate()->firstOrFail();
+
+        // THE ENGINE'S OWN FIGURES, captured before anything is corrected. Everything below is
+        // measured against them: what to print struck through, what "remove this edit" restores
+        // to, and what a second edit to the same line is a change FROM.
+        $snapshot = $this->engineSnapshotOf($slip);
+        $runType = $run->type ?? 'regular';
+
+        $engineValue = $this->lineValueIn($snapshot, $runType, $key);
+
+        if ($engineValue === null) {
+            throw ValidationException::withMessages([
+                'target_key' => ['This payslip has no such line, so there is nothing to correct.'],
+            ]);
+        }
+
+        $existing = PayslipAmendment::where('payslip_id', $slip->id)
+            ->where('target_key', $key)
+            ->first();
+
+        // What the line reads as RIGHT NOW: HR's last correction if there is one, the engine's
+        // figure otherwise. The change to apply is measured from here, while the figure printed
+        // struck through stays the engine's — an edit is always a correction OF the computation,
+        // never of the previous correction.
+        $from = $existing?->override_amount !== null
+            ? round((float) $existing->override_amount, 2)
+            : $engineValue;
+
+        $to = $value === null ? $from : round($value, 2);
+
+        // A CORRECTION THAT CORRECTS NOTHING IS NOT RECORDED. It matters for the whole-period form
+        // of this: waiving a late charge across a run reaches every payslip, and most of them never
+        // had one. Writing a row for those would put "0.00" struck through beside "0.00" on a dozen
+        // documents, and report fifteen payslips corrected when two were.
+        if (abs($to - $from) < 0.005
+            && ($label ?: null) === ($existing?->label_override ?: null)
+            && $existing === null) {
+            return null;
+        }
+
+        $figures = $this->applyLineChange(
+            $slip->attributesToArray(),
+            (int) $slip->employee_id,
+            (int) $run->cycle_end->year,
+            $run->cycle_end->toDateString(),
+            $key,
+            $from,
+            $to,
+            ! empty($slip->separation_pay_taxable),
+        );
+
+        $slip->update([...$figures, 'engine_snapshot' => $snapshot]);
+
+        $override = PayslipAmendment::updateOrCreate(
+            ['payslip_id' => $slip->id, 'target_key' => $key],
+            [
+                // An override is not one of the three appended kinds — it replaces a figure
+                // rather than adding pay or taking it. `kind` stays at its default so every
+                // existing reader of the ledger keeps working; `target_key` is what says which
+                // of the two this row is.
+                'kind' => 'pay',
+                'override_amount' => $value === null ? $existing?->override_amount : $to,
+                // Refreshed rather than frozen, so the struck-through figure is always what the
+                // engine last computed — see the migration.
+                'original_amount' => $engineValue,
+                // The figure HR actually disagreed with, frozen here and never rewritten by a
+                // run. It is what lets a later recompute report that the engine has since
+                // changed its mind — see the migration.
+                'edited_against' => $engineValue,
+                'label_override' => $label,
+                // The signed effect on the line, kept so the ledger can be totalled and audited
+                // without re-deriving it. NOT a term in `adjustment_pay`: an override changes a
+                // line that is already counted, and adding it again would count it twice.
+                'amount' => round(($value === null ? $from : $to) - $engineValue, 2),
+                'tax' => 0,
+                'reason' => $reason,
+                'issued_on' => $issuedOn,
+                'created_by' => $actor->id,
+            ],
+        );
+
+        $this->flagStaleAfterCorrection($run, (int) $slip->employee_id, $key);
+
+        $this->audit->log(
+            'updated', 'Payroll',
+            $this->correctionAuditLine($run, $slip, $override, $engineValue),
+            $run,
+        );
+
+        return $slip;
+    }
+
+    /**
+     * REMOVE A CORRECTION, putting the line back to what the engine computed.
+     *
+     * The exact inverse of the edit, measured the same way: from what HR last said the line was,
+     * back to the figure in the engine snapshot. That is the whole reason the snapshot exists —
+     * overrides are applied to the stored columns by delta, so without it the computed figure an
+     * edit replaced would be nowhere in the row and "undo" would have nothing to restore to.
+     */
+    public function removeLineOverride(Payslip $payslip, PayslipAmendment $override, User $actor): Payslip
+    {
+        $run = $payslip->payrollRun;
+
+        $this->assertCorrectable($run);
+
+        if ((int) $override->payslip_id !== (int) $payslip->id || $override->target_key === null) {
+            throw ValidationException::withMessages([
+                'override' => ['That correction does not belong to this payslip.'],
+            ]);
+        }
+
+        return DB::transaction(function () use ($payslip, $run, $override, $actor) {
+            $slip = Payslip::whereKey($payslip->id)->lockForUpdate()->firstOrFail();
+            $key = (string) $override->target_key;
+
+            $snapshot = $this->engineSnapshotOf($slip);
+            $engineValue = $this->lineValueIn($snapshot, $run->type ?? 'regular', $key);
+
+            if ($engineValue !== null && $override->override_amount !== null) {
+                $figures = $this->applyLineChange(
+                    $slip->attributesToArray(),
+                    (int) $slip->employee_id,
+                    (int) $run->cycle_end->year,
+                    $run->cycle_end->toDateString(),
+                    $key,
+                    round((float) $override->override_amount, 2),
+                    $engineValue,
+                    ! empty($slip->separation_pay_taxable),
+                );
+
+                $slip->update($figures);
+            }
+
+            // Soft-deleted, like every other HR record: a correction that was reversed is history
+            // too, and the question "who changed this payslip, and who changed it back" has to stay
+            // answerable after the fact.
+            $override->delete();
+
+            $this->refreshRunTotals($run);
+            $this->flagStaleAfterCorrection($run, (int) $slip->employee_id, $key);
+
+            $this->audit->log(
+                'updated', 'Payroll',
+                'Removed the correction on ' . ($override->targetLabel() ?? $key)
+                    . ' — ' . ($this->employeeName((int) $slip->employee_id))
+                    . ', ' . $run->cycle_end->format('M Y') . ' payslip',
+                $run,
+            );
+
+            return $slip->fresh()->load(['amendments.creator', 'employee.user', 'payrollRun']);
+        });
+    }
+
+    /**
+     * A period can be corrected only while it is finished and still open.
+     *
+     * Locking is the statement that a period is closed for good, and a `processing` run is mid-write
+     * — its figures are not settled, and the recompute in flight would overwrite the correction as
+     * it went. Both are the same refusals `amendRun()` makes, stated once for both paths.
+     */
+    private function assertCorrectable(?PayrollRun $run): void
+    {
+        if ($run === null) {
+            throw ValidationException::withMessages([
+                'payroll_run_id' => ['This payslip does not belong to a payroll run.'],
+            ]);
+        }
+
+        if ($run->isLocked()) {
+            throw ValidationException::withMessages([
+                'payroll_run_id' => ['This payroll run is locked. Unlock it before correcting its payslips.'],
+            ]);
+        }
+
+        if ($run->status !== 'completed') {
+            throw ValidationException::withMessages([
+                'payroll_run_id' => ["The {$run->status} payroll run must finish before it can be corrected."],
+            ]);
+        }
+    }
+
+    /**
+     * The engine's figures for a payslip, captured once and kept.
+     *
+     * Written lazily for payslips computed before the column existed, where the stored figures ARE
+     * the engine's — nothing had corrected them yet, because there was no way to. From the first
+     * correction onward it is maintained by `run()`, which rewrites it every time the period is
+     * recomputed.
+     *
+     * @return array<string, mixed>
+     */
+    private function engineSnapshotOf(Payslip $payslip): array
+    {
+        $snapshot = $payslip->engine_snapshot;
+
+        return is_array($snapshot) && $snapshot !== []
+            ? $snapshot
+            : $payslip->attributesToArray();
+    }
+
+    /**
+     * What a named line reads as, on a given set of figures.
+     *
+     * Answered by PayslipDocument — the same code that builds the document — because for the
+     * attendance rows the printed figure is not any single stored column but an apportionment of
+     * two authoritative totals. A second implementation here would disagree with the document the
+     * first time basic pay clamped at zero, and HR would be editing a figure nobody was shown.
+     *
+     * Returns null when the payslip genuinely has no such line, and 0.00 when it has one that
+     * carries no money: a line at zero is not printed, but it is still a line and HR must be able
+     * to put a figure on it. The two cases are different answers and the caller acts on both.
+     *
+     * @param  array<string, mixed>  $slip
+     */
+    private function lineValueIn(array $slip, string $runType, string $key): ?float
+    {
+        foreach (PayslipDocument::deductionRows($slip) as $row) {
+            if ($row['key'] === $key) {
+                return round((float) $row['amount'], 2);
+            }
+        }
+
+        foreach (PayslipDocument::earningLines($slip, $runType, []) as $line) {
+            if ($line['key'] === $key) {
+                return round((float) $line['amount'], 2);
+            }
+        }
+
+        // THE GOVERNMENT LINES ARE NOT IN EITHER LIST. The document prints SSS, PhilHealth,
+        // Pag-IBIG and the withholding tax straight from their columns, in a table of their own —
+        // so they are read from the columns here too. Missing this is not a display bug: the
+        // correction is applied as a change FROM whatever this returns, and a statutory line read
+        // as ₱0 would add HR's figure to the one already there instead of replacing it.
+        $class = PayslipLines::classFor($key);
+
+        if ($class === PayslipLines::STATUTORY || $class === PayslipLines::TAX) {
+            return round((float) ($slip[PayslipLines::columnFor($key)] ?? 0), 2);
+        }
+
+        // A dynamic key names a line the PAYSLIP named — a benefit share, a loan, an allowance. If
+        // it is not in the breakdown it is not on this payslip, and there is nothing to correct.
+        //
+        // Everything else is a line that simply carries no money this period. It is not printed,
+        // but it is still a real line at ₱0 and HR must be able to put a figure on it.
+        return PayslipLines::isDynamic($key) ? null : 0.0;
+    }
+
+    /**
+     * Move one line from `$from` to `$to` and let every total follow.
+     *
+     * WORKS ON AN ARRAY, not on the model, because the same change has to be applied in two places:
+     * to a saved payslip when HR edits it, and to a payslip mid-computation inside `run()` when the
+     * period is recomputed and the ledger is replayed on top. One implementation, two callers.
+     *
+     * WHAT EACH CLASS DOES — see PayslipLines for why the class travels with the line:
+     *
+     *   - taxable earning   — the line, gross and taxable pay all move with it, and withholding is
+     *                         re-decided marginally on the year, so December sees the correction.
+     *   - untaxed earning   — the line and gross move; nothing about tax does. A reimbursement was
+     *                         never in a tax base and must not enter one by being corrected.
+     *   - attendance charge — the MIRROR of a taxable earning. Raising the charge lowers the pay it
+     *                         came off, so gross and taxable pay move the other way and the tax
+     *                         withheld on that pay comes back. The charge is written to
+     *                         `absence_deduction`, which is what was actually taken; late and
+     *                         undertime additionally carry a display column of their own so the row
+     *                         prints the corrected figure rather than the one their minutes implied.
+     *   - other deduction   — off net only, into the breakdown line it came from. What was earned
+     *                         was right, so gross, taxable pay and the tax are untouched.
+     *   - statutory / tax   — off net only, into their own column and onto the remittance.
+     *
+     * @param  array<string, mixed>  $slip
+     * @return array<string, mixed>
+     */
+    private function applyLineChange(
+        array $slip,
+        int $employeeId,
+        int $year,
+        string $asOf,
+        string $key,
+        float $from,
+        float $to,
+        bool $separationTaxable = false,
+    ): array {
+        $delta = round($to - $from, 2);
+
+        if ($delta == 0.0) {
+            return $slip;
+        }
+
+        $class = PayslipLines::classFor($key, $separationTaxable);
+        $column = PayslipLines::columnFor($key);
+
+        $add = function (string $field, float $by) use (&$slip): void {
+            $slip[$field] = round((float) ($slip[$field] ?? 0) + $by, 2);
+        };
+
+        switch ($class) {
+            case PayslipLines::TAXABLE_EARNING:
+            case PayslipLines::UNTAXED_EARNING:
+                if ($column !== null) {
+                    $add($column, $delta);
+                }
+
+                // The document prints the FULL period basic and charges absences against it, so a
+                // corrected basic has to move both halves or `period_base − absence_deduction`
+                // would stop equalling the pay that was actually made.
+                if ($key === 'basic') {
+                    $add('base_salary', $delta);
+                }
+
+                if (str_starts_with($key, PayslipLines::ALLOWANCE_PREFIX)) {
+                    $slip = $this->setNamedLine($slip, 'allowances_breakdown', $key, PayslipLines::ALLOWANCE_PREFIX, $to);
+                    $add('allowances', $delta);
+                }
+
+                $add('gross', $delta);
+
+                if ($class === PayslipLines::TAXABLE_EARNING) {
+                    $add('taxable_pay', $delta);
+                    $add('withholding_tax', $this->marginalTaxOn($employeeId, $year, $asOf, $delta));
+                }
+                break;
+
+            case PayslipLines::ATTENDANCE_CHARGE:
+                $add('absence_deduction', $delta);
+                $add('base_salary', -$delta);
+                $add('gross', -$delta);
+                $add('taxable_pay', -$delta);
+
+                if ($column !== null && $column !== 'absence_deduction') {
+                    $add($column, $delta);
+                }
+
+                $add('withholding_tax', $this->marginalTaxOn($employeeId, $year, $asOf, -$delta));
+                break;
+
+            case PayslipLines::OTHER_DEDUCTION:
+                $slip = $this->setNamedLine($slip, 'other_deductions_breakdown', $key, PayslipLines::OTHER_PREFIX, $to);
+                $add('other_deductions', $delta);
+                break;
+
+            case PayslipLines::STATUTORY:
+            case PayslipLines::TAX:
+                if ($column !== null) {
+                    $add($column, $delta);
+                }
+                break;
+
+            default:
+                throw ValidationException::withMessages([
+                    'target_key' => ['That line cannot be corrected.'],
+                ]);
+        }
+
+        return $this->settleTotals($slip);
+    }
+
+    /**
+     * Set the amount on a line the payslip named itself, matched by the slug in its key.
+     *
+     * A benefit share and a loan repayment carry no id onto the payslip — the breakdown is a plain
+     * list of `{name, amount}` — so the name's slug is the only handle they have. Renaming the
+     * benefit therefore orphans the correction, which is the honest outcome: the line HR corrected
+     * is not the line now printed, and silently moving the money onto a different line would be far
+     * worse than saying so.
+     *
+     * @param  array<string, mixed>  $slip
+     * @return array<string, mixed>
+     */
+    private function setNamedLine(array $slip, string $field, string $key, string $prefix, float $to): array
+    {
+        $lines = (array) ($slip[$field] ?? []);
+        $slug = substr($key, strlen($prefix));
+        $found = false;
+
+        foreach ($lines as $i => $line) {
+            if (PayslipDocument::slug((string) $line['name']) === $slug) {
+                $lines[$i]['amount'] = round($to, 2);
+                $found = true;
+                break;
+            }
+        }
+
+        if (! $found) {
+            throw ValidationException::withMessages([
+                'target_key' => ['This payslip no longer has that line, so there is nothing to correct.'],
+            ]);
+        }
+
+        $slip[$field] = array_values($lines);
+
+        return $slip;
+    }
+
+    /**
+     * Recompute the totals from the lines, which is the only way they are ever set.
+     *
+     * THIS IS WHY TOTALS ARE NOT EDITABLE. Gross has already been moved by the line that changed;
+     * everything below it is derived here from the components, exactly as `computePayslip()` ends.
+     * There is no path by which HR can type a net pay that its own lines do not add up to.
+     *
+     * A CORRECTION THAT THE PAYSLIP CANNOT PAY FOR IS REFUSED rather than quietly clamped. Raising
+     * a deduction past what the period earned, or cutting the pay it is taken from, would leave
+     * deductions exceeding gross — and clamping would silently collect less than HR entered while
+     * reporting that it had been taken. Told instead, HR can lower another line, or add the missing
+     * amount as a deduction through `amendRun()`, which is built to carry a shortfall forward.
+     *
+     * @param  array<string, mixed>  $slip
+     * @return array<string, mixed>
+     */
+    private function settleTotals(array $slip): array
+    {
+        $f = fn (string $field) => round((float) ($slip[$field] ?? 0), 2);
+
+        $gross = $f('gross');
+        $total = round(
+            $f('sss') + $f('philhealth') + $f('pagibig') + $f('withholding_tax') + $f('other_deductions'),
+            2,
+        );
+
+        // The shortfall the engine already recorded is not counted again: those components store
+        // what was COLLECTED, and the carryover beside them is what a later period will recover.
+        if ($total > $gross + 0.005) {
+            throw ValidationException::withMessages([
+                'amount' => [
+                    'This correction leaves ₱' . number_format($total, 2) . ' of deductions against ₱'
+                        . number_format($gross, 2) . ' of pay. The payslip cannot cover it — lower another'
+                        . ' line, or add the difference as a deduction so it carries to the next period.',
+                ],
+            ]);
+        }
+
+        $slip['total_deductions'] = $total;
+        $slip['net_pay'] = round(max(0, $gross - $total), 2);
+
+        return $slip;
+    }
+
+    /**
+     * Mark the later runs a correction to this period has just invalidated.
+     *
+     * Only when the correction moved TAXABLE PAY or the tax itself. A benefit share or a loan
+     * repayment changes neither, so nothing a later run's annualisation reads has moved — see
+     * `flagTaxStaleRuns()` for what the mark is protecting.
+     */
+    private function flagStaleAfterCorrection(PayrollRun $run, int $employeeId, string $key): void
+    {
+        // Separation pay is read as TAXABLE here whatever this payslip says, which is the
+        // conservative direction: the cost of marking a run stale that did not need it is a
+        // recompute, and the cost of not marking one that did is a year settled against figures
+        // that no longer exist.
+        $class = PayslipLines::classFor($key, true);
+
+        if (! in_array($class, [PayslipLines::TAXABLE_EARNING, PayslipLines::ATTENDANCE_CHARGE, PayslipLines::TAX], true)) {
+            return;
+        }
+
+        $period = $run->cycle_start->format('M j') . '–' . $run->cycle_end->format('M j, Y');
+
+        $this->flagTaxStaleRuns($run, [$employeeId], "The {$period} period was corrected after this run was computed.");
+    }
+
+    /** What the audit trail records for one corrected line — old figure, new figure, and why. */
+    private function correctionAuditLine(PayrollRun $run, Payslip $slip, PayslipAmendment $override, float $engineValue): string
+    {
+        $line = $override->targetLabel() ?? (string) $override->target_key;
+        $to = $override->override_amount === null ? null : (float) $override->override_amount;
+
+        return 'Corrected ' . $line . ' on ' . $this->employeeName((int) $slip->employee_id)
+            . "'s " . $run->cycle_end->format('M Y') . ' payslip — '
+            . ($to === null
+                ? 'renamed only'
+                : '₱' . number_format($engineValue, 2) . ' → ₱' . number_format($to, 2))
+            . ' — ' . $override->reason;
+    }
+
+    /** An employee's name for a message, falling back to their number and then to their id. */
+    private function employeeName(int $employeeId): string
+    {
+        $employee = Employee::withTrashed()->with('user')->find($employeeId);
+
+        return $employee?->user?->name ?? $employee?->employee_no ?? "employee #{$employeeId}";
+    }
+
+    /**
+     * The corrections standing against lines the engine produced, per EMPLOYEE, oldest first.
+     *
+     * Keyed by employee because that is the key `run()` has in hand while it recomputes, and
+     * fetched for the whole run in one query rather than one per payslip.
+     *
+     * @param  \Illuminate\Database\Eloquent\Collection<int, Payslip>  $slips  keyed by employee_id
+     * @return array<int, \Illuminate\Support\Collection<int, PayslipAmendment>>
+     */
+    private function lineOverridesFor(Collection $slips): array
+    {
+        if ($slips->isEmpty()) {
+            return [];
+        }
+
+        $byPayslip = PayslipAmendment::whereIn('payslip_id', $slips->pluck('id')->all())
+            ->whereNotNull('target_key')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('payslip_id');
+
+        $out = [];
+
+        foreach ($slips as $employeeId => $slip) {
+            $rows = $byPayslip->get($slip->id);
+
+            if ($rows !== null && $rows->isNotEmpty()) {
+                $out[(int) $employeeId] = $rows;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Re-apply a payslip's line corrections to a freshly computed set of figures.
+     *
+     * THE RE-RUN CASE THIS EXISTS FOR. Recomputing a period rewrites every earnings column from
+     * attendance, which would silently erase an edit HR made — the behaviour the whole feature was
+     * asked to avoid. Each correction is therefore re-applied here, as an ABSOLUTE value: the line
+     * becomes what HR said it is, whatever the engine has just decided it should be.
+     *
+     * AND THE RE-RUN REPORTS WHAT IT FOUND. Two things can have changed underneath a correction,
+     * and neither is safe to resolve automatically:
+     *
+     *   - the line is GONE — the benefit was renamed, the loan settled, the allowance dropped.
+     *     There is nothing to override, so the correction is left standing and unapplied rather
+     *     than being silently attached to whatever line now sits in that position.
+     *   - the engine has CHANGED ITS MIND — the attendance behind the figure was corrected, or the
+     *     rate moved. The override still wins, because it is a value a person chose and a recompute
+     *     does not get to overrule it. But it may now be suppressing a figure that is finally right,
+     *     and only the person who made it can know.
+     *
+     * @param  array<string, mixed>  $slip
+     * @param  \Illuminate\Support\Collection<int, PayslipAmendment>  $overrides
+     * @return array{0: array<string, mixed>, 1: list<string>}
+     */
+    private function withLineOverrides(array $slip, Employee $employee, PayrollRun $run, $overrides): array
+    {
+        $snapshot = $slip['engine_snapshot'];
+        $runType = $run->type ?? 'regular';
+        $year = (int) $run->cycle_end->year;
+        $asOf = $run->cycle_end->toDateString();
+        $name = $employee->user?->name ?? $employee->employee_no;
+        $notes = [];
+
+        foreach ($overrides as $override) {
+            $key = (string) $override->target_key;
+            $label = $override->targetLabel() ?? $key;
+
+            // MEASURED AGAINST THE SNAPSHOT, not against the figures being mutated. Several
+            // attendance charges write to the same column, so reading each one's "before" off the
+            // running total would make the second correction a change from the first.
+            $engineValue = $this->lineValueIn($snapshot, $runType, $key);
+
+            if ($engineValue === null) {
+                $notes[] = "{$name}: this period no longer has a “{$label}” line, so the correction on it was not applied.";
+
+                continue;
+            }
+
+            if ($override->edited_against !== null
+                && round((float) $override->edited_against, 2) !== $engineValue) {
+                $notes[] = "{$name}: “{$label}” now computes to ₱" . number_format($engineValue, 2)
+                    . ', not the ₱' . number_format((float) $override->edited_against, 2)
+                    . ' it was corrected from — the correction still stands.';
+            }
+
+            // The struck-through figure follows the engine, so an amended payslip never prints an
+            // original the engine has stopped producing.
+            $override->update(['original_amount' => $engineValue]);
+
+            if ($override->override_amount === null) {
+                // A label-only correction moves no money — it is applied where the document is
+                // built, from the wording on the ledger row.
+                continue;
+            }
+
+            try {
+                $slip = $this->applyLineChange(
+                    $slip,
+                    (int) $employee->id,
+                    $year,
+                    $asOf,
+                    $key,
+                    $engineValue,
+                    round((float) $override->override_amount, 2),
+                    ! empty($slip['separation_pay_taxable']),
+                );
+            } catch (ValidationException $e) {
+                // A period can come back thinner than the one the correction was entered against —
+                // an absence found after the fact. Refusing the whole run over one correction would
+                // hold up everybody's pay, so this one is left unapplied and named.
+                $notes[] = "{$name}: the correction on “{$label}” no longer fits this period and was not applied — "
+                    . collect($e->errors())->flatten()->first();
+            }
+        }
+
+        return [$slip, $notes];
     }
 
     /**
@@ -3671,6 +4496,15 @@ class PayrollService
             // And the corrections already added to them, so recomputing the period from attendance
             // does not silently erase money HR has granted — see amendmentTotalsFor().
             $amendments = $this->amendmentTotalsFor($priorSlips);
+            // And the corrections HR made to lines the engine had ALREADY produced, which are
+            // re-applied further down against whatever this recompute produces for them — see
+            // withLineOverrides(). Kept apart from the totals above because the two are opposites:
+            // one adds money the recompute knows nothing about, the other replaces a figure the
+            // recompute has just worked out for itself.
+            $lineOverrides = $this->lineOverridesFor($priorSlips);
+            // What a re-run has to say about them afterwards: overrides whose line the engine no
+            // longer produces, and overrides the engine has since changed its mind about.
+            $overrideNotes = [];
             $paidElsewhere = [];
             // Employees whose pay was already disbursed and is therefore left untouched.
             $skippedDisbursed = [];
@@ -3935,6 +4769,31 @@ class PayrollService
                     ]);
                 }
 
+                // THE ENGINE'S OWN FIGURES FOR THIS PERIOD — everything the engine does, and nothing
+                // a person has said about it. Recorded on the payslip because a correction to a
+                // line is stored as the value HR wants, not as a nudge: without the figure it
+                // replaced, "put this line back" would have nothing to restore to and a second
+                // edit would have nothing to measure the engine's original against.
+                $slip['engine_snapshot'] = Arr::except($slip, ['engine_snapshot']);
+
+                // AND NOW THE CORRECTIONS TO THOSE LINES, replayed on top. This is what keeps an
+                // edit from disappearing the next time the period is run: the figure is re-applied
+                // against whatever the engine has just computed, not against what it computed when
+                // HR made the edit.
+                //
+                // AFTER THE LOANS, deliberately. A loan collects what the payslip can afford, and
+                // "afford" has to mean what the period actually earned — letting a correction
+                // enlarge the repayment would take more from the employee than the period ever
+                // priced, on the strength of a figure a person typed.
+                if (isset($lineOverrides[$employee->id])) {
+                    [$slip, $notes] = $this->withLineOverrides($slip, $employee, $run, $lineOverrides[$employee->id]);
+                    $overrideNotes = [...$overrideNotes, ...$notes];
+                }
+
+                // One write for the snapshot and for whatever the corrections moved. Idempotent on
+                // the payslips that have neither: every field here is the one already stored.
+                $payslip->update($slip);
+
                 // P2-8: auto-flip the folded claims to paid + link them to this run.
                 // Idempotent — on a re-run, claims already paid by this run are untouched.
                 // Slice 12 — computing is not paying. A claim folded into a payslip becomes
@@ -4037,6 +4896,14 @@ class PayrollService
                     . ($reason ? " — {$reason}" : ''),
                 $run,
             );
+
+            // AND WHAT THE RECOMPUTE FOUND UNDERNEATH THE CORRECTIONS. An override is absolute and
+            // still wins, so nothing here changed a figure — but a correction sitting on a line the
+            // engine has since changed its mind about, or on a line that no longer exists, is
+            // something only the person who made it can resolve. Silence would read as agreement.
+            foreach ($overrideNotes as $note) {
+                $this->audit->log('updated', 'Payroll', $note, $run);
+            }
 
             // Slice 5: say plainly whose pay this re-run left alone.
             if ($skippedDisbursed !== []) {

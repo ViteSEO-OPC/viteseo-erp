@@ -17,7 +17,7 @@ use App\Modules\Hr\Http\Controllers\OfficeExpenseController;
 use App\Modules\Hr\Http\Controllers\DepartmentController;
 use App\Modules\Hr\Http\Controllers\ReportController;
 use App\Modules\Hr\Http\Controllers\TaxTableController;
-use App\Modules\Hr\Http\Controllers\RestDayRequestController;
+use App\Modules\Hr\Http\Controllers\WorkRequestController;
 use App\Modules\Hr\Http\Controllers\WorkSuspensionController;
 use App\Modules\Hr\Http\Controllers\RetroFlagController;
 use App\Modules\Hr\Http\Controllers\EmployeeController;
@@ -77,11 +77,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Withdraw your own, pending only. Ownership + status enforced in the service.
     Route::post('half-day-requests/{halfDayRequest}/cancel', [HalfDayRequestController::class, 'cancel']);
 
-    // Rest-day work requests — filed by pressing Time in on a non-workday, so there is no
-    // date in the body: the server uses the caller's Manila today. Caller files + views own.
-    Route::get('rest-day-requests', [RestDayRequestController::class, 'index']);
-    Route::post('rest-day-requests', [RestDayRequestController::class, 'store']);
-    Route::post('rest-day-requests/{restDayRequest}/cancel', [RestDayRequestController::class, 'cancel']);
+    // Work requests — permission to work a rest day, or a suspended day HR marked as needing
+    // permission. Filed by pressing Time in, so there is no date in the body: the server uses
+    // the caller's Manila today and derives the type from it. Caller files + views own.
+    Route::get('work-requests', [WorkRequestController::class, 'index']);
+    Route::post('work-requests', [WorkRequestController::class, 'store']);
+    Route::post('work-requests/{workRequest}/cancel', [WorkRequestController::class, 'cancel']);
 
     // HR-declared non-working days (typhoon, shutdown). Readable by everyone: the time
     // clock tells the employee work is suspended today, and a rule they cannot see is one
@@ -103,6 +104,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Attendance — the caller clocks their own time; HR sees the roster.
     Route::get('me/attendance', [AttendanceController::class, 'me']);
+    // The caller's own month-by-month attendance record (self-service counterpart to the
+    // Reports hub's Attendance Summary). Identity from the token — see the controller.
+    Route::get('me/attendance-report', [AttendanceController::class, 'myReport']);
     // The caller's own violation flags (read-only; HR's /violations is role-gated).
     Route::get('me/violations', [ViolationController::class, 'me']);
     Route::post('attendance/clock-in', [AttendanceController::class, 'clockIn']);
@@ -202,6 +206,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('attendance/remote-checkins', [RemoteCheckinController::class, 'index']);
         Route::post('attendance/remote-checkins/{remoteCheckin}/approve', [RemoteCheckinController::class, 'approve']);
         Route::post('attendance/remote-checkins/{remoteCheckin}/reject', [RemoteCheckinController::class, 'reject']);
+        // Stale-attendance review queue (item 6). Same "keep it above any attendance/{param}"
+        // caveat as the field time-ins above.
+        Route::get('attendance/open-shifts', [AttendanceController::class, 'openShifts']);
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).
@@ -247,6 +254,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/thirteenth-month/run', [PayrollController::class, 'runThirteenthMonth'])->middleware('throttle:5,1,payroll-13th:');
         // FIN-030b — who this run would pay below the regional floor, and the one-click fix.
         // The check is read-only; the adjustment writes salaries, so it carries a run-sized limit.
+        // Item 12 — attendance exceptions for a cycle, read before the run turns them into money.
+        Route::get('payroll/attendance-exceptions', [PayrollController::class, 'attendanceExceptions']);
         Route::get('payroll/minimum-wage-check', [PayrollController::class, 'minimumWageCheck']);
         Route::post('payroll/minimum-wage-adjustments', [PayrollController::class, 'applyMinimumWage'])
             ->middleware('throttle:5,1,payroll-minimum-wage:');
@@ -260,6 +269,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // keep producing the documents this endpoint exists to stop.
         Route::post('payroll/runs/{payrollRun}/amendments', [PayrollController::class, 'amendRun'])
             ->middleware('throttle:5,1,payroll-amendment:');
+        // The same correction applied to ONE LINE across the whole period — a charge waived for
+        // everybody after an outage. Run-sized limit: it rewrites every payslip in the run.
+        Route::post('payroll/runs/{payrollRun}/line-corrections', [PayrollController::class, 'overrideRunLine'])
+            ->middleware('throttle:5,1,payroll-amendment:');
         // Recompute a period that has already run. The preview is read-only but costs a whole run
         // (it computes for real and rolls back), so both carry the run's own limit.
         Route::get('payroll/runs/{payrollRun}/rerun-preview', [PayrollController::class, 'rerunPreview'])
@@ -272,6 +285,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payroll/runs/{payrollRun}/unlock', [PayrollController::class, 'unlockRun']);
         Route::post('payslips/{payslip}/mark-done', [PayrollController::class, 'markDone']);
         Route::post('payslips/{payslip}/reopen', [PayrollController::class, 'reopenPayslip']);
+        // Correcting ONE LINE on one payslip — the engine said ₱500, HR says ₱300, and the
+        // document prints both. A higher limit than the batch routes above because this is how a
+        // payslip is now corrected at all: a person walking a document and fixing three lines on
+        // it is the ordinary case, not a burst worth refusing.
+        Route::post('payslips/{payslip}/line-corrections', [PayrollController::class, 'overridePayslipLine'])
+            ->middleware('throttle:30,1,payslip-correction:');
+        Route::delete('payslips/{payslip}/line-corrections/{amendment}', [PayrollController::class, 'removePayslipLineCorrection'])
+            ->middleware('throttle:30,1,payslip-correction:');
         Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf'])->middleware('throttle:20,1,hr-pdf:');
 
@@ -314,15 +335,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('half-day-requests/{halfDayRequest}/approve', [HalfDayRequestController::class, 'approve']);
         Route::post('half-day-requests/{halfDayRequest}/reject', [HalfDayRequestController::class, 'reject']);
         Route::post('half-day-requests/{halfDayRequest}/reopen', [HalfDayRequestController::class, 'reopen']);
-        // Approve/decline rest-day work requests (HR only). Approving WRITES the attendance
-        // row, stamped at the moment the employee pressed the button.
-        Route::post('rest-day-requests/{restDayRequest}/approve', [RestDayRequestController::class, 'approve']);
-        Route::post('rest-day-requests/{restDayRequest}/reject', [RestDayRequestController::class, 'reject']);
-        Route::post('rest-day-requests/{restDayRequest}/reopen', [RestDayRequestController::class, 'reopen']);
+        // Approve/decline work requests (HR only). Approving WRITES the attendance row,
+        // stamped at the moment the employee pressed the button.
+        Route::post('work-requests/{workRequest}/approve', [WorkRequestController::class, 'approve']);
+        Route::post('work-requests/{workRequest}/reject', [WorkRequestController::class, 'reject']);
+        Route::post('work-requests/{workRequest}/reopen', [WorkRequestController::class, 'reopen']);
         // Approve/decline early-out requests (HR only).
         Route::post('early-out-requests/{earlyOutRequest}/approve', [EarlyOutRequestController::class, 'approve']);
         Route::post('early-out-requests/{earlyOutRequest}/reject', [EarlyOutRequestController::class, 'reject']);
         Route::post('early-out-requests/{earlyOutRequest}/reopen', [EarlyOutRequestController::class, 'reopen']);
+        // Item 10 — HR files overtime for an employee on a date that has passed. Above the
+        // `{overtimeRequest}` routes below so "for-employee" is never read as an id.
+        Route::post('overtime-requests/for-employee', [OvertimeRequestController::class, 'storeForEmployee']);
         Route::post('overtime-requests/{overtimeRequest}/approve', [OvertimeRequestController::class, 'approve']);
         Route::post('overtime-requests/{overtimeRequest}/reject', [OvertimeRequestController::class, 'reject']);
         Route::post('overtime-requests/{overtimeRequest}/reopen', [OvertimeRequestController::class, 'reopen']);

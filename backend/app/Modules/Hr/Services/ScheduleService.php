@@ -98,6 +98,10 @@ class ScheduleService
             'custom_workdays' => $data['custom_workdays'] ?? null,
             'custom_start_time' => $data['custom_start_time'] ?? null,
             'custom_end_time' => $data['custom_end_time'] ?? null,
+            'custom_am_start_time' => $data['custom_am_start_time'] ?? null,
+            'custom_am_end_time' => $data['custom_am_end_time'] ?? null,
+            'custom_pm_start_time' => $data['custom_pm_start_time'] ?? null,
+            'custom_pm_end_time' => $data['custom_pm_end_time'] ?? null,
             'custom_grace_minutes' => $data['custom_grace_minutes'] ?? null,
             'custom_unpaid_break_minutes' => $data['custom_unpaid_break_minutes'] ?? null,
             'custom_paid_break_minutes' => $data['custom_paid_break_minutes'] ?? null,
@@ -122,6 +126,10 @@ class ScheduleService
         $hasOverride = $employee->custom_workdays !== null
             || $employee->custom_start_time !== null
             || $employee->custom_end_time !== null
+            || $employee->custom_am_start_time !== null
+            || $employee->custom_am_end_time !== null
+            || $employee->custom_pm_start_time !== null
+            || $employee->custom_pm_end_time !== null
             || $employee->custom_grace_minutes !== null
             || $employee->custom_unpaid_break_minutes !== null
             || $employee->custom_paid_break_minutes !== null;
@@ -151,11 +159,15 @@ class ScheduleService
             'unpaid_break_minutes' => $unpaidBreak,
             'paid_break_minutes' => $paidBreak,
             'expected_minutes' => $expectedMinutes,
-            // Half-day windows are template-only (no custom_* override this pass).
-            'am_start_time' => $this->hm($schedule?->am_start_time),
-            'am_end_time' => $this->hm($schedule?->am_end_time),
-            'pm_start_time' => $this->hm($schedule?->pm_start_time),
-            'pm_end_time' => $this->hm($schedule?->pm_end_time),
+            // Half-day windows coalesce PER FIELD, exactly like start/end/grace above: an
+            // employee who starts their afternoons at 13:30 overrides only `custom_pm_start_time`
+            // and keeps the template's end. These decide what a half day is worth — lateness,
+            // undertime and the early-out fraction are all measured against them — so a template
+            // value that does not match the person's real hours is billable minutes.
+            'am_start_time' => $this->hm($employee->custom_am_start_time ?? $schedule?->am_start_time),
+            'am_end_time' => $this->hm($employee->custom_am_end_time ?? $schedule?->am_end_time),
+            'pm_start_time' => $this->hm($employee->custom_pm_start_time ?? $schedule?->pm_start_time),
+            'pm_end_time' => $this->hm($employee->custom_pm_end_time ?? $schedule?->pm_end_time),
             'source' => $source,
             'schedule_name' => $schedule?->name,
             'is_workday' => $date ? in_array($date->isoWeekday(), array_map('intval', $workdays), true) : null,

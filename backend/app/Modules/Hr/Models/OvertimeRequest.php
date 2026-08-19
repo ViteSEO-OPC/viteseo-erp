@@ -19,6 +19,8 @@ class OvertimeRequest extends Model
 
     protected $fillable = [
         'employee_id',
+        // Item 10 — the HR user who filed this on the employee's behalf. NULL = they filed it.
+        'filed_by',
         'work_date',
         'time_from',
         'time_to',
@@ -63,5 +65,11 @@ class OvertimeRequest extends Model
     public function canceller(): BelongsTo
     {
         return $this->belongsTo(User::class, 'cancelled_by');
+    }
+
+    /** The HR user who filed this for the employee, or null when the employee filed it. */
+    public function filer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'filed_by');
     }
 }
