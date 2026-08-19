@@ -407,6 +407,13 @@ class AttendanceService
         $att->location_verified_by = $verifiedBy;
         $att->save();
 
+        // Slice 16 — a clock-in on an approved paid-leave day gives the credit back, the same
+        // settlement an HR correction performs and from the same fact. Payroll already prices
+        // this day as worked off `time_in` alone, so without this the employee was paid AND
+        // still charged the credit. Safe here: the guard above throws on a second punch, and
+        // `leave_credit_refunded_at` makes it idempotent regardless.
+        $this->settleLeaveCreditFor($employee, $att);
+
         return $att;
     }
 
@@ -725,6 +732,13 @@ class AttendanceService
      *
      * Unpaid leave draws no credit, so there is nothing to refund — only the pay changes, and
      * that is handled in the day loop.
+     *
+     * RUNS ON THE EMPLOYEE'S OWN CLOCK-IN TOO, not only on an HR correction. Payroll already
+     * treats a `time_in` as proof the leave wasn't taken (see the day loop) without anyone
+     * approving it, so leaving the credit spent until HR happened to open the row paid the day
+     * and charged the credit anyway. The worry in adjust() about refunding from a path that
+     * re-runs does not apply here: clockIn() writes once per employee per day and throws on a
+     * second punch.
      */
     private function settleLeaveCreditFor(Employee $employee, Attendance $att): void
     {
@@ -737,19 +751,24 @@ class AttendanceService
             ->whereDate('end_date', '>=', $date)
             ->first();
 
-        // Only PAID leave holds a credit worth returning.
-        $holdsCredit = $leave && $leave->leaveType && $leave->leaveType->is_paid;
+        // What this ONE date actually cost the balance at approval — the only amount it can
+        // honestly give back.
+        $credit = $leave ? $this->creditSpentOn($leave, $att->work_date) : 0.0;
+
+        // Only PAID leave that actually spent something on this date holds a credit worth
+        // returning.
+        $holdsCredit = $leave && $leave->leaveType && $leave->leaveType->is_paid && $credit > 0;
         // The day counts as worked when the clock says so, or when HR asserts they were in.
         $worked = $att->time_in !== null
             || ($att->status_override && in_array($att->status, ['present', 'late'], true));
 
         if ($holdsCredit && $worked && $att->leave_credit_refunded_at === null) {
-            $this->moveLeaveCredit($leave, -1.0);
+            $this->moveLeaveCredit($leave, -$credit);
             $att->forceFill(['leave_credit_refunded_at' => now()])->save();
 
             $this->audit->log(
                 'updated', 'Leave',
-                "Returned 1 leave credit — {$date} was worked despite approved "
+                "Returned {$credit} leave credit — {$date} was worked despite approved "
                     . ($leave->leaveType?->name ?? 'leave'),
                 $leave,
             );
@@ -760,10 +779,121 @@ class AttendanceService
         // The correction was undone (or the leave went away): take the credit back.
         if ($att->leave_credit_refunded_at !== null && (! $holdsCredit || ! $worked)) {
             if ($holdsCredit) {
-                $this->moveLeaveCredit($leave, 1.0);
+                $this->moveLeaveCredit($leave, $credit);
             }
             $att->forceFill(['leave_credit_refunded_at' => null])->save();
         }
+    }
+
+    /**
+     * How much balance ONE date inside a leave request actually consumed at approval.
+     *
+     * The refund has to mirror LeaveService::computeDays(), which is what spent the credit in
+     * the first place. A refund bigger than the deduction invents balance out of nothing, and
+     * the `max(0, …)` in moveLeaveCredit() only hides that while the employee has taken no
+     * other leave the same year.
+     *
+     * ZERO FOR A HALF DAY, and not merely because 1.0 ≠ 0.5. On a half day the employee is
+     * SUPPOSED to come in and work the other half, so a clock-in there is expected rather than
+     * evidence the leave went unused — refunding it would hand back the credit of every half
+     * day anyone ever files. The pay side already reasons the same way (see the day loop,
+     * where the half-day branch deliberately runs before the clocked-in check).
+     *
+     * ZERO ON WEEKENDS AND NON-WORKING HOLIDAYS. computeDays() skips them, so a date inside a
+     * leave range that happens to be one never cost a credit, and working it cannot return one.
+     */
+    private function creditSpentOn(LeaveRequest $leave, Carbon $date): float
+    {
+        // An UNLIMITED type draws no credits at all (`deducted_from = 'none'` — see
+        // LeaveService::approve), so there is no balance behind it to give back. Without this
+        // the bucket `match` below falls through to its legacy per-type default and decrements
+        // a balance the approval never touched.
+        if ($leave->deducted_from === 'none') {
+            return 0.0;
+        }
+
+        if ($leave->is_half_day || $date->isWeekend()) {
+            return 0.0;
+        }
+
+        if (in_array($date->toDateString(), $this->holidays->nonWorkingDatesBetween($date, $date), true)) {
+            return 0.0;
+        }
+
+        return 1.0;
+    }
+
+    /**
+     * Settle every day of a leave request against the attendance that ALREADY exists.
+     *
+     * WHY. The two facts can arrive in either order. settleLeaveCreditFor() covers "attendance
+     * lands on a day already on leave" — a clock-in, or an HR correction. This covers the
+     * reverse: leave approved (typically backdated) over days the employee demonstrably worked.
+     * Payroll prices those days as worked off `time_in` either way, so without this the approval
+     * spent a credit for a day it also paid in full.
+     *
+     * Delegates per day, so every rule about WHICH days actually hold a credit — half days,
+     * weekends, non-working holidays, unlimited types — is stated once, in creditSpentOn().
+     */
+    public function settleLeaveCreditsFor(LeaveRequest $leave): void
+    {
+        $employee = $leave->relationLoaded('employee')
+            ? $leave->employee
+            : Employee::find($leave->employee_id);
+
+        if (! $employee) {
+            return;
+        }
+
+        $rows = Attendance::where('employee_id', $leave->employee_id)
+            ->whereBetween('work_date', [
+                $leave->start_date->toDateString(),
+                $leave->end_date->toDateString(),
+            ])
+            ->get();
+
+        foreach ($rows as $att) {
+            $this->settleLeaveCreditFor($employee, $att);
+        }
+    }
+
+    /**
+     * How much of a leave request's deduction has already been handed back, day by day.
+     *
+     * Reversing an approval must give back what the balance is STILL holding, not the request's
+     * full `days` — the difference is credit invented from nothing. Recomputed from
+     * creditSpentOn() rather than assumed to be 1.0 per stamped row, so the two can never drift.
+     */
+    public function refundedCreditFor(LeaveRequest $leave): float
+    {
+        return (float) Attendance::where('employee_id', $leave->employee_id)
+            ->whereBetween('work_date', [
+                $leave->start_date->toDateString(),
+                $leave->end_date->toDateString(),
+            ])
+            ->whereNotNull('leave_credit_refunded_at')
+            ->get()
+            ->sum(fn (Attendance $att) => $this->creditSpentOn($leave, $att->work_date));
+    }
+
+    /**
+     * Drop the refund stamps a leave request left on attendance.
+     *
+     * For reopen(): the request goes back to pending, so the days it covered stop being leave
+     * at all and the stamps stop describing anything. Left behind, a re-approval would deduct
+     * the full request again while every stamped row refused to refund a second time (the
+     * settlement is idempotent ON that stamp) — quietly charging the employee for days they
+     * worked. Cleared, the re-approval settles from scratch and lands in the same place.
+     */
+    public function clearLeaveCreditStamps(LeaveRequest $leave): void
+    {
+        Attendance::where('employee_id', $leave->employee_id)
+            ->whereBetween('work_date', [
+                $leave->start_date->toDateString(),
+                $leave->end_date->toDateString(),
+            ])
+            ->whereNotNull('leave_credit_refunded_at')
+            ->update(['leave_credit_refunded_at' => null]);
     }
 
     /**

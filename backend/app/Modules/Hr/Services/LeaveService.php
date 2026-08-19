@@ -24,6 +24,7 @@ class LeaveService
         private readonly ViolationService $violations,
         private readonly PayrollFreezeService $freeze,
         private readonly RetroFlagService $retro,
+        private readonly AttendanceService $attendance,
     ) {}
 
     /**
@@ -374,6 +375,13 @@ class LeaveService
 
             $request->load(['employee.user', 'leaveType', 'reviewer']);
 
+            // A day the employee DEMONSTRABLY WORKED must not also spend a credit. Approving a
+            // backdated leave over days that already carry a clock-in used to do exactly that:
+            // payroll prices those days as worked (attendance is the source of truth), so the
+            // request was paid in full AND charged to the balance. Runs inside the transaction,
+            // right after the deduction above, so approve() is never observed half-settled.
+            $this->attendance->settleLeaveCreditsFor($request);
+
             $employeeName = $request->employee->user?->name ?? $request->employee->name;
             $this->audit->log(
                 'approved',
@@ -485,9 +493,17 @@ class LeaveService
      * approval (`deducted_from`), so a mode flip between approve and reversal can't
      * restore the wrong table. Legacy rows (approved before stamping) fall back to the
      * paid-type + current-mode guess.
+     *
+     * WHAT THE BALANCE IS STILL HOLDING, not the request's full `days`. A day inside the range
+     * that turned out to be worked has already been refunded (see AttendanceService), so
+     * restoring the whole request on top of that would invent a credit out of nothing —
+     * `max(0, …)` below only hides it while the employee has taken no other leave that year.
+     * cancel() cannot reach this case (it is refused once the leave has started), but reopen()
+     * exists precisely for a mistaken approval on a date already past.
      */
     private function restoreBalance(LeaveRequest $request): void
     {
+        $outstanding = max(0.0, (float) $request->days - $this->attendance->refundedCreditFor($request));
         $bucket = $request->deducted_from;
         if ($bucket === null) {
             $type = LeaveType::find($request->leave_type_id);
@@ -502,7 +518,7 @@ class LeaveService
                 ->where('year', $request->start_date->year)
                 ->first();
             if ($pool) {
-                $pool->update(['used_days' => max(0, (float) $pool->used_days - (float) $request->days)]);
+                $pool->update(['used_days' => max(0, (float) $pool->used_days - $outstanding)]);
             }
         } elseif ($bucket === 'per_type') {
             $balance = LeaveBalance::where('employee_id', $request->employee_id)
@@ -510,7 +526,7 @@ class LeaveService
                 ->where('year', $request->start_date->year)
                 ->first();
             if ($balance) {
-                $balance->update(['used_days' => max(0, (float) $balance->used_days - (float) $request->days)]);
+                $balance->update(['used_days' => max(0, (float) $balance->used_days - $outstanding)]);
             }
         }
     }
@@ -545,7 +561,10 @@ class LeaveService
 
         DB::transaction(function () use ($request, $reason, $wasApproved) {
             if ($wasApproved) {
+                // Order matters: restoreBalance() reads the stamps to work out what is still
+                // outstanding, so they can only be cleared once it has.
                 $this->restoreBalance($request);
+                $this->attendance->clearLeaveCreditStamps($request);
             }
 
             $request->update([
