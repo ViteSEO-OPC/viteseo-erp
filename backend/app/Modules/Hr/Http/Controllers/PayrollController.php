@@ -442,9 +442,23 @@ class PayrollController extends Controller
         )->response();
     }
 
-    // GET /api/v1/hr/payroll/runs/{payrollRun}/export — the run as a CSV file (HR only).
-    public function exportRun(PayrollRun $payrollRun): SymfonyResponse
+    // GET /api/v1/hr/payroll/runs/{payrollRun}/export — the run as a file (HR only).
+    //
+    // `?format=xlsx` returns the styled workbook — the breakdown as HR reads it, plus the register
+    // on a second sheet. Anything else returns the CSV, which is what the machine readers of this
+    // endpoint have always received and must keep receiving.
+    public function exportRun(Request $request, PayrollRun $payrollRun): SymfonyResponse
     {
+        if ($request->query('format') === 'xlsx') {
+            ['path' => $path, 'name' => $name] = $this->service->runXlsx($payrollRun);
+
+            // deleteFileAfterSend, because runXlsx() streams the workbook to a temp file rather
+            // than building it in memory: nothing else is going to clean it up.
+            return response()->download($path, $name, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ])->deleteFileAfterSend(true);
+        }
+
         $csv = $this->service->runCsv($payrollRun);
         $name = "payroll-{$payrollRun->cycle_start?->format('Y-m-d')}-to-{$payrollRun->cycle_end?->format('Y-m-d')}.csv";
 

@@ -41,7 +41,7 @@ import { MoneyStatCard } from "@/modules/hr/components/money-stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
-import { downloadHrPayslipPdf, downloadPayrollRunCsv } from "@/modules/hr/api/payroll";
+import { downloadHrPayslipPdf, downloadPayrollRunCsv, downloadPayrollRunXlsx } from "@/modules/hr/api/payroll";
 import {
   usePayrollRuns,
   usePayrollRun,
@@ -206,6 +206,15 @@ export default function PayrollPage() {
       await downloadPayrollRunCsv(runId);
     } catch {
       toast.error("Could not export the run CSV.");
+    }
+  }
+
+  // The workbook is the copy meant to be READ — the CSV stays for whatever already parses it.
+  async function onExportXlsx(runId: number) {
+    try {
+      await downloadPayrollRunXlsx(runId);
+    } catch {
+      toast.error("Could not export the run workbook.");
     }
   }
 
@@ -740,10 +749,15 @@ export default function PayrollPage() {
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-h3 font-bold text-foreground">Payroll Breakdown</h2>
           {currentRun && detail?.breakdown && (
-            <Button variant="outline" size="sm" onClick={() => onExportCsv(currentRun.id)}>
-              <FileDown />
-              Export CSV
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => onExportXlsx(currentRun.id)}>
+                <FileDown />
+                Export Excel
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => onExportCsv(currentRun.id)}>
+                CSV
+              </Button>
+            </div>
           )}
         </div>
         {detail?.breakdown ? (
@@ -896,10 +910,15 @@ export default function PayrollPage() {
               </Button>
             )}
             {viewRun && (
-              <Button variant="outline" onClick={() => onExportCsv(viewRun.id)}>
-                <FileDown />
-                Export CSV
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => onExportXlsx(viewRun.id)}>
+                  <FileDown />
+                  Export Excel
+                </Button>
+                <Button variant="ghost" onClick={() => onExportCsv(viewRun.id)}>
+                  CSV
+                </Button>
+              </>
             )}
             <DialogClose asChild>
               <Button variant="outline">Close</Button>

@@ -201,6 +201,15 @@ export function downloadPayrollRunCsv(id: number): Promise<void> {
   return downloadFile(`/hr/payroll/runs/${id}/export`, `payroll-run-${id}.csv`);
 }
 
+/**
+ * HR: the same run as a styled workbook — the breakdown laid out to be read, with the full
+ * register (employer shares, override marker) on a second sheet. Same endpoint as the CSV;
+ * the server picks the format off the query string.
+ */
+export function downloadPayrollRunXlsx(id: number): Promise<void> {
+  return downloadFile(`/hr/payroll/runs/${id}/export?format=xlsx`, `payroll-run-${id}.xlsx`);
+}
+
 export async function getMyPayslips(): Promise<PayslipSummary[]> {
   const res = await apiClient.get("/hr/me/payslips");
   return res.data.data;

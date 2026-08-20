@@ -5270,6 +5270,34 @@ class PayrollService
      */
     public function runCsv(PayrollRun $run): string
     {
+        $register = $this->registerRows($run);
+
+        // No BOM: this export is machine-read as often as it is opened by a person, and adding
+        // one now would change every existing consumer's first column header.
+        $csv = CsvWriter::render([$register['columns'], ...$register['rows']], bom: false);
+
+        $this->audit->log(
+            'exported',
+            'Payroll',
+            'Exported payroll run CSV for ' . $run->cycle_start?->format('Y-m-d') . ' – ' . $run->cycle_end?->format('Y-m-d'),
+            $run,
+        );
+
+        return $csv;
+    }
+
+    /**
+     * THE REGISTER — the widest honest description of a run, and the body of both exports.
+     *
+     * The CSV renders it as-is; the workbook parks it on its second sheet. Extracted rather than
+     * duplicated because the columns finance reconciles remittances against (the employer shares,
+     * the override marker) only exist here — a second copy of this list is a second place for a
+     * column to go missing from.
+     *
+     * @return array{columns: list<string>, rows: list<list<float|int|string|null>>}
+     */
+    private function registerRows(PayrollRun $run): array
+    {
         $run->loadMissing(['payslips.employee.user', 'payslips.employee.department']);
 
         $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'nd' => 0.0, 'rd' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'other' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
@@ -5278,7 +5306,7 @@ class PayrollService
         // and CR. Employee and department names are free text a person controls, and this file is
         // opened in Excel on a finance workstation.
         $rows = [];
-        $rows[] = [
+        $columns = [
             'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Night Diff', 'Rest Day', 'Reimbursements', 'Gross',
             'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Other Deductions', 'Total Deductions', 'Net Pay',
             // Slice B7 — this file doubles as the remittance summary, and a per-employee override
@@ -5332,18 +5360,250 @@ class PayrollService
             round($sum['er_sss'], 2), round($sum['er_ph'], 2), round($sum['er_pg'], 2), '',
         ];
 
-        // No BOM: this export is machine-read as often as it is opened by a person, and adding
-        // one now would change every existing consumer's first column header.
-        $csv = CsvWriter::render($rows, bom: false);
+        return [
+            'columns' => $columns,
+            'rows' => $rows,
+            // Which columns are prose. Everything else is a figure — and it has to reach the
+            // workbook AS a figure: Eloquent hands decimals back as strings, and a money column
+            // written as text is one Excel will right-align, refuse to sum, and quietly mislead
+            // whoever tries.
+            'text' => array_keys(array_intersect($columns, ['Employee', 'Department', 'Overridden', 'Status'])),
+        ];
+    }
+
+    /**
+     * THE BREAKDOWN SHEET'S COLUMNS — label, cell treatment, and how wide it has to be to read.
+     *
+     * `charge` columns are the ones shown in parentheses. They are listed here rather than inferred
+     * from the label so that adding a column is one edit in one place: PayrollXlsxWriter styles
+     * whatever this says, and breakdownRow() below fills it in the same order.
+     */
+    private const BREAKDOWN_COLUMNS = [
+        ['label' => 'Employee', 'type' => 'text', 'width' => 26.0],
+        ['label' => 'Department', 'type' => 'text', 'width' => 18.0],
+        ['label' => 'Basic Pay', 'type' => 'money', 'width' => 13.0],
+        ['label' => 'Allowances', 'type' => 'money', 'width' => 12.0],
+        ['label' => 'Overtime', 'type' => 'money', 'width' => 11.0],
+        ['label' => 'Night Diff', 'type' => 'money', 'width' => 11.0],
+        ['label' => 'Rest Day', 'type' => 'money', 'width' => 11.0],
+        ['label' => 'Holiday', 'type' => 'money', 'width' => 11.0],
+        ['label' => 'Reimbursements', 'type' => 'money', 'width' => 14.0],
+        ['label' => 'Other Earnings', 'type' => 'money', 'width' => 13.0],
+        ['label' => 'Gross Pay', 'type' => 'money', 'width' => 14.0],
+        ['label' => 'Absences', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Half-Days', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Undertime', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Late', 'type' => 'charge', 'width' => 10.0],
+        ['label' => 'Work Suspension', 'type' => 'charge', 'width' => 14.0],
+        ['label' => 'Leave Without Pay', 'type' => 'charge', 'width' => 16.0],
+        ['label' => 'Other Attendance', 'type' => 'charge', 'width' => 15.0],
+        ['label' => 'SSS', 'type' => 'charge', 'width' => 10.0],
+        ['label' => 'PhilHealth', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Pag-IBIG', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Withholding Tax', 'type' => 'charge', 'width' => 13.0],
+        ['label' => 'Other Deductions', 'type' => 'charge', 'width' => 14.0],
+        ['label' => 'Total Deductions', 'type' => 'charge', 'width' => 14.0],
+        ['label' => 'Net Pay', 'type' => 'money', 'width' => 14.0],
+        ['label' => 'Status', 'type' => 'status', 'width' => 11.0],
+    ];
+
+    /**
+     * A payroll run as a styled workbook — the copy meant to be READ, next to the CSV's copy meant
+     * to be parsed. Audit-logged like the CSV, because it discloses exactly as much.
+     *
+     * Returns the temp file it wrote plus the name to send it under; the caller deletes it.
+     *
+     * @return array{path: string, name: string}
+     */
+    public function runXlsx(PayrollRun $run): array
+    {
+        // `amendments` is eager-loaded because the deduction columns are built by the same
+        // PayslipDocument code the payslip document uses, and a correction HR typed is a PINNED
+        // row there. Without the ledger the workbook would print the engine's figures beside a
+        // payslip showing HR's — the same figure, disagreeing with itself in two files.
+        $run->loadMissing([
+            'payslips.employee.user',
+            'payslips.employee.department',
+            'payslips.amendments',
+        ]);
+
+        $columns = self::BREAKDOWN_COLUMNS;
+        $rows = [];
+        $sums = array_fill(0, count($columns), 0.0);
+
+        foreach ($run->payslips as $payslip) {
+            $row = $this->breakdownRow($payslip);
+            $rows[] = $row;
+
+            foreach ($columns as $i => $column) {
+                if (in_array($column['type'], ['money', 'charge'], true)) {
+                    $sums[$i] = round($sums[$i] + (float) $row[$i], 2);
+                }
+            }
+        }
+
+        // The total row and the cards are summed from the COLUMNS ABOVE THEM, not from the run's
+        // stored totals. The two agree for an ordinary run — but the sheet showing basic pay gross
+        // of absences has to foot to its own arithmetic, and a header card contradicting the table
+        // under it is the specific failure this export exists to avoid.
+        $totals = $sums;
+        $totals[0] = 'TOTAL PAYROLL';
+        $totals[1] = '';
+        $totals[count($columns) - 1] = '';
+
+        $grossColumn = array_search('Gross Pay', array_column($columns, 'label'), true);
+        $deductionsColumn = array_search('Total Deductions', array_column($columns, 'label'), true);
+        $netColumn = array_search('Net Pay', array_column($columns, 'label'), true);
+
+        $path = tempnam(sys_get_temp_dir(), 'payroll-');
+
+        PayrollXlsxWriter::write(
+            $path,
+            [
+                'title' => 'Payroll Breakdown • ' . $this->periodLabel($run),
+                'kpis' => [
+                    ['label' => 'EMPLOYEES', 'value' => count($rows), 'type' => 'count'],
+                    ['label' => 'GROSS PAYROLL', 'value' => $sums[$grossColumn], 'type' => 'money'],
+                    ['label' => 'TOTAL DEDUCTIONS', 'value' => $sums[$deductionsColumn], 'type' => 'charge'],
+                    ['label' => 'NET PAYROLL', 'value' => $sums[$netColumn], 'type' => 'money'],
+                ],
+                'columns' => $columns,
+                'rows' => $rows,
+                'totals' => $totals,
+            ],
+            $this->registerRows($run),
+        );
 
         $this->audit->log(
             'exported',
             'Payroll',
-            'Exported payroll run CSV for ' . $run->cycle_start?->format('Y-m-d') . ' – ' . $run->cycle_end?->format('Y-m-d'),
+            'Exported payroll run workbook for ' . $run->cycle_start?->format('Y-m-d') . ' – ' . $run->cycle_end?->format('Y-m-d'),
             $run,
         );
 
-        return $csv;
+        return [
+            'path' => $path,
+            'name' => 'VITE_SEO_Payroll_Breakdown_' . Str::of($this->periodLabel($run))
+                ->replace(['–', ' '], ['-', '_'])
+                ->replace(',', '')
+                ->toString() . '.xlsx',
+        ];
+    }
+
+    /**
+     * One employee's line on the breakdown sheet.
+     *
+     * BASIC PAY IS THE FULL PERIOD BASIC and the absence is charged back on the deductions side,
+     * which is how the payslip document reads and how a PH payroll register is expected to read.
+     * `base_salary` is stored ALREADY REDUCED, so showing it directly would hide the absence inside
+     * basic pay and leave the deduction columns explaining a charge that is nowhere on the row.
+     *
+     * The identity every row satisfies, and the reason each residual column exists:
+     *
+     *     Σ earnings  = Gross Pay        (Other Earnings absorbs 13th month, adjustments, final pay)
+     *     Σ charges   = Total Deductions (Other Attendance absorbs LWOP-adjacent charge kinds)
+     *     Gross Pay − Total Deductions = Net Pay
+     *
+     * @return list<float|int|string|null>
+     */
+    private function breakdownRow(Payslip $payslip): array
+    {
+        $slip = $payslip->attributesToArray();
+        $f = fn (string $field) => round((float) ($slip[$field] ?? 0), 2);
+
+        // The corrections HR pinned to a printed line, in the shape PayslipDocument measures
+        // against — same source as PayslipResource::lineOverrides().
+        $overrides = [];
+
+        foreach ($payslip->amendments as $amendment) {
+            if ($amendment->target_key === null) {
+                continue;
+            }
+
+            $overrides[$amendment->target_key] = [
+                'amount' => $amendment->override_amount === null ? null : (float) $amendment->override_amount,
+            ];
+        }
+
+        $charges = [];
+
+        foreach (PayslipDocument::deductionRows($slip, $overrides) as $row) {
+            $charges[$row['key']] = (float) $row['amount'];
+        }
+
+        $charge = fn (string $key) => round($charges[$key] ?? 0.0, 2);
+
+        $absence = $f('absence_deduction');
+
+        // The residual, NOT a sum of the leftover kinds: the named five plus LWOP are what the
+        // sheet has columns for, and every attendance charge apportions out of `absence_deduction`.
+        // Taking the difference is what guarantees the row foots even when a kind appears that
+        // nobody has given a column yet (holiday forfeited, outside employment, a tardiness
+        // penalty) — those would otherwise vanish and the row would be short by their amount.
+        $otherAttendance = round($absence - (
+            $charge('absent') + $charge('half_day') + $charge('undertime')
+            + $charge('late') + $charge('suspended_unpaid') + $charge('leave_unpaid')
+        ), 2);
+
+        $gross = round($f('gross') + $absence, 2);
+        $otherEarnings = round($gross - (
+            $f('period_base') + $f('allowances') + $f('overtime_pay') + $f('night_diff_pay')
+            + $f('rest_day_premium') + $f('holiday_premium') + $f('reimbursements')
+        ), 2);
+
+        return [
+            $payslip->employee?->user?->name ?? $payslip->employee?->name ?? '—',
+            $payslip->employee?->department?->name ?? '',
+            $f('period_base'),
+            $f('allowances'),
+            $f('overtime_pay'),
+            $f('night_diff_pay'),
+            $f('rest_day_premium'),
+            $f('holiday_premium'),
+            $f('reimbursements'),
+            $otherEarnings,
+            $gross,
+            $charge('absent'),
+            $charge('half_day'),
+            $charge('undertime'),
+            $charge('late'),
+            $charge('suspended_unpaid'),
+            $charge('leave_unpaid'),
+            $otherAttendance,
+            $f('sss'),
+            $f('philhealth'),
+            $f('pagibig'),
+            $f('withholding_tax'),
+            $f('other_deductions'),
+            round($f('total_deductions') + $absence, 2),
+            $f('net_pay'),
+            Str::headline((string) $payslip->status),
+        ];
+    }
+
+    /** The cycle as a person writes it: "August 1–15, 2026", or spelled out across a boundary. */
+    private function periodLabel(PayrollRun $run): string
+    {
+        $start = $run->cycle_start;
+        $end = $run->cycle_end;
+
+        if ($start === null || $end === null) {
+            return (string) ($start ?? $end)?->format('F j, Y');
+        }
+
+        if ($start->isSameDay($end)) {
+            return $start->format('F j, Y');
+        }
+
+        if ($start->isSameMonth($end)) {
+            return $start->format('F j') . '–' . $end->format('j, Y');
+        }
+
+        if ($start->year === $end->year) {
+            return $start->format('F j') . ' – ' . $end->format('F j, Y');
+        }
+
+        return $start->format('F j, Y') . ' – ' . $end->format('F j, Y');
     }
 
     /**
