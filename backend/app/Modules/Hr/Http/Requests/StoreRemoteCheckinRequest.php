@@ -4,13 +4,7 @@ namespace App\Modules\Hr\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-/**
- * An off-site time-in: a selfie, and whatever position the browser could manage.
- *
- * The photo is required and the location is not, which is the right way round — the photo
- * is what HR actually reviews, while GPS is corroboration that a phone indoors or a
- * permission-denied browser may simply not have.
- */
+/** An off-site time-in: a selfie, and whatever position the browser could manage. */
 class StoreRemoteCheckinRequest extends FormRequest
 {
     public function authorize(): bool

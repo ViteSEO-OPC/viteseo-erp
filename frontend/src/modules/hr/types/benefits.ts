@@ -1,6 +1,6 @@
-// Company → Benefits (Phase-2 Slice 13).
+// Company → Benefits (Phase-2).
 
-/** The rate version actually in force today — what payroll charges (Slice B3a/b). */
+/** The rate version actually in force today — what payroll charges (b). */
 export interface CurrentContributionRates {
   effective_from: string;
   basis: string;
@@ -63,21 +63,8 @@ export const TAX_TREATMENTS = [
   { value: "taxable", label: "Taxable" },
 ] as const;
 
-/**
- * Slice B19 — whether an allowance is remuneration for SSS / Pag-IBIG purposes.
- *
- * A SEPARATE QUESTION FROM TAX, which is why it is not folded into TAX_TREATMENTS above: SSS
- * expressly includes the mandated COLA, which is de-minimis for tax, and a taxable allowance can
- * legitimately sit outside the contribution base. One combined switch would force a wrong answer
- * on one of the two.
- */
-/**
- * Slice B19 — which salary figure a contribution's rate is applied to.
- *
- * Not the same axis as percentage-vs-bracket, which is how the charge is worked out once a figure
- * is chosen. The two were both called "basis" in the schema and keeping them apart in the UI is
- * the point of the separate labels here.
- */
+/** Whether an allowance is remuneration for SSS / Pag-IBIG purposes. */
+/** Which salary figure a contribution's rate is applied to. */
 export const SALARY_BASES = [
   { value: "basic", label: "Basic monthly salary" },
   { value: "earnings", label: "Actual earnings for the period" },
@@ -128,18 +115,18 @@ export interface BenefitProgram {
   // Allowance config.
   frequency: string; // monthly | semi_monthly | annual
   tax_treatment: string; // de_minimis | taxable
-  /** This benefit's OWN statutory ceiling (B16). Null = none recorded ⇒ fully tax-free. */
+  /** This benefit's OWN statutory ceiling. Null = none recorded ⇒ fully tax-free. */
   deminimis_ceiling: string | null;
   /** The period the ceiling is stated in: monthly | semester | annual. */
   ceiling_period: string | null;
   /**
-   * Slice B19 — does this allowance count toward the SSS / Pag-IBIG contribution base? It is paid
+   * Does this allowance count toward the SSS / Pag-IBIG contribution base? It is paid
    * in full either way; this decides only whether it is remuneration for contribution purposes.
    * Independent of `tax_treatment`, and inert until a contribution is moved onto the earnings
    * basis in Company → Benefits.
    */
   contributable: boolean;
-  // Loan-policy config (B15), only meaningful when kind is "loan_policy".
+  // Loan-policy config, only meaningful when kind is "loan_policy".
   loan_max_principal: string | null;
   loan_term_periods: number | null;
   eligibility: string; // all | status | management | custom
@@ -148,7 +135,7 @@ export interface BenefitProgram {
   /** How many employees the rule covers right now — computed, not stored. */
   covered_count: number;
   /**
-   * Of those, how many an edit to `amount` would actually reach (B14). `overridden` are the
+   * Of those, how many an edit to `amount` would actually reach. `overridden` are the
    * people carrying their own amount, who will not move.
    */
   reach: { following: number; overridden: number };
@@ -162,7 +149,7 @@ export interface BenefitProgram {
   employee_ids: number[];
 }
 
-/** One person's enrolment on a company plan (B2). */
+/** One person's enrolment on a company plan. */
 export interface PlanEnrollment {
   employee_id: number;
   name: string;
@@ -190,7 +177,7 @@ export interface PlanEnrollments {
   rejected?: string[];
 }
 
-/** One allowance as it applies to ONE employee (B14) — the employee-profile view. */
+/** One allowance as it applies to ONE employee — the employee-profile view. */
 export interface EmployeeAllowance {
   program_id: number;
   name: string;
@@ -205,7 +192,7 @@ export interface EmployeeAllowance {
   set_at: string | null;
 }
 
-/** Employee "My Benefits" view — their own benefits and what each is worth (B12). */
+/** Employee "My Benefits" view — their own benefits and what each is worth. */
 export interface MyBenefit {
   id: number;
   name: string;

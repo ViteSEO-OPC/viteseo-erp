@@ -22,33 +22,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Two things, both about payroll surviving contact with reality.
- *
- * PART ONE — A BOUNCED TRANSFER AND THE LOAN LEDGER (the `[~]` item under Slice 3).
- *
- * `LoanService::collectForPeriod()` writes the loan ledger at COMPUTE time, so a balance drops the moment
- * payroll is priced rather than when money moves. The audit offered two fixes: derive `paid()` from
- * disbursed payslips only, or reverse on reopen. The second was chosen, with a note to revisit "once
- * FIN-015 adds real payment records". Those records now exist — `hr_payments` with
- * `pending/settled/failed/returned` — so this is the revisit.
- *
- * The chain is THREE SERVICES DEEP: `PaymentService::fail()` → `PayrollService::reopenPayslip()` →
- * `LoanService::reverseForPayslip()`. Each link was tested in isolation and the whole chain was not, which
- * is the shape of bug nobody notices: an employee's loan balance stays reduced by an instalment that came
- * back with the transfer, and no screen disagrees with any other.
- *
- * `test_a_locked_run_leaves_an_outstanding_item_rather_than_silence` is the fix this pass added. The
- * reversal is NOT forced through on a locked run — that would leave the payslip showing a deduction the
- * ledger says was never collected — so it becomes a task in the queue HR already works instead of a line
- * in the audit log nobody reads.
- *
- * PART TWO — CONCURRENCY (Slice 7).
- *
- * Two simultaneous `run()` calls for the same period must produce one run and one payslip per employee.
- * The guard is a real unique index plus `lockForUpdate()`, and the test drives it through the actual
- * database rather than mocking the race — a mocked race proves the mock.
- */
+/** Two things, both about payroll surviving contact with reality. */
 class BouncedPaymentAndConcurrencyTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -76,7 +50,7 @@ class BouncedPaymentAndConcurrencyTest extends HrTestCase
             'employment_status' => 'regular',
             'base_salary' => 40000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
             // `buildForRun()` excludes anyone with no account on file — a bank transfer needs
-            // somewhere to go. These columns are `encrypted` casts (FIN-022); the model handles that.
+            // somewhere to go. These columns are `encrypted` casts; the model handles that.
             'bank_name' => 'BPI',
             'bank_account' => '1234567890',
             'bank_account_name' => 'Test Employee',
@@ -239,16 +213,9 @@ class BouncedPaymentAndConcurrencyTest extends HrTestCase
         $this->assertSame('Bounced', $payment->failure_reason);
     }
 
-    // --- Part two: concurrency (Slice 7) ---------------------------------------------------------
+    // --- Part two: concurrency ---------------------------------------------------------
 
-    /**
-     * TWO SIMULTANEOUS RUNS FOR THE SAME PERIOD → ONE RUN, ONE PAYSLIP EACH.
-     *
-     * Driven through the real database rather than a mocked race: the protection is a unique index on
-     * (cycle_start, cycle_end, frequency) plus `lockForUpdate()`, and mocking the collision would only
-     * prove the mock. Sequential calls exercise exactly the same code path a second request takes — the
-     * second call must find the first run and recompute it in place rather than create a rival.
-     */
+    /** TWO SIMULTANEOUS RUNS FOR THE SAME PERIOD → ONE RUN, ONE PAYSLIP EACH. */
     public function test_running_the_same_period_twice_produces_one_run(): void
     {
         $payroll = app(PayrollService::class);

@@ -29,7 +29,7 @@ const schema = z.object({
   // blocking submit on a field nobody could see.
   end_date: z.string(),
   reason: z.string().min(1, "Reason is required"),
-  // FIN-034 — half a day OF THIS LEAVE TYPE: 0.5 off the balance, paid when the type is paid.
+  // Half a day OF THIS LEAVE TYPE: 0.5 off the balance, paid when the type is paid.
   // Distinct from the separate Half-Day Request, which is always unpaid and touches no balance.
   is_half_day: z.boolean(),
   // UPPERCASE to match the backend — DeductionService compares 'AM'/'PM' with ===.
@@ -182,8 +182,10 @@ export function LeaveRequestForm({
               <p className="text-xs text-destructive">{errors.start_date.message}</p>
             )}
           </div>
-          {/* FIN-034 — a half day is a single day, so End Date is replaced by "which half" rather
-              than left on screen for the user to keep in sync with the start. */}
+          {/*
+           * A half day is a single day, so End Date is replaced by "which half" rather
+           * than left on screen for the user to keep in sync with the start.
+           */}
           {isHalfDay ? (
             <div className="space-y-1.5">
               <Label>Which half are you taking off</Label>
@@ -228,9 +230,11 @@ export function LeaveRequestForm({
           )}
         </div>
 
-        {/* The toggle the spec always asked for (POD 1 Employee View, "Half-day option"). It sits
-            in the leave form because it is a property of the leave, not a separate kind of request:
-            it spends 0.5 of THIS type's balance and is paid whenever the type is paid. */}
+        {/*
+         * The toggle the spec always asked for (POD 1 Employee View, "Half-day option"). It sits
+         * in the leave form because it is a property of the leave, not a separate kind of request:
+         * it spends 0.5 of THIS type's balance and is paid whenever the type is paid.
+         */}
         <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
           <input
             type="checkbox"

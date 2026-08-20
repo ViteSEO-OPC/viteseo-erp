@@ -22,7 +22,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Slice 13a (2026-07-28 audit) — the pay-affecting half of the correctness cleanups.
+ *  (2026-07-28 audit) — the pay-affecting half of the correctness cleanups.
  *
  * Each test names the item it guards. These are individually small but all of them either move
  * money or stop money moving when it shouldn't.

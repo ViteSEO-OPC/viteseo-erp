@@ -16,17 +16,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 13c (2026-07-28 audit) — a period is priced at the salary in force THEN.
- *
- * `hr_salary_histories` recorded every change with an `effective_date`, but payroll read
- * `$employee->base_salary` live. So a raise silently repriced every earlier period on the next
- * re-run, and an old cycle could never be reproduced. Slice 5's lock guards `disbursed`
- * payslips; this guards the `computed` ones and makes the history meaningful.
- *
- * Documented simplification: the salary is resolved as of the CYCLE END, so a raise dated inside
- * a period applies to that whole period. No intra-period split.
- */
+/** (2026-07-28 audit) — a period is priced at the salary in force THEN. */
 class SalaryEffectiveDateTest extends HrTestCase
 {
     use RefreshDatabase;

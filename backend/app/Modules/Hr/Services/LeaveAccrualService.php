@@ -9,29 +9,7 @@ use App\Modules\Hr\Models\LeaveTypeAllotment;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Leave that accrues monthly, carries into the next year and expires (FIN-034 `R` / MF-10).
- *
- * Balances used to be seeded once for the hire year and then hand-edited forever, so every January HR
- * re-entered the entire company or everyone's leave read zero. This is the engine that replaces that.
- *
- * EVERYTHING HERE RECOMPUTES; NOTHING INCREMENTS. `accrue()` works out what the balance SHOULD be for
- * the months elapsed and writes that figure, rather than adding a month's worth each time it runs. A
- * cron that fires twice on the 1st, a manual run after a missed month, an HR officer clicking the
- * button to check — none of them can hand out extra days. This is the same rule the loan ledger and
- * deduction arrears follow, and it is the reason `accrued_days` / `carried_days` are stored separately
- * from the `entitled_days` total everything else reads.
- *
- * IT NEVER REDUCES ENTITLEMENT BELOW WHAT IS ALREADY SPENT. Lowering `days_per_year`, tightening a
- * carry-over cap, or letting carried days expire can all compute a total under `used_days`. Leave that
- * has been taken cannot be un-taken — the employee was already off work — so the floor is `used_days`
- * and the shortfall is simply not clawed back. Allowing a negative remainder would mean a payslip
- * docking someone for a holiday HR approved months earlier.
- *
- * OPT-IN, per leave type. `accrual_mode = 'none'` is the shipped default and means "leave this type
- * exactly as it is": hand-managed, untouched by this service. Nothing in a migration starts moving
- * entitlements on its own.
- */
+/** Leave that accrues monthly, carries into the next year and expires ( `R` /). */
 class LeaveAccrualService
 {
     public function __construct(private readonly AuditService $audit) {}
@@ -66,7 +44,7 @@ class LeaveAccrualService
         }
 
         // Someone who left still needs their part-year accrual settled — final pay converts unused
-        // leave to cash (FIN-014), and it can only convert what the balance says they have.
+        // leave to cash, and it can only convert what the balance says they have.
         $employees = Employee::withTrashed()->get();
         $allotments = $this->allotmentMap();
         $written = 0;
@@ -99,11 +77,6 @@ class LeaveAccrualService
     /**
      * The yearly entitlement this employee accrues toward.
      *
-     * MIRRORS `EmployeeService`'s seeding precedence exactly — the per-employment-status allotment
-     * first, the leave type's own figure as the fallback. Reading only the type would have quietly
-     * given a probationary employee a regular employee's accrual rate, which is the sort of thing that
-     * shows up as an over-entitlement months later with no obvious cause.
-     *
      * @param  array<string, float>  $allotments
      */
     private function annualDaysFor(Employee $employee, LeaveType $type, array $allotments): float
@@ -114,9 +87,6 @@ class LeaveAccrualService
 
     /**
      * One employee, one type, one year. True when the row changed.
-     *
-     * Creates the balance row if it is missing, because "no row" and "zero days" are the same thing
-     * to an accruing type and requiring HR to pre-create rows is the manual step being removed.
      *
      * @param  array<string, float>  $allotments
      */
@@ -183,16 +153,7 @@ class LeaveAccrualService
         });
     }
 
-    /**
-     * How many months of this year the employee accrues for.
-     *
-     * Pro-rating counts from the HIRE MONTH INCLUSIVE — somebody who started on 20 January accrues
-     * for January. Counting only whole months worked would deny a month to almost every hire, and
-     * the half-month arithmetic that would fix that is a policy nobody has specified.
-     *
-     * Separation is treated the same way at the other end: a leaver accrues through their final
-     * month, so their final-pay leave conversion has the credits they earned in it.
-     */
+    /** How many months of this year the employee accrues for. */
     private function accruableMonths(Employee $employee, LeaveType $type, int $year, int $throughMonth): int
     {
         $start = 1;
@@ -315,13 +276,7 @@ class LeaveAccrualService
         return $written;
     }
 
-    /**
-     * Drop carried days whose expiry has passed, and rebuild the totals that depended on them.
-     *
-     * Expiry does NOT reclaim leave already taken — see the class docblock. If the employee spent the
-     * carried days before they lapsed, the entitlement floors at `used_days` and nothing is clawed
-     * back; what expires is the unspent remainder, which is the only part still available to lose.
-     */
+    /** Drop carried days whose expiry has passed, and rebuild the totals that depended on them. */
     public function expireCarriedDays(?string $asOf = null): int
     {
         $on = Carbon::parse($asOf ?? 'now', config('app.timezone_local'))->toDateString();

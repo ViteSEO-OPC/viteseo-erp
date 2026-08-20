@@ -21,12 +21,7 @@ export function useOvertimeRequests() {
   return useQuery({ queryKey: KEY, queryFn: getOvertimeRequests });
 }
 
-/**
- * Auto-mode overtime the caps held back, for the period shown (FIN-039).
- *
- * Read-only and derived, so it is safe to refetch freely. Keyed on the period so switching cycles
- * doesn't show the previous one's rows.
- */
+/** Auto-mode overtime the caps held back, for the period shown. */
 export function useAutoOvertimeReview(start: string, end: string) {
   return useQuery({
     queryKey: ["hr", "overtime-auto-review", start, end] as const,
@@ -83,7 +78,7 @@ export function useApproveOvertimeRequest() {
     mutationFn: (id: number) => approveOvertimeRequest(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
-      // FIN-039 — an approval is what releases held overtime, so the review queue changes too.
+      // An approval is what releases held overtime, so the review queue changes too.
       qc.invalidateQueries({ queryKey: ["hr", "overtime-auto-review"] });
     },
   });

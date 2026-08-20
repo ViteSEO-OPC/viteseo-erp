@@ -4,26 +4,7 @@ namespace App\Modules\Hr\Support;
 
 use Illuminate\Support\Str;
 
-/**
- * THE EDITABLE LINES OF A PAYSLIP, and what each one does to the money when it moves.
- *
- * WHY THIS EXISTS. HR can now correct a payslip by editing the line that is wrong — "Late ₱500"
- * becomes "₱300" on the document itself — instead of appending a correction underneath it. That
- * turns every printed line into something three separate places have to agree about: the resource
- * that serialises it, the service that applies the override, and the request that validates the key
- * coming back. Three hand-maintained lists would disagree the first time a run type gained a line,
- * which is exactly how the adjustment and final-pay earnings shipped invisible on both documents.
- *
- * WHAT A CLASS IS FOR. The old correction dialog asked HR to choose "extra pay / pay reversed /
- * deduction", which is a question about TAX wearing the clothes of a question about direction — and
- * one HR was being asked to answer for a line that already knows. Overtime is taxable compensation;
- * a missed HMO share is not compensation at all. So the class travels with the line, and cutting an
- * overtime line refunds the tax withheld on it without anyone being asked.
- *
- * WHAT IS DELIBERATELY ABSENT: gross, total deductions, and net pay. They are sums of the lines
- * above them, and a payslip whose parts do not foot to its total is the one error a payslip cannot
- * make. Every figure here is a LEAF — edit it and the totals move by themselves.
- */
+/** THE EDITABLE LINES OF A PAYSLIP, and what each one does to the money when it moves. */
 final class PayslipLines
 {
     /**
@@ -36,16 +17,7 @@ final class PayslipLines
     /** Money paid that was never compensation — a reimbursement, an allowance under its ceiling. */
     public const UNTAXED_EARNING = 'untaxed_earning';
 
-    /**
-     * A charge that reduced pay: an absence, lateness, undertime, an unpaid suspension.
-     *
-     * The mirror image of a taxable earning — raising the charge lowers the pay it came off, and
-     * lowers the tax with it. It is its own class rather than "negative earnings" because it is
-     * PRINTED on the deductions side while it is SUBTRACTED from the compensation side, and the
-     * document's identity only closes if both halves move together (see PayslipResource::
-     * documentTotals — `compensation` leads with the full period basic precisely so the charge can
-     * reappear below it and cancel).
-     */
+    /** A charge that reduced pay: an absence, lateness, undertime, an unpaid suspension. */
     public const ATTENDANCE_CHARGE = 'attendance_charge';
 
     /**
@@ -64,12 +36,6 @@ final class PayslipLines
 
     /**
      * The fixed lines, in the shape every caller needs them.
-     *
-     *   column     — the payslip column the figure is READ from and the delta written to.
-     *   class      — what moves when it moves, above.
-     *   carryover  — the obligation key a shortfall is recorded under when the payslip cannot
-     *                cover an increased deduction (FIN-005/FIN-053). Null for anything that
-     *                cannot go short, which is everything on the earnings side.
      *
      * @var array<string, array{label: string, class: string, column: string, carryover?: string}>
      */
@@ -113,14 +79,7 @@ final class PayslipLines
         'withholding_tax' => ['label' => 'Withholding Tax', 'class' => self::TAX, 'column' => 'withholding_tax', 'carryover' => 'withholding_tax'],
     ];
 
-    /**
-     * The two prefixes whose lines are named at RUN TIME rather than here.
-     *
-     * An allowance is whatever the employee's package calls it ("Transport Allowance"); an
-     * `other:` line is a benefit share, a loan repayment or a correction already on the payslip.
-     * Neither can be enumerated in advance, so the key carries a slug of the name and the payslip's
-     * own breakdown is what it is matched against — see keyForName().
-     */
+    /** The two prefixes whose lines are named at RUN TIME rather than here. */
     public const ALLOWANCE_PREFIX = 'allowance:';
 
     public const OTHER_PREFIX = 'other:';
@@ -131,13 +90,7 @@ final class PayslipLines
         return array_keys(self::LINES);
     }
 
-    /**
-     * Is this a key this system will accept an override for?
-     *
-     * Deliberately permissive about the two dynamic prefixes: whether a payslip actually HAS an
-     * allowance called "transport-allowance" is a question about that payslip, answered where the
-     * override is applied. This answers only whether the key is well formed.
-     */
+    /** Is this a key this system will accept an override for? */
     public static function exists(string $key): bool
     {
         return isset(self::LINES[$key]) || self::isDynamic($key);
@@ -155,14 +108,7 @@ final class PayslipLines
         return false;
     }
 
-    /**
-     * What moves when this line moves.
-     *
-     * `$separationTaxable` is the one line whose class is a property of the PAYSLIP rather than of
-     * the line: separation pay is tax-exempt when employment ended for a cause the law exempts and
-     * compensation when it did not, and the payslip already stores which. Passing it in keeps the
-     * distinction where it is recorded instead of duplicating the rule here.
-     */
+    /** What moves when this line moves. */
     public static function classFor(string $key, bool $separationTaxable = false): ?string
     {
         if ($key === 'separation_pay') {
@@ -195,13 +141,7 @@ final class PayslipLines
         return self::LINES[$key]['label'] ?? null;
     }
 
-    /**
-     * Which obligation a shortfall on this line is recorded under when pay cannot cover it.
-     *
-     * The same five keys `deductionArrearsFor()` already recovers against, so an increased
-     * deduction the payslip could not take is chased by the machinery that exists rather than
-     * being written off — see applyAmendmentDeductionTo() for the same rule stated the other way.
-     */
+    /** Which obligation a shortfall on this line is recorded under when pay cannot cover it. */
     public static function carryoverKeyFor(string $key): ?string
     {
         if (str_starts_with($key, self::OTHER_PREFIX)) {
@@ -221,14 +161,7 @@ final class PayslipLines
         );
     }
 
-    /**
-     * The key for a line the payslip named itself.
-     *
-     * Slugged from the name because that is the only stable handle a benefit share or a loan
-     * repayment has — neither carries an id onto the payslip, and the breakdown is a plain list of
-     * `{name, amount}`. Renaming the benefit therefore orphans the override, which is the honest
-     * outcome: the line HR corrected is not the line now printed.
-     */
+    /** The key for a line the payslip named itself. */
     public static function keyForName(string $prefix, string $name): string
     {
         return $prefix . Str::slug($name);

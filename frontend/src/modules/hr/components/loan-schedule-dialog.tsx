@@ -44,21 +44,7 @@ interface Schedule {
   };
 }
 
-/**
- * A loan's projected repayment schedule (FIN-032).
- *
- * THIS IS THE ART. 113 DOCUMENT. The employee is consenting to a deduction from their own wages, and
- * consent to something they cannot see the shape of is not meaningful consent. The rate alone does not
- * tell them what it costs; the schedule does. So this is open to the loan's owner, not just HR.
- *
- * IT ALSO MAKES "DIMINISHING BALANCE" VISIBLE rather than a claim. The interest column falls every
- * period while the principal column stays flat, because interest is charged on what is still owed. That
- * shape is the entire argument for this method over flat interest, where the total would be roughly
- * three times larger and identical every period.
- *
- * A PROJECTION, NOT A LEDGER, and it says so. It assumes every instalment is collected in full; a short
- * payday collects interest first and less principal, so the real schedule runs longer.
- */
+/** A loan's projected repayment schedule. */
 export function LoanScheduleDialog({
   loanId,
   open,

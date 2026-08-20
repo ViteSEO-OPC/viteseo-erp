@@ -11,17 +11,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 2 (2026-07-28 audit): an unclassified holiday must not be able to kill a payroll run.
- *
- * `hr_holidays.type` is nullable on purpose — the classifier only asserts a type it is 100%
- * sure of and leaves the rest for HR. But holidayPremiumMultiplier() was typed `string`, so
- * one un-typed holiday inside a cycle threw a TypeError and failed the entire run. Verified
- * on live data: 64 of 74 holidays had type = NULL.
- *
- * Two layers now: the pricing helper tolerates null, and the run refuses to start while any
- * home-country holiday in the cycle is unclassified.
- */
+/** (2026-07-28 audit): an unclassified holiday must not be able to kill a payroll run. */
 class UnclassifiedHolidayTest extends HrTestCase
 {
     use RefreshDatabase;

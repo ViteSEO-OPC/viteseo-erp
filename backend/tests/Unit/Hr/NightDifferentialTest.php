@@ -6,7 +6,7 @@ use App\Modules\Hr\Services\AttendanceService;
 use Tests\TestCase;
 
 /**
- * ND-1: which worked minutes fall in the 22:00–06:00 night window. Inputs are minute-of-day on the
+ * Which worked minutes fall in the 22:00–06:00 night window. Inputs are minute-of-day on the
  * work date; `out` exceeds 1440 when the shift crosses midnight. Pure/static — runs everywhere.
  */
 class NightDifferentialTest extends TestCase

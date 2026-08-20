@@ -15,14 +15,11 @@ class ReportController extends Controller
      * Every filter a report may read. One list, because `show()` and `export()` must accept the
      * same set — a filter honoured on screen and dropped on export produces a file that quietly
      * disagrees with the table it was downloaded from.
-     *
-     * FIN-041 paginates the audit report; FIN-042/FIN-017 add `run` (which register to show) and
-     * `frequency` (the pay group); `month` scopes the attendance reports.
      */
     private const FILTERS = [
         'action', 'from', 'to', 'department', 'months', 'page', 'per_page',
         'run', 'frequency', 'month',
-        // FIN-055 — the tax reconciliation is scoped to a whole tax year, not a date range.
+        // The tax reconciliation is scoped to a whole tax year, not a date range.
         'year',
     ];
 
@@ -31,7 +28,7 @@ class ReportController extends Controller
     // GET /api/v1/hr/reports/{key} — one analytics report (HR only).
     public function show(Request $request, string $key): JsonResponse
     {
-        // FIN-041 — `page`/`per_page` let the audit report page instead of silently truncating.
+        // `page`/`per_page` let the audit report page instead of silently truncating.
         $report = $this->service->get(
             $key,
             $request->only(self::FILTERS),

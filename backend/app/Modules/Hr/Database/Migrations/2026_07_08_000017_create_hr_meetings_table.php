@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 21. A meeting HR schedules from a concern. For a NAMED concern the
+// Phase-2. A meeting HR schedules from a concern. For a NAMED concern the
 // meeting carries employee_id (set directly with that person). For an ANONYMOUS
 // concern employee_id stays NULL — the invite is attached to the concern's
 // reference_no, and the submitter finds it via their own concern (concern_id →

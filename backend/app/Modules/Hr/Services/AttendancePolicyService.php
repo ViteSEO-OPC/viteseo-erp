@@ -6,18 +6,8 @@ use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\AttendancePolicyVersion;
 
 /**
- * The single attendance-policy row (Company → Rules). Slice 16's violation engine
+ * The single attendance-policy row (Company → Rules). 's violation engine
  * reads these thresholds; the task-format rule governs the time-in task checklist.
- *
- * TWO WAYS TO READ IT, and the distinction is what stops payroll drifting:
- *
- *   get()          the rules as they stand NOW. Everything live wants this — clock-in gating,
- *                  the geofence, violation flags, the overtime approval rate.
- *   asOf($date)    the rules as they stood on $date. PAYROLL ONLY, always the cycle end, so
- *                  re-running an old cycle cannot reprice it with today's divisor.
- *
- * Anything that answers "what happens if I clock in right now?" must stay on get(). Anything
- * that answers "what was this period worth?" must use asOf().
  */
 class AttendancePolicyService
 {
@@ -62,7 +52,7 @@ class AttendancePolicyService
         'office_ips' => null,
         'overtime_mode' => 'approved_only',
         'overtime_threshold_minutes' => 0,
-        'auto_overtime_daily_cap_minutes' => 0, // uncapped — FIN-039
+        'auto_overtime_daily_cap_minutes' => 0, // uncapped
         'auto_overtime_period_cap_minutes' => 0,
         // Item 7 — flags a day for review without withholding a peso of it. Non-zero by default
         // precisely BECAUSE the caps above are 0: something has to notice a runaway overrun on a
@@ -85,7 +75,7 @@ class AttendancePolicyService
         'daily_rate_basis' => 'period_workdays',
         'annual_divisor' => 261,
         'hours_per_day_divisor' => 8,
-        // Slice 9 — how far over the SCHEDULE's own allowance each may run before it is
+        // How far over the SCHEDULE's own allowance each may run before it is
         // flagged. The allowances themselves live on the work schedule; lunch and break are
         // judged separately so a short lunch can't bankroll a long break. 0 = no tolerance.
         'lunch_grace_minutes' => 15,
@@ -95,14 +85,10 @@ class AttendancePolicyService
     ];
 
     /**
-     * The violation colour ladder (step 3c / finding P1-5). These values are TODAY'S
+     * The violation colour ladder (step 3c /). These values are TODAY'S
      * hard-coded literals from ViolationService::recompute() (:167-168, :183, :186, :196),
      * lifted into data so HR can change them — seeding them here keeps the engine's
      * behaviour identical until ViolationService is taught to read this column.
-     *
-     * Evaluated TOP-DOWN, first match wins (so list most-severe first). An empty list for
-     * a category means "never flag it". Severity names must stay green|yellow|orange|red —
-     * Violation::SEVERITY_RANK and the UI badges depend on them.
      *
      * @var array<string, array<int, array<string, mixed>>>
      */
@@ -129,7 +115,7 @@ class AttendancePolicyService
             ['occurrence_min' => 2, 'severity' => 'yellow'],
             ['occurrence_min' => 1, 'severity' => 'green'],
         ],
-        // Slice 9 — days this month where lunch OR break ran past its own schedule allowance
+        // Days this month where lunch OR break ran past its own schedule allowance
         // by more than its grace. Flag only: an over-long break NEVER costs pay.
         'long_break' => [
             ['occurrence_min' => 4, 'severity' => 'red'],
@@ -140,7 +126,7 @@ class AttendancePolicyService
     ];
 
     /**
-     * Per-request memo (Slice 15). This single row is read by every pricing path, once per
+     * Per-request memo. This single row is read by every pricing path, once per
      * employee per payroll run. update() clears it.
      */
     private ?AttendancePolicy $memo = null;
@@ -152,17 +138,6 @@ class AttendancePolicyService
 
     /**
      * The rules in force on $date — the latest version dated on or before it.
-     *
-     * Payroll passes the CYCLE END, matching salariesAsOf() (13c), the contribution versions
-     * (B3a) and allowance pricing (B11): one resolution date for the whole period, so a cycle
-     * is never priced under two different rulebooks. A change dated inside the open cycle
-     * therefore prices the WHOLE cycle, which is the same promise allowances make.
-     *
-     * Null $date means "now" and returns the live singleton, so a caller that has no cycle in
-     * hand (every screen, every clock-in) is unaffected by any of this.
-     *
-     * The returned model is READ-ONLY in practice: it is rehydrated from the stored payload and
-     * is not the singleton, so saving it would not write the policy back. Nothing does.
      *
      * @param  ?string  $date  Manila calendar date (Y-m-d)
      */
@@ -205,7 +180,7 @@ class AttendancePolicyService
 
     /**
      * Per-request memo, keyed by date. A payroll run resolves one date for every employee, so
-     * this is the same saving `get()`'s memo makes — see Slice 15.
+     * this is the same saving `get()`'s memo makes — see.
      *
      * @var array<string, AttendancePolicy>
      */
@@ -215,10 +190,6 @@ class AttendancePolicyService
      * The violation colour ladder, with a null column meaning "today's behaviour".
      * ViolationService should read the ladder through HERE, never off the column, so a
      * policy row predating the feature can never yield an empty ladder (= no flags at all).
-     *
-     * A stored ladder takes priority per CATEGORY, with defaults filling any category it
-     * doesn't mention — so adding a category (Slice 9's `long_break`) works immediately
-     * instead of being silently absent for every org that has ever saved this page.
      *
      * @return array<string, array<int, array<string, mixed>>>
      */
@@ -274,21 +245,6 @@ class AttendancePolicyService
 
     /**
      * Write the dated version an old payroll run will resolve against.
-     *
-     * DEFAULTS TO TODAY, not to the open cycle: rules HR types now are the rules from now, and
-     * back-dating silently would rewrite payslips that have already been computed. HR passes a
-     * date deliberately when correcting a cycle that has already been run — which is the one
-     * workflow versioning would otherwise break, since a fix saved after the cycle ended could
-     * never reach it.
-     *
-     * SAVING TWICE ON ONE DATE UPDATES that version rather than failing on the unique index.
-     * That is the common case twice over here: the Rules page saves one card at a time, so an
-     * HR officer working through three cards on a Tuesday writes Tuesday's version three times,
-     * each carrying the full policy as it stands after that save.
-     *
-     * THE WHOLE ROW IS DATED, so back-dating reaches every rule currently saved, not only the
-     * card being saved. That is inherent to versioning the row rather than the field, and the
-     * Rules page says so next to the date.
      *
      * @return string the date the version was written for, for the audit line
      */

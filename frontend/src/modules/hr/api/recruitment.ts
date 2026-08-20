@@ -127,9 +127,6 @@ export interface CandidateEmailInput {
 /**
  * Send the composed email. Always multipart, even with no files: a mixed JSON/multipart
  * pair of code paths is one more thing to keep in step for no gain.
- *
- * Returns the updated candidate as well as the log row — the board reads `emails_sent`
- * off the candidate to decide what the card shows next.
  */
 export async function sendCandidateEmail(
   id: number,

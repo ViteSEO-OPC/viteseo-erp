@@ -10,9 +10,9 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 /**
- * Slice A (2026-07-27): payslipFor() must price a day through the policy's daily-rate basis,
+ *  (2026-07-27): payslipFor() must price a day through the policy's daily-rate basis,
  * not always period-workdays. The headline guards are:
- *   - default `period_workdays` reproduces the pre-Slice-A number (no-op for existing orgs),
+ *   - default `period_workdays` reproduces the number (no-op for existing orgs),
  *   - `fixed_divisor` actually changes the daily rate (the gap this slice closes),
  *   - a FULL-attendance period pays exactly perPeriodBase under EITHER basis (base pay is
  *     untouched — the basis only re-prices absences/late), and

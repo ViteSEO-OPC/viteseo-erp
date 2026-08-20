@@ -12,17 +12,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice 10 (2026-07-28 audit) — premium pay is taxable compensation.
- *
- * Withholding was computed on base pay alone. Holiday premium, overtime, the night differential
- * and rest-day premium all reached GROSS but none reached the tax base — harmless while every
- * one of them was always ₱0, an understatement now that they actually pay (live data already had
- * ₱3,141.67 of rest-day premium and ₱61.22 of night differential).
- *
- * Allowances are separate: de-minimis pay is tax-free only up to a ceiling HR sets. Null ceiling
- * = the old behaviour, so that half ships switched off.
- */
+/** (2026-07-28 audit) — premium pay is taxable compensation. */
 class PremiumPayTaxTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -117,8 +107,8 @@ class PremiumPayTaxTest extends HrTestCase
 
     private function withAllowances(float $monthly, float $cap, ?float $ceiling = null): array
     {
-        // Slice B1 — allowances are read from Company → Benefits, not the employee's columns.
-        // Slice B16 — `$ceiling` is this BENEFIT's own de-minimis limit; `$cap` is the separate
+        // Allowances are read from Company → Benefits, not the employee's columns.
+        // `$ceiling` is this BENEFIT's own de-minimis limit; `$cap` is the separate
         // ₱90,000 exemption for 13th month pay and other benefits, which the excess joins.
         $this->employee->benefitPrograms()->detach();
         if ($monthly > 0) {

@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 16. Color-coded attendance violations derived from hr_attendance
+// Phase-2. Color-coded attendance violations derived from hr_attendance
 // + the employee's schedule + the attendance policy. Regenerated idempotently by
 // ViolationService::recompute() — one row per (employee, type, work_date); a row
 // HR has marked resolved is preserved across recomputes.

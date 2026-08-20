@@ -28,54 +28,13 @@ const DEDUCTION_LABELS: Record<PayslipDeductionKey, string> = {
 /**
  * The payslip, as a document. One component for all three audiences: the employee's own page,
  * HR's modal, and (mirrored in `hr::payslip`) the PDF.
- *
- * IT IS PURELY PRESENTATIONAL. No fetching, no mutations, no buttons — the surrounding page
- * owns those. That is what lets the same markup serve a page, a modal and a print target
- * without any of them leaking into the others.
- *
- * THE WALK IT PRINTS (the 2026-08 redesign). The document now moves in four steps rather than
- * settling everything at once, because that is the order the money actually happens in:
- *
- *     earnings − deductions   → Total Current Amount
- *     less contributions & tax → Initial Net Salary
- *     plus allowances          → Total Net
- *
- * Allowances sit BELOW the contributions rather than among the earnings, which is what the
- * separation is for: they are paid on top of a salary that was already taxed, and printing them
- * inside Compensation made them look like part of the base the deductions were taken from.
- *
- * THE MONTH. With HR's timing rules set to `last`, a month's contributions, tax and allowances all
- * land on its final cutoff and no single slip is a picture of the month. That slip therefore
- * carries `month_summary`: the earlier cutoffs restated, totalled, and walked through the same
- * four steps, ending in TOTAL MONTH SALARY. Every figure in it is summed across the month's slips
- * by the API — never inferred from this one, which would be right only under `last`.
- *
- * WHAT IT DELIBERATELY DOES NOT SHOW (trimmed 2026-08-14, Joshua's call). The identity block's
- * government numbers and address, the computation-basis table, and the one-line derivation under
- * each statutory contribution — "2% of ₱10,000.00, the maximum this contribution is charged on" —
- * are all gone. The document states what was earned, what was taken and what was paid; the
- * workings live on the screens that own them.
- *
- * The withholding derivation and the year-end settlement stay, because they are not workings in
- * the same sense: December's tax line can go NEGATIVE and make net pay exceed gross, and nothing
- * else on the page would account for that. So does the disclosure when pay could not cover a
- * deduction, which is a debt the employee still owes.
- *
- * Company details are literals because there is no company-settings table — the same reason
- * the PDF has always hardcoded them.
  */
 
 const COMPANY_NAME = "VITE SEO DIGITAL ADVERTISING OPC";
 const COMPANY_ADDRESS =
   "26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines";
 
-/**
- * The rows the Compensation table shows even at zero, in the order it shows them.
- *
- * A reader checking a payslip is checking a list they already expect. A missing "Overtime" row is
- * indistinguishable from overtime that was worked and silently dropped, so on an ordinary period
- * the skeleton is printed whole and anything else the run paid is appended after it.
- */
+/** The rows the Compensation table shows even at zero, in the order it shows them. */
 const EARNING_SKELETON = ["Basic Pay", "Overtime", "Night Differential", "Rest Day", "Holiday"];
 
 /** Bare grouped amount — no ₱. The document states its currency once, on the net pay bar. */
@@ -125,18 +84,7 @@ function rate(n: number): string | null {
   return n > 0 ? amount(n) : null;
 }
 
-/**
- * TURNING THE DOCUMENT INTO THE FORM.
- *
- * HR corrects a payslip by editing the line that is wrong, on the payslip itself — not by filling
- * in a separate correction box underneath it. So the document IS the editor: every leaf line
- * becomes selectable, and the editor opens directly beneath the line it belongs to.
- *
- * The document owns none of that. It says which line was clicked and renders whatever the caller
- * hands back, because the mutation, the validation and the pending state belong to the screen that
- * has the payslip's id — and because the employee's copy of this component must have no way to
- * reach any of it.
- */
+/** TURNING THE DOCUMENT INTO THE FORM. */
 export interface PayslipEditMode {
   /** The line currently open for correction. */
   selected: string | null;
@@ -149,14 +97,7 @@ export interface PayslipEditMode {
   addDeduction?: ReactNode;
 }
 
-/**
- * WHAT THE ENGINE SAID, on a line HR has since corrected.
- *
- * Struck and muted, immediately before the figure that replaced it. This is the whole reason a
- * correction now lands ON its line instead of as a note under the total: the reader can see both
- * what the payroll engine computed and what a person decided it should be, on the row the question
- * is actually about.
- */
+/** WHAT THE ENGINE SAID, on a line HR has since corrected. */
 function Struck({ children }: { children: ReactNode }) {
   return (
     <span className="mr-1.5 font-normal text-muted-foreground line-through decoration-muted-foreground/70">
@@ -165,13 +106,7 @@ function Struck({ children }: { children: ReactNode }) {
   );
 }
 
-/**
- * The corrections HR has made, keyed by the line each one names.
- *
- * The earnings and deduction rows already carry their own correction, stamped on by the API. The
- * government lines do not — they are printed straight from their columns, in a table of their own —
- * so those are looked up here.
- */
+/** The corrections HR has made, keyed by the line each one names. */
 function correctionsByLine(p: Payslip): Record<string, PayslipAmendment> {
   const out: Record<string, PayslipAmendment> = {};
 
@@ -207,7 +142,7 @@ export function PayslipDocument({
   const employerTotal =
     (p.employer_sss ?? 0) + (p.employer_philhealth ?? 0) + (p.employer_pagibig ?? 0);
   const showEmployer = variant === "hr" && employerTotal > 0;
-  // Slice B7 — snapshotted on the payslip at run time, not read from the profile now: the
+  // Snapshotted on the payslip at run time, not read from the profile now: the
   // override may since have been cleared, and this payslip still charged what it charged.
   const overridden = p.contribution_overrides ?? [];
   // The government lines are printed from their columns rather than from a breakdown, so their
@@ -262,8 +197,10 @@ export function PayslipDocument({
         </div>
         <div className="border-t border-border" />
         <div className="flex flex-wrap gap-8">
-          {/* FIN-011 — the server-resolved label. `frequency` on a final-pay run is
-              "final_pay:<employee id>", an internal key with an id in it. */}
+          {/*
+           * The server-resolved label. `frequency` on a final-pay run is
+           * "final_pay:<employee id>", an internal key with an id in it.
+           */}
           <Meta label="Pay Type">{p.run_type_label || payFrequencyLabel(p.frequency)}</Meta>
           <Meta label="Pay Period">
             {longDate(p.cycle_start)} – {longDate(p.cycle_end)}
@@ -278,13 +215,10 @@ export function PayslipDocument({
           <Info label="Job Role" value={p.employee.job_title} />
         </div>
         <div className="border-t border-border" />
-        {/* The three rates the deduction arithmetic below is quoted in. Per-hour follows the run's
-            own hours-per-day divisor, so it reconciles with the late/undertime charge.
-
-            EM DASHES, NOT ZEROES, when there is no daily rate. Management staff are not paid by
-            the day and their payslips carry `daily_rate` 0 — printing "Per Day 0.00" on one states
-            that a day of their time is worth nothing, rather than that the figure does not apply
-            to them. Payslips predating the attendance columns are in the same position. */}
+        {/*
+         * The three rates the deduction arithmetic below is quoted in. Per-hour follows the run's
+         * own hours-per-day divisor, so it reconciles with the late/undertime charge.
+         */}
         <div className="grid grid-cols-3 gap-6">
           <Info label="Per Day" value={rate(p.rates.daily)} mono />
           <Info label="Per Hour" value={rate(p.rates.hourly)} mono />
@@ -309,9 +243,11 @@ export function PayslipDocument({
             </Fragment>
           ))}
           {edit?.addEarning}
-          {/* The total is NOT selectable, here or anywhere. It is the sum of the lines above it,
-              and a payslip whose parts do not add up to its own total is the one error a payslip
-              cannot make — so there is no control that could produce one. */}
+          {/*
+           * The total is NOT selectable, here or anywhere. It is the sum of the lines above it,
+           * and a payslip whose parts do not add up to its own total is the one error a payslip
+           * cannot make — so there is no control that could produce one.
+           */}
           <Row label="Total Compensation" value={amount(t.earnings)} total />
         </Table>
 
@@ -332,10 +268,12 @@ export function PayslipDocument({
         {month && <SalarySummary summary={month} />}
 
         <Table heading="Government Benefits & Tax">
-          {/* Each statutory line carries the employer's counterpart directly beneath it.
-              Beside the employee's own figure it means something — ₱875 of their pay went to
-              SSS and the company put ₱1,765 in alongside it — which is why it lives here
-              rather than in a detached block of its own. Never in the total. */}
+          {/*
+           * Each statutory line carries the employer's counterpart directly beneath it.
+           * Beside the employee's own figure it means something — ₱875 of their pay went to
+           * SSS and the company put ₱1,765 in alongside it — which is why it lives here
+           * rather than in a detached block of its own. Never in the total.
+           */}
           {(
             [
               ["sss", "SSS", p.sss, p.employer_sss],
@@ -375,20 +313,26 @@ export function PayslipDocument({
             {...pick("withholding_tax")}
           />
           {editorFor("withholding_tax")}
-          {/* FIN-055 — the least checkable figure on the document: an annualised projection of
-              one period, net of contributions, against a dated bracket table. Four steps, none
-              of them visible, ending in a peso amount the reader was expected to accept. */}
+          {/*
+           * The least checkable figure on the document: an annualised projection of
+           * one period, net of contributions, against a dated bracket table. Four steps, none
+           * of them visible, ending in a peso amount the reader was expected to accept.
+           */}
           <TaxBasisNote basis={p.tax_basis} />
-          {/* FIN-054 — December folds the year's correction into the line above, and on the
-              common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
-              not enough: a lone "refund ₱5,432" is the same opacity moved somewhere else. These
-              are the figures it was computed from, so the employee can add it up — and they are
-              the same ones BIR 2316 will show them. */}
+          {/*
+           * December folds the year's correction into the line above, and on the
+           * common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
+           * not enough: a lone "refund ₱5,432" is the same opacity moved somewhere else. These
+           * are the figures it was computed from, so the employee can add it up — and they are
+           * the same ones BIR 2316 will show them.
+           */}
           <TaxSettlement basis={p.tax_annualisation_basis} amount={amount} />
-          {/* When the month's contributions did not all land here, BOTH figures are printed: the
-              rows above sum to the first, and the second is what the walk below continues from.
-              One row labelled "monthly" sitting under rows that do not add up to it would be the
-              one error a payslip cannot make. */}
+          {/*
+           * When the month's contributions did not all land here, BOTH figures are printed: the
+           * rows above sum to the first, and the second is what the walk below continues from.
+           * One row labelled "monthly" sitting under rows that do not add up to it would be the
+           * one error a payslip cannot make.
+           */}
           {month && differs(month.government, t.government) && (
             <Row label="Total Benefits (This Cut-Off)" value={amount(t.government)} total />
           )}
@@ -428,10 +372,10 @@ export function PayslipDocument({
         </Table>
 
         {/*
-          Disclosure, not a term in the total (FIN-053). The figures above are what was actually
-          collected, so this is no longer credited back — it is shown because the employee is
-          entitled to know a deduction they owe went unpaid, and which one.
-        */}
+         * Disclosure, not a term in the total. The figures above are what was actually
+         * collected, so this is no longer credited back — it is shown because the employee is
+         * entitled to know a deduction they owe went unpaid, and which one.
+         */}
         {t.uncollected > 0 && (
           <div className="flex items-center justify-between gap-4 rounded-lg border border-warning bg-warning-subtle px-4 py-3">
             <div>
@@ -458,24 +402,21 @@ export function PayslipDocument({
         )}
 
         <NetBar label={netLabel} value={amount(p.net_pay)} />
-        {/* The month total sits BELOW this cutoff's net, not instead of it: the employee is owed
-            both answers — what lands in their account now, and what the month came to. */}
+        {/*
+         * The month total sits BELOW this cutoff's net, not instead of it: the employee is owed
+         * both answers — what lands in their account now, and what the month came to.
+         */}
         {month && <NetBar label="Total Month Salary" value={amount(month.total_month)} />}
 
-        {/*
-          WHAT WAS ACTUALLY TRANSFERRED, when the net above is no longer that figure.
-
-          Silent on an ordinary payslip, where the net IS what was paid. It appears when a
-          correction landed after payment: the bar above then states an amount larger than the one
-          in the employee's account, and without this the document would be quietly wrong about the
-          only fact the reader can verify against their bank.
-        */}
+        {/* WHAT WAS ACTUALLY TRANSFERRED, when the net above is no longer that figure. */}
         <SettlementNote payslip={p} />
 
 
-        {/* HR keeps ONE extra thing the employee has no use for: the employer TOTAL, which is
-            what gets filed. The three components are already inline above for both audiences,
-            so a standalone "Employer Share (for remittance)" table would repeat them. */}
+        {/*
+         * HR keeps ONE extra thing the employee has no use for: the employer TOTAL, which is
+         * what gets filed. The three components are already inline above for both audiences,
+         * so a standalone "Employer Share (for remittance)" table would repeat them.
+         */}
         {showEmployer && (
           <p className="px-1 text-caption text-muted-foreground">
             Total employer share for remittance:{" "}
@@ -486,18 +427,13 @@ export function PayslipDocument({
         )}
       </div>
 
-      {/*
-        SUPPORTING DETAIL — the one thing left that is a warning rather than a figure.
-
-        The computation-basis table and the per-contribution derivations that used to sit here were
-        removed on 2026-08-14 at Joshua's request: the document states what was paid and taken, and
-        the workings belong on the screens that own them. What survives is not a derivation — it is
-        a statement that a figure above cannot be filed as it stands.
-      */}
+      {/* SUPPORTING DETAIL — the one thing left that is a warning rather than a figure. */}
       <div className="flex flex-col gap-6">
-        {/* Slice B7 — an override replaces the EMPLOYEE half only, so the pair above belongs to
-            no single salary bracket and cannot be filed as it stands. HR-only: the employee
-            cannot act on it, and it must not appear on the copy they receive. */}
+        {/*
+         * An override replaces the EMPLOYEE half only, so the pair above belongs to
+         * no single salary bracket and cannot be filed as it stands. HR-only: the employee
+         * cannot act on it, and it must not appear on the copy they receive.
+         */}
         {variant === "hr" && overridden.length > 0 && (
           <div className="rounded-lg border border-warning bg-warning-subtle px-4 py-3">
             <p className="text-sm font-semibold">
@@ -531,14 +467,7 @@ export function PayslipDocument({
   );
 }
 
-/**
- * The Compensation table's rows: the ordinary period's skeleton, then whatever else this run paid.
- *
- * Only an ordinary period HAS a skeleton. A 13th-month, adjustment or final-pay run has no basic
- * pay and no overtime, and printing five zero rows above the one line that carries the money would
- * describe the slip as an ordinary period that paid nothing — which is the exact defect FIN-011
- * fixed by introducing `earnings_breakdown` in the first place.
- */
+/** The Compensation table's rows: the ordinary period's skeleton, then whatever else this run paid. */
 function earningRows(p: Payslip): PayslipLine[] {
   const earnings = p.earnings_breakdown.filter((line) => line.kind !== "allowance");
 
@@ -565,13 +494,7 @@ function deductionRows(p: Payslip): PayslipDeductionRow[] {
   return p.run_type === "regular" ? rows : rows.filter((row) => row.amount !== 0);
 }
 
-/**
- * One reason the period was charged for, with the dates behind it.
- *
- * The count badge and the date line are the whole point of the row: "Absences 1,316.00" is a
- * figure the reader has to take on trust, and "Absences ②, Aug 5, Aug 10" is one they can check
- * against their own memory of the month.
- */
+/** One reason the period was charged for, with the dates behind it. */
 function DeductionRow({
   row,
   onSelect,
@@ -625,8 +548,10 @@ function DeductionRow({
           )}
         >
           <span>{describeDates(row)}</span>
-          {/* The minute total belongs beside the dates, not on the money row — it is what the
-              dates add up to, and the money row already carries what the minutes cost. */}
+          {/*
+           * The minute total belongs beside the dates, not on the money row — it is what the
+           * dates add up to, and the money row already carries what the minutes cost.
+           */}
           {isTime && (row.minutes ?? 0) > 0 && (
             <span className="shrink-0 font-mono tabular-nums">{row.minutes} min</span>
           )}
@@ -650,14 +575,7 @@ function describeDates(row: PayslipDeductionRow): string {
     .join(isTime ? " · " : ", ");
 }
 
-/**
- * THE MONTH, RESTATED — the table that makes the last cutoff a picture of the whole month.
- *
- * Each earlier cutoff is restated by its TOTAL CURRENT AMOUNT rather than by its net pay. The two
- * are equal only on a cutoff that took no contributions, which is precisely the case this must not
- * silently depend on: under HR's `every` timing the earlier slips take contributions of their own,
- * and adding a net to a pre-contribution subtotal would double-count them out of the month total.
- */
+/** THE MONTH, RESTATED — the table that makes the last cutoff a picture of the whole month. */
 function SalarySummary({ summary }: { summary: PayslipMonthSummary }) {
   return (
     <Table heading="Salary Summary">
@@ -684,9 +602,11 @@ function Table({
 }) {
   return (
     <div className={cn("flex flex-col", className)}>
-      {/* Section titles carry the document's structure, so they sit a shade larger and heavier
-          than the rows beneath them — enough to scan by, not enough to compete with the net-pay
-          bar. Matched to the PDF's headings so the two surfaces read the same. */}
+      {/*
+       * Section titles carry the document's structure, so they sit a shade larger and heavier
+       * than the rows beneath them — enough to scan by, not enough to compete with the net-pay
+       * bar. Matched to the PDF's headings so the two surfaces read the same.
+       */}
       <div className="flex items-center justify-between border-b border-border bg-muted px-4 py-2.5 font-mono text-sm font-extrabold uppercase tracking-wide">
         <span>{heading}</span>
         <span>Amount</span>
@@ -721,19 +641,7 @@ function NetBar({ label, value }: { label: string; value: string }) {
   );
 }
 
-/**
- * What was transferred versus what the payslip now says — printed only when they differ.
- *
- * THE CASE THIS EXISTS FOR. A payslip is paid, and a correction is applied to it afterwards. Its net
- * rises, but the transfer already happened at the old figure; the amount in the employee's account
- * is the one thing on this document they can independently check, and the net bar above no longer
- * matches it. So both figures are stated, each with its date, and the difference is named as a
- * balance rather than left to be inferred from two numbers that disagree.
- *
- * Silent on an unpaid payslip (there is nothing to reconcile yet) and on a paid one that was never
- * corrected, which is nearly all of them — `disbursed_amount` equals `net_pay` there, and a bar
- * repeating the figure above it would be noise on every payslip the company issues.
- */
+/** What was transferred versus what the payslip now says — printed only when they differ. */
 function SettlementNote({ payslip }: { payslip: Payslip }) {
   const paid = payslip.disbursed_amount;
   const outstanding = payslip.amount_outstanding;
@@ -764,19 +672,7 @@ function SettlementNote({ payslip }: { payslip: Payslip }) {
   );
 }
 
-/**
- * THAT THIS DOCUMENT WAS AMENDED, AND WHEN — one sentence, in with the rest of the provenance.
- *
- * WHAT THIS REPLACED. The corrections used to be listed in a block of their own at the foot of the
- * payslip, because that was the only place they existed: the figures above were the engine's, and
- * the block was where a person's disagreement with them lived. Now the disagreement is ON the line
- * it is about, struck through beside the corrected figure, so the block would be the same
- * information said twice — and the second telling is the one that made the reader do arithmetic.
- *
- * The DATE does not survive on the line, though, and a payslip someone has already read once is a
- * document they are entitled to know has changed since. So the fact of it stays, beside the issue
- * date, where a reader looks to find out where a document came from.
- */
+/** THAT THIS DOCUMENT WAS AMENDED, AND WHEN — one sentence, in with the rest of the provenance. */
 function AmendedNote({ amendments }: { amendments: Payslip["amendments"] }) {
   const corrections = (amendments ?? []).filter((a) => a.target_key !== null);
 
@@ -863,17 +759,7 @@ function Row({
   );
 }
 
-/**
- * The year-end tax settlement, shown as its derivation rather than as one figure (FIN-054).
- *
- * Every period withholds by projecting that period across the year, which is only right if every
- * period is identical — they never are. December settles the difference. The result is usually a
- * REFUND, which turns Withholding Tax negative and makes net pay larger than gross; without this
- * block the employee sees both and has nothing to reconcile them against.
- *
- * Renders only on the payslip that closes a year. Payslips written before the figures were stored
- * show nothing rather than a reconstruction, which would change as later runs alter the year.
- */
+/** The year-end tax settlement, shown as its derivation rather than as one figure. */
 function TaxSettlement({
   basis,
   amount,
@@ -942,13 +828,7 @@ function shortDay(iso: string): string {
   });
 }
 
-/**
- * How the withholding figure was reached, in two lines the reader can follow with a calculator.
- *
- * The projection first (what a year of this period would be), then the bracket it landed in.
- * Both are needed: the annual figure alone does not say why the rate is what it is, and the
- * bracket alone does not say what it was applied to.
- */
+/** How the withholding figure was reached, in two lines the reader can follow with a calculator. */
 function TaxBasisNote({ basis }: { basis: Payslip["tax_basis"] }) {
   if (!basis) return null;
 
@@ -972,14 +852,7 @@ function TaxBasisNote({ basis }: { basis: Payslip["tax_basis"] }) {
   );
 }
 
-/**
- * A note ON the row above, not a row of its own — the employer's counterpart contribution.
- *
- * Indented, smaller, italic and muted: four signals at once that this belongs to the line above
- * and is not another deduction. It is never in the government total — that figure is
- * `totals.government`, computed by the API from the employee's own deductions, so there is no path
- * by which this reaches it. The styling says so; the arithmetic enforces it.
- */
+/** A note ON the row above, not a row of its own — the employer's counterpart contribution. */
 function SubRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border px-4 pb-2.5 pl-9 text-caption italic text-muted-foreground">

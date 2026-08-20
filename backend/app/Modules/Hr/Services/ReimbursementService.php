@@ -48,22 +48,7 @@ class ReimbursementService
      * @param  array<string, mixed>  $data
      * @param  array<int, UploadedFile>  $receipts
      */
-    /**
-     * A claim that looks like one already on file (FIN-032).
-     *
-     * WHAT IT CATCHES. Nothing stopped the same receipt being filed twice: no unique index, no
-     * check on (employee, date, amount, category). Both copies could be approved and both folded
-     * into the same payslip, paying the expense twice — and a duplicate is indistinguishable from a
-     * genuine second claim after the fact, so it is not recoverable by inspection later.
-     *
-     * WARNED, NOT BLOCKED, and that is the whole design. Two ₱180 taxi rides on the same day in the
-     * same category is an ordinary Tuesday. Refusing it outright would be wrong often enough that
-     * people would learn to work around it — by nudging the amount, which destroys the very signal
-     * this uses. So a match is surfaced and the submitter confirms.
-     *
-     * Cancelled and rejected claims are excluded: re-filing something that was turned down is the
-     * correct response to being turned down.
-     */
+    /** A claim that looks like one already on file. */
     public function nearDuplicateOf(Employee $employee, array $data, ?int $ignoreId = null): ?Reimbursement
     {
         return Reimbursement::where('employee_id', $employee->id)
@@ -78,7 +63,7 @@ class ReimbursementService
 
     public function create(Employee $employee, array $data, array $receipts = []): Reimbursement
     {
-        // FIN-032 — refuse a look-alike unless the submitter says it is genuinely separate.
+        // Refuse a look-alike unless the submitter says it is genuinely separate.
         if (! ($data['acknowledge_duplicate'] ?? false)) {
             $existing = $this->nearDuplicateOf($employee, $data);
 
@@ -156,7 +141,7 @@ class ReimbursementService
     public function markPaid(Reimbursement $claim, User $reviewer): Reimbursement
     {
         // pending → approved → (scheduled) → paid. `scheduled` means payroll has folded the
-        // claim into a payslip that hasn't been disbursed yet (Slice 12); HR can still settle it
+        // claim into a payslip that hasn't been disbursed yet; HR can still settle it
         // by hand — e.g. paid in cash before the payslip goes out.
         $this->assertStatus($claim, ['approved', 'scheduled'], 'mark as paid');
 
@@ -173,14 +158,7 @@ class ReimbursementService
         return $claim;
     }
 
-    /**
-     * Undo the last mark, one step back: paid → approved, approved/rejected → pending.
-     *
-     * A `scheduled` claim is refused outright — payroll has folded it into a payslip that
-     * hasn't gone out yet, so the run is the thing to change, not the claim. A `paid` claim
-     * that payroll settled is refused while that payslip stands (reverse the payslip first);
-     * one HR marked paid by hand has no payslip behind it and reverses freely.
-     */
+    /** Undo the last mark, one step back: paid → approved, approved/rejected → pending. */
     public function reopen(Reimbursement $claim, ?string $reason = null): Reimbursement
     {
         $this->assertStatus($claim, ['approved', 'rejected', 'paid'], 'undo');

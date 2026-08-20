@@ -17,22 +17,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-009 — decisions made after the period they affect was already paid.
- *
- * Leave, overtime, half-day and early-out were freeze-guarded only in `reopen()`. Approving a
- * back-dated request, or cancelling an approved one, over a settled cutoff changed what that
- * period should have paid — and payroll never heard about it.
- *
- * BLOCKING WAS THE WRONG FIX. The overtime was worked; refusing the approval leaves the attendance
- * record wrong as well as the pay. `OvertimeRequestService::cancel()` already acknowledged this in
- * its docblock — "HR settles the difference manually" — and the real gap was that "manually" had
- * no record, no queue and no reconciliation.
- *
- * So the decision goes through and the difference is tracked, to be settled by an adjustment run
- * (FIN-010) or, for an overpayment, by a person — recovering paid wages needs consent under
- * Art. 113, so it is never netted off a future payslip automatically.
- */
+/** Decisions made after the period they affect was already paid. */
 class RetroApprovalFlagTest extends HrTestCase
 {
     use RefreshDatabase;

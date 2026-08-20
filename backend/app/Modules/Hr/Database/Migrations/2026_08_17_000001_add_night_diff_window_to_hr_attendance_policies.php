@@ -5,14 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Make the night-differential band part of the dated attendance policy.
- *
- * Existing companies and historical versions retain the previous statutory 22:00–06:00
- * behaviour. Backfilling every JSON payload matters: payroll rehydrates the version in force at
- * the cycle end, so leaving old payloads without these keys would make a historical rerun depend
- * on today's fallback instead of the rulebook it actually used.
- */
+/** Make the night-differential band part of the dated attendance policy. */
 return new class extends Migration
 {
     public function up(): void

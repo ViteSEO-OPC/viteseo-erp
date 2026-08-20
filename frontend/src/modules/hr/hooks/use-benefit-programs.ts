@@ -73,7 +73,7 @@ export function useMyBenefits() {
   return useQuery({ queryKey: MY_KEY, queryFn: getMyBenefits });
 }
 
-// ---- Company-plan enrolment (Slice B2) ----
+// ---- Company-plan enrolment ----
 
 const planEnrollmentsKey = (programId: number) =>
   ["hr", "benefit-programs", programId, "enrollments"] as const;
@@ -116,7 +116,7 @@ export function useEndPlanEnrollment(programId: number) {
   });
 }
 
-// ---- One employee's own allowance amounts (Slice B14) ----
+// ---- One employee's own allowance amounts ----
 
 const employeeAllowancesKey = (employeeId: number) =>
   ["hr", "employees", employeeId, "allowances"] as const;

@@ -70,10 +70,6 @@ class OfficeExpenseService
     /**
      * Move an expense to the status the form asked for, if it asked for one.
      *
-     * Everything goes through the existing transition methods rather than writing the column,
-     * so a status set from a form is indistinguishable from one set by the action buttons:
-     * same reviewer, same timestamp, same audit verb, same "already reviewed" guard.
-     *
      * @param  array<string, mixed>  $data
      */
     private function applyRequestedStatus(OfficeExpense $expense, array $data): void

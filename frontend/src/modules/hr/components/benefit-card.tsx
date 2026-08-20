@@ -5,17 +5,7 @@ import { formatPeso } from "@/core/lib/format";
 import type { MyBenefit } from "@/modules/hr/types/benefits";
 import { benefitVisual, isEnrolledStatus } from "@/modules/hr/lib/benefit-visuals";
 
-/**
- * The employee-facing benefit card (My Benefits page).
- *
- * SLICE B12 — IT NOW SAYS WHAT THE BENEFIT IS WORTH. It used to render a name, an icon, a badge
- * and three HR-authored fields that are empty on every programme, so an employee's only benefits
- * screen told them less than their payslip did.
- *
- * THEIR FIGURE, NOT THE COMPANY'S. Where someone has their own allowance amount (B14), this shows
- * what they are paid and never what the standard is — that comparison is a conversation with HR,
- * not something a self-service page should publish.
- */
+/** The employee-facing benefit card (My Benefits page). */
 export function BenefitCard({ benefit }: { benefit: MyBenefit }) {
   const { Icon, swatch } = benefitVisual(benefit.category);
   const enrolled = isEnrolledStatus(benefit.status);
@@ -41,8 +31,10 @@ export function BenefitCard({ benefit }: { benefit: MyBenefit }) {
         </span>
       </div>
 
-      {/* The headline figure. An allowance is money added to pay; a plan's headline is what it
-          costs the employee, because that is the part that reaches their payslip. */}
+      {/*
+       * The headline figure. An allowance is money added to pay; a plan's headline is what it
+       * costs the employee, because that is the part that reaches their payslip.
+       */}
       {isAllowance ? (
         <div className="mt-4">
           <p className="text-3xl font-bold text-foreground">

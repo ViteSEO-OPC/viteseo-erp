@@ -7,10 +7,6 @@ use Illuminate\Support\Facades\Schema;
 // Strict clock-in: when on, an employee cannot start their shift before its scheduled
 // start time. Off (the default) keeps today's behaviour, where an early punch is
 // recorded as-is and simply classified `present`.
-//
-// Deliberately NOT folded into the existing `early_arrival_mode`: that field is a PAYROLL
-// question (do early minutes earn anything — currently inert, only 'none' is accepted),
-// while this one governs whether the punch is accepted at all. One column each.
 return new class extends Migration
 {
     public function up(): void

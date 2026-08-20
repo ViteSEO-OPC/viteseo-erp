@@ -11,18 +11,7 @@ use App\Modules\Hr\Services\AllowanceService;
 use App\Modules\Hr\Services\BenefitProgramService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B14 — paying one employee a different amount.
- *
- * THE LINE THIS SLICE WALKS. B1 gave every enrolment its own amount via a migration, so editing an
- * allowance on the Benefits page reached nobody and the page drove no one's pay; B6 removed the
- * mechanism outright. B14 brings it back for the case it was always meant for — a genuine
- * arrangement with one person — and everything here exists to keep the two apart:
- *
- *   - enrolling somebody NEVER writes an amount
- *   - an amount is stamped with who set it and when
- *   - a programme edit reaches everyone following it, and nobody who is not
- */
+/** Paying one employee a different amount. */
 class AllowanceOverrideTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -153,7 +142,7 @@ class AllowanceOverrideTest extends HrTestCase
         $program = $this->allowance(2000);
         $this->actingAsHr()->putJson($this->url($this->employee, $program), ['amount' => 3000])->assertOk();
 
-        // "14 enrolled employees will be affected" was untrue for all 14 (B6). One following, one not.
+        // "14 enrolled employees will be affected" was untrue for all 14. One following, one not.
         $reach = app(BenefitProgramService::class)->reachOf($program->fresh());
 
         $this->assertSame(1, $reach['following']);

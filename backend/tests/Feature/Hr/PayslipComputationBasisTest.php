@@ -14,13 +14,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * The payslip explaining its own deductions (FIN-055).
- *
- * Two claims, and one property that makes both worth trusting: the per-date ledger SUMS to the
- * unpaid-days figure printed beside it. A breakdown that does not reconcile with the number it
- * explains is worse than no breakdown, because it invites the reader to rely on it.
- */
+/** The payslip explaining its own deductions. */
 class PayslipComputationBasisTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -74,13 +68,7 @@ class PayslipComputationBasisTest extends HrTestCase
         ]);
     }
 
-    /**
-     * Turn on per-minute late/undertime charging.
-     *
-     * Lateness only reaches the payslip at all under one of these modes — `late_minutes` and the
-     * ledger's `late` lines come from the same block, so a policy that charges nothing prints
-     * neither. Tests about lateness therefore have to say which policy they are about.
-     */
+    /** Turn on per-minute late/undertime charging. */
     private function chargeLateness(): void
     {
         app(AttendancePolicyService::class)->update([

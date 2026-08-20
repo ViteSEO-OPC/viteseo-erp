@@ -14,21 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * Item 12 — the attendance problems a cycle carries, asked before payroll turns them into money.
- *
- * MOST OF THIS ALREADY EXISTED AND NOBODY WAS BEING SHOWN IT. Open shifts have a queue (item 6),
- * held and flagged overtime have one (item 7) — but they live on the Attendance and Overtime
- * pages, and HR runs payroll from a third. The summary is the fix for that, and the two detectors
- * below are the genuinely missing checks it needed.
- *
- * The two new ones both catch failures that LOOK FINE on every existing screen:
- *   • an approved overtime request the punches cannot back pays nothing, while the employee and HR
- *     both see "approved";
- *   • a closed 18-hour shift raises no flag at all, because the record is complete — it is just wrong.
- *
- * Schedule 08:00–17:00, clock parked at Thu 2026-08-20.
- */
+/** Item 12 — the attendance problems a cycle carries, asked before payroll turns them into money. */
 class AttendanceExceptionsTest extends HrTestCase
 {
     use RefreshDatabase;

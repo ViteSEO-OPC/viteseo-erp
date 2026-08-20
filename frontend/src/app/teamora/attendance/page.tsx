@@ -146,16 +146,20 @@ export default function AttendancePage() {
         <AttendanceSummaryTiles summary={summary} />
       </div>
 
-      {/* Off-site time-ins awaiting review. Renders nothing when the queue is empty, so
-          this costs no space on a normal day. Above the roster because the people in it
-          are already working and aren't on the clock yet. */}
+      {/*
+       * Off-site time-ins awaiting review. Renders nothing when the queue is empty, so
+       * this costs no space on a normal day. Above the roster because the people in it
+       * are already working and aren't on the clock yet.
+       */}
       <div className="mt-4 empty:mt-0">
         <FieldTimeInQueue />
       </div>
 
-      {/* Forgotten clock-outs. Also above the roster, and for the same reason: these are days
-          whose pay is wrong or unsettled, which outranks reading today's list. Hides itself
-          when nothing needs fixing. */}
+      {/*
+       * Forgotten clock-outs. Also above the roster, and for the same reason: these are days
+       * whose pay is wrong or unsettled, which outranks reading today's list. Hides itself
+       * when nothing needs fixing.
+       */}
       <div className="mt-4 empty:mt-0">
         <OpenShiftQueue
           onFix={(r) => {

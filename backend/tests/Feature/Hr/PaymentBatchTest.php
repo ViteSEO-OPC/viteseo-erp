@@ -19,18 +19,7 @@ use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-015 — the disbursement layer.
- *
- * Payroll computed net pay and then stopped tracking it: "disbursement" was a manual status flip
- * with no payment record, no bank reference and no way to record that a transfer bounced. Bank
- * details were collected on every employee and never used.
- *
- * The audit's own validation for this finding is the first test below — batch total equals the
- * run's `total_net`, and every payslip appears exactly once. The rest guard the properties that
- * make the batch trustworthy: it cannot be raised twice for the same payslips, it does not assert
- * payment it has not observed, and the account it records is the account at the time it paid.
- */
+/** The disbursement layer. */
 class PaymentBatchTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -155,13 +144,7 @@ class PaymentBatchTest extends HrTestCase
 
     // --- what a batch does NOT claim -------------------------------------------------------
 
-    /**
-     * Building a batch must not mark anything disbursed.
-     *
-     * This is the whole reason the three states exist. A batch says "we intend to pay these"; only
-     * the bank's confirmation says money moved. Flipping payslips here would rebuild the
-     * assertion-without-evidence that FIN-052 is about, with more tables behind it.
-     */
+    /** Building a batch must not mark anything disbursed. */
     public function test_building_a_batch_does_not_mark_any_payslip_disbursed(): void
     {
         $run = $this->runPayroll();
@@ -242,13 +225,7 @@ class PaymentBatchTest extends HrTestCase
         }
     }
 
-    /**
-     * The refusal must describe the ACTUAL cause when several apply.
-     *
-     * Caught against the dev data: two employees had bank details and were already batched, ten
-     * had none, and the refusal announced "No one on this run has bank details on file" — false,
-     * and it sends HR to the employee records instead of to the batch they already made.
-     */
+    /** The refusal must describe the ACTUAL cause when several apply. */
     public function test_the_refusal_names_every_reason_not_just_the_last_one(): void
     {
         $run = $this->runPayroll();
@@ -290,7 +267,7 @@ class PaymentBatchTest extends HrTestCase
         $this->assertSame('BDO', $payment->bank_name);
     }
 
-    /** FIN-022 — the account number is stored encrypted, so a database dump does not expose it. */
+    /** The account number is stored encrypted, so a database dump does not expose it. */
     public function test_the_stored_account_number_is_ciphertext(): void
     {
         $run = $this->runPayroll();
@@ -365,7 +342,7 @@ class PaymentBatchTest extends HrTestCase
             ->assertOk()
             ->json('data');
 
-        // Masked on the way out, always — FIN-022. There is no unmask flag on this endpoint.
+        // Masked on the way out, always. There is no unmask flag on this endpoint.
         $this->assertStringStartsWith('••••', $shown['payments'][0]['bank_account_masked']);
         $this->assertArrayNotHasKey('bank_account', $shown['payments'][0]);
     }

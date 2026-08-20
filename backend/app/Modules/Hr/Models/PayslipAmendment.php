@@ -9,22 +9,7 @@ use App\Modules\Hr\Support\PayslipLines;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
-/**
- * One correction added to an already-computed payslip.
- *
- * The LEDGER behind `Payslip::adjustment_pay`, not a mirror of it: that column is the running total,
- * these rows are what it totals. The distinction matters because recomputing a period rewrites every
- * earnings column from attendance — without a record the recompute does not own, a correction would
- * vanish the next time someone re-ran the period that carried it.
- *
- * `tax` is stored rather than re-derived for the same reason. It was computed marginally on the
- * year's earnings as they stood when the correction was raised; re-deciding it against a later YTD
- * would change what was withheld on money that may already have been paid.
- *
- * `kind` says WHAT the row is, and `amount` carries the direction in its sign — see the kind
- * migration. A `deduction` never touches gross or taxable pay, which is the whole reason it cannot
- * simply be a negative `pay`.
- */
+/** One correction added to an already-computed payslip. */
 class PayslipAmendment extends Model
 {
     use SoftDeletes;
@@ -57,25 +42,13 @@ class PayslipAmendment extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    /**
-     * Does this correction REPLACE a line the engine computed, rather than add one of its own?
-     *
-     * The distinction runs through everything downstream: an override is printed ON its line with
-     * the engine's figure struck through beside it, while an addition is printed as a line of its
-     * own. Confusing the two counts the same money twice.
-     */
+    /** Does this correction REPLACE a line the engine computed, rather than add one of its own? */
     public function isOverride(): bool
     {
         return $this->target_key !== null;
     }
 
-    /**
-     * Has the engine changed its mind about this line since HR overruled it?
-     *
-     * The override still wins — it is an absolute figure and a recompute does not get to re-decide
-     * it. This is what lets a run SAY SO, so HR can drop a correction that has outlived the problem
-     * it was fixing rather than leave it quietly suppressing a figure nobody has looked at.
-     */
+    /** Has the engine changed its mind about this line since HR overruled it? */
     public function hasDrifted(): bool
     {
         if ($this->edited_against === null || $this->original_amount === null) {

@@ -278,8 +278,10 @@ export default function RecruitmentPage() {
                 candidates or hire.
               </p>
             )}
-            {/* Only candidates not yet on the board — dragging one onto a pipeline
-                column gives it a stage, so it leaves this table for the kanban. */}
+            {/*
+             * Only candidates not yet on the board — dragging one onto a pipeline
+             * column gives it a stage, so it leaves this table for the kanban.
+             */}
             <CandidatesTable
               candidates={(candidates ?? []).filter((c) => !c.stage)}
               locked={!canAddCandidate}
@@ -303,11 +305,13 @@ export default function RecruitmentPage() {
         {selected && (
           <div className="mt-8">
             <h2 className="mb-3 text-h3 font-bold text-foreground">Pipeline — {selected.title}</h2>
-            {/* Horizontal scroll with snap: on a phone one 256px column fills
-                most of the width and the next one peeks, so a swipe lands
-                cleanly on the following stage instead of drifting between two.
-                `overscroll-x-contain` keeps that swipe from triggering the
-                browser's back gesture. */}
+            {/*
+             * Horizontal scroll with snap: on a phone one 256px column fills
+             * most of the width and the next one peeks, so a swipe lands
+             * cleanly on the following stage instead of drifting between two.
+             * `overscroll-x-contain` keeps that swipe from triggering the
+             * browser's back gesture.
+             */}
             <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-2">
               {selected.stages.map(({ key, label }) => {
                 const all = (candidates ?? []).filter((c) => c.stage === key);
@@ -405,10 +409,6 @@ export default function RecruitmentPage() {
 
 // Confirm a rejection: capture a reason (+ optional note), then optionally hand the
 // candidate to the compose modal. Opened when a card is dragged onto the Rejected column.
-//
-// Rejecting and emailing are now two steps rather than one checkbox that fired a template.
-// The rejection is committed first — it is a record either way — and the email, being the
-// part a person reads, is written before it goes.
 function RejectionDialog({
   candidate,
   onOpenChange,
@@ -566,8 +566,10 @@ function RejectedColumn({
             className="w-full rounded-lg border border-dashed border-border py-2 text-caption text-muted-foreground hover:bg-muted"
           >
             Review {cards.length} rejected
-            {/* Surfaced on the collapsed button because that is this column's resting
-                state — a candidate rejected but never told would otherwise stay hidden. */}
+            {/*
+             * Surfaced on the collapsed button because that is this column's resting
+             * state — a candidate rejected but never told would otherwise stay hidden.
+             */}
             {unTold > 0 && (
               <span className="mt-0.5 block text-[0.7rem] font-medium text-warning">
                 {unTold} not emailed yet
@@ -593,11 +595,6 @@ function RejectedColumn({
 }
 
 // A compact one-line rejected entry — name + reason, with email and reopen actions.
-//
-// The email action is here and not only in the rejection dialog because rejecting and
-// telling the candidate are separate steps: the dialog's checkbox can be unchecked, the
-// compose modal can be cancelled, and a send can fail. Without an entry point on the row,
-// any of those left the candidate rejected with no way to ever write to them.
 function RejectedRow({
   candidate,
   onSelect,

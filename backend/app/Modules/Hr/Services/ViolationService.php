@@ -16,11 +16,6 @@ use Illuminate\Support\Carbon;
  *   yellow — 3rd tardiness; 1-day unauthorised absence (UA)
  *   orange — 3 consecutive lates / 4th tardiness; 2 consecutive UA days
  *   red    — 3+ consecutive days without notice (AWOL)
- *
- * Simplified but faithful: it scans the current month, tracks per-employee late
- * and absence streaks against their EFFECTIVE schedule workdays, and escalates
- * severity. recompute() is idempotent — one row per (employee, type, date); rows
- * HR has resolved survive a recompute.
  */
 class ViolationService
 {
@@ -124,10 +119,10 @@ class ViolationService
         // The colour ladder HR configures (Company → Rules). Constant across this month's
         // scan; a null column falls back to today's literals, so this is a no-op by default.
         $policy = $this->policy->get();
-        // Per-CATEGORY merge, so a category added after HR last saved this page (Slice 9's
+        // Per-CATEGORY merge, so a category added after HR last saved this page ('s
         // `long_break`) still has a ladder instead of silently never firing.
         $rules = $this->policy->violationRules();
-        // Slice 9 — tolerance on top of each employee's own schedule allowance, per bucket.
+        // Tolerance on top of each employee's own schedule allowance, per bucket.
         // Either may be 0, meaning no tolerance at all.
         $lunchGrace = (int) $policy->lunch_grace_minutes;
         $breakGrace = (int) $policy->break_grace_minutes;
@@ -151,13 +146,9 @@ class ViolationService
         // The earliest HUMAN-ENTERED attendance record anywhere is our proxy for when the
         // org began tracking attendance — nobody can be "absent" for a day before tracking
         // existed. (Swap for an explicit go-live/config date if one is ever added.)
-        //
-        // System-generated rows are excluded deliberately: a management backfill reaching
-        // further back than the real records would drag this floor with it and turn every
-        // untracked day before go-live into an absence for EVERY employee.
         $trackingStart = Attendance::where('source', Attendance::SOURCE_MANUAL)->min('work_date');
 
-        // Non-working holidays in the scanned month (Slice 1). Nobody is expected in, so a
+        // Non-working holidays in the scanned month. Nobody is expected in, so a
         // holiday can neither be an absence nor break an absence streak — it is skipped
         // exactly like a rest day. `special_working` and unclassified (NULL) types are not
         // in this map, so those still behave as ordinary workdays.
@@ -248,7 +239,7 @@ class ViolationService
                     continue;
                 }
 
-                // Slice 16 — attendance is the source of truth for flags, and an HR override is
+                // Attendance is the source of truth for flags, and an HR override is
                 // the strongest form of it. A day HR marked on-leave / rest-day / holiday raises
                 // nothing and clears the streaks; `absent` and `late` fall through so they still
                 // flag. Without this, correcting a record left its old flag standing.
@@ -320,7 +311,7 @@ class ViolationService
                     }
                 }
 
-                // Slice 9 — break/lunch overage. Measured against the EMPLOYEE'S OWN entitlement
+                // break/lunch overage. Measured against the EMPLOYEE'S OWN entitlement
                 // (schedule unpaid + paid break) plus the company tolerance, not a flat company
                 // ceiling: a 30-minute-lunch schedule and a 60-minute one can't share one number.
                 // Checked outside the late/absent branches because a long break is orthogonal to
@@ -365,9 +356,6 @@ class ViolationService
      * start (earliest human-entered attendance record) up to the current month. Idempotent
      * and persisted, so the "All time" history view has data for every month, not just the
      * ones that happen to have been opened. No real attendance anywhere → nothing to do.
-     *
-     * Same reason as recompute() for ignoring system-generated rows: they must not decide
-     * how far back the history sweep reaches.
      */
     public function recomputeHistory(): void
     {
@@ -406,8 +394,6 @@ class ViolationService
      * A rung matches when every threshold it declares (streak_min / monthly_min /
      * occurrence_min) is satisfied by the context. Returns null when no rung matches —
      * which a category with an empty ladder uses to mean "never flag this".
-     *
-     * Pure (static) so the money-adjacent severity logic is unit-testable without a DB.
      *
      * @param  array<string, array<int, array<string, mixed>>>  $rules
      * @param  array{streak?:int, monthly?:int, occurrence?:int}  $ctx

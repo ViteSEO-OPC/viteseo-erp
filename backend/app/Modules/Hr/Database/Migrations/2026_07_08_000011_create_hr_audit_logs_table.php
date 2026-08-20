@@ -6,7 +6,7 @@ use Illuminate\Support\Facades\Schema;
 
 // Phase-2 cross-cutting (§14.3c). Append-only "who did what, when" log — no
 // soft-deletes. Introduced here for change-request approvals (before/after); the
-// Audit Trail report (Slice 25) reads and broadens it.
+// Audit Trail report reads and broadens it.
 return new class extends Migration
 {
     public function up(): void

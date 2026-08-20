@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 15. A holiday set = one country + one year (so multiple countries
+// Phase-2. A holiday set = one country + one year (so multiple countries
 // can be maintained side by side). Populated from Nager.Date or added manually.
 return new class extends Migration
 {

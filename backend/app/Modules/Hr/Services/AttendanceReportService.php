@@ -15,17 +15,6 @@ use Illuminate\Support\Collection;
 /**
  * The three month-scoped attendance reports behind the Reports hub's Attendance Summary
  * screen: per-employee totals, the daily time record, and leave usage.
- *
- * WHY IT IS NOT IN ReportService. Every other report there answers one question off one or two
- * aggregate queries. These three answer the same question — "what did each person's month look
- * like, day by day" — and all of them need the identical calendar: which days that employee was
- * scheduled for, which were non-working holidays, which were covered by approved leave, and
- * which had an attendance row. Building that grid once and reading it three ways is the whole
- * design; splitting it across three ReportService methods would mean three copies of it.
- *
- * IT DOES NOT RECLASSIFY DAYS. The status of a day is decided by the same ladder
- * AttendanceService::allForDate() uses for the daily roster, in the same order. A month report
- * that disagreed with the roster HR looked at yesterday would be worse than no report.
  */
 class AttendanceReportService
 {
@@ -203,11 +192,6 @@ class AttendanceReportService
 
     /**
      * Leave report — days taken inside the month against the balance that remains for the year.
-     *
-     * The two figures are deliberately on different clocks and the note says so: leave is TAKEN in
-     * a month but ENTITLED by year, and a "remaining" number that reset every month would be a
-     * fiction. Balances are read from whichever bucket the company's allotment mode makes
-     * authoritative — the shared pool, or the sum of the per-type rows.
      *
      * @param  array<string, mixed>  $filters
      */
@@ -485,10 +469,6 @@ class AttendanceReportService
     /**
      * Dates covered by an APPROVED leave request, as employee_id => (date => leave type name).
      *
-     * Requests are stored as a start/end pair, so they are expanded here. The expansion keeps
-     * every date in the span; whether a given date actually reads as leave is decided in
-     * gridFor(), which will not paint a rest day or a non-working holiday as leave.
-     *
      * @param  array<int, int>  $employeeIds
      * @return array<int, array<string, string>>
      */
@@ -604,11 +584,6 @@ class AttendanceReportService
 
     /**
      * One employee's month, day by day, plus the counts every report reads off it.
-     *
-     * The status ladder is AttendanceService::allForDate()'s, in the same order, with three cases
-     * a month view has and a single-day roster does not: days outside the employment window, days
-     * that have not happened yet, and leave that lands on a rest day or holiday (which stays a
-     * rest day — leave is not consumed by a day nobody was expected to work).
      *
      * @param  array<string, mixed>  $ctx
      * @return array<string, mixed>

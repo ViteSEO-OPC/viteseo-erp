@@ -13,20 +13,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Turning a completed payroll run into money that actually leaves the company (FIN-015).
- *
- * Payroll computed net pay correctly and then stopped tracking it: "disbursement" was a manual
- * status flip per payslip, with no payment record, no bank reference and no way to learn that a
- * transfer had bounced. This service builds the missing half — a batch of payment rows per run,
- * and the bank file that batch produces.
- *
- * WHAT IT DELIBERATELY DOES NOT DO. Building a batch does NOT mark anything disbursed. That is the
- * whole point of separating the three states the audit named (computed → disbursed → settled): a
- * batch says "we intend to pay these", and only the bank's own confirmation says money moved.
- * Flipping payslips at build time would recreate the assertion-without-evidence that FIN-052 is
- * about, just with more tables behind it.
- */
+/** Turning a completed payroll run into money that actually leaves the company. */
 class PaymentService
 {
     public function __construct(
@@ -35,7 +22,7 @@ class PaymentService
         // payslip carried, and reversing one puts back the loan instalments it collected. Both
         // live in PayrollService, and reconciliation has to go through them.
         private PayrollService $payroll,
-        // FIN-015 / FIN-003 — when a bounced transfer's payslip CANNOT be reopened (locked run), the
+        //  / — when a bounced transfer's payslip CANNOT be reopened (locked run), the
         // reversal has to surface somewhere a person actually looks. An audit-log line is a record,
         // not a task.
         private RetroFlagService $retro,
@@ -43,11 +30,6 @@ class PaymentService
 
     /**
      * Build the batch of payments for a completed run.
-     *
-     * WHAT IS INCLUDED. Every payslip on the run that is still `computed`, has a net above zero,
-     * and is not already sitting in a live batch. Each exclusion is reported back rather than
-     * silently dropped, because the number finance checks is "does this batch equal the run", and
-     * a batch that quietly omits three people looks identical to one that does not.
      *
      * @return array{batch: PaymentBatch, skipped: array<string, int>}
      */
@@ -181,10 +163,6 @@ class PaymentService
     /**
      * Does this batch account for the whole run?
      *
-     * The one check worth making before a payroll leaves the building. A difference is not
-     * necessarily an error — a manually-paid payslip or a zero-net period both produce one
-     * legitimately — so this reports rather than refuses, and names the gap in pesos.
-     *
      * @return array{balanced: bool, batch_total: float, run_total: float, difference: float, unpaid_payslips: int}
      */
     public function reconcileWithRun(PaymentBatch $batch): array
@@ -208,19 +186,7 @@ class PaymentService
         ];
     }
 
-    /**
-     * The file finance uploads to the bank, and the record that it was sent.
-     *
-     * FORMAT. This is a documented GENERIC CSV, not any particular bank's layout. The audit asks
-     * for "a bank-file export per supported format" and no bank was named anywhere in the project
-     * docs — and a bank file in the wrong layout is not a partial success, it is a rejected upload.
-     * Rather than guess at BDO's or BPI's column order, this emits an explicit, self-describing
-     * format that a person can map, and the method is written so a real format drops in beside it.
-     * Ask finance which bank(s) before adding one.
-     *
-     * EXPORTING IS A ONE-WAY DOOR. Once the file has been downloaded the company must assume it
-     * was uploaded, so `exported_at` is stamped here and the batch can no longer be rebuilt.
-     */
+    /** The file finance uploads to the bank, and the record that it was sent. */
     public function bankFile(PaymentBatch $batch, User $actor): string
     {
         $batch->loadMissing(['payments.employee', 'payrollRun']);
@@ -288,15 +254,7 @@ class PaymentService
         return ($payment->batch?->reference ?? 'PB') . '-' . $payment->id;
     }
 
-    /**
-     * Record that one transfer actually cleared — the moment "paid" stops being an assertion.
-     *
-     * This is the ONLY thing in the system entitled to say money moved. It marks the payment
-     * settled with the bank's own reference and date, and flips the payslip to `disbursed`
-     * through `PayrollService::markDone()` rather than writing the column directly, because
-     * disbursing a payslip also settles the reimbursements it carried. Bypassing it would pay
-     * someone's expenses on paper and leave the claims sitting `scheduled` forever.
-     */
+    /** Record that one transfer actually cleared — the moment "paid" stops being an assertion. */
     public function settle(Payment $payment, ?string $reference, ?string $settledAt, User $actor): Payment
     {
         if ($payment->status === 'settled') {
@@ -318,7 +276,7 @@ class PaymentService
             // Already disbursed by the manual path, or by an earlier payment on the same payslip
             // after a re-issue. Either way there is nothing left to flip.
             if ($payslip && $payslip->status !== 'disbursed') {
-                // FIN-033 — the actor is the person reconciling, and the key is the payment
+                // The actor is the person reconciling, and the key is the payment
                 // itself: re-importing the same bank file settles the same payment again, which
                 // must be a duplicate rather than a second disbursement.
                 $this->payroll->markDone($payslip, $actor, "payment:{$payment->id}");
@@ -338,23 +296,7 @@ class PaymentService
         });
     }
 
-    /**
-     * Record that a transfer did NOT arrive.
-     *
-     * The half that was completely invisible before: a bounced transfer left the payslip reading
-     * `disbursed` and nothing anywhere said the employee had not been paid. If the payslip was
-     * disbursed on the strength of this payment, it is reopened — money that came back is money
-     * the company still owes, and the payslip has to say so.
-     *
-     * Reopening is best-effort by design. `reopenPayslip()` refuses on a locked run, and that
-     * refusal must not block recording what the bank actually did: the failure is the fact, the
-     * payslip status is bookkeeping that follows it.
-     *
-     * When it does refuse, the shortfall becomes an OUTSTANDING RETRO FLAG rather than only an audit
-     * line — because reopening is also what returns the loan instalments the payslip collected, so a
-     * locked run leaves both the payslip and the employee's loan balance wrong with nothing in anyone's
-     * queue. See the catch block for why the reversal is not forced through instead.
-     */
+    /** Record that a transfer did NOT arrive. */
     public function fail(Payment $payment, string $status, string $reason, User $actor): Payment
     {
         if (! in_array($status, Payment::UNSUCCESSFUL, true)) {
@@ -383,14 +325,6 @@ class PaymentService
                     // now wrong and neither is visible: the payslip still reads `disbursed`, and the
                     // employee's loan balance is still reduced by an instalment that came back with the
                     // transfer.
-                    //
-                    // The reversal is deliberately NOT forced through here. Reversing the loan ledger
-                    // while the payslip still shows the deduction would make the document and the ledger
-                    // disagree — the exact class of defect this module keeps closing — and unlocking a
-                    // sealed run is a decision for a person, not a side effect of a bank file import.
-                    //
-                    // So it becomes an OUTSTANDING ITEM instead, in the same queue HR already works
-                    // (FIN-009's retro flags). A line in the audit log is a record; this is a task.
                     $this->retro->flagIfSettled(
                         $payment,
                         $payment->employee_id,
@@ -420,13 +354,7 @@ class PaymentService
         });
     }
 
-    /**
-     * Keep the batch's headline status honest about its payments.
-     *
-     * settled  every transfer confirmed
-     * partial  some confirmed, or some bounced — either way it needs a person
-     * exported sent, nothing back yet
-     */
+    /** Keep the batch's headline status honest about its payments. */
     public function refreshBatchStatus(?PaymentBatch $batch): void
     {
         if (! $batch) {
@@ -453,20 +381,7 @@ class PaymentService
     }
 
     /**
-     * Apply the bank's confirmation file to a batch (FIN-015).
-     *
-     * HEADER-MATCHED, NOT POSITIONAL, and parse-first — the same shape as
-     * `ContributionScheduleImporter`, for the same reason: the file comes from outside the system,
-     * a column order nobody promised will eventually change, and silently reading the wrong column
-     * here would mark the wrong people paid.
-     *
-     * `$apply = false` reports exactly what would happen and writes nothing. HR is expected to look
-     * at that first — this import moves payslips into `disbursed`, which is the assertion the whole
-     * slice exists to make trustworthy, so it should not happen on a file nobody has read back.
-     *
-     * MATCHING. `Payment Ref` is the reliable key and is emitted in the bank file for exactly this
-     * purpose. `Employee No` is accepted as a fallback for banks that will not echo an arbitrary
-     * column. A row matching neither is reported as unmatched rather than guessed at.
+     * Apply the bank's confirmation file to a batch.
      *
      * @return array{applied: bool, settled: int, failed: int, unmatched: array<int, string>, rows: int}
      */
@@ -592,13 +507,7 @@ class PaymentService
         return $rows;
     }
 
-    /**
-     * Map whatever the bank calls it onto our three outcomes.
-     *
-     * Deliberately conservative: anything unrecognised returns null and is reported as unmatched
-     * rather than assumed successful. Guessing "OK" from an unknown word is how a bounced transfer
-     * becomes a paid payslip.
-     */
+    /** Map whatever the bank calls it onto our three outcomes. */
     private function normaliseStatus(string $raw): ?string
     {
         $value = strtolower(trim($raw));
@@ -613,12 +522,6 @@ class PaymentService
 
     /**
      * Why there was nothing left to pay — accurately, when several reasons apply at once.
-     *
-     * Written after getting this wrong. A run whose payable employees were already batched and
-     * whose remainder had no bank details reported "No one on this run has bank details on file",
-     * which is simply false: two people had them and had already been paid. A refusal that
-     * misdescribes its own cause sends HR to the wrong screen, and the employee list in the
-     * message makes it look authoritative while it does it.
      *
      * @param  array<string, int>  $skipped
      * @param  array<int, string>  $missing

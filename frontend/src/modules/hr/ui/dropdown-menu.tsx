@@ -8,10 +8,6 @@ import { cn } from "@/lib/utils";
 /**
  * Overflow menu, wrapping the `radix-ui` primitive the same way `popover.tsx` does — same
  * package, same `data-slot` convention, same token-only styling. No new dependency.
- *
- * Built for the payroll header, where nine same-weight outline buttons left nothing to say
- * which one was the point of the page. Reference tools live in here; the two actions that
- * carry the workflow stay outside it.
  */
 
 function DropdownMenu(props: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {

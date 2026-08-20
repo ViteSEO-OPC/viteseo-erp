@@ -4,18 +4,7 @@ namespace App\Modules\Hr\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-/**
- * A correction added to an already-computed period's own payslips.
- *
- * NO PERIOD DATES HERE, and that is the difference from the retired adjustment run. That run had
- * to invent a window for itself because it created a run of its own; an amendment is applied to a
- * run that already exists, so the period comes from the route and cannot be mistyped, mis-aligned or
- * pointed at a period that was never run.
- *
- * What is enforced is the part the calendar cannot supply: an explicit employee list, a stated amount
- * per employee, and a reason. These amounts come from a person rather than from the engine, so the
- * record of who, how much and why is the only control there is.
- */
+/** A correction added to an already-computed period's own payslips. */
 class AmendPayrollRunRequest extends FormRequest
 {
     public function authorize(): bool
@@ -38,9 +27,6 @@ class AmendPayrollRunRequest extends FormRequest
             // missed deduction must not. Batch-level rather than per line because a batch already
             // shares one reason and one issue date: it is ONE correction applied to several people,
             // and a batch that both paid and clawed back would need two reasons to explain itself.
-            //
-            // Optional, defaulting to extra pay, which is what every amendment was before deductions
-            // existed — so a caller written against the old shape still means what it said.
             'kind' => ['nullable', 'in:pay,pay_reversal,deduction'],
 
             // WHEN THE CORRECTION IS ISSUED — the date shown beside the line on the payslip.

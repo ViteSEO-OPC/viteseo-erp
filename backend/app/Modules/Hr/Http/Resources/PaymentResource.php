@@ -8,13 +8,6 @@ use Illuminate\Http\Resources\Json\JsonResource;
 /**
  * One transfer, as HR sees it.
  *
- * THE ACCOUNT NUMBER IS MASKED AND THERE IS NO FLAG TO UNMASK IT. Nothing on a payments screen
- * needs the full number: identifying which account was used takes four digits, and the one place
- * the whole thing is legitimately required — the file handed to the bank — reads it from the model
- * directly. FIN-022 asks for masking by default with the full value behind an explicit permission
- * and a per-reveal audit entry; that permission does not exist yet (Slice 6), so the honest
- * position today is that this endpoint simply does not serve it.
- *
  * @mixin \App\Modules\Hr\Models\Payment
  */
 class PaymentResource extends JsonResource

@@ -14,21 +14,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Item 7 — the half of the overtime review queue that flags without withholding.
- *
- * The caps (FIN-039, covered by AutoOvertimeCapTest) both ship as 0, which means UNLIMITED, and
- * the queue used to return nothing at all in that configuration. So the shipped install reviewed
- * no overtime whatsoever: a clock-out corrected to the next morning paid the whole night at 125%
- * with nobody notified.
- *
- * The contract these tests pin is that flagging is NOT a cap. A flagged day pays in full, exactly
- * as it did before, and the row is a notification. The assertion that matters most is
- * `test_flagging_a_day_does_not_change_what_it_pays` — if that ever fails, this feature has
- * quietly become a pay cut.
- *
- * The schedule is 08:00–17:00 with 15 minutes of grace, so "late" below means past 08:15.
- */
+/** Item 7 — the half of the overtime review queue that flags without withholding. */
 class AutoOvertimeFlagTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -108,9 +94,7 @@ class AutoOvertimeFlagTest extends HrTestCase
         $this->assertSame(0, $rows[0]['excess_minutes']);
     }
 
-    /**
-     * THE LOAD-BEARING TEST. A flag must be a notification, not a cap wearing a different name.
-     */
+    /** THE LOAD-BEARING TEST. A flag must be a notification, not a cap wearing a different name. */
     public function test_flagging_a_day_does_not_change_what_it_pays(): void
     {
         $this->policy(['auto_overtime_review_minutes' => 0]);

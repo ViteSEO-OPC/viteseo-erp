@@ -14,24 +14,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B19 — a contribution is charged on the salary figure its own version names.
- *
- * THE DEFECT. Every statutory contribution was charged on `hr_employees.base_salary`: the profile
- * figure, untouched by absences, lates, overtime, allowances or any premium line. An employee with
- * a week of unpaid leave paid SSS on money they never received; one with heavy overtime paid
- * nothing on it. Withholding tax had tracked actual earnings since Slice 10, so the two bases sat a
- * dozen lines apart in the same method and disagreed.
- *
- * WHY NOT ONE RULE FOR ALL THREE. PhilHealth is the fixed BASIC monthly salary by law (Circular
- * 2019-0009, which expressly excludes allowances, overtime and COLA); SSS charges "compensation"
- * (RA 11199 §8(f)) and Pag-IBIG monthly compensation. Applying one basis to all three replaces one
- * wrong answer with a different wrong answer, so the basis is per version.
- *
- * `basic` IS THE DEFAULT, and the tests below lean on it: every version recorded before this slice
- * keeps charging exactly what it charged, so no completed run reprices and no re-run of an old
- * cycle rewrites history.
- */
+/** A contribution is charged on the salary figure its own version names. */
 class ContributionEarningsBasisTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -189,15 +172,7 @@ class ContributionEarningsBasisTest extends HrTestCase
         $this->assertSame(300.0, (float) $slip['philhealth'], 'basic salary, unmoved by absence');
     }
 
-    /**
-     * FIN-050 — the month's base is its cutoffs ADDED, not one cutoff doubled.
-     *
-     * This replaces a test that asserted the annualisation (`period × periodsPerYear ÷ 12`).
-     * That arithmetic is right only when every cutoff of the month is identical: two unpaid weeks
-     * in the second half made the first payslip charge as though the month were whole, and the two
-     * halves could resolve to different SSS bands so the month's total matched no published
-     * figure. The expected ₱300 is unchanged — the mechanism reaching it is not.
-     */
+    /** The month's base is its cutoffs ADDED, not one cutoff doubled. */
     public function test_the_final_cutoff_charges_on_the_months_cutoffs_added(): void
     {
         $this->version('sss', 'earnings');
@@ -238,10 +213,6 @@ class ContributionEarningsBasisTest extends HrTestCase
      * ITS OWN earnings to a month — `period pay × cutoffs` — rather than assuming the contract was
      * met. Someone who lost half the period is not charged as though they had worked it all, which
      * also leaves a smaller correction for the final cutoff.
-     *
-     * The expectation is DERIVED from the slip's own pay rather than written as a literal, so the
-     * test states the rule ("the base is this period's earnings, scaled to a month") instead of
-     * pinning a number that says nothing about why.
      */
     public function test_a_provisional_cutoff_is_charged_on_its_own_earnings_scaled_to_a_month(): void
     {
@@ -265,13 +236,6 @@ class ContributionEarningsBasisTest extends HrTestCase
     /**
      * A capped contribution takes at most its SHARE of the monthly ceiling on one cutoff, never
      * the whole ceiling per cutoff.
-     *
-     * NOT A TEST OF THE `× cutoffs` SCALING, and worth saying so: it passes with or without it,
-     * because the ceiling clamps the monthly figure either way and the timing factor does the
-     * splitting separately. The scaling is guarded by
-     * `test_a_provisional_cutoff_is_charged_on_its_own_earnings_scaled_to_a_month`, which halves
-     * without it. This one guards the ceiling itself — that the split never resolves to a full
-     * monthly maximum on each payslip.
      */
     public function test_a_capped_contribution_takes_only_its_share_of_the_ceiling(): void
     {
@@ -308,14 +272,7 @@ class ContributionEarningsBasisTest extends HrTestCase
         $this->assertSame(150.0, (float) $slip['sss'], '₱300 due for the month, ₱150 already paid');
     }
 
-    /**
-     * OVER-COLLECTED EARLIER IN THE MONTH ⇒ THE DIFFERENCE COMES BACK.
-     *
-     * This was floored at zero, so an employee whose month collapsed after a normal first half
-     * simply kept paying the higher figure. The correction lands on the cutoff being computed now
-     * and touches nothing historical, and the year-end tax settlement already refunds this way —
-     * a negative line here is the same mechanism, bounded by what the month itself collected.
-     */
+    /** OVER-COLLECTED EARLIER IN THE MONTH ⇒ THE DIFFERENCE COMES BACK. */
     public function test_over_collection_is_refunded_on_the_final_cutoff(): void
     {
         $this->version('sss', 'earnings');
@@ -574,8 +531,8 @@ class ContributionEarningsBasisTest extends HrTestCase
 
     /**
      * THE HISTORY GUARANTEE. Moving to the earnings basis in September must not change what August
-     * was charged — the same property `hr_salary_histories` (13c), the rate versions (B3a) and the
-     * allowance versions (B11) each had to establish.
+     * was charged — the same property `hr_salary_histories` (13c), the rate versions and the
+     * allowance versions each had to establish.
      */
     public function test_an_older_cycle_is_still_priced_on_the_older_basis(): void
     {

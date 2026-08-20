@@ -16,16 +16,7 @@ use App\Modules\Hr\Services\SpreadsheetReader;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 
-/**
- * Slice B8 — the published schedule is DATA the system carries, not something someone retypes.
- *
- * Three faults, all about the numbers rather than the code: the bracket table was never entered
- * (SSS was charging a flat percentage of actual salary), `migrate:fresh --seed` reverted the rates
- * to the pre-2025 figures, and the employer EC was half-entered as "₱30 above ₱15,000" when SSS
- * charges ₱10 below and ₱30 above, keyed off the MSC rather than the raw salary.
- *
- * The import reads the agency's own spreadsheet so nobody transcribes sixty rows by hand.
- */
+/** The published schedule is DATA the system carries, not something someone retypes. */
 class ContributionScheduleImportTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -178,9 +169,7 @@ class ContributionScheduleImportTest extends HrTestCase
 
     // --- what the seeder leaves behind ------------------------------------------------
 
-    /**
-     * The B8 promise: rebuild from scratch and the rates are right, with nothing typed in.
-     */
+    /** The B8 promise: rebuild from scratch and the rates are right, with nothing typed in. */
     public function test_a_fresh_install_carries_the_published_schedule(): void
     {
         $this->seed(ContributionSettingSeeder::class);

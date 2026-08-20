@@ -17,16 +17,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Slice 3 (2026-07-28 audit): a graveyard-shift employee must be able to clock out.
- *
- * `work_date` is the Manila date the shift STARTED, but every clock action looked up
- * "today's" row. Clock in 22:00 on the 1st, try to clock out 06:00 on the 2nd, and the
- * service reported "You have not clocked in today" — so the whole night-differential /
- * past-midnight-overtime feature set could only ever be fed by an HR correction.
- *
- * Time is frozen per test so "crossing midnight" is deterministic.
- */
+/** (2026-07-28 audit): a graveyard-shift employee must be able to clock out. */
 class NightShiftClockTest extends HrTestCase
 {
     use RefreshDatabase;

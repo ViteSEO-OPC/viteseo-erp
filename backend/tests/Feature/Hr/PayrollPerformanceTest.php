@@ -15,18 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Slice 15 (2026-07-28 audit) — keep the payroll run off an N+1.
- *
- * The run asked the same questions over and over: the attendance policy per employee, the
- * contribution settings twice per employee, the holiday calendar per employee, the employee's
- * attendance rows FIVE times, and an overlap `exists()` each. On live data that was 305 queries
- * for 12 people.
- *
- * These tests are a ratchet, not a benchmark. The first pins the marginal cost of one more
- * employee — the number that decides whether 500 people is fine or fatal. The second is the one
- * that actually matters: optimisation must not change a single peso.
- */
+/** (2026-07-28 audit) — keep the payroll run off an N+1. */
 class PayrollPerformanceTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -97,10 +86,6 @@ class PayrollPerformanceTest extends HrTestCase
     /**
      * The marginal cost of one more employee. Measured by differencing two runs, so the fixed
      * setup cost cancels out and the number is stable across environments.
-     *
-     * The ceiling is deliberately loose — this is a ratchet against reintroducing a per-day or
-     * per-attendance-row query in a hot path, not a micro-benchmark. Before Slice 15 this was
-     * comfortably above 20.
      */
     public function test_the_per_employee_query_cost_stays_bounded(): void
     {

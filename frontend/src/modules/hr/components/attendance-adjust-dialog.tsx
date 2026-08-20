@@ -30,7 +30,7 @@ import { useAttendancePolicy } from "@/modules/hr/hooks/use-rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 
 /**
- * What HR can assert for a day (Slice 16). Blank derives it from the times, as before.
+ * What HR can assert for a day. Blank derives it from the times, as before.
  * Every value here has a defined pay meaning in AttendanceService::unpaidDaysDetailFor() —
  * don't add one without giving it a rule there, or it becomes a control that does nothing.
  */
@@ -162,8 +162,10 @@ export function AttendanceAdjustDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Wider from lg up so the violation-history table's Details column has room;
-          phone/tablet keep the narrow dialog. */}
+      {/*
+       * Wider from lg up so the violation-history table's Details column has room;
+       * phone/tablet keep the narrow dialog.
+       */}
       <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto overflow-x-hidden sm:max-w-lg lg:max-w-4xl">
         {/* Keyed so state re-initialises from a fresh row (Radix unmounts on close). */}
         {row && (
@@ -390,8 +392,10 @@ function Details({
           <div className="rounded-lg border border-border p-4">
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <Info label="Date" value={formatDate(row.work_date)} />
-              {/* Slice 16 — HR can set the status outright. "Auto" keeps the old behaviour
-                  (derived from Time In); anything else wins, even over the clock. */}
+              {/*
+               * HR can set the status outright. "Auto" keeps the old behaviour
+               * (derived from Time In); anything else wins, even over the clock.
+               */}
               <div className="space-y-1.5">
                 <Label>Status</Label>
                 <SimpleSelect

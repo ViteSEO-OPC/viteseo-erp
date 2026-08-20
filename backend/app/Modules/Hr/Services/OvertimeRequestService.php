@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Overtime requests — an employee asks for N overtime HOURS on a date. HR approves; payroll pays each
- * APPROVED one at the configured OT rate (see PayrollService, OT-3). Mirrors EarlyOutRequestService,
+ * APPROVED one at the configured OT rate (see PayrollService). Mirrors EarlyOutRequestService,
  * opposite sign (positive pay, not a deduction). No shift-window check — OT can fall on a workday OR
  * a rest day; the hours bound lives in StoreOvertimeRequestRequest.
  */
@@ -48,23 +48,7 @@ class OvertimeRequestService
         return round(($end - $start) / 60, 2);
     }
 
-    /**
-     * Do two overtime windows on the same work date collide? (Item 10.)
-     *
-     * WHY THIS REPLACED "ONE REQUEST PER DATE". The pay engine has always handled several windows
-     * on one date — `approvedOvertimeMinutesFor` collects every matched window and merges them —
-     * so the single-request rule was a filing restriction with no calculation behind it. A split
-     * evening (17:00–19:00, then back at 22:00–01:00 after dinner) simply could not be filed, and
-     * the employee's only recourse was to claim the whole span including hours nobody worked.
-     *
-     * What the rule actually needs to prevent is the SAME minutes being approved twice, which is
-     * an overlap, not a second row.
-     *
-     * The ±24h sweep is not paranoia: a window whose end is at or before its start crosses
-     * midnight, so 23:00→02:00 and 00:30→01:30 describe overlapping real time while their raw
-     * minute-of-day ranges look disjoint. Checking the neighbouring day alignments catches that.
-     * Erring toward "overlapping" is the safe direction for a guard on double pay.
-     */
+    /** Do two overtime windows on the same work date collide? (Item 10.) */
     public static function windowsOverlap(string $aFrom, string $aTo, string $bFrom, string $bTo): bool
     {
         $toMinutes = static function (string $hm): int {
@@ -98,11 +82,8 @@ class OvertimeRequestService
     /**
      * How a date's overtime is classified for pay, resolved from the employee's schedule + the
      * holiday calendar + the HR-editable OT rates. The filing form shows this live so the employee
-     * sees the rate BEFORE submitting; payroll re-derives it independently at run time (OT-3), so
+     * sees the rate BEFORE submitting; payroll re-derives it independently at run time, so
      * this is display only and can never be trusted into pay.
-     *
-     * Also returns the day's scheduled END (null on a rest day) — overtime can only start after the
-     * shift is over, so the form uses it as a floor for "time from" and the guard below enforces it.
      *
      * @return array{code:string, label:string, rate_pct:int, is_workday:bool, schedule_end:?string}
      */
@@ -146,27 +127,6 @@ class OvertimeRequestService
     /**
      * Overtime is time worked BEYOND the shift, so on a scheduled workday it cannot start before
      * that day's end time. A rest day / non-workday has no shift to be beyond, so it's unrestricted.
-     *
-     * THE OVERNIGHT ROLL (item 11). This was the one place the fix from item 1 never reached: it
-     * compared raw minute-of-day, and on a 22:00–06:00 schedule the end (360) is a SMALLER number
-     * than the start (1320), so "is the filing before the end" answered nonsense. A 23:00 start —
-     * squarely inside the shift — passed, and so did a 19:00 one three hours before the employee
-     * had even clocked in. Both were then approved and paid nothing, because item 2 only pays the
-     * overlap with real punches: an approved request worth zero, with nothing to explain it.
-     *
-     * A BARE `HH:MM` HAS NO DAY, so it has to be placed on one. The alignment chosen is the one
-     * NEAREST THE SHIFT END, which is not an arbitrary tiebreak — it is the same choice
-     * `bestWindowOverlap()` makes when payroll later matches this request against the punches. A
-     * rule that resolved the time differently from the engine would accept filings the engine then
-     * refuses to pay, which is the exact failure being fixed. Worked through:
-     *
-     *   22:00–06:00 (start 1320, end 1740 after the roll)
-     *     19:00 → nearest alignment 1140, before the end          → rejected (pre-shift)
-     *     23:00 → nearest alignment 1380, before the end          → rejected (mid-shift)
-     *     06:00 → nearest alignment 1800, at/after the end        → allowed
-     *   08:00–17:00 (start 480, end 1020)
-     *     06:00 → nearest alignment 360, before the end           → rejected
-     *     01:00 → nearest alignment 1500 (the following morning)  → allowed, overtime past midnight
      */
     private function assertAfterShift(Employee $employee, string $workDate, string $timeFrom): void
     {
@@ -256,7 +216,7 @@ class OvertimeRequestService
         }
 
         // Hours are DERIVED from the window server-side — the client never supplies the number
-        // that becomes pay. (A pre-OT-4 caller may still pass `hours` directly.)
+        // that becomes pay. (A pre- caller may still pass `hours` directly.)
         $hours = isset($data['time_from'], $data['time_to'])
             ? self::hoursBetween($data['time_from'], $data['time_to'])
             : (float) ($data['hours'] ?? 0);
@@ -284,20 +244,6 @@ class OvertimeRequestService
 
     /**
      * HR files overtime for an employee on a date that has already passed (item 10).
-     *
-     * THE CORRECTION PATH. Somebody worked late, never filed, and the cutoff is closing — until
-     * now the only remedies were to edit the attendance record (which changes what was clocked,
-     * not what was authorised) or to pay it outside the system. This records the authorisation
-     * where every other overtime authorisation lives, so the same pay math prices it.
-     *
-     * PENDING, NOT APPROVED, even though HR is the one filing. Filing and approving stay two
-     * separate acts: `approve()` is where the audit entry and the FIN-009 retro flag live, and
-     * short-circuiting into "approved" would skip both and quietly create pay for a settled
-     * period with no record of the decision. It also keeps a four-eyes route open — the officer
-     * who files need not be the one who signs it off.
-     *
-     * `assertAfterShift` still applies. A correction is allowed to be late, not to be incoherent:
-     * overtime that starts before the employee's shift ended is not overtime whoever files it.
      *
      * @param  array<string, mixed>  $data
      */
@@ -351,7 +297,7 @@ class OvertimeRequestService
         $employeeName = $request->employee->user?->name ?? $request->employee->name;
         $this->audit->log('approved', 'Overtime', "Approved {$employeeName}'s overtime request", $request);
 
-        // FIN-009 — approving overtime for a cutoff that has already been paid changes what that
+        // Approving overtime for a cutoff that has already been paid changes what that
         // period SHOULD have paid. The approval stands (the overtime was worked), and the
         // difference is recorded so an adjustment run can settle it instead of being remembered.
         $this->retro->flagIfSettled(
@@ -386,23 +332,7 @@ class OvertimeRequestService
         return $request;
     }
 
-    /**
-     * Cancel an overtime request (Slice 6).
-     *
-     * WHO MAY DO IT, AND WHY THE SPLIT. Undoing an APPROVED request is still HR-only: the
-     * approval is a commitment of company money, and cancelling one whose period has already
-     * been paid raises an overpayment (see the retro flag below). That has to stay with the
-     * people who can settle it.
-     *
-     * A PENDING request is a different thing entirely — nobody has committed anything, and the
-     * employee who filed it is the right person to withdraw it. Holding them to "ask HR to
-     * decline it" recorded a refusal against them for what was only a change of mind, which is
-     * the same gap leave closed in Slice 21.
-     *
-     * Payroll ignores a cancelled request from the next recompute onward. An already-DISBURSED
-     * payslip is deliberately left alone (Slice 5 protects it) — HR settles the difference
-     * manually rather than have pay silently move under a payslip someone has already been given.
-     */
+    /** Cancel an overtime request. */
     public function cancel(OvertimeRequest $request, User $actor, string $reason): OvertimeRequest
     {
         $isHr = $actor->hasAnyRole(['hr_officer', 'super_admin']);
@@ -436,7 +366,7 @@ class OvertimeRequestService
             'cancel_reason' => $reason,
         ]);
 
-        // FIN-009 — cancelling an APPROVED request whose period has already been paid means the
+        // Cancelling an APPROVED request whose period has already been paid means the
         // company paid overtime its own records now say was never authorised. The docblock above
         // says HR settles that manually; this is what makes "manually" a tracked queue instead of
         // someone's memory. Recovering it is a wage deduction needing consent (Art. 113), so it is

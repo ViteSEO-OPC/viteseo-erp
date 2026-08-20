@@ -5,26 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Whether working a rest day needs HR's permission first (Company → Rules).
- *
- * ON — the shipped default and the only behaviour that existed until now — is the rest-day
- * work request: pressing Time in on a day the schedule does not cover files a request instead
- * of a punch, and HR approving it stamps attendance at the moment of the press.
- *
- * OFF is for companies whose rest-day work is routine rather than exceptional — weekend
- * coverage rotas, skeleton shifts — where a queue that is always approved is a queue nobody
- * reads. The punch is then recorded immediately.
- *
- * NOTHING DOWNSTREAM CHANGES EITHER WAY. Rest-day premium is priced off any attendance row
- * landing on a non-workday (AttendanceService::restDayWorkedMinutesFor), not off an approval,
- * so turning the gate off pays exactly what an approved request paid. This switch decides who
- * has to agree before the row exists, and only that.
- *
- * Defaulted TRUE so an existing install behaves identically until HR opts out. Historical
- * policy versions are backfilled with the same value; safe by construction, because no pay
- * path reads this column — re-running an old cycle produces exactly the money it did before.
- */
+/** Whether working a rest day needs HR's permission first (Company → Rules). */
 return new class extends Migration
 {
     private const DEFAULT = true;

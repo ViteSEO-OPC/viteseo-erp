@@ -210,7 +210,7 @@ class DeductionServiceTest extends TestCase
 
     /**
      * Breaks are not a pay input — however long they run, this service charges nothing for
-     * them. Detecting an OVERLONG break moved to ViolationService in Slice 9 (it is measured
+     * them. Detecting an OVERLONG break moved to ViolationService in (it is measured
      * against the employee's own schedule entitlement, and must work with every deduction mode
      * off); see ViolationBreakFlagTest. What stays guarded here is that it never costs money.
      */

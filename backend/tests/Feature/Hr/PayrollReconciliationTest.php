@@ -17,26 +17,7 @@ use App\Modules\Hr\Services\ReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 7 — every artifact a payroll run produces must agree with every other one.
- *
- * The audit asked for: `run totals == Σ payslips == register == run CSV == bank batch == journal entries`.
- * **Five legs, not six** — the journal entries were removed on 2026-08-07 as out of scope (they are not in
- * `HRIS-BUILD-PLAN.md`), so there is nothing to reconcile against and asserting on it would be asserting
- * on deleted code.
- *
- * WHY THIS TEST EARNS ITS KEEP. Each artifact is built by a different method, from different columns, for
- * a different reader: the run header is a stored aggregate, the register re-sums the payslips, the CSV
- * sums its own row totals, and the batch sums payments. They agree today by construction — nothing
- * enforces it. The first time one of them starts reading a column the others do not, the disagreement
- * shows up as a finance person's spreadsheet not balancing, weeks later, with no way to tell which figure
- * is wrong.
- *
- * THE FIXTURE USES DELIBERATELY UGLY SALARIES. Round numbers hide rounding: three employees at
- * ₱30,000 will reconcile under almost any arithmetic. Figures with real centavos and an odd headcount are
- * what catch a `number_format($n, 0)` or a per-row round that should have been a sum-then-round — which is
- * exactly the defect FIN-017 found in the remittance figures and FIN-042 in the register.
- */
+/** Every artifact a payroll run produces must agree with every other one. */
 class PayrollReconciliationTest extends HrTestCase
 {
     use RefreshDatabase;

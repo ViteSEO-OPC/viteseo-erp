@@ -20,19 +20,7 @@ use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 
-/**
- * Reconciliation — the point at which "paid" stops being an assertion (FIN-015).
- *
- * A batch says the company INTENDS to pay. Only the bank's confirmation says money moved, and the
- * expensive half is the opposite case: before this, a bounced transfer left the payslip reading
- * `disbursed` and nothing anywhere said the employee had not been paid.
- *
- * The property that matters most here is that settling and un-settling go through
- * `PayrollService::markDone()` / `reopenPayslip()` rather than writing the status column. Those
- * methods also settle the reimbursements a payslip carried and put back the loan instalments it
- * collected — a reconciliation that wrote the column directly would pay someone's expenses on
- * paper and strand the claims forever. That is asserted explicitly below.
- */
+/** Reconciliation — the point at which "paid" stops being an assertion. */
 class PaymentReconciliationTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -124,13 +112,7 @@ class PaymentReconciliationTest extends HrTestCase
         $this->assertSame('disbursed', $payment->payslip->fresh()->status);
     }
 
-    /**
-     * Settling must go through `markDone()`, not write the column.
-     *
-     * Disbursing a payslip also settles the reimbursements it carried. A reconciliation that set
-     * `status` directly would leave those claims `scheduled` forever — paid on the payslip, unpaid
-     * in the reimbursement ledger.
-     */
+    /** Settling must go through `markDone()`, not write the column. */
     public function test_settling_also_settles_the_reimbursements_the_payslip_carried(): void
     {
         $employee = $this->employees[0];
@@ -375,7 +357,7 @@ class PaymentReconciliationTest extends HrTestCase
             ->assertJsonValidationErrors('failure_reason');
     }
 
-    // --- FIN-052: the report must not claim money moved -------------------------------------
+    // ---: the report must not claim money moved -------------------------------------
 
     /**
      * The headline figure management reads first used to be "Net paid (YTD)" over COMPLETED RUNS.
@@ -396,7 +378,7 @@ class PaymentReconciliationTest extends HrTestCase
 
         // Nothing settled yet: computed is non-zero, disbursed is flat zero.
         $this->assertNotSame($by['Net computed (YTD)'], $by['Net disbursed (YTD)']);
-        // `peso()` renders whole pesos in on-screen summaries (FIN-017), so this is "₱0", not "₱0.00".
+        // `peso()` renders whole pesos in on-screen summaries, so this is "₱0", not "₱0.00".
         $this->assertSame('₱0', $by['Net disbursed (YTD)']);
 
         // Settle everything; now the two agree and nothing is awaiting payment.

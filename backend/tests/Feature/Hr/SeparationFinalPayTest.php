@@ -12,18 +12,7 @@ use App\Modules\Hr\Services\AttendanceService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice 4 (2026-07-28 audit) — final pay for a leaver, and never destroying paid history.
- *
- * A separation is `separation_type` + a soft-delete, so a leaver was invisible to the run
- * twice over and got NO payslip for the days they had worked. Worse, re-running an older
- * cycle afterwards force-deleted the payslip they had already been paid from.
- *
- * The cycle here (2026-03-01 → 03-15) is entirely in the past, so every scheduled workday
- * with no attendance record counts as unpaid — which makes the numbers easy to reason about:
- * what matters is that the leaver is INCLUDED, and that days after their last one are never
- * treated as owed.
- */
+/** (2026-07-28 audit) — final pay for a leaver, and never destroying paid history. */
 class SeparationFinalPayTest extends HrTestCase
 {
     use RefreshDatabase;

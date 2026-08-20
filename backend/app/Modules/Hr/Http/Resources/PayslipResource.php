@@ -38,14 +38,9 @@ class PayslipResource extends JsonResource
                 'job_title' => $this->employee?->job_title,
                 'department' => $this->employee?->department?->name,
                 'address' => $this->employee?->address,
-                // FIN-022 — FULL for the employee reading their OWN payslip, masked for anyone
+                // FULL for the employee reading their OWN payslip, masked for anyone
                 // else. A payslip has to be usable as evidence of employment and income, which
                 // means the person it belongs to must see their own government numbers on it.
-                //
-                // But HR opening someone else's payslip is a different act, and leaving these
-                // unmasked here would route straight around the audited reveal endpoint: every
-                // government number in the company, readable, with no record of who looked. HR that
-                // genuinely needs the full value uses `/employees/{id}/sensitive`, which logs it.
                 ...$this->identityNumbers($request),
             ],
 
@@ -53,7 +48,7 @@ class PayslipResource extends JsonResource
             // `period_base` is the full period basic; `base_salary` is what survived absences.
             // The payslip shows the former as "Basic Pay" and charges `absence_deduction`
             // against it, so the cost of an absence is visible instead of folded into basic.
-            // FIN-011 — WHICH KIND OF PAYSLIP THIS IS. Without it the document cannot label itself,
+            // WHICH KIND OF PAYSLIP THIS IS. Without it the document cannot label itself,
             // and a 13th-month or final-pay slip reads as an ordinary period that paid no salary.
             // WHICH RUN THIS BELONGS TO, and whether that run is still open. Both are here for the
             // correction flow: adding a line to a payslip is a run-level call, and a locked run
@@ -78,7 +73,7 @@ class PayslipResource extends JsonResource
             'night_diff_minutes' => (int) $this->night_diff_minutes,
             'rest_day_premium' => (float) $this->rest_day_premium,
             'rest_day_minutes' => (int) $this->rest_day_minutes,
-            // FIN-011 — stored all along and never serialised, which is why a 13th-month payslip
+            // Stored all along and never serialised, which is why a 13th-month payslip
             // showed a gross with every earnings line at ₱0.
             'thirteenth_month' => (float) $this->thirteenth_month,
             'other_benefits' => (float) $this->other_benefits,
@@ -86,7 +81,7 @@ class PayslipResource extends JsonResource
             // figure on a 13th-month slip is otherwise a number with no visible basis.
             'taxable_pay' => (float) $this->taxable_pay,
             'gross' => (float) $this->gross,
-            // FIN-011 — the earnings lines, built HERE rather than in each surface, for the same
+            // The earnings lines, built HERE rather than in each surface, for the same
             // reason `totals` is: the React document and the PDF both render them, and two
             // independent lists would drift the first time a run type gained a line.
             'earnings_breakdown' => $this->earningsBreakdown(),
@@ -101,20 +96,20 @@ class PayslipResource extends JsonResource
             // The Deductions table, one row per REASON with the dates behind it. See
             // deductionsBreakdown() — in particular why the pesos are apportioned here.
             'deductions_breakdown' => $this->deductionsBreakdown(),
-            // FIN-032 — interest collected on loans this period. Already itemised as its own line in
+            // Interest collected on loans this period. Already itemised as its own line in
             // the breakdown above; exposed separately so a consumer can total the cost of borrowing
             // without re-parsing the breakdown's labels.
             'loan_interest' => (float) $this->loan_interest,
             'total_deductions' => (float) $this->total_deductions,
-            // FIN-010 — an off-cycle correction's amount and what it is for, so the document can
+            // An off-cycle correction's amount and what it is for, so the document can
             // explain a gross that came from a person rather than from the engine.
-            // FIN-028 — the year-end tax correction, so a December payslip can explain a figure
+            // The year-end tax correction, so a December payslip can explain a figure
             // that is not this period's ordinary projection. Negative means refunded.
             'tax_annualisation' => (float) $this->tax_annualisation,
-            // FIN-054 — the year's figures behind that adjustment. Null on every payslip but the
+            // The year's figures behind that adjustment. Null on every payslip but the
             // one that settles a tax year, and on any written before the column existed.
             'tax_annualisation_basis' => $this->tax_annualisation_basis,
-            // FIN-014 — the terminal lines, so a final payslip can show its own derivation rather
+            // The terminal lines, so a final payslip can show its own derivation rather
             // than one opaque gross.
             'separation_pay' => $this->separation_pay === null ? null : (float) $this->separation_pay,
             'separation_pay_taxable' => (bool) $this->separation_pay_taxable,
@@ -127,12 +122,6 @@ class PayslipResource extends JsonResource
             'net_pay' => (float) $this->net_pay,
 
             // WHAT HAS ACTUALLY BEEN PAID, AND WHAT IS STILL OWED.
-            //
-            // Equal to `net_pay` and zero respectively on every payslip that has not been corrected
-            // after being paid — which is nearly all of them. They exist for the one case that used
-            // to be unrepresentable: a payslip amended after disbursement, where the document's net
-            // is no longer the amount that left the bank. Without both figures the payslip would
-            // claim the correction had already been transferred.
             'disbursed_amount' => $this->disbursed_amount === null ? null : (float) $this->disbursed_amount,
             'amount_outstanding' => $this->amountOutstanding(),
             // WHEN it was paid. An amended payslip has to date both halves — "paid on the 20th,
@@ -178,32 +167,22 @@ class PayslipResource extends JsonResource
             'month_summary' => $this->monthSummary(),
 
             // The company's counterpart contributions.
-            //
-            // SHOWN TO THE EMPLOYEE TOO (2026-08-07, Joshua's call). These were HR-only on the
-            // grounds that remittance data is "not the employee's business". That reasoning holds
-            // for the two fields below it and not for this one: the employer share is money paid
-            // into the employee's OWN SSS, PhilHealth and Pag-IBIG record, and it is the part of
-            // their compensation they are least likely to know about. It is disclosure, not
-            // remittance workflow.
-            //
-            // It is never a term in any total — see `documentTotals()`, which does not reference
-            // it. Nothing deducts it, because nothing was deducted: it is the company's cost.
             'employer_sss' => (float) $this->employer_sss,
             'employer_philhealth' => (float) $this->employer_philhealth,
             'employer_pagibig' => (float) $this->employer_pagibig,
 
-            // FIN-049 — WHAT EACH STATUTORY FIGURE WAS CHARGED ON. See contributionBasis().
+            // WHAT EACH STATUTORY FIGURE WAS CHARGED ON. See contributionBasis().
             'contribution_basis' => $this->contributionBasis(),
 
             // These two stay HR-only. Unlike the employer share, they are genuinely remittance
             // workflow: one says a filing cannot be made as it stands, the other is what a
             // remittance query asks for. Neither is something the employee can act on.
             $this->mergeWhen($this->isHrViewer($request), fn () => [
-                // Slice B7 — which deductions came from a per-employee override rather than the
+                // Which deductions came from a per-employee override rather than the
                 // rates. The two halves can belong to different brackets, which is a problem for
                 // the person filing, not for the person paid.
                 'contribution_overrides' => $this->contribution_overrides ?? [],
-                // Slice B19 — the monthly salary figure each contribution was charged on. Null on
+                // The monthly salary figure each contribution was charged on. Null on
                 // payslips computed before B19 and on runs that take no statutory contributions.
                 'contribution_bases' => $this->contribution_bases,
             ]),
@@ -225,7 +204,7 @@ class PayslipResource extends JsonResource
             'undertime_deduction' => (float) $this->undertime_deduction,
             'late_penalty_days' => (float) $this->late_penalty_days,
 
-            // — Why those figures are what they are (FIN-055) —
+            // — Why those figures are what they are —
             // The counts above say "2.5 unpaid days"; these say WHICH days, and how the tax
             // figure was reached. Null on payslips issued before the columns existed, which the
             // document renders as simply not showing the note.
@@ -239,9 +218,6 @@ class PayslipResource extends JsonResource
     /**
      * The per-date charge ledger, grouped into the two questions people actually ask.
      *
-     * Built by PayslipDocument, which is also what the correction path reads — see the note on
-     * that class for why the document's arithmetic no longer lives here.
-     *
      * @return array{unpaid: list<array<string, mixed>>, late: list<array<string, mixed>>}|null
      */
     private function attendanceLines(): ?array
@@ -252,11 +228,6 @@ class PayslipResource extends JsonResource
     /**
      * The rows on the Deductions table: one per REASON, with its dates and its money.
      *
-     * The apportionment — and why the pesos are split rather than multiplied out — lives in
-     * PayslipDocument::deductionRows(). The corrections HR has made are passed in with them,
-     * because an edited row is PINNED to the figure HR typed and the rest of the pool is shared
-     * among the others: without that, editing one row would move every row and match none.
-     *
      * @return list<array<string, mixed>>
      */
     private function deductionsBreakdown(): array
@@ -265,12 +236,7 @@ class PayslipResource extends JsonResource
     }
 
     /**
-     * The rule that turned late/undertime MINUTES into a fraction of a day (FIN-055).
-     *
-     * Read from the run's own `policy_snapshot`, never from live config: a payslip must keep
-     * explaining itself the same way after HR changes the tiers or the divisor, which is the
-     * whole reason the snapshot exists. Null on runs written before it did, and on payslips
-     * where nothing was charged — an explanation of a rule that took nothing is noise.
+     * The rule that turned late/undertime MINUTES into a fraction of a day.
      *
      * @return array<string, mixed>|null
      */
@@ -299,7 +265,7 @@ class PayslipResource extends JsonResource
         ];
     }
 
-    /** What kind of payslip this is, in words the recipient can read (FIN-011). */
+    /** What kind of payslip this is, in words the recipient can read. */
     private function runTypeLabel(): string
     {
         return match ($this->payrollRun?->type) {
@@ -313,12 +279,7 @@ class PayslipResource extends JsonResource
     }
 
     /**
-     * Every earning on this payslip as a named, keyed line (FIN-011).
-     *
-     * Built by PayslipDocument so the React document, the PDF and the correction dialog all read
-     * ONE description of what a run paid. Two hand-maintained lists would disagree the first time a
-     * run type gained a line — which is exactly how the adjustment and final-pay earnings once
-     * shipped invisible on both documents.
+     * Every earning on this payslip as a named, keyed line.
      *
      * @return list<array<string, mixed>>
      */
@@ -341,9 +302,6 @@ class PayslipResource extends JsonResource
     /**
      * The subtotals the payslip document is built from.
      *
-     * See PayslipDocument::totals() for the identity they satisfy, and for why `deductions` is
-     * `absence_deduction + other_deductions` rather than the stored `total_deductions`.
-     *
      * @return array<string, mixed>
      */
     private function documentTotals(): array
@@ -354,11 +312,6 @@ class PayslipResource extends JsonResource
     /**
      * THE PAYSLIP'S FIGURES as a plain array, which is what PayslipDocument works on.
      *
-     * An array rather than the model, because the same arithmetic has to run against three things
-     * that are not all models: a saved payslip, a payslip mid-computation inside `run()`, and the
-     * `engine_snapshot` of what a payslip looked like before anyone corrected it. The last is what
-     * an override is measured against, so the document's own reader has to accept it too.
-     *
      * @return array<string, mixed>
      */
     private function figures(): array
@@ -368,13 +321,6 @@ class PayslipResource extends JsonResource
 
     /**
      * The corrections HR has made to lines that were already on this payslip, keyed by line.
-     *
-     * Distinct from `amendmentRows()`, which is the corrections that ADDED a line. Both live in the
-     * same ledger and are told apart by `target_key`: an override names the line it replaces, an
-     * addition has no line to name. Keeping them apart matters at exactly one point — an override
-     * must not also be printed as an extra earning, or the document counts it twice.
-     *
-     * Empty when the ledger is not loaded, which renders as a payslip nobody has corrected.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -410,10 +356,6 @@ class PayslipResource extends JsonResource
     /**
      * The corrections that ADDED a line to this payslip, in the shape the document reader wants.
      *
-     * Null — not an empty array — when the ledger is not loaded, because the two mean different
-     * things to the caller: "not loaded" falls back to the single stored `adjustment_pay`, which is
-     * how the payslips of the superseded adjustment runs still render.
-     *
      * @return list<array<string, mixed>>|null
      */
     private function amendmentRows(): ?array
@@ -436,11 +378,6 @@ class PayslipResource extends JsonResource
     /**
      * The daily rate said three ways, because the document's header states all three.
      *
-     * Only the daily figure is stored. The other two are derived from it and from the run's own
-     * `hours_per_day_divisor`, NOT from a hardcoded 8: the divisor is the DOLE day the deduction
-     * arithmetic already uses, and an hourly rate computed against a different one would not
-     * reconcile with the late/undertime charge printed further down the same document.
-     *
      * @return array{daily: float, hourly: float, half_day: float}
      */
     private function rates(): array
@@ -457,15 +394,6 @@ class PayslipResource extends JsonResource
 
     /**
      * Where this slip sits among its calendar month's cutoffs.
-     *
-     * READ FROM THE SCHEDULE, NOT FROM THE PAYSLIPS THAT EXIST. On the month's first cutoff the
-     * second has not been run yet, so counting rows would label it "1 of 1" and the document would
-     * claim to be the whole month. `monthPosition()` derives both figures from the frequency and
-     * the anchor, which is the same source `deduction_timing`'s first/last already resolves
-     * against — so "last cutoff" means the same thing on the payslip as it does in payroll.
-     *
-     * Null for every run type but `regular`: a 13th-month, adjustment or final-pay run is not a
-     * cutoff of anything, and labelling it as one would be a claim about a month it never covered.
      *
      * @return array{index: int, count: int, is_last: bool, label: string|null}|null
      */
@@ -523,31 +451,6 @@ class PayslipResource extends JsonResource
 
     /**
      * THE MONTH, ROLLED UP — carried by the last cutoff only.
-     *
-     * WHY IT EXISTS. With `deduction_timing`/`tax_timing`/`allowance_timing` set to `last`, the
-     * month's contributions, tax and allowances all land on one slip while the earlier slips show
-     * pay alone. Neither slip is then a picture of the month, and the employee has no document
-     * that adds up to what they were actually paid between the 1st and the 31st. This is that
-     * document: the earlier cutoffs restated, totalled, and carried through the same four steps.
-     *
-     * WHY IT IS COMPUTED FROM EVERY SLIP RATHER THAN FROM THIS ONE. The obvious shortcut — "the
-     * last cutoff holds the whole month's contributions, so its own figures are the month's" — is
-     * true ONLY under `last`. Under `every` the contributions are split across the cutoffs and
-     * that shortcut silently under-reports the month by whatever the earlier slips took. Summing
-     * the slips is correct under all three settings, which is why the timing dropdown needs no
-     * special case here at all.
-     *
-     * The identity it satisfies:
-     *
-     *     Σ current − Σ government = initial_net
-     *     initial_net + Σ allowances = total_month = Σ net_pay
-     *
-     * so `total_month − already_paid` is this slip's own net pay, arrived at from the month's
-     * side. The two agreeing is the check that the roll-up is right.
-     *
-     * Null unless this is the last cutoff of a month that HAS more than one and where an earlier
-     * one was actually run — with nothing to restate, the table would be a second copy of the
-     * figures directly above it.
      *
      * @return array<string, mixed>|null
      */
@@ -639,15 +542,7 @@ class PayslipResource extends JsonResource
         ];
     }
 
-    /**
-     * Another slip's "Total Current Amount" — earned less allowances less deductions.
-     *
-     * Derived from the stored columns rather than by building a second PayslipResource for every
-     * cutoff in the month: the walk in `documentTotals()` reduces to `gross − allowances −
-     * other_deductions` once the absence charge cancels (it is added to compensation and taken
-     * off again as a deduction), and the alternative would run `earningsBreakdown()`,
-     * `contributionBasis()` and an identity-masking pass per row to read three numbers.
-     */
+    /** Another slip's "Total Current Amount" — earned less allowances less deductions. */
     private function currentAmountOf(Payslip $slip): float
     {
         return round(
@@ -656,14 +551,7 @@ class PayslipResource extends JsonResource
         );
     }
 
-    /**
-     * The allowance money on another slip.
-     *
-     * Reads the snapshot breakdown first and the column only as its fallback, mirroring
-     * `allowancesBreakdown()` — a slip whose components were recorded must total to the same
-     * figure the document prints for it, or the month roll-up and the table it summarises
-     * disagree by a rounding step.
-     */
+    /** The allowance money on another slip. */
     private function allowanceTotalOf(Payslip $slip): float
     {
         $lines = $slip->allowances_breakdown ?? [];
@@ -680,16 +568,10 @@ class PayslipResource extends JsonResource
         return app(PayScheduleService::class);
     }
 
-    /**
-     * The date this period actually pays out: cycle end plus the configured delay.
-     *
-     * Taken from the run's own policy snapshot first, so an old payslip keeps stating the pay
-     * date it was issued under even after HR changes `pay_delay_days`. Runs from before the
-     * snapshot existed fall back to the current setting.
-     */
+    /** The date this period actually pays out: cycle end plus the configured delay. */
     private function payDate(): ?string
     {
-        // FIN-036 — the date the RUN recorded, not one re-derived at read time. Changing
+        // The date the RUN recorded, not one re-derived at read time. Changing
         // pay_delay_days used to move the stated pay date on payslips already issued.
         if ($this->payrollRun?->scheduled_pay_date) {
             return $this->payrollRun->scheduled_pay_date->format('Y-m-d');
@@ -711,21 +593,7 @@ class PayslipResource extends JsonResource
     }
 
     /**
-     * What each statutory contribution was actually charged on (FIN-049).
-     *
-     * THE QUESTION THIS ANSWERS. A ₱95,000 salary shows Pag-IBIG at ₱200 and reads as an error —
-     * 2% of ₱95,000 is ₱1,900. It is right: the rate applies to a ₱10,000 salary CAP. SSS is
-     * worse, because the rate multiplies a bracket's Monthly Salary Credit rather than the salary
-     * at all. Nothing on the payslip said either thing, so the only way to check a deduction was
-     * to open Company → Benefits and reconstruct the arithmetic by hand.
-     *
-     * BUILT FROM WHAT THE RUN STORED, never from live config: `contribution_bases` on this
-     * payslip and the rate version on the run's `policy_snapshot`. A payslip must keep explaining
-     * itself the same way after HR edits a rate, which is the whole reason both were snapshot.
-     *
-     * Degrades rather than guesses. A payslip predating either snapshot, or a bracket version
-     * whose bands were not captured, simply omits the entry and the document shows the figure
-     * with no note — the same choice `allowancesBreakdown()` makes.
+     * What each statutory contribution was actually charged on.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -819,12 +687,7 @@ class PayslipResource extends JsonResource
     }
 
     /**
-     * The government numbers on the identity block — full only for their owner (FIN-022).
-     *
-     * Ownership, not role, is the test. An HR officer viewing their own payslip is the owner and sees
-     * their own numbers; the same officer viewing a colleague's does not. Getting this the other way
-     * round — keying on role — would show HR every number in the company and show an employee
-     * nothing of their own.
+     * The government numbers on the identity block — full only for their owner.
      *
      * @return array<string, string|null>
      */

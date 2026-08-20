@@ -7,15 +7,6 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Rest-day work requests — permission to work a day the employee's schedule says is not
  * a workday (a Mon–Fri employee coming in on a Saturday).
- *
- * Filed by pressing Time in on a rest day: no attendance row is written, this is. HR
- * approves, and the approval stamps the attendance at `requested_at` — the moment the
- * button was pressed — so nobody loses the minutes HR spent deciding. Payroll needs no
- * teaching: rest-day premium already prices any attendance row on a non-workday, so this
- * table is purely the gate on such a row existing.
- *
- * `requested_at` is therefore the payroll-relevant column, not `created_at`: the two are
- * written together today, but only one of them states what it means.
  */
 return new class extends Migration
 {

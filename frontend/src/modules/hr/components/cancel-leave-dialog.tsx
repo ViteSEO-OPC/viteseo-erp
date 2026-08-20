@@ -28,7 +28,7 @@ export function CancelLeaveDialog({
   onOpenChange: (open: boolean) => void;
   /** What's being cancelled, e.g. "Annual Leave · Jul 1 – Jul 3". */
   subject?: string;
-  /** Heading — overridable so overtime (Slice 6) can reuse this same flow. */
+  /** Heading — overridable so overtime can reuse this same flow. */
   title?: string;
   onConfirm: (reason: string) => Promise<void>;
 }) {

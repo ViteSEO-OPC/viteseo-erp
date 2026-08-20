@@ -5,43 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * The withholding tax table becomes dated data instead of a `match` in PHP (FIN-027).
- *
- * THE GAP. Every other figure that prices a payslip is effective-dated — salaries (Slice 13c),
- * statutory contributions (B3a), allowances (B11), the attendance policy (2026-08-04). The BIR
- * graduated table was a `match (true)` literal inside `PayrollService::annualWithholdingTax()`.
- * Three consequences: a bracket change needs a code deploy, a historical period cannot be repriced
- * at the table that actually applied to it, and the figures themselves are invisible to HR — there
- * is no screen on which anyone could check them.
- *
- * SHAPE, deliberately the same as `hr_contribution_versions` + `hr_contribution_brackets`, which
- * this module already uses for SSS: `effective_from` only, no end date. Two date columns can
- * disagree — a gap leaves a period with no table, an overlap leaves two — whereas one start date
- * per row with "the latest row on or before the cycle end" makes both impossible.
- *
- * THE BRACKET ARITHMETIC is the BIR's own presentation, so a row can be read straight off the
- * published table and checked by eye:
- *
- *     tax = base_tax + rate_on_excess × (annual taxable income − min_annual)
- *
- * `min_annual` is where the band starts and it runs to the next band's start, so there is no
- * `max` column to keep in step — the same reasoning as the MSC bands.
- *
- * THE OPENING TABLE IS BACKFILLED HERE, not left to a seeder, for two reasons. Registering a
- * seeder means editing the shared `DatabaseSeeder`, which belongs to the platform rather than this
- * module. And more importantly a missing tax table would silently withhold ₱0 — the same class of
- * failure FIN-035 exists to prevent — so it must not depend on anyone remembering to run
- * something. `migrate` alone leaves the system correct.
- *
- * IT IS DATED 2000-01-01, NOT 2023-01-01, ON PURPOSE. The hardcoded `match` applied to every
- * period the system has ever priced, regardless of date, because there was no date to apply. An
- * opening row at 2000-01-01 reproduces that exactly, so introducing this table reprices nothing.
- * Dating it 2023-01-01 would leave every earlier cycle resolving to no table at all — a change in
- * behaviour dressed up as a correction. Entering the genuinely older schedules (the 2018–2022
- * tranche, and pre-TRAIN) is a separate job needing the real published figures; when they are
- * added with their correct dates, this row keeps everything before them working.
- */
+/** The withholding tax table becomes dated data instead of a `match` in PHP. */
 return new class extends Migration
 {
     public function up(): void
@@ -73,13 +37,6 @@ return new class extends Migration
 
         // The TRAIN schedule in force from 1 January 2023 (RA 10963, second tranche) — the exact
         // figures that were hardcoded in PayrollService::annualWithholdingTax() before this.
-        //
-        //   over ₱0          up to ₱250,000     exempt
-        //   over ₱250,000    up to ₱400,000     15% of the excess
-        //   over ₱400,000    up to ₱800,000     ₱22,500 + 20% of the excess
-        //   over ₱800,000    up to ₱2,000,000   ₱102,500 + 25% of the excess
-        //   over ₱2,000,000  up to ₱8,000,000   ₱402,500 + 30% of the excess
-        //   over ₱8,000,000                     ₱2,202,500 + 35% of the excess
         $versionId = DB::table('hr_tax_versions')->insertGetId([
             'effective_from' => '2000-01-01',
             'note' => 'TRAIN graduated rates (RA 10963), in force from 1 January 2023 — seeded as the opening table so no historical period reprices.',

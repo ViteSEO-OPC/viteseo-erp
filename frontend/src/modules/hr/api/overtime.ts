@@ -17,13 +17,7 @@ export async function getOvertimeRequests(): Promise<OvertimeRequest[]> {
   return res.data.data;
 }
 
-/**
- * FIN-039 — auto-mode overtime the policy caps held back, awaiting an approval. HR only.
- *
- * Derived from attendance on every read, so there is nothing to resolve here: an item disappears
- * when an overtime request covering that date is APPROVED through the ordinary queue, which is also
- * what releases the minutes for payment.
- */
+/** auto-mode overtime the policy caps held back, awaiting an approval. HR only. */
 export async function getAutoOvertimeReview(
   start: string,
   end: string,
@@ -80,7 +74,7 @@ export async function rejectOvertimeRequest(
   return res.data.data;
 }
 
-/** HR undoes an approved (or pending) request — Slice 6. Reason is required. */
+/** HR undoes an approved (or pending) request. Reason is required. */
 export async function cancelOvertimeRequest(
   id: number,
   reason: string,

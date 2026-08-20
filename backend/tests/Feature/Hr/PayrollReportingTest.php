@@ -18,9 +18,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 13b (2026-07-28 audit) — display, audit trail and reporting. No pay moves here.
- */
+/** (2026-07-28 audit) — display, audit trail and reporting. No pay moves here. */
 class PayrollReportingTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -138,13 +136,8 @@ class PayrollReportingTest extends HrTestCase
     }
 
     /**
-     * Slice B9 item 2 — the Compensation legend labels a chart of REAL payslips, so it has to
+     * The Compensation legend labels a chart of REAL payslips, so it has to
      * carry the rate those payslips were priced at.
-     *
-     * THE BUG: it read `hr_contribution_settings.config`, the row B3a replaced. Nothing has
-     * written that since, so the label was whatever was last left there — it agreed with the
-     * engine only by luck, and a rate change would have put a figure on the chart that no payslip
-     * in it ever used.
      */
     public function test_the_compensation_legend_reads_the_rate_version_in_force(): void
     {
@@ -170,7 +163,7 @@ class PayrollReportingTest extends HrTestCase
     }
 
     /**
-     * Slice B9 item 5 — this used to write a free-form `config` array, which is no longer
+     * This used to write a free-form `config` array, which is no longer
      * accepted: the rates are dated versions (their audit trail is `ContributionVersionTest`),
      * and this setting now means only "does the company operate this contribution at all".
      * Switching one off removes a deduction from every payslip, so it is still audited both ways.
@@ -192,7 +185,7 @@ class PayrollReportingTest extends HrTestCase
         $this->actingAsHr()
             ->putJson('/api/v1/hr/payroll/settings', [
                 'frequency' => 'monthly',
-                // FIN-050 — `first` is no longer a contribution timing; see the test below.
+                // `first` is no longer a contribution timing; see the test below.
                 'deduction_timing' => 'last',
                 'tax_timing' => 'every',
             ])
@@ -203,14 +196,7 @@ class PayrollReportingTest extends HrTestCase
         $this->assertSame('monthly', $log->after['frequency'] ?? null);
     }
 
-    /**
-     * FIN-050 — contributions cannot be charged on the first cutoff only.
-     *
-     * The first cutoff cannot know what the month will earn, so its figure is provisional and the
-     * last cutoff must adjust it — which makes "first only" a split with the worst shape rather
-     * than a distinct option. Rejected at the request rather than quietly coerced, so a settings
-     * save that means something impossible fails loudly.
-     */
+    /** Contributions cannot be charged on the first cutoff only. */
     public function test_contributions_cannot_be_timed_to_the_first_cutoff(): void
     {
         $this->actingAsHr()

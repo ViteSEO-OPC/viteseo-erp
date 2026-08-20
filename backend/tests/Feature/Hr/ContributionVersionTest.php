@@ -13,16 +13,7 @@ use App\Modules\Hr\Services\ContributionService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B3a — statutory rates are dated versions, resolved as of the PAY PERIOD.
- *
- * One undated row meant changing a rate silently repriced every payroll ever run, and an old
- * period could never be reproduced. These rates really do move: SSS went 14% → 15% in January
- * 2025 with its ceiling ₱30,000 → ₱35,000.
- *
- * The headline test is the 2026 SSS schedule end to end: 5% employee, 10% employer, plus the flat
- * ₱30 employer EC contribution above ₱15,000 — which must never touch the employee's net pay.
- */
+/** Statutory rates are dated versions, resolved as of the PAY PERIOD. */
 class ContributionVersionTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -94,7 +85,7 @@ class ContributionVersionTest extends HrTestCase
     {
         $this->sss2026();
 
-        // 2024, not 2025: the seeder carries the published 2025 schedule now (B8), so a 2025
+        // 2024, not 2025: the seeder carries the published 2025 schedule now, so a 2025
         // cycle correctly prices on that rather than on the opening version.
         $this->assertSame(900.0, $this->slip('2024-06-15')['sss'], '4.5% — the opening rate');
         $this->assertSame(1000.0, $this->slip('2026-03-15')['sss']);

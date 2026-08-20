@@ -19,16 +19,7 @@ export function formatContributionPct(rate: number): string {
   return `${Number.isInteger(pct) ? pct : Number(pct.toFixed(2))}%`;
 }
 
-/**
- * One statutory contribution, as a read-only card.
- *
- * Shared by the HR Company → Benefits screen and the employee's My Benefits screen so the two
- * cannot drift: the employee is being shown the rate that produced the deduction on their own
- * payslip, and a second copy of this markup would eventually disagree with the first.
- *
- * `action` is the only difference between the two views — HR passes an "Update rates" button,
- * the employee passes nothing. The card itself never edits.
- */
+/** One statutory contribution, as a read-only card. */
 export function GovernmentContributionCard({
   setting,
   action,
@@ -37,7 +28,7 @@ export function GovernmentContributionCard({
   /** Rendered under the figures. Omitted on the employee view, which is display-only. */
   action?: React.ReactNode;
 }) {
-  // Slice B3a/b — the version in force, NOT the legacy `config`. Reading `config` here meant the
+  // /b — the version in force, NOT the legacy `config`. Reading `config` here meant the
   // card showed 4.5% while payroll charged 5% after a rate change.
   const current = setting.current;
   const rate = Number(current?.employee_rate ?? 0);

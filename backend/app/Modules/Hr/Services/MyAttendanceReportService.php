@@ -13,24 +13,6 @@ use Illuminate\Support\Carbon;
 /**
  * One employee's own attendance for a month, inside a year — the self-service counterpart to the
  * Reports hub's Attendance Summary.
- *
- * WHY IT DOES NOT REUSE AttendanceReportService. That service answers "what did EVERY person's
- * month look like" and deliberately carries only what a per-employee ROW needs: status, punches,
- * hours. The employee reading their own month needs the opposite shape — one person, every fact
- * about each of their days (how many minutes late, how much undertime, which overtime was
- * approved, which day HR suspended work) plus the twelve-month context that makes one month
- * readable. Widening the HR report's grid with per-minute detail would pay that cost once per
- * employee per month on a screen that shows none of it.
- *
- * IT DOES NOT RECLASSIFY DAYS. The status ladder is AttendanceService::allForDate()'s, in the same
- * order, so a day here reads exactly as it did on the roster HR looked at — with the three cases a
- * month view has and a single-day roster does not (outside employment, not yet happened, and leave
- * landing on a rest day or holiday, which stays a rest day).
- *
- * IT DOES NOT PRICE ANYTHING. Every figure is an attendance fact — minutes late, minutes short,
- * minutes of approved overtime — never pesos. What a policy charges for those minutes is the
- * payslip's answer, and two screens computing money from the same day is how they start
- * disagreeing.
  */
 class MyAttendanceReportService
 {
@@ -346,13 +328,7 @@ class MyAttendanceReportService
         ];
     }
 
-    /**
-     * True when anything at all happened in the slice — otherwise the month is empty, not zero.
-     *
-     * Rest days do NOT count. A month still ahead is nothing but weekends and upcoming workdays,
-     * and letting its Saturdays vouch for it would put a confident row of zeroes against every
-     * month of the rest of the year.
-     */
+    /** True when anything at all happened in the slice — otherwise the month is empty, not zero. */
     private function hasData(array $days): bool
     {
         $empty = ['not_employed', 'upcoming', 'rest_day'];
@@ -370,9 +346,6 @@ class MyAttendanceReportService
 
     /**
      * Dates covered by an APPROVED leave request, as date => the type's name and whether it pays.
-     *
-     * Requests are stored as a start/end pair, so they are expanded here; whether a given date
-     * actually reads as leave is decided in gridFor().
      *
      * @return array<string, array{type:string, is_paid:bool}>
      */

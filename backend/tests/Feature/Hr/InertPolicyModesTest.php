@@ -6,17 +6,7 @@ use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice 14 (2026-07-28 audit) — the API must not accept settings the engine ignores.
- *
- * `missing_clockout_mode` offered three values and `early_arrival_mode` three, but the engine
- * reads NEITHER field: `missing_clockout_mode` appears only inside a DeductionService comment,
- * and `early_arrival_mode` has no reader anywhere. Saving `treat_as_absent` therefore looked
- * like HR had switched something on while nothing changed — a worse outcome than a rejection,
- * because it invites the belief that forgotten punches are being charged.
- *
- * Widen these rules again when the modes are actually built.
- */
+/** (2026-07-28 audit) — the API must not accept settings the engine ignores. */
 class InertPolicyModesTest extends HrTestCase
 {
     use RefreshDatabase;

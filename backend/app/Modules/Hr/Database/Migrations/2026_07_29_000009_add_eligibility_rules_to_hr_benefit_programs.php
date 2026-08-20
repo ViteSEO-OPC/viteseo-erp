@@ -5,22 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Who an allowance is for, as a RULE rather than a list of names.
- *
- * WHY. `eligibility` was `all` | `regular` | `custom` — one hard-coded status and nothing else, so
- * "part-timers and contractors" or "management only" could not be expressed at all. It is now a
- * mode plus, for the status mode, the list of statuses it covers.
- *
- * AND WHY A RULE. Membership used to be a list of employee ids written into the enrolment pivot
- * when HR pressed "Add a Plan". That list never re-checked itself: someone enrolled while
- * probationary stayed enrolled after every status change, and someone hired later was simply
- * missing (B5 item 3, B10). A rule is evaluated when payroll runs, so the answer is always current
- * and the drift cannot happen. Only `custom` keeps a list, because "these named people" IS the rule.
- *
- * NO PAY CHANGE. All four allowances are `all`, and all 14 employees were enrolled in all four —
- * so the rule returns exactly the same people it returned yesterday.
- */
+/** Who an allowance is for, as a RULE rather than a list of names. */
 return new class extends Migration
 {
     public function up(): void

@@ -12,24 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 
-/**
- * FIN-022 — bank accounts and government ID numbers were plaintext, and returned in full.
- *
- * `hr_employees` held `bank_account`, `bank_account_name`, `tin`, `sss_number`, `philhealth_number`
- * and `pagibig_number` in the clear, and `EmployeeResource` returned the full account number on every
- * payload carrying an employee. So opening a list of 200 people shipped 200 bank accounts into the
- * browser — sitting in memory, in devtools and in any error report the page produced — and a database
- * dump, a backup on a laptop, or one SQL-injection foothold disclosed all of it readably. The DPA
- * treats these as sensitive personal information.
- *
- * THE FIRST TEST READS THE RAW COLUMN, not the model. Going through Eloquent would decrypt on the way
- * out and pass whether or not anything was encrypted — it would assert that the cast works, which is
- * Laravel's job, rather than that the data at rest is unreadable, which is the finding.
- *
- * THE CONTROL IS NOT REFUSAL. An HR officer must be able to see a bank account — they have to be, to
- * pay someone. So the protection is that the ordinary payload no longer carries it, and asking for it
- * is deliberate and audited.
- */
+/** Bank accounts and government ID numbers were plaintext, and returned in full. */
 class SensitiveFieldEncryptionTest extends HrTestCase
 {
     use RefreshDatabase;

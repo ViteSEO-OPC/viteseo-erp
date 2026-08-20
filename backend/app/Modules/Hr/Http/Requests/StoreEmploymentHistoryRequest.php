@@ -6,14 +6,7 @@ use App\Modules\Hr\Services\EmploymentHistoryService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-/**
- * Adding a role to the employment timeline by hand — a stint nobody recorded at the time.
- *
- * Dates are unconstrained in both directions on purpose: this exists to enter history, and history
- * is by definition in the past. A future-dated role is a scheduled transfer, which is also legitimate.
- * The ordering rule that does matter (end after start) is enforced in the service, where the update
- * path can apply it to a partial payload too.
- */
+/** Adding a role to the employment timeline by hand — a stint nobody recorded at the time. */
 class StoreEmploymentHistoryRequest extends FormRequest
 {
     public function authorize(): bool

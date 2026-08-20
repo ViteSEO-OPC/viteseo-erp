@@ -24,15 +24,6 @@ use Illuminate\Support\Carbon;
 /**
  * An approved half day moves the shift, so lateness must be judged against the half actually
  * worked.
- *
- * THE BUG THIS PINS. Only DeductionService knew a half day shrinks the working window; the clock
- * measured every arrival against the full 08:00–17:00 shift. Somebody with the morning approved
- * off who walked in at 1:00 PM was stamped `late` by five hours — which raised a disciplinary
- * violation, inflated the "Late arrivals" tile, and, with the per-N-lates penalty switched on,
- * cost them A FULL DAY'S PAY for arriving exactly on time.
- *
- * The money test at the bottom is the one to read. The rest exist so the status, the badge and
- * the payslip cannot drift apart again — they are three renderings of one fact.
  */
 class HalfDayLatenessTest extends HrTestCase
 {

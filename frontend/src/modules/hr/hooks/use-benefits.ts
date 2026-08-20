@@ -70,7 +70,7 @@ export function useUpdateEmployeeBenefits(employeeId: number) {
 
 const VERSIONS_KEY = ["hr", "contribution-versions"] as const;
 
-/** The dated rate history for one contribution (Slice B3a). */
+/** The dated rate history for one contribution. */
 export function useContributionVersions(type?: string) {
   return useQuery({
     queryKey: [...VERSIONS_KEY, type ?? "all"] as const,
@@ -80,7 +80,7 @@ export function useContributionVersions(type?: string) {
 }
 
 /**
- * Read an uploaded schedule (Slice B8). A mutation rather than a query because it takes a file and
+ * Read an uploaded schedule. A mutation rather than a query because it takes a file and
  * is a deliberate action — and because caching "what that spreadsheet said" would be meaningless.
  */
 export function useImportContributionSchedule() {

@@ -1,10 +1,4 @@
-{{-- The HTML shell around a body HR wrote in the compose modal.
-
-     Deliberately plain: inline styles only, one table-free centred column, no images and no
-     external stylesheet. Mail clients strip <style> blocks and rewrite layouts unpredictably,
-     and a hiring email has nothing to gain from a design that half of them will mangle.
-
-     $bodyHtml has already been through HtmlSanitizer, which is why it is echoed raw. --}}
+{{-- The HTML shell around a body HR wrote in the compose modal. --}}
 <!DOCTYPE html>
 <html lang="en">
 <head>

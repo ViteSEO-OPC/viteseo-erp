@@ -73,17 +73,7 @@ export function EmployeeRecord({
   const [tab, setTab] = useState<TabKey>("personal");
   const visibleTabs = TABS;
 
-  /**
-   * MF-18 — ending someone's employment ARCHIVES the record, and an archived record is read-only.
-   *
-   * HR can still open it (that is how a leaver is reinstated or rehired at all), but every editing
-   * affordance goes: the employee is soft-deleted, and only the record's own GET resolves a trashed
-   * one, so a Save would 404 against endpoints that cannot see them. Blocks that fetch their own
-   * data — schedule, leave credits, salary history, loans, documents — are hidden for the same
-   * reason rather than left to render an error each.
-   *
-   * The single exception is the lifecycle section, which stays on `isHr`: it is the way back.
-   */
+  /** Ending someone's employment ARCHIVES the record, and an archived record is read-only. */
   const archived = employee.is_separated;
   const canEdit = isHr && !archived;
 
@@ -93,8 +83,10 @@ export function EmployeeRecord({
       <div className="min-w-0 rounded-card border border-border bg-card p-6">
         <div className="flex flex-col items-center text-center">
           <ProfilePhoto employee={employee} canEdit={canEdit} />
-          {/* The rail is a fixed 300px track, so a long name or title has to
-              break rather than run past the card edge. */}
+          {/*
+           * The rail is a fixed 300px track, so a long name or title has to
+           * break rather than run past the card edge.
+           */}
           <p className="mt-3 text-h3 font-bold break-words text-foreground">{employee.name}</p>
           <p className="text-caption break-words text-muted-foreground">
             {employee.job_title}
@@ -136,15 +128,7 @@ export function EmployeeRecord({
         </nav>
       </div>
 
-      {/*
-        Right: tab content. Each editable tab owns its own form + Save/Cancel.
-
-        `min-w-0` on both columns: a grid track sized `1fr` is really
-        `minmax(auto, 1fr)`, so its minimum is the content's min-content width.
-        Any wide-and-unbreakable descendant would push this track past its share
-        and carry the whole record off the right edge of the page — the tab
-        content is where that risk lives, so the floor comes off here.
-      */}
+      {/* Right: tab content. Each editable tab owns its own form + Save/Cancel. */}
       <div className="min-w-0 rounded-card border border-border bg-card p-6">
         {/* Says why the Edit links are missing, before HR goes looking for them. */}
         {archived && (
@@ -191,8 +175,10 @@ export function EmployeeRecord({
               <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
                 Employment History
               </p>
-              {/* Still written automatically by a job-title change; `canEdit` only adds the
-                  hand-correction controls on top of that. */}
+              {/*
+               * Still written automatically by a job-title change; `canEdit` only adds the
+               * hand-correction controls on top of that.
+               */}
               <EmploymentHistorySection
                 employeeId={employee.id}
                 entries={employee.employment_history}
@@ -204,8 +190,10 @@ export function EmployeeRecord({
 
             {canEdit && <HrAccessSection employee={employee} />}
 
-            {/* MF-18 — separate / reinstate / rehire. On the Job tab because tenure and the last
-                working day are job facts, and next to Employment History for the same reason. */}
+            {/*
+             * Separate / reinstate / rehire. On the Job tab because tenure and the last
+             * working day are job facts, and next to Employment History for the same reason.
+             */}
             {isHr && (
               <div className="border-t border-border pt-6">
                 <EmploymentLifecycleSection employee={employee} />
@@ -216,16 +204,20 @@ export function EmployeeRecord({
 
         {tab === "compensation" && (
           <EmployeeCompensationSection employee={employee} canEdit={canEdit} isHr={isHr}>
-            {/* Each of the three blocks below fetches against an employee-scoped route that does not
-                resolve a soft-deleted employee, so for an archived record they are hidden rather
-                than left to render three separate load errors. */}
+            {/*
+             * Each of the three blocks below fetches against an employee-scoped route that does not
+             * resolve a soft-deleted employee, so for an archived record they are hidden rather
+             * than left to render three separate load errors.
+             */}
             {!archived && (
               <div className="border-t border-border pt-6">
                 <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
                   Leave Credits
                 </p>
-                {/* HR edits this person's credits (source of truth, moved off the
-                    Leave Type page); an employee sees their own read-only via "me". */}
+                {/*
+                 * HR edits this person's credits (source of truth, moved off the
+                 * Leave Type page); an employee sees their own read-only via "me".
+                 */}
                 {isHr ? (
                   <EmployeeLeaveCreditsEditor employeeId={employee.id} />
                 ) : (
@@ -243,7 +235,7 @@ export function EmployeeRecord({
               </div>
             )}
 
-            {/* Slice 11b — loans & cash advances repaid through payroll. */}
+            {/* Loans & cash advances repaid through payroll. */}
             {canEdit && (
               <div className="border-t border-border pt-6">
                 <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">

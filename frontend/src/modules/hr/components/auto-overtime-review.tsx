@@ -63,28 +63,7 @@ function FlagBadges({ row }: { row: AutoOvertimeReviewItem }) {
   );
 }
 
-/**
- * Auto-mode overtime that wants a human's attention (FIN-039, extended by item 7).
- *
- * TWO TABLES, NOT ONE, and the split is not cosmetic — the two kinds have OPPOSITE consequences
- * of inaction:
- *
- *   • Held — a cap is withholding these minutes. Doing nothing means the employee is not paid.
- *     Resolving it is the ordinary approve flow on the Overtime Requests table below; an approval
- *     releases the minutes and removes the row, so a second verb here would invent a state nobody
- *     reads. Rendered as a warning, because inaction has a cost.
- *   • Flagged — the day already pays in full, automatically. It is listed only because it looks
- *     unusual: an overrun past the review threshold, or a day that was both late and overtime.
- *     There is nothing to approve. Rendered neutrally, because the correct outcome is often to
- *     read it and move on.
- *
- * Merging them into one table with a status column was the tempting version and it is wrong here:
- * a reader who mistakes a flagged row for a held one sits on wages that were already paid, and one
- * who makes the opposite mistake leaves somebody unpaid.
- *
- * Visible whenever overtime is on auto. It used to hide itself unless a cap was set, which meant
- * the shipped configuration — both caps 0, i.e. UNLIMITED — reviewed nothing at all.
- */
+/** Auto-mode overtime that wants a human's attention (extended by item 7). */
 export function AutoOvertimeReview() {
   const { data: policy } = useAttendancePolicy();
   const [period, setPeriod] = useState(() => monthBounds(manilaToday()));

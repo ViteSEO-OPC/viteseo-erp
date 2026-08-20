@@ -4,32 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Decisions made after the period they affect was already paid (FIN-009).
- *
- * THE SITUATION. Leave, overtime, half-day and early-out requests were freeze-guarded only in
- * `reopen()` — never in `approve()`, and `OvertimeRequestService::cancel()` accepted an already
- * APPROVED request with no check at all. So HR could approve a back-dated overtime request for a
- * cutoff that had already been paid, or cancel one that had already been paid out, and payroll
- * would never know.
- *
- * WHY NOT SIMPLY BLOCK IT — the obvious fix, and the wrong one. The leave was taken. The overtime
- * was worked. Refusing the approval does not undo the fact; it just leaves the attendance record
- * permanently wrong AND the pay wrong, instead of only the pay. `OvertimeRequestService::cancel()`
- * already said this out loud in its own docblock: "HR settles the difference manually rather than
- * have pay silently move under a payslip someone has already been given." The honest gap was that
- * "manually" had no workflow, no record and no reconciliation — the audit's phrase was that it is
- * "FIN-010 by another name".
- *
- * SO THE DECISION IS ALLOWED AND THE MONEY IS TRACKED. The record becomes correct immediately; a
- * row here says a payroll difference is outstanding, which direction it runs, and against which
- * settled run. FIN-010's adjustment run is how an `owed` flag gets paid, and resolving the flag
- * records that it was.
- *
- * `overpaid` deliberately has no automated path. Recovering money already paid is a wage deduction
- * and needs the employee's written consent under Art. 113 — the same ground as FIN-002 — so it is
- * surfaced for a person to handle, not quietly netted off a future payslip.
- */
+/** Decisions made after the period they affect was already paid. */
 return new class extends Migration
 {
     public function up(): void

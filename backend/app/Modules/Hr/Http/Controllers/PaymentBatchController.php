@@ -17,7 +17,7 @@ use Illuminate\Http\Response;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 
 /**
- * Payment batches — the disbursement layer (FIN-015).
+ * Payment batches — the disbursement layer.
  *
  * Thin by policy: every decision lives in `PaymentService`.
  */
@@ -52,13 +52,7 @@ class PaymentBatchController extends Controller
             ->response();
     }
 
-    /**
-     * POST /api/v1/hr/payment-batches — build the batch for a completed run.
-     *
-     * The response carries what was SKIPPED alongside the batch. A batch that quietly omits three
-     * people looks identical to one that does not, and the number finance checks is whether this
-     * equals the run — so both the exclusions and the reconciliation are returned, not just the id.
-     */
+    /** POST /api/v1/hr/payment-batches — build the batch for a completed run. */
     public function store(StorePaymentBatchRequest $request): JsonResponse
     {
         $run = PayrollRun::findOrFail($request->integer('payroll_run_id'));
@@ -108,13 +102,7 @@ class PaymentBatchController extends Controller
         return PaymentResource::make($updated->load('employee.user'))->response();
     }
 
-    /**
-     * POST /api/v1/hr/payment-batches/{paymentBatch}/reconcile — apply the bank's return file.
-     *
-     * Previews by default. This import moves payslips into `disbursed`, which is the assertion the
-     * whole disbursement layer exists to make trustworthy, so it does not happen on a file nobody
-     * has read back: send `confirm=1` once the preview looks right.
-     */
+    /** POST /api/v1/hr/payment-batches/{paymentBatch}/reconcile — apply the bank's return file. */
     public function reconcile(PaymentBatch $paymentBatch, Request $request): JsonResponse
     {
         $request->validate([

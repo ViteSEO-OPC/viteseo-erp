@@ -303,9 +303,11 @@ function MyConcernsCard() {
       cell: (c) => (
         <span className="inline-flex items-center gap-2">
           <span className="font-semibold text-foreground">{c.reference_no}</span>
-          {/* The row IS the notification. A pending ask expires by being answered, so it
-              needs to be visible without opening anything — but the decision itself lives
-              in the detail, where the employee can read what they are answering about. */}
+          {/*
+           * The row IS the notification. A pending ask expires by being answered, so it
+           * needs to be visible without opening anything — but the decision itself lives
+           * in the detail, where the employee can read what they are answering about.
+           */}
           {awaitingAnswer(c) && (
             <span className="inline-flex items-center gap-1 rounded-full bg-warning px-2 py-0.5 text-[11px] font-semibold text-white">
               <span className="size-1.5 rounded-full bg-white" />
@@ -478,18 +480,7 @@ function MyConcernsCard() {
   );
 }
 
-/**
- * HR has asked this employee to identify themselves on an anonymous concern.
- *
- * Lives inside the concern's own detail dialog, reached by clicking the flagged row. The table
- * carries the notice; the decision belongs next to the thing being decided about, so the
- * employee reads what they reported before choosing whether to put their name to it.
- *
- * Both answers are offered with
- * equal weight and neither is styled as the correct one — a decline is a complete answer here,
- * and a UI that made "Yes" the obvious button would quietly undo the protection the whole
- * feature exists to give.
- */
+/** HR has asked this employee to identify themselves on an anonymous concern. */
 function RevealRequestCard({ concern }: { concern: Concern }) {
   const ask = concern.reveal_request;
   const acceptMut = useAcceptConcernReveal();
@@ -590,13 +581,7 @@ function RevealRequestCard({ concern }: { concern: Concern }) {
   );
 }
 
-/**
- * What the employee is told about their own anonymity, inside the concern detail.
- *
- * The old copy said HR could see them all along. It was accurate and it was the problem: the
- * only assurance on the page was that the protection did not really exist. Now the plain state
- * is the reassuring one, and the exceptions are the ones that need explaining.
- */
+/** What the employee is told about their own anonymity, inside the concern detail. */
 function AnonymityPanel({ concern }: { concern: Concern }) {
   const ask = concern.reveal_request;
 

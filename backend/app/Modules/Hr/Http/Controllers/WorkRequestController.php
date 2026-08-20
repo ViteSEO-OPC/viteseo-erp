@@ -23,14 +23,7 @@ class WorkRequestController extends Controller
         return WorkRequestResource::collection($this->service->list($request->user()))->response();
     }
 
-    /**
-     * POST /api/v1/hr/work-requests — the caller asks to work today.
-     *
-     * The date is the caller's Manila today, taken from the server clock: this stands in for a
-     * time-in punch, so it can only ever be about right now. The service decides which KIND of
-     * request the day calls for (rest day, or a suspension that requires permission) and
-     * refuses outright when the day needs no asking.
-     */
+    /** POST /api/v1/hr/work-requests — the caller asks to work today. */
     public function store(StoreWorkRequestRequest $request): JsonResponse
     {
         $employee = $request->user()->employee;

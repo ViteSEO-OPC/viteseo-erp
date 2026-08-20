@@ -22,13 +22,7 @@ export function benefitVisual(category: string) {
   return BENEFIT_VISUALS[category] ?? BENEFIT_VISUALS.general;
 }
 
-/**
- * A live benefit reads as an active (green) badge; anything else is neutral.
- *
- * "Active" counts as well as "Enrolled" (B13 item 4): allowances now derive their badge as
- * "Active", and seeded programmes have always said it, so treating only "Enrolled" as live
- * greyed out every allowance an employee actually has.
- */
+/** A live benefit reads as an active (green) badge; anything else is neutral. */
 export function isEnrolledStatus(status: string): boolean {
   return ["enrolled", "active"].includes(status.trim().toLowerCase());
 }

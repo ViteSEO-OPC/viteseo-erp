@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 20. Employee requests an (official) payslip copy — must include a
+// Phase-2. Employee requests an (official) payslip copy — must include a
 // reason; HR approves or rejects.
 return new class extends Migration
 {

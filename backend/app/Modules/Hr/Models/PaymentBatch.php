@@ -8,17 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-/**
- * One payout of one payroll run (FIN-015).
- *
- * The unit a bank is actually paid in: a file of transfers, generated once, downloaded once, and
- * reconciled back as a whole. It exists so a disbursement has an identity, a total that can be
- * checked against the run, and a record of when it was sent.
- *
- * `total_amount` and `payment_count` are maintained by `PaymentService`, never written directly —
- * they are a cache of the payment rows, and the reconciliation check compares them against the
- * run's own `total_net`.
- */
+/** One payout of one payroll run. */
 class PaymentBatch extends Model
 {
     use SoftDeletes;

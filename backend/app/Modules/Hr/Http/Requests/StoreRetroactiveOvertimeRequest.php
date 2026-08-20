@@ -7,28 +7,7 @@ use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Carbon;
 
-/**
- * HR filing overtime on an employee's behalf, for a date that has already passed (item 10).
- *
- * WHY THIS IS A SEPARATE FORM AND NOT A FLAG ON THE OTHER ONE. The employee-facing rule is "today
- * or later" — back-dating your own overtime is asking to be paid for work nobody can still
- * observe. The correction case is the exact opposite: the date is necessarily in the past, and the
- * evidence is the punch record HR is looking at. Two opposite date rules in one request class,
- * switched on the caller's role, is how a filing guard quietly stops applying to anyone.
- *
- * WHAT MAKES IT "CONTROLLED":
- *   • HR-only, by route (`role:hr_officer|super_admin`).
- *   • Filed as PENDING, never auto-approved. Filing and approving stay two acts, so the existing
- *     approve path — with its audit entry and its FIN-009 retro flag for periods already paid —
- *     runs unchanged. HR filing and HR approving may also be different people.
- *   • `filed_by` records who did it, so the row never masquerades as the employee's own.
- *   • The same overlap rule as ordinary filing: a correction must not double-pay minutes an
- *     existing request already covers.
- *
- * NOT bounded by the payroll freeze. Deliberate, and it matches `approve()`: overtime that was
- * worked was worked, and a cutoff closing does not unmake it. A settled period raises a retro
- * flag so an adjustment run can settle the difference (FIN-009) rather than refusing the record.
- */
+/** HR filing overtime on an employee's behalf, for a date that has already passed (item 10). */
 class StoreRetroactiveOvertimeRequest extends FormRequest
 {
     /** How far back HR may reach. Long enough for the previous cycle and its corrections. */

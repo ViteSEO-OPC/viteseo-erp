@@ -9,21 +9,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\AllowanceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B16 — de minimis is a ceiling PER BENEFIT, and the excess is not taxed on its own.
- *
- * WHAT WAS WRONG. One aggregate cap was applied to the total of every tax-free allowance, and
- * anything over it went straight into taxable compensation. That is two different rules run
- * together, and neither is the one that exists:
- *
- *   - Each de minimis benefit has its OWN statutory ceiling (BIR RR 29-2025). They cannot be
- *     pooled: a small uniform allowance does not create room for a large rice subsidy.
- *   - ₱90,000 is not a de minimis figure at all. It is the exemption covering 13th month pay AND
- *     OTHER BENEFITS (TRAIN), which the excess over each item's ceiling joins.
- *
- * Taxing the excess directly over-withheld for everyone whose benefits sit under ₱90,000 — which
- * is the normal case.
- */
+/** De minimis is a ceiling PER BENEFIT, and the excess is not taxed on its own. */
 class DeMinimisCeilingTest extends HrTestCase
 {
     use RefreshDatabase;

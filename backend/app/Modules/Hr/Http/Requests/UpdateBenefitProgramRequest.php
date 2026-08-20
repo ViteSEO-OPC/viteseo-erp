@@ -24,24 +24,24 @@ class UpdateBenefitProgramRequest extends FormRequest
             'category' => ['sometimes', 'required', 'string', 'max:50'],
             'kind' => ['sometimes', Rule::in(BenefitProgram::KINDS)],
             'amount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            // Slice B5.4 — see withValidator(): an allowance must keep an amount. The check lives
+            // See withValidator(): an allowance must keep an amount. The check lives
             // there because `kind` may be absent on a PATCH and has to fall back to the saved row.
             'description' => ['sometimes', 'nullable', 'string', 'max:1000'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'frequency' => ['sometimes', 'string', 'max:20'],
             'tax_treatment' => ['sometimes', 'in:de_minimis,taxable'],
-            // Slice B16 — this benefit's OWN statutory ceiling. Null = none recorded, which keeps
+            // This benefit's OWN statutory ceiling. Null = none recorded, which keeps
             // the whole amount exempt. Ceilings are per item and are never pooled.
-            // Slice B11 — the date this price applies from. Defaults to today; HR sets it
+            // The date this price applies from. Defaults to today; HR sets it
             // deliberately when a rise is agreed in arrears.
             'effective_from' => ['sometimes', 'nullable', 'date'],
             'deminimis_ceiling' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:9999999.99'],
-            // Slice B15 — loan-policy config. Typed per kind rather than shared into one loose
+            // loan-policy config. Typed per kind rather than shared into one loose
             // shape: a loan policy and an HMO have nothing in common but a name.
             'loan_max_principal' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999'],
             'loan_term_periods' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:600'],
             'ceiling_period' => ['sometimes', 'nullable', 'in:monthly,semester,annual'],
-            // Slice B19 — whether this allowance counts toward the statutory contribution base.
+            // Whether this allowance counts toward the statutory contribution base.
             // Independent of `tax_treatment`; the allowance is paid in full either way.
             'contributable' => ['sometimes', 'boolean'],
             // Who the programme is for. `status` carries the list below; `custom` carries
@@ -72,7 +72,7 @@ class UpdateBenefitProgramRequest extends FormRequest
     public function withValidator(\Illuminate\Contracts\Validation\Validator $validator): void
     {
         $validator->after(function ($v) {
-            // Slice B5.4 — an allowance with no amount renders as ₱0 and pays ₱0, with nothing to
+            // An allowance with no amount renders as ₱0 and pays ₱0, with nothing to
             // say it was never finished. On a PATCH `kind` is usually absent, so the saved row
             // decides: clearing the amount of an existing allowance must fail too.
             $program = $this->route('benefitProgram');

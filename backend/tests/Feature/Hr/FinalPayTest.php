@@ -18,25 +18,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-014 — final pay: the most legally scrutinised payslip a company issues, and it was mostly absent.
- *
- * The regular run already prorated a leaver's last cycle (Slice 4, `withTrashed()`). Everything else
- * was missing: no separation pay, no conversion of unused leave to cash, no settlement of outstanding
- * loans, no tax annualisation. Loans in particular simply STOPPED being collected — `collectForPeriod()`
- * only runs for a pay group the employee is no longer in, so the balance sat on the books with nothing
- * left to recover it from.
- *
- * SEPARATION PAY IS ENTERED, NOT COMPUTED, and that is a deliberate scope line rather than an omission.
- * Articles 298–299 set different formulas per cause, the entitlement turns on facts this system does not
- * hold, and a just-cause dismissal carries none. Encoding unsigned-off multipliers would be the
- * FIN-024 / FIN-030 mistake with a payment as the output instead of a warning.
- *
- * THE TAX ASSERTIONS ARE THE ONES TO READ. Monetised unused VL is exempt up to 12 days (raised from 10
- * by RR 29-2025), the excess joins the ₱90,000 bucket rather than becoming taxable compensation, and
- * the year is trued up against what was actually earned — which for a mid-year leaver is nearly always
- * a refund, because they were withheld all year against a full-year income they never reached.
- */
+/** Final pay: the most legally scrutinised payslip a company issues, and it was mostly absent. */
 class FinalPayTest extends HrTestCase
 {
     use RefreshDatabase;

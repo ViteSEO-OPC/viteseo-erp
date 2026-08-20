@@ -30,23 +30,7 @@ const CHANGE_LABELS: Record<RerunPreviewRow["change"], { label: string; classNam
   unchanged: { label: "No change", className: "text-muted-foreground" },
 };
 
-/**
- * Recompute a period that has already been run — after saying what that would do.
- *
- * WHY THIS IS NOT JUST A BUTTON. Re-running reprices the period from attendance, salaries and the
- * rules in force for the cycle. What comes out is unknowable from the outside, and it replaces
- * figures that were already settled — an employee may be holding the payslip it is about to change.
- * The old route to this was to unlock a run and re-run it from the payroll screen, with no statement
- * of what would move until after it had moved.
- *
- * SO THE DIFF IS FETCHED FIRST, and it is real: the server computes the whole run and rolls it back.
- * That costs a full payroll computation per open, which is why it is fetched when this dialog opens
- * and never cached — a cached diff would describe attendance as it was some minutes ago.
- *
- * WHAT THE ROWS ARE SAYING. `Skipped — paid` is the one worth reading: a disbursed payslip is left
- * untouched by the re-run, so recomputing a period that has mostly been paid out changes very little
- * however wrong it looks. If those rows need to move, the disbursement is reversed first.
- */
+/** Recompute a period that has already been run — after saying what that would do. */
 export function RerunRunDialog({
   run,
   open,
@@ -73,8 +57,10 @@ export function RerunRunDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Keyed on the run so switching periods without closing starts a fresh draft rather than
-            carrying a reason typed for a different cycle. */}
+        {/*
+         * Keyed on the run so switching periods without closing starts a fresh draft rather than
+         * carrying a reason typed for a different cycle.
+         */}
         {run && <RerunBody key={run.id} run={run} open={open} onClose={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>

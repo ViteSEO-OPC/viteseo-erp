@@ -17,15 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * The employee's own monthly attendance record (GET /api/v1/hr/me/attendance-report).
- *
- * The screen exists so an employee can check the record payroll will be run against, so the
- * tests pin the two things that would make it useless: that the day classifications agree with
- * the roster HR sees, and that the endpoint answers about the CALLER and nobody else.
- *
- * Clock parked at 2026-08-20 12:00 Manila; the schedule is 08:00–17:00 Mon–Fri with no grace.
- */
+/** The employee's own monthly attendance record (GET /api/v1/hr/me/attendance-report). */
 class MyAttendanceReportTest extends HrTestCase
 {
     use RefreshDatabase;

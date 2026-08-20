@@ -53,18 +53,18 @@ export default function ReportDetailPage() {
 }
 
 function GenericReport({ reportKey }: { reportKey: string }) {
-  // MF-11 — the generic renderer now honours a department filter whenever the report's payload
+  // The generic renderer now honours a department filter whenever the report's payload
   // carries a `departments` list. Reports were already returning one and the fallback view ignored
   // it, so any report without a bespoke component had a filter the server supported and the page
   // never offered. The control only appears when there is something to filter by.
   const [department, setDepartment] = useState("all");
-  // FIN-041 / FIN-042 — a date range, a pay group and (for the register) which run to show. Each is
+  //  / — a date range, a pay group and (for the register) which run to show. Each is
   // sent only when set, so an untouched screen asks for exactly what it always did.
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [payGroup, setPayGroup] = useState("all");
   const [run, setRun] = useState("");
-  // FIN-055 — the tax reconciliation is asked a YEAR, not a date range: annual tax is a property
+  // The tax reconciliation is asked a YEAR, not a date range: annual tax is a property
   // of the whole year, and a partial range would compute a bracket against pay that is not all of
   // it. Empty means "whatever the server picked", which is the current year.
   const [year, setYear] = useState("");
@@ -129,8 +129,10 @@ function GenericReport({ reportKey }: { reportKey: string }) {
               </div>
             )}
 
-            {/* FIN-041 / FIN-042 — each control appears only when the report's own payload offers
-                something to filter by, so a report that doesn't support one never shows it. */}
+            {/*
+             *  / — each control appears only when the report's own payload offers
+             * something to filter by, so a report that doesn't support one never shows it.
+             */}
             {((report.departments?.length ?? 0) > 0 ||
               (report.pay_groups?.length ?? 0) > 0 ||
               (report.years?.length ?? 0) > 0 ||
@@ -189,11 +191,13 @@ function GenericReport({ reportKey }: { reportKey: string }) {
                     />
                   </div>
                 )}
-                {/* The range is offered on any report carrying a department list — every one of them
-                    aggregates over runs, so a period is always a meaningful thing to ask for.
-                    FIN-055 — EXCEPT a year-scoped one. Annual tax is a property of the whole year:
-                    a bracket found on part of it is not a partial answer, it is a wrong one. A
-                    report that asks for a year does not also offer a range that could contradict it. */}
+                {/*
+                 * The range is offered on any report carrying a department list — every one of them
+                 * aggregates over runs, so a period is always a meaningful thing to ask for.
+                 * EXCEPT a year-scoped one. Annual tax is a property of the whole year:
+                 * a bracket found on part of it is not a partial answer, it is a wrong one. A
+                 * report that asks for a year does not also offer a range that could contradict it.
+                 */}
                 {(report.years?.length ?? 0) === 0 && (
                   <>
                     <div className="flex items-center gap-2">
@@ -262,9 +266,11 @@ function GenericReport({ reportKey }: { reportKey: string }) {
               />
             )}
 
-            {/* FIN-042 — the variance against the previous period. Its own block below the register,
-                because it answers a different question: not "what does this run pay" but "what
-                changed since last time". */}
+            {/*
+             * The variance against the previous period. Its own block below the register,
+             * because it answers a different question: not "what does this run pay" but "what
+             * changed since last time".
+             */}
             {report.variance && (
               <div>
                 <h2 className="mb-3 text-h3 font-bold text-foreground">{report.variance.title}</h2>

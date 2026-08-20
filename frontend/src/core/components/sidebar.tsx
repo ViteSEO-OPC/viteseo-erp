@@ -57,12 +57,21 @@ function NavLink({
         active && !nested
           ? "overflow-hidden bg-dark-teal text-white before:absolute before:inset-y-0 before:left-0 before:w-3.5 before:[background:radial-gradient(100%_230%_at_100%_50%,transparent_49%,var(--brand)_50%)]"
           : active && nested
-            ? "text-brand underline decoration-brand decoration-2 underline-offset-4"
+            ? "text-brand"
             : "text-white hover:bg-sidebar-accent hover:text-white",
       )}
     >
       {!nested && <Icon className="size-[18px] shrink-0" />}
-      <span className="flex-1 truncate">{item.label}</span>
+      {/* The active underline sits on the label, not the link: on the link it
+          would also be inherited by the count badge sitting beside it. */}
+      <span
+        className={cn(
+          "flex-1 truncate",
+          active && nested && "underline decoration-brand decoration-2 underline-offset-4",
+        )}
+      >
+        {item.label}
+      </span>
       {badge > 0 ? <Badge count={badge} /> : null}
     </Link>
   );

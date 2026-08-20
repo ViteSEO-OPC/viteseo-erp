@@ -17,39 +17,13 @@ import {
 } from "@/modules/hr/hooks/use-payroll";
 import type { AmendmentKind, Payslip } from "@/modules/hr/types/payroll";
 
-/**
- * CORRECT A PAYSLIP BY EDITING THE PAYSLIP.
- *
- * WHAT THIS REPLACED. The old dialog was a form beside the document: HR picked a period, picked an
- * employee, typed an amount and chose whether it was pay, reversed pay or a deduction, and the
- * payslip grew a line at the bottom saying "Correction +₱200". The figure that was actually wrong —
- * "Late ₱500", four inches further up — kept saying ₱500. The reader was left to do the arithmetic
- * that the document exists to have already done.
- *
- * So the document IS the form now. Every leaf line is clickable, the editor opens beneath the line
- * it belongs to, and the corrected payslip prints the engine's figure struck through beside the one
- * HR chose. There is no corrections section at the bottom, because there is nothing left to put in
- * it.
- *
- * WHAT HR IS NOT ASKED. Which direction the money goes, and what happens to the tax. The line
- * already knows: cutting overtime reduces taxable pay and refunds the tax withheld on it, changing
- * an HMO share comes off net and leaves the tax alone. That question survives in exactly one place
- * — adding a line that was never on the payslip, which has no computed sibling to inherit from.
- *
- * TOTALS ARE NOT CLICKABLE, here or in the API. They are sums of the lines above them.
- */
+/** CORRECT A PAYSLIP BY EDITING THE PAYSLIP. */
 export function PayslipCorrections({
   payslip,
   editing,
 }: {
   payslip: Payslip;
-  /**
-   * Whether the document is a form.
-   *
-   * OFF BY DEFAULT, and owned by the screen. HR opens a payslip far more often to read it than to
-   * change it, and a document where every row is a button reads differently from one where none
-   * are — the toggle is what keeps looking at a payslip and rewriting one apart.
-   */
+  /** Whether the document is a form. */
   editing: boolean;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
@@ -132,13 +106,7 @@ export function PayslipCorrections({
   );
 }
 
-/**
- * The editor for one line, opened directly beneath it.
- *
- * SEEDED WITH WHAT THE LINE CURRENTLY SAYS, not with an empty box. HR is correcting a figure they
- * are looking at, and re-typing it from scratch to change one digit is how a correction acquires a
- * second error.
- */
+/** The editor for one line, opened directly beneath it. */
 function LineEditor({
   payslip,
   lineKey,
@@ -243,9 +211,11 @@ function LineEditor({
           />
         </Field>
 
-        {/* WHAT THE ENGINE SAID, stated in the editor as well as on the line. HR is about to
-            overrule a computation, and the figure being overruled should be in front of them at
-            the moment they do it. */}
+        {/*
+         * WHAT THE ENGINE SAID, stated in the editor as well as on the line. HR is about to
+         * overrule a computation, and the figure being overruled should be in front of them at
+         * the moment they do it.
+         */}
         {correction?.original_amount != null && (
           <p className="text-caption text-muted-foreground">
             Payroll computed{" "}
@@ -280,18 +250,7 @@ function LineEditor({
   );
 }
 
-/**
- * ADD A LINE THE PAYSLIP NEVER HAD — back pay, a missed HMO share, an allowance nobody priced.
- *
- * THIS IS WHERE THE OLD DIALOG'S QUESTION SURVIVES, and the only place it still makes sense. A
- * correction to a line inherits its tax treatment from the line; a line that does not exist yet has
- * nothing to inherit from, so it has to say what it is. The three answers are the three the ledger
- * has always had.
- *
- * It sits at the foot of the table it adds to rather than in a section of its own: an earning is
- * added under the earnings, a deduction under the deductions, which is where the reader will look
- * for it afterwards.
- */
+/** ADD A LINE THE PAYSLIP NEVER HAD — back pay, a missed HMO share, an allowance nobody priced. */
 function AddLine({
   side,
   payslip,
@@ -442,13 +401,7 @@ function Field({
   );
 }
 
-/**
- * WHAT A LINE CURRENTLY SAYS, found the same way the API finds it.
- *
- * The government lines are not in either breakdown — the document prints them straight from their
- * columns — so they are read from the columns here, exactly as PayrollService::lineValueIn() does.
- * Missing that is not a display bug: it is what seeds the input HR is about to type over.
- */
+/** WHAT A LINE CURRENTLY SAYS, found the same way the API finds it. */
 function findLine(payslip: Payslip, key: string): { name: string; amount: number } | null {
   const row = (payslip.deductions_breakdown ?? []).find((r) => r.key === key);
   if (row) return { name: row.name, amount: row.amount };

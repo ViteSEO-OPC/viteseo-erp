@@ -17,14 +17,7 @@ use App\Modules\Hr\Services\PrivateFileService;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Off-site time-ins (Slice 4).
- *
- * The property that matters most: **approval stamps the SUBMISSION time**. Everything else
- * here is a guard around it. If HR's review delay ever leaked into `time_in`, every field
- * worker would be marked late in proportion to how busy HR was that morning — a payroll
- * error that looks like an attendance problem and would take a long time to trace.
- */
+/** Off-site time-ins. */
 class RemoteCheckinTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -45,7 +38,7 @@ class RemoteCheckinTest extends HrTestCase
     protected function setUp(): void
     {
         parent::setUp();
-        // FIN-004 — check-in selfies live on the PRIVATE disk. They were on `public`, which the
+        // check-in selfies live on the PRIVATE disk. They were on `public`, which the
         // webserver serves with no authentication: a photo of an employee, at a location, at a
         // time, readable by anyone who guessed or was forwarded the URL.
         Storage::fake(PrivateFileService::DISK);

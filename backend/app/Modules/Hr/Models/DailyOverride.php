@@ -8,10 +8,11 @@ class DailyOverride extends Model
 {
     protected $table = 'hr_daily_overrides';
 
-    protected $fillable = ['date', 'grace_minutes'];
+    protected $fillable = ['date', 'grace_minutes', 'min_full_day_minutes'];
 
     protected $casts = [
         'date' => 'date',
         'grace_minutes' => 'integer',
+        'min_full_day_minutes' => 'integer',
     ];
 }

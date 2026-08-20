@@ -8,7 +8,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Tests\TestCase;
 
 /**
- * P0-2: holiday premium now reads the HR-editable rate columns. The headline guard is the NO-OP —
+ * Holiday premium now reads the HR-editable rate columns. The headline guard is the NO-OP —
  * at the seeded DOLE-minimum defaults the multiplier equals the old hardcoded literals (regular
  * +1.0, special +0.3), so no payslip changes. Pure/static, no DB — runs everywhere.
  */

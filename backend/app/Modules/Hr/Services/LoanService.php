@@ -12,30 +12,13 @@ use App\Modules\Hr\Models\Payslip;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Loans and cash advances repaid through payroll (Slice 11b).
- *
- * RE-RUN SAFETY IS THE WHOLE DESIGN. A loan has no `balance` column; the balance is
- * `principal − SUM(payments)`, and payments are unique per (loan, payroll run) and written with
- * updateOrCreate. So recomputing a cycle REPLACES that period's payment rather than adding a
- * second one, and the balance can never drift no matter how many times payroll is re-run — the
- * failure mode Slices 5 and 12 were about.
- *
- * SHORTFALL (decision 2026-07-28): if the payslip can't cover the full instalment we collect
- * what it can and leave the rest on the balance, so net pay never goes negative and the loan
- * simply settles a period later.
- */
+/** Loans and cash advances repaid through payroll. */
 class LoanService
 {
     public function __construct(private readonly AuditService $audit) {}
 
-    /** @return Collection<int, EmployeeLoan> */
     /**
      * Loans across ALL employees, optionally by status — the queue HR decides from.
-     *
-     * There was no such list. `forEmployee()` is per-record, so a loan sitting at `requested`
-     * could only be found by opening the employee it belonged to and scrolling the Compensation
-     * tab, which meant the dashboard could not show one and nobody knew it was waiting.
      *
      * @return Collection<int, EmployeeLoan>
      */
@@ -59,12 +42,7 @@ class LoanService
     }
 
     /**
-     * HR issues a loan — Slice B15, path one.
-     *
-     * IT DOES NOT START `active` ANY MORE. A deduction for a debt owed to the employer needs the
-     * employee's written consent (Labor Code Art. 113), so an issued loan waits at
-     * `pending_authorization` until they give it. `collectForPeriod()` only reads `active`, so
-     * nothing is collected in the meantime — by construction, not by a reminder.
+     * HR issues a loan, path one.
      *
      * @param  array<string, mixed>  $data
      */
@@ -81,7 +59,7 @@ class LoanService
             'principal' => $data['principal'],
             'per_period_amount' => $data['per_period_amount'],
             'start_date' => $data['start_date'],
-            // FIN-032 — the terms. Omitted means zero, which is an interest-free advance rather than
+            // The terms. Omitted means zero, which is an interest-free advance rather than
             // a missing configuration.
             'interest_rate' => $data['interest_rate'] ?? 0,
             'interest_period' => $data['interest_period'] ?? 'annual',
@@ -108,12 +86,7 @@ class LoanService
     }
 
     /**
-     * The employee asks to borrow — Slice B15, path two.
-     *
-     * Nothing is decided and nothing is collectible: it sits at `requested` until HR approves, and
-     * even then it still needs the employee's authorization. The rule on the policy decides
-     * whether they may ask at all, which is the same rule an allowance uses to decide who it
-     * covers — one rule engine, not two.
+     * The employee asks to borrow, path two.
      *
      * @param  array<string, mixed>  $data
      */
@@ -129,7 +102,7 @@ class LoanService
             'principal' => $data['principal'],
             'per_period_amount' => $data['per_period_amount'],
             'start_date' => $data['start_date'],
-            // FIN-032 — the terms. Omitted means zero, which is an interest-free advance rather than
+            // The terms. Omitted means zero, which is an interest-free advance rather than
             // a missing configuration.
             'interest_rate' => $data['interest_rate'] ?? 0,
             'interest_period' => $data['interest_period'] ?? 'annual',
@@ -200,13 +173,7 @@ class LoanService
         return $loan->fresh('payments');
     }
 
-    /**
-     * The employee authorizes the deduction — the gate everything else exists to reach.
-     *
-     * THE EMPLOYEE DOES THIS, NOT HR. Art. 113 wants the worker's own consent; a record HR could
-     * create on their behalf would be worth nothing. The caller passes the authenticated user and
-     * this refuses anyone but the borrower.
-     */
+    /** The employee authorizes the deduction — the gate everything else exists to reach. */
     public function authorize(EmployeeLoan $loan, User $actor): EmployeeLoan
     {
         if ($loan->status !== 'pending_authorization') {
@@ -301,20 +268,7 @@ class LoanService
     }
 
     /**
-     * Refuse to rewrite a repayment schedule payroll has already paid against (FIN-031).
-     *
-     * WHICH FIELDS, AND WHY ONLY THOSE. `principal`, `per_period_amount` and `start_date` decide
-     * what `collectForPeriod()` takes and when it starts. Change any of them after a payslip has
-     * been paid out and the payslip's loan deduction no longer follows from the loan — the employee
-     * holds a document showing an instalment the record now disagrees with, and there is no way to
-     * pay or recover the difference. `type`, `reference` and `notes` are labels; they stay editable
-     * on purpose, because refusing a typo fix in a reference would just push HR to cancel and
-     * re-issue, which loses the consent record.
-     *
-     * FROZEN BY THE PAYSLIP, NOT THE DATE. `PayrollFreezeService` asks "has this employee's DAY been
-     * paid?", which is the right question for attendance and leave. A loan is not tied to days: an
-     * instalment is attached to a run. So the question here is whether any payment this loan has
-     * received sits on a payslip that has been disbursed, or in a run that has been locked.
+     * Refuse to rewrite a repayment schedule payroll has already paid against.
      *
      * @param  array<string, mixed>  $data
      */
@@ -322,7 +276,7 @@ class LoanService
     {
         $touchesSchedule = array_intersect_key($data, array_flip([
             'principal', 'per_period_amount', 'start_date',
-            // FIN-032 — the rate, its period and the fee are part of the schedule too. Changing the
+            // The rate, its period and the fee are part of the schedule too. Changing the
             // rate after a disbursed period would reprice interest that has already been collected
             // and consented to, which is the same wrong as moving the instalment.
             'interest_rate', 'interest_period', 'fees',
@@ -362,7 +316,7 @@ class LoanService
     {
         // The principal can't drop below what has already been collected — that would imply
         // the company owes the employee money back, which is not something payroll can express.
-        // FIN-032 — compared against PRINCIPAL repaid, not the total collected. `paid()` now includes
+        // Compared against PRINCIPAL repaid, not the total collected. `paid()` now includes
         // interest and fees, so using it here would refuse a legitimate correction on a loan whose
         // interest happened to exceed the reduction being made.
         if (isset($data['principal']) && (float) $data['principal'] < $loan->paidPrincipal()) {
@@ -371,17 +325,7 @@ class LoanService
             ]);
         }
 
-        // FIN-031 — the product ceiling holds for the LIFE of the loan, not just at issue.
-        //
-        // `create()` and `request()` both check the policy; `update()` did not. So a loan issued
-        // validly under a ₱50,000 product could be edited to ₱200,000 the next day, or its
-        // instalment lowered until it repaid over three times the allowed term. The ceiling was
-        // enforced once and never again, which is the same shape of hole as FIN-002's status: a
-        // rule applied on one path and skipped on the path that edits the result.
-        //
-        // Checked against the loan's CURRENT policy, with the incoming values merged over the
-        // existing ones — a partial edit that only changes `per_period_amount` still has to fit
-        // the term, and the term needs the principal to be judged.
+        // The product ceiling holds for the LIFE of the loan, not just at issue.
         $loan->loadMissing('employee');
         if ($loan->employee !== null) {
             $this->assertWithinPolicy(
@@ -394,20 +338,13 @@ class LoanService
             );
         }
 
-        // FIN-031 — the repayment schedule is frozen once payroll has paid against it.
+        // The repayment schedule is frozen once payroll has paid against it.
         $this->assertScheduleEditable($loan, $data);
 
-        // FIN-002 — `status` IS NOT EDITABLE HERE, and must never be added back.
-        //
-        // Collection runs off `status = 'active'`, so writing that status is what authorises a
-        // wage deduction. Art. 113 wants the worker's own consent for that, which is why
-        // authorize() is the only writer of it and checks that the actor is the employee whose pay
-        // is being deducted. While `status` sat in this list, HR editing a loan could set `active`
-        // directly and start collecting with `authorized_at` still null — the consent record
-        // simply absent while the deduction proceeded.
+        // `status` IS NOT EDITABLE HERE, and must never be added back.
         $loan->update(array_intersect_key($data, array_flip([
             'type', 'reference', 'principal', 'per_period_amount', 'start_date', 'notes',
-            // FIN-032 — the terms of the loan. Editable like the principal and instalment are, and
+            // The terms of the loan. Editable like the principal and instalment are, and
             // frozen by the same `assertScheduleEditable()` guard once payroll has collected against
             // them: changing the rate after the fact would reprice instalments already paid.
             'interest_rate', 'interest_period', 'fees', 'priority',
@@ -444,12 +381,7 @@ class LoanService
             ]);
         }
 
-        // FIN-002 — consent that was never given cannot be resumed.
-        //
-        // This returned every cancelled loan straight to `active`, including one cancelled while
-        // it was still waiting on the employee. Reopening would then start collecting from wages
-        // the employee had never agreed to. A loan that WAS authorised keeps its `authorized_at`,
-        // so its consent still stands and collection genuinely does resume.
+        // Consent that was never given cannot be resumed.
         $restored = $loan->authorized_at ? 'active' : 'pending_authorization';
 
         $loan->update(['status' => $restored]);
@@ -469,13 +401,6 @@ class LoanService
     /**
      * Collect this period's instalments for one employee and record them against the run.
      *
-     * `availableNet` is what the payslip can still afford after every other deduction. Each
-     * loan takes the lesser of its instalment, its remaining balance, and what's left — so a
-     * thin payslip pays what it can and the rest carries.
-     *
-     * A loan whose balance reaches zero is marked `settled` here, so it stops being collected
-     * without HR having to notice.
-     *
      * @return array{total: float, lines: array<int, array{name: string, amount: float}>}
      */
     public function collectForPeriod(
@@ -484,27 +409,17 @@ class LoanService
         string $cycleEnd,
         float $availableNet,
         ?Payslip $payslip = null,
-        // FIN-032 — how many paydays a year, so a diminishing-balance rate can be split per period.
+        // How many paydays a year, so a diminishing-balance rate can be split per period.
         // Defaults to 0, which yields a zero rate: an omitted argument charges no interest rather
         // than guessing a frequency and charging the wrong amount.
         int $periodsPerYear = 0,
     ): array {
-        // FIN-003(b) — `settled` is included, not just `active`, and that is load-bearing.
-        //
-        // A loan that THIS run's previous compute settled is no longer `active`. Filtering to
-        // `active` alone excluded it from `$loans`, so the cleanup immediately below deleted the
-        // very payment that had settled it — while the loan stayed `settled`. The balance came
-        // back (`outstanding() > 0`) but `isCollectible()` was false, so payroll could never
-        // collect it again, and the re-run's payslip carried no loan deduction so net pay rose.
-        //
-        // Re-visiting a settled loan is safe: the loop below recomputes `$outstanding` from the
-        // payments made OUTSIDE this run, so one settled by an EARLIER run reads zero outstanding
-        // and is skipped, while one settled by this run is correctly re-collected and re-settled.
+        // (b) — `settled` is included, not just `active`, and that is load-bearing.
         $loans = EmployeeLoan::where('employee_id', $employee->id)
             ->whereIn('status', ['active', 'settled'])
             ->whereDate('start_date', '<=', $cycleEnd)
             ->with('payments')
-            // FIN-032 — priority first (lower runs first), so when net pay cannot cover everything HR
+            // Priority first (lower runs first), so when net pay cannot cover everything HR
             // decides which obligation gets the money rather than the query order deciding for them.
             // Then oldest-first within a priority, which is the fair tie-break.
             ->orderBy('priority')
@@ -528,7 +443,7 @@ class LoanService
         foreach ($loans as $loan) {
             // A re-run must not read its OWN previous payment as already-paid, or the balance
             // would look smaller every time. Exclude this run's row before deciding the amount.
-            // FIN-032 — PRINCIPAL only. Interest is charged on this balance, so counting it here
+            // PRINCIPAL only. Interest is charged on this balance, so counting it here
             // would let a loan repay itself out of its own interest.
             $principalPaidElsewhere = round((float) $loan->payments()
                 ->where('payroll_run_id', '!=', $run->id)
@@ -554,15 +469,6 @@ class LoanService
             /**
              * ALLOCATION ORDER WHEN THE PAYSLIP CANNOT COVER EVERYTHING: interest, then fee, then
              * principal.
-             *
-             * Interest first because it is the cost of the money for THIS period — leaving it unpaid
-             * while reducing principal would charge the employee for a balance they had already paid
-             * down. The consequence is worth stating plainly: a short payday means less principal comes
-             * off, so the loan runs slightly longer and costs slightly more in total interest. That is
-             * how every real amortising loan behaves.
-             *
-             * Whatever cannot be collected is simply not collected — it is not written off, and the
-             * next period charges interest on the balance that genuinely remains.
              */
             $interest = round(min($interestDue, $remaining), 2);
             $remaining = round($remaining - $interest, 2);
@@ -634,19 +540,6 @@ class LoanService
     /**
      * Undo the instalments a payslip collected, because that payslip is being un-paid.
      *
-     * FIN-003(a) — WHY THIS EXISTS. `collectForPeriod()` writes the ledger at COMPUTE time, so an
-     * employee's balance drops as soon as payroll runs, before anyone asserts the money moved.
-     * That is the deliberate behaviour (HR sees the deduction the moment the period is priced),
-     * but it was only half a story: `reopenPayslip()` reversed the payslip and its reimbursements
-     * and left the loan alone. Reversing a payment therefore wrote off real debt against money the
-     * company had just decided not to pay, and a loan the payslip had settled stayed `settled`.
-     *
-     * Slice 12 established exactly this invariant for reimbursements. This is the loan half.
-     *
-     * Scoped by (run, employee) rather than by `payslip_id`, because rows written before the
-     * payslip existed carry a null `payslip_id` — the pair is what actually identifies "the
-     * instalments this payslip collected".
-     *
      * @return int how many payment rows were reversed
      */
     public function reverseForPayslip(Payslip $payslip): int
@@ -684,37 +577,12 @@ class LoanService
     }
 
     /**
-     * Settle every outstanding loan on separation, from whatever the final pay can afford (FIN-014).
-     *
-     * WHY THIS EXISTS SEPARATELY FROM `collectForPeriod()`. That method collects a per-period
-     * INSTALMENT, and it only ever runs for the pay group the employee belongs to. Once someone
-     * leaves they are in no pay group, so their loan simply stopped being collected — the audit's
-     * words: "Outstanding loans simply stop being collected when the employee leaves." The balance
-     * sat on the books with nothing left to recover it from.
-     *
-     * So this takes the WHOLE remaining balance rather than an instalment, in the same order
-     * `collectForPeriod()` uses, and stops when the money runs out. What it cannot recover stays
-     * outstanding and visible — the alternative would be writing off real debt because the final
-     * payslip happened to be thin, which is the FIN-003 mistake in a different place.
+     * Settle every outstanding loan on separation, from whatever the final pay can afford.
      *
      * @return float total settled
      */
     /**
-     * The projected repayment schedule — what the employee is agreeing to (FIN-032).
-     *
-     * DIMINISHING BALANCE MADE VISIBLE. Each row charges interest on the balance at the START of that
-     * period, so the interest column falls while the principal column stays flat. That shape is the
-     * whole argument for this method over flat interest, and an employee cannot check a rate they cannot
-     * see: this is what the Art. 113 authorisation should be showing them before they consent.
-     *
-     * A PROJECTION, NOT A LEDGER. It assumes every instalment is collected in full and on time; a short
-     * payday collects interest first and less principal, so the real schedule runs longer. The already-
-     * collected rows come from `payments`, which is the record of what actually happened.
-     *
-     * Capped at 600 periods — a runaway guard, not a business rule. Interest here never blocks
-     * amortisation (principal is `min(instalment, balance)`, so the balance always falls), but a tiny
-     * instalment against a large principal still runs for decades: ₱12,000 at ₱10 a period is 1,200
-     * paydays. `truncated` says the schedule was cut rather than presenting a partial one as complete.
+     * The projected repayment schedule — what the employee is agreeing to.
      *
      * @return array{rows: list<array<string, float|int>>, total_interest: float, periods: int, truncated: bool}
      */
@@ -786,7 +654,7 @@ class LoanService
         $settled = 0.0;
 
         foreach ($loans as $loan) {
-            // FIN-032 — principal and fees tracked separately, because `outstanding()` derives from
+            // Principal and fees tracked separately, because `outstanding()` derives from
             // principal alone. Interest is NOT charged here: a final settlement pays off the balance
             // on the separation date, and charging a full period's interest on money being repaid the
             // same day would overcharge somebody who is leaving.

@@ -19,18 +19,7 @@ import {
 } from "@/modules/hr/lib/my-attendance-display";
 import type { MyAttendanceDay, MyAttendanceMonth } from "@/modules/hr/types/my-attendance";
 
-/**
- * My Attendance — the employee's own month, day by day.
- *
- * The self-service counterpart to the Reports hub's Attendance Summary, which shows the same
- * month for everyone at once and is HR-only. Same period filter, same day classifications, same
- * expandable detail — but one person's, with the minute-level facts that only matter to the
- * person they happened to: how late, how short, how much overtime was approved.
- *
- * IT SHOWS NO MONEY. Every figure is an attendance fact. What a policy charges for those minutes
- * belongs to the payslip, and two screens computing pay from the same day is how they start
- * disagreeing with each other.
- */
+/** My Attendance — the employee's own month, day by day. */
 
 /** 'YYYY-MM' shifted by whole months, without dragging a date library in for it. */
 function shiftMonth(month: string, delta: number): string {
@@ -238,8 +227,10 @@ export default function MyAttendancePage() {
               onShiftMonth={(delta) => setMonth(shiftMonth(pendingMonth, delta))}
             />
 
-            {/* The twelve months of the year, so one month can be read against the rest.
-                Clicking a row is how the reader moves — the same gesture as the calendar arrows. */}
+            {/*
+             * The twelve months of the year, so one month can be read against the rest.
+             * Clicking a row is how the reader moves — the same gesture as the calendar arrows.
+             */}
             <DataTable<MyAttendanceMonth>
               title={`${report.selected_year} at a glance`}
               columns={monthColumns}

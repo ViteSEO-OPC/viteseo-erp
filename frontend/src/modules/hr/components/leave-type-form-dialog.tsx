@@ -64,7 +64,7 @@ const schema = z.object({
       z.literal(""),
     ])
     .optional(),
-  // FIN-034 — accrual. "none" keeps this type hand-managed exactly as before, which is the default
+  // Accrual. "none" keeps this type hand-managed exactly as before, which is the default
   // for every existing type: nothing starts moving entitlements on its own.
   accrual_mode: z.enum(["none", "monthly", "annual"]),
   prorate_first_year: z.boolean(),
@@ -240,8 +240,10 @@ export function LeaveTypeFormDialog({
             </div>
           </div>
 
-          {/* Colour — a native picker beside the hex, so any colour is reachable and the
-              stored value is always visible and typeable. The swatches below are shortcuts. */}
+          {/*
+           * Colour — a native picker beside the hex, so any colour is reachable and the
+           * stored value is always visible and typeable. The swatches below are shortcuts.
+           */}
           <div className="space-y-1.5">
             <Label htmlFor="lt-color">Color</Label>
             <div className="flex items-center gap-2">
@@ -307,9 +309,11 @@ export function LeaveTypeFormDialog({
             </p>
           </div>
 
-          {/* Credits — deliberately its own question. "Paid" is what payroll does with the day;
-              "Limited" is whether there is an allowance to run out of. All four combinations are
-              real, and unpaid-but-capped ("at most 10 LWOP days a year") had no way to be said. */}
+          {/*
+           * Credits — deliberately its own question. "Paid" is what payroll does with the day;
+           * "Limited" is whether there is an allowance to run out of. All four combinations are
+           * real, and unpaid-but-capped ("at most 10 LWOP days a year") had no way to be said.
+           */}
           <div className="space-y-2">
             <Label>Credits</Label>
             <div className="flex gap-2.5">
@@ -389,9 +393,11 @@ export function LeaveTypeFormDialog({
             )}
           </div>
 
-          {/* FIN-034 — accrual, carry-over and expiry. Off by default: an existing type keeps being
-              hand-managed until HR deliberately switches it over, because entitlements are what
-              employees plan holidays around and a migration must not move them. */}
+          {/*
+           * Accrual, carry-over and expiry. Off by default: an existing type keeps being
+           * hand-managed until HR deliberately switches it over, because entitlements are what
+           * employees plan holidays around and a migration must not move them.
+           */}
           <div className="rounded-lg border border-border p-3 space-y-3">
             <div className="space-y-1.5">
               <Label htmlFor="lt-accrual">Accrual</Label>

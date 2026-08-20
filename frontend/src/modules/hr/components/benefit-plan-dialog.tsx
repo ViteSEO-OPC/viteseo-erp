@@ -34,24 +34,7 @@ import {
   type EligibilityMode,
 } from "@/modules/hr/types/benefits";
 
-/**
- * Add or edit a company benefit — one form for both.
- *
- * WHY THIS REPLACED `EditHmoDialog`. There was no way to ADD a company benefit at all: Allowances
- * and Loans each had a button, this section never did, so the catalogue was frozen at whatever the
- * seeder happened to create — an HMO and a retirement plan. "Flexible enough to hold an HMO and
- * anything else" was true of the data model and false of the product.
- *
- * The old dialog also assumed medical: it was titled "Medical · company benefit" and edited a name,
- * a cadence and coverage tiers. A benefit that is not an HMO — life insurance, a retirement plan, a
- * gym subsidy — has a category, a description and a rule for who may be on it, and may deduct
- * nothing at all.
- *
- * WHAT A "COMPANY BENEFIT" IS, precisely: something an employee is ENROLLED in, which may deduct a
- * fixed share from their pay each period. That is the one behaviour this kind has. An allowance
- * adds to gross; a loan deducts against a balance. Anything that does not fit those three cannot
- * reach a payslip, which is the honest limit of the catalogue.
- */
+/** Add or edit a company benefit — one form for both. */
 export function BenefitPlanDialog({
   open,
   program,
@@ -130,7 +113,7 @@ function PlanForm({ program, onDone }: { program: BenefitProgram | null; onDone:
       eligibility: mode,
       eligibility_statuses: mode === "status" ? statuses : [],
       // `employee_ids` is the rule's list for `custom` — being ELIGIBLE is not the same as being
-      // enrolled, which is still done deliberately from "Who is on it" (B2).
+      // enrolled, which is still done deliberately from "Who is on it".
       employee_ids: mode === "custom" ? employeeIds : [],
       ...(publish === undefined ? {} : { status: publish ? "Active" : "Coming soon" }),
     };
@@ -182,8 +165,10 @@ function PlanForm({ program, onDone }: { program: BenefitProgram | null; onDone:
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="bp-cat">Kind</Label>
-            {/* Drives the icon on the employee's own card, so it is a picker rather than free
-                text — a typo would silently fall back to the generic gift icon. */}
+            {/*
+             * Drives the icon on the employee's own card, so it is a picker rather than free
+             * text — a typo would silently fall back to the generic gift icon.
+             */}
             <SimpleSelect
               id="bp-cat"
               value={category}
@@ -272,8 +257,10 @@ function PlanForm({ program, onDone }: { program: BenefitProgram | null; onDone:
           </div>
         )}
 
-        {/* Who MAY be enrolled. Being covered by the rule is not the same as being on the plan —
-            a tier and a share are per person, so enrolling stays a deliberate act (B2). */}
+        {/*
+         * Who MAY be enrolled. Being covered by the rule is not the same as being on the plan —
+         * a tier and a share are per person, so enrolling stays a deliberate act.
+         */}
         <EligibilityPicker
           mode={mode}
           statuses={statuses}

@@ -36,19 +36,6 @@ use Illuminate\Validation\ValidationException;
  * daily rate from actual hr_attendance records. Statutory deductions are driven by
  * the editable Company → Benefits config + each employee's enrolment checklist
  * (ContributionService), NOT hardcoded formulas.
- *
- * THE RATES ARE NO LONGER PLACEHOLDERS. This docblock claimed the SSS config was "a placeholder
- * rate until the official bracket table is supplied" long after B3b/B8 supplied it: the published
- * 61-band schedule is seeded from Circular 2024-006 and machine-imported rather than typed. The
- * withholding table stopped being hardcoded too (FIN-027) — it is dated data in `hr_tax_versions`.
- * The comment was left saying the opposite, which is worse than no comment: it invites the next
- * reader to distrust figures that are in fact correct, or to "fix" them.
- *
- * EVERY PRICING INPUT IS EFFECTIVE-DATED, resolved as of the cycle end: salary
- * (`hr_salary_histories`), statutory rates (`hr_contribution_versions`), allowances
- * (`hr_benefit_program_versions`), the attendance policy (`hr_attendance_policy_versions`), payroll
- * settings (`hr_payroll_setting_versions`) and the tax table (`hr_tax_versions`). Re-running an old
- * period therefore reprices it at what it actually charged, not at today's configuration.
  */
 class PayrollService
 {
@@ -70,43 +57,17 @@ class PayrollService
      * The canonical daily rate, honoring the attendance policy's daily-rate basis:
      *   - fixed_divisor   → base × 12 ÷ annual_divisor (constant all year, DOLE-style)
      *   - period_workdays → this period's pay ÷ its scheduled workdays (the default)
-     * Single source of truth (Slice A, 2026-07-27): payslipFor() and holidayPremiumFor() both
+     * Single source of truth: payslipFor() and holidayPremiumFor() both
      * price a day through here, so absence, late/undertime, and holiday premium can never
-     * disagree. Default basis reproduces the pre-Slice-A number.
+     * disagree. Default basis reproduces the number.
      */
     /**
-     * Is this employee's derived daily rate below the regional minimum wage? (FIN-030)
-     *
-     * WHY THIS IS A WARNING AND NOT VALIDATION. The floor varies by region, by industry and by
-     * establishment size, and it changes on DOLE wage orders with their own dates. A hard block
-     * would be wrong for the cases this system cannot see — a legitimately exempt arrangement, a
-     * part-time schedule, a probationary rate under a different order — and being wrong sometimes is
-     * how a block gets routed around. So it informs; HR decides.
-     *
-     * WHAT MAKES IT WORTH SURFACING AT ALL: the daily rate is DERIVED (salary ÷ the basis on the
-     * attendance policy), so nobody typing a monthly figure can see what it implies per day. That is
-     * the gap — not that HR would knowingly pay below the floor.
-     *
-     * WHY THE RATE IS RETURNED EVEN WITH NO FLOOR CONFIGURED (FIN-030b). The first version returned
-     * null unless a floor was set, so the screen showed nothing at all — and the one number nobody
-     * can work out for themselves stayed invisible in exactly the case where it matters most,
-     * before anyone has thought about the wage order. The rate is the answer to "what is one of
-     * this person's days worth", which the basis alone decides; the floor only decides whether that
-     * answer is a problem. `minimum` stays null when none is configured, and null warns about
-     * nothing — inventing a figure would be guessing at a legal threshold, the same refusal the
-     * de-minimis migration made (FIN-024).
-     *
-     * `below` is the arithmetic truth. `flagged` is `below` minus the people someone has explicitly
-     * excused (FIN-030b), and it is the one every list and gate should read: a warning that is
-     * permanently wrong for the same five part-timers is a warning everyone learns to scroll past.
-     *
-     * Returns null only when the rate itself cannot be derived.
+     * Is this employee's derived daily rate below the regional minimum wage?
      *
      * @return array{
      *     daily_rate: float, basis: string, divisor: int|null, workdays: int,
      *     minimum: float|null, below: bool, flagged: bool, shortfall: float|null,
      *     compliant_salary: float|null, exempt: bool, exempt_reason: string|null
-     * }|null
      */
     public function minimumWageCheckFor(Employee $employee, ?string $asOf = null): ?array
     {
@@ -155,9 +116,6 @@ class PayrollService
      * rather than just assert it. Defaults to the employee's CURRENT period; the pre-run review
      * passes the cycle it is about to pay.
      *
-     * Null when the rate cannot be derived at all (no scheduled workdays) — a schedule problem,
-     * which payroll itself reports with a far better message than a wage warning could give.
-     *
      * @param  array{start: string, end: string}|null  $period
      * @return array{daily_rate: float, basis: string, divisor: int|null, workdays: int, periods_per_year: int}|null
      */
@@ -193,15 +151,7 @@ class PayrollService
 
     /**
      * The monthly base salary whose derived daily rate clears $floor — dailyRateFor() inverted, so
-     * the proposal is produced by the same arithmetic that produced the breach (FIN-030b).
-     *
-     * Rounded UP to the centavo. Rounding to nearest would let a proposal land a hair under the
-     * floor after dailyRateFor()'s own rounding, which is the one outcome an adjustment must never
-     * have: a raise that leaves the person still non-compliant.
-     *
-     * Under `period_workdays` the answer depends on the period's workday count, so it clears the
-     * floor for THIS period and is a close approximation elsewhere. Under `fixed_divisor` it is
-     * exact all year, which is what a fixed divisor is for.
+     * the proposal is produced by the same arithmetic that produced the breach.
      *
      * @param  array{basis: string, divisor: int|null, workdays: int, periods_per_year: int}  $derived
      */
@@ -216,11 +166,6 @@ class PayrollService
 
     /**
      * The employees a run for $frequency pays in this cycle.
-     *
-     * Extracted (FIN-030b) so the pre-run minimum-wage review asks EXACTLY the question the run
-     * asks. A review over a nearly-identical population is worse than none: it clears people the
-     * run then pays, and the difference would only ever show up as a compliance gap nobody
-     * could account for.
      *
      * @return Collection<int, Employee>
      */
@@ -248,22 +193,12 @@ class PayrollService
     }
 
     /**
-     * Everyone this run would pay whose derived daily rate falls under the floor (FIN-030b).
-     *
-     * WHY IT IS ASKED AT THE RUN AND NOT ONLY ON THE PROFILE. A band on a profile page is seen by
-     * whoever happens to open that profile, which for a compliant-looking employee is nobody. The
-     * moment the answer actually matters is the moment money is about to be committed for a period,
-     * so the same question is asked there, over exactly the population the run will pay.
-     *
-     * Evaluated against THIS cycle — the settings in force for it, the policy as it stood at its
-     * end, and its own workday count — so a review of an old period judges it by the floor that
-     * applied then rather than today's.
+     * Everyone this run would pay whose derived daily rate falls under the floor.
      *
      * @return array{
      *     minimum: float|null, basis: string|null, divisor: int|null,
      *     cycle: array{start: string, end: string}, employees: list<array<string, mixed>>,
      *     checked: int, flagged_count: int, exempt_count: int
-     * }
      */
     public function minimumWageReview(string $frequency, string $cycleStart, string $cycleEnd): array
     {
@@ -321,23 +256,7 @@ class PayrollService
     }
 
     /**
-     * Raise the flagged employees to the salary that clears the floor (FIN-030b).
-     *
-     * WHY THIS IS A BUTTON AND NOT A BACKGROUND JOB. A wage order raises what the company MUST pay;
-     * it does not raise anybody's salary by itself. Salary is a contractual term, so the change
-     * needs an approver, a date it takes effect from, and a record — which is precisely what
-     * routing it through EmployeeService::update() buys: the same SalaryHistory row, the same
-     * audit entry and the same repricing guard as any other raise. A job that rewrote pay on its
-     * own would leave nobody able to answer who decided it.
-     *
-     * The system's job is to make the correct number obvious and one click away. Committing it
-     * stays a person's decision, and the ids are passed in explicitly so it is never "everyone the
-     * screen happened to be showing".
-     *
-     * Back pay is NOT computed here. When the effective date reaches into a period that was
-     * already settled, the difference is recorded as a retro flag (FIN-009) — the queue HR already
-     * works from, settled by an adjustment run (FIN-010). Paying it silently from inside a salary
-     * edit would be money moving with no run behind it.
+     * Raise the flagged employees to the salary that clears the floor.
      *
      * @param  list<int>  $employeeIds
      * @return array{applied: list<array<string, mixed>>, skipped: list<array<string, mixed>>, back_pay_flagged: int}
@@ -484,40 +403,23 @@ class PayrollService
         $monthlyBase = (float) $employee->base_salary;
         // The pay for THIS period: annual salary spread across the year's periods.
         $perPeriodBase = $periodsPerYear > 0 ? round(($monthlyBase * 12) / $periodsPerYear, 2) : 0.0;
-        // Daily rate via the policy basis (Slice A) — the one helper every pricing path uses.
+        // Daily rate via the policy basis — the one helper every pricing path uses.
         $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDaysInPeriod);
         $basePay = max(0, round($perPeriodBase - $unpaidDays * $dailyRate, 2));
 
         // Allowances are monthly, non-taxable de-minimis pay. Spread across the year's periods
         // like base, but NOT absence-prorated (they're fixed benefits, not attendance-earned).
-        //
-        // Slice B1 — read from Company → Benefits, not the three `hr_employees` columns. Those
-        // columns and the Benefits page disagreed (₱42,000 vs ₱77,000 a month company-wide) and
-        // Gas Allowance had no column at all, so it could never be paid however HR configured it.
-        // The backfill migration pinned each employee's old column value onto their enrolment, so
-        // this change paid exactly what the columns did on the first run.
-        // Slice B11 — priced as of the CYCLE END, like salary (13c) and the statutory rates
-        // (B3a). Re-running August after a September rise used to pay September's figure.
         $pricedAsOf = $dist['cycle_end'] ?? null;
         $monthlyAllowance = $this->allowances->monthlyFor($employee, $pricedAsOf);
-        // FIN-048 — one factor, used here AND by allowanceBreakdown(), so the total and the lines
+        // One factor, used here AND by allowanceBreakdown(), so the total and the lines
         // that explain it cannot answer the timing question differently.
         $allowanceFactor = $this->allowanceFactor($dist, $periodsPerYear);
         $perPeriodAllowance = round($monthlyAllowance * $allowanceFactor, 2);
 
-        // Slice B10 — PART-MONTHS. A mid-cycle hire or leaver used to receive a whole period's
+        // PART-MONTHS. A mid-cycle hire or leaver used to receive a whole period's
         // allowance while their basic pay was prorated for the days they were actually employed.
         // Someone starting on the 25th got the full month. It is wrong on the first and last
         // payslip anybody gets — the two most closely read payslips in a career.
-        //
-        // NOT the same as absence proration, which stays deliberately off (an allowance is a fixed
-        // benefit, not attendance-earned). This follows the EMPLOYMENT WINDOW only: days before a
-        // hire date or after a last working day were never owed.
-        //
-        // Management is excluded to match their basic pay, which `unpaidDaysDetailFor()` never
-        // prorates either — prorating one and not the other would make their payslip inconsistent
-        // with itself. (Whether a management hire should get a full first month is a separate
-        // question, and an older one than this slice.)
         $employmentFraction = 1.0;
         if (! $employee->isManagement() && isset($dist['cycle_start'], $dist['cycle_end'])) {
             $employmentFraction = $this->attendance->employmentFractionFor(
@@ -532,30 +434,24 @@ class PayrollService
         }
 
         // Only the contributions this employee is enrolled in, at the rates in force for THIS
-        // period (Slice B3a) — not whatever they are today.
+        // period — not whatever they are today.
         $contribConfig = $this->contributions->effectiveFor($employee, $dist['cycle_end'] ?? null);
 
         // Withholding tracks compensation ACTUALLY earned: the monthly-equivalent of the
         // (absence-prorated) base pay. Equals the full monthly salary when there are no
         // unpaid days, so a normal period is unchanged; it scales down only when pay is
         // reduced, so we don't over-withhold a low-earning period.
-        //
-        // Slice 10 — PREMIUM PAY IS TAXABLE. Holiday premium, overtime, the night differential
-        // and rest-day premium are all taxable compensation in PH, and all four were excluded
-        // from this base. That was harmless while every one of them was always ₱0; now that they
-        // actually pay, leaving them out understates withholding. Reimbursements stay out (a
-        // reimbursement is not income).
         $taxablePeriodPay = $basePay + $holidayPremium + $overtimePay + $nightDiffPay + $restDayPremium;
         $taxableMonthly = $periodsPerYear > 0 ? round($taxablePeriodPay * $periodsPerYear / 12, 2) : 0.0;
 
-        // Slice B4 — the two kinds of allowance are taxed differently, so split before taxing.
+        // The two kinds of allowance are taxed differently, so split before taxing.
         // Payroll used to treat EVERY allowance as de-minimis regardless of the switch HR sets on
         // the programme, so marking one "taxable" changed nothing on the payslip and the company
         // quietly under-withheld. Gross pay is unaffected either way: the split only decides how
         // much of the same money is compensation.
         $allowanceSplit = $this->allowances->monthlyTaxBucketsFor($employee, $pricedAsOf);
 
-        // Slice B10 — a part-period employee is taxed on the allowance they were actually paid.
+        // A part-period employee is taxed on the allowance they were actually paid.
         // Without this they would be withheld on a full month of a taxable allowance they only
         // received part of, which is the same error the proration above exists to fix.
         if ($employmentFraction < 1.0) {
@@ -565,35 +461,7 @@ class PayrollService
             );
         }
 
-        // Slice B19 — THE STATUTORY CONTRIBUTION BASE, which is no longer one number.
-        //
-        // WHAT WAS WRONG. Every contribution was charged on `$monthlyBase` — the profile salary,
-        // untouched by absences, lates, overtime, allowances or any premium line. An employee with
-        // a week of unpaid leave paid SSS on money they never received; one with heavy overtime
-        // paid nothing on it. Withholding tax has tracked actual earnings since Slice 10, so the
-        // two bases sat a dozen lines apart and disagreed.
-        //
-        // WHY BOTH FIGURES ARE COMPUTED AND THE VERSION PICKS. The three agencies do not measure
-        // the same thing: PhilHealth is the fixed BASIC monthly salary by law (Circular 2019-0009,
-        // which expressly excludes allowances, overtime and COLA), while SSS charges "compensation"
-        // (RA 11199 §8(f)) and Pag-IBIG monthly compensation. One rule for all three would be
-        // wrong for at least one of them, so each `hr_contribution_versions` row names its own
-        // `salary_basis` and `computePayslip()` reads the figure that version asks for.
-        //
-        // MONTHLY-EQUIVALENT, NOT THIS PERIOD'S CASH. Contributions are monthly amounts that
-        // `timingFactor()` then splits across the month's cutoffs, and the SSS bands are printed
-        // against a monthly salary — so a semi-monthly period's earnings have to be annualised
-        // back up before they can meet a bracket. Same conversion `$taxableMonthly` above does,
-        // and for the same reason.
-        //
-        // KNOWN LIMITATION, stated because it is a real one: with `deduction_timing = every`, two
-        // cutoffs of one month are annualised independently, so a period with overtime and a period
-        // with absences can land in different SSS bands and the month's total will not equal any
-        // single printed band. Setting the timing to `first` or `last` avoids it by charging the
-        // whole monthly contribution on one cutoff.
-        //
-        // NO CIRCULARITY, despite what "based on net pay" sounds like: this is gross EARNINGS,
-        // before any deduction. Nothing in it depends on the contributions computed from it.
+        // THE STATUTORY CONTRIBUTION BASE, which is no longer one number.
         $contributableAllowance = $this->allowances->monthlyContributableFor($employee, $pricedAsOf);
 
         // The same part-period scaling the paid allowance gets above — an employee who was only
@@ -605,34 +473,7 @@ class PayrollService
         // `$taxablePeriodPay` is exactly the right set of earnings lines: base pay net of absences
         // and lates, plus the four premium lines. Reimbursements are excluded there because a
         // reimbursement is not income, which makes it not remuneration here either.
-        // FIN-050 — THE MONTH, NOT THIS CUTOFF DOUBLED.
-        //
-        // This used to be `taxablePeriodPay × periodsPerYear ÷ 12`, i.e. one cutoff extrapolated
-        // to a month. That is right only when every cutoff of the month is identical; two weeks of
-        // unpaid leave in the second half made the first payslip charge as though the month were
-        // whole, and the halves could resolve to different SSS bands.
-        //
-        // On the month's LAST cutoff every earlier cutoff exists, so the month's real earnings are
-        // simply their sum plus this one. The final cutoff then trues the month up — see
-        // contributionForPeriod().
-        //
-        // BEFORE THAT the month cannot be known, so this cutoff's own earnings are SCALED to a
-        // monthly estimate: `period pay × cutoffs in the month`. It used to use the contracted
-        // salary, which charges someone who lost half the period as though they had worked it all
-        // and leaves a larger correction for the final cutoff to claw back.
-        //
-        // THE SCALING IS THE WHOLE POINT AND IS NOT A NO-OP. It is tempting to read `× cutoffs`
-        // then `÷ cutoffs` as cancelling, and in the flat middle of the table it does. The bracket
-        // table is NOT flat: it is constant below the floor (MSC ₱5,000) and constant above the
-        // ceiling (MSC ₱35,000). Looking a HALF-month up in a monthly table applies both limits
-        // twice a month — ₱47,500 a cutoff is already past the ceiling, so each cutoff charges the
-        // monthly maximum and the employee pays double; ₱3,000 a cutoff is lifted to the floor
-        // twice. Scaling to a month first makes each limit apply once, where it belongs.
-        //
-        // A CUTOFF THAT WAS NEVER RUN LEAVES A HOLE, and counting it as zero earnings would
-        // under-charge the month — run only the second cutoff of a semi-monthly month and SSS
-        // would be charged on half a month's pay. Known cutoffs use their actual figures; missing
-        // ones are filled at the contracted per-period rate.
+        // THE MONTH, NOT THIS CUTOFF DOUBLED.
         $cutoffsInMonth = max(1, (int) ($dist['count'] ?? 1));
         $isFinalCutoff = ($dist['index'] ?? 0) >= ($cutoffsInMonth - 1);
         $priorEarnings = (float) ($dist['month_to_date']['earnings'] ?? 0.0);
@@ -657,36 +498,26 @@ class PayrollService
         // MONTHLY figure, which is what the withholding base is measured in.
         $taxableMonthly += $allowanceSplit['taxable'];
 
-        // Slice B16 — the amount above each benefit's OWN statutory ceiling is not taxed here. It
+        // The amount above each benefit's OWN statutory ceiling is not taxed here. It
         // joins the "13th month pay and other benefits" bucket, which is exempt up to ₱90,000 a
         // year (TRAIN); only what is over that figure is compensation.
-        //
-        // The old code taxed the excess immediately against a single pooled cap, which over-withheld
-        // for everybody whose benefits sit under ₱90,000 — the normal case — and applied a rule
-        // (one aggregate de-minimis cap) that does not exist.
-        //
-        // 13th-month pay is NOT added here, and the reason CHANGED. This used to say the system
-        // "reports it but never pays it" — true when written, false since B17 added
-        // `runThirteenthMonth()`. It is excluded now because the 13th-month run computes its own
-        // share of the ₱90,000 bucket and withholds on its own excess, reading back the
-        // `other_benefits` this line records. Adding it here as well would count it twice.
         $taxableMonthly += $this->otherBenefitsTaxableMonthly(
             $allowanceSplit['other_benefits'] * 12,
             $dist['other_benefits_annual_cap'] ?? null,
         );
 
-        // Slice B17 — this period's contribution to the ₱90,000 bucket, recorded on the payslip so
+        // This period's contribution to the ₱90,000 bucket, recorded on the payslip so
         // December can add up what was actually PAID during the year. Recomputing it from the
         // catalogue at year-end would let a mid-year allowance change rewrite history.
         $perPeriodOtherBenefits = $periodsPerYear > 0
             ? round(($allowanceSplit['other_benefits'] * 12) / $periodsPerYear, 2)
             : 0.0;
 
-        // Slice 11a — recurring benefit shares (HMO, union dues) from Company → Benefits.
+        // Recurring benefit shares (HMO, union dues) from Company → Benefits.
         // `count` is how many periods this calendar month has, so a MONTHLY share is split
         // the same way statutory contributions are.
         // The cycle dates are passed so an enrolment that starts or ends mid-year is charged only
-        // for the periods it actually covers (Slice B2).
+        // for the periods it actually covers.
         $otherDeductions = $this->benefitDeductions->forPeriod(
             $employee,
             max(1, (int) ($dist['count'] ?? 1)),
@@ -701,7 +532,7 @@ class PayrollService
         // ACTUALLY applied, which is not `unpaidDays × dailyRate` whenever basePay clamped at
         // zero — deriving it at display time would then subtract more than was taken and the
         // document wouldn't add up to net pay.
-        // Slice B17 — the two figures December needs, and one it cannot derive later.
+        // The two figures December needs, and one it cannot derive later.
         $slip['other_benefits'] = $perPeriodOtherBenefits;
         $slip['thirteenth_month'] = 0.0; // an ordinary slip pays none
 
@@ -742,15 +573,6 @@ class PayrollService
      * This period's allowances split into the components that make them up, snapshot onto the
      * payslip so the document can name them instead of showing one opaque "Allowances" figure.
      *
-     * SNAPSHOT, not a join. Reading the employee's live allowance columns at display time would
-     * silently re-label every historical payslip the moment someone's transport allowance
-     * changes — the same reason `policy_snapshot` exists on the run.
-     *
-     * The residual exists because `allowances` is `round(monthlyTotal × 12 ÷ periods)` — the sum
-     * is rounded, not the parts — so independently rounded components can miss it by a centavo.
-     * It is absorbed into the largest line, which keeps the breakdown summing to the stored
-     * `allowances` exactly without perturbing the figure payroll actually paid.
-     *
      * @return list<array{name:string, amount:float}>
      */
     private function allowanceBreakdown(
@@ -765,14 +587,14 @@ class PayrollService
             return [];
         }
 
-        // Slice B1 — the lines come from the employee's enrolled programmes, not the three
+        // The lines come from the employee's enrolled programmes, not the three
         // hard-coded `hr_employees` columns. That is what lets a fourth allowance (Gas) appear on
         // a payslip at all, and it means the names shown are the ones HR actually configured.
         $lines = [];
         foreach ($this->allowances->linesFor($employee, $pricedAsOf) as $line) {
-            // Slice B10 — scaled by the same part-period fraction as the total, or the lines
+            // Scaled by the same part-period fraction as the total, or the lines
             // would sum past it and the residual would swallow the whole proration.
-            // FIN-048 — and by the same timing factor, for the same reason.
+            // And by the same timing factor, for the same reason.
             $perPeriod = round($line['amount'] * $allowanceFactor * $employmentFraction, 2);
             if ($perPeriod > 0) {
                 $lines[] = ['name' => $line['name'], 'amount' => $perPeriod];
@@ -795,12 +617,7 @@ class PayrollService
 
     /**
      * The taxable slice of this period's allowances, as a MONTHLY figure to match the rest of
-     * the withholding base (Slice 10).
-     *
-     * De-minimis benefits are tax-free only up to a ceiling; the excess is compensation. Each
-     * benefit has its own BIR limit, which we deliberately do NOT hardcode — a table of per-item
-     * limits we can't keep current would be worse than no table. HR sets one annual ceiling for
-     * the total instead. A null ceiling means "all of it is tax-free", exactly as before.
+     * the withholding base.
      */
     private function otherBenefitsTaxableMonthly(float $annualOtherBenefits, mixed $annualCap): float
     {
@@ -816,18 +633,7 @@ class PayrollService
     }
 
     /**
-     * The base salary in force at a date, per employee, from `hr_salary_histories` (Slice 13c).
-     *
-     * THE BUG THIS FIXES. Payroll read `$employee->base_salary` live, so the salary a period was
-     * priced at was simply "whatever it is right now". Give someone a raise and re-run an old
-     * cycle and it repriced at the NEW figure — silently rewriting what they were paid months
-     * ago. Slice 5's lock protects `disbursed` payslips; this protects the `computed` ones and,
-     * more importantly, makes an old period reproducible at all.
-     *
-     * AS OF THE CYCLE END, deliberately: a raise dated inside the period applies to the WHOLE
-     * period. There is no intra-period split — that would need the daily rate to change mid-cycle,
-     * which the per-period model can't express. A raise dated on the next period's first day
-     * therefore doesn't leak backwards, which is the case that actually matters.
+     * The base salary in force at a date, per employee, from `hr_salary_histories`.
      *
      * @param  \Illuminate\Support\Collection<int, Employee>|Collection<int, Employee>  $employees
      * @return array<int, float> employee_id => base salary
@@ -855,25 +661,7 @@ class PayrollService
 
     /**
      * What each employee already earned, and already paid in statutory contributions, on the
-     * EARLIER cutoffs of this same calendar month (FIN-050).
-     *
-     * WHY THE MONTH AND NOT THE PERIOD. SSS, PhilHealth and Pag-IBIG are monthly amounts on a
-     * monthly base. When that base is `earnings`, the base for a semi-monthly cutoff used to be
-     * "this cutoff's pay × 2" — an EXTRAPOLATION of half a month, which is only right when both
-     * halves are identical. Two weeks of unpaid leave in the second half produced a first payslip
-     * charged as if the whole month were normal, and the two halves could land in different SSS
-     * bands so the month's total matched no printed band at all. Adding the cutoffs gives the
-     * month its real figure.
-     *
-     * AND WHAT WAS ALREADY TAKEN, because the final cutoff charges the month's true contribution
-     * MINUS what the earlier cutoffs collected — the "true-up" that lets a split deduction end the
-     * month at the correct total even though its first half was necessarily provisional.
-     *
-     * SCOPED to runs of the same TYPE, for the reason the double-pay guard documents: a 13th-month
-     * or final-pay run covering the same days is different money and must not count as this
-     * month's ordinary earnings. `cycle_start <` this cycle keeps it to EARLIER cutoffs, so
-     * re-running the first cutoff never counts the second, and this run's own prior compute is
-     * excluded so a re-run cannot true up against itself and drift on every attempt.
+     * EARLIER cutoffs of this same calendar month.
      *
      * @param  \Illuminate\Support\Collection<int, int>  $employeeIds
      * @return array<int, array{earnings: float, sss: float, philhealth: float, pagibig: float}>
@@ -923,18 +711,7 @@ class PayrollService
 
     /**
      * Every setting that priced this run, captured onto it so a later config change can never
-     * make an old payslip inexplicable (4b, completed in Slice 8).
-     *
-     * WHY IT GREW. v1 hand-listed 13 deduction fields and drifted: it captured none of the seven
-     * premium/overtime rate columns, `overtime_mode`, or `night_diff_pct` — all of which move
-     * money — so "a policy change never silently re-prices these payslips" was simply untrue for
-     * premium pay. The attendance policy is now taken from `array_keys(DEFAULTS)` so a new column
-     * is captured the day it is added and this can't drift again. Contribution config and the pay
-     * schedule are captured for the same reason: both set prices.
-     *
-     * INFORMATIONAL, NOT REPLAY. A re-run always uses the CURRENT rules — this records what was
-     * in force, it does not restore it. That is why Slice 5's lock exists: the lock is what stops
-     * an old cycle being re-priced, not this.
+     * make an old payslip inexplicable (4b, completed in).
      */
     private function policySnapshot(PayrollSetting $setting, string $cycleEnd): array
     {
@@ -946,7 +723,7 @@ class PayrollService
             // whatever the singleton says at the moment the snapshot is written.
             'attendance_policy' => $this->attendancePolicy->asOf($cycleEnd)
                 ->only(array_keys(AttendancePolicyService::DEFAULTS)),
-            // Slice B3a — the dated rate versions actually in force for this cycle. The
+            // The dated rate versions actually in force for this cycle. The
             // `contributions` block below is the enrolment config; this is what priced it.
             'contribution_versions' => $this->contributions->versionsAsOf($cycleEnd)
                 ->map(fn ($v) => $v->only([
@@ -954,7 +731,7 @@ class PayrollService
                     'employee_amount_cap', 'employer_amount_cap', 'fixed_employer_add_on', 'add_on_min_salary',
                 ]) + [
                     'effective_from' => $v->effective_from?->toDateString(),
-                    // FIN-049 — the bands too. Without them a bracket contribution's snapshot
+                    // The bands too. Without them a bracket contribution's snapshot
                     // records the RATE but not the table it multiplies, so nothing can say
                     // afterwards which Monthly Salary Credit an SSS deduction was charged on —
                     // the first thing anyone asks when they query the figure.
@@ -974,45 +751,14 @@ class PayrollService
                 ->values()
                 ->all(),
             // Frequency sets per-period pay; the timings decide which cutoff deductions land on.
-            //
-            // Built from the model's fillable, NOT hand-listed. The five keys here used to be
-            // written out by hand, and Slice 10 added the benefits ceiling to the settings two
-            // slices later without adding it here — so a payslip could not explain its
-            // taxable-allowance line. Slice 8 existed to stop exactly this drift and had fixed
-            // only its attendance-policy half.
             'payroll_setting' => $setting->only($setting->getFillable()),
         ];
     }
 
     /**
-     * Refuse to drop a payslip that a PAYMENT still points at (FIN-046).
-     *
-     * WHY `status` STOPPED BEING ENOUGH. The cleanup below deletes payslips for employees who
-     * have left the pay group, guarded by `status = 'computed'` on the reasoning that a
-     * `disbursed` slip is money already paid and therefore history. That guard predates payment
-     * batches. A payslip queued in a PENDING batch is still `computed` — no money has moved — yet
-     * `hr_payments.payslip_id` is `restrictOnDelete()`, so the delete fails at the database with a
-     * raw SQLSTATE[23000] the moment such a slip is targeted. The status column had quietly
-     * stopped being a proxy for "nothing references this".
-     *
-     * HOW A SLIP GETS HERE WITHOUT ANYONE TOUCHING IT. Pay group membership is
-     * `COALESCE(NULLIF(pay_frequency,''), <company default>)`, so every employee with no explicit
-     * frequency follows the company setting. Changing that ONE setting moves all of them between
-     * pay groups — including any whose payslip from the old group is already committed to a batch.
-     * That is exactly how this first fired: two employees inherited `semi_monthly`, were paid into
-     * a batch, and then moved to `monthly` when the default changed.
-     *
-     * BLOCKING, NOT SKIPPING. Silently keeping the slip would leave the run holding a payslip for
-     * someone outside its pay group — the orphan this cleanup exists to prevent — and its totals
-     * would disagree with the batch. Deleting it would destroy the record that someone is owed
-     * money. Neither is ours to choose, so the run stops and says who and why. The transaction
-     * rolls back, exactly as the raw FK error did, but with a reason attached.
-     *
-     * `withTrashed()` on the payments is deliberate: a soft-deleted row is still physically
-     * present, so it still trips the foreign key. Filtering it out would let the crash back in.
+     * Refuse to drop a payslip that a PAYMENT still points at.
      *
      * @param  \Illuminate\Support\Collection<int, int>  $keep  employee ids this run still pays
-     *
      * @throws ValidationException naming every blocked employee and the batches involved
      */
     private function assertDroppable(PayrollRun $run, \Illuminate\Support\Collection $keep, string $frequency): void
@@ -1057,21 +803,6 @@ class PayrollService
 
     /**
      * Which captured rules NO LONGER match what would price this cycle today.
-     *
-     * WHY THIS EXISTS. `policySnapshot()` is frozen at run time, and correctly so — it records
-     * what actually priced these payslips. But a rule change dated on or before the cycle end
-     * silently makes the panel disagree with the Company rules screen, and the panel said nothing
-     * about it: HR switches late deduction on, opens the run, reads "Late deduction: none", and
-     * concludes the setting did not take. The record was right; its SILENCE was the defect.
-     *
-     * Comparison is against `asOf(cycle_end)` — the same resolution payroll itself would use on a
-     * re-run — so a listed field is exactly a field a re-run would price differently. A change
-     * dated AFTER the cycle end is correctly absent: it cannot touch this cycle either way.
-     *
-     * Both sides go through `->only()` on a cast model and are compared as encoded JSON, because
-     * the raw payload and the cast attribute disagree on shape (`1` vs `true`, `"14.6538000"` vs
-     * `14.6538`) for values that are in fact identical — comparing them directly reports drift
-     * on every boolean and decimal in the policy.
      *
      * @return list<array{group: string, key: string, was: mixed, now: mixed}>
      */
@@ -1149,23 +880,13 @@ class PayrollService
      * changes on a panel headed "what priced these payslips" is noise that buries the fields
      * that DO move money (`violation_rules` alone is a four-category ladder that renders longer
      * than the rest of the panel put together).
-     *
-     * These govern the badge ladder, task-note validation and where someone may punch in. Each
-     * acts at CLOCK-IN or on a report, never when attendance already on file is turned into pay,
-     * which is the only thing a re-run redoes.
      */
     private const DRIFT_IGNORED = [
         'violation_rules', 'task_format',
         'geofence_enabled', 'office_lat', 'office_lng', 'office_radius_m', 'office_ips',
     ];
 
-    /**
-     * Whether two captured values mean the same thing to the engine.
-     *
-     * `null` and `0` are the same setting here: every numeric policy field is read through an
-     * `(int)`/`(float)` cast, so an uncapped limit stored as `null` in an old payload and as `0`
-     * today is not a change — reporting it as one trains HR to ignore the banner.
-     */
+    /** Whether two captured values mean the same thing to the engine. */
     private static function sameValue(mixed $before, mixed $now): bool
     {
         $empty = fn (mixed $v) => $v === null || $v === 0 || $v === 0.0 || $v === '0';
@@ -1178,17 +899,7 @@ class PayrollService
     }
 
     /**
-     * How much of the MONTHLY allowance lands on this period (FIN-048).
-     *
-     * `every` is deliberately NOT `timingFactor()`'s even split. That one divides by the number of
-     * cutoffs in the MONTH; allowances have always divided the ANNUAL figure by `periodsPerYear`,
-     * and for weekly pay the two disagree — 12 ÷ 52 is a constant ₱346.15 on ₱1,500/month, while
-     * 1 ÷ monthCount pays ₱375 in a four-week month and ₱300 in a five-week one. Keeping the
-     * existing arithmetic for the default means this setting cannot change anybody's pay until
-     * they actually choose one of the other two options.
-     *
-     * `first` / `last` pay the whole monthly amount on one cutoff, which is what makes them worth
-     * having: an allowance meant to cover a monthly bill should arrive once, in full.
+     * How much of the MONTHLY allowance lands on this period.
      *
      * @param  array<string, mixed>  $dist
      */
@@ -1206,36 +917,7 @@ class PayrollService
     }
 
     /**
-     * What this cutoff actually collects for one statutory contribution (FIN-050).
-     *
-     * NOT the final cutoff → the timing setting's ordinary share of the month, computed on the
-     * contracted salary. Provisional by nature: the month is not finished.
-     *
-     * The final cutoff → THE MONTH'S TRUE TOTAL MINUS WHAT THE EARLIER CUTOFFS ALREADY TOOK. This
-     * is the true-up, and it is what lets a split deduction end the month at the right figure
-     * despite a provisional first half. Worked example, ₱50,000 basic with two unpaid weeks in the
-     * second half: the 15th takes ₱875 (half of the ₱1,750 the contract implies), the month's real
-     * earnings land at ₱25,000 so the true total is ₱1,250, and the 30th takes ₱375 rather than a
-     * second ₱875. The month totals ₱1,250 — a figure that appears on the SSS table, which the old
-     * arithmetic could not guarantee.
-     *
-     * DELIBERATELY ALLOWED TO GO NEGATIVE. If the earlier cutoffs collected more than the month
-     * turned out to owe — a normal first half followed by a collapsed second one — this cutoff
-     * REFUNDS the difference rather than keeping it.
-     *
-     * This was floored at zero, on the reasoning that a negative deduction could not be undone on
-     * an already-disbursed payslip. That reasoning was wrong: the correction lands on THIS cutoff,
-     * which is being computed now, and touches nothing historical. Keeping the floor meant the
-     * employee simply overpaid and never got it back. The year-end tax settlement already refunds
-     * exactly this way (its test asserts "nothing may clamp it at zero"), and the refund is bounded
-     * by what the month itself collected, so it cannot run away.
-     *
-     * Remittance stays consistent because both cutoffs sit inside the same month: the month totals
-     * the corrected figure, which is what the employee paid and what the company owes.
-     *
-     * With `salary_basis = basic` this changes nothing: the monthly figure is identical on every
-     * cutoff, so the true-up subtracts exactly the shares already taken and lands on the same
-     * number the timing factor alone produced.
+     * What this cutoff actually collects for one statutory contribution.
      *
      * @param  array<string, mixed>  $dist
      */
@@ -1266,7 +948,7 @@ class PayrollService
      * Compute a payslip breakdown. `basePay` is the attendance-adjusted pay and
      * `allowances` the non-taxable de-minimis pay that go into gross; `contribBases` are the
      * candidate monthly salary figures statutory CONTRIBUTIONS can be computed on, and each
-     * contribution's own version says which of them it wants (Slice B19); `taxableMonthly` is the
+     * contribution's own version says which of them it wants; `taxableMonthly` is the
      * monthly-equivalent compensation WITHHOLDING TAX is computed on (scales with actual
      * earnings); `contribConfig` is the enrolled contributions; `overrides` are per-employee
      * statutory amounts that win over config.
@@ -1278,7 +960,7 @@ class PayrollService
      */
     public function computePayslip(float $basePay, float $reimb, float $allowances, array $contribBases, float $taxableMonthly, array $contribConfig, array $dist, float $holidayPremium = 0.0, float $overtimePay = 0.0, float $nightDiffPay = 0.0, float $restDayPremium = 0.0, array $otherDeductions = ['total' => 0.0, 'lines' => []]): array
     {
-        // Slice B19 — each contribution is charged on the figure ITS OWN version asks for, which
+        // Each contribution is charged on the figure ITS OWN version asks for, which
         // is why this is resolved per type rather than once. PhilHealth stays on basic salary by
         // law while SSS follows earnings, and that is the recommended setup, not an edge case.
         $sssBase = $this->contributionBaseFor('sss', $contribConfig, $contribBases);
@@ -1305,7 +987,7 @@ class PayrollService
 
         // Withholding tax on the taxable monthly compensation actually earned (minus the
         // employee's mandatory contributions), distributed by the tax-timing setting. What the
-        // caller put into `taxableMonthly` (Slice 10): base pay + all four premium lines, plus
+        // caller put into `taxableMonthly`: base pay + all four premium lines, plus
         // any allowance above the de-minimis ceiling. Reimbursements are never in it.
         $annualTaxable = max(0, ($taxableMonthly - ($sssM + $phM + $pgM)) * 12);
         $annualTax = $this->annualWithholdingTax($annualTaxable, $dist['cycle_end'] ?? null);
@@ -1313,15 +995,7 @@ class PayrollService
         $tf = $this->timingFactor($dist['tax_timing'] ?? 'every', $dist['index'] ?? 0, $dist['count'] ?? 1);
         $wht = round($monthlyTax * $tf, 2);
 
-        // FIN-055 — the derivation behind that one figure, snapshot for the payslip.
-        //
-        // Withholding is the least checkable number on the document: it is computed on an
-        // ANNUALISED projection of a period, net of contributions, against a dated bracket table
-        // — four steps, none of them visible, ending in a peso amount the reader is expected to
-        // accept. Every intermediate is already in scope here, so recording them costs nothing
-        // and is the only place that can.
-        //
-        // Null when nothing was withheld: an empty derivation under a ₱0 line is noise.
+        // The derivation behind that one figure, snapshot for the payslip.
         $taxBasis = $wht == 0.0 ? null : [
             'taxable_monthly' => round($taxableMonthly, 2),
             'contributions_monthly' => round($sssM + $phM + $pgM, 2),
@@ -1337,27 +1011,21 @@ class PayrollService
             'timing' => $dist['tax_timing'] ?? 'every',
         ];
         $taxAnnualisation = 0.0;
-        // FIN-054 — populated only on the cycle that settles a tax year; null everywhere else, so
+        // Populated only on the cycle that settles a tax year; null everywhere else, so
         // the payslip renders the settlement block exactly when it has the figures for it.
         $taxAnnualisationBasis = null;
 
-        // Slice B17 — THIS PERIOD's taxable compensation, net of the employee's own contributions.
+        // THIS PERIOD's taxable compensation, net of the employee's own contributions.
         // Stored per slip because the year's total is what the tax on 13th month is computed
         // against, and it must be a sum of what happened rather than a projection: twelve
         // annualised projections of a year are not a year.
         $periodsPerYear = max(1, (int) ($dist['periods_per_year'] ?? (($dist['count'] ?? 1) * 12)));
         $taxablePay = round($annualTaxable / $periodsPerYear, 2);
 
-        // FIN-028 — YEAR-END TRUE-UP. On the cycle containing 31 December, stop projecting and
+        // YEAR-END TRUE-UP. On the cycle containing 31 December, stop projecting and
         // settle the year: tax actually due on what was actually earned, minus everything already
         // withheld. The caller supplies the prior totals; this is the only place that can apply
         // them, because it is the only place that knows this period's own taxable share.
-        //
-        // The result is deliberately allowed to be NEGATIVE. Over-withholding across the year is
-        // the common case (a good month early on projects a higher bracket than the year lands in),
-        // and the correction is a refund on this payslip. Nothing below clamps it: `min($total,
-        // $gross)` leaves a negative total alone, and `max(0, $gross - $total)` then makes net pay
-        // larger than gross, which is exactly what a refund is.
         if (isset($dist['year_end_true_up'])) {
             $priorTaxable = (float) ($dist['year_end_true_up']['taxable_prior'] ?? 0);
             $priorWithheld = (float) ($dist['year_end_true_up']['withheld_prior'] ?? 0);
@@ -1370,7 +1038,7 @@ class PayrollService
             $taxAnnualisation = round($settled - $wht, 2);
             $wht = $settled;
 
-            // FIN-054 — and the three figures that EXPLAIN it, captured here because they are
+            // And the three figures that EXPLAIN it, captured here because they are
             // assembled from every other payslip of the year and would otherwise be gone. Without
             // them December shows a negative Withholding Tax and a net larger than gross with
             // nothing to say why.
@@ -1385,11 +1053,11 @@ class PayrollService
             ];
         }
 
-        // All four premium lines are in gross AND in the withholding base (Slice 10) — the
+        // All four premium lines are in gross AND in the withholding base — the
         // caller folds them into `taxableMonthly` before calling.
         $gross = round($basePay + $allowances + $reimb + $holidayPremium + $overtimePay + $nightDiffPay + $restDayPremium, 2);
 
-        // Slice 11a — the employee's share of the benefits they're enrolled in (HMO, union
+        // The employee's share of the benefits they're enrolled in (HMO, union
         // dues…). Post-tax: these are not statutory contributions, so they never reduce the
         // withholding base above.
         $otherTotal = round((float) ($otherDeductions['total'] ?? 0), 2);
@@ -1402,7 +1070,7 @@ class PayrollService
         $deductionCarryover = round(max(0, $totalDeductions - $gross), 2);
         $totalDeductions = round(min($totalDeductions, $gross), 2);
 
-        // FIN-053 — and now say WHICH obligation went short. Capping the total while leaving the
+        // And now say WHICH obligation went short. Capping the total while leaving the
         // components at their computed values made the payslip disagree with itself, and the
         // remittance report sums those components straight out of the table: it reported more
         // withheld than was ever taken. Allocate the cap across them so the parts sum to the total.
@@ -1419,13 +1087,7 @@ class PayrollService
         $wht = $collected['withholding_tax'];
         $otherTotal = $collected['other_deductions'];
 
-        // FIN-005 — recover what earlier periods could not collect, from whatever room is left.
-        //
-        // ROOM IS WHAT REMAINS AFTER THIS PERIOD'S OWN OBLIGATIONS, and that order is deliberate.
-        // Giving arrears priority would push the current period's statutory dues into shortfall,
-        // creating fresh arrears to chase next period — the debt would rotate rather than clear.
-        // The current period's contributions are due now; an arrear is already late, and recovering
-        // it must not manufacture another one.
+        // Recover what earlier periods could not collect, from whatever room is left.
         $recovered = [];
         $arrearsRecovered = 0.0;
         $room = round($gross - $totalDeductions, 2);
@@ -1472,29 +1134,29 @@ class PayrollService
             'philhealth' => $philhealth,
             'pagibig' => $pagibig,
             'withholding_tax' => $wht,
-            // FIN-028 — how much of `withholding_tax` is the year-end correction. Signed:
+            // How much of `withholding_tax` is the year-end correction. Signed:
             // positive collected, negative refunded. Zero on every period but the last.
             'tax_annualisation' => $taxAnnualisation,
-            // FIN-054 — the year's figures behind that adjustment, so the payslip can show its
+            // The year's figures behind that adjustment, so the payslip can show its
             // derivation instead of one unexplained (and often negative) tax line.
             'tax_annualisation_basis' => $taxAnnualisationBasis,
-            // FIN-055 — how `withholding_tax` was arrived at. Null when none was withheld.
+            // How `withholding_tax` was arrived at. Null when none was withheld.
             'tax_basis' => $taxBasis,
             'taxable_pay' => $taxablePay,
-            // Slice 11a — recurring benefit shares, with the breakdown so the payslip can
+            // Recurring benefit shares, with the breakdown so the payslip can
             // name them rather than show one opaque figure.
             'other_deductions' => $otherTotal,
             'other_deductions_breakdown' => $otherDeductions['lines'] ?? [],
             'employer_sss' => $erSss,
             'employer_philhealth' => $erPh,
             'employer_pagibig' => $erPg,
-            // Slice B7 recorded which of the three came from a per-employee amount rather than the
+            //  Recorded which of the three came from a per-employee amount rather than the
             // government rates. Per-employee amounts are gone — every contribution now follows the
             // company rates for everyone — so a new payslip has nothing to declare here. The column
             // and its readers stay: payslips issued while the override existed must keep saying so,
             // or the remittance mismatch they carry becomes invisible after the fact.
             'contribution_overrides' => null,
-            // Slice B19 — what each contribution was actually charged on, snapshot because it can
+            // What each contribution was actually charged on, snapshot because it can
             // no longer be re-derived: the earnings basis depends on this period's attendance and
             // premium lines, and on a per-allowance `contributable` flag HR can change afterwards.
             // Only the types the employee is enrolled in — the others were charged on nothing.
@@ -1506,10 +1168,10 @@ class PayrollService
             'total_deductions' => $totalDeductions,
             // What couldn't be taken because gross wasn't enough to cover it (item 1).
             'deduction_carryover' => $deductionCarryover,
-            // FIN-053 — the same figure split by obligation, so the arrears can be named. Null
+            // The same figure split by obligation, so the arrears can be named. Null
             // when nothing went short, which is the overwhelming majority of payslips.
             'deduction_carryover_breakdown' => $uncollected ?: null,
-            // FIN-005 — what this payslip recovered from EARLIER periods' shortfalls. Subtracted
+            // What this payslip recovered from EARLIER periods' shortfalls. Subtracted
             // from the outstanding balance by `deductionArrearsFor()`, which derives it rather
             // than keeping a running total that a re-run could double-count.
             'arrears_recovered' => $arrearsRecovered,
@@ -1521,18 +1183,7 @@ class PayrollService
     }
 
     /**
-     * Outstanding deduction arrears per employee, per obligation (FIN-005).
-     *
-     * DERIVED, NOT STORED: owed minus recovered, both read back off the payslips. A running balance
-     * column decremented per run is the failure mode Slices 5, 12 and 11b each had to unpick, and
-     * `EmployeeLoan` already demonstrates the alternative — the ledger IS the balance.
-     *
-     * `$excludeRunId` keeps a re-run from settling against its own previous attempt: without it, a
-     * recompute would read the arrears its own prior pass had already recovered, find them gone,
-     * and quietly stop recovering them.
-     *
-     * Only `regular` runs contribute. 13th-month and adjustment runs both write a zero carryover by
-     * construction, so including them would add nothing but a wider query.
+     * Outstanding deduction arrears per employee, per obligation.
      *
      * @param  \Illuminate\Support\Collection<int, Employee>|array<int, int>  $employees
      * @return array<int, array<string, float>>  employee_id => [obligation => outstanding]
@@ -1572,10 +1223,6 @@ class PayrollService
 
         // Drop anything fully settled, so callers can treat a present key as a live debt. Rounding
         // can leave a stray centavo either way; below one is nothing to chase.
-        //
-        // Cast to float explicitly: the amounts arrive from `json_decode`, which yields an INT for
-        // a whole-peso value, and callers comparing against a money figure should not have to care
-        // which. The return type says float, so it returns float.
         foreach ($out as $id => $obligations) {
             $live = [];
             foreach ($obligations as $key => $amount) {
@@ -1590,31 +1237,7 @@ class PayrollService
     }
 
     /**
-     * Split a capped deduction total across the obligations it is made of (FIN-053).
-     *
-     * When gross cannot cover everything owed, something goes uncollected — the question is WHAT,
-     * and until now the payslip had no answer. It capped the total and left every component at its
-     * computed value, so the parts summed to more than the whole and the remittance report summed
-     * the parts.
-     *
-     * PRIORITY ORDER: statutory contributions → withholding tax → benefit shares. The statutory
-     * three come first because they are the employee's own entitlement record — a missed SSS month
-     * is a gap in their pension history, not just an unpaid bill — and benefit shares come last
-     * because they are the only voluntary item in the list. Within the statutory three the order is
-     * SSS, PhilHealth, Pag-IBIG, which is arbitrary but fixed: they are all mandatory and nothing
-     * distinguishes them, so what matters is that the answer is deterministic and stated, rather
-     * than falling out of whatever order the array happened to be built in.
-     *
-     * Loans are NOT here. They are collected after the payslip against remaining net
-     * (`LoanService::collectForPeriod()`), which already takes min(instalment, balance, net) and
-     * carries the rest on the loan ledger — a shortfall there is already tracked, and is the one
-     * case the original "leave it on the balance" convention actually handled.
-     *
-     * A NEGATIVE COMPONENT IS NOT A DEDUCTION. `withholding_tax` goes negative on the December
-     * true-up, where the year over-withheld and the payslip carries a refund (FIN-028). A refund
-     * ADDS to what is available, so negatives are honoured in full and folded into the pool rather
-     * than competing for it. Allocating them like deductions would zero the refund to "afford" a
-     * contribution — taking money the employee is owed to pay a bill they also owe, silently.
+     * Split a capped deduction total across the obligations it is made of.
      *
      * @param  array<string, float>  $components  obligation => computed amount
      * @param  float  $gross  the ceiling on what can be taken
@@ -1664,13 +1287,7 @@ class PayrollService
     }
 
     /**
-     * The monthly salary figure one contribution is charged on (Slice B19).
-     *
-     * The version in force names the basis; `basic` is the answer for anything that does not,
-     * which is every version recorded before this slice and every type the employee is not
-     * enrolled in. An unrecognised value falls back to `basic` for the same reason
-     * `AllowanceService` defaults an unknown tax treatment to de-minimis: guessing the
-     * larger base for a value we do not understand would over-deduct from real people.
+     * The monthly salary figure one contribution is charged on.
      *
      * @param  array<string, array<string, mixed>>  $config
      * @param  array{basic: float, earnings: float}  $bases
@@ -1685,12 +1302,6 @@ class PayrollService
     /**
      * The monthly amount for one statutory contribution: 0 if the employee isn't enrolled, else
      * the company-config computation.
-     *
-     * There is no per-employee escape hatch any more. A profile amount used to win over the rates
-     * here, and it replaced the EMPLOYEE side only — the employer half kept following the brackets,
-     * so one payslip could carry a pair that exists on no SSS table and a remittance built from it
-     * could not be filed. Un-enrolling (ContributionEnrolment) is the honest way to say someone
-     * does not pay a contribution; a different amount for the same bracket was never one.
      *
      * @param  array<string, array<string, mixed>>  $config
      */
@@ -1722,10 +1333,6 @@ class PayrollService
     /**
      * One contribution from its config — the employee side.
      *
-     * Slice B7 — the arithmetic moved to `ContributionCalculator` so the employee form can show
-     * what the rates WOULD charge next to a per-employee override without a second implementation
-     * of it. This wrapper stays because payroll reads better for it.
-     *
      * @param  array<string, mixed>  $config
      */
     private function contribution(array $config, float $base): float
@@ -1753,7 +1360,7 @@ class PayrollService
             return 0.0;
         }
 
-        // Same daily-rate basis as absence/late (Slice A) — priced through the shared helper.
+        // Same daily-rate basis as absence/late — priced through the shared helper.
         $policy ??= $this->attendancePolicy->get();
         $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
 
@@ -1789,7 +1396,7 @@ class PayrollService
     }
 
     /**
-     * The add-on multiple of the daily rate for WORKING a holiday of this type (P0-2). Reads the
+     * The add-on multiple of the daily rate for WORKING a holiday of this type. Reads the
      * HR-editable rate columns instead of hardcoded literals: a "total %" column (e.g. 200) becomes
      * an add-on of (pct − 100) ÷ 100 on top of the day's normal pay. At the DOLE-minimum defaults
      * (regular 200 → +1.0, special 130 → +0.3) this reproduces the old hardcoded behaviour exactly.
@@ -1809,11 +1416,11 @@ class PayrollService
     }
 
     /**
-     * Overtime pay for the cycle (OT-3): each APPROVED overtime request's hours × the hourly rate ×
+     * Overtime pay for the cycle: each APPROVED overtime request's hours × the hourly rate ×
      * the OT rate for that day's type (from the editable rate table). Stacks with holiday premium
      * WITHOUT double-counting — the premium pays the regular-day hours worked on a holiday, OT pays
      * the *extra* approved hours. Management → 0. Paid only in `approved_only` mode (auto detection is
-     * OT-5; `none` = off). No-op until an OT request is approved, so wiring it changes no pesos today.
+     * `none` = off). No-op until an OT request is approved, so wiring it changes no pesos today.
      *
      * @param  array<string, string>  $holidayMap  date 'Y-m-d' => type
      * @return array{pay: float, minutes: int}
@@ -1826,10 +1433,10 @@ class PayrollService
 
         $policy ??= $this->attendancePolicy->get();
 
-        // WHICH minutes count is the mode's job (OT-5); pricing them is shared below.
-        //   approved_only        → the hours on each APPROVED request (the safe, authorised default)
-        //   auto_after_threshold → clock minutes past the scheduled end (opt-in, warned in the UI)
-        //   none                 → overtime is switched off entirely
+        // WHICH minutes count is the mode's job; pricing them is shared below.
+        // approved_only        → the hours on each APPROVED request (the safe, authorised default)
+        // auto_after_threshold → clock minutes past the scheduled end (opt-in, warned in the UI)
+        // none                 → overtime is switched off entirely
         $byDate ??= $this->overtimeMinutesByDate($employee, $start, $end, $policy);
         if ($byDate === []) {
             return ['pay' => 0.0, 'minutes' => 0];
@@ -1853,27 +1460,8 @@ class PayrollService
     }
 
     /**
-     * Night-shift differential (ND-1): +`night_diff_pct`% of the hourly rate for every minute worked
+     * Night-shift differential: +`night_diff_pct`% of the hourly rate for every minute worked
      * between 22:00 and 06:00 — for ALL night work, not just overtime, per PH practice. Management → 0.
-     *
-     * STACKING: this is only the PREMIUM portion (the +10%), so it adds on top of the overtime line for
-     * hours that are both. For night minutes that are ALSO overtime the premium is compounded onto the
-     * overtime rate — hourly × OT% × night% — matching the PH rule that night pay is a percentage of the
-     * applicable (overtime) hourly rate, not of the base. Ordinary night hours get hourly × night%.
-     *
-     * HOLIDAY AND REST-DAY NIGHT HOURS COMPOUND TOO (item 9). The differential is a percentage of the
-     * APPLICABLE hourly rate, and on a regular holiday that rate is 200%, not 100% — so plain night
-     * hours there earn hourly × 200% × 10%, which is what the DOLE handbook's own worked examples
-     * show. Paying hourly × 10% regardless of the day was under-paying every night hour on a holiday
-     * or rest day by exactly the day's premium.
-     *
-     * NOT DOUBLE-COUNTING the day premium: holidayPremiumFor()/restDayPremiumFor() pay the day's own
-     * add-on and this line pays only the +10%. Multiplying that 10% by the day's rate raises the
-     * PREMIUM to the right base; it does not add the holiday rate a second time.
-     *
-     * Known limitation: a regular holiday falling on a rest day is priced at the holiday rate rather
-     * than the statutory 260% combination. Strictly better than the flat 100% it replaced, and the
-     * combined-rate question is the same one holidayPremiumFor() leaves open — fix both together.
      *
      * @param  array<string, array{minutes:int, night:int}>|null  $otByDate  shared with overtimePayFor
      * @return array{pay: float, minutes: int}
@@ -1926,14 +1514,9 @@ class PayrollService
     private const REST_DAY_PREMIUM_CAP_MIN = 8 * 60;
 
     /**
-     * Rest-day premium (RD-1): pay for WORKING a scheduled rest day — the first 8 hours at
+     * Rest-day premium: pay for WORKING a scheduled rest day — the first 8 hours at
      * `premium_rest_day_pct`. Hours past the 8th are rest-day OVERTIME instead (see the cap in
      * overtimeMinutesByDate), so one rest day is never paid through both lines.
-     *
-     * FULL RATE vs PREMIUM-ONLY: under the default `period_workdays` basis (and the 261/313 divisors)
-     * the salary is spread over SCHEDULED WORKDAYS only — a rest day isn't in it at all, so working one
-     * earns the whole 130%. Only when the divisor counts every day (365) is the day already inside the
-     * salary, and then just the +30% portion is owed on top.
      *
      * @param  array<string, int>  $restByDate  date => minutes worked on a rest day
      * @return array{pay: float, minutes: int}
@@ -2000,16 +1583,7 @@ class PayrollService
     }
 
     /**
-     * Auto-mode overtime, capped, with the over-cap minutes payable only on an approval (FIN-039).
-     *
-     * The two caps bound what pays with nobody looking; they are deliberately NOT a pay cut. A day
-     * trimmed by a cap keeps its full figure available, and an approved overtime request covering that
-     * date releases it. So the mode reads: up to the cap, being clocked in is enough; past the cap,
-     * somebody has to say yes. That is what makes a forgotten clock-out cost a review-queue item
-     * instead of five hours at 125%.
-     *
-     * Exact-window approvals release only their overlap with the held punch interval. Legacy
-     * hours-only approvals retain the old total-based fallback because their interval is unknowable.
+     * Auto-mode overtime, capped, with the over-cap minutes payable only on an approval.
      *
      * @return array<string, array{minutes:int, night:int}>
      */
@@ -2064,7 +1638,7 @@ class PayrollService
     }
 
     /**
-     * The OT rate (whole percent) for a day, from the editable rate table (P0-1): regular holiday and
+     * The OT rate (whole percent) for a day, from the editable rate table: regular holiday and
      * special-day from the holiday map; a non-workday that isn't a holiday is a REST day; otherwise an
      * ordinary day. Pure + static so it is unit-testable without a DB.
      */
@@ -2082,13 +1656,6 @@ class PayrollService
     /**
      * The ORDINARY-HOURS rate (whole percent) for a day — the sibling of overtimeMultiplierPct(),
      * and the base the night differential is a percentage of (item 9).
-     *
-     * Reads the same editable premium columns the holiday and rest-day lines use, so raising a rate
-     * on the Rules page moves the differential with it. An ordinary workday is a plain 100%: there
-     * is no `premium_ordinary_pct` column because there is nothing to configure — 100% of the rate
-     * is the rate. `special_working` also lands on 100%, which is exactly what it means.
-     *
-     * Pure + static so the arithmetic is unit-testable without a DB.
      */
     public static function dayRateMultiplierPct(?string $holidayType, bool $isWorkday, AttendancePolicy $policy): int
     {
@@ -2108,41 +1675,16 @@ class PayrollService
      */
     private function annualWithholdingTax(float $t, ?string $asOf = null): float
     {
-        // FIN-027 — the table now comes from `hr_tax_versions`, resolved as of the cycle end, the
+        // The table now comes from `hr_tax_versions`, resolved as of the cycle end, the
         // same way salaries, statutory rates, allowances and the attendance policy already are.
         // The brackets used to be a `match (true)` literal here: correct, but undateable, so a
         // re-run of an old period priced it at today's table and a bracket change needed a deploy.
         return $this->tax->annualTax($t, $asOf);
     }
 
+    /** Pay the year's 13th month. */
     /**
-     * Pay the year's 13th month — Slice B17.
-     *
-     * WHAT THIS CLOSES. 13th month was a report and nothing more: no payslip carried it, so no tax
-     * was ever withheld on it. It is also the largest item in the ₱90,000 exemption it shares with
-     * the excess de minimis (B16), so for anyone whose 13th month clears that figure the company
-     * was under-withholding and would have found out at year-end.
-     *
-     * THE BUCKET IS READ BACK, NOT RECOMPUTED. Both halves come from the payslips actually issued
-     * during the year — `thirteenth_month` from the basic pay they paid, `other_benefits` from
-     * what each period contributed. Deriving either from today's catalogue would let a mid-year
-     * allowance change rewrite the year a December run is measured against.
-     *
-     * THE TAX IS MARGINAL, which is what annualisation means: the exemption's excess is added on
-     * top of the compensation the employee has actually been taxed on for the year, and the tax is
-     * the difference. Taxing the excess in isolation would charge it from the bottom bracket up
-     * and under-withhold for everybody.
-     *
-     * NOT A STATUTORY-CONTRIBUTION EVENT. SSS, PhilHealth and Pag-IBIG are charged on monthly
-     * compensation and are not levied again on 13th month, so this run carries none.
-     */
-    /**
-     * What a 13th-month run WOULD pay, without writing anything — Slice B17.
-     *
-     * The dialog that offers the button shows a *projection* built from a different query, and the
-     * two differ whenever the year is partial. Confirming a payroll run against a figure it is not
-     * going to pay is the kind of small dishonesty that costs trust the first time someone checks.
-     * Same shape as B8's schedule import: read it, show it, save nothing until HR says yes.
+     * What a 13th-month run WOULD pay, without writing anything.
      *
      * @return array{rows: array<int, array<string, mixed>>, gross: float, tax: float, count: int}
      */
@@ -2159,26 +1701,7 @@ class PayrollService
         ];
     }
 
-    /**
-     * The ONE definition of what a year's 13th-month pay is measured from (FIN-013).
-     *
-     * There were three, and they disagreed. `computeThirteenthMonth()` filtered
-     * `type = 'regular'` but not status, so a run still mid-recompute (`processing`) could
-     * contribute half-written payslips to the figure actually PAID. `thirteenthMonth()` — the
-     * accrual report HR reviews — filtered `status = 'completed'` but not type, so a previous
-     * 13th-month run counted toward the next one. `ytd()` did the same. The number on the report,
-     * the number in the preview dialog and the number paid could all differ, and no two of them
-     * were wrong in the same direction.
-     *
-     * The rule, stated once: **regular runs only** (13th month is not itself basic salary, and
-     * including it compounds on every re-run), **completed runs only** (a `processing` run is
-     * half-written by definition). Philippine law measures the entitlement on total BASIC salary
-     * earned in the year, which is `hr_payslips.base_salary` — attendance-adjusted, and excluding
-     * allowances, premiums and reimbursements.
-     *
-     * Returns a query, not results, so each caller can select what it needs — a per-employee sum,
-     * a grouped report, or the full set — without a second opinion about which rows qualify.
-     */
+    /** The ONE definition of what a year's 13th-month pay is measured from. */
     private function thirteenthMonthBasisFor(int $year): \Illuminate\Database\Query\Builder
     {
         return DB::table('hr_payslips')
@@ -2197,7 +1720,7 @@ class PayrollService
      */
     private function computeThirteenthMonth(int $year, float $cap): array
     {
-        // FIN-027 — 13th month is paid at year end, so it is taxed on the table in force then.
+        // 13th month is paid at year end, so it is taxed on the table in force then.
         $taxAsOf = "{$year}-12-31";
 
         // What the year actually paid, per employee, from the REGULAR runs only — including a
@@ -2252,7 +1775,7 @@ class PayrollService
     public function runThirteenthMonth(int $year, User $runner): PayrollRun
     {
         return DB::transaction(function () use ($year, $runner) {
-            // FIN-025 — the ₱90,000 other-benefits cap as it stood at that year end.
+            // The ₱90,000 other-benefits cap as it stood at that year end.
             $setting = PayrollSetting::asOf("{$year}-12-31");
             $cap = (float) ($setting->other_benefits_annual_cap ?? 0);
 
@@ -2280,7 +1803,7 @@ class PayrollService
                 'frequency' => 'thirteenth_month',
                 'type' => 'thirteenth_month',
                 'status' => 'completed',
-                // FIN-036 — a 13th-month run is paid on a date too, and its payslip says so.
+                // A 13th-month run is paid on a date too, and its payslip says so.
                 'scheduled_pay_date' => Carbon::parse($cycleEnd)
                     ->addDays((int) ($setting->pay_delay_days ?? 0))
                     ->toDateString(),
@@ -2294,14 +1817,11 @@ class PayrollService
             $deductions = 0.0;
             $count = 0;
 
-            // FIN-012 — this loop used to be a bare updateOrCreate, missing BOTH guards that
+            // This loop used to be a bare updateOrCreate, missing BOTH guards that
             // run() has. Re-running after part of the 13th month had been paid rewrote amounts
             // that were already declared disbursed (observed: a paid ₱27,500 silently became
             // ₱30,000), and an employee who no longer qualified kept a stale payslip that still
             // counted toward YTD, the remittance report and this run's own totals.
-            //
-            // Mirrors run(): skip disbursed slips but roll their existing figures into the
-            // summary, then force-delete the computed slips of anyone no longer in the set.
             $priorSlips = Payslip::where('payroll_run_id', $run->id)->get()->keyBy('employee_id');
             $paidEmployeeIds = [];
 
@@ -2349,7 +1869,7 @@ class PayrollService
                 $count++;
             }
 
-            // FIN-012 — drop the computed slips of anyone who fell out of the set on this re-run
+            // Drop the computed slips of anyone who fell out of the set on this re-run
             // (their year was voided, they were separated, their basic went to zero). A disbursed
             // slip is never touched: that money left the company and is not ours to erase.
             $run->payslips()
@@ -2376,32 +1896,7 @@ class PayrollService
     }
 
     /**
-     * Pay an off-cycle correction (FIN-010).
-     *
-     * WHAT IT DOES NOT DO IS THE POINT. It does not read attendance, does not prorate, does not
-     * resolve a salary, and takes no statutory contributions — those are monthly and were already
-     * taken on the period being corrected. It pays amounts a person has stated, with a reason, and
-     * withholds tax on them. Anything more would make it a second pay engine, and two engines that
-     * both claim to compute pay is precisely the divergence this audit is about.
-     *
-     * TAX IS MARGINAL, not a fresh annualisation. The employee has already been withheld on this
-     * year's pay; a correction adds to that total, so the tax due is the difference between the
-     * annual tax on (what has been taxed so far + this amount) and the annual tax on what has been
-     * taxed so far. Exactly the method `computeThirteenthMonth()` uses for the excess over ₱90,000,
-     * and for the same reason: taxing the amount in isolation would apply the lowest bracket to
-     * money that actually sits on top of a year's earnings.
-     *
-     * RE-RUNNABLE, like every other run here: recomputing replaces this batch's lines. A disbursed
-     * payslip is never touched (FIN-012's rule, applied from the start rather than retrofitted).
-     *
-     * REPLACED BY `amendRun()`, AND NO LONGER REACHABLE FROM THE API. Paying a correction on a
-     * payslip of its own produced two documents for one period that referenced each other nowhere;
-     * an amendment puts the correction on the payslip it corrects. The route and its request class
-     * are deleted, so nothing new can be created this way.
-     *
-     * The method stays because the adjustment runs already in the database do not: they are real
-     * payslips of real money, and they still have to render, disburse, and re-run. Removing this
-     * would take the only test coverage of that behaviour with it. Do not call it for new work.
+     * Pay an off-cycle correction.
      *
      * @param  array<int, array{employee_id: int, amount: float|int|string, note?: string|null}>  $lines
      */
@@ -2535,39 +2030,6 @@ class PayrollService
     /**
      * Correct an already-computed period by adding a line to each named employee's OWN payslip.
      *
-     * THE ONE DOCUMENT RULE. FIN-010 paid a correction by raising a separate run and a second
-     * payslip. The money was right and the audit trail existed, but the employee ended up with a
-     * March payslip stating a wrong figure and an unexplained payslip dated April, neither pointing
-     * at the other. An amendment instead adds a dated line to the March payslip — the way an amended
-     * payslip works everywhere outside this system — so one period has one document.
-     *
-     * IT STILL DOES NOT RECOMPUTE ANYTHING. No attendance is read, nothing is prorated, and no
-     * statutory contribution is taken again: those are monthly and were already charged on this
-     * period. HR states who and how much; this withholds tax on it and records the line. Two engines
-     * that both claim to compute pay is the divergence the payroll audit was about.
-     *
-     * TAX IS MARGINAL, as it was for the adjustment run and for the 13th month's excess over
-     * ₱90,000: the tax due is the annual tax on (what has been taxed this year + this amount) less
-     * the annual tax on what has been taxed already. Taxing the amount in isolation would apply the
-     * lowest bracket to money sitting on top of a year's earnings.
-     *
-     * AMENDING A PAID PAYSLIP IS ALLOWED, and is the case this exists for. The payslip's net grows
-     * while `disbursed_amount` stays at what was actually transferred, so the difference reads as
-     * outstanding rather than as money already sent — see the amendments migration. What is refused
-     * is amending a LOCKED run: locking is the statement that a period is closed for good, and an
-     * amendment is a change to it.
-     *
-     * A CORRECTION CAN ALSO TAKE MONEY, and `$kind` says which of two ways (see the kind migration).
-     * `pay_reversal` unwinds pay that should not have been paid, so it reduces taxable pay and
-     * refunds the tax withheld on it; `deduction` adds a deduction the period missed, which comes
-     * off net only and leaves gross, taxable pay and the tax alone. `$lines` carry POSITIVE
-     * magnitudes in every case — the direction is the kind's, not the line's.
-     *
-     * ON A PAID PAYSLIP, taking money leaves the payslip's net BELOW what was transferred, and the
-     * difference reads as an overpayment on the document and in the run. Nothing collects it
-     * automatically: recovering paid wages is a deduction needing the employee's written consent
-     * under Art. 113, so it is stated for a person to act on rather than taken silently.
-     *
      * @param  array<int, array{employee_id: int, amount: float|int|string, note?: string|null}>  $lines
      * @param  'pay'|'pay_reversal'|'deduction'  $kind
      */
@@ -2625,7 +2087,7 @@ class PayrollService
             }
 
             // The tax year and table are the CORRECTED period's, not today's. A March correction
-            // raised in August is still March's money, and FIN-027's table is dated.
+            // raised in August is still March's money, and 's table is dated.
             $year = (int) $run->cycle_end->year;
             $taxAsOf = $run->cycle_end->toDateString();
 
@@ -2723,13 +2185,7 @@ class PayrollService
         });
     }
 
-    /**
-     * Withholding on an amount paid ON TOP of what an employee has already earned this year.
-     *
-     * The difference between the annual tax on the year including this amount and the annual tax on
-     * the year without it. Shared by the amendment path and the legacy adjustment run so the two can
-     * never disagree about what a correction costs.
-     */
+    /** Withholding on an amount paid ON TOP of what an employee has already earned this year. */
     private function marginalTaxOn(int $employeeId, int $year, string $asOf, float $amount): float
     {
         $alreadyTaxed = (float) $this->thirteenthMonthBasisFor($year)
@@ -2747,21 +2203,7 @@ class PayrollService
         );
     }
 
-    /**
-     * Fold one correction into a payslip's stored figures.
-     *
-     * WHAT IT TOUCHES AND WHAT IT POINTEDLY DOES NOT. The amount is earnings on this payslip, so it
-     * raises `gross`, and it is taxable compensation, so it raises `taxable_pay` — which is what
-     * makes a later 13th month, final pay or year-end true-up see it. It does NOT touch
-     * `base_salary` (back pay is not basic salary earned in this period, and the 13th-month basis is
-     * measured on that column) and it does NOT re-charge SSS, PhilHealth or Pag-IBIG, which are
-     * monthly and were already taken on this period.
-     *
-     * `disbursed_amount` is deliberately untouched: raising the net of a paid payslip is exactly how
-     * the outstanding balance comes to exist.
-     *
-     * A `deduction` TAKES A DIFFERENT ROUTE ENTIRELY — see below. It is not negative earnings.
-     */
+    /** Fold one correction into a payslip's stored figures. */
     private function applyAmendmentTo(Payslip $slip, string $kind, float $amount, float $tax, ?string $note, string $reason): void
     {
         if ($kind === 'deduction') {
@@ -2786,21 +2228,7 @@ class PayrollService
         ]);
     }
 
-    /**
-     * Fold a MISSED DEDUCTION into a payslip — a benefit share, a uniform, an unrecorded obligation.
-     *
-     * IT GOES WHERE LOANS AND BENEFIT SHARES GO: `other_deductions`, with a named line in its
-     * breakdown. Not into `adjustment_pay` as a negative, which would state that the employee earned
-     * less than they did, move `taxable_pay` and quietly refund tax the BIR is owed. And not into a
-     * column of its own, which would drop out of the document's identity
-     * (`compensation − deductions − government = net_pay`) and out of the arrears machinery.
-     *
-     * WHAT PAY CANNOT COVER CARRIES FORWARD instead of being written off. A deduction is money owed,
-     * so the part a thin payslip cannot take becomes a carryover under the same key the engine
-     * already uses for an uncollected benefit share — and the next run with room recovers it
-     * automatically (FIN-005/FIN-053). The alternative is a deduction that HR entered, the payslip
-     * silently dropped, and nobody ever collected.
-     */
+    /** Fold a MISSED DEDUCTION into a payslip — a benefit share, a uniform, an unrecorded obligation. */
     private function applyAmendmentDeductionTo(Payslip $slip, float $amount, string $label): void
     {
         $available = max(0.0, round((float) $slip->net_pay, 2));
@@ -2814,7 +2242,7 @@ class PayrollService
 
         $slip->update([
             'other_deductions' => round((float) $slip->other_deductions + $taken, 2),
-            // Appended so the breakdown keeps footing to the total (FIN-053) and the employee can
+            // Appended so the breakdown keeps footing to the total and the employee can
             // read what was taken off them rather than one larger unexplained figure.
             'other_deductions_breakdown' => [
                 ...($slip->other_deductions_breakdown ?? []),
@@ -2829,14 +2257,6 @@ class PayrollService
 
     /**
      * The corrections standing against a set of payslips, totalled per EMPLOYEE.
-     *
-     * Keyed by employee rather than by payslip because that is the key `run()` has in hand while it
-     * recomputes, and it fetches the whole run's ledger in one query rather than one per employee.
-     *
-     * Split by KIND, because the two halves reach a payslip by different routes: extra pay and
-     * reversals are earnings (`amount`, signed, with the tax that went with them), a missed
-     * deduction comes off net only (`deductions`, always positive). Summing them into one figure
-     * would recompute a deduction as negative pay and refund tax on it.
      *
      * @param  \Illuminate\Database\Eloquent\Collection<int, Payslip>  $slips  keyed by employee_id
      * @return array<int, array{amount: float, tax: float, deduction_lines: list<array{name: string, amount: float}>, note: string|null}>
@@ -2890,21 +2310,6 @@ class PayrollService
     /**
      * Re-apply a payslip's corrections to a freshly computed set of figures.
      *
-     * The write-time twin of `applyAmendmentTo()`, working on the array `payslipFor()` returns rather
-     * than on a saved row — which is what lets a recompute account for the corrections BEFORE loans
-     * are collected against the net and before the run's totals are summed.
-     *
-     * `adjustment_pay` is SET to the ledger total, not added to: the ledger is the source of truth
-     * and a recompute that added to the stored column would double it every time the period was run.
-     * The withheld tax comes from the ledger too, so re-running does not re-decide what was withheld
-     * on money that may already have been paid out.
-     *
-     * DEDUCTIONS ARE RE-APPLIED THE SAME WAY THEY WERE TAKEN, and re-capped rather than restored:
-     * a recompute can leave a thinner payslip than the one the deduction was entered against (an
-     * absence found after the fact), so what it can afford is decided again here. The shortfall
-     * becomes a carryover the next run recovers, which is also why nothing is lost when the cap
-     * moves in either direction.
-     *
      * @param  array<string, mixed>  $slip
      * @param  array{amount: float, tax: float, deduction_lines: list<array{name: string, amount: float}>, note: string|null}  $totals
      * @return array<string, mixed>
@@ -2948,32 +2353,7 @@ class PayrollService
         return $slip;
     }
 
-    /**
-     * CORRECT A LINE THAT IS ALREADY ON A PAYSLIP — the engine said ₱500, HR says ₱300.
-     *
-     * WHY THIS REPLACED APPENDING A CORRECTION. `amendRun()` adds a line underneath the document:
-     * "Late ₱500" with "Correction +₱200" below it. Both figures are true and the payslip is still
-     * wrong about the only thing its reader wants to know, which is what the late charge actually
-     * was. An override changes the line itself and prints the engine's figure struck through beside
-     * it, which is how an amended payslip reads everywhere outside this system.
-     *
-     * WHAT MOVES IS DECIDED BY THE LINE, NOT BY HR. The old dialog asked whether a correction was
-     * extra pay, reversed pay or a deduction — a question about TAX dressed as a question about
-     * direction, and one the line already knows the answer to. Cutting overtime reduces taxable pay
-     * and refunds the tax withheld on it; changing an HMO share comes off net and leaves the tax
-     * alone. See PayslipLines for the classes and what each one does.
-     *
-     * THE VALUE IS ABSOLUTE. HR states what the line IS, not how much to move it — so a re-run that
-     * recomputes the underlying figure does not silently re-decide the answer. See the migration.
-     *
-     * TOTALS ARE NOT EDITABLE, and there is no code path here that could make them so: gross, total
-     * deductions and net are recomputed from the lines every time one moves. A payslip whose parts
-     * do not foot to its total is the one error a payslip cannot make.
-     *
-     * `$value` MAY BE NULL — a label-only correction, where the figure was right and its wording
-     * was not. The line keeps its key, so the payroll register, the remittance report and BIR 2316
-     * all still group by what the line IS rather than by what HR has called it.
-     */
+    /** CORRECT A LINE THAT IS ALREADY ON A PAYSLIP — the engine said ₱500, HR says ₱300. */
     public function overrideLine(
         Payslip $payslip,
         string $key,
@@ -3009,21 +2389,6 @@ class PayrollService
 
     /**
      * ONE LINE, MANY PAYSLIPS — the correction that is one decision rather than N identical ones.
-     *
-     * WHAT THIS IS FOR, and what it deliberately is not. A rule applied to a whole payroll can be
-     * wrong for the whole payroll: a system outage that made everyone late, a charge that should
-     * not have run this cutoff. Waiving it employee by employee is the same decision retyped
-     * fifteen times, and the fifteenth is where the typo lives.
-     *
-     * IT SETS A LINE TO ONE FIGURE, which is only ever sensible for waiving. "Set everyone's late
-     * charge to ₱300" is nonsense — each person's is a different number — while "waive everyone's
-     * late charge this period" is a real instruction, and it is ₱0 for all of them. The API takes a
-     * value rather than assuming zero, because the rule is the caller's to state; the screen offers
-     * the only form of it that means anything.
-     *
-     * A PAYSLIP WITHOUT THAT LINE IS SKIPPED AND NAMED, not refused. Half the run having no late
-     * charge is the normal case, not an error — and failing the batch over it would mean the only
-     * way to waive a charge for the people who have one is to list them by hand.
      *
      * @param  list<int>|null  $employeeIds  null for everyone this run pays
      * @return array{run: PayrollRun, applied: int, skipped: list<string>}
@@ -3103,13 +2468,7 @@ class PayrollService
         });
     }
 
-    /**
-     * Write ONE correction to ONE payslip, inside a transaction the caller already owns.
-     *
-     * Shared by the single-payslip route and the whole-run one so the two can never disagree about
-     * what correcting a line does — the batch is the same act repeated, not a second implementation
-     * of it. The run's totals are refreshed by the caller, once, rather than per payslip.
-     */
+    /** Write ONE correction to ONE payslip, inside a transaction the caller already owns. */
     private function writeOverride(
         Payslip $payslip,
         PayrollRun $run,
@@ -3212,14 +2571,7 @@ class PayrollService
         return $slip;
     }
 
-    /**
-     * REMOVE A CORRECTION, putting the line back to what the engine computed.
-     *
-     * The exact inverse of the edit, measured the same way: from what HR last said the line was,
-     * back to the figure in the engine snapshot. That is the whole reason the snapshot exists —
-     * overrides are applied to the stored columns by delta, so without it the computed figure an
-     * edit replaced would be nowhere in the row and "undo" would have nothing to restore to.
-     */
+    /** REMOVE A CORRECTION, putting the line back to what the engine computed. */
     public function removeLineOverride(Payslip $payslip, PayslipAmendment $override, User $actor): Payslip
     {
         $run = $payslip->payrollRun;
@@ -3274,13 +2626,7 @@ class PayrollService
         });
     }
 
-    /**
-     * A period can be corrected only while it is finished and still open.
-     *
-     * Locking is the statement that a period is closed for good, and a `processing` run is mid-write
-     * — its figures are not settled, and the recompute in flight would overwrite the correction as
-     * it went. Both are the same refusals `amendRun()` makes, stated once for both paths.
-     */
+    /** A period can be corrected only while it is finished and still open. */
     private function assertCorrectable(?PayrollRun $run): void
     {
         if ($run === null) {
@@ -3305,11 +2651,6 @@ class PayrollService
     /**
      * The engine's figures for a payslip, captured once and kept.
      *
-     * Written lazily for payslips computed before the column existed, where the stored figures ARE
-     * the engine's — nothing had corrected them yet, because there was no way to. From the first
-     * correction onward it is maintained by `run()`, which rewrites it every time the period is
-     * recomputed.
-     *
      * @return array<string, mixed>
      */
     private function engineSnapshotOf(Payslip $payslip): array
@@ -3323,15 +2664,6 @@ class PayrollService
 
     /**
      * What a named line reads as, on a given set of figures.
-     *
-     * Answered by PayslipDocument — the same code that builds the document — because for the
-     * attendance rows the printed figure is not any single stored column but an apportionment of
-     * two authoritative totals. A second implementation here would disagree with the document the
-     * first time basic pay clamped at zero, and HR would be editing a figure nobody was shown.
-     *
-     * Returns null when the payslip genuinely has no such line, and 0.00 when it has one that
-     * carries no money: a line at zero is not printed, but it is still a line and HR must be able
-     * to put a figure on it. The two cases are different answers and the caller acts on both.
      *
      * @param  array<string, mixed>  $slip
      */
@@ -3362,34 +2694,11 @@ class PayrollService
 
         // A dynamic key names a line the PAYSLIP named — a benefit share, a loan, an allowance. If
         // it is not in the breakdown it is not on this payslip, and there is nothing to correct.
-        //
-        // Everything else is a line that simply carries no money this period. It is not printed,
-        // but it is still a real line at ₱0 and HR must be able to put a figure on it.
         return PayslipLines::isDynamic($key) ? null : 0.0;
     }
 
     /**
      * Move one line from `$from` to `$to` and let every total follow.
-     *
-     * WORKS ON AN ARRAY, not on the model, because the same change has to be applied in two places:
-     * to a saved payslip when HR edits it, and to a payslip mid-computation inside `run()` when the
-     * period is recomputed and the ledger is replayed on top. One implementation, two callers.
-     *
-     * WHAT EACH CLASS DOES — see PayslipLines for why the class travels with the line:
-     *
-     *   - taxable earning   — the line, gross and taxable pay all move with it, and withholding is
-     *                         re-decided marginally on the year, so December sees the correction.
-     *   - untaxed earning   — the line and gross move; nothing about tax does. A reimbursement was
-     *                         never in a tax base and must not enter one by being corrected.
-     *   - attendance charge — the MIRROR of a taxable earning. Raising the charge lowers the pay it
-     *                         came off, so gross and taxable pay move the other way and the tax
-     *                         withheld on that pay comes back. The charge is written to
-     *                         `absence_deduction`, which is what was actually taken; late and
-     *                         undertime additionally carry a display column of their own so the row
-     *                         prints the corrected figure rather than the one their minutes implied.
-     *   - other deduction   — off net only, into the breakdown line it came from. What was earned
-     *                         was right, so gross, taxable pay and the tax are untouched.
-     *   - statutory / tax   — off net only, into their own column and onto the remittance.
      *
      * @param  array<string, mixed>  $slip
      * @return array<string, mixed>
@@ -3481,12 +2790,6 @@ class PayrollService
     /**
      * Set the amount on a line the payslip named itself, matched by the slug in its key.
      *
-     * A benefit share and a loan repayment carry no id onto the payslip — the breakdown is a plain
-     * list of `{name, amount}` — so the name's slug is the only handle they have. Renaming the
-     * benefit therefore orphans the correction, which is the honest outcome: the line HR corrected
-     * is not the line now printed, and silently moving the money onto a different line would be far
-     * worse than saying so.
-     *
      * @param  array<string, mixed>  $slip
      * @return array<string, mixed>
      */
@@ -3517,16 +2820,6 @@ class PayrollService
 
     /**
      * Recompute the totals from the lines, which is the only way they are ever set.
-     *
-     * THIS IS WHY TOTALS ARE NOT EDITABLE. Gross has already been moved by the line that changed;
-     * everything below it is derived here from the components, exactly as `computePayslip()` ends.
-     * There is no path by which HR can type a net pay that its own lines do not add up to.
-     *
-     * A CORRECTION THAT THE PAYSLIP CANNOT PAY FOR IS REFUSED rather than quietly clamped. Raising
-     * a deduction past what the period earned, or cutting the pay it is taken from, would leave
-     * deductions exceeding gross — and clamping would silently collect less than HR entered while
-     * reporting that it had been taken. Told instead, HR can lower another line, or add the missing
-     * amount as a deduction through `amendRun()`, which is built to carry a shortfall forward.
      *
      * @param  array<string, mixed>  $slip
      * @return array<string, mixed>
@@ -3559,13 +2852,7 @@ class PayrollService
         return $slip;
     }
 
-    /**
-     * Mark the later runs a correction to this period has just invalidated.
-     *
-     * Only when the correction moved TAXABLE PAY or the tax itself. A benefit share or a loan
-     * repayment changes neither, so nothing a later run's annualisation reads has moved — see
-     * `flagTaxStaleRuns()` for what the mark is protecting.
-     */
+    /** Mark the later runs a correction to this period has just invalidated. */
     private function flagStaleAfterCorrection(PayrollRun $run, int $employeeId, string $key): void
     {
         // Separation pay is read as TAXABLE here whatever this payslip says, which is the
@@ -3608,9 +2895,6 @@ class PayrollService
     /**
      * The corrections standing against lines the engine produced, per EMPLOYEE, oldest first.
      *
-     * Keyed by employee because that is the key `run()` has in hand while it recomputes, and
-     * fetched for the whole run in one query rather than one per payslip.
-     *
      * @param  \Illuminate\Database\Eloquent\Collection<int, Payslip>  $slips  keyed by employee_id
      * @return array<int, \Illuminate\Support\Collection<int, PayslipAmendment>>
      */
@@ -3641,22 +2925,6 @@ class PayrollService
 
     /**
      * Re-apply a payslip's line corrections to a freshly computed set of figures.
-     *
-     * THE RE-RUN CASE THIS EXISTS FOR. Recomputing a period rewrites every earnings column from
-     * attendance, which would silently erase an edit HR made — the behaviour the whole feature was
-     * asked to avoid. Each correction is therefore re-applied here, as an ABSOLUTE value: the line
-     * becomes what HR said it is, whatever the engine has just decided it should be.
-     *
-     * AND THE RE-RUN REPORTS WHAT IT FOUND. Two things can have changed underneath a correction,
-     * and neither is safe to resolve automatically:
-     *
-     *   - the line is GONE — the benefit was renamed, the loan settled, the allowance dropped.
-     *     There is nothing to override, so the correction is left standing and unapplied rather
-     *     than being silently attached to whatever line now sits in that position.
-     *   - the engine has CHANGED ITS MIND — the attendance behind the figure was corrected, or the
-     *     rate moved. The override still wins, because it is a value a person chose and a recompute
-     *     does not get to overrule it. But it may now be suppressing a figure that is finally right,
-     *     and only the person who made it can know.
      *
      * @param  array<string, mixed>  $slip
      * @param  \Illuminate\Support\Collection<int, PayslipAmendment>  $overrides
@@ -3747,22 +3015,6 @@ class PayrollService
     /**
      * Mark the later runs whose withholding was settled against a year-to-date that just moved.
      *
-     * THE SILENT FAILURE THIS MAKES VISIBLE. Four things are computed from the year's earlier
-     * payslips rather than from their own period: the tax on a 13th month's excess over ₱90,000, a
-     * final pay's annualisation, a correction's marginal tax, and December's year-end true-up. Each
-     * reads the year live when it runs, so amending March BEFORE December runs needs no action at
-     * all — December will simply read the new figures. Amending March AFTER December has run leaves
-     * December settled against numbers that no longer exist, and nothing about the run says so.
-     *
-     * SCOPED TO THE RUNS THAT ACTUALLY DEPEND ON IT. An ordinary mid-year cutoff annualises its own
-     * pay and is untouched by what came before it; flagging every later period would make the mark
-     * meaningless. So this flags a later run only when it is one of those four kinds and it holds a
-     * payslip for an affected employee.
-     *
-     * A MARK, NOT A RECOMPUTE. Recomputing December from inside an amendment to March would move
-     * money on a period nobody was looking at, possibly one already disbursed. Recomputing is a
-     * decision, and this is the queue it gets made from.
-     *
      * @param  list<int>  $employeeIds
      */
     private function flagTaxStaleRuns(PayrollRun $amended, array $employeeIds, string $reason): int
@@ -3806,33 +3058,7 @@ class PayrollService
     }
 
     /**
-     * Pay a leaver everything terminal they are owed (FIN-014).
-     *
-     * FOUR THINGS, and the regular run does none of them. It already prorates the leaver's final
-     * cycle (Slice 4, `withTrashed()`), so this deliberately does NOT touch basic salary — it pays:
-     *
-     *   1. unused leave converted to cash at the daily rate,
-     *   2. separation pay as HR entered it (see the migration for why it is entered, not computed),
-     *   3. the outstanding loan balance, settled against net — loans otherwise simply stopped being
-     *      collected when someone left, because `collectForPeriod()` only runs for a pay group they
-     *      are no longer in,
-     *   4. tax annualised across the year actually worked, not projected as if the year continued.
-     *
-     * THE TAX TREATMENT IS THE PART WORTH READING.
-     *
-     * Monetised unused vacation leave is exempt up to **12 days** — raised from 10 by BIR RR 29-2025,
-     * the same regulation that moved the rice and uniform ceilings. Anything above 12 days joins the
-     * ₱90,000 "13th month and other benefits" bucket rather than becoming taxable compensation
-     * directly, which is the chain B16 built and FIN-024 documented.
-     *
-     * Separation pay is exempt when the cause is beyond the employee's control (NIRC §32(B)(6)(b));
-     * HR marks the exception with `separation_pay_taxable`, because the system holds no fact that
-     * distinguishes a retrenchment from a negotiated exit.
-     *
-     * Then the whole year is trued up exactly as December does (FIN-028): annual tax due on what was
-     * actually earned, minus what was actually withheld. For a mid-year leaver that is almost always a
-     * REFUND — they were withheld all year against a projected full-year income they never reached.
-     * Getting this wrong in the other direction is the common real-world payroll complaint.
+     * Pay a leaver everything terminal they are owed.
      *
      * @param  array{separation_pay?: float|null, separation_pay_taxable?: bool, unused_leave_days?: float|null, reason: string}  $data
      */
@@ -3944,8 +3170,6 @@ class PayrollService
             // owed, leaving net pay at zero on a payslip that should have paid them back several
             // thousand pesos. Caught by the refund test, which is why that test asserts on net_pay
             // rather than only on withholding_tax.
-            //
-            // A refund is cash, so it also ENLARGES what a loan can be settled from.
             $availableNet = round(max(0, $gross - $tax), 2);
             $loanSettlement = $this->loans->settleOnSeparation($employee, $run, $availableNet);
 
@@ -4005,13 +3229,7 @@ class PayrollService
         });
     }
 
-    /**
-     * Monetised unused vacation leave is exempt up to this many days.
-     *
-     * **12, not 10** — raised by BIR RR 29-2025 (issued 22 Dec 2025, effective 6 Jan 2026), the same
-     * regulation that moved rice to ₱2,500/month and uniform to ₱8,000/year. The older figure is
-     * still what most references say, which is exactly why it is a named constant with its source.
-     */
+    /** Monetised unused vacation leave is exempt up to this many days. */
     private const EXEMPT_LEAVE_CONVERSION_DAYS = 12;
 
     /**
@@ -4021,23 +3239,7 @@ class PayrollService
      * going to be paid. Shared mode holds a single pool, per-type mode holds a row per type.
      */
     /**
-     * What one employee's unused paid leave would cost if it were paid out today (MF-11).
-     *
-     * UNUSED PAID LEAVE IS A LIABILITY, and it was nowhere on the books. It becomes cash the moment
-     * somebody leaves — `runFinalPay()` converts it at the daily rate — and for the five-day Service
-     * Incentive Leave the Labour Code requires that conversion outright (Art. 95). So the company owes
-     * it whether or not anyone has left yet, and a balance sheet that omits it understates payroll
-     * obligations by the whole accrued balance.
-     *
-     * IT DELIBERATELY REUSES `unusedLeaveDaysFor()` AND `dailyRateFor()` — the exact functions final pay
-     * uses — rather than recomputing the same idea a second time. A liability report that disagreed with
-     * the payslip it is predicting would be worse than no report: accounting would accrue one figure
-     * and pay another, and nobody could tell which was wrong. Any change to how final pay values leave
-     * moves this report with it, by construction.
-     *
-     * Priced at TODAY's rate (or `$asOf`), not the rate at separation, because that is unknowable — a
-     * raise between now and someone's eventual last day changes what this costs. It is an accrual
-     * estimate, and the report says so.
+     * What one employee's unused paid leave would cost if it were paid out today.
      *
      * @return array{days: float, daily_rate: float, amount: float}
      */
@@ -4102,7 +3304,7 @@ class PayrollService
     }
 
     /**
-     * Seal a finished cycle (Slice 5). Only when every payslip in it has actually been paid
+     * Seal a finished cycle. Only when every payslip in it has actually been paid
      * out — locking a half-disbursed run would strand the rest, since a locked run can't be
      * recomputed. Reversible via unlock(), which is audited: the lock is a safety catch
      * against an accidental re-run, not a legal seal.
@@ -4184,21 +3386,10 @@ class PayrollService
         return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
     }
 
-    /**
-     * HR marks a payslip as disbursed (paid out manually) — the terminal state.
-     *
-     * Slice 12 — this is also where reimbursements actually become `paid`. Running payroll only
-     * SCHEDULES them onto a payslip; the money leaves the company here, so this is the honest
-     * moment to record it.
-     */
+    /** HR marks a payslip as disbursed (paid out manually) — the terminal state. */
     public function markDone(Payslip $payslip, ?User $actor = null, ?string $idempotencyKey = null): Payslip
     {
-        // FIN-033 — the one act that asserts money left the company, now with preconditions.
-        //
-        // IDEMPOTENCY FIRST, before the refusals. A repeat carrying the same key is a duplicate
-        // request — a double-click, a retried POST, a re-imported reconciliation file — and is
-        // answered as success without acting twice. Erroring on a double-click trains people to
-        // ignore the error, which is how the genuine refusal below stops being read.
+        // The one act that asserts money left the company, now with preconditions.
         if ($payslip->status === 'disbursed') {
             if ($idempotencyKey !== null && $payslip->disbursement_key === $idempotencyKey) {
                 return $payslip->load(['employee.user', 'employee.department']);
@@ -4272,15 +3463,7 @@ class PayrollService
         });
     }
 
-    /**
-     * Pay the balance an amendment left on an already-disbursed payslip.
-     *
-     * NOT a second disbursement — the payslip was and remains paid, and its status does not move.
-     * What changes is how much of it has been transferred, so this brings `disbursed_amount` up to
-     * the amended net and records that it happened. Reimbursements and loans are deliberately not
-     * revisited: they were settled by the original disbursement and a correction does not re-open
-     * them.
-     */
+    /** Pay the balance an amendment left on an already-disbursed payslip. */
     private function payOutstanding(Payslip $payslip, ?User $actor, ?string $idempotencyKey): Payslip
     {
         $balance = $payslip->amountOutstanding();
@@ -4312,11 +3495,6 @@ class PayrollService
      * Undo the above — the payslip goes back to `computed` and the claims it settled go
      * back to `scheduled`, i.e. owed on this run again. Use when a disbursement was
      * recorded in error.
-     *
-     * A locked run is refused: locking requires every payslip disbursed, so un-disbursing
-     * one would leave the run sealed in a state it could never have been locked in. Unlock
-     * it first. Reversing also re-opens the payslip to recompute, which is the point —
-     * whatever was wrong upstream can now be fixed and the run re-run.
      */
     public function reopenPayslip(Payslip $payslip, ?string $reason = null): Payslip
     {
@@ -4336,7 +3514,7 @@ class PayrollService
         return DB::transaction(function () use ($payslip, $reason) {
             $payslip->update([
                 'status' => 'computed',
-                // FIN-033 — clear the provenance. Leaving `disbursement_key` set would make the
+                // Clear the provenance. Leaving `disbursement_key` set would make the
                 // idempotency check treat the NEXT genuine disbursement from the same client as a
                 // duplicate and silently no-op it, and a stale `disbursed_by` would credit someone
                 // with a payment that was reversed.
@@ -4360,7 +3538,7 @@ class PayrollService
                 $claim->update(['status' => 'scheduled']);
             }
 
-            // FIN-003(a) — and put back the loan instalments this payslip collected. Without
+            // (a) — and put back the loan instalments this payslip collected. Without
             // this, un-paying a payslip wrote off debt against money the company did not pay,
             // and a loan the payslip had settled stayed settled. Same invariant as the claims
             // above; loans simply never had it.
@@ -4401,14 +3579,14 @@ class PayrollService
     ): PayrollRun {
         $startedAt = microtime(true);
 
-        // FIN-035 — refuse before anything is written if an active statutory contribution has no
+        // Refuse before anything is written if an active statutory contribution has no
         // rate version in force for this cycle. Outside the transaction on purpose: this is a
         // precondition on the request, not a step in the run, and HR should see the reason rather
         // than a rolled-back run that appears to have done nothing.
         $this->contributions->assertRatesInForce($cycleEnd);
 
         $run = DB::transaction(function () use ($cycleStart, $cycleEnd, $frequency, $runner, $reason) {
-            // FIN-025 — the settings IN FORCE for this period, not whatever they are today.
+            // The settings IN FORCE for this period, not whatever they are today.
             // `frequency` drives periodsPerYear (how annual pay is sliced and how the withholding
             // base is annualised) and the timing settings decide which cutoff carries the monthly
             // deductions, so reading them live let a re-run of an old cycle silently reprice it.
@@ -4422,15 +3600,15 @@ class PayrollService
                 'count' => $monthCount,
                 'deduction_timing' => $setting->deduction_timing,
                 'tax_timing' => $setting->tax_timing,
-                // FIN-048 — and which cutoff the monthly allowance itself lands on.
+                // And which cutoff the monthly allowance itself lands on.
                 'allowance_timing' => $setting->allowance_timing,
-                // Slice 10 — the ceiling above which allowances become taxable (null = none).
+                // The ceiling above which allowances become taxable (null = none).
                 'other_benefits_annual_cap' => $setting->other_benefits_annual_cap,
-                // Slice B3a — resolves the statutory rates in force for this period.
+                // Resolves the statutory rates in force for this period.
                 'cycle_end' => $cycleEnd,
-                // Slice B2 — decides whether a dated plan enrolment covers this period at all.
+                // Decides whether a dated plan enrolment covers this period at all.
                 'cycle_start' => $cycleStart,
-                // Slice B17 — so a period can record its own share of the year's taxable pay.
+                // So a period can record its own share of the year's taxable pay.
                 'periods_per_year' => $periodsPerYear,
             ];
 
@@ -4446,7 +3624,7 @@ class PayrollService
             // first-time run — the audit line distinguishes the two.
             $isRerun = $run && $run->run_at !== null;
 
-            // A locked cycle is closed for good (Slice 5) — refuse before anything is touched.
+            // A locked cycle is closed for good — refuse before anything is touched.
             if ($run && $run->isLocked()) {
                 throw ValidationException::withMessages([
                     'cycle_start' => [
@@ -4464,7 +3642,7 @@ class PayrollService
                         'cycle_start' => $cycleStart,
                         'cycle_end' => $cycleEnd,
                         'frequency' => $frequency,
-                        // FIN-001 — stated HERE as well as in the column default, deliberately,
+                        // Stated HERE as well as in the column default, deliberately,
                         // for the reason PayrollSetting::current() documents: `create()` returns a
                         // model built from the attributes it INSERTED, so a DB-side default lands
                         // on the row while the in-memory instance still reads null. The overlap
@@ -4473,7 +3651,7 @@ class PayrollService
                         // cycle, which is worse than the bug it was added to fix.
                         'type' => 'regular',
                         'status' => 'processing',
-                        // FIN-036 — stamped once, here. Derived from the delay in force NOW, then
+                        // Stamped once, here. Derived from the delay in force NOW, then
                         // frozen: changing pay_delay_days later must not move the date on a
                         // payslip an employee is already holding.
                         'scheduled_pay_date' => Carbon::parse($cycleEnd)
@@ -4511,58 +3689,29 @@ class PayrollService
 
             $totalGross = $totalDed = $totalNet = 0;
             $count = 0;
-            // Reimbursements auto-paid by this run (P2-8) — tallied for one audit line.
+            // Reimbursements auto-paid by this run — tallied for one audit line.
             $reimbPaidCount = 0;
             $reimbPaidTotal = 0.0;
 
             // Only the employees in this pay group (their pay_frequency, or the default), and
             // only those employed at some point during the cycle.
-            //
-            // FINAL PAY (Slice 4): a separation is recorded as `separation_type` PLUS a
-            // soft-delete, so a leaver was doubly invisible here — the old `whereNull(
-            // 'separation_type')` filter and Eloquent's own soft-delete scope. Anyone who left
-            // mid-cycle therefore got no payslip at all for the days they had worked. We now
-            // pull them back in with withTrashed() when their last day falls on/after the
-            // cycle start; unpaidDaysDetailFor() prorates the days after they left.
             $employees = $this->payGroupEmployees($frequency, $cycleStart, $cycleEnd, $setting->frequency);
 
             // Holidays in this cycle (date => type), fetched once for the whole run.
             $holidayMap = $this->holidays->typedHolidaysBetween(Carbon::parse($cycleStart), Carbon::parse($cycleEnd));
 
-            // The attendance policy drives the daily-rate basis (Slice A) — fetch once, reuse.
-            //
-            // asOf($cycleEnd), not get(): the rules as they stood at the END OF THIS CYCLE, the
-            // same resolution date salary (13c), the statutory rates (B3a) and allowances (B11)
-            // already use. Before this, re-running any cycle that was not locked or disbursed
-            // repriced it with today's divisor and today's deduction modes.
+            // The attendance policy drives the daily-rate basis — fetch once, reuse.
             $policy = $this->attendancePolicy->asOf($cycleEnd);
 
-            // Slice 13c — the salary each employee was actually on during this period.
+            // The salary each employee was actually on during this period.
             $salaryAsOf = $this->salariesAsOf($employees, $cycleEnd);
 
-            // FIN-005 — what earlier periods failed to collect from each employee, so this period
+            // What earlier periods failed to collect from each employee, so this period
             // can recover it from whatever room is left after its own obligations. Excludes this
             // run so a re-run does not settle against its own previous attempt.
             $arrears = $this->deductionArrearsFor($employees, $run->id);
 
-            // FIN-028 — is this the cycle that closes the tax year?
-            //
-            // Tested by CONTAINMENT of 31 December rather than by `cycle_end === '{year}-12-31'`,
-            // because only monthly and semi-monthly land exactly on it. A weekly or bi-weekly
-            // group's final cutoff straddles the year boundary, and those employees need the
-            // true-up just as much.
-            //
-            // FIN-053 — THE YEAR COMES FROM `cycleStart`, AND THAT IS THE WHOLE POINT.
-            //
-            // Taking it from `cycleEnd` defeated the containment test it was written to enable.
-            // The one cutoff that straddles the boundary — 28 Dec 2026 to 3 Jan 2027 — ends in the
-            // NEXT year, so the check compared it against 31 Dec 2027 and failed; the cutoff before
-            // it ends 27 Dec, before the boundary, and failed too. The consequence was silent and
-            // permanent: NO weekly or bi-weekly cycle ever satisfied this, so those employees were
-            // never annualised at all and their year was closed on twelve months of projections.
-            // Monthly and semi-monthly were unaffected only because a cutoff happens to land on
-            // 31 December, which is exactly the coincidence the containment test existed not to
-            // depend on.
+            // Is this the cycle that closes the tax year?
             $taxYear = Carbon::parse($cycleStart)->year;
             $yearEnd = $taxYear . '-12-31';
             $isFinalCycleOfYear = $cycleStart <= $yearEnd && $cycleEnd >= $yearEnd;
@@ -4590,30 +3739,14 @@ class PayrollService
                     ->all();
             }
 
-            // FIN-050 — what the month's EARLIER cutoffs already earned and already paid in
+            // What the month's EARLIER cutoffs already earned and already paid in
             // statutory contributions. One query for the run, keyed by employee, in the shape and
             // for the reason `$yearToDateTax` above uses: a query per employee here would be an
             // N+1 by construction.
             $monthToDate = $this->monthToDateContributions($run, $cycleStart, $cycleEnd, $employees->pluck('id'));
 
-            // Slice 15 — who already has a payslip in an OVERLAPPING run, resolved in ONE query
+            // Who already has a payslip in an OVERLAPPING run, resolved in ONE query
             // instead of an exists() per employee. Same question, same answer, 1/N the round trips.
-            //
-            // FIN-001 — THE GUARD IS SCOPED TO RUNS OF THE SAME TYPE, and must stay that way.
-            //
-            // It used to match on dates alone. A 13th-month run is created at {year}-12-01 to
-            // {year}-12-31, which overlaps every December regular cycle exactly — so paying 13th
-            // month made every employee read as "already paid for December". Two outcomes, both
-            // observed in PayrollThirteenthMonthOverlapTest: December had not run yet and nobody
-            // was paid at all, or December had already run and the re-run force-deleted its
-            // payslips, because `$keep` emptied and an empty `whereNotIn` compiles to `1 = 1`.
-            //
-            // The question this guard is actually asking is "has this employee already been paid
-            // THIS KIND of pay for this period?" — the case it exists for is an employee whose
-            // pay_frequency changed after being run in another group, i.e. two REGULAR runs
-            // covering the same days. 13th month, and every future run type (adjustment,
-            // off-cycle, final pay — FIN-010), is different money for the same days and must not
-            // block the regular cycle, or be blocked by it.
             $paidInAnotherRun = Payslip::whereIn('employee_id', $employees->pluck('id'))
                 ->where('payroll_run_id', '!=', $run->id)
                 ->whereHas('payrollRun', fn ($q) => $q
@@ -4625,7 +3758,7 @@ class PayrollService
                 ->flip();
 
             foreach ($employees as $employee) {
-                // Slice 13c — price this period at the salary that was in force THEN, not the
+                // Price this period at the salary that was in force THEN, not the
                 // one on the record today. Set on the in-memory model (never saved) so every
                 // pricing path — daily rate, holiday premium, the overtime hourly rate, the
                 // rest-day premium — picks it up consistently, instead of threading the figure
@@ -4634,7 +3767,7 @@ class PayrollService
                     $employee->base_salary = $salaryAsOf[$employee->id];
                 }
 
-                // Already paid out (Slice 5): never recompute a disbursed payslip. Its status
+                // Already paid out: never recompute a disbursed payslip. Its status
                 // used to be preserved while its AMOUNTS were silently rewritten — a salary
                 // edit plus a re-run of an old cycle changed money that had already left the
                 // company. Its existing totals still roll into this run's summary.
@@ -4661,18 +3794,6 @@ class PayrollService
                 // Reimbursements folded into this period's pay, PLUS any already scheduled by
                 // THIS run (so a re-run keeps them folded). Auto-flipped to `scheduled` + linked
                 // to the run below.
-                //
-                // FIN-023 — THE WINDOW IS `<= cycleEnd`, NOT `BETWEEN cycleStart AND cycleEnd`.
-                //
-                // A run used to fold in only claims whose expense_date fell inside its own cycle,
-                // and no later run ever looked backwards. So a July expense approved in September
-                // could only be paid by re-running July — which is refused once that run is locked
-                // or its payslip disbursed. The claim sat `approved` forever, and the only escape
-                // was marking it paid by hand outside payroll, which records no payment anywhere.
-                //
-                // An unattached approved claim is now picked up by the next run regardless of how
-                // old it is. `whereNull('payroll_run_id')` is what makes that safe: a claim
-                // already scheduled onto another run is never stolen from it.
                 $reimbursements = Reimbursement::where('employee_id', $employee->id)
                     ->whereDate('expense_date', '<=', $cycleEnd)
                     ->where(fn ($q) => $q
@@ -4707,20 +3828,20 @@ class PayrollService
                 $overtime = $this->overtimePayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
                 $nightDiff = $this->nightDiffPayFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy, $otByDate);
 
-                // FIN-028 — on the cycle that closes the tax year, hand this employee's prior
+                // On the cycle that closes the tax year, hand this employee's prior
                 // totals down so computePayslip settles the year instead of projecting it again.
                 // Absent on every other cycle, which leaves the existing behaviour untouched.
                 $employeeDist = $isFinalCycleOfYear
                     ? [...$dist, 'year_end_true_up' => $yearToDateTax[$employee->id] ?? ['taxable_prior' => 0.0, 'withheld_prior' => 0.0]]
                     : $dist;
 
-                // FIN-005 — this employee's outstanding shortfall, if any. Absent for almost
+                // This employee's outstanding shortfall, if any. Absent for almost
                 // everyone, which keeps the ordinary payslip untouched.
                 if (isset($arrears[$employee->id])) {
                     $employeeDist['arrears'] = $arrears[$employee->id];
                 }
 
-                // FIN-050 — the month so far, so a contribution on `earnings` can be charged on
+                // The month so far, so a contribution on `earnings` can be charged on
                 // the WHOLE month rather than on this cutoff doubled.
                 $employeeDist['month_to_date'] = $monthToDate[$employee->id]
                     ?? ['earnings' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0];
@@ -4741,13 +3862,13 @@ class PayrollService
                     [...$slip, 'status' => $priorStatus[$employee->id] ?? 'computed'],
                 );
 
-                // Slice 11b — loans/cash advances come LAST, because what they can collect
+                // loans/cash advances come LAST, because what they can collect
                 // depends on what the payslip can still afford. They're post-tax and don't
                 // touch gross, so folding them in afterwards is exact rather than a re-compute.
                 // Always called (even at zero) so a cancelled loan's stale ledger row is cleared.
                 $loans = $this->loans->collectForPeriod(
                     $employee, $run, $cycleEnd, (float) $slip['net_pay'], $payslip,
-                    // FIN-032 — the diminishing-balance rate is per year; this splits it per payday.
+                    // The diminishing-balance rate is per year; this splits it per payday.
                     $periodsPerYear,
                 );
 
@@ -4780,11 +3901,6 @@ class PayrollService
                 // edit from disappearing the next time the period is run: the figure is re-applied
                 // against whatever the engine has just computed, not against what it computed when
                 // HR made the edit.
-                //
-                // AFTER THE LOANS, deliberately. A loan collects what the payslip can afford, and
-                // "afford" has to mean what the period actually earned — letting a correction
-                // enlarge the repayment would take more from the employee than the period ever
-                // priced, on the strength of a figure a person typed.
                 if (isset($lineOverrides[$employee->id])) {
                     [$slip, $notes] = $this->withLineOverrides($slip, $employee, $run, $lineOverrides[$employee->id]);
                     $overrideNotes = [...$overrideNotes, ...$notes];
@@ -4794,16 +3910,14 @@ class PayrollService
                 // the payslips that have neither: every field here is the one already stored.
                 $payslip->update($slip);
 
-                // P2-8: auto-flip the folded claims to paid + link them to this run.
+                // auto-flip the folded claims to paid + link them to this run.
                 // Idempotent — on a re-run, claims already paid by this run are untouched.
-                // Slice 12 — computing is not paying. A claim folded into a payslip becomes
+                // Computing is not paying. A claim folded into a payslip becomes
                 // `scheduled` ("included in the Jul 16–31 payslip"), NOT `paid`; it only becomes
                 // paid when HR marks that payslip disbursed (markDone). Before this, running
                 // payroll flipped claims to `paid` before a peso had left the company, and a
                 // later re-run that dropped the employee left them stranded as paid against a
                 // run with no payslip.
-                //
-                // An already-`paid` claim is left alone: money out is history (Slice 5).
                 foreach ($reimbursements as $claim) {
                     if ($claim->status === 'paid') {
                         continue;
@@ -4827,24 +3941,8 @@ class PayrollService
             // Keep only payslips for employees actually paid in this run — drop those no
             // longer in the pay group AND those skipped as already-paid-elsewhere, so a
             // re-run leaves no orphans or double-pay.
-            //
-            // NEVER a disbursed one (Slice 4): money already paid out is history. Before this,
-            // separating an employee and re-running an old cycle force-deleted the payslip
-            // they had actually been paid from.
-            //
-            // FIN-001 — AN EMPTY `$keep` DELETES EVERY COMPUTED PAYSLIP IN THIS RUN, and that is
-            // correct: `whereNotIn` over an empty set compiles to `1 = 1`, and an empty `$keep`
-            // means every employee either left the pay group or is genuinely paid by an
-            // overlapping run of the SAME type. Both deserve the cleanup.
-            //
-            // It is called out because this is the blast radius of anything that wrongly inflates
-            // `$paidElsewhere`. That is exactly what happened when the guard above matched on
-            // dates alone: a 13th-month run marked everyone as paid, `$keep` emptied, and a
-            // December re-run destroyed the payslips December had already produced. The guard is
-            // the control; this line is what it protects. No extra filter is needed here — these
-            // three cleanups are scoped to `$run` and cannot reach another run's rows.
             $keep = $employees->pluck('id')->diff($paidElsewhere);
-            // FIN-046 — and never one a PAYMENT still points at. See the method for why
+            // And never one a PAYMENT still points at. See the method for why
             // `status` alone stopped being a safe test for "droppable".
             $this->assertDroppable($run, $keep, $frequency);
             $run->payslips()
@@ -4852,13 +3950,13 @@ class PayrollService
                 ->where('status', 'computed')
                 ->forceDelete();
 
-            // Slice 11b — same cleanup for the loan ledger: an employee dropped from this run
+            // Same cleanup for the loan ledger: an employee dropped from this run
             // must not keep a repayment against it, or their balance would stay wrongly reduced.
             LoanPayment::where('payroll_run_id', $run->id)
                 ->whereHas('loan', fn ($q) => $q->whereNotIn('employee_id', $keep))
                 ->delete();
 
-            // Slice 12 — and release reimbursements scheduled onto this run for anyone no longer
+            // And release reimbursements scheduled onto this run for anyone no longer
             // in it, so they return to the approved pool instead of being stranded against a run
             // that no longer pays them. An already-`paid` claim is never touched.
             Reimbursement::where('payroll_run_id', $run->id)
@@ -4874,7 +3972,7 @@ class PayrollService
                 'employee_count' => $count,
                 'run_at' => now(),
                 'run_by' => $runner->id,
-                // Step 4b / Slice 8 — every rule that priced this run, so an old payslip can
+                // Step 4b / — every rule that priced this run, so an old payslip can
                 // always be explained. A record, not a replay: see policySnapshot().
                 'policy_snapshot' => $this->policySnapshot($setting, $cycleEnd),
                 // Whatever made this run's withholding stale has just been recomputed against the
@@ -4905,7 +4003,7 @@ class PayrollService
                 $this->audit->log('updated', 'Payroll', $note, $run);
             }
 
-            // Slice 5: say plainly whose pay this re-run left alone.
+            // Say plainly whose pay this re-run left alone.
             if ($skippedDisbursed !== []) {
                 $this->audit->log(
                     'updated',
@@ -4915,16 +4013,10 @@ class PayrollService
                 );
             }
 
-            // FIN-051 — and TELL THE CALLER, not just the audit log.
-            //
-            // A re-run that skips disbursed payslips is correct (Slice 5: money already paid out
-            // is history) but it was silent about it. From the screen the run simply completed and
-            // appeared to change nothing, with no way to know which payslips were deliberately
-            // left alone or why — someone chasing a stale figure has no reason to suspect the run
-            // did exactly what it was supposed to.
+            // And TELL THE CALLER, not just the audit log.
             $run->skippedDisbursedCount = count($skippedDisbursed);
 
-            // P2-8: one summary line for the reimbursements this run auto-paid.
+            // One summary line for the reimbursements this run auto-paid.
             if ($reimbPaidCount > 0) {
                 $this->audit->log(
                     'updated',
@@ -4938,7 +4030,7 @@ class PayrollService
             return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
         });
 
-        // Slice 15 — one line so a slow run is visible without guesswork. The whole run is a
+        // One line so a slow run is visible without guesswork. The whole run is a
         // single transaction, so its duration is also how long the payroll tables stay locked.
         Log::info('hr.payroll.run', [
             'cycle' => "{$cycleStart}..{$cycleEnd}",
@@ -4952,21 +4044,6 @@ class PayrollService
 
     /**
      * WHAT RE-RUNNING THIS PERIOD WOULD CHANGE. Computed for real, saved nowhere.
-     *
-     * WHY A PREVIEW EXISTS AT ALL. Re-running a settled period is not a refresh — it reprices from
-     * attendance, salaries and the rules in force for the cycle, and the figures it lands on are the
-     * ones an employee may already be holding a payslip for. "Recompute" is a button whose effect
-     * nobody can predict, and the only honest way to describe it is to do it and show the result.
-     *
-     * HOW IT IS SAFE. The real `run()` executes inside a transaction this method always rolls back.
-     * That is sound rather than clever because payroll writes nothing outside the database — no
-     * mail, no notifications, no events, no queued jobs, no cache — so a rollback leaves nothing
-     * behind. Two harmless traces do survive: auto-increment ids are consumed, and `run()` writes
-     * its own timing line to the application log, so a preview appears there as a run.
-     *
-     * DISBURSED PAYSLIPS ARE MARKED, NOT DIFFED. A re-run leaves them untouched by design (Slice 5),
-     * which is exactly the fact HR needs before deciding — "recompute" on a period that is 80% paid
-     * out changes far less than the button implies.
      *
      * @return array{rows: array<int, array<string, mixed>>, meta: array<string, mixed>}
      */
@@ -5002,14 +4079,7 @@ class PayrollService
         return $result;
     }
 
-    /**
-     * Recompute a period that has already been run, with a stated reason.
-     *
-     * Distinct from `POST payroll/run` in two ways that matter. The cycle comes from the run itself,
-     * so a period cannot be recomputed as a different pay group by mistyping the dates; and the
-     * reason is required, because this changes figures that were already settled and "someone
-     * clicked recompute" is not an answer to why they moved.
-     */
+    /** Recompute a period that has already been run, with a stated reason. */
     public function rerunRun(PayrollRun $run, string $reason, User $actor): PayrollRun
     {
         $this->assertRerunnable($run);
@@ -5023,14 +4093,7 @@ class PayrollService
         );
     }
 
-    /**
-     * Only an ordinary cycle can be recomputed from its own dates.
-     *
-     * The other three run types are keyed by something else entirely — a 13th month by its year, a
-     * final pay by the employee, an adjustment by the batch it paid — so feeding their dates back
-     * through `run()` would compute an ordinary period that happens to share a window and pay
-     * everybody for it. Each has its own recompute path; this one refuses rather than guesses.
-     */
+    /** Only an ordinary cycle can be recomputed from its own dates. */
     private function assertRerunnable(PayrollRun $run): void
     {
         if ($run->isLocked()) {
@@ -5208,7 +4271,7 @@ class PayrollService
             // 13th-month accrual: PH law = total BASIC salary earned in the year ÷ 12.
             // `base_salary` is the attendance-adjusted basic pay (excludes allowances/
             // reimbursements), so this is the correct basis. Projected until year-end.
-            // FIN-013 — the TOTALS above intentionally span every completed run (13th-month pay
+            // The TOTALS above intentionally span every completed run (13th-month pay
             // is income and belongs in a year-to-date figure). The 13th-month PROJECTION must
             // not: measured on regular runs only, or last year's payment inflates this year's
             // entitlement. Same basis as the report and the run.
@@ -5221,17 +4284,7 @@ class PayrollService
         ];
     }
 
-    /**
-     * Render one payslip to a DomPDF document — the same document the UI shows.
-     *
-     * Fed by PayslipResource so the PDF and the screen can never disagree about what a payslip
-     * contains. The one deliberate difference is the employer share, which the view drops
-     * entirely: a downloaded payslip is a document that gets forwarded, so HR's copy and the
-     * employee's are identical files.
-     *
-     * Amounts are bare numbers with a single "PHP" on the net line — DomPDF's bundled fonts
-     * have no ₱ glyph, so a peso sign would render as a blank box.
-     */
+    /** Render one payslip to a DomPDF document — the same document the UI shows. */
     public function payslipPdf(Payslip $payslip): \Barryvdh\DomPDF\PDF
     {
         return Pdf::loadView('hr::payslip', $this->payslipViewData($payslip));
@@ -5270,18 +4323,41 @@ class PayrollService
      */
     public function runCsv(PayrollRun $run): string
     {
+        $register = $this->registerRows($run);
+
+        // No BOM: this export is machine-read as often as it is opened by a person, and adding
+        // one now would change every existing consumer's first column header.
+        $csv = CsvWriter::render([$register['columns'], ...$register['rows']], bom: false);
+
+        $this->audit->log(
+            'exported',
+            'Payroll',
+            'Exported payroll run CSV for ' . $run->cycle_start?->format('Y-m-d') . ' – ' . $run->cycle_end?->format('Y-m-d'),
+            $run,
+        );
+
+        return $csv;
+    }
+
+    /**
+     * THE REGISTER — the widest honest description of a run, and the body of both exports.
+     *
+     * @return array{columns: list<string>, rows: list<list<float|int|string|null>>}
+     */
+    private function registerRows(PayrollRun $run): array
+    {
         $run->loadMissing(['payslips.employee.user', 'payslips.employee.department']);
 
         $sum = ['base' => 0.0, 'allow' => 0.0, 'holiday' => 0.0, 'ot' => 0.0, 'nd' => 0.0, 'rd' => 0.0, 'reimb' => 0.0, 'sss' => 0.0, 'ph' => 0.0, 'pg' => 0.0, 'wht' => 0.0, 'other' => 0.0, 'er_sss' => 0.0, 'er_ph' => 0.0, 'er_pg' => 0.0];
 
-        // FIN-019 — every row goes through CsvWriter, which neutralises leading =, +, -, @, tab
+        // Every row goes through CsvWriter, which neutralises leading =, +, -, @, tab
         // and CR. Employee and department names are free text a person controls, and this file is
         // opened in Excel on a finance workstation.
         $rows = [];
-        $rows[] = [
+        $columns = [
             'Employee', 'Department', 'Base', 'Allowances', 'Holiday Premium', 'Overtime Pay', 'Night Diff', 'Rest Day', 'Reimbursements', 'Gross',
             'SSS', 'PhilHealth', 'Pag-IBIG', 'Withholding Tax', 'Other Deductions', 'Total Deductions', 'Net Pay',
-            // Slice B7 — this file doubles as the remittance summary, and a per-employee override
+            // This file doubles as the remittance summary, and a per-employee override
             // moves the employee half only. Without this column the mismatched pair reads as a
             // proper contribution and gets filed as one.
             'Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Overridden', 'Status',
@@ -5332,18 +4408,231 @@ class PayrollService
             round($sum['er_sss'], 2), round($sum['er_ph'], 2), round($sum['er_pg'], 2), '',
         ];
 
-        // No BOM: this export is machine-read as often as it is opened by a person, and adding
-        // one now would change every existing consumer's first column header.
-        $csv = CsvWriter::render($rows, bom: false);
+        return [
+            'columns' => $columns,
+            'rows' => $rows,
+            // Which columns are prose. Everything else is a figure — and it has to reach the
+            // workbook AS a figure: Eloquent hands decimals back as strings, and a money column
+            // written as text is one Excel will right-align, refuse to sum, and quietly mislead
+            // whoever tries.
+            'text' => array_keys(array_intersect($columns, ['Employee', 'Department', 'Overridden', 'Status'])),
+        ];
+    }
+
+    /** THE BREAKDOWN SHEET'S COLUMNS — label, cell treatment, and how wide it has to be to read. */
+    private const BREAKDOWN_COLUMNS = [
+        ['label' => 'Employee', 'type' => 'text', 'width' => 26.0],
+        ['label' => 'Department', 'type' => 'text', 'width' => 18.0],
+        ['label' => 'Basic Pay', 'type' => 'money', 'width' => 13.0],
+        ['label' => 'Allowances', 'type' => 'money', 'width' => 12.0],
+        ['label' => 'Overtime', 'type' => 'money', 'width' => 11.0],
+        ['label' => 'Night Diff', 'type' => 'money', 'width' => 11.0],
+        ['label' => 'Rest Day', 'type' => 'money', 'width' => 11.0],
+        ['label' => 'Holiday', 'type' => 'money', 'width' => 11.0],
+        ['label' => 'Reimbursements', 'type' => 'money', 'width' => 14.0],
+        ['label' => 'Other Earnings', 'type' => 'money', 'width' => 13.0],
+        ['label' => 'Gross Pay', 'type' => 'money', 'width' => 14.0],
+        ['label' => 'Absences', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Half-Days', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Undertime', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Late', 'type' => 'charge', 'width' => 10.0],
+        ['label' => 'Work Suspension', 'type' => 'charge', 'width' => 14.0],
+        ['label' => 'Leave Without Pay', 'type' => 'charge', 'width' => 16.0],
+        ['label' => 'Other Attendance', 'type' => 'charge', 'width' => 15.0],
+        ['label' => 'SSS', 'type' => 'charge', 'width' => 10.0],
+        ['label' => 'PhilHealth', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Pag-IBIG', 'type' => 'charge', 'width' => 11.0],
+        ['label' => 'Withholding Tax', 'type' => 'charge', 'width' => 13.0],
+        ['label' => 'Other Deductions', 'type' => 'charge', 'width' => 14.0],
+        ['label' => 'Total Deductions', 'type' => 'charge', 'width' => 14.0],
+        ['label' => 'Net Pay', 'type' => 'money', 'width' => 14.0],
+        ['label' => 'Status', 'type' => 'status', 'width' => 11.0],
+    ];
+
+    /**
+     * A payroll run as a styled workbook — the copy meant to be READ, next to the CSV's copy meant
+     * to be parsed. Audit-logged like the CSV, because it discloses exactly as much.
+     *
+     * @return array{path: string, name: string}
+     */
+    public function runXlsx(PayrollRun $run): array
+    {
+        // `amendments` is eager-loaded because the deduction columns are built by the same
+        // PayslipDocument code the payslip document uses, and a correction HR typed is a PINNED
+        // row there. Without the ledger the workbook would print the engine's figures beside a
+        // payslip showing HR's — the same figure, disagreeing with itself in two files.
+        $run->loadMissing([
+            'payslips.employee.user',
+            'payslips.employee.department',
+            'payslips.amendments',
+        ]);
+
+        $columns = self::BREAKDOWN_COLUMNS;
+        $rows = [];
+        $sums = array_fill(0, count($columns), 0.0);
+
+        foreach ($run->payslips as $payslip) {
+            $row = $this->breakdownRow($payslip);
+            $rows[] = $row;
+
+            foreach ($columns as $i => $column) {
+                if (in_array($column['type'], ['money', 'charge'], true)) {
+                    $sums[$i] = round($sums[$i] + (float) $row[$i], 2);
+                }
+            }
+        }
+
+        // The total row and the cards are summed from the COLUMNS ABOVE THEM, not from the run's
+        // stored totals. The two agree for an ordinary run — but the sheet showing basic pay gross
+        // of absences has to foot to its own arithmetic, and a header card contradicting the table
+        // under it is the specific failure this export exists to avoid.
+        $totals = $sums;
+        $totals[0] = 'TOTAL PAYROLL';
+        $totals[1] = '';
+        $totals[count($columns) - 1] = '';
+
+        $grossColumn = array_search('Gross Pay', array_column($columns, 'label'), true);
+        $deductionsColumn = array_search('Total Deductions', array_column($columns, 'label'), true);
+        $netColumn = array_search('Net Pay', array_column($columns, 'label'), true);
+
+        $path = tempnam(sys_get_temp_dir(), 'payroll-');
+
+        PayrollXlsxWriter::write(
+            $path,
+            [
+                'title' => 'Payroll Breakdown • ' . $this->periodLabel($run),
+                'kpis' => [
+                    ['label' => 'EMPLOYEES', 'value' => count($rows), 'type' => 'count'],
+                    ['label' => 'GROSS PAYROLL', 'value' => $sums[$grossColumn], 'type' => 'money'],
+                    ['label' => 'TOTAL DEDUCTIONS', 'value' => $sums[$deductionsColumn], 'type' => 'charge'],
+                    ['label' => 'NET PAYROLL', 'value' => $sums[$netColumn], 'type' => 'money'],
+                ],
+                'columns' => $columns,
+                'rows' => $rows,
+                'totals' => $totals,
+            ],
+            $this->registerRows($run),
+        );
 
         $this->audit->log(
             'exported',
             'Payroll',
-            'Exported payroll run CSV for ' . $run->cycle_start?->format('Y-m-d') . ' – ' . $run->cycle_end?->format('Y-m-d'),
+            'Exported payroll run workbook for ' . $run->cycle_start?->format('Y-m-d') . ' – ' . $run->cycle_end?->format('Y-m-d'),
             $run,
         );
 
-        return $csv;
+        return [
+            'path' => $path,
+            'name' => 'VITE_SEO_Payroll_Breakdown_' . Str::of($this->periodLabel($run))
+                ->replace(['–', ' '], ['-', '_'])
+                ->replace(',', '')
+                ->toString() . '.xlsx',
+        ];
+    }
+
+    /**
+     * One employee's line on the breakdown sheet.
+     *
+     * @return list<float|int|string|null>
+     */
+    private function breakdownRow(Payslip $payslip): array
+    {
+        $slip = $payslip->attributesToArray();
+        $f = fn (string $field) => round((float) ($slip[$field] ?? 0), 2);
+
+        // The corrections HR pinned to a printed line, in the shape PayslipDocument measures
+        // against — same source as PayslipResource::lineOverrides().
+        $overrides = [];
+
+        foreach ($payslip->amendments as $amendment) {
+            if ($amendment->target_key === null) {
+                continue;
+            }
+
+            $overrides[$amendment->target_key] = [
+                'amount' => $amendment->override_amount === null ? null : (float) $amendment->override_amount,
+            ];
+        }
+
+        $charges = [];
+
+        foreach (PayslipDocument::deductionRows($slip, $overrides) as $row) {
+            $charges[$row['key']] = (float) $row['amount'];
+        }
+
+        $charge = fn (string $key) => round($charges[$key] ?? 0.0, 2);
+
+        $absence = $f('absence_deduction');
+
+        // The residual, NOT a sum of the leftover kinds: the named five plus LWOP are what the
+        // sheet has columns for, and every attendance charge apportions out of `absence_deduction`.
+        // Taking the difference is what guarantees the row foots even when a kind appears that
+        // nobody has given a column yet (holiday forfeited, outside employment, a tardiness
+        // penalty) — those would otherwise vanish and the row would be short by their amount.
+        $otherAttendance = round($absence - (
+            $charge('absent') + $charge('half_day') + $charge('undertime')
+            + $charge('late') + $charge('suspended_unpaid') + $charge('leave_unpaid')
+        ), 2);
+
+        $gross = round($f('gross') + $absence, 2);
+        $otherEarnings = round($gross - (
+            $f('period_base') + $f('allowances') + $f('overtime_pay') + $f('night_diff_pay')
+            + $f('rest_day_premium') + $f('holiday_premium') + $f('reimbursements')
+        ), 2);
+
+        return [
+            $payslip->employee?->user?->name ?? $payslip->employee?->name ?? '—',
+            $payslip->employee?->department?->name ?? '',
+            $f('period_base'),
+            $f('allowances'),
+            $f('overtime_pay'),
+            $f('night_diff_pay'),
+            $f('rest_day_premium'),
+            $f('holiday_premium'),
+            $f('reimbursements'),
+            $otherEarnings,
+            $gross,
+            $charge('absent'),
+            $charge('half_day'),
+            $charge('undertime'),
+            $charge('late'),
+            $charge('suspended_unpaid'),
+            $charge('leave_unpaid'),
+            $otherAttendance,
+            $f('sss'),
+            $f('philhealth'),
+            $f('pagibig'),
+            $f('withholding_tax'),
+            $f('other_deductions'),
+            round($f('total_deductions') + $absence, 2),
+            $f('net_pay'),
+            Str::headline((string) $payslip->status),
+        ];
+    }
+
+    /** The cycle as a person writes it: "August 1–15, 2026", or spelled out across a boundary. */
+    private function periodLabel(PayrollRun $run): string
+    {
+        $start = $run->cycle_start;
+        $end = $run->cycle_end;
+
+        if ($start === null || $end === null) {
+            return (string) ($start ?? $end)?->format('F j, Y');
+        }
+
+        if ($start->isSameDay($end)) {
+            return $start->format('F j, Y');
+        }
+
+        if ($start->isSameMonth($end)) {
+            return $start->format('F j') . '–' . $end->format('j, Y');
+        }
+
+        if ($start->year === $end->year) {
+            return $start->format('F j') . ' – ' . $end->format('F j, Y');
+        }
+
+        return $start->format('F j, Y') . ' – ' . $end->format('F j, Y');
     }
 
     /**
@@ -5355,7 +4644,7 @@ class PayrollService
      */
     public function thirteenthMonth(int $year): array
     {
-        // FIN-013 — the same basis the run itself uses, so the accrual report and the payment
+        // The same basis the run itself uses, so the accrual report and the payment
         // can never disagree. This used to filter status but not type, so last year's 13th-month
         // run counted toward this year's accrual.
         $rows = $this->thirteenthMonthBasisFor($year)

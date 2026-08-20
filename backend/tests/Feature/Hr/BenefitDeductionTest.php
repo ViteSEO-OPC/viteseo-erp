@@ -13,17 +13,7 @@ use App\Modules\Hr\Services\BenefitDeductionService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice 11a (2026-07-28 audit) — payroll finally reads Company → Benefits.
- *
- * The structure was all there and unused: `hr_benefit_programs` is the catalogue,
- * `hr_benefit_enrollments.employee_share` is what the employee pays, `deduction_cadence` says
- * how often. Payroll read none of it, so an HMO could be configured `per_cutoff` with a share
- * and nothing was ever deducted — the Benefits page was a brochure.
- *
- * Loans and cash advances are deliberately NOT here: they need a decrementing balance and are
- * per-employee, not a company programme (Slice 11b).
- */
+/** (2026-07-28 audit) — payroll finally reads Company → Benefits. */
 class BenefitDeductionTest extends HrTestCase
 {
     use RefreshDatabase;

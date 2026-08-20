@@ -68,9 +68,6 @@ export interface ClockInWindow {
    * Non-null means Time in files a REQUEST rather than punching in, and names why — a rest day
    * with the company rule on, or a suspension HR marked as needing permission. Null means the
    * ordinary punch, including on a rest day when HR has turned that rule off.
-   *
-   * The server's answer, never re-derived here: it combines the effective schedule with two
-   * switches, and a browser copy of either would go stale the moment HR changed one.
    */
   work_request_required: WorkRequestType | null;
   /**
@@ -89,11 +86,6 @@ export interface ClockInWindow {
   /**
    * HR has cancelled work today (typhoon, shutdown). Null on an ordinary day and on the
    * employee's own rest day, where saying "work is cancelled" would be noise.
-   *
-   * On its own it does NOT disable the time clock: a skeleton crew still comes in, and blocking
-   * them would leave the people who actually worked with no record of it. `work_requires_request`
-   * is HR's per-declaration exception — on it, the button asks instead of punching, which is
-   * what `work_request_required` reports.
    */
   suspension: {
     name: string;
@@ -136,10 +128,30 @@ export interface RemoteCheckin {
   rejection_note: string | null;
 }
 
+/**
+ * Today's declared rules, as the employee's OWN panel sees them. A shortened compensable day
+ * that only HR can see helps nobody — the point is that people may leave once the hours are in,
+ * and they cannot act on a rule they were never shown.
+ */
+export interface DayRules {
+  date: string;
+  grace_minutes: number;
+  /** null = no minimum-hours bar today, which is the ordinary case. */
+  min_full_day_minutes: number | null;
+  /**
+   * Manila "HH:MM" at which this employee reaches the bar, given when they actually clocked in.
+   * null when they have not clocked in yet, or when the bar is out of reach inside their
+   * schedule (an afternoon off, say, with no approved overtime to extend it).
+   */
+  full_day_at: string | null;
+  full_day_met: boolean;
+}
+
 export interface MyAttendance {
   today: Attendance | null;
   week: Attendance[];
   clock_in: ClockInWindow;
+  day_rules: DayRules | null;
 }
 
 export type Severity = "green" | "yellow" | "orange" | "red";
@@ -205,17 +217,13 @@ export interface HrAttendanceRow {
   break_minutes: number;
   hours_worked: number;
   status: string;
-  /** Slice 16 — a human asserted this status; it beats the clock and the leave table. */
+  /** A human asserted this status; it beats the clock and the leave table. */
   status_override: boolean;
   leave_type: string | null;
   /**
    * Which half of the day is approved OFF — an unpaid half-day request or half-day leave,
    * the two being the same shape with different funding. `'BOTH'` is a whole day reached by
    * filing each half separately. Null on an ordinary day.
-   *
-   * The board shows it because the shift on such a day is genuinely shorter: without it a
-   * 1:00 PM arrival read as an unexplained one, and the person reading the row had no way to
-   * tell an approved afternoon from someone who simply turned up late.
    */
   half_day_off: "AM" | "PM" | "BOTH" | null;
   timing: AttendanceTiming | null;
@@ -251,6 +259,12 @@ export interface DailyOverride {
   id?: number;
   date: string;
   grace_minutes: number | null;
+  /**
+   * Minutes that must actually be WORKED for the date to count as a whole day, or null when
+   * HR declared no such bar (almost every day). Stored in minutes like every other duration
+   * in the module; the dialog collects hours and converts.
+   */
+  min_full_day_minutes: number | null;
 }
 
 /**

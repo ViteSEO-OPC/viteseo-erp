@@ -7,18 +7,7 @@ use App\Modules\Hr\Models\Concern;
 use App\Modules\Hr\Models\ConcernRevealRequest;
 use Illuminate\Validation\ValidationException;
 
-/**
- * The identity-reveal negotiation on an anonymous concern.
- *
- * HR asks with a stated reason; the reporter accepts or declines with one of their own. Only an
- * acceptance stamps `hr_concerns.identity_revealed_at`, which is the single thing ConcernResource
- * consults before emitting a name.
- *
- * Every method here is written on the assumption that the reporter is the party with something
- * to lose. That is why the reason is mandatory on both sides, why a decline is final for that
- * request rather than something HR can appeal in place, and why nothing in the audit trail names
- * the reporter — including the lines about the request to name them.
- */
+/** The identity-reveal negotiation on an anonymous concern. */
 class ConcernRevealService
 {
     public function __construct(private readonly AuditService $audit) {}
@@ -121,10 +110,6 @@ class ConcernRevealService
     /**
      * Guard shared by both answers: the responder must be the person who filed the concern, and
      * the question must still be open.
-     *
-     * Ownership is checked against `$concern->employee_id`, which is stored on every concern
-     * including anonymous ones — this is the one place in the module that reads it for a
-     * decision rather than for display, and it never leaves the service.
      */
     private function assertOwnPending(ConcernRevealRequest $request, User $actor, string $action): Concern
     {

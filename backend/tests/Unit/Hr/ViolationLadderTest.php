@@ -7,7 +7,7 @@ use App\Modules\Hr\Services\ViolationService;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Pins the violation colour ladder evaluation (finding P1-5) — pure, no DB. The
+ * Pins the violation colour ladder evaluation — pure, no DB. The
  * headline is the NO-OP GATE: the seeded default ladder reproduces exactly the old
  * hard-coded severities, so making ViolationService read the ladder changed no flags.
  */

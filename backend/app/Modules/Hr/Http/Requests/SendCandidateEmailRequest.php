@@ -6,13 +6,7 @@ use App\Modules\Hr\Services\RecruitmentService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-/**
- * A candidate email as HR composed it in the modal.
- *
- * Sent as multipart so attachments can ride along, which means the recipient lists arrive as
- * `cc[]` / `bcc[]` and everything else as strings. `type` still matters even though the body
- * is free text: it is what the board reads to know which stage email has gone out.
- */
+/** A candidate email as HR composed it in the modal. */
 class SendCandidateEmailRequest extends FormRequest
 {
     /** Per file, matching the rest of the module's uploads (PHP's own cap here is 8M). */

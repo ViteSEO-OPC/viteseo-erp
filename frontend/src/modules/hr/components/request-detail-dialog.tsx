@@ -66,13 +66,7 @@ export function DetailNote({ label, text }: { label: string; text: string | null
   );
 }
 
-/**
- * A withdrawal by the person who filed the request.
- *
- * Kept apart from `RequestDecision` on purpose: being declined is HR's verdict, withdrawing is
- * the requester changing their mind, and collapsing them into one "decision" block is what made
- * the two indistinguishable in the record.
- */
+/** A withdrawal by the person who filed the request. */
 export interface RequestCancellation {
   /** When — the block is hidden entirely while this is null. */
   at: string | null;
@@ -92,18 +86,7 @@ export interface RequestDecision {
   label?: string;
 }
 
-/**
- * The full record behind a row in an HR queue.
- *
- * Every queue shows the same skeleton — what was asked, by whom, what was decided — so
- * this owns that skeleton and each page supplies only its own `fields`. The decision
- * block is built in rather than left to callers because it answers the question the
- * table can't ("who approved this, and why?") and would otherwise be repeated ten times.
- *
- * `open` should be driven by looking the row up in the live list by id, NOT by holding
- * the row object that was clicked: deciding from inside the modal has to move the status
- * shown here, or HR is left reading stale state next to contradictory buttons.
- */
+/** The full record behind a row in an HR queue. */
 export function RequestDetailDialog({
   open,
   onOpenChange,

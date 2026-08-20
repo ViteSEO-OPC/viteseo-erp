@@ -19,20 +19,7 @@ import { formatPeso, formatDate } from "@/core/lib/format";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { useMinimumWageCheck, useApplyMinimumWage } from "@/modules/hr/hooks/use-payroll";
 
-/**
- * Everyone this run would pay below the regional floor, and the raise that clears it (FIN-030b).
- *
- * WHY THE SYSTEM PROPOSES AND A PERSON COMMITS. A wage order raises what the company MUST pay; it
- * does not raise anybody's salary by itself. Salary is a contractual term, so the change needs an
- * approver, a date it takes effect from and a record — which is what routing it through the normal
- * salary-change path buys: the same history row, the same audit entry, the same repricing guard as
- * any other raise. A job that rewrote pay on its own would leave nobody able to answer who decided
- * it, and would bump the part-timers and exempt arrangements the check cannot see.
- *
- * So this screen does the arithmetic nobody can do in their head — the monthly figure whose derived
- * daily rate clears the floor — and stops there. Selection is explicit; nothing is applied to a
- * list that was not read.
- */
+/** Everyone this run would pay below the regional floor, and the raise that clears it. */
 export function MinimumWageDialog({
   open,
   onOpenChange,
@@ -96,7 +83,7 @@ export function MinimumWageDialog({
       }
       close(false);
     } catch (err) {
-      // FIN-007 — the date reaches into completed runs. That refusal is a QUESTION, so it is asked
+      // The date reaches into completed runs. That refusal is a QUESTION, so it is asked
       // rather than shown as a dead end: those periods were paid at the old salary, and the
       // difference becomes back pay rather than a silent repricing.
       const backdated =

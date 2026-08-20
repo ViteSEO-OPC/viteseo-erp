@@ -12,16 +12,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B3b — SSS charges on the bracket's Monthly Salary Credit, not on actual salary.
- *
- * Earn ₱20,100 and SSS does not take 5% of ₱20,100 — that salary sits in a band whose MSC is
- * exactly ₱20,000. Percentage-of-salary is wrong for almost everyone, in both directions, on every
- * payslip, and wrong for the employer remittance that gets filed.
- *
- * Each band stores only where it STARTS; it runs up to the next band's start. That is what makes
- * gaps and overlaps impossible to express, rather than something to validate against.
- */
+/** SSS charges on the bracket's Monthly Salary Credit, not on actual salary. */
 class ContributionBracketTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -143,7 +134,7 @@ class ContributionBracketTest extends HrTestCase
         )['sss'];
 
         $this->assertSame(1000.0, $slip('2026-03-15'), 'the bracket table');
-        // 2024 predates BOTH this table and the published 2025 schedule the seeder carries (B8),
+        // 2024 predates BOTH this table and the published 2025 schedule the seeder carries,
         // so the opening percentage version (4.5%, ₱30k cap) still applies.
         $this->assertSame(904.5, $slip('2024-06-30'), '4.5% of ₱20,100');
     }
@@ -175,7 +166,7 @@ class ContributionBracketTest extends HrTestCase
             ...$payload, 'brackets' => [['min_salary' => 0, 'msc' => 10000]],
         ])->assertCreated();
 
-        // This test's own version, by date: the seeder also ships a bracket version now (B8), so
+        // This test's own version, by date: the seeder also ships a bracket version now, so
         // "the only bracket one" is no longer a way to find it.
         $version = ContributionVersion::where('type', 'sss')
             ->whereDate('effective_from', '2026-01-01')->firstOrFail();

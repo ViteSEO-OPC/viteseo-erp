@@ -11,16 +11,7 @@ use App\Modules\Hr\Models\Reimbursement;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * Withdrawing a claim, payroll inquiry or concern you filed yourself.
- *
- * Leave and overtime already had this; these three did not, so the only escape from a mistaken
- * submission was to ask HR to DECLINE it — which writes a rejection against the employee instead
- * of a withdrawal by them. The two are different facts and the record has to keep them apart.
- *
- * The rule lives once in `Services\Concerns\CancelsOwnRequest`, so these tests exercise it through
- * all three endpoints rather than trusting that sharing a trait makes them behave alike.
- */
+/** Withdrawing a claim, payroll inquiry or concern you filed yourself. */
 class CancelOwnRequestTest extends HrTestCase
 {
     use RefreshDatabase;

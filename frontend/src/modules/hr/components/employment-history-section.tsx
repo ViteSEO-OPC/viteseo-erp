@@ -56,19 +56,7 @@ function serverMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-/**
- * The employment timeline, with hand-corrections (Job tab).
- *
- * STILL WRITTEN AUTOMATICALLY. Creating an employee opens the first role, and changing the job
- * title on this same tab closes the current one and opens a new one. Nothing here replaces that —
- * these controls exist for what automation cannot do: a title typed wrong two promotions ago, a
- * stint nobody recorded, a duplicate left by a mis-click.
- *
- * Editing is safe in a way the compensation timeline's is not: nothing downstream reads this table,
- * so a correction can only be right or wrong about history, never expensive. The one rule the
- * server enforces is that a single role may be open at a time — the automatic close finds its
- * target by looking for the role without an end date.
- */
+/** The employment timeline, with hand-corrections (Job tab). */
 export function EmploymentHistorySection({
   employeeId,
   entries,

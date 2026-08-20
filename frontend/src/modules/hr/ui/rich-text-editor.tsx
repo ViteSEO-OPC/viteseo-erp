@@ -38,17 +38,7 @@ export interface RichTextEditorProps {
   invalid?: boolean;
 }
 
-/**
- * The formatting surface for a candidate email.
- *
- * The toolbar offers exactly what survives the server's HTML sanitiser, so nothing HR can
- * press produces markup that is silently dropped on the way out. Anything richer — tables,
- * images, colours — is left out on purpose: mail clients render those inconsistently at
- * best, and a hiring email gains nothing from them.
- *
- * HR-local rather than shared: the Projects module has its own note editor with its own
- * extension set, and coupling the two would make an email inherit whatever a note needs.
- */
+/** The formatting surface for a candidate email. */
 export function RichTextEditor({
   value,
   onChange,

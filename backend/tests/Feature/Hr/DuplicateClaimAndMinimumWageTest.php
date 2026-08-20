@@ -16,23 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-032 and FIN-030 — two gaps that both come down to nobody being told.
- *
- * FIN-032: nothing stopped the same receipt being filed twice — no unique index, no check on
- * (employee, date, amount, category). Both copies could be approved and both folded into the same
- * payslip, paying the expense twice, and after the fact a duplicate is indistinguishable from a
- * genuine second claim.
- *
- * FIN-030: `base_salary` was validated `min:0` and no minimum-wage rule existed anywhere. The daily
- * rate is DERIVED — salary ÷ the basis on the attendance policy — so nobody typing a monthly figure
- * can see what it implies per day. That is the actual gap; not that HR would knowingly underpay.
- *
- * BOTH ARE WARNINGS, NOT BLOCKS, and for the same reason: each has legitimate exceptions this system
- * cannot see. Two ₱180 taxi rides on one day is an ordinary Tuesday; a sub-floor daily rate can be a
- * lawful part-time or exempt arrangement. A rule that is wrong often enough gets routed around —
- * and for duplicates the workaround is nudging the amount, which destroys the only signal there is.
- */
+/** And — two gaps that both come down to nobody being told. */
 class DuplicateClaimAndMinimumWageTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -70,7 +54,7 @@ class DuplicateClaimAndMinimumWageTest extends HrTestCase
         ], $overrides);
     }
 
-    // --- FIN-032: duplicate claims ----------------------------------------------------------
+    // ---: duplicate claims ----------------------------------------------------------
 
     public function test_a_look_alike_claim_is_refused_until_confirmed(): void
     {
@@ -129,14 +113,14 @@ class DuplicateClaimAndMinimumWageTest extends HrTestCase
             ->assertJsonValidationErrors('amount');
     }
 
-    // --- FIN-030: minimum wage ---------------------------------------------------------------
+    // ---: minimum wage ---------------------------------------------------------------
 
     /**
      * @return array<string, mixed>|null
      */
     private function checkFor(Employee $employee): ?array
     {
-        // withPayrollChecks() — FIN-030b made the check opt-in so the 200-row directory does not
+        // withPayrollChecks() — made the check opt-in so the 200-row directory does not
         // derive 200 daily rates for a field it never shows.
         return (new EmployeeResource($employee))
             ->withPayrollChecks()
@@ -144,7 +128,7 @@ class DuplicateClaimAndMinimumWageTest extends HrTestCase
     }
 
     /**
-     * No floor configured warns about nothing — never a guessed legal threshold. FIN-030b: the
+     * No floor configured warns about nothing — never a guessed legal threshold.: the
      * DAILY RATE is still reported, because that is the number nobody can work out from the
      * monthly figure they typed, and it is most needed before anyone has entered a wage order.
      */

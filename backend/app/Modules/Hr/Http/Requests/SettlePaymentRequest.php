@@ -6,13 +6,7 @@ use App\Modules\Hr\Models\Payment;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-/**
- * Record what the bank did with one transfer (FIN-015).
- *
- * `settled` is the only outcome that means money reached the employee, so it is the only one that
- * moves a payslip to `disbursed`. The two unsuccessful outcomes require a reason, because a failed
- * transfer is a thing somebody now has to chase and "failed" on its own tells them nothing.
- */
+/** Record what the bank did with one transfer. */
 class SettlePaymentRequest extends FormRequest
 {
     public function authorize(): bool

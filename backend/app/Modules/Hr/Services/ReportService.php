@@ -28,20 +28,18 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
  * Read-only analytics for the Reports hub. Real aggregates where the data
  * exists; the diversity report + the attrition RATE are clearly flagged mock
  * (no termination / demographic data in the MVP schema).
- *
- * Money is pre-formatted server-side here (display-only reports).
  */
 class ReportService
 {
     public const KEYS = [
         'headcount', 'attrition', 'leave', 'compensation', 'payroll',
         'recruitment', 'diversity', 'health_safety', 'audit',
-        // MF-11 — the export route gates on THIS list, not on `get()`'s match. A report added to one
+        // The export route gates on THIS list, not on `get()`'s match. A report added to one
         // and not the other reads fine and refuses to export, which is how it would ship half-wired.
         'leave_liability',
-        // FIN-042 — the pre-disbursement review screen: register → totals → variance.
+        // The pre-disbursement review screen: register → totals → variance.
         'payroll_register',
-        // FIN-055 — the year-end check: tax due against tax withheld, per employee.
+        // The year-end check: tax due against tax withheld, per employee.
         'tax_reconciliation',
         // The three month-scoped attendance views, built by AttendanceReportService.
         ...AttendanceReportService::KEYS,
@@ -49,15 +47,15 @@ class ReportService
 
     public function __construct(
         private readonly AuditService $audit,
-        // Slice B9 — the legend resolves the dated rate version payroll actually priced with.
+        // The legend resolves the dated rate version payroll actually priced with.
         private readonly ContributionService $contributions,
-        // MF-11 — the leave-liability report values leave on exactly the basis final pay uses, so it
+        // The leave-liability report values leave on exactly the basis final pay uses, so it
         // borrows PayrollService rather than reimplementing `unusedLeaveDaysFor()` + `dailyRateFor()`.
         private readonly PayrollService $payrollService,
         // The attendance reports share one month-long day grid; they live in their own service so
         // the three of them can read the same calendar instead of rebuilding it each.
         private readonly AttendanceReportService $attendanceReports,
-        // FIN-055 — the reconciliation recomputes each employee's annual tax from the same dated
+        // The reconciliation recomputes each employee's annual tax from the same dated
         // table payroll used, rather than trusting the figure payroll happened to withhold.
         private readonly TaxService $tax,
     ) {}
@@ -103,10 +101,10 @@ class ReportService
     /** Table-style reports (Audit Trail) export as CSV; chart reports export as PDF. */
     public function exportFormat(string $key): string
     {
-        // MF-11 — the liability report exports CSV for the same reason the audit trail does: it is a
+        // The liability report exports CSV for the same reason the audit trail does: it is a
         // row-per-employee table that accounting reconciles against, not a chart anyone reads. The
         // attendance reports are the same shape: a register HR reconciles, not a chart.
-        // FIN-055 — the tax reconciliation joins that list for the same reason: it is a
+        // The tax reconciliation joins that list for the same reason: it is a
         // row-per-employee table accounting works through against BIR 2316, not a chart.
         return in_array($key, ['audit', 'leave_liability', 'payroll_register', 'tax_reconciliation', ...AttendanceReportService::KEYS], true)
             ? 'csv'
@@ -125,7 +123,7 @@ class ReportService
      */
     public function download(string $key, array $filters = []): HttpResponse
     {
-        // FIN-041 — an export carries EVERY row in range, not the first page. A file named after the
+        // An export carries EVERY row in range, not the first page. A file named after the
         // whole period that contains page 1 of 4 is the same silent truncation the old 300-row cap
         // was, moved into a filename.
         $report = $this->get($key, $filters + ['all' => true]);
@@ -174,7 +172,7 @@ class ReportService
             }
         }
 
-        // FIN-019 — audit `details`, usernames and generic table rows are all user-controlled
+        // Audit `details`, usernames and generic table rows are all user-controlled
         // free text, so they go out through the shared neutralising writer.
         return CsvWriter::render($rows);
     }
@@ -216,14 +214,7 @@ class ReportService
         return '₱' . number_format($n, 0);
     }
 
-    /**
-     * Money to the centavo (FIN-042 / FIN-017).
-     *
-     * `peso()` above is `number_format($n, 0)` — fine for a headline stat, fatal for a register. The
-     * whole point of a register is that its totals reconcile to `hr_payroll_runs.total_*` exactly, and
-     * rounding every row to whole pesos guarantees they will not. Same reason the remittance export
-     * writes full precision.
-     */
+    /** Money to the centavo. */
     private function pesoExact(float $n): string
     {
         return '₱' . number_format($n, 2);
@@ -436,22 +427,7 @@ class ReportService
     }
 
     /**
-     * The peso value of unused paid leave — an obligation that was nowhere on the books (MF-11).
-     *
-     * WHY THIS IS A LIABILITY AND NOT A STATISTIC. Unused paid leave turns into cash the moment
-     * somebody leaves: `runFinalPay()` converts it at the daily rate, and for the five-day Service
-     * Incentive Leave the Labour Code requires that conversion whether or not the employee asks
-     * (Art. 95). The company therefore owes this money now, and a balance sheet without it understates
-     * payroll obligations by the entire accrued balance. The existing Absences report already promised
-     * "liability accrual" in its own description and never computed one.
-     *
-     * IT DOES NOT DO ITS OWN ARITHMETIC. Every row comes from `PayrollService::leaveLiabilityFor()`,
-     * which is built on the same two functions final pay uses to value leave. A report that computed
-     * this independently would eventually disagree with the payslip it is predicting, and accounting
-     * would accrue one number while payroll paid another.
-     *
-     * IT IS AN ESTIMATE AT TODAY'S RATES, stated as such in the note. A raise between now and someone's
-     * eventual last day changes what their balance costs, and no report can know that in advance.
+     * The peso value of unused paid leave — an obligation that was nowhere on the books.
      *
      * @param  array<string, mixed>  $filters
      */
@@ -550,11 +526,7 @@ class ReportService
     }
 
     /**
-     * A gross/net total across the given runs, department-scoped and filter-aware (FIN-041).
-     *
-     * Unfiltered it is the calendar year from the run headers — exactly what it always was. Filtered it
-     * comes from the runs actually in scope, and from the payslips when a department is selected, because
-     * `hr_payroll_runs.total_*` is company-wide and cannot be split.
+     * A gross/net total across the given runs, department-scoped and filter-aware.
      *
      * @param  \Illuminate\Support\Collection<int, PayrollRun>  $runs
      */
@@ -581,11 +553,7 @@ class ReportService
 
     /**
      * One run's net, for the chart — from the run header normally, from the payslips when a department
-     * filter is on (FIN-041).
-     *
-     * `hr_payroll_runs.total_net` is company-wide by definition, so a departmental chart plotting it
-     * would show the same bars whatever department was selected — a filter that appears to work and
-     * does nothing.
+     * filter is on.
      */
     private function runNet(PayrollRun $run, ?int $deptId): float
     {
@@ -622,55 +590,19 @@ class ReportService
         return [
             $this->peso($gross),
             // Derived as gross − net rather than summing `total_deductions`: the payslip column is
-            // capped at gross (FIN-053), so summing it would not equal what actually came off.
+            // capped at gross, so summing it would not equal what actually came off.
             $this->peso(round($gross - $net, 2)),
             $this->peso($net),
         ];
     }
 
     /**
-     * The payroll register — the screen payroll review actually needs before disbursement (FIN-042).
-     *
-     * The only per-employee financial listing was the run CSV export: a file you download, open in a
-     * spreadsheet and add up by hand. There was no on-screen register, no department subtotal, and no
-     * comparison against the previous period — so the standard pre-disbursement check (register →
-     * totals → variance) had no supporting screen at all.
-     *
-     * ITS TOTALS MUST EQUAL `hr_payroll_runs.total_*` EXACTLY, which is the finding's own validation and
-     * the reason `pesoExact()` exists. A register whose figures are rounded to whole pesos cannot
-     * reconcile to anything, and a reconciliation view that does not reconcile is worse than none — it
-     * looks authoritative while being off by the sum of everyone's centavos.
-     *
-     * THE VARIANCE IS AGAINST THE PREVIOUS RUN OF THE SAME PAY GROUP, not simply the previous run. A
-     * semi-monthly cycle compared against a 13th-month run would show a meaningless swing, and the
-     * question being asked is "did anything move since last payday for these people".
-     *
-     * DEFAULTS TO THE LATEST COMPLETED RUN, because that is the one about to be paid. `?run=` picks
-     * another; `?department=` narrows the rows, and when it does the subtotals and the reconciliation
-     * note both say so rather than appearing to disagree with the run.
+     * The payroll register — the screen payroll review actually needs before disbursement.
      *
      * @param  array<string, mixed>  $filters
      */
     /**
-     * Year-end tax reconciliation (FIN-055) — per employee, tax DUE against tax WITHHELD.
-     *
-     * WHY THIS EXISTS RATHER THAN MORE GUARDS INSIDE PAYROLL. Withholding is a projection: each
-     * period taxes itself as though the year continued unchanged, and December settles the
-     * difference. That settlement is one step in one run, and every way it can silently not happen
-     * looks identical from the outside — a payslip already disbursed is refused a recompute, a
-     * locked run cannot be re-run, an employee who changed pay groups mid-year is counted in one
-     * group and settled in another, December is never re-run after a late correction, and a date
-     * bug once meant no weekly or bi-weekly cycle ever settled at all (FIN-053). Each of those was
-     * invisible in the app and would have surfaced at filing.
-     *
-     * Guards inside the engine can fail the same way the thing they guard fails. This reads the
-     * FINISHED payslips and recomputes the answer independently, so it cannot be fooled by the
-     * mechanism it is checking — and it is the same figure pair BIR 2316 and the alphalist report,
-     * so it is work that has to exist regardless.
-     *
-     * TAXABLE PAY IS SUMMED, NOT RE-DERIVED. `taxable_pay` is what each payslip actually taxed;
-     * rebuilding it from today's salaries and rules would measure the year against a rulebook it
-     * was never paid under, which is the drift every snapshot in this module exists to prevent.
+     * Year-end tax reconciliation — per employee, tax DUE against tax WITHHELD.
      *
      * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
@@ -741,11 +673,6 @@ class ReportService
                 $this->pesoExact($withheld),
                 ($gap > 0 ? '+' : '') . $this->pesoExact($gap),
                 // The word, not the sign — "short ₱1,300" is the sentence someone acts on.
-                //
-                // An employee whose year was never settled is reported as UNSETTLED rather than as
-                // over- or under-withheld, whatever the difference says. Until the closing cycle
-                // runs, that difference is the projection working as designed; calling it a
-                // discrepancy would make the report wrong on every payslip of every open year.
                 match (true) {
                     abs($gap) <= $tolerance && $settledEver => 'Balanced',
                     ! $settledEver => 'Not settled yet',
@@ -795,15 +722,7 @@ class ReportService
             ->all();
     }
 
-    /**
-     * What the reader should do about it, in one sentence.
-     *
-     * A MID-YEAR GAP IS NORMAL AND MUST NOT READ AS AN ALARM. Withholding projects each period
-     * across a full year, so a year only part-way through has collected against pay that has not
-     * happened: every employee legitimately shows as over-withheld until the closing cycle settles
-     * them. A report that cries wolf every month is one nobody reads in December, when it matters —
-     * so an unsettled year is described as unfinished rather than as a discrepancy.
-     */
+    /** What the reader should do about it, in one sentence. */
     private function reconciliationNote(int $count, int $short, int $over, int $unsettled, int $year): string
     {
         if ($count === 0) {
@@ -1024,11 +943,6 @@ class ReportService
     /**
      * One payslip as register figures plus their display strings.
      *
-     * `other_earnings` catches the non-ordinary run types — 13th month, an adjustment, separation pay
-     * and leave conversion — so a register covering one of those runs still adds up to its gross
-     * instead of showing a gross explained by nothing. That was FIN-011's defect on the payslip; the
-     * register would have had the same hole.
-     *
      * @return array{figures: array<string, float>, display: list<string>}
      */
     private function registerLine(Payslip $slip): array
@@ -1065,21 +979,7 @@ class ReportService
     }
 
     /**
-     * Payroll & cost — now filterable by period, department and pay group (FIN-041 / FIN-017).
-     *
-     * IT LISTED EVERY COMPLETED RUN EVER, with no way to narrow it, so reconciling a single month or a
-     * single department was impossible on screen. The YTD figures were the only aggregates and they
-     * were fixed to the calendar year.
-     *
-     * `from`/`to` bound the CYCLE, `frequency` picks the pay group, `department` narrows the per-employee
-     * aggregates. THE LABELS CHANGE WITH THE FILTER — "Net computed (YTD)" becomes "(in range)" once a
-     * range is set, because a figure whose label lies about its own scope is how FIN-052 happened in the
-     * first place (a "Net paid" label over a computed-runs sum).
-     *
-     * A DEPARTMENT FILTER CANNOT NARROW A RUN'S OWN TOTALS — `hr_payroll_runs.total_*` is company-wide by
-     * definition. So when one is set, the run table and the per-run chart are computed from the payslips
-     * instead, and the note says so. Silently showing whole-company run totals under a department filter
-     * would be the more dangerous alternative.
+     * Payroll & cost — now filterable by period, department and pay group.
      *
      * @param  array<string, mixed>  $filters
      */
@@ -1113,15 +1013,11 @@ class ReportService
             ? (float) $runs->filter(fn ($r) => (int) $r->cycle_start->format('Y') === $this->year())->sum('total_net')
             : (float) $scopedSlips()->sum('hr_payslips.net_pay');
 
-        // FIN-052 — this figure used to be labelled "Net paid (YTD)" while summing COMPLETED RUNS.
+        // This figure used to be labelled "Net paid (YTD)" while summing COMPLETED RUNS.
         // A run reaches `completed` the moment payroll finishes computing it; whether the money
         // ever left is a separate fact entirely. So the headline number management reads first
         // asserted cash movement that may not have happened, and a computed-but-unpaid cycle
         // inflated it by a full period with nothing on the report to say so.
-        //
-        // Split into what was computed and what was actually disbursed. Both are shown, because
-        // each answers a real question — "what did this year's payroll cost" and "what has
-        // actually gone out" — and collapsing them is what caused the problem.
         $disbursedYtd = (float) ($deptId === null && ! $ranged && ! $frequency
             ? Payslip::query()
                 ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
@@ -1138,7 +1034,7 @@ class ReportService
             : 0;
 
         // Government remittance (YTD): employee vs employer contribution per agency,
-        // summed over this year's completed runs' payslips (P2-3).
+        // summed over this year's completed runs' payslips.
         $agg = ($deptId === null && ! $ranged && ! $frequency
             ? Payslip::query()
                 ->join('hr_payroll_runs', 'hr_payslips.payroll_run_id', '=', 'hr_payroll_runs.id')
@@ -1162,9 +1058,9 @@ class ReportService
             'description' => 'Run history, gross-to-net, cost per head and government remittance.',
             'mock' => false,
             'summary' => [
-                // "Computed" and "disbursed" are different claims — see FIN-052 above.
-                // FIN-041 — the label states its own scope. A figure whose label lies about what it
-                // covers is exactly how FIN-052 happened.
+                // "Computed" and "disbursed" are different claims — see above.
+                // The label states its own scope. A figure whose label lies about what it
+                // covers is exactly how happened.
                 ['label' => 'Net computed ' . $scopeLabel, 'value' => $this->peso($netYtd)],
                 ['label' => 'Net disbursed ' . $scopeLabel, 'value' => $this->peso($disbursedYtd)],
                 ['label' => 'Awaiting payment', 'value' => $this->peso($awaitingPayment)],
@@ -1329,7 +1225,7 @@ class ReportService
     {
         $deptId = $filters['department'] ?? null;
         $months = (int) ($filters['months'] ?? 9);
-        // FIN-041 — an explicit range wins over the rolling `months` window. Both are kept: `months` is
+        // An explicit range wins over the rolling `months` window. Both are kept: `months` is
         // what the chart has always used, and a date range is what reconciling a specific period needs.
         $from = $filters['from'] ?? null;
         $to = $filters['to'] ?? null;
@@ -1339,17 +1235,7 @@ class ReportService
             ? Carbon::parse($from, config('app.timezone_local'))->startOfDay()
             : now(config('app.timezone_local'))->startOfMonth()->subMonths(max(0, $months - 1));
 
-        // Contribution rates for the legend labels — from the DATED VERSION IN FORCE (Slice B9
-        // item 2), not the legacy `hr_contribution_settings.config`.
-        //
-        // That config is the row B3a replaced: payroll has priced from `hr_contribution_versions`
-        // since then and nothing writes the old one, so the legend read whatever was last left
-        // there. It agreed by luck — both said 2.5% — and would have been wrong the first time a
-        // rate changed, labelling a chart of real payslips with a rate none of them used.
-        //
-        // Resolved as of TODAY rather than per run: one legend serves bars from several cycles, so
-        // there is no single cycle-end to resolve against. A rate change mid-chart is a labelling
-        // limit worth accepting; a rate that was never in force is not.
+        // Contribution rates for the legend labels — from the DATED VERSION IN FORCE, not the legacy `hr_contribution_settings.config`.
         $versions = $this->contributions->versionsAsOf(now(config('app.timezone_local'))->toDateString());
         $rate = function (string $type) use ($versions): string {
             $version = $versions->get($type);
@@ -1397,13 +1283,6 @@ class ReportService
         }
 
         // Benefits coverage — % of employees enrolled in each contribution.
-        //
-        // BOTH SIDES OF THIS FRACTION MUST MEAN THE SAME PEOPLE (B13 item 7 / B9 item 4). The
-        // numerator counted every row in `hr_employee_benefits` while the denominator counted only
-        // live employees, and a checklist row outlives the employee it belongs to — 7 soft-deleted
-        // employees × 3 contributions left 21 rows against 14 people, so this tile read **150%**.
-        // The rows are deliberately kept (an employee can be restored, and their enrolment should
-        // come back with them), so the fix is to count through the employee, not to delete them.
         $total = max(1, Employee::count());
         $coverage = [];
         foreach (['sss' => 'SSS', 'philhealth' => 'PhilHealth', 'pagibig' => 'Pag-IBIG'] as $type => $label) {
@@ -1427,10 +1306,10 @@ class ReportService
             'description' => 'Gross-to-net breakdowns, cost per head, benefits coverage, payroll run history for audit.',
             'mock' => false,
             'summary' => [
-                // FIN-052 — "computed", not "paid". A completed run means payroll finished
+                // "computed", not "paid". A completed run means payroll finished
                 // calculating; it says nothing about whether the money left. See payroll() above.
-                // FIN-041 — these follow the filter, and the LABEL says which scope it is showing.
-                // A figure labelled YTD while a range is applied is the FIN-052 mistake again.
+                // These follow the filter, and the LABEL says which scope it is showing.
+                // A figure labelled YTD while a range is applied is the mistake again.
                 ['label' => 'Gross computed ' . $scopeLabel, 'value' => $this->peso($this->compensationTotal($runs, 'total_gross', $deptId, $ranged || $frequency))],
                 ['label' => 'Net computed ' . $scopeLabel, 'value' => $this->peso($this->compensationTotal($runs, 'total_net', $deptId, $ranged || $frequency))],
                 ['label' => 'Benefits coverage', 'value' => count($coverage) ? ($coverage[0]['display']) : '—'],
@@ -1438,7 +1317,7 @@ class ReportService
             'bars' => null,
             'table' => null,
             'stacked' => ['series' => $series, 'points' => $points],
-            // FIN-041 — the pay groups with completed runs, so the filter only offers real options.
+            // The pay groups with completed runs, so the filter only offers real options.
             'pay_groups' => PayrollRun::where('status', 'completed')
                 ->distinct()
                 ->orderBy('frequency')
@@ -1508,22 +1387,12 @@ class ReportService
     }
 
     /** @param array<string, mixed> $filters */
-    /** @param array<string, mixed> $filters */
     private function audit(array $filters): array
     {
         $months = (int) ($filters['months'] ?? 9);
         $since = now(config('app.timezone_local'))->startOfMonth()->subMonths(max(0, $months - 1));
 
-        // FIN-041 — PAGINATED, and it states the total.
-        //
-        // This used to `take(300)` with nothing saying so. An audit export presented as complete was
-        // not: with 500 entries in range, 200 were silently absent and the file looked finished. For
-        // the report whose entire purpose is "who did what", a silent truncation is the one failure
-        // mode that matters, because the missing rows are invisible by construction.
-        //
-        // `all` is for the export. A CSV is read by a person reconciling something, and handing them
-        // page 1 of 4 in a file named after the whole range would recreate the same lie in a new
-        // place. The page cap exists for the SCREEN, which cannot usefully render 20,000 rows.
+        // PAGINATED, and it states the total.
         $query = AuditLog::with('user')->where('created_at', '>=', $since)->latest();
 
         $total = $query->clone()->count();
@@ -1550,7 +1419,7 @@ class ReportService
                 'action' => $a->action,
                 'details' => $a->description ?? '—',
             ])->all(),
-            // FIN-041 — so the screen can page, and so "showing 100 of 4,312" is sayable. The
+            // So the screen can page, and so "showing 100 of 4,312" is sayable. The
             // absence of this is what made the old cap silent.
             'pagination' => [
                 'total' => $total,

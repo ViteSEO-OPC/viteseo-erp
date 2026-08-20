@@ -17,21 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
-/**
- * FIN-038 — pricing a payslip used to write enrolment rows.
- *
- * `ContributionService::effectiveFor()` — a read path, called per employee from inside `run()`'s
- * single transaction — called `benefitsFor()`, which `firstOrCreate`s any missing
- * `hr_employee_benefits` row. Three consequences: a read mutated enrolment data; a large run added
- * N × types INSERTs and their row locks to the critical path of a transaction that already holds the
- * payroll tables; and the first run after someone switched a contribution ON enrolled the entire
- * company as a side effect of computing pay.
- *
- * THE ASSERTION IS ON THE QUERY LOG, not on the row count, because a row count cannot tell the
- * difference between "no write happened" and "the write was idempotent and the rows already
- * existed". The audit's validation step is worded the same way: assert `run()` issues no INSERT to
- * `hr_employee_benefits`.
- */
+/** Pricing a payslip used to write enrolment rows. */
 class PayrollDoesNotWriteEnrolmentsTest extends HrTestCase
 {
     use RefreshDatabase;

@@ -43,6 +43,9 @@ class AttendanceController extends Controller
                         'work_request' => null,
                         'suspension' => null,
                     ],
+                    // Same reason as clock_in above: the shape must match the real branch's, or
+                    // the panel's optional chaining ends up deciding the day's rules.
+                    'day_rules' => null,
                 ],
             ]);
         }
@@ -56,6 +59,9 @@ class AttendanceController extends Controller
                 // Lets the panel disable "Time in" and say when it opens, instead of the
                 // employee discovering the strict rule through a rejected press.
                 'clock_in' => $this->service->clockInWindowFor($employee),
+                // Today's declared rules, so the panel can say "full day at 6h — you reach it
+                // at 3:12 PM" instead of leaving the employee to discover it on their payslip.
+                'day_rules' => $this->service->dayRulesFor($employee),
             ],
         ]);
     }
@@ -63,9 +69,6 @@ class AttendanceController extends Controller
     /**
      * GET /api/v1/hr/me/attendance-report?month=YYYY-MM — the caller's OWN month, day by day,
      * with the twelve-month context around it.
-     *
-     * The employee is resolved from the token, never from the query string: this returns one
-     * person's punches, lateness and leave, and a client-supplied id would make it everyone's.
      */
     public function myReport(Request $request): JsonResponse
     {
@@ -138,13 +141,7 @@ class AttendanceController extends Controller
         return response()->json(['data' => $this->service->summary($request->query('date'))]);
     }
 
-    /**
-     * GET /api/v1/hr/attendance/open-shifts?from=&to= — the stale-attendance review queue (item 6).
-     *
-     * Shifts with a punch in and none out, split into the ones auto-closure could not price
-     * (`needs_fix`, the pay is wrong until HR corrects it) and the ones it could (`auto_closed`,
-     * tidy-up only). Corrections go back through `attendance/adjust` below — this only finds them.
-     */
+    /** GET /api/v1/hr/attendance/open-shifts?from=&to= — the stale-attendance review queue (item 6). */
     public function openShifts(Request $request): JsonResponse
     {
         $data = $request->validate([

@@ -1,4 +1,4 @@
-// Phase-2 Slice 21 — concerns + meeting scheduling (privacy-critical).
+// Phase-2 — concerns + meeting scheduling (privacy-critical).
 
 export const CONCERN_CATEGORIES = [
   { value: "conduct", label: "Workplace Conduct" },
@@ -36,13 +36,7 @@ export interface ConcernAttachment {
   mime: string | null;
 }
 
-/**
- * HR asking an anonymous reporter to identify themselves — and their answer.
- *
- * Both sides see the same object: the reporter needs the reason and the asker's name to decide,
- * and HR needs the refusal and ITS reason rather than a silence to interpret. Nothing here
- * carries the reporter's identity; that lives on the concern behind `identity_revealed_at`.
- */
+/** HR asking an anonymous reporter to identify themselves — and their answer. */
 export interface ConcernRevealRequest {
   id: number;
   status: "pending" | "accepted" | "declined";

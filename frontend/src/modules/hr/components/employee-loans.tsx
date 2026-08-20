@@ -35,19 +35,13 @@ const TYPE_LABEL: Record<string, string> = {
   other: "Other",
 };
 
-/**
- * Loans & cash advances repaid through payroll (Slice 11b).
- *
- * `outstanding` is DERIVED on the server from the payment ledger, never a stored figure — so
- * what's shown here always matches what payroll has actually collected, however many times a
- * cycle has been re-run.
- */
+/** Loans & cash advances repaid through payroll. */
 export function EmployeeLoans({ employeeId }: { employeeId: number }) {
   const { data: loans, isLoading } = useEmployeeLoans(employeeId);
   const createMut = useCreateEmployeeLoan(employeeId);
   const cancelMut = useCancelEmployeeLoan(employeeId);
   const reopenMut = useReopenEmployeeLoan(employeeId);
-  // Slice B15 — HR decides on a request. Neither outcome starts a deduction.
+  // HR decides on a request. Neither outcome starts a deduction.
   const decideMut = useDecideLoan(employeeId);
 
   const [adding, setAdding] = useState(false);
@@ -59,7 +53,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
     principal: "",
     per_period_amount: "",
     start_date: new Date().toISOString().slice(0, 10),
-    // FIN-032 — the terms. Blank/0 = interest-free, which is a real product, not a gap.
+    // The terms. Blank/0 = interest-free, which is a real product, not a gap.
     interest_rate: "",
     interest_period: "annual",
     fees: "",
@@ -192,9 +186,11 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
             />
           </div>
 
-          {/* FIN-032 — the terms. Diminishing balance: interest is charged each period on what is
-              STILL OWED, so the rate typed here is the rate the employee actually pays. Blank = 0%,
-              which is an interest-free advance. */}
+          {/*
+           * The terms. Diminishing balance: interest is charged each period on what is
+           * STILL OWED, so the rate typed here is the rate the employee actually pays. Blank = 0%,
+           * which is an interest-free advance.
+           */}
           <div className="space-y-1.5">
             <Label htmlFor="loan-rate">Interest rate (%)</Label>
             <Input
@@ -285,8 +281,10 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                 <th className="px-4 py-2.5 text-left">Started</th>
                 <th className="px-4 py-2.5 text-right">Total</th>
                 <th className="px-4 py-2.5 text-right">Per period</th>
-                {/* FIN-032 — the terms belong on the row: an instalment without its rate reads as
-                    the whole cost of the loan, which is what made the old field misleading. */}
+                {/*
+                 * The terms belong on the row: an instalment without its rate reads as
+                 * the whole cost of the loan, which is what made the old field misleading.
+                 */}
                 <th className="px-4 py-2.5 text-right">Rate</th>
                 <th className="px-4 py-2.5 text-right">Repaid</th>
                 <th className="px-4 py-2.5 text-right">Outstanding</th>
@@ -337,9 +335,11 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
                     <StatusBadge status={l.status} />
                   </td>
                   <td className="px-4 py-2.5 text-right">
-                    {/* Slice B15 — approving is the COMPANY's decision. The deduction still waits
-                        on the employee's own authorization (Labor Code Art. 113), which is why
-                        there is no "activate" here for HR to press. */}
+                    {/*
+                     * Approving is the COMPANY's decision. The deduction still waits
+                     * on the employee's own authorization (Labor Code Art. 113), which is why
+                     * there is no "activate" here for HR to press.
+                     */}
                     {l.status === "requested" && (
                       <span className="inline-flex gap-1">
                         <Button
@@ -421,7 +421,7 @@ export function EmployeeLoans({ employeeId }: { employeeId: number }) {
         onConfirm={onCancel}
       />
 
-      {/* FIN-032 — what the employee is consenting to under Art. 113: the schedule, not just the rate. */}
+      {/* What the employee is consenting to under Art. 113: the schedule, not just the rate. */}
       <LoanScheduleDialog
         loanId={scheduleId}
         open={scheduleId !== null}

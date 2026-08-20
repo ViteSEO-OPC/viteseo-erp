@@ -128,16 +128,13 @@ export default function PayslipsPage() {
         {/* History — pay periods; finalized ones are viewable */}
         <div className="flex flex-col gap-3">
           {/*
-            An invisible twin of the detail pane's action bar. Those buttons sit
-            outside the document so the payslip stays a payslip, which also means
-            the payslip's top edge starts a row lower than History's did — the two
-            cards read as misaligned. Mirroring the bar's height (`h-8`, set by the
-            Download button) and the same `gap-3` lines the card up with the
-            payslip itself rather than with the buttons above it.
-
-            Only from `lg`, where the two are actually side by side, and only when
-            a payslip is open — the empty panel has no action bar to match.
-          */}
+           * An invisible twin of the detail pane's action bar. Those buttons sit
+           * outside the document so the payslip stays a payslip, which also means
+           * the payslip's top edge starts a row lower than History's did — the two
+           * cards read as misaligned. Mirroring the bar's height (`h-8`, set by the
+           * Download button) and the same `gap-3` lines the card up with the
+           * payslip itself rather than with the buttons above it.
+           */}
           {showDetail && <div aria-hidden className="hidden h-8 lg:block" />}
 
           <div className="h-fit overflow-hidden rounded-card border border-border bg-card shadow-sm">

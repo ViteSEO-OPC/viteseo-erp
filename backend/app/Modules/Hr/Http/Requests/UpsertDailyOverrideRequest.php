@@ -20,6 +20,11 @@ class UpsertDailyOverrideRequest extends FormRequest
         return [
             'date' => ['required', 'date_format:Y-m-d'],
             'grace_minutes' => ['nullable', 'integer', 'min:0', 'max:240'],
+            // The compensable-day threshold, in MINUTES. Floor of 1 because zero would mean
+            // "clocking in at all earns a full day", which is not a shortened day, it is no
+            // day at all. Ceiling of 24h so a typo cannot declare an unreachable bar that
+            // silently makes every employee undertime.
+            'min_full_day_minutes' => ['nullable', 'integer', 'min:1', 'max:1440'],
         ];
     }
 }

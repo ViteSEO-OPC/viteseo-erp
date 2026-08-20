@@ -9,9 +9,6 @@ use Illuminate\Validation\Rule;
 /**
  * Correcting a role on the employment timeline. Partial: only the keys sent are written, so a
  * dialog can fix a typo'd title without restating the dates.
- *
- * `end_date` uses `present` rather than `sometimes` because sending it as null is meaningful here —
- * it reopens the role as the current one — and `sometimes` cannot tell "sent as null" from "absent".
  */
 class UpdateEmploymentHistoryRequest extends FormRequest
 {

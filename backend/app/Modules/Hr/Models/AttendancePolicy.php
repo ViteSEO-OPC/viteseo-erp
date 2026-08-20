@@ -30,7 +30,7 @@ class AttendancePolicy extends Model
         'office_ips',
         'overtime_mode',
         'overtime_threshold_minutes',
-        // FIN-039 — how much auto-mode overtime pays without anyone approving it. 0 = uncapped.
+        // How much auto-mode overtime pays without anyone approving it. 0 = uncapped.
         'auto_overtime_daily_cap_minutes',
         'auto_overtime_period_cap_minutes',
         // Item 7 — a day's auto overtime worth flagging for review. Notifies, never withholds.

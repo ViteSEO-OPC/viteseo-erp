@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 19. Employees request a document (payroll/leave/attendance/CoE);
+// Phase-2. Employees request a document (payroll/leave/attendance/CoE);
 // HR fulfils (optionally attaching a file) or rejects.
 return new class extends Migration
 {

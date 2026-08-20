@@ -13,24 +13,7 @@ use App\Modules\Hr\Models\SalaryHistory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Hand-editing the two timelines on the employee record.
- *
- * Both are written automatically and both now accept corrections, but they are NOT the same kind of
- * data and the tests are split on that line.
- *
- * The employment timeline is a record for people. Nothing reads it, so a correction can only be
- * right or wrong about history — never expensive. It is free, with one structural rule: exactly one
- * role may be open, because `recordRoleChange()` finds the role to close by looking for the row
- * without an end date, and two of those makes the next promotion close an arbitrary one.
- *
- * The compensation timeline prices payroll. `salariesAsOf()` pays an employee the latest row with
- * `effective_date <= cycle_end`, so editing a row changes money and deleting one removes the basis
- * for a payslip that was already issued. Hence: settled rows correctable only with an explicit
- * acknowledgement (and a retro flag to track the difference), settled rows never deletable, and
- * never a record with no rows left at all — that one falls back to today's salary for every period
- * ever run, which is the same corruption arriving quietly.
- */
+/** Hand-editing the two timelines on the employee record. */
 class HistoryEditingTest extends HrTestCase
 {
     use RefreshDatabase;

@@ -2,25 +2,7 @@
 
 namespace App\Modules\Hr\Services;
 
-/**
- * Writes CSV rows with spreadsheet formula injection neutralised (FIN-019).
- *
- * THE PROBLEM. Excel, LibreOffice and Sheets treat a cell whose first character is `=`, `+`, `-`
- * or `@` as a FORMULA rather than text. Several columns in this module's exports are free text an
- * employee controls — their own name, a department name, an audit description, concern text. An
- * employee named `=cmd|'/c calc'!A1` produces a payroll CSV that executes on open, and the machine
- * it opens on is finance's, which is exactly the machine worth attacking. The file is not
- * malformed and nothing warns: the export looks perfectly normal right up to the moment it runs.
- *
- * THE FIX is the accepted one (OWASP): prefix a dangerous leading character with a single quote,
- * which spreadsheets read as "the rest of this cell is literal text" and do not display. Tab and
- * carriage return are included because they are stripped by some parsers before the formula check,
- * putting the trigger character back at the front.
- *
- * WHY A SHARED CLASS. `PayrollService::runCsv()` and `ReportService::buildCsv()` each opened their
- * own handle and called `fputcsv()` directly. Two writers means the next export added is a coin
- * flip on whether it is safe — the point of this class is that there is one place to be right.
- */
+/** Writes CSV rows with spreadsheet formula injection neutralised. */
 final class CsvWriter
 {
     /**

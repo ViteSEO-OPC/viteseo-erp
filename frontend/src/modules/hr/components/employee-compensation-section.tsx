@@ -57,14 +57,14 @@ const schema = z.object({
   philhealth_number: optionalText(32),
   pagibig_number: optionalText(32),
   is_management: z.boolean(),
-  // FIN-030b — out of the minimum-wage check, with the reason on the record. The server requires
+  // Out of the minimum-wage check, with the reason on the record. The server requires
   // the reason when the flag is set; asked for here so it is never a silent exemption.
   minimum_wage_exempt: z.boolean(),
   minimum_wage_exempt_reason: optionalText(),
   // Only consulted when the base salary actually changes.
   salary_change_type: z.string(),
   salary_change_reason: optionalText(),
-  // FIN-007 — the date the new salary actually takes effect. Blank means today, which is what
+  // The date the new salary actually takes effect. Blank means today, which is what
   // every salary change used to be stamped with whether or not that was true.
   salary_effective_date: z.string(),
 });
@@ -136,7 +136,7 @@ export function EmployeeCompensationSection({
   children?: React.ReactNode;
 }) {
   /**
-   * FIN-007 — backdating a salary over a completed payroll run is refused until HR confirms, and
+   * Backdating a salary over a completed payroll run is refused until HR confirms, and
    * the message names the affected periods. That refusal is a QUESTION, so it becomes a dialog
    * rather than a red field the user cannot get past.
    */
@@ -188,14 +188,9 @@ export function EmployeeCompensationSection({
     },
     { name: "bank_account", label: "Bank account number", placeholder: "1234-5678-9012-34" },
     { name: "bank_account_name", label: "Bank account name" },
-    // Slice B7 — SSS / PhilHealth / Pag-IBIG moved OUT of this grid into their own block below.
+    // SSS / PhilHealth / Pag-IBIG moved OUT of this grid into their own block below.
     // Sitting here they read as three ordinary peso boxes beside the bank details, with nothing
     // to say that filling one switches off the government rates for that employee.
-    //
-    // Slice B9 — the food / transportation / load boxes that used to close this list are gone.
-    // Payroll stopped reading them in B1, so raising someone's food allowance here changed
-    // nothing on their payslip. Allowances are programmes in Company → Benefits, and the
-    // catalogue is not three of anything — it grows and shrinks as HR adds and deletes them.
   ];
 
   return (
@@ -233,7 +228,7 @@ export function EmployeeCompensationSection({
                   placeholder: "e.g. Annual increase",
                 },
                 {
-                  // FIN-007 — a raise agreed for 1 August but entered on 5 September used to
+                  // A raise agreed for 1 August but entered on 5 September used to
                   // price August at the OLD salary, permanently. The date is now recorded as it
                   // really is; leaving it blank keeps the previous behaviour (effective today).
                   name: "salary_effective_date",
@@ -248,30 +243,31 @@ export function EmployeeCompensationSection({
           </div>
         )}
 
-        {/* FIN-030 / FIN-030b — the derived daily rate, always, with the floor beside it when one
-            is configured. Advisory and never blocking: the floor varies by region, industry and
-            establishment size, and this system does not know which apply. It is shown at all
-            because the daily rate is DERIVED (salary ÷ the policy's basis), so nobody typing a
-            monthly figure can see what it implies per day — which is the actual gap, not that HR
-            would knowingly underpay. */}
+        {/*
+         *  / — the derived daily rate, always, with the floor beside it when one
+         * is configured. Advisory and never blocking: the floor varies by region, industry and
+         * establishment size, and this system does not know which apply. It is shown at all
+         * because the daily rate is DERIVED (salary ÷ the policy's basis), so nobody typing a
+         * monthly figure can see what it implies per day — which is the actual gap, not that HR
+         * would knowingly underpay.
+         */}
         <MinimumWageBlock employee={employee} editing={editing} form={form} />
 
-        {/* Slice B14 — what replaces the three fixed allowance boxes B9 removed. Rendered from
-            the catalogue, so it follows however many allowances the company has.
-            
-            Three states, not two. HR editing gets the catalogue block; an employee gets their own
-            read-only figures from a self-service endpoint; HR looking at an ARCHIVED record gets
-            neither, because the HR reader does not resolve a soft-deleted employee and would only
-            render a load error. */}
+        {/*
+         * What replaces the three fixed allowance boxes B9 removed. Rendered from
+         * the catalogue, so it follows however many allowances the company has.
+         */}
         {isHr ? (
           canEdit && <EmployeeAllowancesBlock employeeId={employee.id} />
         ) : (
           <MyAllowancesBlock />
         )}
 
-        {/* Slice B9 item 3 — who pays into what. Sits under the overrides on purpose: this is
-            the honest way to express "this person is exempt", and the block above is the one
-            that cannot express it without breaking the remittance. */}
+        {/*
+         * Who pays into what. Sits under the overrides on purpose: this is
+         * the honest way to express "this person is exempt", and the block above is the one
+         * that cannot express it without breaking the remittance.
+         */}
         {(isHr ? canEdit : true) && (
           <ContributionEnrolmentBlock employeeId={employee.id} canEdit={canEdit} />
         )}
@@ -325,7 +321,7 @@ export function EmployeeCompensationSection({
         {children}
       </div>
 
-      {/* FIN-007 — backdating is allowed, but never silently. */}
+      {/* Backdating is allowed, but never silently. */}
       <Dialog open={backdateWarning !== null} onOpenChange={(o) => !o && setBackdateWarning(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>

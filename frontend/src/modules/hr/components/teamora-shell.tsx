@@ -14,32 +14,7 @@ import { useViewMode } from "@/modules/hr/components/view-mode-context";
 import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
 import { useMyEmployee } from "@/modules/hr/hooks/use-my-employee";
 
-/**
- * TeamOra's responsive frame — an HR-local replacement for `core/AppShell`.
- *
- * `AppShell` renders the sidebar as a permanent 256px column, which leaves a
- * 375px phone ~119px for content. This wraps the shared core `Sidebar` and
- * `TopBar` instead of forking them: below `xl` the sidebar becomes an
- * off-canvas drawer opened by a hamburger, at `xl`+ it is the static column
- * exactly as before.
- *
- * The switch is `xl` (1280px), not `lg`: the sidebar costs a flat 256px, so at
- * 1024px it was taking a quarter of the window and leaving pages — the employee
- * record worst of all, since it spends another 300px on its own rail — too
- * little to lay out in. Every real laptop width (1280, 1366, 1440, 1512, 1536)
- * still gets the persistent column; the drawer covers iPad-landscape and
- * half-screen windows, which are tablet-shaped anyway.
- *
- * Anything positioned against the sidebar from outside the shell has to move
- * with this. Today that is the modal offset in `components/ui/dialog.tsx`
- * (`xl:left-64`) — keep the two breakpoints identical or modals centre on a
- * sidebar that isn't there.
- *
- * It lives in `modules/hr/` rather than `core/` so the shared shell (which
- * Sprintly/Zerem also render) stays untouched. The drawer mechanics mirror
- * `core/layout/Sidebar.tsx`, the Projects shell that already does this —
- * worth consolidating the two once the platform merge lands.
- */
+/** TeamOra's responsive frame — an HR-local replacement for `core/AppShell`. */
 export function TeamoraShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const router = useRouter();
@@ -92,9 +67,11 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
 
   return (
     <NotificationProvider>
-      {/* Pinned to the viewport so the document itself never scrolls — only
-          `main` does. (min-w-0 lets wide content scroll inside `main` rather
-          than pushing the whole page sideways.) */}
+      {/*
+       * Pinned to the viewport so the document itself never scrolls — only
+       * `main` does. (min-w-0 lets wide content scroll inside `main` rather
+       * than pushing the whole page sideways.)
+       */}
       <div className="fixed inset-0 flex overflow-hidden">
         {/* Desktop: the static column, unchanged from AppShell. */}
         <div className="hidden xl:flex">
@@ -144,9 +121,11 @@ export function TeamoraShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Two bars, one at a time: the HR-owned mobile bar below `xl` (it
-              carries the hamburger, and a notification dropdown that fits a
-              320px screen), core's shared bar from `xl` up. */}
+          {/*
+           * Two bars, one at a time: the HR-owned mobile bar below `xl` (it
+           * carries the hamburger, and a notification dropdown that fits a
+           * 320px screen), core's shared bar from `xl` up.
+           */}
           <TeamoraMobileTopBar
             variant={variant}
             onOpenNav={() => setMobileOpen(true)}

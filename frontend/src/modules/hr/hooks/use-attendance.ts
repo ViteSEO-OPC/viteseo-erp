@@ -70,14 +70,7 @@ export function useAdjustAttendance() {
   });
 }
 
-/**
- * The stale-attendance review queue (item 6).
- *
- * Keyed UNDER ["hr","attendance"] deliberately: `useAdjustAttendance` invalidates that prefix,
- * so correcting a row makes it leave the queue with no extra wiring. The queue also has to be
- * re-read after a correction rather than patched, because fixing one day can change whether a
- * neighbouring overnight row still counts as open.
- */
+/** The stale-attendance review queue (item 6). */
 export function useOpenShifts(from?: string, to?: string) {
   return useQuery({
     queryKey: ["hr", "attendance", "open-shifts", from ?? "", to ?? ""],
@@ -145,12 +138,22 @@ export function useDailyOverride(date?: string) {
 export function useUpsertDailyOverride() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ date, graceMinutes }: { date: string; graceMinutes: number | null }) =>
-      upsertDailyOverride(date, graceMinutes),
+    mutationFn: ({
+      date,
+      graceMinutes,
+      minFullDayMinutes,
+    }: {
+      date: string;
+      graceMinutes: number | null;
+      minFullDayMinutes: number | null;
+    }) => upsertDailyOverride(date, graceMinutes, minFullDayMinutes),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hr", "daily-override"] });
       qc.invalidateQueries({ queryKey: ["hr", "attendance-summary"] });
       qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+      // The rule the employee panel prints comes from `me/attendance`, so changing it here
+      // has to refresh that too — an HR officer is an employee with a clock panel as well.
+      qc.invalidateQueries({ queryKey: MY_KEY });
     },
   });
 }

@@ -15,21 +15,7 @@ use App\Modules\Hr\Services\NotificationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Every request type HR can decide must appear in the aggregates that claim to list them.
- *
- * THE FAILURE THIS GUARDS is silent by construction. Overtime, early-out, half-day and loan
- * requests all had working approve/reject endpoints and their own review page, and were absent
- * from the dashboard's Pending Approvals, the notification bell, and the nav badges. Nothing
- * errored: a request simply arrived, sat in a queue nobody was shown, and was found only if
- * somebody happened to open the right page. Adding the fifth request type without adding it here
- * would reproduce that exactly, so each surface is asserted per type rather than in aggregate.
- *
- * The badge assertions matter as much as the queue ones. Counts are keyed by NAV HREF and the
- * sidebar matches `navBadges[child.href]` by exact string, so a count written against a path that
- * is not a nav item is dropped without complaint — which is how the leave badge went missing for
- * as long as it did.
- */
+/** Every request type HR can decide must appear in the aggregates that claim to list them. */
 class ApprovalQueueCoverageTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -38,9 +24,6 @@ class ApprovalQueueCoverageTest extends HrTestCase
 
     /**
      * The hrefs the sidebar can actually match, mirroring `frontend/src/core/nav.ts`.
-     *
-     * Duplicated deliberately: the backend cannot import the nav, so without a copy here a stale
-     * badge key stays invisible. If nav.ts changes, this list is the thing that fails.
      *
      * @var list<string>
      */
@@ -254,7 +237,7 @@ class ApprovalQueueCoverageTest extends HrTestCase
 
     // --- the dashboard ------------------------------------------------------------------------
 
-    /** `leavers` was hardcoded to 0 with a note that stopped being true when MF-18 shipped. */
+    /** `leavers` was hardcoded to 0 with a note that stopped being true when shipped. */
     public function test_the_headcount_chart_counts_real_leavers(): void
     {
         app(EmployeeService::class)->separate($this->employee, [

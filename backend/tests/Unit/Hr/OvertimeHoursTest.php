@@ -6,7 +6,7 @@ use App\Modules\Hr\Services\OvertimeRequestService;
 use Tests\TestCase;
 
 /**
- * OT-4: overtime is filed as a time WINDOW and the hours that become pay are derived from it
+ * Overtime is filed as a time WINDOW and the hours that become pay are derived from it
  * server-side — the client never types the number. A window ending at/before its start crosses
  * midnight. Pure/static, no DB — runs everywhere.
  */

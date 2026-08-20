@@ -3,21 +3,7 @@
 import { formatPeso } from "@/core/lib/format";
 import { useMyBenefits } from "@/modules/hr/hooks/use-benefit-programs";
 
-/**
- * The caller's own allowances, read-only — the employee's half of `EmployeeAllowancesBlock`.
- *
- * WHY A SEPARATE COMPONENT rather than a `canEdit` flag on the HR one. It is not the same
- * information with the buttons taken off. The HR block shows the PROGRAMME's standard amount
- * beside this employee's, and names whoever set an exception — deliberately, because telling a
- * deliberate arrangement from a leftover is its whole job. Neither belongs on a self-service page:
- * nobody should learn from their own profile that they are paid above or below their colleagues
- * (see MyBenefitResource on the backend, which is the decision this follows).
- *
- * So it reads `me/benefit-programs`, which already serves exactly what an employee may see — their
- * figure, monthly, computed by the same service payroll runs — and no HR endpoint is widened.
- *
- * Same shape as `MyLeaveCredits`, for the same reason.
- */
+/** The caller's own allowances, read-only — the employee's half of `EmployeeAllowancesBlock`. */
 export function MyAllowancesBlock() {
   const { data, isLoading } = useMyBenefits();
   const allowances = (data ?? []).filter((b) => b.kind === "allowance");

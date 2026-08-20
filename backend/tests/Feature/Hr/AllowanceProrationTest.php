@@ -12,18 +12,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B10 — an allowance is prorated for the part of the period actually worked.
- *
- * THE BUG. Basic pay was prorated for the days somebody was employed; the allowance was not. A
- * hire starting on the 25th received a whole month's allowance, and a leaver received one for a
- * month they were mostly gone. It is wrong on the first and last payslip anybody gets — the two
- * most closely read payslips in a career.
- *
- * WHAT IS NOT PRORATED, deliberately: ABSENCE. An allowance is a fixed benefit rather than
- * something earned per day attended, so unpaid days leave it alone. The distinction this slice
- * turns on is "not employed yet" versus "employed and away".
- */
+/** An allowance is prorated for the part of the period actually worked. */
 class AllowanceProrationTest extends HrTestCase
 {
     use RefreshDatabase;

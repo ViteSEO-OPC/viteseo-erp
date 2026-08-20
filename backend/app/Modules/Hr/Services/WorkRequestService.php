@@ -12,26 +12,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Work requests — permission to work a day nobody was expected in on.
- *
- * The flow is deliberately unlike every other request in this module: the employee does not fill
- * in a form, they press Time in. The server refuses to write attendance and files this instead,
- * stamped with the moment of the press. HR approving it writes the attendance row at THAT moment
- * — not at the moment of approval — so the review delay costs the employee nothing.
- *
- * TWO DAYS ASK THE SAME QUESTION, hence one table:
- *   rest_day    the employee's schedule does not cover the day, and the company rule
- *               `rest_day_work_requires_request` is on.
- *   suspension  an ordinary workday HR cancelled, on a declaration whose
- *               `work_requires_request` is set.
- * Either switch turned off means the punch is simply recorded and nothing is filed here.
- *
- * Nothing downstream needed teaching. Rest-day premium already prices any attendance row landing
- * on a non-workday (AttendanceService::restDayWorkedMinutesFor), a suspended day with a time-in
- * is already paid as worked, and violations already skip both. This service is only the gate on
- * such a row existing.
- */
+/** Work requests — permission to work a day nobody was expected in on. */
 class WorkRequestService
 {
     use CancelsOwnRequest;
@@ -64,9 +45,6 @@ class WorkRequestService
     /**
      * The employee's live request for a Manila date, if any — what the time clock reads to decide
      * between offering the button, saying "waiting for HR", and saying why it was refused.
-     *
-     * Includes decided requests for the day so the panel can explain a rejection rather than
-     * silently re-offering the same button.
      */
     public function forDate(Employee $employee, string $date): ?WorkRequest
     {
@@ -78,14 +56,7 @@ class WorkRequestService
             ->first();
     }
 
-    /**
-     * Which kind of request a date calls for, or null when the employee may simply time in.
-     *
-     * The single reader of both switches, so the clock panel, the clock-in gate and this
-     * service's own `create()` can never disagree about whether a day needs asking. A rest day
-     * wins over a suspension declared on the same date: the employee was never expected in, so
-     * the company's decision to cancel work says nothing about them.
-     */
+    /** Which kind of request a date calls for, or null when the employee may simply time in. */
     public function requiredTypeFor(Employee $employee, string $date): ?string
     {
         if ($employee->isManagement()) {
@@ -182,9 +153,6 @@ class WorkRequestService
     /**
      * Approve — and write the attendance row the refused clock-in would have written, stamped
      * at `requested_at`.
-     *
-     * The employee then clocks OUT through the ordinary time clock: `openRow()` resolves a row
-     * with a time-in and no time-out, so no special case is needed on the way back out.
      */
     public function approve(WorkRequest $request, User $reviewer): WorkRequest
     {
@@ -300,10 +268,6 @@ class WorkRequestService
     /**
      * Undo the decision — back to pending, and the attendance row the approval created goes
      * with it.
-     *
-     * Refused once the shift has been clocked OUT: at that point the day was genuinely worked
-     * and its hours are real, so deleting the row would erase attendance rather than undo an
-     * approval. That correction belongs on the Attendance screen, where it is visible as one.
      */
     public function reopen(WorkRequest $request, ?string $reason = null): WorkRequest
     {
@@ -406,13 +370,7 @@ class WorkRequestService
         ]);
     }
 
-    /**
-     * Move pending requests past their window to `expired`.
-     *
-     * Lazily, on read, rather than on a schedule: a cron that fails leaves approvable back-dated
-     * shifts sitting in the queue, and there is no moment an expired request matters except the
-     * moment somebody looks at it.
-     */
+    /** Move pending requests past their window to `expired`. */
     private function expireStale(?Employee $employee = null): void
     {
         $cutoff = now()->subHours(WorkRequest::EXPIRES_AFTER_HOURS);

@@ -3,17 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Slice 14 (2026-07-28 audit) — reset the two policy modes whose values the engine never read.
- *
- * `missing_clockout_mode` and `early_arrival_mode` accepted several values through the API while
- * only one of each was implemented. Validation now rejects the unbuilt ones (see
- * UpdateAttendancePolicyRequest), so any row already holding one would make the Rules page
- * un-saveable: the form loads the stored value, sends it back, and gets a 422 on a field HR
- * can't even edit.
- *
- * No column changes — just bringing stored data in line with what the engine actually does.
- */
+/** (2026-07-28 audit) — reset the two policy modes whose values the engine never read. */
 return new class extends Migration
 {
     public function up(): void

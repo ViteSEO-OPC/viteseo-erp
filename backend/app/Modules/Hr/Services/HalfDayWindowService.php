@@ -9,33 +9,6 @@ use Illuminate\Support\Carbon;
 /**
  * Which half of a day an employee is off — and therefore which window they were actually
  * expected to work.
- *
- * WHY THIS EXISTS. Exactly one function in the module used to know that an approved half day
- * shrinks the working window: DeductionService::workedWindow(), which prices per-minute late
- * and undertime. Everything else — the clock-in status, the roster's punctuality badge, the
- * open-shift auto-close — measured against the FULL 08:00–17:00 day. So an employee with an
- * approved morning off who clocked in at 1:00 PM was stamped `late` by five hours. That status
- * is not cosmetic: it raises a disciplinary violation, and with the per-N-lates penalty switched
- * on it costs a full day's pay for arriving exactly on time.
- *
- * TWO SOURCES, ONE ANSWER. A half day arrives either as an approved HalfDayRequest (always
- * unpaid; `period` names the half taken OFF) or as an approved half-day LeaveRequest
- * (`half_day_period`, same meaning, funded by a credit instead). They are the same shape with
- * different funding, so nothing about lateness may depend on which one it was.
- *
- * BOTH HALVES OFF is a real state, not a nonsense one — AM and PM are filed separately and
- * payroll already clamps the pair to one full day. It is not the same as "no half day": the
- * whole day is off, so there is no start to be late for at all.
- *
- * READS ARE BY DATE RANGE, NEVER BY EMPLOYEE. Two queries fetch every approved half day in the
- * range for the whole company, memoized under the range alone, and callers index into the result.
- * Narrowing the query to one employee would be the obvious thing and the wrong one: payroll walks
- * employees in a loop and asks four separate questions per employee, so a per-employee key turns
- * into 2N queries and `PayrollPerformanceTest` — a ratchet against exactly this — fails. Half days
- * are sparse, so the whole-company result for one cycle is a handful of rows.
- *
- * Any write that changes an approval must call forget(), the same discipline
- * AttendanceService::forgetRows() already follows for its own row memo.
  */
 class HalfDayWindowService
 {
@@ -61,11 +34,6 @@ class HalfDayWindowService
 
     /**
      * Every approved half day in an inclusive date range, for every employee.
-     *
-     * The approval filters MIRROR PAYROLL EXACTLY (see AttendanceService::unpaidDaysDetailFor,
-     * which counts the same two tables the same way). A row this service treats as a half day
-     * but payroll does not — or the reverse — would put the roster badge and the payslip back
-     * into disagreement, which is the whole failure being fixed here.
      *
      * @return array<string, string>  "employeeId|Y-m-d" => 'AM' | 'PM' | 'BOTH'
      */
@@ -130,21 +98,6 @@ class HalfDayWindowService
     /**
      * The window an employee was expected to work on a day whose off-half is $offHalf.
      *
-     * A HALF DAY WITH NO CONFIGURED WINDOW RETURNS NOTHING, and that is the important case.
-     * Falling back to the full shift there — which is what this did, mirroring DeductionService —
-     * measures an afternoon arrival against an 8:00 AM start and calls it five hours late: the
-     * original bug, resurrected for any schedule whose AM/PM columns were left blank.
-     *
-     * The split CANNOT be derived. `hr_work_schedules` stores the unpaid break's LENGTH but never
-     * when it falls, and the two seeded schedules prove no arithmetic rule fits: Office
-     * (08:00–18:00, 60m break) splits 4h/5h at noon while Field (08:00–17:00, 60m) splits 4h/4h.
-     * Any midpoint formula reproduces one and breaks the other. So the honest answer to a missing
-     * window is "no window", and callers judge nothing rather than judging against a guess — you
-     * cannot hold somebody to a shift nobody defined, and a wrong 300-minute figure is worse than
-     * no figure because it looks actionable.
-     *
-     * Note this is NOT the same as the no-half-day case, which correctly keeps the full shift.
-     *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for the date
      * @return array{0: ?string, 1: ?string}  ['HH:MM' start, 'HH:MM' end]; [null, null] when there
      *                                        is no window to judge: the whole day off, or a half
@@ -179,12 +132,6 @@ class HalfDayWindowService
 
     /**
      * Like windowFor(), except a whole day off keeps the full schedule window.
-     *
-     * For the places where a null window would leave a day UNPRICEABLE rather than merely
-     * unjudged. The open-shift resolver needs an end to auto-close an abandoned punch against;
-     * refusing to derive one would strand a day that pays perfectly well in HR's exception queue.
-     * Somebody who punched in on a day they had entirely off — or on a half day nobody configured
-     * a window for — is a question for a human, not a reason to drop the record on the floor.
      *
      * @param  array<string, mixed>  $eff
      * @return array{0: ?string, 1: ?string}

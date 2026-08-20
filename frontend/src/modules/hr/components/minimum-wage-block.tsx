@@ -6,25 +6,7 @@ import { Input } from "@/components/ui/input";
 import { formatPeso } from "@/core/lib/format";
 import type { Employee } from "@/modules/hr/types/employee";
 
-/**
- * The DERIVED daily rate, and the regional floor when one is configured (FIN-030 / FIN-030b).
- *
- * WHY THE RATE IS SHOWN EVEN WHEN NOTHING IS WRONG. Salary is typed monthly; a wage order governs
- * a DAY. The conversion runs through the attendance policy's basis, so the same ₱20,000 is ₱657.53
- * a day over a 365 divisor (the salary covers every calendar day, rest days and holidays included)
- * and ₱919.54 over 261 (it covers scheduled workdays only). Nobody can do that in their head from
- * the figure in the box above, and the first version of this block only appeared when the rate was
- * already too low — which is to say it stayed invisible in every case where knowing the number
- * might have prevented the problem.
- *
- * The basis is named on screen for the same reason: it is not a formatting detail, it is the
- * statement of which days the salary is paying for, and the whole verdict turns on it.
- *
- * The warning is advisory and never blocks a save. The floor varies by region, industry and
- * establishment size; part-time and exempt arrangements legitimately fall below it. The permanent
- * answer for those people is the exemption below, which takes them out of the check with the
- * reason on the record — not a warning everyone learns to scroll past.
- */
+/** The DERIVED daily rate, and the regional floor when one is configured. */
 export function MinimumWageBlock<T extends FieldValues>({
   employee,
   editing,

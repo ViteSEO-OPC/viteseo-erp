@@ -41,7 +41,7 @@ import { MoneyStatCard } from "@/modules/hr/components/money-stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
-import { downloadHrPayslipPdf, downloadPayrollRunCsv } from "@/modules/hr/api/payroll";
+import { downloadHrPayslipPdf, downloadPayrollRunCsv, downloadPayrollRunXlsx } from "@/modules/hr/api/payroll";
 import {
   usePayrollRuns,
   usePayrollRun,
@@ -66,7 +66,7 @@ import type {
 } from "@/modules/hr/types/payroll";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
 
-/** The three headline totals, each with its own show/hide (FIN-043). */
+/** The three headline totals, each with its own show/hide. */
 type MoneyTotal = "gross" | "deductions" | "net";
 
 export default function PayrollPage() {
@@ -81,12 +81,12 @@ export default function PayrollPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [thirteenthOpen, setThirteenthOpen] = useState(false);
-  // FIN-010 / FIN-009 — payslip corrections and the queue of differences awaiting one.
+  //  / — payslip corrections and the queue of differences awaiting one.
   const [amendOpen, setAmendOpen] = useState(false);
   const [retroOpen, setRetroOpen] = useState(false);
   const [taxTableOpen, setTaxTableOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
-  // FIN-030b — the minimum-wage review, and the one-off override that gets a flagged run through.
+  // The minimum-wage review, and the one-off override that gets a flagged run through.
   const [minWageOpen, setMinWageOpen] = useState(false);
   const [minWageAck, setMinWageAck] = useState(false);
   const [minWageReason, setMinWageReason] = useState("");
@@ -101,11 +101,11 @@ export default function PayrollPage() {
   }>({ runId: null, employeeId: null, reason: null });
   const { data: retroFlags = [] } = useRetroFlags();
   const { data: deductionArrears = [] } = useDeductionArrears();
-  // FIN-009 + FIN-005 — one badge for everything payroll could not settle by itself. Two separate
+  //  + — one badge for everything payroll could not settle by itself. Two separate
   // counters would have HR checking two places for the same class of problem.
   const outstandingCount = retroFlags.length + deductionArrears.length;
   const [payThirteenthOpen, setPayThirteenthOpen] = useState(false);
-  // Slice B17 — what the RUN would pay, which differs from the projection above whenever the year
+  // What the RUN would pay, which differs from the projection above whenever the year
   // is partial. Declared after `thirteenthOpen` because it reads it; fetched only while open.
   const { data: thirteenthPay } = useThirteenthMonthPreview(undefined, thirteenthOpen);
   const [viewRunId, setViewRunId] = useState<number | null>(null);
@@ -115,22 +115,7 @@ export default function PayrollPage() {
   const [correcting, setCorrecting] = useState(false);
   /** The run whose charge is being waived across every payslip in it. */
   const [waiveRunId, setWaiveRunId] = useState<number | null>(null);
-  /**
-   * FIN-043 — SHOULDER-SURFING PROTECTION, and the UI says so.
-   *
-   * This hides amounts in the RENDER only. The figures are already in the fetched payload, so
-   * anyone with devtools sees them regardless — it is not an access control and must not be
-   * presented as one. The audit downgraded it to informational for the right reason: the role
-   * looking at this page is authorised to receive these amounts, so there is no boundary being
-   * crossed. What was wrong was the eye icon implying confidentiality it does not provide.
-   *
-   * Omitting amounts server-side would be the real control, and belongs with the restricted-role
-   * work in Slice 6 — not here, where it would only mean the same authorised person sees less.
-   *
-   * Now per-card rather than one page-wide switch: the three headline totals are what a passer-by
-   * reads from across a desk, and they are hidden independently so a gross figure can be shown
-   * while net stays covered.
-   */
+  /** SHOULDER-SURFING PROTECTION, and the UI says so. */
   const [maskedTotals, setMaskedTotals] = useState<Record<MoneyTotal, boolean>>({
     gross: false,
     deductions: false,
@@ -160,7 +145,7 @@ export default function PayrollPage() {
       ? { frequency: activeGroup.frequency, cycle_start: period.start, cycle_end: period.end }
       : null;
 
-  // FIN-030b — asked BEFORE the run, over exactly the population the run would pay. A band on a
+  // Asked BEFORE the run, over exactly the population the run would pay. A band on a
   // profile page is seen by whoever opens that profile, which for a compliant-looking employee is
   // nobody; this is the moment the money is about to be committed for the period.
   const { data: minWageCheck } = useMinimumWageCheck(cycle);
@@ -209,6 +194,15 @@ export default function PayrollPage() {
     }
   }
 
+  // The workbook is the copy meant to be READ — the CSV stays for whatever already parses it.
+  async function onExportXlsx(runId: number) {
+    try {
+      await downloadPayrollRunXlsx(runId);
+    } catch {
+      toast.error("Could not export the run workbook.");
+    }
+  }
+
   // Has THIS group's current period been run yet?
   const currentRun = cycle
     ? runs?.find(
@@ -220,7 +214,7 @@ export default function PayrollPage() {
     : undefined;
   const alreadyRun = !!currentRun;
   const { data: detail } = usePayrollRun(currentRun?.id);
-  // Slice 5 — a re-run skips these, and a run can be locked once they are all disbursed.
+  // A re-run skips these, and a run can be locked once they are all disbursed.
   const disbursedCount =
     detail?.breakdown?.filter((r) => r.status === "disbursed").length ?? 0;
   const lockMut = useSetPayrollRunLock();
@@ -233,13 +227,13 @@ export default function PayrollPage() {
     try {
       const run = await runMut.mutateAsync({
         ...cycle,
-        // FIN-030b — only sent when there is something to acknowledge. The server refuses the run
+        // Only sent when there is something to acknowledge. The server refuses the run
         // otherwise, which is the point: paying below the floor may well be correct, but doing it
         // with nothing on the record is not.
         ...(minWageAck ? { minimum_wage_ack: true, minimum_wage_ack_reason: minWageReason } : {}),
       });
 
-      // FIN-051 — a re-run REFUSES to touch payslips that were already disbursed, which is
+      // A re-run REFUSES to touch payslips that were already disbursed, which is
       // correct but was silent: the run reported success, the figures did not move, and nothing
       // said which ones were skipped or why. A warning rather than a success, because "computed"
       // on its own is the sentence that sends someone hunting for a bug that isn't there.
@@ -279,17 +273,21 @@ export default function PayrollPage() {
       cell: (r) => (
         <div className="flex flex-col">
           <span className="font-semibold">{peso(r.net)}</span>
-          {/* Only when the two figures have come apart — a payslip corrected after it was paid.
-              Everywhere else the net IS what was transferred, and restating it under itself on
-              every row would bury the handful where it matters. */}
+          {/*
+           * Only when the two figures have come apart — a payslip corrected after it was paid.
+           * Everywhere else the net IS what was transferred, and restating it under itself on
+           * every row would bury the handful where it matters.
+           */}
           {r.disbursed != null && r.outstanding > 0 && (
             <span className="text-caption text-warning">
               {peso(r.disbursed)} paid · {peso(r.outstanding)} to pay
             </span>
           )}
-          {/* The other direction: a correction TOOK money off a payslip that was already paid, so
-              the company is out of pocket. No button here — recovering paid wages needs the
-              employee's written consent, so this states it for a person to arrange. */}
+          {/*
+           * The other direction: a correction TOOK money off a payslip that was already paid, so
+           * the company is out of pocket. No button here — recovering paid wages needs the
+           * employee's written consent, so this states it for a person to arrange.
+           */}
           {r.disbursed != null && r.outstanding < 0 && (
             <span className="text-caption text-warning">
               {peso(r.disbursed)} paid · {peso(-r.outstanding)} overpaid
@@ -319,8 +317,10 @@ export default function PayrollPage() {
           </Button>
           {r.status === "disbursed" ? (
             <>
-              {/* A payslip corrected after payment is disbursed AND owes money. The button pays
-                  just the balance — the status does not move, because it is already true. */}
+              {/*
+               * A payslip corrected after payment is disbursed AND owes money. The button pays
+               * just the balance — the status does not move, because it is already true.
+               */}
               {r.outstanding > 0 ? (
                 <Button
                   size="xs"
@@ -378,9 +378,11 @@ export default function PayrollPage() {
       cell: (r) => (
         <div className="flex flex-col items-end gap-0.5">
           <StatusBadge status="completed" label="Completed" />
-          {/* An earlier period of this tax year was corrected after this run withheld its tax, so
-              this run's figures are settled against a year-to-date that has since moved. Silent
-              would mean December quietly comes out wrong. */}
+          {/*
+           * An earlier period of this tax year was corrected after this run withheld its tax, so
+           * this run's figures are settled against a year-to-date that has since moved. Silent
+           * would mean December quietly comes out wrong.
+           */}
           {r.is_tax_stale && (
             <span
               className="inline-flex items-center gap-1 text-caption text-warning"
@@ -399,8 +401,10 @@ export default function PayrollPage() {
       cell: (r) => (
         // The row opens the breakdown, so the control inside it must not.
         <div onClick={(e) => e.stopPropagation()}>
-          {/* Only an ordinary cycle: a 13th month is recomputed from its own screen and a final pay
-              from the employee it belongs to, because neither is keyed by these dates. */}
+          {/*
+           * Only an ordinary cycle: a 13th month is recomputed from its own screen and a final pay
+           * from the employee it belongs to, because neither is keyed by these dates.
+           */}
           {r.type === "regular" && (
             <Button
               size="xs"
@@ -440,11 +444,11 @@ export default function PayrollPage() {
     <div className="p-4 sm:p-8">
       <PageHeader
         /*
-          This header carries ~10 actions, far more than the one or two most TeamOra pages have.
-          The shared `sm:flex-row` would put them beside the title from 640px up, leaving a tablet
-          about half a row of width and stacking them 3–4 deep. Holding the column layout until
-          `lg` gives the button row the full width on tablet.
-        */
+         * This header carries ~10 actions, far more than the one or two most TeamOra pages have.
+         * The shared `sm:flex-row` would put them beside the title from 640px up, leaving a tablet
+         * about half a row of width and stacking them 3–4 deep. Holding the column layout until
+         * `lg` gives the button row the full width on tablet.
+         */
         className="sm:flex-col lg:flex-row"
         title="Payroll"
         subtitle={
@@ -453,23 +457,12 @@ export default function PayrollPage() {
             : "Loading pay schedule…"
         }
         actions={
-          /*
-            THE TWO VERBS THAT CARRY THE WORKFLOW, then everything else behind `⋯`.
-
-            This was nine same-weight outline buttons in a row. They were undifferentiated, so
-            nothing said that running the group is the point of the page while the tax table is
-            a lookup — and `PageHeader` lays `actions` out as `flex items-center gap-2` with NO
-            wrap (page-header.tsx:29), so the row squashed and ran off the edge on narrow
-            screens. An older comment here claimed that container wrapped; it does not, and
-            trusting it is what let the row grow this far.
-
-            The two badged queues moved OUT to the alert strip below — see PayrollAlerts. They
-            also stay in the menu, so an EMPTY queue is still reachable: the strip is the shout
-            when something is owed, the menu is the permanent address.
-          */
+          /* THE TWO VERBS THAT CARRY THE WORKFLOW, then everything else behind `⋯`. */
           <>
-            {/* FIN-015 — the disbursement layer. Only a completed run has anything to pay,
-                and the dialog is where the bank file comes from. */}
+            {/*
+             * The disbursement layer. Only a completed run has anything to pay,
+             * and the dialog is where the bank file comes from.
+             */}
             <Button
               variant="outline"
               onClick={() => setPayOpen(true)}
@@ -492,9 +485,11 @@ export default function PayrollPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
-                {/* FIN-009 / FIN-030b — the two queues. Kept here as well as in the strip so a
-                    zero count is still openable; an empty queue and an unchecked one are not
-                    the same thing, which is the whole reason they are counted. */}
+                {/*
+                 *  / — the two queues. Kept here as well as in the strip so a
+                 * zero count is still openable; an empty queue and an unchecked one are not
+                 * the same thing, which is the whole reason they are counted.
+                 */}
                 <DropdownMenuItem onSelect={() => setRetroOpen(true)}>
                   <AlertTriangle
                     className={outstandingCount > 0 ? "text-warning" : undefined}
@@ -510,10 +505,12 @@ export default function PayrollPage() {
 
                 <DropdownMenuSeparator />
 
-                {/* ADDING a line to payslips — back pay, a missed HMO share, an amount the engine
-                    never priced. CHANGING a line that is already there happens on the payslip
-                    itself, where the wrong figure is; this is for the money that has no line yet,
-                    and it can reach several employees at once. */}
+                {/*
+                 * ADDING a line to payslips — back pay, a missed HMO share, an amount the engine
+                 * never priced. CHANGING a line that is already there happens on the payslip
+                 * itself, where the wrong figure is; this is for the money that has no line yet,
+                 * and it can reach several employees at once.
+                 */}
                 <DropdownMenuItem
                   onSelect={() => {
                     setAmendPrefill({
@@ -531,8 +528,10 @@ export default function PayrollPage() {
                   <Gift />
                   13th-month
                 </DropdownMenuItem>
-                {/* FIN-027 — the tax bands are data so they can be checked; this is where
-                    you check them. */}
+                {/*
+                 * The tax bands are data so they can be checked; this is where
+                 * you check them.
+                 */}
                 <DropdownMenuItem onSelect={() => setTaxTableOpen(true)}>
                   <Percent />
                   Tax table
@@ -543,7 +542,7 @@ export default function PayrollPage() {
                   <DropdownMenuShortcut>{history.length}</DropdownMenuShortcut>
                 </DropdownMenuItem>
 
-                {/* Slice 5 — seal the cycle once every payslip is paid out. */}
+                {/* Seal the cycle once every payslip is paid out. */}
                 {(detail?.can_lock || detail?.is_locked) && <DropdownMenuSeparator />}
                 {detail?.can_lock && (
                   <DropdownMenuItem
@@ -585,9 +584,11 @@ export default function PayrollPage() {
         }
       />
 
-      {/* WHAT IS OWED, said out loud. A badge on a permanently-lit button reads as decoration —
-          it looks the same whether it says 0 or 3. This renders ONLY when something is actually
-          outstanding, so its presence IS the signal, and it disappears entirely when clear. */}
+      {/*
+       * WHAT IS OWED, said out loud. A badge on a permanently-lit button reads as decoration —
+       * it looks the same whether it says 0 or 3. This renders ONLY when something is actually
+       * outstanding, so its presence IS the signal, and it disappears entirely when clear.
+       */}
       {(outstandingCount > 0 || minWageFlagged > 0) && (
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border border-warning/40 bg-warning-subtle px-4 py-3">
           <AlertTriangle className="size-5 shrink-0 text-warning" />
@@ -614,10 +615,12 @@ export default function PayrollPage() {
         </div>
       )}
 
-      {/* Item 12 — attendance problems this cycle, gathered from the queues that already own them.
-          Same rule as the strip above: it renders only when something actually fired, so its
-          presence is the signal. Amber only when something is BLOCKING; the merely-odd entries are
-          neutral, because five permanent yellow bars is how a warning stops being read. */}
+      {/*
+       * Item 12 — attendance problems this cycle, gathered from the queues that already own them.
+       * Same rule as the strip above: it renders only when something actually fired, so its
+       * presence is the signal. Amber only when something is BLOCKING; the merely-odd entries are
+       * neutral, because five permanent yellow bars is how a warning stops being read.
+       */}
       {exceptions.length > 0 && (
         <div
           className={cn(
@@ -658,9 +661,11 @@ export default function PayrollPage() {
         </div>
       )}
 
-      {/* FIN-043 — visible while masking is on, because a tooltip nobody hovers is not a
-          correction. Someone hiding amounts under the impression it is a security control needs to
-          be told at the moment they are relying on it, not when they go looking. */}
+      {/*
+       * Visible while masking is on, because a tooltip nobody hovers is not a
+       * correction. Someone hiding amounts under the impression it is a security control needs to
+       * be told at the moment they are relying on it, not when they go looking.
+       */}
       {anyMasked && (
         <p className="mt-4 rounded-card border border-border bg-muted/40 px-4 py-2 text-caption text-muted-foreground">
           Amounts are hidden on screen only — for privacy from people nearby. They are still in the
@@ -668,11 +673,13 @@ export default function PayrollPage() {
         </p>
       )}
 
-      {/* A PERMANENT EXPLAINER, NOT AN ALERT (FIN-052).
-          This carried the same amber that the outstanding/minimum-wage strip above uses. Two
-          identical yellow bars stacked meant the one that actually needs action read as
-          decoration — and this one is on screen every single visit, which is exactly what teaches
-          people to skip the colour. Warning styling is now reserved for things that want you. */}
+      {/*
+       * A PERMANENT EXPLAINER, NOT AN ALERT.
+       * This carried the same amber that the outstanding/minimum-wage strip above uses. Two
+       * identical yellow bars stacked meant the one that actually needs action read as
+       * decoration — and this one is on screen every single visit, which is exactly what teaches
+       * people to skip the colour. Warning styling is now reserved for things that want you.
+       */}
       <div className="mt-6 flex items-start gap-3 rounded-card border border-border bg-muted/40 px-4 py-3">
         <Zap className="mt-0.5 size-5 shrink-0 text-muted-foreground" fill="currentColor" />
         <p className="text-sm text-muted-foreground">
@@ -740,16 +747,23 @@ export default function PayrollPage() {
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-h3 font-bold text-foreground">Payroll Breakdown</h2>
           {currentRun && detail?.breakdown && (
-            <Button variant="outline" size="sm" onClick={() => onExportCsv(currentRun.id)}>
-              <FileDown />
-              Export CSV
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => onExportXlsx(currentRun.id)}>
+                <FileDown />
+                Export Excel
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => onExportCsv(currentRun.id)}>
+                CSV
+              </Button>
+            </div>
           )}
         </div>
         {detail?.breakdown ? (
           <>
-            {/* What a correction left behind: a balance owed, or tax settled against figures that
-                have since moved. */}
+            {/*
+             * What a correction left behind: a balance owed, or tax settled against figures that
+             * have since moved.
+             */}
             <RunCorrectionNotices run={detail} onRerun={setRerunRun} />
             <DataTable
               columns={makeColumns(!!detail.is_locked)}
@@ -757,7 +771,7 @@ export default function PayrollPage() {
               rowKey={(_r, i) => i}
               onRowClick={(r) => setPayslipId(r.id)}
             />
-            {/* Slice 8 — what these amounts were computed with. */}
+            {/* What these amounts were computed with. */}
             <RunRulesSnapshot snapshot={detail.policy_snapshot} drift={detail.rules_drift} />
           </>
         ) : (
@@ -865,9 +879,11 @@ export default function PayrollPage() {
             <p className="py-10 text-center text-sm text-muted-foreground">Loading breakdown…</p>
           )}
           <DialogFooter>
-            {/* Correcting an OLD period is the point of the amendment flow, so the entry point is
-                here as well as in the header menu — with this run already chosen. The dialog closes
-                behind it, following the corrections queue: two stacked modals fight for focus. */}
+            {/*
+             * Correcting an OLD period is the point of the amendment flow, so the entry point is
+             * here as well as in the header menu — with this run already chosen. The dialog closes
+             * behind it, following the corrections queue: two stacked modals fight for focus.
+             */}
             {viewRun && !viewRun.is_locked && (
               <Button
                 variant="outline"
@@ -880,8 +896,10 @@ export default function PayrollPage() {
                 Waive a charge for everyone
               </Button>
             )}
-            {/* The same recompute the history row offers, for whoever is already looking at the
-                figures rather than the list of periods. */}
+            {/*
+             * The same recompute the history row offers, for whoever is already looking at the
+             * figures rather than the list of periods.
+             */}
             {viewRun && viewRun.type === "regular" && !viewRun.is_locked && (
               <Button
                 variant="outline"
@@ -896,10 +914,15 @@ export default function PayrollPage() {
               </Button>
             )}
             {viewRun && (
-              <Button variant="outline" onClick={() => onExportCsv(viewRun.id)}>
-                <FileDown />
-                Export CSV
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => onExportXlsx(viewRun.id)}>
+                  <FileDown />
+                  Export Excel
+                </Button>
+                <Button variant="ghost" onClick={() => onExportCsv(viewRun.id)}>
+                  CSV
+                </Button>
+              </>
             )}
             <DialogClose asChild>
               <Button variant="outline">Close</Button>
@@ -908,8 +931,10 @@ export default function PayrollPage() {
         </DialogContent>
       </Dialog>
 
-      {/* One employee's payslip — opened by clicking a breakdown row. Identical to what the
-          employee sees, plus the employer share (which their own copy omits). */}
+      {/*
+       * One employee's payslip — opened by clicking a breakdown row. Identical to what the
+       * employee sees, plus the employer share (which their own copy omits).
+       */}
       <Dialog
         open={payslipId != null}
         onOpenChange={(o) => {
@@ -932,10 +957,12 @@ export default function PayrollPage() {
           </DialogHeader>
           {openPayslip ? (
             <>
-              {/* CORRECTING A PAYSLIP HAPPENS ON THE PAYSLIP. Switched on here rather than in a
-                  dialog of its own: the figure HR wants to change is on this document, and a
-                  second modal over the top of it would hide the thing being corrected. Off by
-                  default — reading a payslip is far more common than rewriting one. */}
+              {/*
+               * CORRECTING A PAYSLIP HAPPENS ON THE PAYSLIP. Switched on here rather than in a
+               * dialog of its own: the figure HR wants to change is on this document, and a
+               * second modal over the top of it would hide the thing being corrected. Off by
+               * default — reading a payslip is far more common than rewriting one.
+               */}
               <PayslipCorrections
                 // Remounted on every toggle, so switching out of edit mode and back in starts
                 // clean rather than resuming a half-typed correction.
@@ -1009,9 +1036,11 @@ export default function PayrollPage() {
             <DialogClose asChild>
               <Button variant="outline">Close</Button>
             </DialogClose>
-            {/* Slice B17 — paying it lives HERE rather than in the page header: this is already
-                the screen that answers "what does 13th month look like this year", and the header
-                carries five actions as it is. */}
+            {/*
+             * Paying it lives HERE rather than in the page header: this is already
+             * the screen that answers "what does 13th month look like this year", and the header
+             * carries five actions as it is.
+             */}
             {(thirteenthPay?.count ?? 0) > 0 && !thirteenthPay?.meta.is_locked && (
               <Button onClick={() => setPayThirteenthOpen(true)}>
                 <Gift />
@@ -1022,8 +1051,10 @@ export default function PayrollPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Slice B17 — a payroll run, so it names its consequence rather than asking "are you
-          sure", and it quotes the figures the RUN produces, not the projection behind it. */}
+      {/*
+       * A payroll run, so it names its consequence rather than asking "are you
+       * sure", and it quotes the figures the RUN produces, not the projection behind it.
+       */}
       <Dialog open={payThirteenthOpen} onOpenChange={setPayThirteenthOpen}>
         <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
@@ -1108,7 +1139,7 @@ export default function PayrollPage() {
               latest salaries, attendance and reimbursements. It only computes — no payments are sent.
             </DialogDescription>
           </DialogHeader>
-          {/* Slice 5: be explicit that paid-out payslips are left alone. */}
+          {/* Be explicit that paid-out payslips are left alone. */}
           {disbursedCount > 0 && (
             <p className="rounded-card border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">
@@ -1117,11 +1148,13 @@ export default function PayrollPage() {
               will be skipped — money already paid out is never recomputed.
             </p>
           )}
-          {/* FIN-030b — the run stops ONCE on a minimum-wage breach, and any answer gets past it.
-              Not a wall: everything the check cannot see (a granted exemption, a part-time
-              schedule, an order that does not apply) is still a legitimate reason to proceed. What
-              it refuses is proceeding with nothing on the record — underpayment creates wage
-              differentials and, under RA 8188, double indemnity. */}
+          {/*
+           * The run stops ONCE on a minimum-wage breach, and any answer gets past it.
+           * Not a wall: everything the check cannot see (a granted exemption, a part-time
+           * schedule, an order that does not apply) is still a legitimate reason to proceed. What
+           * it refuses is proceeding with nothing on the record — underpayment creates wage
+           * differentials and, under RA 8188, double indemnity.
+           */}
           {minWageFlagged > 0 && (
             <div className="space-y-2 rounded-card border border-warning/40 bg-warning/10 p-3">
               <p className="text-sm font-medium text-foreground">
@@ -1181,10 +1214,10 @@ export default function PayrollPage() {
         </DialogContent>
       </Dialog>
 
-      {/* FIN-030b — the review, and the raise that clears the floor. */}
+      {/* The review, and the raise that clears the floor. */}
       <MinimumWageDialog open={minWageOpen} onOpenChange={setMinWageOpen} cycle={cycle} />
 
-      {/* FIN-009 — the queue of pay differences awaiting settlement. */}
+      {/* The queue of pay differences awaiting settlement. */}
       <TaxTableDialog open={taxTableOpen} onOpenChange={setTaxTableOpen} />
 
       <RetroFlagsDialog
@@ -1203,7 +1236,7 @@ export default function PayrollPage() {
         }}
       />
 
-      {/* FIN-010 — off-cycle correction. */}
+      {/* off-cycle correction. */}
       <PaymentBatchDialog
         open={payOpen}
         onOpenChange={setPayOpen}
@@ -1222,9 +1255,11 @@ export default function PayrollPage() {
         prefillReason={amendPrefill.reason}
       />
 
-      {/* The whole-payroll form of a correction: one charge, waived for everybody who carried it.
-          Separate from correcting a payslip because it is a judgement about the PERIOD — an
-          outage, a closure — rather than about one person's month. */}
+      {/*
+       * The whole-payroll form of a correction: one charge, waived for everybody who carried it.
+       * Separate from correcting a payslip because it is a judgement about the PERIOD — an
+       * outage, a closure — rather than about one person's month.
+       */}
       <RunLineWaiverDialog
         runId={waiveRunId}
         runLabel={waiveRunLabel}
@@ -1242,14 +1277,7 @@ export default function PayrollPage() {
   );
 }
 
-/**
- * What a correction left behind on a run: money still owed, and tax that no longer adds up.
- *
- * Both are consequences of amending a period rather than re-running it, and neither is visible in
- * the run's own totals — an amended run reports a larger net and looks entirely settled. Rendered
- * above the breakdown for the current run and inside the past-run dialog, because a correction on an
- * old period is the case this exists for.
- */
+/** What a correction left behind on a run: money still owed, and tax that no longer adds up. */
 function RunCorrectionNotices({
   run,
   onRerun,
@@ -1318,7 +1346,7 @@ function RunCorrectionNotices({
   );
 }
 
-/** A label/value line in the 13th-month confirmation (Slice B17). */
+/** A label/value line in the 13th-month confirmation. */
 function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="flex items-start justify-between gap-4">

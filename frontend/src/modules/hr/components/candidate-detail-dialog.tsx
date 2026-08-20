@@ -91,9 +91,11 @@ export function CandidateDetailDialog({
               </Row>
             </dl>
 
-            {/* The assessment deadline is the one email detail the board itself shows,
-                so it stays on the record; everything else about what was sent lives in
-                the history below, message by message. */}
+            {/*
+             * The assessment deadline is the one email detail the board itself shows,
+             * so it stays on the record; everything else about what was sent lives in
+             * the history below, message by message.
+             */}
             {candidate.assessment_deadline && (
               <p className="text-caption text-muted-foreground">
                 Assessment due {formatDate(candidate.assessment_deadline)}

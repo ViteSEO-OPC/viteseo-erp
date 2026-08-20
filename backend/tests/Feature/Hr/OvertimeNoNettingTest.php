@@ -13,21 +13,7 @@ use App\Modules\Hr\Services\AttendanceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 7 (2026-07-28 audit) — a GUARD, not a fix. Nothing changed in the engine.
- *
- * Overtime is measured against `end_time`, never against hours worked. Arriving late and
- * leaving late therefore pays overtime AND docks the late time, on separate ledgers. That
- * looks like a bug and has been "fixed" by netting at least twice; both rulings say no:
- *
- *   • Rule 2e  — `overtimeMinutes = hoursWorked − expectedHours` is never correct (a skipped
- *                meal would manufacture overtime out of nothing).
- *   • F-4      — netting overtime against same-day lateness violates Labor Code Art. 88:
- *                overtime carries a ≥125% premium, undertime is docked at the plain rate, so
- *                offsetting them shortchanges the worker.
- *
- * These tests exist so the next person who "fixes" it gets a red suite and this explanation.
- */
+/** (2026-07-28 audit) — a GUARD, not a fix. Nothing changed in the engine. */
 class OvertimeNoNettingTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -77,7 +63,7 @@ class OvertimeNoNettingTest extends HrTestCase
     }
 
     /**
-     * THE F-4 CASE. In 09:00 (1h late), out 18:00 (1h past end). Overtime is the full 60
+     * THE CASE. In 09:00 (1h late), out 18:00 (1h past end). Overtime is the full 60
      * minutes past `end_time` — NOT zero. Netting it against the late hour is Art. 88
      * non-compliant, so the ledgers stay separate.
      */

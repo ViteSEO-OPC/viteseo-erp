@@ -7,17 +7,7 @@ use App\Modules\Hr\Services\ViolationService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 
-/**
- * Writes the attendance rows for management staff (see ManagementAttendanceService).
- *
- * Runs nightly from HrServiceProvider. The default window is the last 7 days, not
- * just today, so a missed or failed run self-heals on the next one instead of
- * leaving a permanent hole that the violation engine would read as an absence.
- *
- *   php artisan hr:generate-management-attendance
- *   php artisan hr:generate-management-attendance --days=30
- *   php artisan hr:generate-management-attendance --from=2026-07-03 --to=2026-07-24 --dry-run
- */
+/** Writes the attendance rows for management staff (see ManagementAttendanceService). */
 class GenerateManagementAttendance extends Command
 {
     protected $signature = 'hr:generate-management-attendance

@@ -12,15 +12,7 @@ use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Services\LoanService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B15 — a loan is a product HR defines, and a deduction the employee has agreed to.
- *
- * THE AUTHORIZATION IS THE POINT. Labor Code Art. 113 permits deducting a debt owed to the
- * employer only with the employee's explicit written consent, so both routes into a loan — HR
- * issuing one, or the employee asking — end at the same gate. A loan no longer starts `active`,
- * and `collectForPeriod()` reads `active` only, so an unauthorized loan cannot be collected by
- * construction rather than by a check somebody has to remember.
- */
+/** A loan is a product HR defines, and a deduction the employee has agreed to. */
 class LoanAuthorizationTest extends HrTestCase
 {
     use RefreshDatabase;

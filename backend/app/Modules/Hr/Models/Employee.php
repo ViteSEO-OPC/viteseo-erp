@@ -31,7 +31,7 @@ class Employee extends Model
         'employee_role',
         'onboarding_status',
         'separation_type',
-        // The employee's last working day — bounds their final payslip (Slice 4).
+        // The employee's last working day — bounds their final payslip.
         'separation_date',
         'previous_hire_date',
         'hire_date',
@@ -43,7 +43,7 @@ class Employee extends Model
         'bank_account',
         'base_salary',
         'is_management',
-        // FIN-030b — excluded from the minimum-wage check, with the reason on the record.
+        // Excluded from the minimum-wage check, with the reason on the record.
         'minimum_wage_exempt',
         'minimum_wage_exempt_reason',
         'pay_frequency',
@@ -93,7 +93,7 @@ class Employee extends Model
     protected $casts = [
         'hire_date' => 'date',
         'separation_date' => 'date',
-        'previous_hire_date' => 'date', // MF-18 — the prior stint's start, kept across a rehire
+        'previous_hire_date' => 'date', // The prior stint's start, kept across a rehire
 
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
@@ -106,13 +106,10 @@ class Employee extends Model
         'custom_grace_minutes' => 'integer',
         'custom_unpaid_break_minutes' => 'integer',
         'custom_paid_break_minutes' => 'integer',
-        // FIN-022 — sensitive personal information under the Data Privacy Act, encrypted at rest.
+        // Sensitive personal information under the Data Privacy Act, encrypted at rest.
         // These columns are TEXT, not varchar(255): the envelope is ~228 chars for a 17-char
         // account number, so varchar would fit today and silently truncate — destroying the value,
         // because a truncated ciphertext cannot be decrypted.
-        //
-        // Nothing may `where` or `orderBy` these. Encrypted values are opaque to SQL; a lookup by
-        // account number needs a separate blind index, not a query against this column.
         'bank_account' => 'encrypted',
         'bank_account_name' => 'encrypted',
         'tin' => 'encrypted',
@@ -122,7 +119,7 @@ class Employee extends Model
     ];
 
     /**
-     * The sensitive fields, named once (FIN-022).
+     * The sensitive fields, named once.
      *
      * Used by the casts above, the masking below and the reveal endpoint, so the three cannot drift
      * apart — a field added to the casts but not to the masking would be returned in full.
@@ -132,13 +129,7 @@ class Employee extends Model
         'sss_number', 'philhealth_number', 'pagibig_number',
     ];
 
-    /**
-     * A sensitive value reduced to its last four characters (FIN-022).
-     *
-     * `••••4471` is enough for a human to confirm they are looking at the right account and useless
-     * to anyone who is not. Short values are masked ENTIRELY rather than partially: revealing the
-     * last four of a five-character value discloses most of it.
-     */
+    /** A sensitive value reduced to its last four characters. */
     public static function maskSensitive(?string $value): ?string
     {
         if ($value === null || $value === '') {
@@ -176,14 +167,7 @@ class Employee extends Model
         return (bool) $this->is_management;
     }
 
-    /**
-     * Browser-facing URL for the profile picture, or null to fall back to initials.
-     *
-     * Lives here rather than in a Resource because the face belongs everywhere a person
-     * is listed — a dozen resources embed an identity block, and each building the URL
-     * itself is a dozen chances to build it differently. Deliberately not in `$appends`:
-     * every payload that carries it names it.
-     */
+    /** Browser-facing URL for the profile picture, or null to fall back to initials. */
     protected function photoUrl(): Attribute
     {
         return Attribute::get(
@@ -251,14 +235,7 @@ class Employee extends Model
             'benefit_program_id',
         )
             // The per-employee columns on the pivot. `employee_share` is what payroll deducts
-            // (Slice 11a) — without this it reads as null and nothing is ever taken.
-            //
-            // `amount` is a DELIBERATE allowance override (B14): null means the employee follows
-            // the programme, which is the default and must stay the common case. It is not a
-            // membership — the eligibility rule decides that.
-            // `enrolled_at` / `ended_at` MUST be listed here (B2): a pivot column absent from
-            // withPivot is silently dropped on write and reads as null, so the dates looked saved
-            // and every dated enrolment charged from the beginning of time.
+            // Without this it reads as null and nothing is ever taken.
             ->withPivot([
                 'tier', 'employee_share', 'amount', 'amount_set_by', 'amount_set_at',
                 'enrolled_at', 'ended_at',

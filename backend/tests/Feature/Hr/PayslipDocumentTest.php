@@ -18,30 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * The payslip DOCUMENT — the redesign (2026-07-28), not the payroll engine.
- *
- * The engine is covered elsewhere and none of its figures changed here. What changed is how
- * the document derives itself from them, and that derivation has one property worth pinning:
- *
- *     compensation − deductions − government = net_pay
- *
- * It has to hold on EVERY payslip, because a payslip whose arithmetic doesn't close is a
- * payslip an employee is entitled to dispute. The two ways it can break are the interesting
- * cases and both are tested: basic pay clamping at zero (absences worth more than the period),
- * and deductions exceeding gross.
- *
- * `+ uncollected` USED TO BE PART OF THIS IDENTITY (removed with FIN-053). The component columns
- * once stored the full computed deduction while the total was capped at gross, so the document
- * had to credit the shortfall back to avoid resolving to a large negative against a net of zero.
- * The columns now store what was collected, so the correction is gone at the source. `uncollected`
- * is still asserted below — it must still be REPORTED — but it must no longer be ADDED, and the
- * shortfall test guards exactly that: adding it back now would overstate net by the carryover.
- *
- * Also guarded: the employer's counterpart contributions ARE disclosed to the employee
- * (reversed 2026-08-07) but are never a term in any total — and the document is one page,
- * whatever the configuration throws at it.
- */
+/** The payslip DOCUMENT — the redesign (2026-07-28), not the payroll engine. */
 class PayslipDocumentTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -212,7 +189,7 @@ class PayslipDocumentTest extends HrTestCase
 
     /**
      * Deductions bigger than pay. The cap is now allocated across the individual obligations
-     * (FIN-053), so every figure the document shows is what was actually collected and the
+     * So every figure the document shows is what was actually collected and the
      * identity closes on its own. The shortfall is still disclosed, and itemised by obligation
      * so the employee can see WHICH deduction went unpaid rather than one opaque total.
      */
@@ -231,7 +208,7 @@ class PayslipDocumentTest extends HrTestCase
         $this->assertGreaterThan(0.0, $doc['totals']['uncollected']);
         $this->assertReconciles($doc);
 
-        // FIN-053 — the shortfall says which obligation it belongs to. The ₱50,000 benefit share
+        // The shortfall says which obligation it belongs to. The ₱50,000 benefit share
         // is last in the priority order, so it is what goes unpaid.
         $this->assertArrayHasKey('other_deductions', $doc['totals']['uncollected_breakdown']);
         $this->assertEqualsWithDelta(
@@ -242,7 +219,7 @@ class PayslipDocumentTest extends HrTestCase
         );
     }
 
-    /** Enrol the employee in an allowance programme — the Slice B1 source of truth. */
+    /** Enrol the employee in an allowance programme — the source of truth. */
     private function enrolInAllowance(string $name, float $monthly): void
     {
         $program = BenefitProgram::create([
@@ -255,7 +232,7 @@ class PayslipDocumentTest extends HrTestCase
 
     public function test_the_allowance_breakdown_sums_to_the_allowances_paid(): void
     {
-        // Slice B1 — allowances come from Company → Benefits now, not the employee's columns.
+        // Allowances come from Company → Benefits now, not the employee's columns.
         $this->enrolInAllowance('Transportation Allowance', 1000);
         $this->enrolInAllowance('Food Allowance', 500);
 
@@ -263,7 +240,7 @@ class PayslipDocumentTest extends HrTestCase
         $doc = $this->employeeDocument($this->runPayroll());
 
         $lines = $doc['allowances_breakdown'];
-        // Ordered by programme name (Slice B1) rather than the old hard-coded column order.
+        // Ordered by programme name rather than the old hard-coded column order.
         $this->assertSame(
             ['Food Allowance', 'Transportation Allowance'],
             array_column($lines, 'name'),
@@ -305,17 +282,7 @@ class PayslipDocumentTest extends HrTestCase
         $this->assertSame('semi_monthly', $doc['frequency']);
     }
 
-    /**
-     * The employee DOES see the employer's counterpart contributions (2026-08-07, Joshua's call).
-     *
-     * THIS TEST USED TO ASSERT THE OPPOSITE, and the reasoning it carried was that the employer
-     * share is remittance data and "not theirs to see". That was reconsidered: this money is paid
-     * into the employee's OWN SSS, PhilHealth and Pag-IBIG record, and it is the part of their
-     * compensation they are least likely to know exists. Withholding it protected nothing.
-     *
-     * What it must NOT do is change any figure — see the assertions below, which are the real
-     * subject of this test. Disclosure only.
-     */
+    /** The employee DOES see the employer's counterpart contributions (2026-08-07, Joshua's call). */
     public function test_the_employee_sees_the_employer_share_as_disclosure_only(): void
     {
         $this->attendance();
@@ -391,20 +358,7 @@ class PayslipDocumentTest extends HrTestCase
             ->assertHeader('content-type', 'application/pdf');
     }
 
-    /**
-     * The DOWNLOAD now carries the employer share — as disclosure, below the net-pay bar.
-     *
-     * REVERSED 2026-08-07 (Joshua's call). This asserted the opposite, on the grounds that a
-     * payslip file gets forwarded — to a bank, a landlord, an embassy — so it should not carry
-     * remittance data. The forwarding argument survives; the classification did not. The employer
-     * share is money paid into the employee's own SSS, PhilHealth and Pag-IBIG record, so it
-     * belongs on the document they receive.
-     *
-     * STILL ONE DOCUMENT FOR BOTH AUDIENCES, which is the property that actually mattered: HR's
-     * copy and the employee's remain identical, because this is now in both.
-     *
-     * Asserted against the rendered HTML because the PDF's text is compressed.
-     */
+    /** The DOWNLOAD now carries the employer share — as disclosure, below the net-pay bar. */
     public function test_the_downloaded_payslip_discloses_the_employer_share(): void
     {
         $this->attendance();
@@ -454,18 +408,7 @@ class PayslipDocumentTest extends HrTestCase
         $this->assertSame(3, substr_count($employeeHtml, '+ employer share'));
     }
 
-    /**
-     * THE PAYSLIP IS ONE PAGE, whatever the configuration throws at it.
-     *
-     * WHY THIS IS A TEST AND NOT A STYLE PREFERENCE. When the document overflows it does not lose
-     * the top — it pushes the NET PAY and the signature block onto page two, which is the half the
-     * employee and any recipient actually read. Measured on 2026-08-07: six allowance programmes
-     * and six benefit deductions already did it, before anything was added.
-     *
-     * The height is BOUNDED rather than merely tuned: `$capped` rolls surplus breakdown lines into
-     * one labelled summed line and `$fit`/`$fitWide` trim names that would wrap, so the page cannot
-     * grow with data. This proves it at an absurd input — thirty of each, names long enough to wrap.
-     */
+    /** THE PAYSLIP IS ONE PAGE, whatever the configuration throws at it. */
     public function test_the_pdf_is_a_single_page_even_with_absurd_content(): void
     {
         $this->attendance();

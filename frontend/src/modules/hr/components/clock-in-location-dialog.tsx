@@ -18,9 +18,6 @@ import type { LocationFix } from "@/modules/hr/types/attendance";
 /**
  * Where are you clocking in from? Shown instead of the plain confirm dialog when the
  * server reports it is enforcing a geofence.
- *
- * The position request starts the instant this opens — not when they choose "Office" — so
- * the fix is already cached by the time anyone taps. See useGpsPrewarm.
  */
 export function ClockInLocationDialog({
   open,
@@ -40,8 +37,10 @@ export function ClockInLocationDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => !pending && onOpenChange(o)}>
       <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto lg:max-w-lg">
-        {/* The body is its own component so the GPS pre-warm starts when Radix MOUNTS the
-            content — i.e. the instant the dialog opens — and is torn down on close. */}
+        {/*
+         * The body is its own component so the GPS pre-warm starts when Radix MOUNTS the
+         * content — i.e. the instant the dialog opens — and is torn down on close.
+         */}
         <ClockInChoice onOffice={onOffice} onOutside={onOutside} pending={pending} />
       </DialogContent>
     </Dialog>
@@ -107,13 +106,7 @@ function ClockInChoice({
   );
 }
 
-/**
- * Capture and confirm the selfie.
- *
- * A plain file input with `capture="user"` rather than getUserMedia: on a phone it opens
- * the front camera directly, on a laptop it opens the file picker, and it needs no camera
- * permission plumbing or video teardown to get wrong.
- */
+/** Capture and confirm the selfie. */
 function SelfieStep({
   onBack,
   onSubmit,

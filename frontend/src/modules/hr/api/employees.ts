@@ -12,7 +12,7 @@ import type {
 /**
  * The employee directory. `status` defaults to "active" server-side.
  *
- * MF-18 — "former" is what makes a rehire reachable: a separated employee is soft-deleted, so the
+ * "former" is what makes a rehire reachable: a separated employee is soft-deleted, so the
  * default directory cannot show them and there was no way to find someone to take back.
  */
 export async function getEmployees(
@@ -28,7 +28,7 @@ export async function getEmployees(
   return res.data.data;
 }
 
-/** MF-18 — end employment. `separation_date` is the last WORKING day; payroll prorates against it. */
+/** End employment. `separation_date` is the last WORKING day; payroll prorates against it. */
 export async function separateEmployee(
   id: number,
   input: { separation_type: "voluntary" | "involuntary"; separation_date: string; reason?: string },
@@ -38,7 +38,7 @@ export async function separateEmployee(
 }
 
 /**
- * MF-18 — undo a separation. Service is CONTINUOUS: hire date, leave credits and loan
+ * Undo a separation. Service is CONTINUOUS: hire date, leave credits and loan
  * authorisations all stand. For a genuinely new relationship use `rehireEmployee` instead.
  */
 export async function reinstateEmployee(id: number, reason?: string): Promise<Employee> {
@@ -47,7 +47,7 @@ export async function reinstateEmployee(id: number, reason?: string): Promise<Em
 }
 
 /**
- * MF-18 — take someone back as a NEW relationship. Tenure restarts from `hire_date`, leave is
+ * Take someone back as a NEW relationship. Tenure restarts from `hire_date`, leave is
  * seeded fresh, and any outstanding loan drops back to needing the employee's consent (Art. 113).
  */
 export async function rehireEmployee(
@@ -97,16 +97,7 @@ export async function getSalaryHistory(id: number): Promise<SalaryHistoryEntry[]
   return res.data.data;
 }
 
-/* -------------------------------------------------------------------------------------------
- * Hand-corrections to the two timelines on the record.
- *
- * Both are still written automatically — the employment one by a job-title change, the
- * compensation one by a salary change. These are the escape hatch for what automation cannot fix.
- *
- * The compensation writes are gated server-side and their errors are meaningful: a 422 on
- * `effective_date` is a QUESTION (confirm and resend with `acknowledge_repricing`), while a 422 on
- * `id` is a refusal with no override. See SalaryHistoryService on the backend.
- * ------------------------------------------------------------------------------------------- */
+/* Hand-corrections to the two timelines on the record. */
 
 export interface EmploymentHistoryInput {
   title: string;
@@ -225,7 +216,7 @@ export async function getMyEmployee(): Promise<Employee> {
   return res.data.data;
 }
 
-// --- Loans & cash advances (Slice 11b; policies + consent in B15) -----------------
+// --- Loans & cash advances (policies + consent in B15) -----------------
 
 export interface EmployeeLoan {
   id: number;
@@ -238,7 +229,7 @@ export interface EmployeeLoan {
   /** The PRINCIPAL instalment. Interest and any fee are charged on top, not folded into this. */
   per_period_amount: number;
   start_date: string;
-  // FIN-032 — the terms. Diminishing balance: interest is charged each period on the balance still
+  // The terms. Diminishing balance: interest is charged each period on the balance still
   // owed, so the stated rate is the effective rate. 0 = interest-free.
   interest_rate: number;
   interest_period: "annual" | "monthly";
@@ -246,7 +237,7 @@ export interface EmployeeLoan {
   /** Collection order when net pay is short. Lower runs first. */
   priority: number;
   /**
-   * Slice B15 — a loan no longer starts collectible. `pending_authorization` is the state that
+   * A loan no longer starts collectible. `pending_authorization` is the state that
    * matters: the employee has not yet consented to the deduction, and payroll skips it.
    */
   status:
@@ -270,7 +261,7 @@ export interface EmployeeLoan {
   paid_principal: number;
   paid_interest: number;
   paid_fees: number;
-  // Slice B15 — the policy behind it, and the consent that makes any deduction lawful.
+  // The policy behind it, and the consent that makes any deduction lawful.
   benefit_program_id: number | null;
   policy_name?: string | null;
   requested_at: string | null;
@@ -289,7 +280,7 @@ export interface EmployeeLoanInput {
   per_period_amount: number;
   start_date: string;
   notes?: string | null;
-  // FIN-032 — all optional; omitted means an interest-free, fee-free loan at default priority.
+  // All optional; omitted means an interest-free, fee-free loan at default priority.
   interest_rate?: number;
   interest_period?: "annual" | "monthly";
   fees?: number;
@@ -339,11 +330,7 @@ export async function reopenEmployeeLoan(
   return res.data.data;
 }
 
-// --- The employee's own loans (Slice B15) -----------------------------------------
-//
-// Separate from the HR endpoints above: these resolve the employee from the token, and the
-// authorization is the employee's own act — Labor Code Art. 113 wants the worker's consent, not
-// a record HR could create on their behalf.
+// --- The employee's own loans -----------------------------------------
 
 export async function getMyLoans(): Promise<EmployeeLoan[]> {
   const res = await apiClient.get("/hr/me/loans");

@@ -117,7 +117,7 @@ export default function ReimbursementPage() {
       />
     );
 
-    // `scheduled` (Slice 12) = folded into a payslip that hasn't gone out yet. It pays
+    // `scheduled` = folded into a payslip that hasn't gone out yet. It pays
     // itself when that payslip is disbursed, but HR can still settle it by hand. No undo
     // here: payroll is already carrying it — reverse the payslip instead.
     if (c.status === "approved" || c.status === "scheduled") {

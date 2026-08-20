@@ -21,7 +21,7 @@ class ScheduleService
     ) {}
 
     /**
-     * Per-instance memo of the default schedule (F / F-10). effectiveFor() falls back to
+     * Per-instance memo of the default schedule (F /). effectiveFor() falls back to
      * default() for every schedule-less employee, once per day — a payroll run hit this
      * single, unchanging row thousands of times. The service is resolved once per run; any
      * write (create/update/delete) clears the memo, so it can never go stale within a request.
@@ -116,7 +116,7 @@ class ScheduleService
 
     /**
      * The effective schedule for an employee (optionally on a given date). This is
-     * the one method Slice 16's violation engine calls.
+     * the one method 's violation engine calls.
      *
      * @return array{workdays:array<int>, start_time:?string, end_time:?string, grace_minutes:int, unpaid_break_minutes:int, paid_break_minutes:int, expected_minutes:?int, am_start_time:?string, am_end_time:?string, pm_start_time:?string, pm_end_time:?string, source:string, schedule_name:?string, is_workday:?bool}
      */
@@ -156,6 +156,11 @@ class ScheduleService
             'start_time' => $startTime,
             'end_time' => $endTime,
             'grace_minutes' => (int) $grace,
+            // The day's "minimum hours = full day" bar, or null when HR declared none (almost
+            // always). Company-wide per date, exactly like the grace override above, which is
+            // why it rides along here rather than on the employee: every consumer that already
+            // asks for a day's effective rules needs it, and none of them should query for it.
+            'min_full_day_minutes' => $date !== null ? $this->dailyOverrides->minFullDayForDate($date) : null,
             'unpaid_break_minutes' => $unpaidBreak,
             'paid_break_minutes' => $paidBreak,
             'expected_minutes' => $expectedMinutes,

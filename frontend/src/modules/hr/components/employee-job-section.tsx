@@ -174,8 +174,10 @@ export function EmployeeJobSection({
         {/* The employee ID is assigned by the system and never edited. */}
         {!editing && (
           <div className="grid grid-cols-1 gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-            {/* Was a hand-rolled copy of `Detail`; using the real one keeps it on
-                the shared label/value styling and its overflow guards. */}
+            {/*
+             * Was a hand-rolled copy of `Detail`; using the real one keeps it on
+             * the shared label/value styling and its overflow guards.
+             */}
             <Detail label="Employee ID number" value={employee.employee_no} />
           </div>
         )}

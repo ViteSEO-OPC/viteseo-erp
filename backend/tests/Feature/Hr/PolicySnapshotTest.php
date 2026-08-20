@@ -12,14 +12,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice 8 (2026-07-28 audit) — the run's policy snapshot must cover everything that priced it.
- *
- * v1 hand-listed 13 deduction fields and had already drifted: none of the seven premium/overtime
- * rate columns, `overtime_mode` or `night_diff_pct` were captured, so a rate change left old
- * payslips unexplainable. The attendance policy is now derived from `array_keys(DEFAULTS)`, which
- * is what stops it drifting again — the first test is the guard for that.
- */
+/** (2026-07-28 audit) — the run's policy snapshot must cover everything that priced it. */
 class PolicySnapshotTest extends HrTestCase
 {
     use RefreshDatabase;

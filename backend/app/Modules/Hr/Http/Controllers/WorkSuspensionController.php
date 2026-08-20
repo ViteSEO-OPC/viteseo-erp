@@ -15,13 +15,7 @@ class WorkSuspensionController extends Controller
 {
     public function __construct(private readonly WorkSuspensionService $service) {}
 
-    /**
-     * GET /api/v1/hr/work-suspensions — every declaration.
-     *
-     * Readable by any authenticated user, not just HR: the employee's time clock says "work is
-     * suspended today" off the back of it, and a rule employees cannot see is a rule they find
-     * out about by being marked absent.
-     */
+    /** GET /api/v1/hr/work-suspensions — every declaration. */
     public function index(): JsonResponse
     {
         return WorkSuspensionResource::collection($this->service->list())->response();

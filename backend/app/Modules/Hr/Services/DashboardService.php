@@ -85,7 +85,7 @@ class DashboardService
             $joiners = Employee::withTrashed()->whereBetween('hire_date', $range)->count();
 
             // `leavers` was hardcoded to 0 with a "no termination data yet" note that stopped being
-            // true when MF-18 shipped: separations write `separation_date`, and the chart has been
+            // true when shipped: separations write `separation_date`, and the chart has been
             // reporting a company nobody ever leaves ever since.
             $leavers = Employee::withTrashed()->whereBetween('separation_date', $range)->count();
 
@@ -128,15 +128,6 @@ class DashboardService
 
     /**
      * The latest real status changes across the module.
-     *
-     * It read three sources — leave, reimbursements and new hires — out of the dozen things that
-     * actually happen, so a day spent approving overtime and early-outs left a feed insisting the
-     * only recent events were two claims and a hire. Every decision type that carries a timestamp
-     * is here now, and separations are included: someone leaving is the single most significant
-     * change to a headcount and it was the one event the dashboard could not show at all.
-     *
-     * Each source takes a few rows and the merged list is cut to 6, so adding types widens the
-     * CHOICE rather than the query cost.
      *
      * @return array<int, array<string, mixed>>
      */

@@ -205,11 +205,11 @@ function Editor({
       <p className="text-xs text-muted-foreground">Leave break fields blank to use the assigned schedule&apos;s breaks.</p>
 
       {/*
-        Half-day windows. These are what an approved half day is JUDGED against — lateness,
-        undertime and the early-out fraction all measure from them — so an employee whose
-        afternoons really start at 13:30 needs it said here, or the template's 13:00 turns the
-        difference into billable lateness every time they take a morning off.
-      */}
+       * Half-day windows. These are what an approved half day is JUDGED against — lateness,
+       * undertime and the early-out fraction all measure from them — so an employee whose
+       * afternoons really start at 13:30 needs it said here, or the template's 13:00 turns the
+       * difference into billable lateness every time they take a morning off.
+       */}
       <div className="space-y-1.5">
         <Label>Override half-day windows</Label>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

@@ -17,19 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Recomputing a period that has already been run, and saying first what that would do.
- *
- * WHY THE PREVIEW IS THE INTERESTING HALF. "Recompute" reprices from attendance, salaries and the
- * rules in force for the cycle — its effect is unknowable from the button, and the figures it lands
- * on replace ones an employee may already hold a payslip for. So the preview computes the run for
- * real and rolls it back.
- *
- * THE TEST THAT MATTERS MOST is the first one: a preview that leaves anything behind is worse than
- * no preview, because it turns a question into an unannounced write. The second is the disbursed
- * one — a re-run leaves paid payslips alone by design, and a preview that quietly diffed them would
- * promise changes the run will refuse to make.
- */
+/** Recomputing a period that has already been run, and saying first what that would do. */
 class PayrollRerunTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -193,13 +181,7 @@ class PayrollRerunTest extends HrTestCase
         $this->assertSame($row['before']['net'], $row['after']['net']);
     }
 
-    /**
-     * A DISBURSED PAYSLIP IS MARKED SKIPPED, NOT DIFFED.
-     *
-     * The re-run refuses to touch it (Slice 5 — money that has gone out is history), so a preview
-     * showing a new figure for it would promise a change the run will not make. This is also the
-     * fact HR is actually deciding on: recomputing a period that is mostly paid out changes little.
-     */
+    /** A DISBURSED PAYSLIP IS MARKED SKIPPED, NOT DIFFED. */
     public function test_a_disbursed_payslip_is_reported_as_skipped_and_not_repriced(): void
     {
         $run = $this->period();

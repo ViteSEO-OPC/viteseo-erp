@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 24. Self-service FAQ / knowledge base. HR authors; employees read
+// Phase-2. Self-service FAQ / knowledge base. HR authors; employees read
 // the published entries. status: draft → published → archived.
 return new class extends Migration
 {

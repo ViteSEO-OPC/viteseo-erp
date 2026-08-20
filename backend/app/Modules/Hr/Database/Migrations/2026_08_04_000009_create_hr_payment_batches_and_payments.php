@@ -4,53 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Where the money actually went (FIN-015).
- *
- * THE GAP. Payroll computed net pay correctly and then stopped tracking it. "Disbursement" was a
- * single manual status flip per payslip (`markDone()`) — no payment record, no bank reference, no
- * failure handling, no reconciliation. Bank details were collected on every employee and never
- * used. The money left the company through a channel the system could not see, and the system held
- * no evidence of when, or whether, an employee was actually paid.
- *
- * THREE STATES, NOT TWO. The audit's terminology, which these tables exist to make real:
- *
- *   computed  — a payslip exists
- *   disbursed — HR asserted payment
- *   settled   — money confirmed received
- *
- * Only the first two were establishable before this. A payment row is what carries the third: the
- * bank's reference, the date it cleared, and — the half that matters most in practice — the date it
- * did NOT clear and why. A returned transfer used to be invisible; the payslip sat `disbursed`
- * regardless.
- *
- * WHY A BATCH AND NOT JUST PAYMENTS. Banks are paid in files, not in rows. The batch is the unit
- * that gets generated, downloaded, uploaded to the bank and reconciled back, so it needs its own
- * identity, total and export timestamp. It also gives the one assertion worth making about a
- * payroll disbursement: the batch total must equal the run's `total_net`, and every payslip in the
- * run must appear exactly once. A batch that does not satisfy both is a payroll someone will be
- * chasing at month end.
- *
- * THE ACCOUNT IS SNAPSHOTTED, NOT REFERENCED. `hr_payments` copies the employee's bank details at
- * the moment the batch is built rather than joining to `hr_employees`. An employee who changes
- * bank next month must not retroactively change where last month's money went — the payment record
- * is evidence of a transfer that already happened, and evidence that mutates is not evidence. This
- * is the same reasoning as the dated salary history and the run's policy snapshot.
- *
- * THOSE SNAPSHOT COLUMNS ARE ENCRYPTED, and the employee table's are not — a deliberate
- * inconsistency. FIN-022 flags plaintext bank accounts and government IDs as a High finding, and
- * fixing it on `hr_employees` is Slice 6 work with a data migration behind it. This table is new
- * and has no legacy rows, so encrypting here costs nothing and is strictly better than minting a
- * second plaintext copy of the most sensitive column in the system while the first one is already
- * a known finding. When Slice 6 encrypts the employee table, these match rather than needing a
- * second pass. Encrypted values are opaque to SQL — nothing aggregates or searches on them, and
- * nothing should.
- *
- * WHAT THIS MIGRATION DOES NOT DO. It does not touch `markDone()`. That path stays as the manual
- * assertion it always was, because a company paying by cash or cheque still needs it and because
- * removing it would strand every payslip disbursed before these tables existed. Reconciliation
- * (the import that flips payslips to `disbursed` on the bank's confirmation) builds on these rows.
- */
+/** Where the money actually went. */
 return new class extends Migration
 {
     public function up(): void

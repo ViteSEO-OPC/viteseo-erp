@@ -17,23 +17,7 @@ use App\Modules\Hr\Services\TaxService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-028 — the year-end withholding true-up.
- *
- * Every period withholds by ANNUALISING that period: this cutoff's taxable pay × periods per year,
- * taxed, divided back down. Correct when you cannot see the future, but it is a projection, and it
- * is only right if every period is identical. They never are — overtime in one month and none the
- * next, a raise in August, unpaid days in June. Twelve projections of a year are not a year, so
- * the sum of what was withheld drifts from the tax actually due.
- *
- * Nobody notices during the year. It surfaces when the employee files, or when the company issues
- * BIR 2316 and the figures disagree with what it remitted.
- *
- * THE ASSERTION THAT MATTERS is the first one: after the December run, total withheld across the
- * year equals the annual tax due on the year's actual taxable pay. Everything else here guards the
- * ways that could be got wrong — a refund that gets clamped at zero, a re-run that settles the
- * year against its own previous attempt, and every other cycle quietly acquiring an adjustment.
- */
+/** The year-end withholding true-up. */
 class YearEndTaxAnnualisationTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -94,14 +78,7 @@ class YearEndTaxAnnualisationTest extends HrTestCase
         }
     }
 
-    /**
-     * Present on every December weekday, so the closing run prices a real month.
-     *
-     * Without this the December run finds no attendance, treats every workday as unpaid, and pays
-     * almost nothing — which makes the year's actual taxable far lower than the Jan–Nov
-     * projections assumed and turns every scenario into a large refund. That is correct behaviour
-     * for an employee who did not work, but it is not the case under test.
-     */
+    /** Present on every December weekday, so the closing run prices a real month. */
     private function workedDecember(): void
     {
         $tz = config('app.timezone_local');
@@ -150,22 +127,7 @@ class YearEndTaxAnnualisationTest extends HrTestCase
         ];
     }
 
-    /**
-     * FIN-053 — A CYCLE THAT STRADDLES 31 DECEMBER STILL CLOSES THE YEAR.
-     *
-     * The containment test above exists precisely so weekly and bi-weekly groups reach the
-     * true-up: their final cutoff runs from late December into January and never lands on the
-     * 31st. But the year was derived from `cycle_end`, which for that cutoff is the FOLLOWING
-     * year — so it was compared against the wrong 31 December and failed, and the cutoff before it
-     * ends on the 27th and failed too. The result was that NO weekly or bi-weekly cycle ever
-     * annualised: those employees closed the year on twelve months of projections, permanently,
-     * with nothing anywhere to say so.
-     *
-     * Driven through a REAL RUN, not a re-implementation of the date rule: a test that restates
-     * the condition would pass against the broken code too, which is exactly how this survived.
-     * The observable is `tax_annualisation`, which is non-zero only when the true-up actually
-     * fired — the same signal `test_an_ordinary_cycle_carries_no_adjustment` asserts the absence of.
-     */
+    /** A CYCLE THAT STRADDLES 31 DECEMBER STILL CLOSES THE YEAR. */
     public function test_a_weekly_cycle_straddling_new_year_still_annualises(): void
     {
         // A deliberately uneven year, so a correction is genuinely owed and cannot come out at
@@ -210,15 +172,7 @@ class YearEndTaxAnnualisationTest extends HrTestCase
         $this->assertSame(0.0, round((float) $slip->tax_annualisation, 2));
     }
 
-    /**
-     * FIN-054 — the settlement records the figures that EXPLAIN it, and they add up.
-     *
-     * December folds the year's correction into the Withholding Tax line, and on the common case
-     * that line goes negative and net pay exceeds gross. Without these three numbers the payslip
-     * shows a negative tax with nothing to say why — so they are asserted to RECONCILE, not merely
-     * to be present: a stored explanation that does not equal the figure it explains is worse than
-     * none, because it invites the reader to trust it.
-     */
+    /** The settlement records the figures that EXPLAIN it, and they add up. */
     public function test_the_settlement_records_figures_that_reconcile(): void
     {
         $this->payJanToNov([200000, 200000, 200000, 20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000]);
@@ -266,13 +220,7 @@ class YearEndTaxAnnualisationTest extends HrTestCase
         $this->assertNull($slip->tax_annualisation_basis);
     }
 
-    /**
-     * FIN-055 — the reconciliation report agrees with a correctly settled year.
-     *
-     * The report recomputes each employee's annual tax from their payslips instead of trusting
-     * what payroll withheld, so this is a genuine cross-check of the settlement rather than a
-     * restatement of it: if the two ever disagree, one of them is wrong.
-     */
+    /** The reconciliation report agrees with a correctly settled year. */
     public function test_the_reconciliation_report_balances_a_settled_year(): void
     {
         $this->payJanToNov([200000, 200000, 200000, 20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000]);
@@ -367,17 +315,6 @@ class YearEndTaxAnnualisationTest extends HrTestCase
     /**
      * Under-withholding is collected on the same payslip — but the scenario has to be constructed,
      * and WHY is worth stating.
-     *
-     * Per-period annualisation is structurally biased toward OVER-withholding. The tax table is
-     * convex (rates rise with income), and withholding takes the average of `f(12 × period)` while
-     * the year owes `f(Σ periods)`. By Jensen's inequality the first is always ≥ the second, so
-     * uneven pay alone can never under-withhold — it only ever over-withholds, and refunds are the
-     * normal year-end outcome.
-     *
-     * Collection happens in the flat region the inequality does not bind: the exempt band. Each
-     * month here annualises to ₱240,000, below the ₱250,000 threshold, so every period withholds
-     * exactly zero — while the year's total crosses the threshold and genuinely owes tax. Without
-     * a true-up this employee would end the year having paid nothing on income that was taxable.
      */
     public function test_tax_owed_but_never_withheld_is_collected_in_december(): void
     {

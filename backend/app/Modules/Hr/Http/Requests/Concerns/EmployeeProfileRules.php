@@ -68,7 +68,7 @@ trait EmployeeProfileRules
             // contribution while the employer side kept following the brackets, so one payslip
             // could carry a pair that exists on no SSS table. Enrolment is the supported way to
             // say someone does not pay one.
-            // No allowance rules — Slice B9. An allowance is a programme in Company → Benefits,
+            // No allowance rules. An allowance is a programme in Company → Benefits,
             // and three fixed columns could never express a catalogue that grows and shrinks.
             // Government membership numbers for the payslip header. Free-form strings on
             // purpose: agencies format these inconsistently and a strict mask would reject

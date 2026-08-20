@@ -29,13 +29,7 @@ use Illuminate\Support\Collection;
  */
 class NotificationService
 {
-    /**
-     * Where leave, half-day, early-out and overtime are all reviewed.
-     *
-     * A constant because it is also a BADGE KEY: the sidebar matches `navBadges[child.href]` by
-     * exact string, so a count written against a stale path is silently discarded rather than
-     * failing loudly — which is exactly how the leave badge went missing.
-     */
+    /** Where leave, half-day, early-out and overtime are all reviewed. */
     private const WORK_SCHEDULE_REQUESTS = '/teamora/requests/work-schedule';
 
     /** The employee's own leave page. This was `/teamora/time-off`, which is not a route. */

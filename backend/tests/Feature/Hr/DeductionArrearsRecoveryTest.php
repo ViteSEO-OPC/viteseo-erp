@@ -15,20 +15,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-005 — deductions a thin payslip could not collect are recovered later.
- *
- * FIN-053 closed the reporting half: the cap is allocated across the obligations and
- * `deduction_carryover_breakdown` says which one went short. Nothing read that column back, so the
- * money half stayed open — the shortfall was named and then forgotten. The employee's statutory
- * record stayed short and the company still owed the agency the full contribution, making an
- * uncollected ₱800 of SSS an unrecorded liability.
- *
- * THE BALANCE IS DERIVED, not stored: `Σ carryover − Σ recovered`, read off the payslips. That is
- * what makes recovery re-run safe without a reconciliation step, and it is the same principle
- * `EmployeeLoan` uses against `hr_loan_payments`. The re-run test below is the one that would catch
- * a regression to a stored balance.
- */
+/** Deductions a thin payslip could not collect are recovered later. */
 class DeductionArrearsRecoveryTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -55,13 +42,7 @@ class DeductionArrearsRecoveryTest extends HrTestCase
         ]);
     }
 
-    /**
-     * A prior period that went short, written directly.
-     *
-     * Seeded rather than produced by starving a real run: the point under test is RECOVERY, and
-     * manufacturing a genuine shortfall through attendance would make the arithmetic depend on
-     * contribution rates rather than on the mechanism.
-     */
+    /** A prior period that went short, written directly. */
     private function priorShortfall(array $breakdown, string $start = '2026-02-01', string $end = '2026-02-15'): Payslip
     {
         $run = PayrollRun::create([
@@ -147,13 +128,7 @@ class DeductionArrearsRecoveryTest extends HrTestCase
         );
     }
 
-    /**
-     * A payslip with no room recovers nothing, and the debt survives.
-     *
-     * It also GROWS, which is correct and worth asserting rather than glossing: an employee who
-     * earned nothing this period could not pay this period's statutory dues either, so those join
-     * the arrears. The recovery mechanism must not mistake that for progress.
-     */
+    /** A payslip with no room recovers nothing, and the debt survives. */
     public function test_a_payslip_with_no_room_recovers_nothing(): void
     {
         $this->priorShortfall(['sss' => 800.0]);

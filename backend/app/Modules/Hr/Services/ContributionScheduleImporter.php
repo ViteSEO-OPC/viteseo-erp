@@ -2,29 +2,7 @@
 
 namespace App\Modules\Hr\Services;
 
-/**
- * Turns a published contribution schedule (the agency's own spreadsheet) into MSC bands.
- *
- * WHY THIS EXISTS (Slice B8). The SSS schedule is 60+ bands. B3b shipped a paste-the-table box,
- * and the table was never entered — hand-transcribing sixty rows of government figures is the kind
- * of job that does not get done, and when it does, a single mistyped MSC is silently wrong on every
- * payslip in that band. HR uploads the circular's own .xlsx instead.
- *
- * HOW IT READS THE FILE. Nothing is positional. The header row is found by looking for a row that
- * names a compensation range, then each column is matched by what its header SAYS:
- *
- *   "Range of Compensation"  → the salary band          (required)
- *   "MSC Total"              → what the rates charge on (required — NOT "MSC Regular SS", which is
- *                              only part of it once the MPF portion starts above ₱20,000)
- *   "ER EC"                  → employer-only EC per band
- *   "EE Total" / "ER Total"  → the published amounts, used to CHECK our arithmetic
- *
- * Every guess is returned for HR to confirm or re-point before anything is saved, because a
- * schedule with a column read wrongly is worse than no schedule at all.
- *
- * WHAT IT DOES NOT DO. It never writes. `parse()` is a pure read that returns bands, a suggested
- * version, and a list of warnings; saving is the ordinary create-a-version endpoint.
- */
+/** Turns a published contribution schedule (the agency's own spreadsheet) into MSC bands. */
 class ContributionScheduleImporter
 {
     /**
@@ -210,11 +188,6 @@ class ContributionScheduleImporter
      * Rates and ceiling inferred from the table itself, plus a check that our arithmetic
      * reproduces the agency's printed amounts.
      *
-     * This is the answer to "do we store the published peso amounts or calculate them?" — if
-     * rate × MSC reproduces every printed figure, calculating is safe and there is nothing to
-     * store. If it does not, the mismatching bands are named here rather than discovered on a
-     * payslip.
-     *
      * @param  array<int, array<string, mixed>>  $bands
      * @param  array<int, string>  $warnings
      * @return array<string, mixed>
@@ -295,13 +268,7 @@ class ContributionScheduleImporter
         return (float) array_key_first($counts);
     }
 
-    /**
-     * The lower bound of a printed range.
-     *
-     *   "BELOW 5,250"        → 0        (a "below" row is the floor, whatever number it names)
-     *   "5,250 - 5,749.99"   → 5250
-     *   "34,750 - Over"      → 34750
-     */
+    /** The lower bound of a printed range. */
     private function lowerBound(string $text): ?float
     {
         $normalised = $this->normalise($text);

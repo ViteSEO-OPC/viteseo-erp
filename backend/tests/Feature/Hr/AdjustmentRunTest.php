@@ -14,25 +14,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-010 — off-cycle adjustment runs, RETIRED as a feature and kept as a guarantee.
- *
- * Corrections are now added to the payslip of the period they correct (PayslipAmendmentTest); the
- * HTTP route that raised a second payslip in a hand-typed window is gone. What remains is the
- * service path that produced the adjustment runs already in the database. Those are real payslips
- * of real money: they must keep rendering, keep being disbursable, and keep declining to freeze
- * attendance they never priced. That is what this file still protects.
- *
- * There were two write paths into pay: an aligned regular period and the December 13th-month run.
- * Every correction found by FIN-007 (back-dated raise), FIN-008 (attendance fix), FIN-009 (late
- * approval) and FIN-023 (late reimbursement) produced a difference with nowhere to be paid — the
- * only route was unlocking and re-running a closed period, which rewrites history and is refused
- * once payslips are disbursed.
- *
- * The two tests that matter most here are the last two: an adjustment must not disturb the regular
- * run for the same dates (FIN-001's guard is what makes that possible), and it must not freeze
- * attendance over a window it does not price.
- */
+/** off-cycle adjustment runs, RETIRED as a feature and kept as a guarantee. */
 class AdjustmentRunTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -161,7 +143,7 @@ class AdjustmentRunTest extends HrTestCase
 
     /**
      * THE INTEROPERATION THAT MATTERS. An adjustment over dates a regular run also covers must
-     * neither block it nor be blocked by it. This only works because FIN-001 made the double-pay
+     * neither block it nor be blocked by it. This only works because made the double-pay
      * guard type-aware; before that, any second run over the same dates skipped everyone.
      */
     public function test_an_adjustment_does_not_stop_the_regular_run_for_the_same_dates(): void

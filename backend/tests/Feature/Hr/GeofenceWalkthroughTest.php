@@ -18,13 +18,8 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The Slice 5 walkthrough, as a test: feature off → on and passing → on and failing →
+ * The walkthrough, as a test: feature off → on and passing → on and failing →
  * off-site selfie → HR decides → the kill switch.
- *
- * The per-rung behaviour is covered by GeofenceClockInTest and RemoteCheckinTest. What
- * this file protects is the SEQUENCE — that the pieces still compose after someone changes
- * one of them, and above all that the kill switch is a real escape hatch rather than a
- * setting that merely looks like one.
  */
 class GeofenceWalkthroughTest extends HrTestCase
 {
@@ -102,9 +97,7 @@ class GeofenceWalkthroughTest extends HrTestCase
         Attendance::where('employee_id', $this->employee->id)->forceDelete();
     }
 
-    /**
-     * The whole script in order, on one day, as a person would actually walk it.
-     */
+    /** The whole script in order, on one day, as a person would actually walk it. */
     public function test_the_full_walkthrough(): void
     {
         // --- 1. Feature OFF: today's clock-in, untouched. -------------------------------
@@ -336,13 +329,7 @@ class GeofenceWalkthroughTest extends HrTestCase
         app(RemoteCheckinService::class)->approve($checkin, $this->hr);
     }
 
-    /**
-     * A late field time-in approved AFTER the month turned must still raise its flag.
-     *
-     * Violations are computed lazily per month, and the default recompute covers the
-     * current one — so a July row approved in August would otherwise stay unflagged until
-     * somebody thought to open July.
-     */
+    /** A late field time-in approved AFTER the month turned must still raise its flag. */
     public function test_a_late_field_time_in_approved_next_month_still_raises_its_flag(): void
     {
         $this->atManila('2026-07-31 10:45'); // late, on the last day of the month

@@ -16,20 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-033 — the act that declares money paid had no preconditions and no provenance.
- *
- * `markDone()` is the only thing in the system that asserts a payslip's money left the company. It
- * checked nothing: not that the payslip was `computed`, not that its run had finished, not that it
- * was not already disbursed. It recorded no actor and no timestamp — "who marked this paid?" was
- * answerable only from the audit log, and "when?" only from `updated_at`, which the next write
- * overwrote. Nothing stopped a double-submit doing it twice.
- *
- * THE IDEMPOTENCY DISTINCTION IS THE INTERESTING PART, and both halves are asserted below. A repeat
- * carrying the SAME key is a duplicate request and is answered as success without acting twice; a
- * repeat with a DIFFERENT key is a genuine second attempt and is refused. Erroring on a double-click
- * teaches people to ignore the error, which is how the real refusal stops being read.
- */
+/** The act that declares money paid had no preconditions and no provenance. */
 class DisbursementGuardTest extends HrTestCase
 {
     use RefreshDatabase;

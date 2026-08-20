@@ -274,8 +274,10 @@ export function WorkScheduleFormDialog({
             </p>
           </div>
 
-          {/* Half-day windows — what an approved half day's lateness and undertime are measured
-              against, so they have to be stated rather than guessed at. */}
+          {/*
+           * Half-day windows — what an approved half day's lateness and undertime are measured
+           * against, so they have to be stated rather than guessed at.
+           */}
           <div className="space-y-1.5">
             <Label>Half-day windows</Label>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

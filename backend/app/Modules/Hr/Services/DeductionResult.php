@@ -2,18 +2,7 @@
 
 namespace App\Modules\Hr\Services;
 
-/**
- * The result of pricing ONE worked day's late/undertime shortfall (DeductionService).
- *
- * Money is expressed as a FRACTION of one day so it flows through unpaidDaysFor()'s
- * existing float accumulator unchanged — a full day is 1.0, so a payslip, report and
- * CSV never learn that minutes were involved. `unpaidFraction` is the single source of
- * truth for money; the component minutes/fractions exist only so the payslip (step 7)
- * can show "Late 30 min · Undertime 0" instead of one opaque number.
- *
- * Invariant (asserted by the caller/tests): lateMinutes + undertimeMinutes == the raw
- * shortfall that produced this result, so the components can never silently double-count.
- */
+/** The result of pricing ONE worked day's late/undertime shortfall (DeductionService). */
 final class DeductionResult
 {
     /**

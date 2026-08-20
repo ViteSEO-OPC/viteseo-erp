@@ -5,21 +5,7 @@ namespace App\Modules\Hr\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/**
- * Employee "My Benefits" view — Slice B12.
- *
- * WHAT WAS MISSING. This carried a name, a category and a status, and the three fields meant to
- * hold the content (`details`, `progress`, `footer_label`) are empty on every programme. So an
- * employee's only benefits screen showed them less than their payslip did: no amount, no idea what
- * any of it is worth. It could not be fixed in the frontend, because the money was never sent.
- *
- * THEIR FIGURE, NOT THE COMPANY'S. Where B14 gave someone their own allowance amount, this shows
- * what THEY are paid and says nothing about the standard (decided 2026-08-03). Nobody should learn
- * from a self-service page that they are paid above or below their colleagues; that is a
- * conversation with HR, not a card.
- *
- * NOTHING CROSS-EMPLOYEE, as before: no headcounts, no other people's amounts, no employer costs.
- */
+/** Employee "My Benefits" view. */
 class MyBenefitResource extends JsonResource
 {
     /**
@@ -41,11 +27,7 @@ class MyBenefitResource extends JsonResource
             // Company plans keep theirs: "Coming soon" versus "Active" is a real difference there.
             'status' => $isAllowance ? 'Active' : $this->status,
 
-            // --- what it is worth to this employee (B12) ---
-            //
-            // Always a MONTHLY figure, computed by the same service payroll runs, so the total on
-            // this page and the allowance line on the payslip are the same arithmetic rather than
-            // two implementations that can drift.
+            // --- what it is worth to this employee ---
             'monthly_amount' => $isAllowance
                 ? (float) ($this->monthly_amount ?? 0)
                 : null,

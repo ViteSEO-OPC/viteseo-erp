@@ -16,29 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * THE MONTH ROLL-UP the redesigned payslip carries on its last cutoff.
- *
- * The design it implements shows the second cutoff restating the first and totalling the month.
- * That works trivially when the month's contributions, tax and allowances all land on the last
- * slip — which is what `deduction_timing`/`tax_timing`/`allowance_timing` = `last` does, and what
- * the mockup was drawn against. It is NOT trivially true otherwise, and the shortcut the mockup
- * implies ("the last slip holds the month, so its own figures are the month's") under-reports the
- * month by whatever the earlier slips took as soon as those settings read `every`.
- *
- * So the roll-up sums the month's slips instead, and these tests pin the identity that makes it
- * right under EVERY setting:
- *
- *     total_current − government   = initial_net
- *     initial_net   + allowances   = total_month
- *     total_month   − already_paid = this slip's own net pay
- *
- * The last line is the real check: the month roll-up and the slip's own stored net are computed
- * from opposite directions, so their agreeing is not something both could get wrong the same way.
- *
- * Also pinned: the per-reason Deductions rows sum to the Deductions total. They are apportioned
- * rather than multiplied out precisely so that they can — see `deductionsBreakdown()`.
- */
+/** THE MONTH ROLL-UP the redesigned payslip carries on its last cutoff. */
 class PayslipMonthSummaryTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -206,13 +184,7 @@ class PayslipMonthSummaryTest extends HrTestCase
         $this->assertEqualsWithDelta($m['total_month'], $first['net_pay'] + $second['net_pay'], 0.01);
     }
 
-    /**
-     * THE CASE THE MOCKUP'S ARITHMETIC WOULD HAVE FAILED.
-     *
-     * Under `every`, contributions and allowances are split across both cutoffs, so the last slip
-     * no longer holds the month's. A roll-up that read its own figures as the month's would report
-     * roughly half the contributions and half the allowances and still look internally consistent.
-     */
+    /** THE CASE THE MOCKUP'S ARITHMETIC WOULD HAVE FAILED. */
     public function test_the_roll_up_holds_when_deductions_are_split_across_both_cutoffs(): void
     {
         $this->timing('every');
@@ -254,13 +226,7 @@ class PayslipMonthSummaryTest extends HrTestCase
         $this->assertWalkCloses($doc);
     }
 
-    /**
-     * The Deductions table's rows must sum to the total printed beneath them.
-     *
-     * Absences deep enough to clamp basic pay at zero are the case that breaks a rows-by-
-     * multiplication implementation: the charge really applied is smaller than `days × daily_rate`,
-     * so every row looks defensible and the column does not add up.
-     */
+    /** The Deductions table's rows must sum to the total printed beneath them. */
     public function test_deduction_rows_sum_to_the_deduction_total(): void
     {
         $this->attendance(self::FIRST[0], self::FIRST[1], absentDays: 3);
@@ -304,14 +270,7 @@ class PayslipMonthSummaryTest extends HrTestCase
         $this->assertWalkCloses($doc);
     }
 
-    /**
-     * A PAYSLIP FROM BEFORE THE CHARGE LEDGER EXISTED must still foot.
-     *
-     * `attendance_lines` is null on every slip written before its migration and is deliberately
-     * not backfilled — the ledger can only be produced by the run that priced the period. The
-     * absence charge is still on the row, though, so a table built purely from the ledger prints
-     * five zeroes above a five-figure total. Caught on the seeded demo data, not in the abstract.
-     */
+    /** A PAYSLIP FROM BEFORE THE CHARGE LEDGER EXISTED must still foot. */
     public function test_a_payslip_with_no_charge_ledger_still_attributes_its_absence_charge(): void
     {
         $this->attendance(self::FIRST[0], self::FIRST[1], absentDays: 3);
@@ -336,16 +295,7 @@ class PayslipMonthSummaryTest extends HrTestCase
         $this->assertSame(0, $absences['count']);
     }
 
-    /**
-     * THE PDF IS STILL ONE PAGE on the tallest payslip the redesign can produce.
-     *
-     * `PayslipDocumentTest` already proves it for an ordinary cutoff at absurd inputs. This is the
-     * case that one cannot reach: the month's LAST cutoff, which carries a Salary Summary table
-     * the first does not, on top of the Allowances table the rebuild added below the contributions.
-     * Three blocks were added to a document that already had to be bounded, so the guarantee has to
-     * be re-proved where it is tightest — overflow does not truncate the top, it pushes the net pay
-     * and the signatures onto page two.
-     */
+    /** THE PDF IS STILL ONE PAGE on the tallest payslip the redesign can produce. */
     public function test_the_last_cutoff_pdf_is_a_single_page_at_absurd_content(): void
     {
         $this->attendance(...self::FIRST);

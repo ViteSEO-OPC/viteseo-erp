@@ -6,17 +6,7 @@ use App\Modules\Hr\Services\SalaryHistoryService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-/**
- * Adding a compensation entry by hand.
- *
- * `base_salary` is the MONTHLY figure, matching `hr_employees.base_salary` and every other salary
- * input in the module — the record page annualises it for display only. Entering an annual figure
- * here would overpay by twelve, so the field is labelled monthly on the form as well.
- *
- * `acknowledge_repricing` is the second-call confirmation: the service refuses a date that falls
- * inside completed payroll runs until this comes back true. Same mechanism as the backdated raise
- * on the record itself (FIN-007).
- */
+/** Adding a compensation entry by hand. */
 class StoreSalaryHistoryRequest extends FormRequest
 {
     public function authorize(): bool

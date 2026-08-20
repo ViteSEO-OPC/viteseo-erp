@@ -16,19 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Work requests — permission to work a day nobody was expected in on.
- *
- * A Mon–Fri employee who comes in on a Saturday cannot simply clock in: the day earns a
- * rest-day premium, so somebody has to agree to spend it. Pressing Time in files a request
- * stamped with that moment, and HR's approval writes the attendance row AT that moment —
- * the promise the whole feature rests on, and the first thing these tests pin down.
- *
- * Two switches decide whether the gate applies at all: the company rule
- * `rest_day_work_requires_request`, and a work suspension's own `work_requires_request`. The
- * last two sections here pin both, including the thing that would be easiest to get wrong —
- * that a rest day walked straight onto with the gate off is `present`, never `late`.
- */
+/** Work requests — permission to work a day nobody was expected in on. */
 class WorkRequestTest extends HrTestCase
 {
     use RefreshDatabase;

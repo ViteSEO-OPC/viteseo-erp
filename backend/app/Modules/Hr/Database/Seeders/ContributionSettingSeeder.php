@@ -7,41 +7,10 @@ use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\ContributionVersion;
 use Illuminate\Database\Seeder;
 
-/**
- * Government contributions, as data (Slice B3a, completed in B8).
- *
- * TWO VERSIONS PER TYPE, and both matter:
- *
- *   2000-01-01 — the OPENING version. Deliberately the old simplified rates, so a payroll cycle
- *                that ran before the current schedule took effect still reprices at what it
- *                actually charged. Never "correct" these to today's figures.
- *   2025-01-01 — the CURRENT published schedule, in force now.
- *
- * WHY THE CURRENT ONE IS HERE AT ALL (B8). It used to be typed in by hand: the SSS version on the
- * live database was created by a script, `created_by` was null, and nothing in the code recreated
- * it — so every `migrate:fresh --seed` quietly reverted SSS to 4.5 / 9.5 per cent with a ₱30,000
- * ceiling, and correctness depended on somebody remembering to retype the schedule. That is not
- * something that can be handed over.
- *
- * The SSS bands below are the published schedule (Circular 2024-006, effective January 2025),
- * transcribed by machine from the agency's own spreadsheet via `ContributionScheduleImporter` —
- * not typed. `min_salary` is where each band starts and it runs to the next band's start;
- * `employer_add_on` is that band's EC contribution, which is employer-only and is why the top
- * employer figure is ₱3,530 rather than ₱3,500. Verified on import: 5 per cent of the MSC
- * reproduces the printed employee amount on all 61 bands, and 10 per cent plus EC reproduces the
- * employer one — so there is nothing to store beyond the MSC itself.
- *
- * Idempotent: `firstOrCreate` per version, and the bands are written only when the version is new.
- */
+/** Government contributions, as data (completed in B8). */
 class ContributionSettingSeeder extends Seeder
 {
-    /**
-     * The published SSS schedule: [salary from, MSC, employer EC].
-     *
-     * A salary is charged on its band's MSC, not on the salary itself: ₱20,100 is charged on
-     * ₱20,000. The first band starts at 0 (printed as "BELOW 5,250") so every salary lands
-     * somewhere; the last runs to infinity, which is what makes ₱35,000 the ceiling.
-     */
+    /** The published SSS schedule: [salary from, MSC, employer EC]. */
     private const SSS_2025_BANDS = [
             [0, 5000, 10],
             [5250, 5500, 10],
@@ -146,7 +115,7 @@ class ContributionSettingSeeder extends Seeder
                 ['config' => $s['config'], 'is_active' => true],
             );
 
-            // Slice B3a — payroll reads DATED VERSIONS, not this row's `config`. On a fresh
+            // Payroll reads DATED VERSIONS, not this row's `config`. On a fresh
             // install the backfill migration runs before this seeder and finds nothing, so
             // without seeding an opening version every statutory deduction would be ₱0.
             $c = $s['config'];

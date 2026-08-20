@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 15. One holiday within a set. `type` is the PH classification
+// Phase-2. One holiday within a set. `type` is the PH classification
 // (Nager can't supply it — set by our classifier for PH, defaulted + flagged for
 // other countries, always editable by HR). Only regular / special_non_working are
 // non-working days; special_working is a normal working day.

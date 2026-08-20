@@ -15,23 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * MF-18 — the employment lifecycle's exit, and its two different ways back in.
- *
- * A separation was `separation_type` + a soft delete with no documented reversal. It was worse than
- * that: NOTHING OUTSIDE `AttritionDemoSeeder` EVER WROTE A SEPARATION, so `separation_date` — the
- * column `runFinalPay()` refuses to work without, and the one attendance proration and leave accrual
- * read as the employment end — was never set by any path a user could reach. Final pay (FIN-014) was
- * built and unreachable.
- *
- * REINSTATEMENT AND REHIRE ARE DIFFERENT EVENTS and the tests are split on that line. Reinstatement
- * says the separation should not have happened, so service is continuous: hire date, leave credits and
- * loan authorisations all stand. Rehire says this is a new relationship: tenure restarts, leave is
- * seeded fresh, and an outstanding loan drops back to `pending_authorization` because Art. 113 wants
- * the employee's consent for the deduction actually being made — not consent they gave for a job they
- * no longer held. Getting these the same way round would reset the tenure of someone whose dismissal
- * was reversed, and wipe leave they had earned.
- */
+/** The employment lifecycle's exit, and its two different ways back in. */
 class RehireAndReinstatementTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -352,7 +336,7 @@ class RehireAndReinstatementTest extends HrTestCase
             ->assertForbidden();
     }
 
-    /** MF-18 needs a way to FIND a former employee — the directory hides soft-deleted rows. */
+    /** Needs a way to FIND a former employee — the directory hides soft-deleted rows. */
     public function test_former_employees_can_be_listed(): void
     {
         $this->separate('2026-06-30');

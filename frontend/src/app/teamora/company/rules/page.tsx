@@ -106,10 +106,12 @@ export default function RulesPage() {
         {/* Section B — attendance policy */}
         <AttendancePolicyForm />
 
-        {/* Section C — payroll settings. Kept visually separate from the attendance policy
-            rather than folded into its card grid: both sections carry an "Effective from"
-            date, but they mean DIFFERENT things (see the two banners), and the payroll rules
-            have nothing to do with the violation engine the attendance heading describes. */}
+        {/*
+         * Section C — payroll settings. Kept visually separate from the attendance policy
+         * rather than folded into its card grid: both sections carry an "Effective from"
+         * date, but they mean DIFFERENT things (see the two banners), and the payroll rules
+         * have nothing to do with the violation engine the attendance heading describes.
+         */}
         <PayrollSettingsForm />
       </div>
 
@@ -364,7 +366,7 @@ function AttendancePolicyEditor() {
   const [missedCaution, setMissedCaution] = useState(String(rungValue(vr, "missed_time_out", "yellow", "occurrence_min", 2)));
   const [missedWarning, setMissedWarning] = useState(String(rungValue(vr, "missed_time_out", "orange", "occurrence_min", 3)));
   const [missedCritical, setMissedCritical] = useState(String(rungValue(vr, "missed_time_out", "red", "occurrence_min", 4)));
-  // Long break -- by count of over-long-break days this month (Slice 9).
+  // Long break -- by count of over-long-break days this month.
   const [breakLow, setBreakLow] = useState(String(rungValue(vr, "long_break", "green", "occurrence_min", 1)));
   const [breakCaution, setBreakCaution] = useState(String(rungValue(vr, "long_break", "yellow", "occurrence_min", 2)));
   const [breakWarning, setBreakWarning] = useState(String(rungValue(vr, "long_break", "orange", "occurrence_min", 3)));
@@ -373,8 +375,8 @@ function AttendancePolicyEditor() {
   const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
 
   // Tardiness pay deduction — two INDEPENDENT switches that can both be on:
-  //   • lateChargeOn       = deduct for the actual time late (exact minutes, or a threshold rule)
-  //   • latePenaltyEnabled = deduct 1 extra full day for every N lates in the pay period
+  // • lateChargeOn       = deduct for the actual time late (exact minutes, or a threshold rule)
+  // • latePenaltyEnabled = deduct 1 extra full day for every N lates in the pay period
   const [lateChargeOn, setLateChargeOn] = useState((policy?.late_deduction_mode ?? "none") !== "none");
   const [latePenaltyEnabled, setLatePenaltyEnabled] = useState(policy?.late_penalty_enabled ?? false);
   const [latesPerDeduction, setLatesPerDeduction] = useState(String(policy?.lates_per_deduction ?? 3));
@@ -402,7 +404,7 @@ function AttendancePolicyEditor() {
   const [locating, setLocating] = useState(false);
   const [overtimeMode, setOvertimeMode] = useState<OvertimeMode>(policy?.overtime_mode ?? "approved_only");
   const [overtimeThreshold, setOvertimeThreshold] = useState(String(policy?.overtime_threshold_minutes ?? 0));
-  // FIN-039 — how much auto-mode overtime pays without an approval. 0 = uncapped (the default),
+  // How much auto-mode overtime pays without an approval. 0 = uncapped (the default),
   // so an existing company's pay does not move until HR deliberately sets a figure.
   const [otDailyCap, setOtDailyCap] = useState(String(policy?.auto_overtime_daily_cap_minutes ?? 0));
   const [otPeriodCap, setOtPeriodCap] = useState(String(policy?.auto_overtime_period_cap_minutes ?? 0));
@@ -712,12 +714,14 @@ function AttendancePolicyEditor() {
 
   return (
     <div className="space-y-6">
-      {/* HOW FAR A SAVE ON THIS PAGE REACHES. Stated ONCE, at the top, rather than repeated in
-          each money-moving dialog: every rule here is read live by PayrollService at compute time
-          (there is no effective-date on the attendance policy, unlike allowances and salary), so
-          the caveat is identical for all of them — and a per-card notice would silently miss
-          whichever card is added next. The cards' own warnings say what a rule DOES; this says
-          which payslips it can still change. */}
+      {/*
+       * HOW FAR A SAVE ON THIS PAGE REACHES. Stated ONCE, at the top, rather than repeated in
+       * each money-moving dialog: every rule here is read live by PayrollService at compute time
+       * (there is no effective-date on the attendance policy, unlike allowances and salary), so
+       * the caveat is identical for all of them — and a per-card notice would silently miss
+       * whichever card is added next. The cards' own warnings say what a rule DOES; this says
+       * which payslips it can still change.
+       */}
       <div className="rounded-lg border border-success bg-success-subtle p-4">
         <p className="text-xs text-foreground">
           <strong>A change here reaches the whole of any cycle it applies to — it is not split
@@ -762,9 +766,11 @@ function AttendancePolicyEditor() {
         ))}
       </div>
 
-      {/* Violation flags — the colour ladder HR sets. Uses the same four alert levels as
-          the Attendance modal legend (Low/Informational → Caution → Warning → Critical).
-          Disciplinary only; never pay. */}
+      {/*
+       * Violation flags — the colour ladder HR sets. Uses the same four alert levels as
+       * the Attendance modal legend (Low/Informational → Caution → Warning → Critical).
+       * Disciplinary only; never pay.
+       */}
       <SettingsDialog
         card={CARD.violation}
         open={openCard === "violation"}
@@ -811,7 +817,7 @@ function AttendancePolicyEditor() {
             never counts as overtime; these levels only set its colour in the Attendance flags.
           </Hint>
         </div>
-        {/* Slice 9 — over-long breaks became a real flag; these set its colour. */}
+        {/* over-long breaks became a real flag; these set its colour. */}
         <div className="space-y-3">
           <p className="text-[13px] font-semibold text-foreground">
             Over-long break — days this month
@@ -956,8 +962,10 @@ function AttendancePolicyEditor() {
           minutes only pay once HR corrects the record. It stays flagged in Violation history (set
           its alert levels under <strong>Violation flags</strong>).
         </Hint>
-        {/* Item 11 — the rule was stated but not where its consequences land. HR reading this
-            should not have to discover the queue that lists the days it could not settle. */}
+        {/*
+         * Item 11 — the rule was stated but not where its consequences land. HR reading this
+         * should not have to discover the queue that lists the days it could not settle.
+         */}
         <Hint>
           Days this <em>cannot</em> settle — someone who clocked in on a rest day, has no schedule
           assigned, or has an approved overtime request with no clock-out behind it — are listed
@@ -971,7 +979,7 @@ function AttendancePolicyEditor() {
         open={openCard === "early_ot"}
         onOpenChange={(o) => !o && setOpenCard(null)}
         pending={saving === "early_ot"}
-        // Slice 14 / item 8 — early_arrival_mode is deliberately NOT sent, and no longer has a
+        //  / item 8 — early_arrival_mode is deliberately NOT sent, and no longer has a
         // control at all: no engine reads it and the API rejects anything but "none", so echoing a
         // stored value back would 422 and block HR from saving the overtime settings.
         onSave={() =>
@@ -1028,10 +1036,12 @@ function AttendancePolicyEditor() {
         </Hint>
         <SubDivider />
 
-        {/* Item 8 — the disabled "Early arrival" select that used to head this row is GONE. It
-            offered three ways to value early minutes, no engine read any of them, and a control
-            that cannot be operated still reads as a feature that exists. Early minutes are simply
-            ignored; the sentence below says so, which is the honest version of the same fact. */}
+        {/*
+         * Item 8 — the disabled "Early arrival" select that used to head this row is GONE. It
+         * offered three ways to value early minutes, no engine read any of them, and a control
+         * that cannot be operated still reads as a feature that exists. Early minutes are simply
+         * ignored; the sentence below says so, which is the honest version of the same fact.
+         */}
         <SubHeading>How extra time is paid</SubHeading>
         <div className="flex flex-wrap items-end gap-4">
           <FieldSelect
@@ -1048,8 +1058,10 @@ function AttendancePolicyEditor() {
           {overtimeMode === "auto_after_threshold" && (
             <>
               <NumberField id="pol-ot-threshold" label="Minimum overtime (minutes)" value={overtimeThreshold} onChange={setOvertimeThreshold} min={0} max={1440} />
-              {/* FIN-039 — the ceiling on what pays with nobody looking. 0 = uncapped, which is
-                  what every existing company is on, so the labels have to say so. */}
+              {/*
+               * The ceiling on what pays with nobody looking. 0 = uncapped, which is
+               * what every existing company is on, so the labels have to say so.
+               */}
               <NumberField
                 id="pol-ot-daily-cap"
                 label="Auto-pay cap per day (minutes, 0 = no cap)"
@@ -1066,9 +1078,11 @@ function AttendancePolicyEditor() {
                 min={0}
                 max={65535}
               />
-              {/* Item 7 — the one number here that touches no money. It puts a day in front of HR
-                  and pays it in full either way, which is why it can be on by default while the
-                  caps above are off. */}
+              {/*
+               * Item 7 — the one number here that touches no money. It puts a day in front of HR
+               * and pays it in full either way, which is why it can be on by default while the
+               * caps above are off.
+               */}
               <NumberField
                 id="pol-ot-review"
                 label="Flag a day for review over (minutes, 0 = never)"
@@ -1097,8 +1111,10 @@ function AttendancePolicyEditor() {
               is the safer setting. A day&apos;s whole overrun is paid once it passes the minimum, and a
               missing clock-out never counts as overtime.
             </p>
-            {/* The late-arrival case surprises people, so say it outright rather than let HR
-                discover it on a payslip. See AttendanceService::autoOvertimeMinutesFor. */}
+            {/*
+             * The late-arrival case surprises people, so say it outright rather than let HR
+             * discover it on a payslip. See AttendanceService::autoOvertimeMinutesFor.
+             */}
             <p className="mt-2 text-xs text-foreground">
               <strong>Arriving late does not cancel out overtime.</strong>{" "}
               Someone who comes in an hour
@@ -1109,8 +1125,10 @@ function AttendancePolicyEditor() {
             </p>
           </div>
         )}
-        {/* 0 caps = UNLIMITED, and 0 is what the fields start on — so this state is reached by
-            leaving them alone, not by choosing it. Confirmed once, on the save that enters it. */}
+        {/*
+         * 0 caps = UNLIMITED, and 0 is what the fields start on — so this state is reached by
+         * leaving them alone, not by choosing it. Confirmed once, on the save that enters it.
+         */}
         {needsCapAck && (
           <div className="rounded-lg border border-danger bg-danger-subtle p-3">
             <p className="text-xs text-foreground">
@@ -1135,8 +1153,10 @@ function AttendancePolicyEditor() {
         </Hint>
       </SettingsDialog>
 
-      {/* Working a rest day. Its own card rather than a line in "Early arrival & overtime":
-          this decides whether a whole request queue exists, and HR looks for it by name. */}
+      {/*
+       * Working a rest day. Its own card rather than a line in "Early arrival & overtime":
+       * this decides whether a whole request queue exists, and HR looks for it by name.
+       */}
       <SettingsDialog
         card={CARD.rest_day_work}
         open={openCard === "rest_day_work"}
@@ -1187,8 +1207,10 @@ function AttendancePolicyEditor() {
         </Hint>
       </SettingsDialog>
 
-      {/* Geofenced clock-in. The switch is the kill switch: off = today's clock-in, with
-          nothing else in the app changing. On but half-configured fails OPEN by design. */}
+      {/*
+       * Geofenced clock-in. The switch is the kill switch: off = today's clock-in, with
+       * nothing else in the app changing. On but half-configured fails OPEN by design.
+       */}
       <SettingsDialog
         card={CARD.geofence}
         open={openCard === "geofence"}
@@ -1376,9 +1398,11 @@ function AttendancePolicyEditor() {
           premium and the night differential each read their rate here on the next payroll run —
           changing one changes what people are paid.
         </Hint>
-        {/* Item 9 — the differential compounds, so raising a DAY rate raises the night pay on that
-            day too. Worth saying outright: HR would otherwise read these as five independent
-            numbers and be surprised when moving one moved another line on the payslip. */}
+        {/*
+         * Item 9 — the differential compounds, so raising a DAY rate raises the night pay on that
+         * day too. Worth saying outright: HR would otherwise read these as five independent
+         * numbers and be surprised when moving one moved another line on the payslip.
+         */}
         <Hint>
           <strong>The night differential stacks on the day&apos;s own rate.</strong> It is a
           percentage of what the hour is already worth, not of the basic rate — so a night hour on
@@ -1432,8 +1456,10 @@ function AttendancePolicyEditor() {
         )}
       </SettingsDialog>
 
-      {/* Break overage (flag only). The LIMIT lives on each work schedule; this is the
-          tolerance on top of it — see ViolationService (Slice 9). */}
+      {/*
+       * Break overage (flag only). The LIMIT lives on each work schedule; this is the
+       * tolerance on top of it — see ViolationService.
+       */}
       <SettingsDialog
         card={CARD.break}
         open={openCard === "break"}
@@ -1475,10 +1501,6 @@ function AttendancePolicyEditor() {
  * already run keeps what it was priced with, whereas the attendance rules are read live.
  * That difference is why the two sections keep separate dates and separate banners rather
  * than sharing one control that would be a lie about one of them.
- *
- * These used to sit on the payroll page itself, inline above Run / Lock / Disburse. They
- * are company configuration touched a few times a year, not part of running a cycle, and
- * an ungated dropdown that can change pay frequency does not belong next to Disburse.
  */
 type PayrollCardKey = "schedule" | "minimum_wage";
 
@@ -1515,15 +1537,7 @@ const TIMING_OPTIONS = [
   { value: "last", label: "Last cutoff only" },
 ];
 
-/**
- * FIN-050 — contributions have no "first cutoff only".
- *
- * SSS, PhilHealth and Pag-IBIG are monthly amounts on a monthly base, and the first cutoff cannot
- * know what the month will earn. Anything it charges is provisional, so the last cutoff must carry
- * an adjustment — at which point "first only" is just a split with the worst shape: the whole
- * month taken on the 15th and part of it handed back on the 30th. Allowances and withholding tax
- * keep all three (an allowance is a fixed monthly figure; tax self-corrects at year end).
- */
+/** Contributions have no "first cutoff only". */
 const CONTRIBUTION_TIMING_OPTIONS = TIMING_OPTIONS.filter((o) => o.value !== "first");
 
 function PayrollSettingsForm() {
@@ -1553,7 +1567,7 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
   const [deductionTiming, setDeductionTiming] = useState(settings.deduction_timing);
   const [taxTiming, setTaxTiming] = useState(settings.tax_timing);
   const [allowanceTiming, setAllowanceTiming] = useState(settings.allowance_timing);
-  // FIN-046 — how many people this default actually decides the pay group for.
+  // How many people this default actually decides the pay group for.
   const inheritingCount = settings.inheriting_employee_count ?? 0;
   // A STRING so an empty box stays empty ("no floor set") instead of collapsing to 0, which
   // would be a wage order of nothing rather than no wage order at all.
@@ -1600,9 +1614,11 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
 
   return (
     <div className="space-y-6">
-      {/* Deliberately not the colour or the wording of the attendance banner above: these
-          settings are replayed per cycle, those are read live. Two notices that looked the
-          same would teach HR the wrong rule about one of them. */}
+      {/*
+       * Deliberately not the colour or the wording of the attendance banner above: these
+       * settings are replayed per cycle, those are read live. Two notices that looked the
+       * same would teach HR the wrong rule about one of them.
+       */}
       <div className="rounded-lg border border-info bg-info-subtle p-4">
         <p className="text-xs text-foreground">
           <strong>Each cycle is priced with the settings in force for that cycle.</strong>{" "}
@@ -1664,13 +1680,15 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
           employees into a different pay group.
         </Hint>
 
-        {/* FIN-046 — THE COUNT, BEFORE THE SAVE.
-            Pay group membership is COALESCE(pay_frequency, <this setting>), so this one field
-            decides the pay group for everyone who never set their own. Changing it re-assigns all
-            of them at once and writes nothing to their records — the first symptom is a payroll
-            run that no longer finds them, or a re-run that cannot clean up after them because
-            their old payslip is already committed to a payment batch. Shown only once the value
-            has actually been changed, so it reads as a consequence rather than decoration. */}
+        {/*
+         * THE COUNT, BEFORE THE SAVE.
+         * Pay group membership is COALESCE(pay_frequency, <this setting>), so this one field
+         * decides the pay group for everyone who never set their own. Changing it re-assigns all
+         * of them at once and writes nothing to their records — the first symptom is a payroll
+         * run that no longer finds them, or a re-run that cannot clean up after them because
+         * their old payslip is already committed to a payment batch. Shown only once the value
+         * has actually been changed, so it reads as a consequence rather than decoration.
+         */}
         {inheritingCount > 0 && frequency !== settings.frequency && (
           <div className="mt-2 rounded-lg border border-warning/40 bg-warning-subtle px-3 py-2 text-xs text-foreground">
             <strong>

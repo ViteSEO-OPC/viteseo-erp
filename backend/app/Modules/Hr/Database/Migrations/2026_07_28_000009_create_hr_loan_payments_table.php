@@ -4,18 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice 11b — the loan payment ledger. One row per (loan, payroll run).
- *
- * This is what makes the whole feature re-run safe. `unique(loan_id, payroll_run_id)` plus
- * updateOrCreate means recomputing a cycle REPLACES that period's payment instead of adding a
- * second one, so a balance derived as `principal − SUM(amount)` can never drift however many
- * times payroll is re-run. It also gives HR a payment history for free.
- *
- * `amount` may be less than the loan's per-period figure: when a payslip can't cover the full
- * instalment we take what's there and the remainder stays on the balance (product decision,
- * 2026-07-28) — so net pay never goes negative and the loan just settles a period later.
- */
+/** The loan payment ledger. One row per (loan, payroll run). */
 return new class extends Migration
 {
     public function up(): void

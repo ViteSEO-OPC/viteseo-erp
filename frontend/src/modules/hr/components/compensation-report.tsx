@@ -30,7 +30,7 @@ export function CompensationReport() {
   const [to, setTo] = useState("");
   const [payGroup, setPayGroup] = useState("all");
 
-  // FIN-041 — an explicit date range and a pay group, alongside the rolling `months` window this
+  // An explicit date range and a pay group, alongside the rolling `months` window this
   // report already had. The range WINS over `months` server-side: the rolling window is what the chart
   // has always shown, and a range is what reconciling a specific period needs.
   const params: Record<string, string | number> = { months: range };
@@ -99,7 +99,7 @@ export function CompensationReport() {
             ...departments.map((d) => ({ value: String(d.id), label: d.name })),
           ]}
         />
-        {/* FIN-041 — pay group, offered only when there is more than one to choose between. */}
+        {/* Pay group, offered only when there is more than one to choose between. */}
         {(report?.pay_groups?.length ?? 0) > 1 && (
           <SimpleSelect
             aria-label="Pay group"

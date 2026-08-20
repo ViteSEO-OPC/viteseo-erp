@@ -13,7 +13,7 @@ class ContributionSettingResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        // Slice B3a/b — `config` is the LEGACY row and is no longer what payroll reads. The card
+        // /b — `config` is the LEGACY row and is no longer what payroll reads. The card
         // showed SSS at 4.5% while payroll charged 5%, because this resource still served the old
         // column. `current` is the version actually in force today, so the page and the payslip
         // agree.
@@ -29,7 +29,7 @@ class ContributionSettingResource extends JsonResource
             'current' => $version ? [
                 'effective_from' => $version->effective_from?->format('Y-m-d'),
                 'basis' => $version->basis,
-                // Slice B19 — which salary figure this is charged on: `basic` (the profile rate)
+                // Which salary figure this is charged on: `basic` (the profile rate)
                 // or `earnings` (what the period actually paid).
                 'salary_basis' => $version->salary_basis ?: 'basic',
                 'employee_rate' => (float) $version->employee_rate,

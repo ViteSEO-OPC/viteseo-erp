@@ -53,26 +53,7 @@ const SKIP_LABELS: Record<keyof PaymentSkipped, string> = {
   zero_net: "net pay of zero",
 };
 
-/**
- * Pay a completed run (FIN-015).
- *
- * WHAT WAS MISSING. Payroll computed net pay correctly and then stopped tracking it. Disbursement
- * was a manual per-payslip flip with no payment record, no bank reference and no way to learn that
- * a transfer had bounced; the bank details collected on every employee were never used at all.
- *
- * WHY THE FORM ASKS SO LITTLE. Who gets paid, and how much, comes from the run — never typed. A
- * typed amount would be a second, unreconciled answer to "what does payroll owe", which is the
- * whole class of defect this work exists to close. The only real decision is how the money leaves.
- *
- * BUILDING A BATCH DOES NOT MARK ANYONE PAID. It says "we intend to pay these". Only the bank's
- * own confirmation says money moved — that is the difference between `computed`, `disbursed` and
- * `settled`, and collapsing it is exactly the overstatement FIN-052 is about.
- *
- * THE SKIPPED LIST IS NOT A FOOTNOTE. A batch that quietly omits three people looks identical to
- * one that does not, and the number finance checks is whether the batch equals the run. So both
- * the exclusions and the reconciliation are shown, and an unbalanced batch is called out rather
- * than left for someone to notice at month end.
- */
+/** Pay a completed run. */
 export function PaymentBatchDialog({
   open,
   onOpenChange,
@@ -146,11 +127,11 @@ export function PaymentBatchDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/*
-        Capped at `90svh` with the body as the only scroller. Even with the
-        transfers list bounded, a run paid in several batches stacks past the
-        window, and this dialog had no height limit at all — so the overflow was
-        unreachable rather than scrollable.
-      */}
+       * Capped at `90svh` with the body as the only scroller. Even with the
+       * transfers list bounded, a run paid in several batches stacks past the
+       * window, and this dialog had no height limit at all — so the overflow was
+       * unreachable rather than scrollable.
+       */}
       <DialogContent className="flex max-h-[90svh] max-w-2xl flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle>Pay this run</DialogTitle>
@@ -205,9 +186,9 @@ export function PaymentBatchDialog({
           </div>
 
           {/*
-            Bank transfer is the only method that needs an account number, so it is the only one
-            that can silently leave someone out. Said up front rather than discovered afterwards.
-          */}
+           * Bank transfer is the only method that needs an account number, so it is the only one
+           * that can silently leave someone out. Said up front rather than discovered afterwards.
+           */}
           {method === "bank_transfer" && (
             <p className="text-caption text-muted-foreground flex items-start gap-2">
               <FileWarning className="mt-0.5 size-3.5 shrink-0" />
@@ -280,10 +261,10 @@ export function PaymentBatchDialog({
             ))}
 
             {/*
-              Downloading stamps the batch as sent and it can no longer be rebuilt — once the file
-              exists the company has to assume the bank has it, and regenerating from changed
-              payslips is how someone gets paid twice.
-            */}
+             * Downloading stamps the batch as sent and it can no longer be rebuilt — once the file
+             * exists the company has to assume the bank has it, and regenerating from changed
+             * payslips is how someone gets paid twice.
+             */}
             {batches.some((b) => !b.exported_at) && (
               <p className="text-caption text-muted-foreground">
                 Downloading the bank file marks a batch as sent. It cannot be rebuilt after that.
@@ -302,17 +283,7 @@ export function PaymentBatchDialog({
   );
 }
 
-/**
- * The transfers in one batch, and what the bank did with each (FIN-015).
- *
- * THIS IS WHERE "PAID" BECOMES A FACT. A batch on its own only says the company intended to pay.
- * Marking a transfer settled is what moves the payslip to `disbursed`; marking one failed is the
- * case that was previously invisible — a bounced transfer used to leave the payslip reading paid
- * with nothing anywhere to contradict it.
- *
- * Two ways in, because companies differ: upload the bank's return file, or work down the list by
- * hand against a statement. Small teams will do the latter and it must not feel like the fallback.
- */
+/** The transfers in one batch, and what the bank did with each. */
 function BatchTransfers({ batchId }: { batchId: number }) {
   const { data, isLoading } = usePaymentBatch(batchId);
   const settle = useSettlePayment();
@@ -371,13 +342,15 @@ function BatchTransfers({ batchId }: { batchId: number }) {
   return (
     <div className="space-y-3">
       {/*
-        Preview first, apply second — deliberately two clicks. This import moves payslips into
-        `disbursed`, so it should not run on a file nobody has read back.
-      */}
+       * Preview first, apply second — deliberately two clicks. This import moves payslips into
+       * `disbursed`, so it should not run on a file nobody has read back.
+       */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-caption text-muted-foreground">Bank return file:</span>
-        {/* Both controls are styled buttons hiding their own input — the pair reads as one
-            two-step action, which a bare browser file widget beside a button did not. */}
+        {/*
+         * Both controls are styled buttons hiding their own input — the pair reads as one
+         * two-step action, which a bare browser file widget beside a button did not.
+         */}
         <Button variant="outline" size="sm" asChild>
           <label>
             <Upload className="size-4" />
@@ -415,16 +388,12 @@ function BatchTransfers({ batchId }: { batchId: number }) {
       </div>
 
       {/*
-        The transfers scroll inside a fixed height instead of growing the dialog.
-        This is one row per employee in the batch — a payroll run for 80 people
-        is 80 rows — and expanding it used to push the dialog taller than the
-        window, which on a `top-1/2 -translate-y-1/2` dialog means the top and
-        bottom are simply cut off with no way to reach them.
-
-        The upload controls above and the failure-reason panel below stay outside
-        the scroller deliberately: hitting "Failed" on a row near the bottom must
-        not send you hunting for the reason input.
-      */}
+       * The transfers scroll inside a fixed height instead of growing the dialog.
+       * This is one row per employee in the batch — a payroll run for 80 people
+       * is 80 rows — and expanding it used to push the dialog taller than the
+       * window, which on a `top-1/2 -translate-y-1/2` dialog means the top and
+       * bottom are simply cut off with no way to reach them.
+       */}
       <div className={cn("max-h-64 space-y-1 overflow-y-auto pr-1", dialogScrollbar)}>
         {data.batch.payments?.map((payment) => (
           <div key={payment.id} className="flex flex-wrap items-center justify-between gap-2 py-1">

@@ -15,29 +15,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-/**
- * FIN-004 (payroll audit, §3) — HR evidence files were world-readable.
- *
- * WRITTEN TO FAIL. Every HR upload went to the `public` disk, which is served straight off the
- * `public/storage` symlink by the webserver — no authentication, no ownership check, no expiry,
- * no revocation. Reimbursement receipts, employment contracts, government IDs, payroll-inquiry
- * attachments, résumés, whistle-blower attachments and clock-in selfies were all one guessed or
- * leaked URL away from anyone on the internet. A URL that leaks via email, referrer header,
- * browser history or a backup is disclosed permanently, because nothing can revoke it.
- *
- * THE FIX, and why it is signed URLs rather than token-authenticated endpoints. Files move to the
- * `local` disk (storage/app/private), which is NOT symlinked into public/. Laravel serves it via
- * `ServeFile`, which refuses anything without a valid relative signature because the disk's
- * visibility is not `public`. The API hands out short-lived signed URLs, generated only inside
- * resources that are already behind `auth:sanctum` and the module's role checks.
- *
- * Authenticated controller endpoints were the other option and were rejected for a concrete
- * reason: the frontend renders these files with `<img src>` and direct download links, and a
- * browser does not attach the Axios Bearer token to either. That would have meant fetching every
- * receipt as a blob. The audit's own recommendation allows signed URLs "where a direct link is
- * genuinely needed" — this is that case. The exposure changes from permanent-and-anonymous to a
- * link that expires, issued only to someone already authorised to see the record.
- */
+/** (payroll audit, §3) — HR evidence files were world-readable. */
 class PrivateFileStorageTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -127,17 +105,6 @@ class PrivateFileStorageTest extends HrTestCase
     /**
      * `ServeFile` returns 403 outside production (404 in production) when the signature is
      * missing.
-     *
-     * HONEST LIMIT OF THIS TEST: it passed BEFORE the fix too, and not because the system was
-     * safe. FIN-004's real exposure is not in Laravel at all — the `public` disk is reachable
-     * through the `public/storage` symlink, which the webserver resolves before PHP is ever
-     * invoked. PHPUnit has no webserver and no symlink, so a request for a public-disk file falls
-     * through to Laravel's `storage.local` route and is refused on signature grounds regardless.
-     *
-     * It is kept as a regression guard on the signature requirement — if anyone ever sets
-     * `visibility => public` on the local disk, `ServeFile::hasValidSignature()` starts returning
-     * true for everything and this test catches it. The assertions that actually prove FIN-004 is
-     * fixed are the disk-placement ones above.
      */
     public function test_a_stored_file_cannot_be_fetched_without_its_signature(): void
     {
@@ -158,14 +125,7 @@ class PrivateFileStorageTest extends HrTestCase
         $this->get($tampered)->assertStatus(403);
     }
 
-    /**
-     * Slice 4d — the TTL has to outlast a page that sits mounted and focused without refetching.
-     *
-     * Not an arbitrary number: `core/query-provider.tsx` overrides only `retry`, so TanStack's
-     * defaults apply (staleTime 0, refetchOnWindowFocus true) and a link is normally seconds old
-     * when clicked. This guards the margin left for the one case that escapes that — an idle
-     * focused page — and pins it well short of anything that stops counting as short-lived.
-     */
+    /** The TTL has to outlast a page that sits mounted and focused without refetching. */
     public function test_the_link_ttl_outlasts_an_idle_page_without_being_long_lived(): void
     {
         $this->assertGreaterThanOrEqual(

@@ -4,10 +4,6 @@ import type { MyAttendanceDay, MyDayStatus } from "@/modules/hr/types/my-attenda
  * How every day of the employee's own month reads — one label and one colour per status, shared
  * by the calendar, the day table and the legend so the three cannot describe the same day
  * differently.
- *
- * The two suspension flavours share a chip on purpose: to the eye they are the same fact (HR
- * cancelled work), and which of them costs a day's pay is said in words on the row rather than
- * left to a colour nobody can decode.
  */
 export const MY_DAY_STATUS: Record<MyDayStatus, { label: string; chip: string; dot: string }> = {
   present: { label: "Present", chip: "bg-success-subtle text-success", dot: "bg-success" },
@@ -89,10 +85,6 @@ export interface DayHighlight {
 /**
  * Everything that happened on a day, in reading order — the calendar's tooltip and the table's
  * detail column both come from here, so a day never says two different things on one screen.
- *
- * Each entry is TAGGED rather than just worded, because the table drops the three facts its own
- * numeric columns already carry. Matching on the wording instead would have quietly eaten an HR
- * note ending in "late" — the one sentence on the row a human actually wrote.
  */
 export function dayHighlights(day: MyAttendanceDay): DayHighlight[] {
   const parts: DayHighlight[] = [];

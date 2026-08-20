@@ -30,7 +30,7 @@ class LeaveService
 
     /**
      * Leave days = weekdays (Mon–Fri) between start and end, inclusive, MINUS any
-     * non-working holidays in range (Slice 15 — §5.5c). Half-day = 0.5, single day.
+     * non-working holidays in range ( — §5.5c). Half-day = 0.5, single day.
      * Weekends and holidays don't consume balance.
      */
     public function computeDays(string $start, string $end, bool $isHalfDay): float
@@ -101,23 +101,6 @@ class LeaveService
     /**
      * The leave types this employee may actually file, newest rule first (§ Leave Type config).
      *
-     * THE RULE, AND WHY EACH PART OF IT.
-     *
-     *  - UNLIMITED types are always offered. There is no entitlement to be zero — the type is
-     *    uncapped, so nothing about a per-person number can disqualify it. LWOP ships unlimited,
-     *    which is why a zero-means-hidden rule that ignored this flag would delete unpaid leave
-     *    from the product. Note the test for it is `is_unlimited`, NOT `is_paid`: HR can now cap
-     *    an unpaid type ("at most 10 LWOP days a year"), and a capped type earns its credits check
-     *    whether or not payroll pays the day.
-     *
-     *  - In SHARED mode every type is offered. They all draw the one SIL pool, so a per-type
-     *    number means nothing there; the pool is the only entitlement.
-     *
-     *  - In NOT-SHARED mode a capped type is offered only when this employee is entitled to more
-     *    than zero days of it. Their own balance row wins when they have one (HR can grant an
-     *    individual more or less than their band); otherwise the allotment default for their
-     *    employment status decides. Zero on both means they do not have that leave type.
-     *
      * @return Collection<int, LeaveType>
      */
     public function selectableTypesFor(Employee $employee): Collection
@@ -163,9 +146,6 @@ class LeaveService
         // and `LeaveBalanceResource` dereferences that relation. One deleted type therefore took
         // the whole endpoint down with a 500 for every employee who had ever held that leave,
         // which is what emptied the Work Schedule cards in both allotment modes.
-        //
-        // Filtered rather than deleted, because a soft delete is reversible: restore the type and
-        // these balances come back with it.
         return $employee->leaveBalances()
             ->with('leaveType')
             ->whereHas('leaveType')
@@ -200,7 +180,7 @@ class LeaveService
                 ->first();
 
             if ($poolModel) {
-                // FIN-034 — FLOAT, not int. The columns are decimal(5,1) and half-day leave puts
+                // FLOAT, not int. The columns are decimal(5,1) and half-day leave puts
                 // real halves in them, so casting to int reported 2.5 days used as 2 and handed the
                 // employee back half a day of credit they had already spent.
                 $entitled = (float) $poolModel->entitled_days;
@@ -246,7 +226,7 @@ class LeaveService
      */
     public function create(Employee $employee, array $data): LeaveRequest
     {
-        // FIN-034 — leave can be taken half a day at a time, and `computeDays()` already knew how
+        // Leave can be taken half a day at a time, and `computeDays()` already knew how
         // (0.5, same-day only). Only this call site was passing a hardcoded `false`, so the ability
         // existed and was unreachable. A half day of PAID leave costs 0.5 credits and is paid; a
         // half day of LWOP costs half a day's pay. Both leave the other half expected worked.
@@ -401,7 +381,7 @@ class LeaveService
         // A newly-approved leave can retroactively clear an absence/AWOL flag on the
         // covered days (e.g. a backdated leave). Recompute so violation history stays
         // in sync immediately, not only on the next attendance-roster load.
-        // FIN-009 — approving a request for days payroll has already settled changes what that
+        // Approving a request for days payroll has already settled changes what that
         // period SHOULD have paid. The approval stands (the leave was taken), and the difference
         // is recorded so an adjustment run can settle it rather than relying on someone's memory.
         if ($wasPending) {
@@ -500,13 +480,6 @@ class LeaveService
      * approval (`deducted_from`), so a mode flip between approve and reversal can't
      * restore the wrong table. Legacy rows (approved before stamping) fall back to the
      * paid-type + current-mode guess.
-     *
-     * WHAT THE BALANCE IS STILL HOLDING, not the request's full `days`. A day inside the range
-     * that turned out to be worked has already been refunded (see AttendanceService), so
-     * restoring the whole request on top of that would invent a credit out of nothing —
-     * `max(0, …)` below only hides it while the employee has taken no other leave that year.
-     * cancel() cannot reach this case (it is refused once the leave has started), but reopen()
-     * exists precisely for a mistaken approval on a date already past.
      */
     private function restoreBalance(LeaveRequest $request): void
     {
@@ -542,10 +515,6 @@ class LeaveService
      * Undo the decision — back to pending, so HR can rule on it again. Unlike cancel()
      * (final, and only before the leave starts), a reopened request is still live, which
      * is what makes it the right tool for a mistaken approval on a date already past.
-     *
-     * Re-approving re-deducts, so the credits an approval consumed are given back here,
-     * and violations recompute because the covered days stop counting as excused leave.
-     * Refused once payroll has settled any day the leave covers.
      */
     public function reopen(LeaveRequest $request, ?string $reason = null): LeaveRequest
     {

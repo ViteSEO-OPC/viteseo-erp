@@ -921,7 +921,7 @@ function OvertimeSection() {
     return (
       <>
         {r.status === "approved" ? (
-          // Slice 6 — an approved request is no longer frozen: HR can undo overtime
+          // An approved request is no longer frozen: HR can undo overtime
           // that isn't going to happen, before payroll pays it.
           <Button size="sm" variant="outline" disabled={busyId === r.id} onClick={() => setReview({ mode: "cancel", r })}>
             <X />
@@ -960,8 +960,10 @@ function OvertimeSection() {
       cell: (r) => (
         <span className="text-muted-foreground">
           {r.reason}
-          {/* Item 10 — a request HR filed on someone's behalf must say so. Without it the row is
-              indistinguishable from one the employee sent, which credits the wrong person. */}
+          {/*
+           * Item 10 — a request HR filed on someone's behalf must say so. Without it the row is
+           * indistinguishable from one the employee sent, which credits the wrong person.
+           */}
           {r.filed_by && <span className="block text-xs italic">Filed by {r.filed_by}</span>}
         </span>
       ),
@@ -976,8 +978,10 @@ function OvertimeSection() {
 
   return (
     <div className="mt-10">
-      {/* FIN-039 — overtime the auto-pay cap held back, shown ABOVE the request table because the
-          table below is where it gets resolved: approving a request for that date releases it. */}
+      {/*
+       * Overtime the auto-pay cap held back, shown ABOVE the request table because the
+       * table below is where it gets resolved: approving a request for that date releases it.
+       */}
       <AutoOvertimeReview />
 
       <OvertimeCorrectionDialog open={filingFor} onOpenChange={setFilingFor} />
@@ -991,9 +995,11 @@ function OvertimeSection() {
             holiday).
           </p>
         </div>
-        {/* Item 10 — the correction path for overtime that was worked but never filed. Employees
-            cannot back-date their own, so without this the only remedies were editing the
-            attendance record or paying it outside the system. */}
+        {/*
+         * Item 10 — the correction path for overtime that was worked but never filed. Employees
+         * cannot back-date their own, so without this the only remedies were editing the
+         * attendance record or paying it outside the system.
+         */}
         <Button variant="outline" onClick={() => setFilingFor(true)}>
           <CalendarPlus />
           File for an employee
@@ -1027,8 +1033,10 @@ function OvertimeSection() {
         onConfirm={onConfirm}
       />
 
-      {/* Cancelling an APPROVED request needs its own reason prompt (Slice 6). The shared
-          ReviewDialog only knows approve/reject and lives in core/, so reuse the HR one. */}
+      {/*
+       * Cancelling an APPROVED request needs its own reason prompt. The shared
+       * ReviewDialog only knows approve/reject and lives in core/, so reuse the HR one.
+       */}
       <CancelLeaveDialog
         open={review?.mode === "cancel"}
         onOpenChange={(o) => !o && setReview(null)}

@@ -17,7 +17,7 @@ class LeaveTypeResource extends JsonResource
             'name' => $this->name,
             'code' => $this->code,
             'days_per_year' => (float) $this->days_per_year,
-            // FIN-034 — accrual settings. 'none' means this type stays hand-managed.
+            // Accrual settings. 'none' means this type stays hand-managed.
             'accrual_mode' => $this->accrual_mode,
             'prorate_first_year' => (bool) $this->prorate_first_year,
             'carry_over_cap_days' => $this->carry_over_cap_days === null

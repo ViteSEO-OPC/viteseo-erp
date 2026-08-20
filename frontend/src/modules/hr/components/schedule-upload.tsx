@@ -11,21 +11,7 @@ import { useImportContributionSchedule } from "@/modules/hr/hooks/use-benefits";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import type { ContributionBand, ScheduleImportResult } from "@/modules/hr/api/benefits";
 
-/**
- * The columns the system looks at — and it is only ever these five, out of a dozen in the file.
- *
- * SAVED (three). A bracket is three numbers: where it starts, what the rate is charged on, and the
- * employer-only EC. That is the whole table as payroll needs it.
- *
- * CHECKED (two). The agency also prints what each band costs. Those are not stored — they are
- * recomputed from the rate — but they are read so the import can prove its own arithmetic against
- * them before anything is saved.
- *
- * IGNORED (the rest). Every other column is a component of one of these: MSC Regular SS + MSC MPF
- * make up MSC Total, ER Regular SS + ER MPF + ER EC make up ER Total. Storing a part as if it were
- * the whole is the one mistake that would be invisible afterwards, which is why the MSC column is
- * shown here rather than guessed at silently.
- */
+/** The columns the system looks at — and it is only ever these five, out of a dozen in the file. */
 const FIELDS = [
   { key: "range", label: "Salary range", hint: "Where each bracket starts", role: "saved" },
   { key: "msc", label: "Charged on (MSC)", hint: "What the rate is applied to — the TOTAL, not a part of it", role: "saved" },
@@ -43,19 +29,7 @@ const COLUMN_LETTERS = [
   ...Array.from({ length: 26 }, (_, i) => `A${String.fromCharCode(65 + i)}`),
 ];
 
-/**
- * Load the SSS bracket table by uploading the agency's own spreadsheet (Slice B8).
- *
- * WHY NOT PASTE. The schedule is 61 bands. B3b shipped a paste-the-table box and the table was
- * never entered — copying sixty rows of government figures out of a PDF is a job that does not get
- * done, and one mistyped MSC is silently wrong on every payslip in that band. The circular is
- * published as a spreadsheet; the system reads that.
- *
- * WHY IT STILL ASKS. The file is read by what its column headings SAY, not by position, and every
- * guess is shown before anything is saved — including a check that our own arithmetic reproduces
- * the peso amounts the agency printed. A schedule imported with a column misread is worse than no
- * schedule at all, so nothing is written until HR has seen what it read.
- */
+/** Load the SSS bracket table by uploading the agency's own spreadsheet. */
 export function ScheduleUpload({
   current,
   imported,
@@ -177,9 +151,11 @@ function ImportSummary({
         </p>
       ))}
 
-      {/* The guidance the file may need: which column is which. Every column the system looks at
-          is listed — including the two it only checks against — so nothing is read invisibly, and
-          any of them can be re-pointed without a code change. */}
+      {/*
+       * The guidance the file may need: which column is which. Every column the system looks at
+       * is listed — including the two it only checks against — so nothing is read invisibly, and
+       * any of them can be re-pointed without a code change.
+       */}
       <div className="space-y-3">
         <p className="text-caption text-muted-foreground">
           These are the only columns the system reads. The first three are saved as the bracket
@@ -263,8 +239,10 @@ function ImportSummary({
             {formatPeso(top.msc)}, which makes that the ceiling.
           </p>
 
-          {/* The strongest check available: does our own arithmetic reproduce the peso amounts
-              the agency printed? If it does, there is nothing to argue about. */}
+          {/*
+           * The strongest check available: does our own arithmetic reproduce the peso amounts
+           * the agency printed? If it does, there is nothing to argue about.
+           */}
           {result.suggested.amounts_match ? (
             <p className="flex items-start gap-1.5 rounded-lg border border-success/40 bg-success-subtle px-3 py-2 text-caption text-foreground">
               <Check className="mt-0.5 size-3.5 shrink-0 text-success" />

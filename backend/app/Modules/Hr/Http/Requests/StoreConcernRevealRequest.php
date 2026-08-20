@@ -4,13 +4,7 @@ namespace App\Modules\Hr\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-/**
- * HR asking an anonymous reporter to identify themselves.
- *
- * The reason is required — the reporter cannot weigh a request whose purpose is not stated —
- * but its length is not policed. A character count does not make a reason good, and a real one
- * can be short ("the payroll dates in your report contradict our records").
- */
+/** HR asking an anonymous reporter to identify themselves. */
 class StoreConcernRevealRequest extends FormRequest
 {
     public function authorize(): bool

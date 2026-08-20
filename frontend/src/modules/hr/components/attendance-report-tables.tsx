@@ -103,13 +103,7 @@ interface ExpandableRow {
   department: string | null;
 }
 
-/**
- * Employee rows that open into a per-employee detail panel.
- *
- * The whole row is clickable, because that is what the screen tells the reader to do — but the
- * name is also a real `<button>`, so the breakdown is reachable from the keyboard without giving
- * a `<tr>` a button role and breaking the table for a screen reader.
- */
+/** Employee rows that open into a per-employee detail panel. */
 function ExpandableTable<T extends ExpandableRow>({
   rows,
   columns,

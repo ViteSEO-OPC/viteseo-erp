@@ -6,40 +6,13 @@ use App\Modules\Hr\Models\Attendance;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Decides whether an office clock-in really came from the office.
- *
- * Two independent signals, and they are NOT interchangeable:
- *
- *   • The office **IP** is mandatory. To hold the office's public address you must be
- *     physically on its network — that is what NAT means. Nothing verifies without it.
- *   • **GPS** is corroboration, used only when the browser hands back a reading good
- *     enough to be worth believing.
- *
- * WHY GPS can't be mandatory (the desktop problem): `navigator.geolocation` answers on
- * every machine, GPS hardware or not. A phone or a Wi-Fi laptop trilaterates to tens of
- * metres; an ethernet desktop with no Wi-Fi radio falls back to resolving its own IP and
- * returns a CITY-level guess — kilometres out, and not as an error but as confident-looking
- * coordinates. Requiring both signals unconditionally would therefore reject the office's
- * own desk staff every morning and dump them all in HR's selfie queue.
- *
- * The browser tells us how much to trust each fix via `coords.accuracy` (metres, 95%
- * confidence), so that — not user-agent sniffing — is what decides. A laptop reports a
- * desktop-class user agent and geolocates perfectly well; the accuracy number doesn't lie.
- *
- * Documented in HRIS-Geofenced-Attendance-Plan.md §67/§70 as the "office-IP shortcut for
- * desktops"; the MVP plan lost it in the trim.
- */
+/** Decides whether an office clock-in really came from the office. */
 class GeofenceService
 {
     /**
      * Fixes worse than this are treated as no fix at all, and the IP carries the check
      * alone. 150 m sits above honest indoor GPS/Wi-Fi drift (~20–100 m) and far below the
      * kilometres an IP-derived guess reports, so it separates the two cleanly.
-     *
-     * A constant, not a policy column, on purpose: HR has no way to judge a good value, and
-     * a wrong one silently changes who can clock in. The radius IS theirs to set — that is
-     * the knob with a real-world meaning.
      */
     public const MAX_ACCURACY_M = 150;
 
@@ -48,14 +21,7 @@ class GeofenceService
 
     public function __construct(private readonly AttendancePolicyService $policy) {}
 
-    /**
-     * Is the geofence actually going to check anything?
-     *
-     * True only when the toggle is on AND the policy is complete enough to enforce. A
-     * half-configured policy answers FALSE, which is the same answer employees get when the
-     * feature is off — the fail-open path (§2.5) has to be invisible in the UI too, or the
-     * time clock would demand a location it is about to ignore.
-     */
+    /** Is the geofence actually going to check anything? */
     public function enforcing(): bool
     {
         return $this->config() !== null;
@@ -96,7 +62,6 @@ class GeofenceService
      * @param  ?float  $accuracy  browser-reported radius of confidence, in metres
      * @param  ?string  $ip  the address the SERVER sees; never a client-supplied value
      * @return ?string  one of Attendance::LOCATION_IP_GPS | LOCATION_IP_ONLY, or null
-     *
      * @throws ValidationException when the employee is provably not at the office
      */
     public function verifyOfficeClockIn(?float $lat, ?float $lng, ?float $accuracy, ?string $ip): ?string
@@ -104,10 +69,6 @@ class GeofenceService
         $config = $this->config();
 
         // Either off — the kill switch — or on but with nothing to check against.
-        //
-        // FAIL OPEN (plan §2.5): a half-finished setting must never lock the whole company
-        // out of its own time clock. Loud in the log for the misconfigured case, silent for
-        // the deliberate off case, and invisible to the employee in both.
         if ($config === null) {
             $policy = $this->policy->get();
 

@@ -80,7 +80,7 @@ export default function HolidaysPage() {
   const activeSet =
     sets?.find((s) => s.country_code === country && s.year === Number(year)) ?? null;
   const { data: holidays } = useHolidays(activeSet?.id ?? null);
-  // Holidays HR hasn't typed yet — these are what block a payroll run (Slice 2).
+  // Holidays HR hasn't typed yet — these are what block a payroll run.
   const unclassified = (holidays ?? []).filter((h) => !h.type);
   const deleteHolidayMut = useDeleteHoliday(activeSet?.id ?? 0);
 
@@ -175,14 +175,10 @@ export default function HolidaysPage() {
       {/* Toolbar: country + year on the left, refresh + add on the right */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         {/*
-          At 375px the page has 343px of content, and `w-56` + gap-3 + `w-28` is
-          348px — with neither select able to shrink, the year dropdown ran off
-          the right edge and took the page's horizontal scrollbar with it.
-
-          On phones the country select takes whatever is left over instead of a
-          fixed 224px, and the year keeps its width (it holds four digits, so it
-          has nothing to spare). From `sm` up both return to the fixed widths.
-        */}
+         * At 375px the page has 343px of content, and `w-56` + gap-3 + `w-28` is
+         * 348px — with neither select able to shrink, the year dropdown ran off
+         * the right edge and took the page's horizontal scrollbar with it.
+         */}
         <div className="flex w-full items-center gap-3 sm:w-auto">
           <SimpleSelect
             aria-label="Country"
@@ -281,15 +277,7 @@ export default function HolidaysPage() {
   );
 }
 
-/**
- * HR-declared non-working days — typhoons, shutdowns.
- *
- * On this page but NOT in the holiday table, which is the point the copy has to carry: a
- * holiday is a legal calendar date whose class decides a statutory premium, while this is the
- * company cancelling one day and saying whether it is still paid. They live side by side
- * because HR looks for both in the same place; they are separate because payroll prices them
- * differently and always will.
- */
+/** HR-declared non-working days — typhoons, shutdowns. */
 function WorkSuspensionsSection({ year }: { year: string }) {
   const { data: suspensions, isLoading } = useWorkSuspensions();
   const deleteMut = useDeleteWorkSuspension();

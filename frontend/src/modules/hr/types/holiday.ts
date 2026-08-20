@@ -54,14 +54,7 @@ export function countryName(code: string): string {
   return COUNTRIES.find((c) => c.code === code)?.name ?? code;
 }
 
-/**
- * An HR-declared non-working day — a typhoon, a flood, a company shutdown.
- *
- * Deliberately NOT a Holiday. A holiday is a legal calendar date with a class that decides the
- * premium a worked day earns; this is the company cancelling one day, and the only thing it
- * decides is whether the day is still paid. `status` is what the roster and payroll read, and
- * it comes from the server so no screen re-derives it from the boolean.
- */
+/** An HR-declared non-working day — a typhoon, a flood, a company shutdown. */
 export interface WorkSuspension {
   id: number;
   date: string;

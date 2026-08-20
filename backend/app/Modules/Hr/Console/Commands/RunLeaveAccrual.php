@@ -6,22 +6,7 @@ use App\Modules\Hr\Services\LeaveAccrualService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 
-/**
- * Accrues leave, carries last year's unused days forward, and expires what has lapsed (FIN-034).
- *
- * Runs on the 1st of each month from HrServiceProvider, and does all three steps in the order they
- * depend on each other: roll over first (so January's balance exists and knows its carried figure),
- * then accrue this month, then drop anything whose expiry has passed.
- *
- * SAFE TO RUN AT ANY TIME, ANY NUMBER OF TIMES. `LeaveAccrualService` recomputes totals from stored
- * components rather than incrementing them, so a double cron fire, a manual catch-up after a missed
- * month, or an HR officer running it to see what happens all converge on the same balances. That is
- * why there is no lock file and no "already ran this month" guard — there is nothing to guard.
- *
- *   php artisan hr:leave-accrual
- *   php artisan hr:leave-accrual --year=2026
- *   php artisan hr:leave-accrual --as-of=2026-06-30 --no-rollover
- */
+/** Accrues leave, carries last year's unused days forward, and expires what has lapsed. */
 class RunLeaveAccrual extends Command
 {
     protected $signature = 'hr:leave-accrual

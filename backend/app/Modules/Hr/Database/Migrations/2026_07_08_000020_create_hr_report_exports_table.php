@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 25. Report export history — every export is logged so each report
+// Phase-2. Report export history — every export is logged so each report
 // shows a "who exported this, when" trail.
 return new class extends Migration
 {

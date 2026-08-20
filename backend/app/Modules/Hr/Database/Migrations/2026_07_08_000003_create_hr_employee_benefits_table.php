@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 13. Per-employee contribution checklist — "not all employees have
+// Phase-2. Per-employee contribution checklist — "not all employees have
 // the same contributions." Payroll only applies a contribution to an employee when
 // their row here is enrolled = true. Seeded enrolled for every active contribution
 // on hire (EmployeeService::create), then HR toggles per person.

@@ -16,11 +16,6 @@ use Illuminate\Validation\ValidationException;
 /**
  * HR-side leave configuration (Company → Leave Type): the leave-type catalogue,
  * the per-employment-status allotment defaults, and per-person balance overrides.
- *
- * Two layers, per the 2026-07-08 decision:
- *   - Allotments = default credits applied ONLY when an employee is created.
- *   - Balances   = each person's actual, editable credits (the source of truth).
- * Editing an allotment never rewrites existing balances (going-forward only).
  */
 class LeaveConfigService
 {

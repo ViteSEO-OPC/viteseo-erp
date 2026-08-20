@@ -38,24 +38,7 @@ function serverMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-/**
- * Employment lifecycle — separate, reinstate, rehire (MF-18).
- *
- * WHY REINSTATE AND REHIRE ARE TWO BUTTONS AND NOT ONE. They are different events with different
- * consequences, and the UI has to make choosing between them a deliberate act:
- *
- *   · Reinstate — the separation should not have happened (withdrawn resignation, reversed
- *     dismissal). Service is continuous: hire date, leave credits and loan authorisations all stand.
- *   · Rehire — a new employment relationship. Tenure restarts, leave is seeded fresh for the year,
- *     and any outstanding loan goes back to needing the employee's consent (Art. 113).
- *
- * A single "bring back" button would have to guess, and guessing wrong either resets the tenure of
- * someone whose dismissal was overturned or gifts a rehire credits they no longer hold. So each
- * dialog states what it will do to leave and loans before HR confirms.
- *
- * Separating is also where `separation_date` gets written — the last working day payroll prorates
- * against and the field final pay refuses to run without.
- */
+/** Employment lifecycle — separate, reinstate, rehire. */
 export function EmploymentLifecycleSection({ employee }: { employee: Employee }) {
   const [mode, setMode] = useState<Mode>(null);
   const [separationType, setSeparationType] = useState<"voluntary" | "involuntary">("voluntary");
@@ -147,8 +130,10 @@ export function EmploymentLifecycleSection({ employee }: { employee: Employee })
               </Button>
             </>
           ) : (
-            /* type="button" matters: this section renders inside the Job tab's <form>, and a
-               bare button would default to submit — opening the dialog AND silently saving. */
+            /*
+             * type="button" matters: this section renders inside the Job tab's <form>, and a
+             * bare button would default to submit — opening the dialog AND silently saving.
+             */
             <Button type="button" variant="outline" onClick={() => setMode("separate")}>
               <UserMinus />
               End employment

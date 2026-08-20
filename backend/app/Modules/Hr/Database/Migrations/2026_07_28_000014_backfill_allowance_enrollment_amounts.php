@@ -4,22 +4,8 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Slice B1 — pin every employee's CURRENT allowance onto their enrolment, so the switch from the
+ * Pin every employee's CURRENT allowance onto their enrolment, so the switch from the
  * `hr_employees` columns to Company → Benefits pays exactly what it paid the day before.
- *
- * Without this the switch would reprice everyone at once: 9 employees match their programme
- * amounts, 1 is paid ₱2,000/month above them, and 4 have NULL columns (enrolled in everything,
- * paid nothing). Those five differences are decisions for HR, surfaced by the reconciliation
- * report — not something a migration should make on their behalf.
- *
- * MAPPING. Three programmes map to a payroll column; Gas Allowance never had one, so it has never
- * been paid and is pinned at 0. Matching is by NAME because there is no stable key — deliberately
- * defensive: any allowance programme this doesn't recognise is also pinned at 0, which is what it
- * is worth on a payslip today. An unrecognised programme therefore cannot start paying by accident.
- *
- * These pins are TRANSITIONAL. `AllowanceService` treats a non-null pivot amount as a deliberate
- * per-employee override; clearing one hands that employee back to the programme amount. The
- * reconciliation report exists to work through them.
  */
 return new class extends Migration
 {

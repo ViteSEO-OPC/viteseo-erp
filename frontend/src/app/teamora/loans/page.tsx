@@ -17,17 +17,7 @@ import { useMyLoans, useRequestLoan, useAuthorizeLoan } from "@/modules/hr/hooks
 import { useMyBenefits } from "@/modules/hr/hooks/use-benefit-programs";
 import type { EmployeeLoan } from "@/modules/hr/api/employees";
 
-/**
- * The employee's own loans — Slice B15.
- *
- * WHY THIS PAGE EXISTS AT ALL. Before it, an employee learned about a loan from a deduction line
- * on a payslip. Two things have to live here instead:
- *
- *  1. **What they owe** — balance, repaid, what comes off next.
- *  2. **Their authorization.** Labor Code Art. 113 permits deducting a debt owed to the employer
- *     only with the employee's explicit written consent. Nothing is collected until they give it,
- *     so this button is not a formality — it is the thing that makes the deduction lawful.
- */
+/** The employee's own loans. */
 export default function MyLoansPage() {
   const { data: loans, isLoading } = useMyLoans();
   const { data: benefits } = useMyBenefits();
@@ -83,10 +73,12 @@ export default function MyLoansPage() {
               <p className="text-sm font-bold text-foreground">
                 {formatPeso(loan.principal)} is ready — your approval is needed
               </p>
-              {/* FIN-032 — this is the Art. 113 consent, so it must state the TERMS, not just the
-                  instalment. With interest the deduction is larger than `per_period_amount` and the
-                  total repaid exceeds the principal; saying "X per payslip until the principal is
-                  repaid" would be a material misstatement on the screen where consent is given. */}
+              {/*
+               * This is the Art. 113 consent, so it must state the TERMS, not just the
+               * instalment. With interest the deduction is larger than `per_period_amount` and the
+               * total repaid exceeds the principal; saying "X per payslip until the principal is
+               * repaid" would be a material misstatement on the screen where consent is given.
+               */}
               <p className="mt-1 text-sm text-foreground">
                 By authorizing, you agree that{" "}
                 <strong>{formatPeso(loan.per_period_amount)} of the loan</strong> will be deducted from
@@ -169,7 +161,7 @@ export default function MyLoansPage() {
         )}
       </div>
 
-      {/* FIN-032 — the schedule the Art. 113 consent above links to. */}
+      {/* The schedule the Art. 113 consent above links to. */}
       <LoanScheduleDialog
         loanId={scheduleId}
         open={scheduleId !== null}

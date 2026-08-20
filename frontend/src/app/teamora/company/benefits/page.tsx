@@ -40,7 +40,7 @@ export default function BenefitsPage() {
   // — allowances were filtered by `is_active` and company plans were not.
   const allowances = (programs ?? []).filter((p) => p.kind === "allowance");
   const company = (programs ?? []).filter((p) => p.kind === "plan");
-  // Slice B15 — loan policies are a third behaviour: they deduct against a balance rather than
+  // Loan policies are a third behaviour: they deduct against a balance rather than
   // adding to gross or taking a fixed share.
   const loanPolicies = (programs ?? []).filter((p) => p.kind === "loan_policy");
   const activeCount = (programs ?? []).length;
@@ -55,7 +55,7 @@ export default function BenefitsPage() {
   // one at all, so the catalogue was frozen at whatever the seeder created.
   const [planOpen, setPlanOpen] = useState(false);
   const [editPlan, setEditPlan] = useState<BenefitProgram | null>(null);
-  // Slice B2 — who is ON a plan is a separate job from what the plan IS, and conflating the two
+  // Who is ON a plan is a separate job from what the plan IS, and conflating the two
   // is what made "Add a Plan" impossible to understand.
   const [membersOf, setMembersOf] = useState<BenefitProgram | null>(null);
   const [loanOpen, setLoanOpen] = useState(false);
@@ -104,8 +104,10 @@ export default function BenefitsPage() {
             </Button>
           </div>
 
-          {/* The tax-free ceiling belongs with the allowances it governs, not on the payroll
-              page. It is stored on the payroll settings because that is what payroll reads. */}
+          {/*
+           * The tax-free ceiling belongs with the allowances it governs, not on the payroll
+           * page. It is stored on the payroll settings because that is what payroll reads.
+           */}
           <DeMinimisCeiling />
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
@@ -241,7 +243,7 @@ function GovCard({ setting, onEdit }: { setting: ContributionSetting; onEdit: ()
     <GovernmentContributionCard
       setting={setting}
       action={
-        // Slice B3a — these rates change by legislation; each change is dated so old payslips
+        // These rates change by legislation; each change is dated so old payslips
         // keep the figures that applied to them.
         <Button size="sm" variant="outline" className="mt-4" onClick={onEdit}>
           <Pencil />
@@ -254,10 +256,7 @@ function GovCard({ setting, onEdit }: { setting: ContributionSetting; onEdit: ()
 
 /**
  * How much allowance stays tax-free in a year. Above it, the excess is taxed as compensation
- * (Slice 10). Blank = no ceiling, which is the behaviour if HR never sets one.
- *
- * Saved onto the payroll settings — that is the record payroll actually reads — but it is
- * surfaced here because it is a rule ABOUT allowances, and this is where HR manages them.
+ * . Blank = no ceiling, which is the behaviour if HR never sets one.
  */
 function DeMinimisCeiling() {
   const { data: settings } = usePayrollSettings();
@@ -300,10 +299,12 @@ function DeMinimisCeiling() {
           }
         }}
       />
-      {/* Slice B16 — this box used to be labelled the de-minimis cap and applied to the total of
-          every tax-free allowance. That is two different rules run together: each de-minimis
-          benefit has its OWN ceiling (set on the allowance itself), and ₱90,000 is the separate
-          exemption covering 13th month pay and other benefits. */}
+      {/*
+       * This box used to be labelled the de-minimis cap and applied to the total of
+       * every tax-free allowance. That is two different rules run together: each de-minimis
+       * benefit has its OWN ceiling (set on the allowance itself), and ₱90,000 is the separate
+       * exemption covering 13th month pay and other benefits.
+       */}
       <p className="mt-2 text-caption text-muted-foreground">
         The statutory <strong>₱90,000</strong> covers 13th month pay, bonuses, and anything an
         allowance pays <em>above its own de-minimis ceiling</em>. Each allowance carries that
@@ -326,8 +327,10 @@ function AllowanceCard({ program, onEdit }: { program: BenefitProgram; onEdit: (
             <p className="font-bold text-foreground">{program.name}</p>
             <p className="text-xs text-muted-foreground">
               Allowance · Monthly ·{" "}
-              {/* Slice B4 — this switch now changes withholding, so it has to be visible without
-                  opening each allowance in turn. */}
+              {/*
+               * This switch now changes withholding, so it has to be visible without
+               * opening each allowance in turn.
+               */}
               {program.tax_treatment === "taxable" ? (
                 <span className="font-medium text-warning">Taxable</span>
               ) : (
@@ -348,7 +351,7 @@ function AllowanceCard({ program, onEdit }: { program: BenefitProgram; onEdit: (
   );
 }
 
-// A loan policy — what may be borrowed, by whom, over how long (Slice B15).
+// A loan policy — what may be borrowed, by whom, over how long.
 function LoanPolicyCard({ program, onEdit }: { program: BenefitProgram; onEdit: () => void }) {
   return (
     <div className="rounded-card border border-border bg-card p-5">
@@ -367,11 +370,13 @@ function LoanPolicyCard({ program, onEdit }: { program: BenefitProgram; onEdit: 
       <p className="mt-4 text-3xl font-bold text-foreground">
         {program.loan_max_principal ? formatPeso(program.loan_max_principal) : "No limit"}
       </p>
-      {/* FIN-031 — the interest clause is gone with the field. This card used to print
-          "6% a year" for a rate `LoanService` never read, which is the most misleading place it
-          appeared: HR read it as the terms of the product. Loans repay principal only; when
-          interest is genuinely implemented it returns here with an amortisation schedule behind
-          it, not as a percentage nothing charges. */}
+      {/*
+       * The interest clause is gone with the field. This card used to print
+       * "6% a year" for a rate `LoanService` never read, which is the most misleading place it
+       * appeared: HR read it as the terms of the product. Loans repay principal only; when
+       * interest is genuinely implemented it returns here with an amortisation schedule behind
+       * it, not as a percentage nothing charges.
+       */}
       <p className="mt-1 text-xs text-muted-foreground">
         Most that can be borrowed
         {program.loan_term_periods ? ` · within ${program.loan_term_periods} payslips` : ""}
@@ -414,7 +419,7 @@ function CompanyBenefitCard({
         <p className="mt-3 text-sm text-muted-foreground">{program.description}</p>
       )}
 
-      {/* Slice B2 — a plan nobody can be put on is a brochure. This is the way on. */}
+      {/* A plan nobody can be put on is a brochure. This is the way on. */}
       <div className="mt-4 flex flex-wrap gap-2">
         <Button variant="outline" size="sm" onClick={onMembers}>
           Who is on it

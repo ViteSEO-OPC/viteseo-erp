@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// OT-4: an overtime request is filed as a TIME WINDOW (from → to); `hours` is derived from it
+// An overtime request is filed as a TIME WINDOW (from → to); `hours` is derived from it
 // server-side, never typed by the client. Nullable so any row filed before this (hours-only)
 // still reads. A window crossing midnight (to <= from) counts as spanning into the next day.
 return new class extends Migration

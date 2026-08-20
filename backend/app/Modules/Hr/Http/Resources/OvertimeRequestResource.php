@@ -24,7 +24,7 @@ class OvertimeRequestResource extends JsonResource
             'review_note' => $this->review_note,
             'reviewed_at' => $this->reviewed_at,
             'reviewed_by' => $this->reviewer?->name,
-            // Slice 6 — HR cancelled an approved request before it was paid.
+            // HR cancelled an approved request before it was paid.
             'cancelled_at' => $this->cancelled_at,
             'cancelled_by' => $this->canceller?->name,
             'cancel_reason' => $this->cancel_reason,

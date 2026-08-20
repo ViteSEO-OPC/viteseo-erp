@@ -14,18 +14,7 @@ use App\Modules\Hr\Services\BenefitProgramService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B11 — an allowance remembers what it used to be worth.
- *
- * THE GAP. Re-running an old cycle priced its allowances at TODAY's figure. Salary has been safe
- * since payroll Slice 13c and the statutory rates since B3a; allowances were the third pricing
- * input and the only one with no memory. Raise Meal Allowance in September, re-run August, and
- * August quietly paid September's amount.
- *
- * Bounded before it was built — a disbursed payslip cannot be recomputed and the breakdown is
- * snapshotted — but 13 computed payslips were exposed on the live database, and that number grows
- * every cycle until they are paid out.
- */
+/** An allowance remembers what it used to be worth. */
 class AllowanceHistoryTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -125,20 +114,7 @@ class AllowanceHistoryTest extends HrTestCase
 
     // --- a change dated INSIDE the open cycle -------------------------------------------
 
-    /**
-     * THE MID-CYCLE CASE, pinned deliberately rather than left emergent.
-     *
-     * The three tests above all move an allowance BETWEEN cycles, which is the easy half. The
-     * common real case is HR raising an allowance on the 29th while the 16–31 cutoff is still
-     * open, and nothing asserted what that does. It is not a gap in the code — it is a gap in
-     * what the code was ever asked to promise.
-     *
-     * The promise: pricing resolves at the CYCLE END and nowhere else, so a version dated any
-     * day on or before the 31st prices the ENTIRE 16–31 period. Deliberately NOT day-weighted:
-     * an allowance is a fixed monthly benefit, not something earned per day (the same reasoning
-     * that keeps absence proration off it — see PayrollService::payslipFor). Splitting it at the
-     * save date would also make the figure depend on the hour HR happened to click Save.
-     */
+    /** THE MID-CYCLE CASE, pinned deliberately rather than left emergent. */
     public function test_a_rise_dated_inside_the_open_cycle_prices_the_whole_cycle(): void
     {
         $program = $this->allowance(2000);

@@ -4,35 +4,10 @@ namespace App\Modules\Hr\Database\Seeders;
 
 use Illuminate\Support\Facades\Log;
 
-/**
- * Makes an HR demo seeder a no-op outside local/testing (FIN-021).
- *
- * WHAT WAS WRONG. `php artisan db:seed` — the documented reset path, and the default any hosting
- * platform's deploy hook reaches for — called every demo seeder in this directory. Those create
- * demo employees on real salaries, fabricated payroll runs, fabricated payslips and backfilled
- * audit entries. Nothing distinguishes a fabricated payroll run from a real one afterwards: it
- * counts in reports, in YTD, in the 13th-month basis and in the audit trail. One accidental seed
- * against a live database poisons every financial figure in the system, and there is no flag to
- * filter it back out.
- *
- * WHY A TRAIT, NOT A BASE CLASS. These seeders take injected dependencies with signatures that
- * differ per seeder (`run(PayrollService $service, PayScheduleService $schedule)`, and so on).
- * A base class with a templated `run()` would have to fix one signature and break the rest.
- *
- * WHY NOT IN DatabaseSeeder. That file is shared with the CRM and Projects modules and calls
- * their demo seeders too. Splitting it is the complete fix and belongs to the platform owner;
- * this closes the HR half without reaching into another pod's reset flow. CRM and Projects demo
- * data is still seeded by `db:seed` in any environment — that half of FIN-021 is still open.
- */
+/** Makes an HR demo seeder a no-op outside local/testing. */
 trait RefusesOutsideDemoEnvironments
 {
-    /**
-     * True when this seeder must not run — call it as the first line of `run()`.
-     *
-     * Fails CLOSED: anything that is not explicitly local or testing is treated as an environment
-     * where fabricated payroll must not appear, so a mis-set or empty APP_ENV is safe rather than
-     * permissive.
-     */
+    /** True when this seeder must not run — call it as the first line of `run()`. */
     protected function demoSeedingBlocked(): bool
     {
         if (app()->environment(['local', 'testing'])) {

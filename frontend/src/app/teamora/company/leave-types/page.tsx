@@ -431,23 +431,7 @@ function NotSharedGrid({ types }: { types: LeaveType[] }) {
  * first leave type row hosts the editable pool sizes; every other type is
  * disabled ("—") to signal it shares that single pool.
  */
-/**
- * Shared mode: ONE pool, so one row.
- *
- * The pool is NOT a leave type and never was — `hr_shared_leave_allotments` is keyed by
- * employment status alone, with no `leave_type_id`, and `hr_shared_leave_balances` likewise. So
- * this row is a label for a pot of credits, not a row of the leave-types table.
- *
- * That matters, because the two earlier attempts at this both went wrong by assuming otherwise.
- * Listing every leave type and disabling all but one put a grid of dead inputs in front of HR and
- * implied the other types had their own blank numbers. Looking up a real "SIL" type to name the
- * row then made the screen fail when none existed — and creating one to fix that would have put
- * SIL into every employee's leave-type dropdown, where it does not belong: in shared mode SIL is
- * the credits, and the leave types are the REASONS that spend them.
- *
- * Naming it Service Incentive Leave is a label decision, not a data one. The PH statutory pool is
- * SIL, so that is what HR should read, whatever leave types the company happens to have defined.
- */
+/** Shared mode: ONE pool, so one row. */
 function SharedGrid() {
   const { data: shared } = useSharedAllotments();
 

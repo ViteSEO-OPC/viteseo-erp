@@ -16,25 +16,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-011 — a payslip that explains its own gross, for every run type.
- *
- * THE DEFECT WAS WIDER THAN THE FINDING SAID. It was reported as "13th-month payslips render as a gross
- * with no earnings lines"; in fact both documents hardcoded an ordinary period's earnings (Basic Pay,
- * allowances, overtime, night differential, holiday, rest day, reimbursement) and rendered
- * "Basic Pay ₱0" for anything that was not one. That covered FOUR run types — 13th month, the off-cycle
- * adjustment (FIN-010) and final pay (FIN-014) all store their amounts in their own columns, and no
- * document knew about any of them. The last two shipped invisible in this same audit: the columns and
- * the resource fields were added, and nothing rendered them.
- *
- * SO THE LINES ARE BUILT ONCE, IN THE RESOURCE, exactly like `totals` already is. Two hand-maintained
- * lists — one in React, one in Blade — is precisely how the adjustment and final-pay types came to be
- * missing from both.
- *
- * `test_the_lines_always_sum_to_total_compensation` is the invariant that makes the document honest: if
- * the named lines do not add up to the figure printed as Total Compensation, the payslip is showing an
- * unexplained number, which is the whole complaint.
- */
+/** A payslip that explains its own gross, for every run type. */
 class PayslipEarningsLinesTest extends HrTestCase
 {
     use RefreshDatabase;

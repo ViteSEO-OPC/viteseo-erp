@@ -10,11 +10,8 @@ import type {
 } from "@/modules/hr/types/payroll";
 
 /**
- * "Rules used for this run" (Slice 8) — the settings that were in force when a payroll run
+ * "Rules used for this run" — the settings that were in force when a payroll run
  * executed, so an old payslip can always be explained.
- *
- * It is a RECORD, not a replay: re-running always uses the current rules. Locking a run
- * (Slice 5) is what actually stops an old cycle being re-priced.
  */
 
 /** Field name → the words HR uses. Anything unlisted falls back to a de-slugged label. */
@@ -62,11 +59,6 @@ const PERCENT = /_pct$/;
 /**
  * Fields that only move money while a companion rule is switched on. Each is shown ONLY when
  * its gate is open — the same condition the engine itself checks.
- *
- * Both failure modes are real. Show them always and the panel prints six rules that priced
- * nothing (today's config leaves five of them inert), which is the settings-dump this panel
- * exists not to be. Show them never — as it did — and flipping rounding to `round_up` makes a
- * payslip inexplicable, because the block size that produced the deduction appears nowhere.
  */
 const GATES: Record<string, (p: Record<string, unknown>) => boolean> = {
   // DeductionService::applyRounding() — `exact` ignores the block entirely.
@@ -207,7 +199,7 @@ export function RunRulesSnapshot({
   snapshot?: PolicySnapshot | null;
   drift?: RulesDriftEntry[];
 }) {
-  // Runs from before Slice 8 have no snapshot (or the flat v1 shape) — say so plainly
+  // Runs from before have no snapshot (or the flat v1 shape) — say so plainly
   // rather than render a misleading empty panel.
   if (!snapshot) return null;
 
@@ -217,7 +209,7 @@ export function RunRulesSnapshot({
 
   // Enrolment says WHETHER a contribution was charged; the dated version says AT WHAT RATE.
   // Reading the rate off `contributions[].config` — as this panel used to — showed the dead
-  // pre-Slice-B9 column, so the run's SSS read 4.5% while the version that actually priced it
+  //  Column, so the run's SSS read 4.5% while the version that actually priced it
   // (and the Benefits screen) said 5%.
   const versions = new Map(
     (snapshot.contribution_versions ?? []).map((v) => [v.type, v]),

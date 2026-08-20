@@ -36,16 +36,16 @@ export async function updatePayrollSettings(input: {
   frequency: string;
   deduction_timing?: string;
   tax_timing?: string;
-  /** FIN-048 — which cutoff the monthly allowance lands on: every | first | last. */
+  /** Which cutoff the monthly allowance lands on: every | first | last. */
   allowance_timing?: string;
-  /** Slice 10 — null clears the ceiling (allowances fully tax-free). */
+  /** Null clears the ceiling (allowances fully tax-free). */
   other_benefits_annual_cap?: number | null;
   /**
-   * FIN-025 — the date these settings take effect. Omitted means today. Payroll resolves settings
+   * The date these settings take effect. Omitted means today. Payroll resolves settings
    * as of the cycle end, so this is what stops a change reaching back into periods already run.
    */
   effective_from?: string;
-  /** FIN-030 — the regional minimum daily wage. Null clears it (warns about nothing). */
+  /** The regional minimum daily wage. Null clears it (warns about nothing). */
   minimum_daily_wage?: number | null;
 }): Promise<PayrollSettings> {
   const res = await apiClient.put("/hr/payroll/settings", input);
@@ -67,7 +67,7 @@ export async function runPayroll(input: {
   cycle_start: string;
   cycle_end: string;
   /**
-   * FIN-030b — proceed past a minimum-wage breach. The reason is required when this is set: it is
+   * Proceed past a minimum-wage breach. The reason is required when this is set: it is
    * the record that somebody decided to run anyway, rather than the button simply having been
    * clicked. Omitted when there is nothing to acknowledge.
    */
@@ -78,9 +78,7 @@ export async function runPayroll(input: {
   return res.data.data;
 }
 
-/**
- * FIN-030b — who this run would pay below the regional floor. Read-only; prices nothing.
- */
+/** Who this run would pay below the regional floor. Read-only; prices nothing. */
 export async function getMinimumWageCheck(input: {
   frequency: string;
   cycle_start?: string;
@@ -91,7 +89,7 @@ export async function getMinimumWageCheck(input: {
 }
 
 /**
- * FIN-030b — raise the named employees to the salary that clears the floor, as dated salary
+ * Raise the named employees to the salary that clears the floor, as dated salary
  * changes. The ids are explicit: a salary change is not something to apply to a list nobody read.
  */
 export async function applyMinimumWageAdjustments(input: {
@@ -118,7 +116,7 @@ export async function reopenPayslip(id: number, reason?: string): Promise<Payrol
   return res.data.data;
 }
 
-/** Seal a fully-disbursed run so it can never be recomputed (Slice 5). */
+/** Seal a fully-disbursed run so it can never be recomputed. */
 export async function lockPayrollRun(id: number): Promise<PayrollRun> {
   const res = await apiClient.post(`/hr/payroll/runs/${id}/lock`);
   return res.data.data;
@@ -139,7 +137,7 @@ export async function getThirteenthMonth(
   return { rows: res.data.data, year: res.data.meta.year };
 }
 
-/** Exactly what a 13th-month run would pay — computed, saved nowhere (Slice B17). */
+/** Exactly what a 13th-month run would pay — computed, saved nowhere. */
 export async function previewThirteenthMonth(year?: number): Promise<{
   rows: ThirteenthMonthPayRow[];
   gross: number;
@@ -201,6 +199,15 @@ export function downloadPayrollRunCsv(id: number): Promise<void> {
   return downloadFile(`/hr/payroll/runs/${id}/export`, `payroll-run-${id}.csv`);
 }
 
+/**
+ * HR: the same run as a styled workbook — the breakdown laid out to be read, with the full
+ * register (employer shares, override marker) on a second sheet. Same endpoint as the CSV;
+ * the server picks the format off the query string.
+ */
+export function downloadPayrollRunXlsx(id: number): Promise<void> {
+  return downloadFile(`/hr/payroll/runs/${id}/export?format=xlsx`, `payroll-run-${id}.xlsx`);
+}
+
 export async function getMyPayslips(): Promise<PayslipSummary[]> {
   const res = await apiClient.get("/hr/me/payslips");
   return res.data.data;
@@ -222,13 +229,7 @@ export async function getHrPayslip(id: number): Promise<Payslip> {
   return res.data.data;
 }
 
-/**
- * Set ONE line to ONE figure across a whole period — a charge waived for everybody.
- *
- * `employee_ids` omitted means everyone the period pays. Payslips without that line are skipped
- * and named in `meta.skipped` rather than failing the batch: half a run having no late charge is
- * the normal case, not an error.
- */
+/** Set ONE line to ONE figure across a whole period — a charge waived for everybody. */
 export async function correctRunLine(
   runId: number,
   input: {
@@ -249,19 +250,7 @@ export async function correctRunLine(
   };
 }
 
-/**
- * Correct ONE line on ONE payslip — the engine said ₱500 for Late, HR says ₱300.
- *
- * NO KIND, and that is the difference from `amendPayrollRun`. A line appended to the bottom of a
- * document carries no clue about what it is, so that call has to ask whether it is pay, reversed
- * pay or a deduction. A correction to `late` or to `sss` does not: the line's own class decides
- * what moves and what happens to the tax, so the question is not asked and cannot be answered
- * wrongly.
- *
- * `amount` may be omitted for a correction to the WORDING alone — the figure was right and what it
- * was called was not. Sending the same `target_key` again REPLACES the correction rather than
- * stacking a second one on it, and the struck-through figure stays the engine's.
- */
+/** Correct ONE line on ONE payslip — the engine said ₱500 for Late, HR says ₱300. */
 export async function correctPayslipLine(
   payslipId: number,
   input: {
@@ -285,21 +274,7 @@ export async function removePayslipLineCorrection(
   return res.data.data;
 }
 
-/**
- * Correct a period on its OWN payslips.
- *
- * The period comes from the run id rather than from typed dates, which is the difference from the
- * adjustment run this replaces: a correction is applied to a payslip that exists, so it cannot be
- * pointed at a window nothing was ever paid for. `issued_on` is when the correction is issued (not
- * the period being fixed) and defaults to today.
- *
- * It recomputes nothing — it adds the stated amounts to the period's payslips and withholds tax.
- * Amending a payslip already paid out is allowed and expected: its net rises while the amount
- * actually transferred stays put, so the difference reads as outstanding.
- *
- * `kind` decides whether the batch pays, reverses pay or deducts, and the amounts are positive
- * magnitudes in all three cases — see AmendmentKind. Defaults to extra pay when omitted.
- */
+/** Correct a period on its OWN payslips. */
 export async function amendPayrollRun(
   runId: number,
   input: {
@@ -336,7 +311,7 @@ export async function rerunPayrollRun(runId: number, reason: string): Promise<Pa
   return res.data.data;
 }
 
-/** Retroactive pay differences still waiting to be settled (FIN-009). */
+/** Retroactive pay differences still waiting to be settled. */
 export async function getRetroFlags(): Promise<RetroFlag[]> {
   const res = await apiClient.get("/hr/retro-flags");
   return res.data.data;
@@ -348,16 +323,9 @@ export async function resolveRetroFlag(id: number, note: string): Promise<RetroF
   return res.data.data;
 }
 
-// --- Disbursement (FIN-015) ------------------------------------------------------------------
+// --- Disbursement ------------------------------------------------------------------
 
-/**
- * Build the payment batch for a completed run.
- *
- * Nothing about WHO or HOW MUCH is sent: both are derived from the run, because typed amounts
- * would be a second unreconciled source of truth for what payroll owes. `meta.skipped` says who
- * was left out and why — a batch that quietly omits three people looks identical to one that
- * does not, so the caller is expected to show it.
- */
+/** Build the payment batch for a completed run. */
 export async function createPaymentBatch(input: {
   payroll_run_id: number;
   method: PaymentMethod;
@@ -387,13 +355,7 @@ export async function getPaymentBatch(
   return { batch: res.data.data, reconciliation: res.data.meta.reconciliation };
 }
 
-/**
- * Download the file finance uploads to the bank.
- *
- * This is the point of no return: the server stamps `exported_at` on first download, after which
- * the batch can no longer be rebuilt. Once the file exists the company has to assume the bank has
- * it, and regenerating from changed payslips is how someone gets paid twice.
- */
+/** Download the file finance uploads to the bank. */
 export function downloadBankFile(id: number, reference: string): Promise<void> {
   return downloadFile(`/hr/payment-batches/${id}/bank-file`, `bank-file-${reference}.csv`);
 }
@@ -412,13 +374,7 @@ export async function settlePayment(
   return res.data.data;
 }
 
-/**
- * Apply the bank's return file to a batch.
- *
- * Previews unless `confirm` is set. This import moves payslips into `disbursed` — the assertion
- * the whole disbursement layer exists to make trustworthy — so it should not run on a file nobody
- * has read back.
- */
+/** Apply the bank's return file to a batch. */
 export async function reconcilePaymentBatch(
   id: number,
   file: File,
@@ -432,7 +388,7 @@ export async function reconcilePaymentBatch(
   return res.data.data;
 }
 
-/** Deductions a thin payslip could not collect, still outstanding (FIN-005). */
+/** Deductions a thin payslip could not collect, still outstanding. */
 export async function getDeductionArrears(): Promise<DeductionArrear[]> {
   const res = await apiClient.get("/hr/deduction-arrears");
   return res.data.data;

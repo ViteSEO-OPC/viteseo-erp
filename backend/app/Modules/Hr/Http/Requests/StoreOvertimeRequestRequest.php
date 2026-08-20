@@ -29,16 +29,7 @@ class StoreOvertimeRequestRequest extends FormRequest
         ];
     }
 
-    /**
-     * Does this window collide with one the employee already has live on that date?
-     *
-     * Rejected and cancelled rows are ignored — they authorise nothing, so they cannot
-     * double-pay anything. Rows with no window at all (legacy hours-only approvals) are skipped
-     * too: with nothing to compare against, blocking on them would forbid filing on a date the
-     * employee cannot see the shape of.
-     *
-     * Shared with the HR retroactive form via a static so the two filing paths cannot drift.
-     */
+    /** Does this window collide with one the employee already has live on that date? */
     public static function overlapsExisting(int $employeeId, string $workDate, string $from, string $to, ?int $ignoreId = null): bool
     {
         return OvertimeRequest::where('employee_id', $employeeId)

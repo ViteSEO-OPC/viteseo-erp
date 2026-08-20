@@ -84,7 +84,7 @@ class EarlyOutRequestService
             $request,
         );
 
-        // FIN-009 — a early-out shortens a paid day, so approving one for a cutoff payroll has
+        // A early-out shortens a paid day, so approving one for a cutoff payroll has
         // already settled means the employee was paid for time the record now says they did not
         // work. The approval stands; the difference is recorded rather than left to memory.
         // OVERPAID, not OWED: recovering it is a wage deduction needing consent (Art. 113).
@@ -167,11 +167,6 @@ class EarlyOutRequestService
      * The date must be a scheduled workday and the time must fall strictly inside
      * that day's shift (after start, before end) — an early-out only makes sense
      * against hours the person was expected to work.
-     *
-     * ON AN APPROVED HALF DAY THAT SHIFT IS THE HALF, not the whole thing. A morning-only day
-     * used to accept an early-out at 3:00 PM — a time the employee was already off — and payroll
-     * then charged them for leaving during it. Filing against hours you do not owe is not an
-     * early departure, so it is refused here rather than priced later.
      */
     private function assertWithinShift(Employee $employee, string $workDate, string $time): void
     {

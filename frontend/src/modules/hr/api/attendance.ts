@@ -98,7 +98,7 @@ export interface AdjustAttendanceInput {
   time_in: string | null;
   time_out: string | null;
   /**
-   * Slice 16 — null/omitted derives the status from the times (the old behaviour). A value
+   * null/omitted derives the status from the times (the old behaviour). A value
    * here is an explicit HR override that wins over both the clock and the leave table.
    */
   status?: string | null;
@@ -119,10 +119,19 @@ export async function getDailyOverride(date?: string): Promise<DailyOverride | n
   return res.data.data;
 }
 
+/**
+ * PUT, not PATCH: the two rules are one record and one decision, so the dialog always sends
+ * both. A null field clears that rule; both null removes the day's row entirely.
+ */
 export async function upsertDailyOverride(
   date: string,
   graceMinutes: number | null,
+  minFullDayMinutes: number | null,
 ): Promise<DailyOverride> {
-  const res = await apiClient.put("/hr/daily-overrides", { date, grace_minutes: graceMinutes });
+  const res = await apiClient.put("/hr/daily-overrides", {
+    date,
+    grace_minutes: graceMinutes,
+    min_full_day_minutes: minFullDayMinutes,
+  });
   return res.data.data;
 }

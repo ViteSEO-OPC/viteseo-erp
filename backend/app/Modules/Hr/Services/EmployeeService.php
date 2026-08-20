@@ -67,7 +67,7 @@ class EmployeeService
         'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
         'bank_name', 'bank_account', 'height', 'weight', 'health_condition',
         'pay_frequency', 'currency', 'bank_account_type', 'bank_account_name',
-        // Slice B9 — the three allowance columns are gone from here. Payroll stopped reading them
+        // The three allowance columns are gone from here. Payroll stopped reading them
         // in B1 and Company → Benefits is the catalogue now, so writing them only produced a
         // number on the profile that no payslip agreed with.
         'tin', 'sss_number', 'philhealth_number', 'pagibig_number',
@@ -84,9 +84,7 @@ class EmployeeService
         return $parts ? trim(implode(' ', $parts)) : ($data['name'] ?? '');
     }
 
-    /**
-     * Job columns written explicitly rather than as part of the profile blob.
-     */
+    /** Job columns written explicitly rather than as part of the profile blob. */
     private const CORE_COLUMNS = [
         'department_id', 'manager_id', 'job_title',
         'employment_status', 'onboarding_status', 'hire_date', 'base_salary',
@@ -114,7 +112,7 @@ class EmployeeService
             $out['is_management'] = ! empty($data['is_management']);
         }
 
-        // FIN-030b — same non-nullable-boolean treatment. Clearing the flag clears the reason with
+        // Same non-nullable-boolean treatment. Clearing the flag clears the reason with
         // it: a stale "part-time" note sitting on someone who is no longer exempt reads as a live
         // justification, which is worse than no note at all.
         if (array_key_exists('minimum_wage_exempt', $data)) {
@@ -215,17 +213,7 @@ class EmployeeService
         ]);
     }
 
-    /**
-     * Close the open role on the employment-history timeline when the employment itself ends (MF-18).
-     *
-     * The timeline says what someone did here and until when, so a separation that does not touch it
-     * leaves the record contradicting itself: the header reads "Left on 30 June" while the role below
-     * it still reads "Present · current". Only a job-title change used to move this timeline, which
-     * meant the one transition that ends every employment was the one it did not record.
-     *
-     * Stamped with the LAST WORKING DAY, not today, for the same reason payroll prorates on it — the
-     * date HR fills the form in is not the date the employment ended.
-     */
+    /** Close the open role on the employment-history timeline when the employment itself ends. */
     private function closeTimelineOnSeparation(Employee $employee, string $lastDay, ?string $reason): void
     {
         $current = $employee->employmentHistories()
@@ -256,9 +244,6 @@ class EmployeeService
     /**
      * Undo that close — reinstatement's whole claim is that the ending never happened, so the role it
      * closed goes back to being the current one rather than the timeline keeping a phantom exit.
-     *
-     * Only a row this service closed is reopened: anything else is a role change or a hand-corrected
-     * timeline, and reopening that would resurrect a job the person genuinely no longer holds.
      */
     private function reopenTimelineOnReinstatement(Employee $employee): void
     {
@@ -307,14 +292,7 @@ class EmployeeService
         ]);
     }
 
-    /**
-     * The employee directory.
-     *
-     * `$status` — 'active' (default), 'former' or 'all'. MF-18 needs this: a separated employee is
-     * soft-deleted, so before this there was no way to LIST anyone who had left, which made rehiring
-     * unreachable from the UI even once the endpoint existed. Default stays 'active' so the directory
-     * looks exactly as it did.
-     */
+    /** The employee directory. */
     public function list(?string $search = null, string $status = 'active'): LengthAwarePaginator
     {
         return Employee::query()
@@ -352,7 +330,7 @@ class EmployeeService
             $user->assignRole('hr_employee');
 
             // 2) The HR record hangs off that user. employee_no derives from the
-            //    (unique) user id, so it's guaranteed unique too.
+            // (unique) user id, so it's guaranteed unique too.
             $employee = Employee::create([
                 'user_id' => $user->id,
                 'department_id' => $data['department_id'],
@@ -367,17 +345,13 @@ class EmployeeService
             ]);
 
             // 3) Seed this year's leave credits from the allotment defaults for this employment
-            //    status. These are only the STARTING credits — HR can freely edit each person's
-            //    balances afterwards. The shape depends on the company allotment mode: shared =
-            //    one pool; not-shared = one row per leave type.
-            //
-            //    MF-18 — shared with `rehire()` rather than duplicated. A rehired employee has to
-            //    get exactly what a new hire gets, and two copies of this is how the two would
-            //    drift into giving different credits for the same employment status.
+            // status. These are only the STARTING credits — HR can freely edit each person's
+            // balances afterwards. The shape depends on the company allotment mode: shared =
+            // one pool; not-shared = one row per leave type.
             $this->seedLeaveBalances($employee);
 
             // 4) Seed the contribution checklist — enrolled in every active
-            //    government contribution by default; HR can opt individuals out.
+            // government contribution by default; HR can opt individuals out.
             foreach (ContributionSetting::where('is_active', true)->get() as $setting) {
                 EmployeeBenefit::create([
                     'employee_id' => $employee->id,
@@ -387,9 +361,9 @@ class EmployeeService
             }
 
             // 4b) No allowance enrolment here any more: an allowance now says who it is FOR
-            //     (everyone / these statuses / management / these named people), and payroll
-            //     evaluates that rule per run. A new hire therefore picks up everything they
-            //     qualify for the moment they exist, and stops needing to be remembered.
+            // (everyone / these statuses / management / these named people), and payroll
+            // evaluates that rule per run. A new hire therefore picks up everything they
+            // qualify for the moment they exist, and stops needing to be remembered.
 
             // 5) Open the salary history with the starting salary.
             SalaryHistory::create([
@@ -411,7 +385,7 @@ class EmployeeService
                 'changed_by' => Auth::id(),
             ]);
 
-            // FIN-038 — the other moment an enrolment row can start being missing. Created here
+            // The other moment an enrolment row can start being missing. Created here
             // rather than by the next payroll run, which used to write these rows from inside its
             // own pricing transaction. Not load-bearing for pay: a missing row still reads as
             // enrolled, so this gives the enrolment checklist something to show, nothing more.
@@ -447,13 +421,7 @@ class EmployeeService
 
             // A salary change appends to the history (never rewrites it).
             if ($newSalary !== $oldSalary) {
-                // FIN-007 — the date the raise ACTUALLY takes effect, not the date it was typed.
-                //
-                // This was hardcoded to `now()`. A raise agreed for 1 August but entered on
-                // 5 September priced August at the old salary, permanently: payroll resolves the
-                // salary as of the cycle end, and with no retroactive run (FIN-010) the difference
-                // could never be paid. A promotion agreed for a future date could not be scheduled
-                // at all. Defaults to today, so omitting it behaves exactly as before.
+                // The date the raise ACTUALLY takes effect, not the date it was typed.
                 $effectiveDate = $data['salary_effective_date']
                     ?? now(config('app.timezone_local'))->toDateString();
 
@@ -468,22 +436,7 @@ class EmployeeService
                     'changed_by' => Auth::id(),
                 ]);
 
-                /**
-                 * FIN-009 — A BACK-DATED RAISE INTO A SETTLED PERIOD IS AN OUTSTANDING DIFFERENCE.
-                 *
-                 * `assertSalaryDateIsSafe()` above already warns and demands acknowledgement, and the
-                 * salary history now records what was decided. Neither of those pays anybody. Until this,
-                 * "confirm to record it anyway" meant the raise was recorded and the back pay owed for the
-                 * already-paid days was tracked NOWHERE — HR was told about it once, in a dialog, and then
-                 * it was gone.
-                 *
-                 * The retro flag existed and was raised for overtime, leave, half-day and early-out
-                 * decisions, plus the bulk minimum-wage uplift — but not for an ordinary raise, which is
-                 * the most common retroactive event there is.
-                 *
-                 * `flagIfSettled()` returns null on its own when nothing is settled, so a normal forward-
-                 * dated raise is unaffected: no run covers a future date, so there is nothing to owe.
-                 */
+                /** A BACK-DATED RAISE INTO A SETTLED PERIOD IS AN OUTSTANDING DIFFERENCE. */
                 app(RetroFlagService::class)->flagIfSettled(
                     $history,
                     $employee->id,
@@ -589,18 +542,7 @@ class EmployeeService
     public const SEPARATION_TYPES = ['voluntary', 'involuntary'];
 
     /**
-     * End someone's employment (MF-18).
-     *
-     * THIS DID NOT EXIST. A separation was only ever written by `AttritionDemoSeeder`, which meant
-     * `separation_date` — the column `runFinalPay()` refuses to run without, and the one attendance
-     * proration and leave accrual read as the employment end — was never set by any path a user could
-     * reach. Final pay was built and unreachable.
-     *
-     * `separation_date` AND `deleted_at` ARE KEPT IN SYNC ON PURPOSE. They answer different questions
-     * (last working day vs. when the record was archived) and could legitimately differ, but the
-     * attrition report buckets quarters on `deleted_at` while payroll prorates on `separation_date`.
-     * Letting them drift would mean the two disagree about when somebody left, so the separation date
-     * is written to both and there is one answer.
+     * End someone's employment.
      *
      * @param  array{separation_type:string, separation_date:string, reason?:string|null}  $data
      */
@@ -648,17 +590,7 @@ class EmployeeService
         });
     }
 
-    /**
-     * Undo a separation that should not have happened — service is CONTINUOUS (MF-18).
-     *
-     * A withdrawn resignation or a reversed dismissal. The hire date stands, so tenure is unbroken;
-     * leave credits stand, because they were earned under an employment relationship that is now
-     * treated as never having ended; and an authorised salary deduction stays authorised, because the
-     * employee's Art. 113 consent was never withdrawn — only their employment appeared to end.
-     *
-     * Distinct from `rehire()`, which is a new relationship. Getting these the same way round matters:
-     * reinstating someone as a rehire would quietly reset their tenure and wipe leave they had earned.
-     */
+    /** Undo a separation that should not have happened — service is CONTINUOUS. */
     public function reinstate(Employee $employee, ?string $reason = null): Employee
     {
         if (! $employee->trashed() && $employee->separation_date === null) {
@@ -691,28 +623,7 @@ class EmployeeService
         });
     }
 
-    /**
-     * Take someone back as a NEW employment relationship (MF-18).
-     *
-     * Tenure restarts from `$hireDate`; the old date moves to `previous_hire_date` so the record can
-     * still say when they first joined. Three continuity decisions, each made deliberately:
-     *
-     * LEAVE STARTS FRESH. Balances for the new year are seeded from the allotment defaults exactly as
-     * they are for any new hire, and the previous stint's rows stay untouched as history. Carrying an
-     * old unused balance across a genuine break in service would be a gift nobody authorised — and if
-     * a final pay ran, those days were already converted to cash (FIN-014), so carrying them would pay
-     * for the same leave twice.
-     *
-     * OUTSTANDING LOANS ARE NOT AUTO-RESUMED. Anything still owed goes back to
-     * `pending_authorization`, which is exactly what stops `collectForPeriod()` reading it. Resuming
-     * collection on its own would deduct from the new relationship's wages under consent given for the
-     * old one, and Art. 113 requires the employee's written authorisation for the deduction actually
-     * being made. HR re-issues the authorisation request; the employee agrees again, or does not.
-     *
-     * THE SEPARATION IS CLEARED, NOT ERASED. `separation_type`/`separation_date` are reset because the
-     * person is employed again and every payroll filter keys on them, but the audit trail keeps the
-     * separation and the rehire as two events, so the break in service is still visible.
-     */
+    /** Take someone back as a NEW employment relationship. */
     public function rehire(Employee $employee, string $hireDate, ?string $reason = null): Employee
     {
         if (! $employee->trashed() && $employee->separation_date === null) {
@@ -780,14 +691,7 @@ class EmployeeService
         });
     }
 
-    /**
-     * This year's starting leave credits from the allotment defaults, idempotently.
-     *
-     * Extracted from `create()` so a rehire seeds exactly what a new hire does — a second copy of this
-     * logic is how the two would drift, and a rehired employee would end up with the wrong credits for
-     * their employment status. `firstOrCreate` rather than `create` because a rehire in the same
-     * calendar year as the separation already has rows for it.
-     */
+    /** This year's starting leave credits from the allotment defaults, idempotently. */
     private function seedLeaveBalances(Employee $employee): void
     {
         $year = now(config('app.timezone_local'))->year;
@@ -883,20 +787,7 @@ class EmployeeService
 
     /**
      * Refuse a back-dated salary change that reaches into finished payroll runs, unless HR says
-     * so explicitly (FIN-007).
-     *
-     * WHY NOT JUST ALLOW IT. Payroll resolves the salary in force at the cycle end, so recording a
-     * raise dated inside a completed period means the next recompute of that period pays a
-     * different amount than the payslip already issued. There is no retroactive run to pay the
-     * difference through (FIN-010), so the choice is between silently rewriting a finished period
-     * and telling someone. This tells them, and names the periods.
-     *
-     * WHAT THIS DOES NOT DO, stated plainly because the field would otherwise look more precise
-     * than the arithmetic behind it: pricing has NO INTRA-PERIOD SPLIT. `salariesAsOf($cycleEnd)`
-     * applies one salary to the whole period, so a raise dated mid-cutoff prices the entire cutoff
-     * at the new figure — including the days before it took effect. The history is now truthful
-     * and the resolution is documented; genuine split-period pricing (prorating each salary across
-     * the days it covered) is the remaining half and is a separate piece of work.
+     * so explicitly.
      *
      * @param  array<string, mixed>  $data
      */

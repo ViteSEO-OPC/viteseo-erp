@@ -20,15 +20,6 @@ use Illuminate\Support\Carbon;
 /**
  * The night differential where it meets the rest of the day's pay: unpaid meals, holidays,
  * rest days and missing punches.
- *
- * The three overnight/ND fixes are covered from the clock side (NightShiftClockTest), the
- * approval side (ApprovedOvertimePunchOverlapTest) and the configuration side
- * (ConfigurableNightDifferentialTest). What none of them exercise is how ND behaves once
- * another pay rule is acting on the SAME minutes — which is where a wrong answer is both
- * most likely and hardest to spot on a payslip.
- *
- * All dates sit inside 2026-08-01…15 (Mon 3rd, Tue 4th, Sun 2nd), and the clock is parked
- * after the cycle so the run is always pricing a closed period.
  */
 class NightDifferentialPayrollTest extends HrTestCase
 {
@@ -186,10 +177,6 @@ class NightDifferentialPayrollTest extends HrTestCase
      * MISSING TIME-OUT (item 5). An abandoned shift resolves to the employee's own scheduled end,
      * so the graveyard worker is paid the full ordinary shift INCLUDING the differential — the
      * thing an open punch used to forfeit entirely.
-     *
-     * Overtime stays zero, structurally: overtime is `out − scheduled end`, and the resolved
-     * `out` IS the scheduled end. The approved 06:00–08:00 request deliberately does not extend
-     * it — approval is permission, not proof — and only a real punch releases it.
      */
     public function test_an_abandoned_shift_pays_the_scheduled_shift_with_no_overtime(): void
     {

@@ -16,24 +16,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * Item 10 — filing overtime that the old rules made impossible to record correctly.
- *
- * TWO SEPARATE COMPLAINTS, both about FILING rather than arithmetic:
- *
- *   • One request per date. The pay engine has always merged several windows on a date, so this
- *     was a form restriction with no calculation behind it. A split evening — 17:00–19:00, dinner,
- *     back at 22:00–01:00 — could not be filed at all, and the employee's only recourse was to
- *     claim the whole span including the hours nobody worked. Replaced by an OVERLAP rule, which
- *     is what actually prevents the same minutes being paid twice.
- *
- *   • No way to correct a past date. Somebody works late, never files, and the cutoff closes.
- *     HR can now file it on their behalf; the request lands PENDING so the ordinary approve path
- *     — with its audit entry and its FIN-009 retro flag for periods already paid — still rules on
- *     it. `filed_by` keeps the row from masquerading as the employee's own.
- *
- * The schedule is 08:00–17:00, so every window below starts at or after 17:00.
- */
+/** Item 10 — filing overtime that the old rules made impossible to record correctly. */
 class OvertimeCorrectionTest extends HrTestCase
 {
     use RefreshDatabase;

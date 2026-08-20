@@ -6,15 +6,8 @@ import { Eye, EyeOff } from "lucide-react";
 export const MASKED_AMOUNT = "₱ ••••••";
 
 /**
- * Summary card for a money figure, with its own show/hide (eye) toggle — FIN-043's
+ * Summary card for a money figure, with its own show/hide (eye) toggle — 's
  * shoulder-surfing protection at card level rather than one page-wide switch.
- *
- * This hides the figure in the RENDER only. It is already in the fetched payload, so it is a
- * privacy affordance for people nearby, never an access control.
- *
- * Deliberately not built on `core/components/stat-card`: that one is shared with the other pods
- * and types `label` as a plain string, so the button could not be slotted in without changing a
- * shared signature. The visual result is identical — same padding, radius, and type scale.
  */
 export function MoneyStatCard({
   label,

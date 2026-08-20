@@ -15,22 +15,7 @@ use App\Modules\Hr\Services\EmployeeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-007 — a salary change could only ever take effect today.
- *
- * `EmployeeService::update()` stamped every salary-history row with `now()`. Payroll resolves the
- * salary as of the cycle end, so a raise agreed for 1 August but entered on 5 September priced
- * August at the OLD salary — permanently, because there is no retroactive run to pay the
- * difference through (FIN-010). A promotion agreed for a future date could not be scheduled at all.
- *
- * WHAT IS FIXED HERE: the recorded history is now truthful, and a date that reaches into finished
- * payroll runs is refused unless HR acknowledges it.
- *
- * WHAT IS NOT: there is still no intra-period split. `salariesAsOf($cycleEnd)` applies one salary
- * to the whole period, so a raise dated mid-cutoff prices the whole cutoff at the new figure. That
- * is asserted below rather than left implied — a documented limitation is a different thing from
- * an unknown one.
- */
+/** A salary change could only ever take effect today. */
 class SalaryEffectiveDateBackdatingTest extends HrTestCase
 {
     use RefreshDatabase;

@@ -4,33 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Clear the `late` marks left on days an employee had a HALF DAY approved.
- *
- * Until now only DeductionService knew that an approved half day shrinks the working window.
- * The clock-in path measured every arrival against the full shift, so somebody with the morning
- * off who walked in at 1:00 PM was stamped `late` by five hours. That status is not cosmetic: it
- * raises a disciplinary violation, it inflates the roster's "Late arrivals" tile, and — with
- * `late_penalty_enabled` — the per-N-lates rule counts it, so three of them cost a full day's pay.
- *
- * The service fix corrects every row written from here on. This corrects the ones already stored,
- * because nothing downstream re-derives the status: payroll, the violation ladder and the reports
- * all read the column.
- *
- * ONLY EVER `late` → `present`, NEVER THE REVERSE. Narrowing a day to the half actually worked can
- * only move the cutoff LATER (the afternoon half starts after the morning does), so no row that is
- * currently `present` could become late under the new rule. That makes this safe to run blind: the
- * worst a mistake here can do is leave a wrong `late` standing, never invent one.
- *
- * ROWS HR TOUCHED BY HAND ARE LEFT ALONE (`status_override`). A human asserting a status outranks
- * any derivation, which is the whole point of that column — including the HR officers who have
- * been using it to work around this very bug.
- *
- * Raw queries, no services: a migration has to keep working when the classes it was written
- * against have moved on. The resolution below mirrors ScheduleService::effectiveFor() and
- * HalfDayWindowService::windowFor() as they stand today — employee override → assigned schedule →
- * default schedule, with the AM/PM windows coming from the schedule template only.
- */
+/** Clear the `late` marks left on days an employee had a HALF DAY approved. */
 return new class extends Migration
 {
     public function up(): void

@@ -4,24 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Asking an anonymous reporter to identify themselves — and their answer.
- *
- * WHAT CHANGED. Until now HR could always see who filed an anonymous concern; the anonymity
- * was from everyone else. That made "anonymous" a promise the system did not keep, and the
- * person it mattered most to — someone reporting their own manager — was the person it misled.
- * Now HR sees `Anonymous`, and the eye asks rather than reveals: HR states a reason, the
- * reporter decides, and a refusal is a complete answer that costs them nothing.
- *
- * `hr_concerns.identity_revealed_at` is the flag ConcernResource actually reads. It is stamped
- * here on acceptance and nowhere else. Deriving the answer from these rows instead would mean
- * a resource that forgot to eager-load them silently hid an identity HR was entitled to — the
- * failure would be invisible and blamed on the feature rather than the query.
- *
- * A declined request does NOT bar another: circumstances change, and an investigation can
- * reach a point where asking again is reasonable. Every ask is a row and an audit line, so a
- * pattern of asking is visible to the person being asked.
- */
+/** Asking an anonymous reporter to identify themselves — and their answer. */
 return new class extends Migration
 {
     public function up(): void

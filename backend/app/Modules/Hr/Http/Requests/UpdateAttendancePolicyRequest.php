@@ -40,7 +40,7 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'late_tiers.*.hours' => ['required_with:late_tiers', 'numeric', 'min:0', 'max:24'],
 
             'undertime_deduction_mode' => ['sometimes', 'in:none,per_hour'],
-            // Slice 14 — restricted to what the engine actually honours. This accepted
+            // Restricted to what the engine actually honours. This accepted
             // `treat_as_undertime_to_now` and `treat_as_absent`, neither of which is implemented:
             // DeductionService mentions the field only in a comment. Accepting a value that
             // silently does nothing is worse than rejecting it — HR would believe a forgotten
@@ -51,7 +51,7 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // capped at 12h so the setting cannot be turned into "never".
             'missing_timeout_allowance_minutes' => ['sometimes', 'integer', 'min:30', 'max:720'],
 
-            // Slice 14 — same: `offset_undertime` and `overtime_eligible` have NO reader
+            // same: `offset_undertime` and `overtime_eligible` have NO reader
             // anywhere in the codebase. The Rules page already shows this control disabled;
             // this stops the API from accepting them behind its back.
             'early_arrival_mode' => ['sometimes', 'in:none'],
@@ -80,7 +80,7 @@ class UpdateAttendancePolicyRequest extends FormRequest
 
             'overtime_mode' => ['sometimes', 'in:none,approved_only,auto_after_threshold'],
             'overtime_threshold_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
-            // FIN-039 — ceilings on auto-mode overtime paid without an approval. 0 = uncapped, and
+            // Ceilings on auto-mode overtime paid without an approval. 0 = uncapped, and
             // that is the shipped default: there is no statutory maximum on overtime in the
             // Philippines, so any figure here is the company's own control, not a legal one.
             'auto_overtime_daily_cap_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],

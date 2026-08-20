@@ -42,7 +42,7 @@ class UpdateEmployeeRequest extends FormRequest
             'hire_date' => ['sometimes', 'required', 'date'],
             'base_salary' => ['sometimes', 'required', 'numeric', 'min:0', 'max:99999999.99'],
             // Optional note + type stored on the salary-history row when salary changes.
-            // FIN-007 — the date the new salary actually takes effect. Optional: omitted means
+            // The date the new salary actually takes effect. Optional: omitted means
             // today, which is the behaviour that existed before (every change was stamped `now`).
             // Given, it lets HR record a raise that was agreed earlier without pretending it
             // started the day it was typed in.
@@ -51,7 +51,7 @@ class UpdateEmployeeRequest extends FormRequest
             'acknowledge_repricing' => ['sometimes', 'boolean'],
             'salary_change_reason' => ['nullable', 'string', 'max:255'],
             'salary_change_type' => ['nullable', Rule::in(['promotion', 'merit', 'adjustment'])],
-            // FIN-030b — excluded from the minimum-wage check. The reason is REQUIRED when the flag
+            // Excluded from the minimum-wage check. The reason is REQUIRED when the flag
             // is set: an unexplained exemption is not auditable, and this is the field somebody
             // will be asked to justify.
             'minimum_wage_exempt' => ['sometimes', 'boolean'],

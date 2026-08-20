@@ -15,16 +15,7 @@ use App\Modules\Hr\Services\ViolationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 1 (2026-07-28 audit): a non-working holiday is NOT an absence.
- *
- * Before this, the day loop in unpaidDaysDetailFor() never looked at the holiday calendar,
- * so an unworked regular holiday on a scheduled workday was charged a full day's pay —
- * verified on live data: Independence Day 2026-06-12 cost one day.
- *
- * The control case (an ordinary workday with no record) must keep costing a day, otherwise
- * the fix would have paid for every absence too.
- */
+/** (2026-07-28 audit): a non-working holiday is NOT an absence. */
 class HolidayPayTest extends HrTestCase
 {
     use RefreshDatabase;

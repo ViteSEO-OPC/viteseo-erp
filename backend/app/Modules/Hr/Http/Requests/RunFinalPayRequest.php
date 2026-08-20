@@ -4,18 +4,7 @@ namespace App\Modules\Hr\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-/**
- * Final pay for one leaver (FIN-014).
- *
- * `separation_pay` is ENTERED, not computed, and the amount is HR's to determine. Articles 298–299
- * set different formulas for retrenchment, redundancy, closure and disease; the entitlement turns on
- * facts this system does not hold; and a just-cause dismissal carries none. So the request takes the
- * figure and the system taxes it correctly — see the migration for the full reasoning.
- *
- * `unused_leave_days` is optional. Omitted, the service reads the employee's remaining PAID leave
- * balance for the year. Given, HR's figure wins — a final settlement is frequently negotiated, and a
- * system that refused to record what was agreed would just be worked around in a spreadsheet.
- */
+/** Final pay for one leaver. */
 class RunFinalPayRequest extends FormRequest
 {
     public function authorize(): bool
