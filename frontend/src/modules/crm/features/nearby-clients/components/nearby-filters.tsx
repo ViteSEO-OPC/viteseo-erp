@@ -29,9 +29,15 @@ function FilterSelect({
 }) {
   // Base-ui SelectValue renders the raw value, so the "all" option's value IS its readable label
   // (mapped back to "" = no filter). Matches the codebase's value-equals-label Select convention.
+  //
+  // With no options the only entry is "All …", so the control can filter nothing. Disabling it says
+  // that plainly instead of offering a dropdown that opens onto a single inert row — which is how an
+  // empty Prospect Pool used to make these read as broken rather than empty.
+  const inert = options.length === 0;
+
   return (
     <Select value={value || allLabel} onValueChange={(v) => onChange(v && v !== allLabel ? v : "")}>
-      <SelectTrigger className="w-full">
+      <SelectTrigger className="w-full" disabled={inert}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

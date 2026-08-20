@@ -34,6 +34,7 @@ export function NearbyClientsPage() {
     useMyLocation,
     clearOrigin,
     geoStatus,
+    totalCount,
     isLoading,
     isError,
   } = useNearbyClients();
@@ -110,6 +111,10 @@ export function NearbyClientsPage() {
                 onDirections={onDirections}
                 onQualify={onQualify}
                 qualifyingId={qualify.isPending ? (qualify.variables ?? null) : null}
+                // `totalCount` is the unfiltered pool size, so this distinguishes "nothing
+                // discovered yet" from "your filters excluded everything" — the page previously
+                // reported both as a filter miss, which reads as broken when the pool is empty.
+                poolIsEmpty={totalCount === 0}
               />
             )}
           </div>

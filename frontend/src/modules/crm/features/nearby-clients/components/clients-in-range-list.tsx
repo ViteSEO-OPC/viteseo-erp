@@ -10,9 +10,15 @@ type Props = {
   onDirections: (client: NearbyClient) => void;
   onQualify: (client: NearbyClient) => void;
   qualifyingId: string | null;
+  /**
+   * True when the Prospect Pool itself is empty — i.e. nothing has been discovered yet, as opposed
+   * to the filters having excluded everything. The two look identical in the list (zero cards) but
+   * mean opposite things to a BD, so they must not share a message.
+   */
+  poolIsEmpty: boolean;
 };
 
-export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit, onDirections, onQualify, qualifyingId }: Props) {
+export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit, onDirections, onQualify, qualifyingId, poolIsEmpty }: Props) {
   const nearest = clients[0]?.distanceKm ?? null;
   const activeCount = clients.filter((c) => c.active).length;
 
@@ -47,7 +53,13 @@ export function ClientsInRangeList({ clients, selectedId, onSelect, onPlanVisit,
           ))}
         </div>
       ) : (
-        <EmptyState message="No clients match these filters." />
+        <EmptyState
+          message={
+            poolIsEmpty
+              ? "No discovered businesses yet. Run discovery to populate the Prospect Pool."
+              : "No clients match these filters."
+          }
+        />
       )}
     </div>
   );
