@@ -540,7 +540,12 @@ class AttendanceService
 
         $cutoff = $start->addMinutes($eff['grace_minutes'] ?? 0);
 
-        return $local->gt($cutoff) ? 'late' : 'present';
+        // Judged to the MINUTE: seconds are dropped before comparing. `now()` carries real
+        // seconds, so an 08:15:05 punch against an 08:15:00 cutoff used to read `late` while
+        // DeductionService — which works off whole minutes (clockToMinutes()) — charged it
+        // nothing. Truncating here makes the flag agree with the money: the whole 08:15 minute
+        // is on time, 08:16 is late.
+        return $local->copy()->startOfMinute()->gt($cutoff) ? 'late' : 'present';
     }
 
     /**
@@ -3222,6 +3227,10 @@ class AttendanceService
         if ($start === null) {
             return ['category' => 'on_time', 'late_minutes' => 0];
         }
+
+        // Minute precision, matching arrivalStatus() — see the note there. Without this the
+        // dashboard could file an arrival under `late` that carries 0 late minutes.
+        $timeInLocal = $timeInLocal->copy()->startOfMinute();
 
         $graceEnd = $start->copy()->addMinutes($eff['grace_minutes'] ?? 0);
 
