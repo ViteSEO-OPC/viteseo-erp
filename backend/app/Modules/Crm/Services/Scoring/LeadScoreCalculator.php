@@ -49,6 +49,17 @@ class LeadScoreCalculator
         // ── Fit signals ──────────────────────────────────────────────────────────────────────
         // Website: three-state digital-sales-opportunity gradient (Amendment B). Mutually exclusive;
         // has-website is the Negative side of the same gradient and is emitted below.
+        //
+        // `website-unknown` and `website-unreachable` are NEUTRAL BY CONSTRUCTION: they match none of
+        // the three conditions, so all three signals stay inactive and contribute 0. This is why they
+        // need no weight in config/scoring.php — and that matters, because the point values are
+        // DB-backed (ScoringConfigProvider validates an active version against the file's `points`
+        // keys). Adding a key would invalidate the published Business Rules version and silently drop
+        // the engine back to the file baseline. Scoring by ABSENCE keeps the frozen rule set untouched:
+        // no new signal, no re-weight, no republish. Do not "fix" this by adding zero-point entries.
+        //
+        // The meaning: an unverified website tells us nothing about the opportunity, so it must move
+        // the score neither up nor down.
         $signals[] = new ScoreSignal(
             'website-no-website', 'No Website', ScoreSignal::FIT,
             $websiteStatus === 'no-website' ? $c->point('no_website') : 0, $websiteStatus === 'no-website',

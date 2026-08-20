@@ -15,7 +15,10 @@ def test_normalize_real_element_end_to_end(overpass_element):
     business = normalize(raw, source="openstreetmap")
 
     assert business.business_name == "Starbucks"
-    assert business.website_status == "has-website"  # real website detected
+    # A URL in the provider record is the AUDIT'S INPUT, not a verdict — discovery never claims that
+    # a business has a website, only that a directory happened to list one.
+    assert business.website_status == "website-unknown"
+    assert business.website == "https://www.starbucks.com/"
     assert business.industry == "Cafe"
     assert business.city == "Makati"
     assert business.place_id == "node/255068024"
@@ -24,14 +27,35 @@ def test_normalize_real_element_end_to_end(overpass_element):
     assert business.contact_name is None
 
 
-def test_normalize_no_website_is_no_website():
+def test_normalize_missing_website_is_unknown_not_no_website():
+    """The Mercury Drug defect: OpenStreetMap omits the `website` tag constantly, including for chains
+    with obvious web presences. That silence is a gap in the DIRECTORY, and recording it as
+    `no-website` told the CRM a business had no website and handed it the +25 greenfield-prospect
+    signal on no evidence at all."""
     raw = RawBusiness(provider_id="node/1", name="Sari-Sari Store", website=None)
-    assert normalize(raw, source="openstreetmap").website_status == "no-website"
+    business = normalize(raw, source="openstreetmap")
+
+    assert business.website_status == "website-unknown"
+    assert business.website is None
 
 
-def test_normalize_non_url_website_is_no_website():
+def test_normalize_non_url_website_is_unknown_and_carries_no_url():
     raw = RawBusiness(provider_id="node/2", name="Nook", website="see facebook")
-    assert normalize(raw, source="openstreetmap").website_status == "no-website"
+    business = normalize(raw, source="openstreetmap")
+
+    assert business.website_status == "website-unknown"
+    assert business.website is None, "an unusable value is never persisted as a URL"
+
+
+def test_the_provider_shape_cannot_express_a_website_claim():
+    """Structural, not conventional: `has-website` is not in the provider's vocabulary, so no future
+    edit to the normalizer can reintroduce the guess without this failing first."""
+    import pytest
+    from pydantic import ValidationError
+
+    for claimed in ("has-website", "no-website", "needs-redesign"):
+        with pytest.raises(ValidationError):
+            NormalizedBusiness(business_name="X", source="openstreetmap", website_status=claimed)
 
 
 def test_payload_excludes_none_and_forbidden_fields():
@@ -51,7 +75,7 @@ def test_payload_never_contains_forbidden_fields_when_fully_populated():
         email="a@b.com",
         phone="+63999",
         industry="Cafe",
-        website_status="has-website",
+        website_status="website-unknown",
         region="Metro Manila",
         province="Southern Manila District",
         city="Makati",

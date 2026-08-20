@@ -37,7 +37,7 @@ class IndexLeadRequest extends FormRequest
             'priority' => ['nullable', Rule::in(['high', 'medium', 'low'])],
             // Website-condition column — independent filter powering the Website Status overview
             // cards' drill-down. Separate from priority/status.
-            'website_status' => ['nullable', Rule::in(['has-website', 'no-website', 'needs-redesign'])],
+            'website_status' => ['nullable', Rule::in(['has-website', 'no-website', 'needs-redesign', 'website-unknown', 'website-unreachable'])],
             // Communication-lifecycle columns (Email Outreach / Cold Calling). Independent single-value
             // filters with the same shape as `priority` above. Validated against the enums that are the
             // single backend source of truth for these columns — the same enums the write path uses, so

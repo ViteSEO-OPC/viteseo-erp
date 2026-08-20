@@ -293,6 +293,8 @@ function EditLeadForm({
                     <option value="has-website">Has Website</option>
                     <option value="no-website">No Website</option>
                     <option value="needs-redesign">Needs Redesign</option>
+                    <option value="website-unknown">Not Verified</option>
+                    <option value="website-unreachable">Unreachable</option>
                   </select>
                 </SelectShell>
               </FormField>

@@ -32,7 +32,12 @@ export type ServiceAreaSummary = {
 
 export type NearbyPriority = "high" | "medium" | "low";
 
-export type WebsiteStatus = "has-website" | "needs-redesign" | "no-website";
+export type WebsiteStatus =
+  | "has-website"
+  | "needs-redesign"
+  | "no-website"
+  | "website-unknown"
+  | "website-unreachable";
 
 /**
  * Website Intelligence audit signals — real detections only (never fabricated). Every field is a
@@ -79,7 +84,8 @@ export type NearbyClient = {
   latitude: number | null;
   longitude: number | null;
   /**
-   * DERIVED prospecting priority (no-website → high, needs-redesign → medium, has-website → low),
+   * DERIVED prospecting priority (no-website → high, needs-redesign → medium, has-website → low,
+   * website-unknown / website-unreachable → medium),
    * computed by the Nearby API from Website Intelligence. NOT the CRM `leads.priority` field. Drives
    * the list chip, map-pin colour, and the prospecting-priority filter — one shared value everywhere.
    */

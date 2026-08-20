@@ -3,6 +3,10 @@
 The payload's typed fields are the approved core signals; everything else (extended page types, more
 socials, contact form, maps embed, crawl metadata, and future SEO/mobile/perf checks) goes in the
 `audit` blob — so new capabilities can be added without changing the CRM schema.
+
+`final_url` and `canonical_url` are typed rather than blob fields because the CRM *derives* from them
+(identity verification), and a derivation input should be a validated part of the contract instead of
+an optional key in a free-form dictionary.
 """
 
 from __future__ import annotations
@@ -33,7 +37,9 @@ def build_audit(html: str, final_url: str, status: int) -> dict:
             description=None,
             contact_form=False,
             maps_embed=False,
-            extra={"homepage_status": status, "final_url": final_url},
+            final_url=final_url,
+            canonical_url=None,
+            extra={"homepage_status": status},
         )
 
     sel = Selector(text=html)
@@ -51,7 +57,9 @@ def build_audit(html: str, final_url: str, status: int) -> dict:
         description=detectors.extract_description(sel),
         contact_form=detectors.has_contact_form(sel),
         maps_embed=detectors.has_maps_embed(sel),
-        extra={"homepage_status": status, "final_url": final_url},
+        final_url=final_url,
+        canonical_url=detectors.extract_canonical(sel, final_url),
+        extra={"homepage_status": status},
     )
 
 
@@ -68,6 +76,8 @@ def unreachable_audit() -> dict:
         description=None,
         contact_form=False,
         maps_embed=False,
+        final_url=None,
+        canonical_url=None,
         extra={"unreachable": True},
     )
 
@@ -84,6 +94,8 @@ def _payload(
     description: str | None,
     contact_form: bool,
     maps_embed: bool,
+    final_url: str | None,
+    canonical_url: str | None,
     extra: dict,
 ) -> dict:
     # Extended / future signals live in `audit` (typed core stays first-class on the CRM record).
@@ -113,6 +125,12 @@ def _payload(
         "linkedin_url": socials.get("linkedin"),
         "instagram_url": socials.get("instagram"),
         "youtube_url": socials.get("youtube"),
+        # Where the request actually LANDED, and what the page calls itself. The CRM verifies business
+        # identity against these rather than the URL it queued, so a redirect into a parked or
+        # unrelated host is judged on where it ended up. Reported, never interpreted: deciding whether
+        # a page belongs to a business is CRM business logic, and this is a strict data provider.
+        "final_url": final_url,
+        "canonical_url": canonical_url,
         # Truncate to the CRM's field limits so a long title/description never 422s the submission.
         "website_title": title[:255] if title else None,
         "website_description": description[:2000] if description else None,

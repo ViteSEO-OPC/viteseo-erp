@@ -225,8 +225,10 @@ class LeadController extends Controller
             ->groupBy('website_status')
             ->get();
 
-        // Always emit all three buckets in render order, zero-filled — a stable card layout.
-        $buckets = collect(['no-website', 'needs-redesign', 'has-website'])
+        // Always emit every bucket in render order, zero-filled — a stable card layout. `website-unknown`
+        // and `website-unreachable` are included because `$total` counts them: omitting them would leave
+        // `pipelinePct` silently summing to less than 100% once unverified leads exist.
+        $buckets = collect(['no-website', 'needs-redesign', 'has-website', 'website-unknown', 'website-unreachable'])
             ->map(function (string $websiteStatus) use ($rows, $total): array {
                 $row = $rows->firstWhere('website_status', $websiteStatus);
                 $count = (int) ($row->count ?? 0);

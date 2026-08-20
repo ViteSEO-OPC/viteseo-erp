@@ -218,15 +218,49 @@ class CrmDemoSeeder extends Seeder
     /**
      * 14 discovered businesses in the Prospect Pool (Nearby Clients): `source` set, never qualified,
      * unassigned, geocoded for the map. These take no part in Business Computation.
+     *
+     * Every prospect's website state is INTERNALLY CONSISTENT with how it could actually have been
+     * reached, because the state now carries a claim about evidence:
+     *
+     *   - most are `website-unknown` with NO audit row — discovery only ever reports "not checked",
+     *     so this is what a freshly discovered business genuinely looks like;
+     *   - a few carry an audit row whose identity was VERIFIED, which is the only route to
+     *     `has-website` / `needs-redesign`;
+     *   - one was audited and did not respond (`website-unreachable`);
+     *   - one was audited, responded, and could NOT be tied to the business — the case that keeps it
+     *     at `website-unknown` despite having been checked.
+     *
+     * Seeding `no-website` here would assert "verified to have no website" about a business nothing
+     * ever looked at, which is the exact defect this pipeline was corrected to stop making — and it
+     * would hand the +25 greenfield signal to demo data. `no-website` is therefore absent by design;
+     * it becomes reachable again only through candidate discovery (not built) or a human decision.
      */
     private function prospects(User $admin): void
     {
         $cities = array_keys(self::CITIES);
 
+        // [website_status, has a URL, audit row to create (null = never audited)]
+        $webStates = [
+            ['website-unknown', false, null],
+            ['website-unknown', false, null],
+            ['website-unknown', true, null],
+            ['website-unknown', false, null],
+            ['website-unknown', true, null],
+            ['website-unknown', false, null],
+            ['website-unknown', true, null],
+            ['website-unknown', false, null],
+            ['website-unknown', true, null],
+            ['has-website', true, ['reachable' => true, 'https' => true, 'core' => true, 'verified' => true]],
+            ['has-website', true, ['reachable' => true, 'https' => true, 'core' => true, 'verified' => true]],
+            ['needs-redesign', true, ['reachable' => true, 'https' => false, 'core' => false, 'verified' => true]],
+            ['website-unreachable', true, ['reachable' => false, 'https' => false, 'core' => false, 'verified' => false]],
+            ['website-unknown', true, ['reachable' => true, 'https' => true, 'core' => true, 'verified' => false]],
+        ];
+
         for ($i = 0; $i < 14; $i++) {
             $city = $cities[$i % count($cities)];
             [$lat, $lng, $region, $province] = self::CITIES[$city];
-            $websiteStatus = ['no-website', 'needs-redesign', 'has-website'][$i % 3];
+            [$websiteStatus, $hasUrl, $audit] = $webStates[$i];
             $discoveredAt = $this->now->copy()->subDays(fake()->numberBetween(1, 45));
 
             $prospect = Lead::factory()->create([
@@ -243,7 +277,7 @@ class CrmDemoSeeder extends Seeder
                 'address' => fake()->streetAddress(),
                 'latitude' => $lat + (fake()->numberBetween(-350, 350) / 10000),
                 'longitude' => $lng + (fake()->numberBetween(-350, 350) / 10000),
-                'website' => $websiteStatus === 'no-website' ? null : 'https://'.fake()->domainName(),
+                'website' => $hasUrl ? 'https://'.fake()->domainName() : null,
                 'place_id' => 'demo-place-'.str_pad((string) $i, 4, '0', STR_PAD_LEFT),
                 'source' => 'nearby',         // + qualified_at NULL below ⇒ scopeProspect
                 'qualified_at' => null,
@@ -252,6 +286,29 @@ class CrmDemoSeeder extends Seeder
                 'created_at' => $discoveredAt,
                 'updated_at' => $discoveredAt,
             ]);
+
+            if ($audit !== null) {
+                $prospect->websiteEnrichment()->create([
+                    'website_reachable' => $audit['reachable'],
+                    'https_enabled' => $audit['https'],
+                    'about_page' => $audit['core'],
+                    'contact_page' => $audit['core'],
+                    'services_page' => $audit['core'],
+                    'final_url' => $audit['reachable'] ? $prospect->website : null,
+                    'identity_verified' => $audit['verified'],
+                    'identity_confidence' => $audit['verified'] ? 70 : 10,
+                    'identity_signals' => [
+                        'domain_matches_name' => $audit['verified'],
+                        'title_matches_name' => $audit['verified'],
+                        'phone_match' => false,
+                        'email_domain_match' => false,
+                        'city_match' => false,
+                    ],
+                    'provider' => 'scrapy-website-intelligence',
+                    'last_checked_at' => $discoveredAt->copy()->addDays(1),
+                    'enriched_at' => $discoveredAt->copy()->addDays(1),
+                ]);
+            }
 
             unset($prospect);
         }

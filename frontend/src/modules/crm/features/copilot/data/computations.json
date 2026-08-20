@@ -325,13 +325,15 @@
       "label": "Website Status Overview",
       "measures": "How the pipeline splits by a prospect's web presence",
       "formula": "GROUP BY website_status; pipelinePct = round(count ÷ total × 100) over all active visible leads",
-      "reasoning": "No Website is the highest-conversion segment, which is why it also carries the largest positive score signal.",
+      "reasoning": "No Website carries the largest positive score signal, but it now means VERIFIED to have none — a website is only claimed either way once a page has been fetched and tied back to the business.",
       "caveats": [
-        "The dashboard endpoint serving this is named 'priority-buckets' for backward compatibility but aggregates website status, not priority."
+        "The dashboard endpoint serving this is named 'priority-buckets' for backward compatibility but aggregates website status, not priority.",
+        "Five buckets are emitted, not three. Not Verified (website-unknown) and Unreachable (website-unreachable) are scoring-NEUTRAL: they contribute 0, neither the +25 No Website signal nor the -15 Has Website penalty.",
+        "Most discovered prospects sit in Not Verified until an audit runs, so a small No Website count is expected and correct — it is not a data gap."
       ],
       "confidence": "documented",
-      "verifiedAgainst": "DashboardController::priorityBuckets",
-      "keywords": "website status distribution no website needs redesign has website buckets overview how computed"
+      "verifiedAgainst": "LeadController::websiteStatusBuckets",
+      "keywords": "website status distribution no website needs redesign has website not verified unreachable unknown buckets overview how computed"
     },
     {
       "id": "target-location",

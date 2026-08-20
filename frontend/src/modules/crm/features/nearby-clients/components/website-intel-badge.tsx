@@ -6,6 +6,8 @@ const STATUS_STYLE: Record<string, { label: string; cls: string }> = {
   "has-website": { label: "Strong website", cls: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300" },
   "needs-redesign": { label: "Needs redesign", cls: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" },
   "no-website": { label: "No website", cls: "bg-muted text-muted-foreground" },
+  "website-unknown": { label: "Website not verified", cls: "bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300" },
+  "website-unreachable": { label: "Website unreachable", cls: "bg-orange-100 text-orange-700 dark:bg-orange-950/50 dark:text-orange-300" },
 };
 
 /**

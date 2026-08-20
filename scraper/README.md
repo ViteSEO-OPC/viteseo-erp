@@ -166,9 +166,26 @@ shows exactly what would be submitted.
 For each queued business, a Scrapy crawl fetches the homepage and detects availability, HTTPS, page
 structure (About/Contact/Services/Careers/Blog/…), business info (emails/phones), and social links.
 It submits the findings to `PUT /leads/{id}/website-enrichment`; the CRM records them on
-`lead_website_enrichments` and derives the coarse `website_status`. Provider-independent — it audits a
-URL no matter which discovery provider supplied it. The audit is homepage-based today; deeper
+`crm_lead_website_enrichments` and derives the coarse `website_status`. Provider-independent — it
+audits a URL no matter which discovery provider supplied it. The audit is homepage-based today; deeper
 multi-page crawling is a future capability the architecture already supports.
+
+The payload also reports `final_url` (where the request LANDED, after redirects) and `canonical_url`
+(what the page calls itself, via `<link rel="canonical">` or `og:url`). The CRM uses those to check
+that the page actually belongs to the business — matching its name against the domain and title, its
+phone against the numbers on the page, its email domain, its city — before it will record a website as
+that business's own. **A reachable page is not enough.** That decision is deliberately the CRM's: it
+is business logic, and it needs the lead's phone/email/city, which this provider never receives.
+
+### Website status is the CRM's to decide
+
+`discover` reports `website-unknown` for every business, always. Observing that a directory record
+carries a `website` tag is a fact about the DIRECTORY, not about the business — OpenStreetMap omits
+the tag routinely, including for chains with obvious web presences — so treating its absence as "this
+business has no website" was wrong, and expensive: `no-website` is the CRM's largest lead-scoring
+signal. The provider's shape can no longer express the claim (`WebsiteStatus` is a one-value
+`Literal`), so the guess cannot come back by accident. The URL itself is still captured when the
+provider supplies one — it is the audit's input, not a verdict.
 
 ## Configuration (`.env`)
 
