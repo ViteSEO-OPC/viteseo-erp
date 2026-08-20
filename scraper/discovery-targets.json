@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "Discovery targets for `python -m scraper discover-all` — the automatic, scheduled",
+    "counterpart to the manual `discover` command. VERSION-CONTROLLED: treat it as code and",
+    "deploy it; do not hand-edit it on a server, or the next deploy will silently revert it.",
+    "",
+    "Each entry expands to one (area, category) PAIR per category. A scheduled run takes the",
+    "next `--targets` pairs in round-robin order, so no pair is queried again until every other",
+    "pair has had a turn.",
+    "",
+    "`area` is free text resolved by Nominatim (`--area`). `category` must be a word the active",
+    "provider knows — see CATEGORY_SELECTORS in scraper/providers/openstreetmap.py. These are",
+    "PROVIDER categories (OSM tags), deliberately NOT the CRM's Business Niche registry: the CRM",
+    "niche vocabulary is a separate business concern and must not leak into provider selectors.",
+    "",
+    "`defaults.limit` bounds how many businesses a single pair may discover per run, and",
+    "`defaults.targets_per_run` how many pairs one run may touch. The volume ceiling is the product",
+    "of the two; both are clamped by MAX_LIMIT / MAX_TARGETS_PER_RUN in scraper/targets.py, which",
+    "exist to protect Overpass and Nominatim (shared community infrastructure) and must not be",
+    "raised to chase throughput. Widen coverage by ADDING TARGETS, not by lifting the caps.",
+    "",
+    "Growth lever: the pool is meant to build continuously, so add areas/categories here rather",
+    "than increasing per-run volume. More targets means a longer rotation, not a bigger burst."
+  ],
+  "defaults": {
+    "limit": 30,
+    "targets_per_run": 3
+  },
+  "targets": [
+    {
+      "area": "Makati City, Philippines",
+      "categories": ["pharmacy", "dentist", "clinic"]
+    },
+    {
+      "area": "Quezon City, Philippines",
+      "categories": ["restaurant", "salon"]
+    }
+  ]
+}

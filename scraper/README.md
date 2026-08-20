@@ -74,6 +74,78 @@ cp .env.example .env    # then set CRM_TOKEN (a Sanctum token for an Admin/Super
 Re-running discovery over the same area is **idempotent** — the CRM dedups by `place_id` (and email),
 so businesses already ingested are skipped, not duplicated.
 
+### Automatic discovery (`discover-all`)
+
+`discover` requires a human to pick an area and category every time. `discover-all` is the scheduled
+counterpart: it reads a **version-controlled target list** and runs the next few targets in
+round-robin order, so the pool fills itself without anyone choosing.
+
+```bash
+# Preview the next target — no CRM contact, and the rotation cursor does NOT advance:
+.venv/bin/python -m scraper discover-all --print-only
+
+# Dry run the next target against the CRM (validates, persists nothing):
+.venv/bin/python -m scraper discover-all
+
+# Commit — what the scheduler runs:
+.venv/bin/python -m scraper discover-all --commit
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--targets N` | file, else `3` | How many `(area, category)` pairs this run may touch (clamped to 10) |
+| `--limit N` | file, else `30` | Override the per-target discovery limit (clamped to 50) |
+| `--commit` | off | Persist. **Without it the run is a dry run**, exactly like `discover` |
+| `--print-only` | off | Print only; skip the CRM and leave the cursor untouched |
+| `--targets-file` / `--state-file` | see below | Path overrides (used by tests) |
+
+**Targets** live in `discovery-targets.json` (version-controlled — deploy it, do not hand-edit it on
+a server). Each entry expands to one pair per category:
+
+```json
+{
+  "defaults": { "limit": 30, "targets_per_run": 3 },
+  "targets": [
+    { "area": "Makati City, Philippines", "categories": ["pharmacy", "dentist"] }
+  ]
+}
+```
+
+`area` is free text resolved by Nominatim; `category` must be a word the active provider knows (see
+`CATEGORY_SELECTORS`) or a raw `key=value` selector. These are **provider** categories, deliberately
+separate from the CRM's Business Niche registry.
+
+**Rotation state** lives in `.discovery-state.json` beside it — runtime state, git-ignored, and
+self-healing (a missing or corrupt file simply restarts the rotation). It holds the cursor plus each
+pair's last run. Round-robin guarantees **no pair is queried again until every other pair has had a
+turn**.
+
+**Volume** is `targets_per_run × limit`. Shipped defaults are **3 × 30 = up to 90 businesses/run**,
+and fewer in practice because the CRM dedups on `place_id`/email — the pool is meant to build
+continuously, not trickle.
+
+Both dimensions are configurable in `discovery-targets.json` (`defaults.limit`,
+`defaults.targets_per_run`) and overridable per run (`--limit`, `--targets`). Precedence is
+**flag → file → built-in default**.
+
+Two ceilings are **not** product knobs and stay put: `MAX_LIMIT` (50 per target) and
+`MAX_TARGETS_PER_RUN` (10 per run), in `scraper/targets.py`. Overpass and Nominatim are shared
+community infrastructure and this tool is a guest on them. **Widen coverage by adding targets, not by
+raising the caps** — more targets means a longer rotation, not a bigger burst.
+
+**Failure is isolated per target** — one unresolvable area logs and the run continues. A run only
+exits non-zero when *every* selected target failed, so a flaky area never alarms the scheduler.
+
+**Scheduling** (not installed by this repo — an ops step):
+
+```
+30 2 * * *  cd /var/www/vsp-release6/scraper && flock -n .discovery.lock \
+              .venv/bin/python -m scraper discover-all --commit >> logs/discovery.log 2>&1
+```
+
+`flock` is the overlap guard — cron has no equivalent of the Laravel scheduler's
+`withoutOverlapping()`.
+
 Categories accept a friendly word (`cafe`, `restaurant`, `pharmacy`, `bakery`, `salon`, `hotel`,
 `dentist`, `real_estate`, …) or a raw OSM selector like `amenity=cafe`.
 
