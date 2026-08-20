@@ -72,10 +72,15 @@ export function useNearbyClients() {
       locations: distinct(all.map((c) => c.area)),
       niches: distinct(all.map((c) => c.niche)),
       statuses: distinct(all.map((c) => c.status)),
-      // Derived prospecting priorities present in the pool, ranked High → Medium → Low.
-      priorities: PRIORITY_ORDER.filter((label) =>
-        all.some((c) => formatPriority(c.priority) === label),
-      ),
+      // ALWAYS the full vocabulary, never narrowed to what the pool currently holds.
+      //
+      // Unlike niche/status/location — open-ended values that only mean something if a record has
+      // them — prospecting priority is a CLOSED, derived set of exactly three levels
+      // (NearbyClientResource::prospectingPriority maps website_status → high|medium|low, defaulting
+      // to medium). A BD filtering a pool that happens to be all-High still needs Medium and Low
+      // present to understand the axis and to keep the control stable as discovery adds records.
+      // Deriving it from the data made the dropdown's shape depend on discovery timing.
+      priorities: [...PRIORITY_ORDER],
     }),
     [all],
   );

@@ -87,15 +87,18 @@ class Lead extends Model
      *
      * Eloquent does NOT hydrate DB-level defaults back into the in-memory instance, so without this a
      * lead created without an explicit `website_status` reaches the `created` observer (the Lead Score
-     * Engine) with a null value and the strictly-typed calculator fails. `'no-website'` is the approved
-     * base website state (BD-PERF-COMP-SPEC §4.2) — a greenfield prospect (+25) — refined later only by
-     * Website Intelligence. Keeping these in sync with the migration keeps the model, the database, and
-     * the scoring engine consistent, and applies to every creation path (wizard, import, discovery).
+     * Engine) with a null value and the strictly-typed calculator fails. `'website-unknown'` is the base
+     * website state: nothing has checked yet, so nothing is claimed. It is scoring-NEUTRAL, and is
+     * refined by Website Intelligence once a URL is fetched AND verified as the business's own. It
+     * replaced `'no-website'`, which asserted the +25 greenfield-prospect signal about every lead whose
+     * website had simply never been looked at. Keeping these in sync with the migration keeps the model,
+     * the database, and the scoring engine consistent, and applies to every creation path (wizard,
+     * import, discovery).
      *
      * @var array<string, mixed>
      */
     protected $attributes = [
-        'website_status' => 'no-website',
+        'website_status' => 'website-unknown',
         'priority' => 'medium',
         'email_outreach' => 'none',
         'cold_calling' => 'not-called',

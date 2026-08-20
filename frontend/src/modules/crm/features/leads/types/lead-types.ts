@@ -2,7 +2,12 @@ import type { PriorityLevel, LeadStatus } from "@/modules/crm/features/dashboard
 
 export type { PriorityLevel, LeadStatus };
 
-export type WebsiteStatus = "has-website" | "no-website" | "needs-redesign";
+export type WebsiteStatus =
+  | "has-website"
+  | "no-website"
+  | "needs-redesign"
+  | "website-unknown"
+  | "website-unreachable";
 
 // Human-readable labels for the website_status enum. Centralized here (next to the enum)
 // so every surface — Lead Detail chip, Edit drawer, etc. — renders the same wording.
@@ -10,6 +15,8 @@ export const WEBSITE_STATUS_LABELS: Record<WebsiteStatus, string> = {
   "has-website": "Has Website",
   "no-website": "No Website",
   "needs-redesign": "Needs Redesign",
+  "website-unknown": "Not Verified",
+  "website-unreachable": "Unreachable",
 };
 
 export type OutreachStatus = "sent" | "opened" | "replied" | "none";

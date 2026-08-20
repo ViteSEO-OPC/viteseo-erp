@@ -1,9 +1,16 @@
 """Normalizer — provider-neutral ``RawBusiness`` -> canonical ``NormalizedBusiness`` (CRM fit-data).
 
-This is where discovery output becomes the exact shape the CRM ingest accepts. It performs website
-detection (presence of a real URL -> ``website_status``) and passes through identity, contactability,
-category, administrative location, coordinates, and provenance. It computes no score, KPI, ownership,
-or engagement value — those are not part of the shape.
+This is where discovery output becomes the exact shape the CRM ingest accepts. It captures the URL a
+provider supplied (when it supplied one) and passes through identity, contactability, category,
+administrative location, coordinates, and provenance. It computes no score, KPI, ownership, or
+engagement value — those are not part of the shape.
+
+It also does not decide whether a business HAS a website. Discovery can only observe whether a
+directory record happens to carry a URL tag, which is a fact about the directory, not about the
+business — OpenStreetMap omits the tag routinely, including for chains with obvious web presences.
+That observation is not evidence, so every discovered business leaves here as ``website-unknown`` and
+the question is settled by the Website Intelligence audit, which fetches the URL and verifies the page
+actually belongs to the business.
 """
 
 from __future__ import annotations
@@ -19,11 +26,12 @@ def _looks_like_url(value: str) -> bool:
 def normalize(raw: RawBusiness, source: str) -> NormalizedBusiness:
     """Map one discovered business to the CRM fit-data shape.
 
-    ``website_status`` is a real detection result: a usable website URL -> ``has-website``; its
-    absence -> ``no-website``. ``contact_name`` is left unset — discovery rarely exposes a contact
-    person, and the CRM defaults it to the business name (a documented normalization, not fabrication).
+    ``website_status`` is always ``website-unknown`` — see the module docstring. The URL itself IS
+    carried when the provider supplied a usable one; it is the audit's input, not a verdict.
+    ``contact_name`` is left unset — discovery rarely exposes a contact person, and the CRM defaults it
+    to the business name (a documented normalization, not fabrication).
     """
-    has_website = bool(raw.website and _looks_like_url(raw.website))
+    has_url = bool(raw.website and _looks_like_url(raw.website))
 
     return NormalizedBusiness(
         business_name=raw.name.strip(),
@@ -31,9 +39,9 @@ def normalize(raw: RawBusiness, source: str) -> NormalizedBusiness:
         email=raw.email or None,
         phone=raw.phone or None,
         industry=raw.category or None,
-        website_status="has-website" if has_website else "no-website",
-        # Persist the actual URL only when it's a real website (no fabrication).
-        website=raw.website.strip() if has_website and raw.website else None,
+        website_status="website-unknown",
+        # Persist the actual URL only when the provider supplied a usable one (no fabrication).
+        website=raw.website.strip() if has_url and raw.website else None,
         region=raw.region or None,
         province=raw.province or None,
         city=raw.city or None,

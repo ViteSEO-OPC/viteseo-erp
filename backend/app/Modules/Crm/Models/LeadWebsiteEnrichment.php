@@ -16,6 +16,7 @@ use Illuminate\Support\Carbon;
  * the interpretation/scoring.
  *
  * @property array<string, mixed>|null $audit
+ * @property array<string, bool>|null $identity_signals
  * @property Carbon|null $last_checked_at Cast to datetime; declared so static analysis applies the cast.
  * @property Carbon|null $enriched_at Cast to datetime; declared so static analysis applies the cast.
  */
@@ -34,6 +35,11 @@ use Illuminate\Support\Carbon;
     'linkedin_url',
     'instagram_url',
     'youtube_url',
+    'final_url',
+    'canonical_url',
+    'identity_verified',
+    'identity_confidence',
+    'identity_signals',
     'website_title',
     'website_description',
     'audit',
@@ -59,6 +65,8 @@ class LeadWebsiteEnrichment extends Model
             'emails_found' => 'array',
             'phones_found' => 'array',
             'audit' => 'array',
+            'identity_verified' => 'boolean',
+            'identity_signals' => 'array',
             'last_checked_at' => 'datetime',
             'enriched_at' => 'datetime',
         ];

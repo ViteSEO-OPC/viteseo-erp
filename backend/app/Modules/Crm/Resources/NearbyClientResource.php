@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\NicheCanonicalizer;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Str;
@@ -27,7 +28,13 @@ class NearbyClientResource extends JsonResource
             'id' => (string) $this->id,
             'business' => $this->business_name,
             'initials' => $this->initialsFor($this->business_name),
-            'niche' => $this->industry,
+            // The Business Niche registry's spelling when this industry is registered, otherwise the
+            // raw value. Discovery derives `industry` from provider tags and knows nothing about the
+            // CRM registry, so `pharmacy` and `Pharmacy` would otherwise be two separate filter
+            // options that each miss the other's leads. Every other CRM surface already matches
+            // niches case-insensitively ({@see \App\Modules\Crm\Models\Niche}); this gives Nearby the
+            // same view. Unregistered values pass through unchanged — see NicheCanonicalizer.
+            'niche' => app(NicheCanonicalizer::class)->canonical($this->industry),
             // Human area label — most specific administrative unit available.
             'area' => $this->city ?? $this->province ?? $this->region,
             'contact' => $this->contact_name,
@@ -52,13 +59,16 @@ class NearbyClientResource extends JsonResource
      * Derived PROSPECTING priority for the Nearby bounded context — a weaker digital presence is a
      * stronger prospect for the BD team:
      *
-     *   no-website      → high
-     *   needs-redesign  → medium
-     *   has-website     → low
+     *   no-website           → high     (verified: no credible website exists)
+     *   needs-redesign       → medium
+     *   has-website          → low
+     *   website-unknown      → medium   (nothing has been verified — claim nothing either way)
+     *   website-unreachable  → medium   (a URL that did not answer is not proof of an opportunity)
      *
      * Computed purely from Website Intelligence (`website_status`) at presentation time — never
-     * persisted, and deliberately independent of the CRM `leads.priority` field. An unclassified /
-     * not-yet-audited business (no website_status) defaults to medium (neutral).
+     * persisted, and deliberately independent of the CRM `leads.priority` field. Unknown and
+     * unreachable both land on medium for the same reason they score 0: an unverified business must
+     * not be advertised to BDs as the strongest prospect on the board.
      */
     private function prospectingPriority(): string
     {
@@ -82,9 +92,14 @@ class NearbyClientResource extends JsonResource
 
         return [
             'url' => $this->website,
-            'status' => $this->website_status, // has-website | needs-redesign | no-website | null
+            'status' => $this->website_status, // has-website | needs-redesign | no-website | website-unknown | website-unreachable
             'audited' => $e !== null,
             'auditedAt' => $e?->last_checked_at?->toIso8601String(),
+            // Whether the audited page was confirmed to BELONG to this business, and how strongly.
+            // `null` = never evaluated (no audit yet, or a row audited before verification existed) —
+            // which `false` would misreport as "checked and rejected".
+            'identityVerified' => $e?->identity_verified,
+            'identityConfidence' => $e?->identity_confidence,
             'signals' => $e === null ? null : [
                 'reachable' => (bool) $e->website_reachable,
                 'https' => (bool) $e->https_enabled,

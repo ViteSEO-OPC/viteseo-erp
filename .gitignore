@@ -38,6 +38,14 @@ docs/
 # Python virtualenvs (e.g. scraper tooling) — never commit; recreate from requirements.txt
 .venv/
 venv/
+
+# Scraper scheduled-discovery rotation cursor. RUNTIME STATE, not configuration: it records which
+# (area, category) target ran last so the next run picks up where this one stopped. Per-environment
+# and self-healing — losing it just restarts the rotation, which the CRM's place_id/email dedup makes
+# harmless. The target LIST itself (discovery-targets.json) IS version-controlled.
+/scraper/.discovery-state.json
+/scraper/.discovery.lock
+/scraper/logs/
 *.egg-info/
 __pycache__/
 *.py[cod]

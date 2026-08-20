@@ -16,7 +16,12 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-WebsiteStatus = Literal["has-website", "no-website"]
+# Discovery can only ever report "not checked". Observing that a directory record carries a URL tag
+# is a fact about the directory, not about the business, so this provider never claims a website
+# state — the CRM's Website Intelligence audit fetches the URL and verifies the page belongs to the
+# business before any other value is assigned. The richer vocabulary (has-website / needs-redesign /
+# no-website / website-unreachable) is the CRM's to write, and is deliberately not modelled here.
+WebsiteStatus = Literal["website-unknown"]
 
 
 class RawBusiness(BaseModel):
