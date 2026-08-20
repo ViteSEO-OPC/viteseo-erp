@@ -37,6 +37,7 @@ class DeductionService
      *   - am_start_min, am_end_min, pm_start_min, pm_end_min: int|null   half windows (F-3)
      *   - governed_by_early_out: bool             an approved early-out already prices this day's undertime
      *   - amnesty: bool                           force-majeure waiver for this date (F-8/§9) ⇒ zero
+     *   - full_day_credited: bool                 the day cleared HR's minimum-hours bar ⇒ zero undertime
      *   - cap_remaining: float                    max fraction this day may still cost (1.0 full day; 0.5 left on a half-day)
      */
     public function forDay(array $ctx, AttendancePolicy $policy): DeductionResult
@@ -88,10 +89,17 @@ class DeductionService
         }
 
         // --- undertime (clock-derived; approved early-out days are handled elsewhere) ---
+        //
+        // `full_day_credited` — the day cleared the minimum-hours bar HR declared for that date
+        // (FullDayCreditService), so leaving before the scheduled end is not undertime at all:
+        // the company shortened the compensable day. It zeroes the undertime branch ONLY.
+        // Lateness below is untouched and still charges, which is the decision: a shortened day
+        // says how much work earns a full day, it does not say arriving late is free.
         $undertimeMinutes = 0;
         if (
             $policy->undertime_deduction_mode === 'per_hour'
             && empty($ctx['governed_by_early_out'])
+            && empty($ctx['full_day_credited'])
             && $workEnd !== null
             && $timeOut !== null // a missing clock-out is flagged, not charged (default mode)
         ) {

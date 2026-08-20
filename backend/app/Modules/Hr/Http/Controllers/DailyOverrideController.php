@@ -26,6 +26,7 @@ class DailyOverrideController extends Controller
         $override = $this->service->upsert(
             $request->validated('date'),
             $request->validated('grace_minutes'),
+            $request->validated('min_full_day_minutes'),
         );
         return response()->json(['data' => DailyOverrideResource::make($override)]);
     }

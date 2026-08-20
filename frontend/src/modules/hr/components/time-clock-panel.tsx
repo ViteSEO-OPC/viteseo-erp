@@ -104,7 +104,19 @@ function liveWorkedMinutes(a: Attendance, now: number): number {
   if (!a.time_in) return 0;
   if (a.state === "clocked_out") return a.hours_worked * 60;
   const gross = (now - new Date(a.time_in).getTime()) / 60000;
-  return Math.max(0, gross - a.lunch_minutes - a.break_minutes);
+  // ONLY the unpaid meal comes out. A paid short break sits inside the paid day by definition,
+  // which is what the server does when it saves `hours_worked` (Item 13b.2) — subtracting it
+  // here too made the ticking figure lower than the one it settled on, so the number jumped UP
+  // the moment you clocked out.
+  return Math.max(0, gross - a.lunch_minutes);
+}
+
+/** 360 → "6h", 390 → "6h 30m". The day's bar is announced in hours, stored in minutes. */
+function hoursLabel(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 export function TimeClockPanel() {
@@ -215,6 +227,7 @@ export function TimeClockPanel() {
     : "– – : – – : – –";
 
   const workedMin = today ? liveWorkedMinutes(today, now) : 0;
+  const dayRules = data?.day_rules ?? null;
 
   // Which confirmation modal is open ("time_out" has its own tasks dialog).
   const [confirm, setConfirm] = useState<"time_in" | "lunch" | "break" | null>(null);
@@ -502,6 +515,29 @@ export function TimeClockPanel() {
           <span>Break: {formatHm(today?.break_minutes ?? 0)}</span>
           <span>Lunch: {formatHm(today?.lunch_minutes ?? 0)}</span>
         </div>
+
+        {/*
+          The day's shortened-hours rule, on the employee's OWN panel. HR declaring "six hours
+          is a full day today" helps nobody who never hears about it — they work the whole shift
+          anyway. The clock time is the part that matters: the rule is "six hours", but what a
+          person can act on is "you reach it at 3:00 PM", which depends on when THEY clocked in.
+        */}
+        {dayRules?.min_full_day_minutes != null && (
+          <div className="mt-3 rounded-lg bg-white/10 px-3 py-2">
+            <p className="text-sm font-semibold text-brand">
+              Full day at {hoursLabel(dayRules.min_full_day_minutes)} today
+            </p>
+            <p className="mt-0.5 text-xs text-white/70">
+              {dayRules.full_day_met
+                ? "You've worked the minimum — today counts in full."
+                : dayRules.full_day_at
+                  ? `You reach it at ${format12Hour(dayRules.full_day_at)}.`
+                  : !today?.time_in
+                    ? "Time in to see when you reach it."
+                    : "Your hours today are shorter than this — it would need approved overtime."}
+            </p>
+          </div>
+        )}
 
         <p className="mt-5 text-label font-bold uppercase tracking-wide text-white/50">
           This Week

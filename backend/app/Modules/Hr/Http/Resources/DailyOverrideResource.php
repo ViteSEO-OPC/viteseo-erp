@@ -14,6 +14,7 @@ class DailyOverrideResource extends JsonResource
             'id' => $this->id,
             'date' => $this->date?->toDateString(),
             'grace_minutes' => $this->grace_minutes,
+            'min_full_day_minutes' => $this->min_full_day_minutes,
         ];
     }
 }

@@ -136,10 +136,30 @@ export interface RemoteCheckin {
   rejection_note: string | null;
 }
 
+/**
+ * Today's declared rules, as the employee's OWN panel sees them. A shortened compensable day
+ * that only HR can see helps nobody — the point is that people may leave once the hours are in,
+ * and they cannot act on a rule they were never shown.
+ */
+export interface DayRules {
+  date: string;
+  grace_minutes: number;
+  /** null = no minimum-hours bar today, which is the ordinary case. */
+  min_full_day_minutes: number | null;
+  /**
+   * Manila "HH:MM" at which this employee reaches the bar, given when they actually clocked in.
+   * null when they have not clocked in yet, or when the bar is out of reach inside their
+   * schedule (an afternoon off, say, with no approved overtime to extend it).
+   */
+  full_day_at: string | null;
+  full_day_met: boolean;
+}
+
 export interface MyAttendance {
   today: Attendance | null;
   week: Attendance[];
   clock_in: ClockInWindow;
+  day_rules: DayRules | null;
 }
 
 export type Severity = "green" | "yellow" | "orange" | "red";
@@ -251,6 +271,12 @@ export interface DailyOverride {
   id?: number;
   date: string;
   grace_minutes: number | null;
+  /**
+   * Minutes that must actually be WORKED for the date to count as a whole day, or null when
+   * HR declared no such bar (almost every day). Stored in minutes like every other duration
+   * in the module; the dialog collects hours and converts.
+   */
+  min_full_day_minutes: number | null;
 }
 
 /**

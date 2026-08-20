@@ -145,12 +145,22 @@ export function useDailyOverride(date?: string) {
 export function useUpsertDailyOverride() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ date, graceMinutes }: { date: string; graceMinutes: number | null }) =>
-      upsertDailyOverride(date, graceMinutes),
+    mutationFn: ({
+      date,
+      graceMinutes,
+      minFullDayMinutes,
+    }: {
+      date: string;
+      graceMinutes: number | null;
+      minFullDayMinutes: number | null;
+    }) => upsertDailyOverride(date, graceMinutes, minFullDayMinutes),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hr", "daily-override"] });
       qc.invalidateQueries({ queryKey: ["hr", "attendance-summary"] });
       qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+      // The rule the employee panel prints comes from `me/attendance`, so changing it here
+      // has to refresh that too — an HR officer is an employee with a clock panel as well.
+      qc.invalidateQueries({ queryKey: MY_KEY });
     },
   });
 }

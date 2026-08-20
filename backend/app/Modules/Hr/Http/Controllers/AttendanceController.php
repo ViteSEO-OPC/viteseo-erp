@@ -43,6 +43,9 @@ class AttendanceController extends Controller
                         'work_request' => null,
                         'suspension' => null,
                     ],
+                    // Same reason as clock_in above: the shape must match the real branch's, or
+                    // the panel's optional chaining ends up deciding the day's rules.
+                    'day_rules' => null,
                 ],
             ]);
         }
@@ -56,6 +59,9 @@ class AttendanceController extends Controller
                 // Lets the panel disable "Time in" and say when it opens, instead of the
                 // employee discovering the strict rule through a rejected press.
                 'clock_in' => $this->service->clockInWindowFor($employee),
+                // Today's declared rules, so the panel can say "full day at 6h — you reach it
+                // at 3:12 PM" instead of leaving the employee to discover it on their payslip.
+                'day_rules' => $this->service->dayRulesFor($employee),
             ],
         ]);
     }

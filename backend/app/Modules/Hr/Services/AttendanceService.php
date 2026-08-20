@@ -31,6 +31,7 @@ class AttendanceService
         private readonly WorkRequestService $workRequests,
         private readonly WorkSuspensionService $suspensions,
         private readonly HalfDayWindowService $halfDays,
+        private readonly FullDayCreditService $fullDayCredit,
     ) {}
 
     /**
@@ -94,6 +95,128 @@ class AttendanceService
     private function forgetRows(): void
     {
         $this->rowsMemo = [];
+    }
+
+    /**
+     * Dates in a range with APPROVED overtime, as a 'Y-m-d' => true set.
+     *
+     * Range-keyed, like every other per-employee lookup here: keying it by employee alone would
+     * return one range's answer for another and only ever show up in a full payroll run, never
+     * in a test that asks about a single person.
+     *
+     * @var array<string, array<string, true>>
+     */
+    private array $otDatesMemo = [];
+
+    /** @return array<string, true> */
+    private function approvedOtDates(Employee $employee, string $start, string $end): array
+    {
+        $key = "{$employee->id}|{$start}|{$end}";
+
+        if (! array_key_exists($key, $this->otDatesMemo)) {
+            $dates = [];
+            foreach (
+                OvertimeRequest::where('employee_id', $employee->id)
+                    ->where('status', 'approved')
+                    ->whereBetween('work_date', [$start, $end])
+                    ->get(['work_date']) as $ot
+            ) {
+                $dates[$ot->work_date->toDateString()] = true;
+            }
+            $this->otDatesMemo[$key] = $dates;
+        }
+
+        return $this->otDatesMemo[$key];
+    }
+
+    /**
+     * Did this day clear the minimum-hours bar HR declared for its date?
+     *
+     * The single place that question is answered, so the payslip and the "Undertime" badge can
+     * never disagree about it — the two read it from here, exactly as they both read the
+     * half-day window from HalfDayWindowService for the same reason.
+     *
+     * Answering `false` always means "treat the day exactly as before": this can only remove a
+     * charge, never add one (see FullDayCreditService). Short-circuits on the common cases, so
+     * an ordinary day — no bar declared, or nobody clocked in — costs nothing to ask about.
+     */
+    private function creditedFullDay(?Attendance $row, array $eff, bool $overtimeApproved): bool
+    {
+        if (($eff['min_full_day_minutes'] ?? null) === null || ! $row || ! $row->time_in) {
+            return false;
+        }
+
+        return $this->fullDayCredit->met($this->fullDayCreditCtx($row, $eff, $overtimeApproved));
+    }
+
+    /**
+     * The facts FullDayCreditService needs about one day. Built in one place so the payslip, the
+     * "Undertime" badge and the employee's own panel all judge the bar on identical inputs.
+     *
+     * @param  array<string,mixed>  $eff
+     * @return array<string,mixed>
+     */
+    private function fullDayCreditCtx(Attendance $row, array $eff, bool $overtimeApproved): array
+    {
+        return [
+            'threshold_min' => (int) ($eff['min_full_day_minutes'] ?? 0),
+            // The FULL schedule window on purpose, even on a half-day: an employee whose half is
+            // off may work into the other half to reach the bar, and that time is inside their
+            // normal schedule, so all of it counts.
+            'start_min' => $this->hmToMinutes($eff['start_time'] ?? null),
+            'end_min' => $this->hmToMinutes($eff['end_time'] ?? null),
+            'am_end_min' => $this->hmToMinutes($eff['am_end_time'] ?? null),
+            'pm_start_min' => $this->hmToMinutes($eff['pm_start_time'] ?? null),
+            'time_in_min' => $this->clockToMinutes($row->time_in),
+            'time_out_min' => $this->clockToMinutes($row->time_out),
+            'unpaid_break_minutes' => (int) ($eff['unpaid_break_minutes'] ?? 0),
+            'lunch_minutes' => (int) $row->lunch_minutes,
+            'overtime_approved' => $overtimeApproved,
+        ];
+    }
+
+    /**
+     * TODAY's rules for one employee, for their own clock panel — the grace period in force and,
+     * when HR declared one, the minimum-hours bar plus the clock time they reach it at.
+     *
+     * WHY THE EMPLOYEE IS TOLD AT ALL. A shortened compensable day that only HR can see benefits
+     * nobody: the whole point is that people may leave once they have put the hours in, and they
+     * cannot act on a rule they were never shown. The hr_daily_overrides endpoint itself is
+     * HR-only (it WRITES the rule for everybody), so the day's answer rides along with the
+     * employee's own attendance instead.
+     *
+     * @return array<string,mixed>
+     */
+    public function dayRulesFor(Employee $employee): array
+    {
+        $day = $this->localNow()->startOfDay();
+        $dateStr = $day->toDateString();
+        $eff = $this->schedule->effectiveFor($employee, $day);
+        $threshold = $eff['min_full_day_minutes'] ?? null;
+
+        $rules = [
+            'date' => $dateStr,
+            'grace_minutes' => (int) ($eff['grace_minutes'] ?? 0),
+            'min_full_day_minutes' => $threshold,
+            // Both null until they clock in — there is no "you reach it at" without a start.
+            'full_day_at' => null,
+            'full_day_met' => false,
+        ];
+
+        $row = $this->todayRow($employee);
+
+        if ($threshold === null || ! $row || ! $row->time_in) {
+            return $rules;
+        }
+
+        $otDates = $this->approvedOtDates($employee, $dateStr, $dateStr);
+        $ctx = $this->fullDayCreditCtx($row, $eff, isset($otDates[$dateStr]));
+
+        $rules['full_day_met'] = $this->fullDayCredit->met($ctx);
+        $at = $this->fullDayCredit->reachesAt($ctx);
+        $rules['full_day_at'] = $at !== null ? $this->minutesToHm($at) : null;
+
+        return $rules;
     }
 
     private function localNow(): Carbon
@@ -2146,6 +2269,21 @@ class AttendanceService
                 continue; // a rest day has no scheduled end to fall short of
             }
 
+            // A day that cleared HR's minimum-hours bar is NOT undertime. The company shortened
+            // the compensable day, so clocking out before the scheduled end is precisely what
+            // was allowed — flagging it would tell the employee they fell short of a rule they
+            // actually met. Read through the same helper the payslip uses, so the badge and the
+            // money can never disagree about whether the bar was cleared.
+            //
+            // Guarded on the bar existing first: without it this would query approved overtime
+            // for every employee-month anybody opens a report on.
+            if (($eff['min_full_day_minutes'] ?? null) !== null) {
+                $otDates = $this->approvedOtDates($employee, $start, $end);
+                if ($this->creditedFullDay($row, $eff, isset($otDates[$day->toDateString()]))) {
+                    continue;
+                }
+            }
+
             $offHalf = $offHalves["{$employee->id}|{$day->toDateString()}"] ?? null;
             [$startHm, $endHm] = $this->halfDays->windowFor($eff, $offHalf);
             $startMin = $this->hmToMinutes($startHm);
@@ -2914,6 +3052,23 @@ class AttendanceService
                 'detail' => $detail,
             ];
         };
+        /**
+         * Did this date clear the minimum-hours bar? Thin wrapper over creditedFullDay() that
+         * supplies the overtime lookup, so the three pricing branches below read as one line.
+         */
+        $creditedFullDay = function (?Attendance $row, array $eff, string $dateStr) use ($employee, $start, $end): bool {
+            // Guarded BEFORE the overtime query so an ordinary run never issues it: almost no
+            // date declares a bar, and a payroll run must not pay a query per employee for a
+            // feature that is switched off on all but a handful of days a year.
+            if (($eff['min_full_day_minutes'] ?? null) === null || ! $row || ! $row->time_in) {
+                return false;
+            }
+
+            $otDates = $this->approvedOtDates($employee, $start, $end);
+
+            return $this->creditedFullDay($row, $eff, isset($otDates[$dateStr]));
+        };
+
         // DOLE: holiday pay for a REGULAR holiday is forfeited when the employee was absent
         // without pay on the workday immediately before it. Null = no prior workday seen yet
         // in this range, in which case we don't know and pay the holiday (employee-favourable).
@@ -3086,7 +3241,21 @@ class AttendanceService
             // still priced against it — the same treatment an approved half-day request gets, which
             // is the point: the two are now the same shape with different funding.
             if ($leave && $leave->is_half_day) {
+                // The day's minimum-hours bar is judged BEFORE anything is charged, because
+                // clearing it makes the day WHOLE — it has to be able to cancel the half itself,
+                // not merely the undertime stacked on top of it. Somebody who took half a day
+                // and then worked the bar's worth of hours anyway is owed a full day; if the
+                // half still cost them, they would have worked those hours for nothing.
+                $credited = $creditedFullDay($row, $eff, $dateStr);
+
                 $halfUnpaid = ($leave->leaveType && ! $leave->leaveType->is_paid) ? 0.5 : 0.0;
+                if ($credited) {
+                    $halfUnpaid = 0.0;
+                    // NOTE: a PAID half-day leave credit is already spent by the time this runs,
+                    // and clearing the bar does not hand it back. Refunding the balance is a
+                    // separate decision about leave accounting, not about this day's pay.
+                    $charge($dateStr, 'full_day_credited', 0.0, "Worked the day's minimum hours");
+                }
                 $unpaid += $halfUnpaid;
                 if ($halfUnpaid > 0) {
                     $charge($dateStr, 'leave_unpaid', $halfUnpaid, 'Half day leave without pay');
@@ -3096,15 +3265,19 @@ class AttendanceService
                     $lateCount++;
                 }
 
+                // A day already credited whole cannot also be shortened by an early-out: the
+                // employee put in the hours the company itself called a full day.
                 $eoFrac = 0.0;
-                foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
-                    $eoFrac += $this->earlyOutFraction(
-                        (string) $eo->early_out_time,
-                        $eff,
-                        (string) $leave->half_day_period,
-                    );
+                if (! $credited) {
+                    foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
+                        $eoFrac += $this->earlyOutFraction(
+                            (string) $eo->early_out_time,
+                            $eff,
+                            (string) $leave->half_day_period,
+                        );
+                    }
+                    $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 }
-                $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 $unpaid += $eoFrac;
                 if ($eoFrac > 0) {
                     $charge($dateStr, 'early_out', $eoFrac, 'Approved early-out');
@@ -3119,6 +3292,7 @@ class AttendanceService
                             (string) $leave->half_day_period,
                             1.0 - $halfUnpaid - $eoFrac,
                             isset($earlyOuts[$dateStr]),
+                            $credited,
                         ),
                         $policy,
                     );
@@ -3171,9 +3345,21 @@ class AttendanceService
                 // pending/approved, so AM+PM = 1.0 is the practical maximum, but that check is a
                 // form-request `exists()` with no unique index behind it: two concurrent submits
                 // can both pass. Cheap defence against that and against direct inserts.
-                $halfUnpaid = min(1.0, 0.5 * $dayHalves->count());
+                //
+                // ...unless the day cleared HR's minimum-hours bar. The half-day was the
+                // employee's own request, so nothing here forces them to reach the bar — but if
+                // they choose to work on into the half they had off and do reach it, the day is
+                // whole and the half stops costing them. That is the entire point of the
+                // escape hatch: the bar is a floor to be met, never a penalty to be missed.
+                $credited = $creditedFullDay($row, $eff, $dateStr);
+
+                $halfUnpaid = $credited ? 0.0 : min(1.0, 0.5 * $dayHalves->count());
                 $unpaid += $halfUnpaid;
-                $charge($dateStr, 'half_day', $halfUnpaid, 'Approved half-day request');
+                if ($credited) {
+                    $charge($dateStr, 'full_day_credited', 0.0, "Worked the day's minimum hours");
+                } else {
+                    $charge($dateStr, 'half_day', $halfUnpaid, 'Approved half-day request');
+                }
 
                 // Item 8 — a late arrival on a half-day used to escape the per-N-lates penalty
                 // entirely, because this branch never touched the tally.
@@ -3193,10 +3379,12 @@ class AttendanceService
                     : (string) $dayHalves->first()->period;
 
                 $eoFrac = 0.0;
-                foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
-                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff, $offHalf);
+                if (! $credited) {
+                    foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
+                        $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff, $offHalf);
+                    }
+                    $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 }
-                $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 $unpaid += $eoFrac;
                 if ($eoFrac > 0) {
                     $charge($dateStr, 'early_out', $eoFrac, 'Approved early-out');
@@ -3204,7 +3392,7 @@ class AttendanceService
 
                 if ($deductionsActive && $dayHalves->count() === 1 && $row && $row->time_in) {
                     $ded = $this->deduction->forDay(
-                        $this->deductionCtx($row, $eff, $policy, (string) $dayHalves->first()->period, 1.0 - $halfUnpaid - $eoFrac, isset($earlyOuts[$dateStr])),
+                        $this->deductionCtx($row, $eff, $policy, (string) $dayHalves->first()->period, 1.0 - $halfUnpaid - $eoFrac, isset($earlyOuts[$dateStr]), $credited),
                         $policy,
                     );
                     $unpaid += $ded->unpaidFraction;
@@ -3243,16 +3431,26 @@ class AttendanceService
                 // fraction (unchanged, ÷ scheduled span); clock-derived late/undertime is
                 // priced by DeductionService (÷ 8) only when a mode is on. The two never
                 // double-charge — DeductionService skips a day an early-out governs.
+                // Clearing the day's minimum-hours bar makes the day whole: an approved early-out
+                // stops costing anything, because the employee worked the hours the company
+                // itself declared sufficient. Lateness is deliberately NOT waived — see the
+                // undertime branch in DeductionService.
+                $credited = $creditedFullDay($row, $eff, $dateStr);
+
                 $eoFrac = 0.0;
-                foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
-                    $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                if ($credited) {
+                    $charge($dateStr, 'full_day_credited', 0.0, "Worked the day's minimum hours");
+                } else {
+                    foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
+                        $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                    }
+                    $eoFrac = min(1.0, $eoFrac);
                 }
-                $eoFrac = min(1.0, $eoFrac);
                 $unpaid += $eoFrac;
 
                 if ($deductionsActive) {
                     $ded = $this->deduction->forDay(
-                        $this->deductionCtx($row, $eff, $policy, null, 1.0 - $eoFrac, isset($earlyOuts[$dateStr])),
+                        $this->deductionCtx($row, $eff, $policy, null, 1.0 - $eoFrac, isset($earlyOuts[$dateStr]), $credited),
                         $policy,
                     );
                     $unpaid += $ded->unpaidFraction;
@@ -3333,7 +3531,7 @@ class AttendanceService
      * @param  array<string, mixed>  $eff
      * @return array<string, mixed>
      */
-    private function deductionCtx(Attendance $row, array $eff, AttendancePolicy $policy, ?string $halfDayOff, float $capRemaining, bool $governedByEarlyOut): array
+    private function deductionCtx(Attendance $row, array $eff, AttendancePolicy $policy, ?string $halfDayOff, float $capRemaining, bool $governedByEarlyOut, bool $fullDayCredited = false): array
     {
         return [
             'start_min' => $this->hmToMinutes($eff['start_time'] ?? null),
@@ -3351,6 +3549,8 @@ class AttendanceService
             // (audit §9) — not built yet, so no day is amnestied. Follow-up before enabling.
             'amnesty' => false,
             'cap_remaining' => $capRemaining,
+            // Zeroes the undertime charge (and only that) — the day met HR's minimum-hours bar.
+            'full_day_credited' => $fullDayCredited,
             'break_minutes' => (int) $row->break_minutes,
             'lunch_minutes' => (int) $row->lunch_minutes,
         ];

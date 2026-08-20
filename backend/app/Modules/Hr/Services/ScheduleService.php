@@ -156,6 +156,11 @@ class ScheduleService
             'start_time' => $startTime,
             'end_time' => $endTime,
             'grace_minutes' => (int) $grace,
+            // The day's "minimum hours = full day" bar, or null when HR declared none (almost
+            // always). Company-wide per date, exactly like the grace override above, which is
+            // why it rides along here rather than on the employee: every consumer that already
+            // asks for a day's effective rules needs it, and none of them should query for it.
+            'min_full_day_minutes' => $date !== null ? $this->dailyOverrides->minFullDayForDate($date) : null,
             'unpaid_break_minutes' => $unpaidBreak,
             'paid_break_minutes' => $paidBreak,
             'expected_minutes' => $expectedMinutes,
