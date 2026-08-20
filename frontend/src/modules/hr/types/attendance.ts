@@ -1,3 +1,5 @@
+import type { WorkRequestType } from "@/modules/hr/types/leave";
+
 export type ClockState =
   | "not_clocked_in"
   | "clocked_in"
@@ -57,19 +59,29 @@ export interface ClockInWindow {
    */
   geofence: boolean;
   /**
-   * Is today one of this employee's scheduled workdays? `false` turns Time in into a REQUEST
-   * to work a rest day — the server refuses the punch and files one instead. Read from the
-   * server rather than derived from the weekday: the effective schedule resolves override →
-   * assigned → default, and a second copy of that in the browser would drift.
+   * Is today one of this employee's scheduled workdays? Read from the server rather than
+   * derived from the weekday: the effective schedule resolves override → assigned → default,
+   * and a second copy of that in the browser would drift.
    */
   is_workday: boolean;
   /**
-   * The employee's latest rest-day request for today, when today is a rest day. Null on a
-   * workday, for management, and before anything is filed. `requested_at` is the time-in an
-   * approval will stamp — the panel quotes it so the promise is visible before HR decides.
+   * Non-null means Time in files a REQUEST rather than punching in, and names why — a rest day
+   * with the company rule on, or a suspension HR marked as needing permission. Null means the
+   * ordinary punch, including on a rest day when HR has turned that rule off.
+   *
+   * The server's answer, never re-derived here: it combines the effective schedule with two
+   * switches, and a browser copy of either would go stale the moment HR changed one.
    */
-  rest_day_request: {
+  work_request_required: WorkRequestType | null;
+  /**
+   * The employee's latest work request for today. Null on an ordinary workday, for management,
+   * and before anything is filed. Present even once the day no longer requires asking, so a
+   * decision already made still gets explained. `requested_at` is the time-in an approval will
+   * stamp — the panel quotes it so the promise is visible before HR decides.
+   */
+  work_request: {
     id: number;
+    type: WorkRequestType;
     status: "pending" | "approved" | "rejected" | "cancelled" | "expired";
     requested_at: string | null;
     review_note: string | null;
@@ -78,13 +90,16 @@ export interface ClockInWindow {
    * HR has cancelled work today (typhoon, shutdown). Null on an ordinary day and on the
    * employee's own rest day, where saying "work is cancelled" would be noise.
    *
-   * It does NOT disable the time clock: a skeleton crew still comes in, and blocking them
-   * would leave the people who actually worked with no record of it.
+   * On its own it does NOT disable the time clock: a skeleton crew still comes in, and blocking
+   * them would leave the people who actually worked with no record of it. `work_requires_request`
+   * is HR's per-declaration exception — on it, the button asks instead of punching, which is
+   * what `work_request_required` reports.
    */
   suspension: {
     name: string;
     is_paid: boolean;
     status: "suspended_paid" | "suspended_unpaid";
+    work_requires_request: boolean;
   } | null;
 }
 
@@ -193,6 +208,16 @@ export interface HrAttendanceRow {
   /** Slice 16 — a human asserted this status; it beats the clock and the leave table. */
   status_override: boolean;
   leave_type: string | null;
+  /**
+   * Which half of the day is approved OFF — an unpaid half-day request or half-day leave,
+   * the two being the same shape with different funding. `'BOTH'` is a whole day reached by
+   * filing each half separately. Null on an ordinary day.
+   *
+   * The board shows it because the shift on such a day is genuinely shorter: without it a
+   * 1:00 PM arrival read as an unexplained one, and the person reading the row had no way to
+   * tell an approved afternoon from someone who simply turned up late.
+   */
+  half_day_off: "AM" | "PM" | "BOTH" | null;
   timing: AttendanceTiming | null;
   flag: ViolationFlag | null;
   tasks: DayTask[];
@@ -226,4 +251,53 @@ export interface DailyOverride {
   id?: number;
   date: string;
   grace_minutes: number | null;
+}
+
+/**
+ * Why an open shift is in the review queue — mirrors AttendanceService's RESOLVE_* constants.
+ * These are the branches the pay engine took, not a label: `auto_closed` means pay DID resolve
+ * the day at the scheduled end, the other three mean it could not price the day at all.
+ */
+export type OpenShiftReason =
+  | "auto_closed"
+  | "rest_day"
+  | "no_schedule"
+  | "in_after_end";
+
+/** One row of the stale-attendance review queue (item 6). */
+export interface OpenShiftRow {
+  attendance_id: number;
+  employee_id: number;
+  name: string | null;
+  department: string | null;
+  work_date: string;
+  time_in: string | null;
+  /**
+   * Manila 'HH:MM' for the day, or null when the employee has no schedule at all. On a day with
+   * an approved half day this is the HALF the employee was expected to work — the same window
+   * `resolved_time_out` was derived against, so the two cannot appear to contradict each other.
+   */
+  scheduled_start: string | null;
+  scheduled_end: string | null;
+  /** Which half was approved off, and hence why the window above is shorter than usual. */
+  half_day_off: "AM" | "PM" | "BOTH" | null;
+  reason: OpenShiftReason;
+  /**
+   * `needs_fix` — the day cannot be priced and is being paid wrongly until HR corrects it.
+   * `auto_closed` — the money is already right; the record is just still open.
+   * Note an approved overtime request forces `needs_fix` even on an auto-closed day, because
+   * the approval says overtime happened and the auto-close paid none.
+   */
+  status: "needs_fix" | "auto_closed";
+  /** Manila 'HH:MM' where pay placed the end of the shift; null when it could not. */
+  resolved_time_out: string | null;
+  /** The resolved end falls on the day after work_date (an overnight schedule). */
+  resolved_next_day: boolean;
+  /** Approved overtime on this date that the auto-close pays nothing for. */
+  approved_overtime_hours: number | null;
+  hours_open: number;
+  /** Under the 18h self-close limit — the employee can still close it from their own clock. */
+  employee_can_fix: boolean;
+  /** ISO instant the allowance expired and pay stopped waiting. */
+  auto_closes_at: string | null;
 }

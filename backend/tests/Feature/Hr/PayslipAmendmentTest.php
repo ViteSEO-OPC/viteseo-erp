@@ -815,7 +815,15 @@ class PayslipAmendmentTest extends HrTestCase
      * the difference, is the one error a payslip cannot make — and the PDF is the surface where
      * nobody can click through for the explanation.
      */
-    public function test_the_pdf_states_what_was_transferred_and_lists_the_corrections(): void
+    /**
+     * A correction that ADDS a line is printed as that line, with the date it was issued.
+     *
+     * The standalone "Corrections to this payslip" block below the signatures is gone. It existed
+     * when the figures above were the engine's and a person's disagreement with them had nowhere
+     * else to live; corrections now sit on the line they are about — an added line IS a line — so
+     * the block would be the same information said twice.
+     */
+    public function test_the_pdf_states_what_was_transferred_and_shows_the_correction_as_a_line(): void
     {
         $run = $this->paidPeriod();
         $this->amend($run, 3000);
@@ -827,8 +835,10 @@ class PayslipAmendmentTest extends HrTestCase
 
         $this->assertStringContainsString('Still to be paid', $html);
         $this->assertStringContainsString('was paid out on', $html);
-        $this->assertStringContainsString('Corrections to this payslip (1)', $html);
+        // The correction, on the Compensation table, carrying its reason and its issue date.
+        $this->assertStringContainsString('Adjustment', $html);
         $this->assertStringContainsString('Back pay for the 1 Aug raise', $html);
+        $this->assertStringNotContainsString('Corrections to this payslip', $html);
     }
 
     /** An untouched payslip says none of it — the net IS what was paid, and repeating it is noise. */

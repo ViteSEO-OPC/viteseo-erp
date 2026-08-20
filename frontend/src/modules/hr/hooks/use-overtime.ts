@@ -8,6 +8,7 @@ import {
   getOvertimeSettings,
   classifyOvertime,
   createOvertimeRequest,
+  createOvertimeRequestForEmployee,
   approveOvertimeRequest,
   rejectOvertimeRequest,
   cancelOvertimeRequest,
@@ -58,6 +59,21 @@ export function useCreateOvertimeRequest() {
   return useMutation({
     mutationFn: createOvertimeRequest,
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+/**
+ * Item 10 — HR filing for an employee, retroactively. Invalidates the auto-review queue too: a
+ * correction on a date that queue is reporting changes what is still outstanding there.
+ */
+export function useCreateOvertimeRequestForEmployee() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: createOvertimeRequestForEmployee,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "overtime-auto-review"] });
+    },
   });
 }
 

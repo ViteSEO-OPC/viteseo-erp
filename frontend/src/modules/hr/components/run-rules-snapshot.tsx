@@ -25,6 +25,11 @@ const LABELS: Record<string, string> = {
   lates_per_deduction: "Lates per deduction",
   monthly_late_reset: "Late count resets monthly",
   late_minutes_from: "Late counted from",
+  // Item 8 — a real pay rule that was missing here. Payroll resolves the DATED policy at cycle
+  // end and prices an abandoned shift to the scheduled end using this allowance, so it genuinely
+  // is one of the rules this run was computed under. (Its siblings `missing_clockout_mode` and
+  // `early_arrival_mode` stay out: no engine reads either, so neither priced anything.)
+  missing_timeout_allowance_minutes: "Wait after shift end before closing a missing time-out (minutes)",
   undertime_deduction_mode: "Undertime deduction",
   overtime_mode: "Overtime",
   overtime_threshold_minutes: "Minimum overtime (min)",
@@ -84,7 +89,10 @@ const GATES: Record<string, (p: Record<string, unknown>) => boolean> = {
   // off, "Lates per deduction: 3" describes a rule that charged nobody anything.
   lates_per_deduction: (p) => p.late_penalty_enabled === true,
   monthly_late_reset: (p) => p.late_penalty_enabled === true,
-  // AttendanceService::autoOvertimeReview() — bails unless auto mode AND a positive cap.
+  // A 0 cap is UNCAPPED, so it changes no money and does not belong in a run's rules snapshot.
+  // (Item 7's `auto_overtime_review_minutes` is absent from LABELS entirely and must stay that
+  // way — it only raises a flag for HR and never moves a peso, so it is not a rule this run was
+  // computed under.)
   auto_overtime_daily_cap_minutes: (p) =>
     p.overtime_mode === "auto_after_threshold" && Number(p.auto_overtime_daily_cap_minutes ?? 0) > 0,
   auto_overtime_period_cap_minutes: (p) =>

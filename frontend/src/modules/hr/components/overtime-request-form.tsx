@@ -40,6 +40,39 @@ function toMinutes(hm: string): number {
   return h * 60 + m;
 }
 
+/**
+ * Is `timeFrom` before the shift ends, once both are placed on a real day? (Item 11.)
+ *
+ * MIRRORS `OvertimeRequestService::assertAfterShift` DELIBERATELY, including the tiebreak. A bare
+ * HH:MM has no day attached, so it has to be placed on one, and the alignment chosen is the one
+ * nearest the shift end — the same choice the server makes and the same one payroll's window match
+ * makes later. Comparing the raw numbers instead (as this did) got a 22:00–06:00 shift backwards:
+ * it waved through 23:00, an hour INTO the shift, and refused 01:00 after a day shift, which is
+ * ordinary overtime past midnight.
+ *
+ * Returns false when the schedule is unknown or the day has no shift — a rest day has nothing to
+ * be "beyond", so nothing to guard.
+ */
+function startsBeforeShiftEnd(
+  timeFrom: string,
+  shiftStart: string | null,
+  shiftEnd: string | null,
+): boolean {
+  if (!shiftStart || !shiftEnd || !HHMM.test(timeFrom)) return false;
+
+  const startMin = toMinutes(shiftStart);
+  let endMin = toMinutes(shiftEnd);
+  if (endMin <= startMin) endMin += 24 * 60; // the shift ends the following day
+
+  const raw = toMinutes(timeFrom);
+  let nearest = raw;
+  for (const offset of [-24 * 60, 0, 24 * 60]) {
+    if (Math.abs(raw + offset - endMin) < Math.abs(nearest - endMin)) nearest = raw + offset;
+  }
+
+  return nearest < endMin;
+}
+
 function hoursBetween(from: string, to: string): number | null {
   if (!HHMM.test(from) || !HHMM.test(to) || from === to) return null;
   const start = toMinutes(from);
@@ -91,12 +124,16 @@ export function OvertimeRequestForm() {
 
   // Overtime is time BEYOND the shift, so on a workday it can't start before the scheduled end.
   // (A rest day has no shift end — the whole day is overtime, so there's nothing to guard.)
+  const shiftStart = classification?.schedule_start ?? null;
   const shiftEnd = classification?.schedule_end ?? null;
-  const startsTooEarly =
-    !!shiftEnd && HHMM.test(timeFrom ?? "") && toMinutes(timeFrom!) < toMinutes(shiftEnd);
+  const startsTooEarly = startsBeforeShiftEnd(timeFrom ?? "", shiftStart, shiftEnd);
+  // An overnight shift needs its whole window shown: "your shift ends at 06:00" alone reads as
+  // this morning, when it means tomorrow morning.
+  const isOvernight =
+    !!shiftStart && !!shiftEnd && toMinutes(shiftEnd) <= toMinutes(shiftStart);
 
   async function onSubmit(v: FormValues) {
-    if (shiftEnd && toMinutes(v.time_from) < toMinutes(shiftEnd)) {
+    if (startsBeforeShiftEnd(v.time_from, shiftStart, shiftEnd)) {
       setError("time_from", { message: `Overtime starts after your shift ends at ${shiftEnd}.` });
       return;
     }
@@ -179,6 +216,13 @@ export function OvertimeRequestForm() {
           ) : startsTooEarly ? (
             <p className="text-xs text-destructive">
               Overtime starts after your shift ends at {shiftEnd}.
+            </p>
+          ) : isOvernight ? (
+            // Naming both ends is the whole point on a graveyard shift: "ends at 06:00" on its own
+            // reads as this morning, when the shift it belongs to has not started yet.
+            <p className="text-xs text-muted-foreground">
+              Your shift runs {shiftStart} to {shiftEnd} the next morning, so overtime starts from{" "}
+              {shiftEnd} onwards.
             </p>
           ) : shiftEnd ? (
             <p className="text-xs text-muted-foreground">Your shift ends at {shiftEnd}.</p>

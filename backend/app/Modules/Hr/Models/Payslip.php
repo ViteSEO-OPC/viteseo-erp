@@ -66,6 +66,9 @@ class Payslip extends Model
         // Why those figures are what they are: the per-date charge ledger, and the withholding
         // derivation. Snapshots — see the migration for why neither is derived at read time.
         'attendance_lines', 'tax_basis',
+        // The engine's own figures for this period, before any correction HR made to a line.
+        // Written by run(); the baseline every override is measured against and restored to.
+        'engine_snapshot',
     ];
 
     protected $casts = [
@@ -83,6 +86,7 @@ class Payslip extends Model
         'late_penalty_days' => 'decimal:2',
         'attendance_lines' => 'array',
         'tax_basis' => 'array',
+        'engine_snapshot' => 'array',
         'reimbursements' => 'decimal:2',
         'adjustment_pay' => 'decimal:2',
         'separation_pay' => 'decimal:2',

@@ -77,6 +77,10 @@ class WorkScheduleController extends Controller
             'custom_workdays' => $employee->custom_workdays,
             'custom_start_time' => $employee->custom_start_time ? substr($employee->custom_start_time, 0, 5) : null,
             'custom_end_time' => $employee->custom_end_time ? substr($employee->custom_end_time, 0, 5) : null,
+            'custom_am_start_time' => $employee->custom_am_start_time ? substr($employee->custom_am_start_time, 0, 5) : null,
+            'custom_am_end_time' => $employee->custom_am_end_time ? substr($employee->custom_am_end_time, 0, 5) : null,
+            'custom_pm_start_time' => $employee->custom_pm_start_time ? substr($employee->custom_pm_start_time, 0, 5) : null,
+            'custom_pm_end_time' => $employee->custom_pm_end_time ? substr($employee->custom_pm_end_time, 0, 5) : null,
             'custom_grace_minutes' => $employee->custom_grace_minutes,
             'effective' => $this->service->effectiveFor($employee),
         ];

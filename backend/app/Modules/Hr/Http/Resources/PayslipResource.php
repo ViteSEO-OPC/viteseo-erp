@@ -7,6 +7,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Services\PayScheduleService;
+use App\Modules\Hr\Support\PayslipDocument;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Carbon;
@@ -54,6 +55,11 @@ class PayslipResource extends JsonResource
             // against it, so the cost of an absence is visible instead of folded into basic.
             // FIN-011 — WHICH KIND OF PAYSLIP THIS IS. Without it the document cannot label itself,
             // and a 13th-month or final-pay slip reads as an ordinary period that paid no salary.
+            // WHICH RUN THIS BELONGS TO, and whether that run is still open. Both are here for the
+            // correction flow: adding a line to a payslip is a run-level call, and a locked run
+            // refuses every correction — which the screen should say before HR types one.
+            'payroll_run_id' => (int) $this->payroll_run_id,
+            'run_is_locked' => (bool) $this->payrollRun?->isLocked(),
             'run_type' => $this->payrollRun?->type ?? 'regular',
             // What the header prints. The raw `frequency` was going straight onto the document, and
             // for a final-pay run that string is "final_pay:<employee id>" — an internal key, with an
@@ -143,6 +149,13 @@ class PayslipResource extends JsonResource
                     // `amount` follows it; the kind is what says why it moved that way.
                     'kind' => $a->kind,
                     'kind_label' => $a->kindLabel(),
+                    // WHICH LINE this corrected, when it corrected one rather than adding one.
+                    // Null on an added line — that is the whole difference between the two.
+                    'target_key' => $a->target_key,
+                    'target_label' => $a->targetLabel(),
+                    'override_amount' => $a->override_amount === null ? null : (float) $a->override_amount,
+                    'original_amount' => $a->original_amount === null ? null : (float) $a->original_amount,
+                    'label_override' => $a->label_override,
                     'amount' => (float) $a->amount,
                     'tax' => (float) $a->tax,
                     'net' => $a->net(),
@@ -226,208 +239,29 @@ class PayslipResource extends JsonResource
     /**
      * The per-date charge ledger, grouped into the two questions people actually ask.
      *
-     * `unpaid` — WHERE THE FIGURE COMES FROM, and specifically where its decimal comes from.
-     * It carries every line that cost a fraction of a day, lateness included, because "4.5
-     * unpaid days" beside a list of four absences leaves the .5 unexplained and the reader
-     * worse off than before: they can now see that the note does not add up.
-     *
-     * `late` — HOW THE MINUTES BECAME MONEY. Every late/undertime line, whether or not it was
-     * charged, so the minute counts printed above it can be traced to their days.
-     *
-     * A late line therefore appears in BOTH, deliberately. They answer different questions and
-     * each note says which one it is answering; suppressing it from one of them to avoid the
-     * repetition is what broke the first version.
-     *
-     * Grouped HERE rather than in each surface for the same reason `earningsBreakdown()` is:
-     * the React document and the PDF both render it, and two hand-maintained groupings would
-     * disagree the first time a charge kind was added.
-     *
-     * Returns null, not an empty array, when there is nothing to explain.
+     * Built by PayslipDocument, which is also what the correction path reads — see the note on
+     * that class for why the document's arithmetic no longer lives here.
      *
      * @return array{unpaid: list<array<string, mixed>>, late: list<array<string, mixed>>}|null
      */
     private function attendanceLines(): ?array
     {
-        $lines = $this->attendance_lines;
-
-        if (! is_array($lines) || $lines === []) {
-            return null;
-        }
-
-        $timeKinds = ['late', 'undertime'];
-        $unpaid = [];
-        $late = [];
-
-        foreach ($lines as $line) {
-            if (in_array($line['kind'] ?? null, $timeKinds, true)) {
-                $late[] = $line;
-            }
-
-            // Everything that cost days lands in `unpaid`, including lateness — that is what
-            // makes the group sum to the figure it explains.
-            if (round((float) ($line['days'] ?? 0), 4) > 0) {
-                $unpaid[] = $line;
-            }
-        }
-
-        if ($unpaid === [] && $late === []) {
-            return null;
-        }
-
-        return ['unpaid' => $unpaid, 'late' => $late];
+        return PayslipDocument::attendanceLines($this->figures());
     }
 
-    /** How the charge ledger's `kind` reads on the document. */
-    private const CHARGE_NAMES = [
-        'absent' => 'Absences',
-        'undertime' => 'Undertime',
-        'half_day' => 'Half-Days',
-        'late' => 'Late',
-        'suspended_unpaid' => 'Work Suspension',
-        'leave_unpaid' => 'Leave Without Pay',
-        'holiday_forfeited' => 'Holiday Forfeited',
-        'not_employed' => 'Outside Employment',
-        'early_out' => 'Early Out',
-        'late_penalty' => 'Tardiness Penalty',
-    ];
-
     /**
-     * The rows on the redesigned Deductions table: one per REASON, with its dates and its money.
+     * The rows on the Deductions table: one per REASON, with its dates and its money.
      *
-     * WHY THE PESOS ARE APPORTIONED RATHER THAN MULTIPLIED OUT. The obvious construction —
-     * `days × daily_rate` per reason — does not add up to what was taken. Basic pay clamps at
-     * zero, so a period deep enough in unpaid days has an absence charge SMALLER than its days
-     * imply, and the late/undertime figures are clamped again on top of that (see
-     * `documentTotals()`). Rows built by multiplication would each look defensible and their total
-     * would contradict the total printed beneath them — the one error a payslip cannot make.
-     *
-     * So the two authoritative figures are split instead: `totals.absences` across the day-costing
-     * reasons in proportion to their days, `totals.late_undertime` across the two time reasons in
-     * proportion to their own charges. Both splits carry their rounding residual onto the largest
-     * row, which is what keeps `Σ rows == totals.deductions` exact rather than approximately true.
-     *
-     * The five rows the document always shows are emitted even at zero — the reader is checking a
-     * list they already expect, and a missing "Undertime" row is indistinguishable from an
-     * undertime charge that was silently dropped. Every other reason appears only when it happened.
+     * The apportionment — and why the pesos are split rather than multiplied out — lives in
+     * PayslipDocument::deductionRows(). The corrections HR has made are passed in with them,
+     * because an edited row is PINNED to the figure HR typed and the rest of the pool is shared
+     * among the others: without that, editing one row would move every row and match none.
      *
      * @return list<array<string, mixed>>
      */
     private function deductionsBreakdown(): array
     {
-        $lines = $this->attendance_lines;
-        $lines = is_array($lines) ? $lines : [];
-
-        $timeKinds = ['late', 'undertime'];
-        $groups = [];
-
-        foreach ($lines as $line) {
-            $kind = $line['kind'] ?? null;
-
-            if ($kind === null) {
-                continue;
-            }
-
-            $groups[$kind] ??= ['days' => 0.0, 'minutes' => 0, 'dates' => []];
-            $groups[$kind]['days'] += (float) ($line['days'] ?? 0);
-            $groups[$kind]['dates'][] = [
-                'date' => $line['date'] ?? null,
-                'detail' => $line['detail'] ?? null,
-            ];
-
-            // "180m" out of "180 min late" — the count the design prints beside each date.
-            if (in_array($kind, $timeKinds, true) && preg_match('/^(\d+)\s*min/', (string) ($line['detail'] ?? ''), $m)) {
-                $groups[$kind]['minutes'] += (int) $m[1];
-            }
-        }
-
-        $totals = $this->documentTotals();
-
-        // --- the day-costing reasons share the absence charge ------------------------------------
-        $dayKinds = array_values(array_diff(array_keys($groups), $timeKinds));
-        $weights = array_combine(
-            $dayKinds,
-            array_map(fn (string $k) => $groups[$k]['days'], $dayKinds),
-        );
-
-        // A PAYSLIP FROM BEFORE THE LEDGER EXISTED still has an absence charge and no lines to
-        // attribute it to (`attendance_lines` is null and is deliberately not backfilled — see its
-        // migration). Without this the rows would print as five zeroes above a five-figure total:
-        // the table contradicting itself is far worse than a row that cannot name its dates.
-        if (array_sum($weights) <= 0 && round((float) $totals['absences'], 2) != 0.0) {
-            $weights = ['absent' => 1.0];
-            $groups['absent'] ??= ['days' => 0.0, 'minutes' => 0, 'dates' => []];
-        }
-
-        $amounts = $this->apportion((float) $totals['absences'], $weights);
-
-        // --- and the two time reasons share the clamped late/undertime charge --------------------
-        $amounts += $this->apportion((float) $totals['late_undertime'], [
-            'late' => (float) $this->late_deduction,
-            'undertime' => (float) $this->undertime_deduction,
-        ]);
-
-        $rows = [];
-        // The skeleton the document always shows, in the order it shows it.
-        $always = ['absent', 'undertime', 'half_day', 'late', 'suspended_unpaid'];
-
-        foreach ([...$always, ...array_diff(array_keys($groups), $always)] as $kind) {
-            $group = $groups[$kind] ?? null;
-
-            $rows[] = [
-                'key' => $kind,
-                'name' => self::CHARGE_NAMES[$kind] ?? ucwords(str_replace('_', ' ', $kind)),
-                'count' => $group === null ? 0 : count($group['dates']),
-                'days' => round($group['days'] ?? 0.0, 2),
-                'minutes' => in_array($kind, $timeKinds, true) ? (int) ($group['minutes'] ?? 0) : null,
-                'dates' => $group['dates'] ?? [],
-                'amount' => round($amounts[$kind] ?? 0.0, 2),
-            ];
-        }
-
-        // --- everything that is not attendance: benefit shares, loans, cash advances -------------
-        foreach ($this->other_deductions_breakdown ?? [] as $line) {
-            $rows[] = [
-                'key' => 'other',
-                'name' => $line['name'],
-                'count' => 0,
-                'days' => 0.0,
-                'minutes' => null,
-                'dates' => [],
-                'amount' => round((float) $line['amount'], 2),
-            ];
-        }
-
-        return $rows;
-    }
-
-    /**
-     * Split `$total` across `$weights` in proportion, exactly.
-     *
-     * The residual left by rounding each share to centavos is carried onto the largest weight, so
-     * the parts sum to the whole rather than to the whole ± a centavo per row. With no positive
-     * weight the total cannot be attributed to anything and every share is zero — the caller's
-     * skeleton rows then print 0.00, which is the truthful outcome.
-     *
-     * @param  array<string, float>  $weights
-     * @return array<string, float>
-     */
-    private function apportion(float $total, array $weights): array
-    {
-        $sum = array_sum($weights);
-
-        if ($sum <= 0 || round($total, 2) == 0.0) {
-            return array_map(fn () => 0.0, $weights);
-        }
-
-        $out = [];
-        foreach ($weights as $key => $weight) {
-            $out[$key] = round($total * ($weight / $sum), 2);
-        }
-
-        $largest = array_keys($weights, max($weights), true)[0];
-        $out[$largest] = round($out[$largest] + ($total - array_sum($out)), 2);
-
-        return $out;
+        return PayslipDocument::deductionRows($this->figures(), $this->lineOverrides());
     }
 
     /**
@@ -479,211 +313,124 @@ class PayslipResource extends JsonResource
     }
 
     /**
-     * Every earning on this payslip as a named line (FIN-011).
+     * Every earning on this payslip as a named, keyed line (FIN-011).
      *
-     * THE DEFECT THIS FIXES was wider than "13th month has no lines". Both documents hardcoded an
-     * ordinary period's earnings — Basic Pay, allowances, overtime, night differential, holiday, rest
-     * day, reimbursement — and rendered "Basic Pay ₱0" for anything else. That covered FOUR run types:
-     * 13th month, the off-cycle adjustment (FIN-010) and final pay (FIN-014) all store their amounts in
-     * their own columns, none of which either document knew about. An employee opened a legally
-     * consequential document stating a gross, a withholding-tax figure, and every earnings line at zero.
+     * Built by PayslipDocument so the React document, the PDF and the correction dialog all read
+     * ONE description of what a run paid. Two hand-maintained lists would disagree the first time a
+     * run type gained a line — which is exactly how the adjustment and final-pay earnings once
+     * shipped invisible on both documents.
      *
-     * Built here rather than in each surface for the same reason as `documentTotals()`: the React
-     * payslip and the PDF both render this, and two hand-maintained lists would disagree the first time
-     * a run type gained a line — which is exactly how the adjustment and final-pay types shipped
-     * invisible after their columns were added.
-     *
-     * A line appears only when it carries money, EXCEPT Basic Pay on an ordinary run: a regular period
-     * that genuinely paid no basic (a full month of unpaid leave) still has to say so rather than
-     * silently omit the row the whole document is built around.
-     *
-     * EVERY LINE CARRIES A `kind`. The redesigned document prints allowances in their own table
-     * BELOW the net-of-contributions subtotal rather than among the earnings, so the two surfaces
-     * need to tell them apart. Splitting them here rather than in the document keeps this list the
-     * single description of what a run paid — a second, presentation-side rule for "is this an
-     * allowance?" is exactly the kind of duplication `earnings_breakdown` was introduced to end.
-     *
-     * @return list<array{name: string, amount: float, note: string|null, kind: string}>
+     * @return list<array<string, mixed>>
      */
     private function earningsBreakdown(): array
     {
-        $type = $this->payrollRun?->type ?? 'regular';
-        $lines = [];
-
-        $add = function (string $name, float $amount, ?string $note = null, string $kind = 'earning') use (&$lines) {
-            if (round($amount, 2) != 0.0) {
-                $lines[] = ['name' => $name, 'amount' => round($amount, 2), 'note' => $note, 'kind' => $kind];
-            }
-        };
-
-        // --- the ordinary period ---------------------------------------------------------------
-        if ($type === 'regular') {
-            $lines[] = [
-                'name' => 'Basic Pay',
-                'amount' => round((float) $this->period_base, 2),
-                'note' => null,
-                'kind' => 'earning',
-            ];
-
-            foreach ($this->allowancesBreakdown() as $line) {
-                $lines[] = [
-                    'name' => $line['name'],
-                    'amount' => $line['amount'],
-                    'note' => null,
-                    'kind' => 'allowance',
-                ];
-            }
-
-            $add('Overtime', (float) $this->overtime_pay, $this->minutesNote($this->overtime_minutes));
-            $add('Night Differential', (float) $this->night_diff_pay, $this->minutesNote($this->night_diff_minutes));
-            $add('Holiday', (float) $this->holiday_premium);
-            $add('Rest Day', (float) $this->rest_day_premium, $this->minutesNote($this->rest_day_minutes));
-        }
-
-        // --- 13th month ------------------------------------------------------------------------
-        // The whole gross of a 13th-month run. `other_benefits` is the same money seen from the tax
-        // side (what went into the ₱90,000 bucket), so it is NOT a second earnings line — adding it
-        // would double the compensation total.
-        $add('13th Month Pay', (float) $this->thirteenth_month);
-
-        // --- corrections to this period ---------------------------------------------------------
-        //
-        // ONE LINE PER AMENDMENT, each carrying the date it was issued, because that date is the
-        // only thing distinguishing two corrections to the same period — and because an amended
-        // payslip whose gross simply grew is indistinguishable from one that was always wrong.
-        //
-        // Falls back to the single stored total when the ledger is not loaded, and for the payslips
-        // of the superseded adjustment runs, which have an `adjustment_pay` and no amendments behind
-        // it. Both must keep rendering: they are real payslips of real money.
-        $amendments = $this->relationLoaded('amendments') ? $this->amendments : null;
-
-        if ($amendments !== null && $amendments->isNotEmpty()) {
-            foreach ($amendments as $amendment) {
-                // A MISSED DEDUCTION IS NOT AN EARNING, negative or otherwise. It reaches the
-                // document through `other_deductions_breakdown` — where the money actually went —
-                // and listing it here as well would count it twice and understate gross.
-                if ($amendment->isDeduction()) {
-                    continue;
-                }
-
-                $add(
-                    // A reversal is a line of its own: "Adjustment −₱1,000" reads as an adjustment
-                    // that was mis-entered, which is exactly what it must not be mistaken for.
-                    (float) $amendment->amount < 0 ? 'Pay Reversed' : 'Adjustment',
-                    (float) $amendment->amount,
-                    trim(($amendment->note ?: $amendment->reason) . ' · issued '
-                        . ($amendment->issued_on?->format('M j, Y') ?? '')),
-                );
-            }
-        } else {
-            $add('Adjustment', (float) $this->adjustment_pay, $this->adjustment_note ?: null);
-        }
-
-        // --- final pay (FIN-014) ---------------------------------------------------------------
-        $add('Separation Pay', (float) $this->separation_pay,
-            $this->separation_pay_taxable ? 'Taxable' : 'Tax-exempt');
-        $add('Unused Leave Converted', (float) $this->leave_conversion,
-            $this->leave_conversion_days === null
-                ? null
-                : rtrim(rtrim(number_format((float) $this->leave_conversion_days, 1), '0'), '.') . ' day(s)');
-
-        // --- paid on any run type --------------------------------------------------------------
-        $add('Reimbursement', (float) $this->reimbursements);
-
-        return $lines;
+        return PayslipDocument::earningLines(
+            $this->figures(),
+            $this->payrollRun?->type ?? 'regular',
+            $this->amendmentRows(),
+            $this->lineOverrides(),
+        );
     }
 
     /** "2.5 hrs" from a minute count, or null when there are none. */
     private function minutesNote(mixed $minutes): ?string
     {
-        $m = (int) $minutes;
-
-        return $m > 0 ? rtrim(rtrim(number_format($m / 60, 2), '0'), '.') . ' hrs' : null;
+        return PayslipDocument::minutesNote($minutes);
     }
 
     /**
      * The subtotals the payslip document is built from.
      *
-     * The identity they satisfy, for every payslip:
-     *
-     *     compensation − deductions − government = net_pay
-     *
-     * `compensation` leads with the FULL period basic, so the absence charge has to reappear
-     * on the deductions side for the two to cancel — that is why `deductions` is
+     * See PayslipDocument::totals() for the identity they satisfy, and for why `deductions` is
      * `absence_deduction + other_deductions` rather than the stored `total_deductions`.
      *
-     * `uncollected` USED TO BE A TERM IN THIS IDENTITY and no longer is (FIN-053). It was here
-     * because the component columns stored the full computed deduction while `total_deductions`
-     * was capped at gross: `deductions + government` therefore overstated what was really taken
-     * by exactly the carryover, and crediting it back was what stopped the document resolving to
-     * a negative number against a net pay of zero.
-     *
-     * The components now store what was COLLECTED, so the overstatement is gone at the source and
-     * the identity closes without the correction. `uncollected` stays in this array — the employee
-     * is entitled to know a deduction went unpaid, and it is the figure the arrears work reads —
-     * but it is now a disclosure, not arithmetic. Adding it back would credit the shortfall twice.
-     *
-     * `late_undertime` is clamped to the absence charge because basic pay clamps at zero: past
-     * that point the raw minute-level figures exceed the reduction that was really applied.
-     * The clamp keeps both absence rows non-negative and their sum exact.
-     *
-     * THE REDESIGN ADDED THREE MORE, and they are a re-cut of the same money rather than anything
-     * new. The document now walks earnings → deductions → contributions → allowances, so it needs
-     * the two waypoints on that walk (`current`, `initial_net`) and the earnings figure with
-     * allowances taken OUT of it (`earnings`), since they are now printed in their own table
-     * further down. The identity still closes, one step later than before:
-     *
-     *     earnings − deductions = current
-     *     current − government  = initial_net
-     *     initial_net + allowances = net_pay
-     *
-     * `allowances` is summed from the allowance-kind lines rather than read from the column, so
-     * the table's rows always foot to its own total — on a run type that emits no allowance lines
-     * the column could otherwise print a total above an empty table.
-     *
-     * @return array<string, float>
+     * @return array<string, mixed>
      */
     private function documentTotals(): array
     {
-        $absenceCharge = (float) $this->absence_deduction;
-        $lateUndertime = min((float) $this->late_deduction + (float) $this->undertime_deduction, $absenceCharge);
+        return PayslipDocument::totals($this->figures());
+    }
 
-        $compensation = round((float) $this->gross + $absenceCharge, 2);
-        $allowances = round(array_sum(array_map(
-            fn (array $line) => $line['kind'] === 'allowance' ? $line['amount'] : 0.0,
-            $this->earningsBreakdown(),
-        )), 2);
-        $deductions = round($absenceCharge + (float) $this->other_deductions, 2);
-        $government = round(
-            (float) $this->sss + (float) $this->philhealth
-                + (float) $this->pagibig + (float) $this->withholding_tax,
-            2,
-        );
+    /**
+     * THE PAYSLIP'S FIGURES as a plain array, which is what PayslipDocument works on.
+     *
+     * An array rather than the model, because the same arithmetic has to run against three things
+     * that are not all models: a saved payslip, a payslip mid-computation inside `run()`, and the
+     * `engine_snapshot` of what a payslip looked like before anyone corrected it. The last is what
+     * an override is measured against, so the document's own reader has to accept it too.
+     *
+     * @return array<string, mixed>
+     */
+    private function figures(): array
+    {
+        return $this->resource->attributesToArray();
+    }
 
-        $current = round($compensation - $allowances - $deductions, 2);
+    /**
+     * The corrections HR has made to lines that were already on this payslip, keyed by line.
+     *
+     * Distinct from `amendmentRows()`, which is the corrections that ADDED a line. Both live in the
+     * same ledger and are told apart by `target_key`: an override names the line it replaces, an
+     * addition has no line to name. Keeping them apart matters at exactly one point — an override
+     * must not also be printed as an extra earning, or the document counts it twice.
+     *
+     * Empty when the ledger is not loaded, which renders as a payslip nobody has corrected.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function lineOverrides(): array
+    {
+        if (! $this->relationLoaded('amendments')) {
+            return [];
+        }
 
-        return [
-            'compensation' => $compensation,
-            // The Compensation table's own total: everything that is not an allowance.
-            'earnings' => round($compensation - $allowances, 2),
-            'allowances' => $allowances,
-            'absences' => round($absenceCharge - $lateUndertime, 2),
-            'late_undertime' => round($lateUndertime, 2),
-            'deductions' => $deductions,
-            // "Total Current Amount" — earned, less what attendance and obligations took off it,
-            // and before any statutory contribution.
-            'current' => $current,
-            'government' => $government,
-            // "Initial Net Salary" — the same figure net of contributions and tax, still without
-            // the allowances that are paid on top of it.
-            'initial_net' => round($current - $government, 2),
-            // Disclosure only — see the identity note above. Not summed into net.
-            'uncollected' => (float) $this->deduction_carryover,
-            // FIN-053 — which obligations that shortfall belongs to, so the document can name
-            // them instead of showing one unexplained figure. Empty when nothing went short, and
-            // on payslips issued before the split (the migration does not backfill).
-            'uncollected_breakdown' => $this->deduction_carryover_breakdown ?? [],
-        ];
+        $out = [];
+
+        foreach ($this->amendments as $amendment) {
+            if ($amendment->target_key === null) {
+                continue;
+            }
+
+            $out[$amendment->target_key] = [
+                'id' => $amendment->id,
+                // Null on a label-only correction — HR renamed the line and left the figure alone.
+                'amount' => $amendment->override_amount === null ? null : (float) $amendment->override_amount,
+                'label' => $amendment->label_override,
+                // What the engine computed, refreshed on every run: the struck-through figure.
+                'original' => $amendment->original_amount === null ? null : (float) $amendment->original_amount,
+                'reason' => $amendment->reason,
+                'issued_on' => $amendment->issued_on?->toDateString(),
+                'issued_by' => $amendment->creator?->name,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * The corrections that ADDED a line to this payslip, in the shape the document reader wants.
+     *
+     * Null — not an empty array — when the ledger is not loaded, because the two mean different
+     * things to the caller: "not loaded" falls back to the single stored `adjustment_pay`, which is
+     * how the payslips of the superseded adjustment runs still render.
+     *
+     * @return list<array<string, mixed>>|null
+     */
+    private function amendmentRows(): ?array
+    {
+        if (! $this->relationLoaded('amendments')) {
+            return null;
+        }
+
+        return $this->amendments->map(fn ($a) => [
+            'id' => $a->id,
+            'kind' => $a->kind,
+            'target_key' => $a->target_key,
+            'amount' => (float) $a->amount,
+            'note' => $a->note,
+            'reason' => $a->reason,
+            'issued_on' => $a->issued_on?->format('M j, Y'),
+        ])->values()->all();
     }
 
     /**
@@ -1056,26 +803,13 @@ class PayslipResource extends JsonResource
     }
 
     /**
-     * Allowances split into their components, for payslips that recorded the split.
+     * The allowance components, or one aggregate line for payslips issued before the split existed.
      *
-     * Payslips written before the snapshot column existed can't be split after the fact — the
-     * employee's allowance columns have moved on since. Those collapse to one honest
-     * "Allowances" line rather than a guess.
-     *
-     * @return list<array{name:string, amount:float}>
+     * @return list<array{name: string, amount: float}>
      */
     private function allowancesBreakdown(): array
     {
-        $lines = $this->allowances_breakdown ?? [];
-
-        if ($lines === [] && (float) $this->allowances > 0) {
-            return [['name' => 'Allowances', 'amount' => (float) $this->allowances]];
-        }
-
-        return array_map(
-            fn (array $line) => ['name' => $line['name'], 'amount' => (float) $line['amount']],
-            $lines,
-        );
+        return PayslipDocument::allowanceLines($this->figures());
     }
 
     /** Whether the caller is HR (or an admin) rather than the employee reading their own slip. */

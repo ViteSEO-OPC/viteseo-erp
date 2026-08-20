@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Models\Holiday;
+use App\Modules\Hr\Models\HolidaySet;
 use App\Modules\Hr\Models\LeaveBalance;
 use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\LeaveType;
@@ -13,6 +15,7 @@ use App\Modules\Hr\Models\Violation;
 use App\Modules\Hr\Models\WorkSchedule;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\AttendanceService;
+use App\Modules\Hr\Services\LeaveService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
@@ -74,7 +77,7 @@ class AttendanceOverrideTest extends HrTestCase
         return $this->svc()->unpaidDaysFor($this->employee->fresh(), $date, $date);
     }
 
-    private function leave(bool $paid, string $date, float $days = 1): LeaveRequest
+    private function leave(bool $paid, string $date, float $days = 1, bool $halfDay = false): LeaveRequest
     {
         $type = LeaveType::create([
             'name' => $paid ? 'Annual' : 'LWOP', 'code' => $paid ? 'AL' : 'LWOP',
@@ -91,6 +94,7 @@ class AttendanceOverrideTest extends HrTestCase
         return LeaveRequest::create([
             'employee_id' => $this->employee->id, 'leave_type_id' => $type->id,
             'start_date' => $date, 'end_date' => $date, 'days' => $days,
+            'is_half_day' => $halfDay,
             'reason' => 'x', 'status' => 'approved', 'deducted_from' => $paid ? 'per_type' : 'none',
         ]);
     }
@@ -145,6 +149,198 @@ class AttendanceOverrideTest extends HrTestCase
         $this->svc()->adjust($this->employee, $this->today, ['time_in' => null]);
 
         $this->assertSame(1.0, $this->usedDays());
+    }
+
+    /**
+     * A HALF DAY IS NOT EVIDENCE. The employee takes half off and is expected to work the
+     * other half, so clocking in is the normal course of that day — not proof the leave went
+     * unused. Refunding it would return the credit of every half day ever filed, and return
+     * 1.0 against a 0.5 deduction while doing it.
+     */
+    public function test_half_day_leave_keeps_its_credit_when_the_day_is_worked(): void
+    {
+        $this->leave(paid: true, date: $this->today, days: 0.5, halfDay: true);
+        $this->assertSame(0.5, $this->usedDays());
+
+        $this->svc()->adjust($this->employee, $this->today, ['time_in' => '13:00', 'time_out' => '17:00']);
+
+        $this->assertSame(0.5, $this->usedDays(), 'the half day was always meant to be worked');
+    }
+
+    /**
+     * A non-working holiday inside a leave range never consumed a credit (LeaveService::
+     * computeDays skips it), so working it cannot give one back.
+     */
+    public function test_a_holiday_inside_the_range_refunds_nothing(): void
+    {
+        $leave = $this->leave(paid: true, date: $this->today);
+        $set = HolidaySet::firstOrCreate(
+            ['country_code' => 'PH', 'year' => (int) Carbon::parse($this->today)->format('Y')],
+            ['source' => 'manual'],
+        );
+        Holiday::create([
+            'holiday_set_id' => $set->id, 'name' => 'Test', 'date' => $this->today,
+            'type' => 'regular', 'source' => 'manual',
+        ]);
+
+        $this->svc()->adjust($this->employee, $this->today, ['time_in' => '08:00', 'time_out' => '17:00']);
+
+        $this->assertSame(1.0, $this->usedDays(), 'nothing was spent on a holiday, so nothing returns');
+        $this->assertNotNull($leave->fresh());
+    }
+
+    // --- 1b. the employee's own clock-in settles it too ------------------------------
+
+    /** The whole point: no HR action required. */
+    public function test_a_self_clock_in_on_paid_leave_returns_the_credit(): void
+    {
+        $today = $this->travelToAWorkdayMorning();
+        $this->leave(paid: true, date: $today);
+        $this->assertSame(1.0, $this->usedDays());
+
+        $this->svc()->clockIn($this->employee);
+
+        $this->assertSame(0.0, $this->usedDays(), 'the credit goes back without HR touching the row');
+        $this->assertSame(0.0, $this->unpaid($today), 'and the day is paid');
+    }
+
+    public function test_a_self_clock_in_on_half_day_leave_keeps_the_credit(): void
+    {
+        $today = $this->travelToAWorkdayMorning();
+        $this->leave(paid: true, date: $today, days: 0.5, halfDay: true);
+
+        $this->svc()->clockIn($this->employee);
+
+        $this->assertSame(0.5, $this->usedDays());
+    }
+
+    /** Unpaid leave holds no credit, so a clock-in has nothing to give back. */
+    public function test_a_self_clock_in_on_unpaid_leave_stamps_nothing(): void
+    {
+        $today = $this->travelToAWorkdayMorning();
+        $this->leave(paid: false, date: $today);
+
+        $att = $this->svc()->clockIn($this->employee);
+
+        $this->assertNull($att->fresh()->leave_credit_refunded_at);
+        $this->assertSame(0.0, $this->unpaid($today), 'LWOP that was worked is still paid');
+    }
+
+    /** Freeze the clock on a workday morning and return that Manila date. */
+    private function travelToAWorkdayMorning(): string
+    {
+        $tz = config('app.timezone_local');
+        $d = Carbon::now($tz)->startOfMonth()->addDays(6)->setTime(8, 0);
+        while ($d->isWeekend()) {
+            $d->addDay();
+        }
+        Carbon::setTestNow($d);
+
+        return $d->toDateString();
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
+    // --- 1c. approval is the other order the two facts arrive in ---------------------
+
+    /** A pending request plus an EMPTY balance, so approve() does the deducting. */
+    private function pendingLeave(string $start, string $end, float $days = 1, bool $unlimited = false): LeaveRequest
+    {
+        $type = LeaveType::create([
+            'name' => 'Annual', 'code' => 'AL', 'is_paid' => true,
+            'default_days' => 10, 'is_unlimited' => $unlimited,
+        ]);
+        LeaveBalance::create([
+            'employee_id' => $this->employee->id, 'leave_type_id' => $type->id,
+            'year' => (int) Carbon::parse($start)->format('Y'),
+            'entitled_days' => 10, 'used_days' => 0,
+        ]);
+
+        return LeaveRequest::create([
+            'employee_id' => $this->employee->id, 'leave_type_id' => $type->id,
+            'start_date' => $start, 'end_date' => $end, 'days' => $days,
+            'reason' => 'x', 'status' => 'pending',
+        ]);
+    }
+
+    private function leaves(): LeaveService
+    {
+        return app(LeaveService::class);
+    }
+
+    /** The day was already worked when the leave was approved over it. */
+    public function test_approving_leave_over_a_worked_day_spends_no_credit(): void
+    {
+        $this->svc()->adjust($this->employee, $this->today, ['time_in' => '08:00', 'time_out' => '17:00']);
+        $leave = $this->pendingLeave($this->today, $this->today);
+
+        $this->leaves()->approve($leave, User::factory()->create());
+
+        $this->assertSame(0.0, $this->usedDays(), 'a day payroll pays as worked cannot also cost a credit');
+        $this->assertSame(0.0, $this->unpaid($this->today));
+    }
+
+    /** Only the day that was actually worked comes back — the rest of the range still costs. */
+    public function test_only_the_worked_day_of_an_approved_range_is_refunded(): void
+    {
+        $tz = config('app.timezone_local');
+        $start = Carbon::parse($this->today, $tz)->subDay();
+        while ($start->isWeekend()) {
+            $start->subDay();
+        }
+
+        $this->svc()->adjust($this->employee, $this->today, ['time_in' => '08:00', 'time_out' => '17:00']);
+        $leave = $this->pendingLeave($start->toDateString(), $this->today, days: 2);
+
+        $this->leaves()->approve($leave, User::factory()->create());
+
+        $this->assertSame(1.0, $this->usedDays(), 'the unworked day still spends its credit');
+    }
+
+    /** Reversing the approval gives back what the balance is STILL holding, not the full request. */
+    public function test_reopening_after_a_refund_restores_only_what_is_outstanding(): void
+    {
+        $this->svc()->adjust($this->employee, $this->today, ['time_in' => '08:00', 'time_out' => '17:00']);
+        $leave = $this->pendingLeave($this->today, $this->today);
+        $hr = User::factory()->create();
+
+        $this->leaves()->approve($leave, $hr);
+        $this->assertSame(0.0, $this->usedDays());
+
+        $this->leaves()->reopen($leave->fresh());
+
+        $this->assertSame(0.0, $this->usedDays(), 'nothing was outstanding, so nothing comes back');
+        $this->assertNull(
+            Attendance::where('employee_id', $this->employee->id)->first()->leave_credit_refunded_at,
+            'the stamp stops describing anything once the request is pending again',
+        );
+
+        // And the round trip lands exactly where it started, rather than charging the worked
+        // day because a stale stamp refused to refund twice.
+        $this->leaves()->approve($leave->fresh(), $hr);
+        $this->assertSame(0.0, $this->usedDays());
+    }
+
+    /**
+     * An unlimited type draws no credits at all, so there is no balance behind it to give back
+     * — the refund must not fall through to the per-type bucket and decrement someone's
+     * unrelated allowance.
+     */
+    public function test_an_unlimited_type_refunds_nothing(): void
+    {
+        $leave = $this->pendingLeave($this->today, $this->today, unlimited: true);
+        $this->leaves()->approve($leave, User::factory()->create());
+        // Credits the employee spent on OTHER leave that year — the balance the fall-through
+        // bucket would have raided.
+        LeaveBalance::where('employee_id', $this->employee->id)->update(['used_days' => 3]);
+
+        $this->svc()->adjust($this->employee, $this->today, ['time_in' => '08:00', 'time_out' => '17:00']);
+
+        $this->assertSame(3.0, $this->usedDays(), 'an unrelated balance is left alone');
     }
 
     // --- 2. HR's status wins --------------------------------------------------------

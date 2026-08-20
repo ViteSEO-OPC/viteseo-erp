@@ -28,7 +28,6 @@ import { TimePicker } from "@/modules/hr/ui/time-picker";
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-const OPT_TIME = z.string().regex(TIME_RE, "Use HH:MM").or(z.literal(""));
 
 function toMinutes(hm: string): number | null {
   const m = /^(\d{2}):(\d{2})$/.exec(hm);
@@ -47,10 +46,13 @@ const schema = z.object({
   grace_minutes: z.coerce.number().min(0).max(240),
   unpaid_break_minutes: z.coerce.number().min(0).max(480),
   paid_break_minutes: z.coerce.number().min(0).max(480),
-  am_start_time: OPT_TIME,
-  am_end_time: OPT_TIME,
-  pm_start_time: OPT_TIME,
-  pm_end_time: OPT_TIME,
+  // Required, not optional. A blank half-day window is the state in which an approved half day
+  // cannot be judged at all — and the split cannot be computed from the shift, because the
+  // schedule records how LONG the unpaid break is but never when it falls.
+  am_start_time: z.string().regex(TIME_RE, "Use HH:MM"),
+  am_end_time: z.string().regex(TIME_RE, "Use HH:MM"),
+  pm_start_time: z.string().regex(TIME_RE, "Use HH:MM"),
+  pm_end_time: z.string().regex(TIME_RE, "Use HH:MM"),
   is_default: z.boolean(),
 });
 
@@ -64,10 +66,10 @@ const DEFAULTS: FormValues = {
   grace_minutes: 15,
   unpaid_break_minutes: 60,
   paid_break_minutes: 20,
-  am_start_time: "",
-  am_end_time: "",
-  pm_start_time: "",
-  pm_end_time: "",
+  am_start_time: "08:00",
+  am_end_time: "12:00",
+  pm_start_time: "13:00",
+  pm_end_time: "18:00",
   is_default: false,
 };
 
@@ -272,9 +274,10 @@ export function WorkScheduleFormDialog({
             </p>
           </div>
 
-          {/* Half-day windows — optional; when set they let a half-day's hours be known, not guessed. */}
+          {/* Half-day windows — what an approved half day's lateness and undertime are measured
+              against, so they have to be stated rather than guessed at. */}
           <div className="space-y-1.5">
-            <Label>Half-day windows (optional)</Label>
+            <Label>Half-day windows</Label>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {(
                 [
@@ -303,7 +306,9 @@ export function WorkScheduleFormDialog({
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              e.g. AM 08:00–12:00, PM 13:00–18:00. Leave blank to keep the default half-day handling.
+              The hours each half of a half-day covers — an approved half day is judged against
+              these, so someone with the morning off is on time when they arrive for the PM start.
+              Override them per person on their Job tab.
             </p>
           </div>
 

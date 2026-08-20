@@ -100,6 +100,8 @@ class WorkSuspensionService
             'date' => $date,
             'name' => $data['name'],
             'is_paid' => (bool) $data['is_paid'],
+            // Absent means false — the time clock behaves exactly as it always has.
+            'work_requires_request' => (bool) ($data['work_requires_request'] ?? false),
             'note' => $data['note'] ?? null,
             'declared_by' => $actor->id,
         ])->load('declarer');
@@ -136,12 +138,16 @@ class WorkSuspensionService
         $before = [
             'name' => $suspension->name,
             'is_paid' => (bool) $suspension->is_paid,
+            'work_requires_request' => (bool) $suspension->work_requires_request,
             'note' => $suspension->note,
         ];
 
         $suspension->update([
             'name' => $data['name'] ?? $suspension->name,
             'is_paid' => array_key_exists('is_paid', $data) ? (bool) $data['is_paid'] : $suspension->is_paid,
+            'work_requires_request' => array_key_exists('work_requires_request', $data)
+                ? (bool) $data['work_requires_request']
+                : $suspension->work_requires_request,
             'note' => array_key_exists('note', $data) ? $data['note'] : $suspension->note,
             'declared_by' => $actor->id,
         ]);
@@ -152,6 +158,7 @@ class WorkSuspensionService
         $after = [
             'name' => $suspension->name,
             'is_paid' => (bool) $suspension->is_paid,
+            'work_requires_request' => (bool) $suspension->work_requires_request,
             'note' => $suspension->note,
         ];
 
@@ -162,6 +169,14 @@ class WorkSuspensionService
             $description .= $after['is_paid']
                 ? ' — now PAID (the day no longer costs anyone a day\'s pay)'
                 : ' — now UNPAID (the day now costs one day\'s pay)';
+        }
+
+        // Spelled out for the same reason: it changes what the time clock does to everyone who
+        // presses Time in today, and "updated" tells nobody which way it went.
+        if ($before['work_requires_request'] !== $after['work_requires_request']) {
+            $description .= $after['work_requires_request']
+                ? ' — anyone coming in must now ask HR first'
+                : ' — anyone coming in may now time in without asking';
         }
 
         $this->audit->log('updated', 'Attendance', $description, $suspension, $before, $after);

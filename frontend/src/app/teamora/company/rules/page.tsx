@@ -35,7 +35,6 @@ import { PAY_FREQUENCIES, payFrequencyLabel } from "@/modules/hr/types/employee"
 import {
   formatWorkdays,
   type DailyRateBasis,
-  type EarlyArrivalMode,
   type EarlyClockInMode,
   type LateDeductionMode,
   type LateTier,
@@ -243,6 +242,7 @@ type PolicyCardKey =
   | "violation"
   | "time_deductions"
   | "early_ot"
+  | "rest_day_work"
   | "geofence"
   | "premium_rates"
   | "basis"
@@ -272,6 +272,12 @@ const POLICY_CARDS: PolicyCard[] = [
     key: "early_ot",
     title: "Early arrival & overtime",
     description: "Clocking in early, and how extra time past the schedule is treated.",
+  },
+  {
+    key: "rest_day_work",
+    title: "Working a rest day",
+    description:
+      "Whether someone can time in on a day their schedule doesn't cover, or has to ask you first. The day is paid the same either way.",
   },
   {
     key: "geofence",
@@ -377,9 +383,13 @@ function AttendancePolicyEditor() {
   const [undertimeMode, setUndertimeMode] = useState<UndertimeDeductionMode>(policy?.undertime_deduction_mode ?? "none");
 
   // Early arrival & overtime.
-  const [earlyArrival, setEarlyArrival] = useState<EarlyArrivalMode>(policy?.early_arrival_mode ?? "none");
   const [earlyClockIn, setEarlyClockIn] = useState<EarlyClockInMode>(
     policy?.early_clock_in_mode ?? "allow",
+  );
+
+  // Working a rest day. On (the default) = the work-request queue; off = an ordinary punch.
+  const [restDayNeedsRequest, setRestDayNeedsRequest] = useState(
+    policy?.rest_day_work_requires_request ?? true,
   );
 
   // Geofenced clock-in. lat/lng are kept as STRINGS so an empty box stays empty ("no pin
@@ -396,6 +406,12 @@ function AttendancePolicyEditor() {
   // so an existing company's pay does not move until HR deliberately sets a figure.
   const [otDailyCap, setOtDailyCap] = useState(String(policy?.auto_overtime_daily_cap_minutes ?? 0));
   const [otPeriodCap, setOtPeriodCap] = useState(String(policy?.auto_overtime_period_cap_minutes ?? 0));
+  // Item 7 — flags a long day for review WITHOUT withholding any of it. Deliberately not a third
+  // cap: the caps above decide what pays, this decides what HR gets told about.
+  const [otReviewMinutes, setOtReviewMinutes] = useState(String(policy?.auto_overtime_review_minutes ?? 240));
+  // Ticked to confirm "0 = unlimited" when saving auto mode with both caps off. One-shot by
+  // construction: once saved, the stored policy already IS uncapped auto and the box stops asking.
+  const [capsAcknowledged, setCapsAcknowledged] = useState(false);
 
   // Premium & overtime rates (Phase 0) — whole-percent, floored at the DOLE minimum (UI + server).
   const [premRestDay, setPremRestDay] = useState(String(policy?.premium_rest_day_pct ?? 130));
@@ -415,6 +431,10 @@ function AttendancePolicyEditor() {
   const [thresholdOver, setThresholdOver] = useState(String(th.over));
   const [thresholdCharge, setThresholdCharge] = useState(String(th.charge));
   const [lateFrom, setLateFrom] = useState(policy?.late_minutes_from ?? "start_time");
+  // Item 5 — how long past someone's own shift end an open punch is still "in progress".
+  const [timeoutAllowance, setTimeoutAllowance] = useState(
+    String(policy?.missing_timeout_allowance_minutes ?? 180),
+  );
   // daily_deduction_cap is fixed at 1.0 (a day can never cost more than a day's pay) and not
   // HR-editable — a sub-1 cap only ever mattered with rounding and just confused users.
 
@@ -471,6 +491,30 @@ function AttendancePolicyEditor() {
     );
     if (err) {
       toast.error(err);
+      return false;
+    }
+    return true;
+  }
+
+  function guardTimeoutAllowance(): boolean {
+    const n = Number(timeoutAllowance);
+    if (!Number.isInteger(n) || n < 30 || n > 720) {
+      toast.error("The wait after the shift ends must be between 30 minutes and 12 hours.");
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Auto mode with both caps at 0 means overtime pays from the clock with NO ceiling — and 0 is
+   * the shipped default, so this is reached by leaving fields alone rather than by typing a number.
+   * Confirmed once, on the save that ENTERS that state; editing anything else in the card later
+   * does not ask again, because nagging about a setting the company has already chosen is how a
+   * confirmation stops being read.
+   */
+  function guardOvertimeCaps(): boolean {
+    if (needsCapAck && !capsAcknowledged) {
+      toast.error("Tick the box to confirm overtime should pay with no ceiling.");
       return false;
     }
     return true;
@@ -653,6 +697,16 @@ function AttendancePolicyEditor() {
 
   // On, but with nothing to check against. The server fails OPEN on this (§2.5) — better a
   // normal clock-in than a company locked out — but HR must be told it isn't enforcing.
+  const formUncappedAuto =
+    overtimeMode === "auto_after_threshold" &&
+    Number(otDailyCap) === 0 &&
+    Number(otPeriodCap) === 0;
+  const storedUncappedAuto =
+    policy?.overtime_mode === "auto_after_threshold" &&
+    (policy?.auto_overtime_daily_cap_minutes ?? 0) === 0 &&
+    (policy?.auto_overtime_period_cap_minutes ?? 0) === 0;
+  const needsCapAck = formUncappedAuto && !storedUncappedAuto;
+
   const geofenceIncomplete =
     geofenceOn && (cleanIps().length === 0 || officeLat.trim() === "" || officeLng.trim() === "");
 
@@ -801,8 +855,9 @@ function AttendancePolicyEditor() {
             late_penalty_enabled: latePenaltyEnabled,
             lates_per_deduction: Number(latesPerDeduction),
             undertime_deduction_mode: undertimeMode,
+            missing_timeout_allowance_minutes: Number(timeoutAllowance),
             daily_deduction_cap: 1,
-          })
+          }, guardTimeoutAllowance)
         }
       >
         {/* Lateness — two switches that can BOTH be on. */}
@@ -866,10 +921,47 @@ function AttendancePolicyEditor() {
             ]}
           />
         </div>
+        <Hint>Leaving early is billed to the exact minute.</Hint>
+
+        <SubDivider />
+
+        {/* Item 5 — the missing time-out policy. */}
+        <SubHeading>When someone forgets to clock out</SubHeading>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-foreground">Wait</span>
+          <Input
+            id="pol-timeout-allowance"
+            type="number"
+            min={30}
+            max={720}
+            step={30}
+            value={timeoutAllowance}
+            onChange={(e) => setTimeoutAllowance(e.target.value)}
+            className="w-24"
+          />
+          <span className="text-sm text-foreground">
+            minutes after their shift ends, then treat the shift as finished.
+          </span>
+        </div>
         <Hint>
-          Leaving early is billed to the exact minute. A <strong>forgotten clock-out</strong> is
-          auto-credited to the scheduled end time — it never docks pay and never counts as overtime; it&apos;s
-          flagged in Violation history (set its alert levels under <strong>Violation flags</strong>).
+          Counted from <strong>each person&apos;s own shift end</strong>, never a fixed hour — so a
+          9-to-6 shift is settled at 9 PM and a 10 PM–6 AM shift at 9 AM the next morning. Anyone
+          who clocks out themselves before then is untouched, so there is no rush while they finish
+          their task list.
+        </Hint>
+        <Hint>
+          The shift is then paid up to its <strong>scheduled end</strong>: a full ordinary day,
+          night differential included, with <strong>no overtime and no undertime</strong>. An
+          approved overtime request does not extend it — overtime needs a real clock-out, so those
+          minutes only pay once HR corrects the record. It stays flagged in Violation history (set
+          its alert levels under <strong>Violation flags</strong>).
+        </Hint>
+        {/* Item 11 — the rule was stated but not where its consequences land. HR reading this
+            should not have to discover the queue that lists the days it could not settle. */}
+        <Hint>
+          Days this <em>cannot</em> settle — someone who clocked in on a rest day, has no schedule
+          assigned, or has an approved overtime request with no clock-out behind it — are listed
+          under <strong>Open shifts</strong> on the Attendance page, where you can correct them.
         </Hint>
       </SettingsDialog>
 
@@ -879,17 +971,22 @@ function AttendancePolicyEditor() {
         open={openCard === "early_ot"}
         onOpenChange={(o) => !o && setOpenCard(null)}
         pending={saving === "early_ot"}
-        // Slice 14 — early_arrival_mode is deliberately NOT sent: the control is disabled
-        // (no engine reads it) and the API now rejects anything but "none", so echoing a
+        // Slice 14 / item 8 — early_arrival_mode is deliberately NOT sent, and no longer has a
+        // control at all: no engine reads it and the API rejects anything but "none", so echoing a
         // stored value back would 422 and block HR from saving the overtime settings.
         onSave={() =>
-          saveCard("early_ot", {
-            early_clock_in_mode: earlyClockIn,
-            overtime_mode: overtimeMode,
-            overtime_threshold_minutes: Number(overtimeThreshold),
-            auto_overtime_daily_cap_minutes: Number(otDailyCap),
-            auto_overtime_period_cap_minutes: Number(otPeriodCap),
-          })
+          saveCard(
+            "early_ot",
+            {
+              early_clock_in_mode: earlyClockIn,
+              overtime_mode: overtimeMode,
+              overtime_threshold_minutes: Number(overtimeThreshold),
+              auto_overtime_daily_cap_minutes: Number(otDailyCap),
+              auto_overtime_period_cap_minutes: Number(otPeriodCap),
+              auto_overtime_review_minutes: Number(otReviewMinutes),
+            },
+            guardOvertimeCaps,
+          )
         }
       >
         <SubHeading>When someone times in before their shift starts</SubHeading>
@@ -931,20 +1028,12 @@ function AttendancePolicyEditor() {
         </Hint>
         <SubDivider />
 
-        <SubHeading>What early minutes are worth</SubHeading>
+        {/* Item 8 — the disabled "Early arrival" select that used to head this row is GONE. It
+            offered three ways to value early minutes, no engine read any of them, and a control
+            that cannot be operated still reads as a feature that exists. Early minutes are simply
+            ignored; the sentence below says so, which is the honest version of the same fact. */}
+        <SubHeading>How extra time is paid</SubHeading>
         <div className="flex flex-wrap items-end gap-4">
-          <FieldSelect
-            id="pol-early"
-            label="Early arrival"
-            value={earlyArrival}
-            onChange={(v) => setEarlyArrival(v as EarlyArrivalMode)}
-            disabled
-            options={[
-              { value: "none", label: "Ignore early minutes" },
-              { value: "offset_undertime", label: "Offset same-day undertime" },
-              { value: "overtime_eligible", label: "Count toward overtime (with approval)" },
-            ]}
-          />
           <FieldSelect
             id="pol-ot"
             label="Overtime"
@@ -977,9 +1066,28 @@ function AttendancePolicyEditor() {
                 min={0}
                 max={65535}
               />
+              {/* Item 7 — the one number here that touches no money. It puts a day in front of HR
+                  and pays it in full either way, which is why it can be on by default while the
+                  caps above are off. */}
+              <NumberField
+                id="pol-ot-review"
+                label="Flag a day for review over (minutes, 0 = never)"
+                value={otReviewMinutes}
+                onChange={setOtReviewMinutes}
+                min={0}
+                max={1440}
+              />
             </>
           )}
         </div>
+        {overtimeMode === "auto_after_threshold" && (
+          <Hint>
+            <strong>Flag for review</strong> is not a cap. A day over it is still paid in full and
+            automatically — it just appears under <strong>Overtime to review</strong> on the
+            Overtime page so somebody sees it. Days that were both late and overtime are listed
+            there too, whatever this is set to.
+          </Hint>
+        )}
         {overtimeMode === "auto_after_threshold" && (
           <div className="rounded-lg border border-warning bg-warning-subtle p-3">
             <p className="text-xs text-foreground">
@@ -992,7 +1100,8 @@ function AttendancePolicyEditor() {
             {/* The late-arrival case surprises people, so say it outright rather than let HR
                 discover it on a payslip. See AttendanceService::autoOvertimeMinutesFor. */}
             <p className="mt-2 text-xs text-foreground">
-              <strong>Arriving late does not cancel out overtime.</strong> Someone who comes in an hour
+              <strong>Arriving late does not cancel out overtime.</strong>{" "}
+              Someone who comes in an hour
               late and stays an hour past the shift is paid that overtime, and the late hour is deducted
               separately. The two are never netted off — Philippine law (Art. 88) forbids offsetting
               undertime with overtime, because overtime is worth more per hour. If that trade looks
@@ -1000,11 +1109,81 @@ function AttendancePolicyEditor() {
             </p>
           </div>
         )}
+        {/* 0 caps = UNLIMITED, and 0 is what the fields start on — so this state is reached by
+            leaving them alone, not by choosing it. Confirmed once, on the save that enters it. */}
+        {needsCapAck && (
+          <div className="rounded-lg border border-danger bg-danger-subtle p-3">
+            <p className="text-xs text-foreground">
+              <strong>Both auto-pay caps are 0, which means no ceiling.</strong> Every minute
+              anyone clocks past their shift will be paid at the overtime rate with nobody
+              approving it. A clock-out corrected to the next morning would pay the whole night.
+              Set a cap to hold the excess for approval instead.
+            </p>
+            <div className="mt-2">
+              <CheckBox
+                checked={capsAcknowledged}
+                onChange={setCapsAcknowledged}
+                label="I understand — pay automatic overtime with no ceiling"
+              />
+            </div>
+          </div>
+        )}
         <Hint>
-          Early-arrival handling isn&apos;t active yet — early minutes are always ignored for now, whatever
-          this shows. Overtime is live: <strong>Only when approved</strong> pays each approved overtime
-          request; <strong>No overtime</strong> switches it off. Rest-day work is paid only through an
-          approved request, never auto-detected.
+          <strong>Arriving early is never paid.</strong> Turning up at 7:30 for an 8:00 shift earns
+          nothing extra and cannot offset leaving early later the same day — only time past the
+          scheduled <em>end</em> can become overtime.
+        </Hint>
+      </SettingsDialog>
+
+      {/* Working a rest day. Its own card rather than a line in "Early arrival & overtime":
+          this decides whether a whole request queue exists, and HR looks for it by name. */}
+      <SettingsDialog
+        card={CARD.rest_day_work}
+        open={openCard === "rest_day_work"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "rest_day_work"}
+        onSave={() =>
+          saveCard("rest_day_work", { rest_day_work_requires_request: restDayNeedsRequest })
+        }
+      >
+        <SubHeading>When someone times in on a day that isn&apos;t theirs</SubHeading>
+        <CheckBox
+          checked={restDayNeedsRequest}
+          onChange={setRestDayNeedsRequest}
+          label="They have to ask HR first"
+        />
+        <Hint>
+          {restDayNeedsRequest ? (
+            <>
+              <strong>Time in</strong> becomes <strong>Request to work today</strong>, and the
+              request lands under <strong>Work Requests</strong> on the Work Schedule requests
+              page. Approving it times them in at <strong>the moment they pressed the button</strong>
+              , not the moment you approve — so however long you take costs them nothing. A request
+              nobody decides lapses after 24 hours, because approving it later would back-date a
+              shift.
+            </>
+          ) : (
+            <>
+              They time in as they would on any other day and the punch is recorded straight away.
+              Nothing reaches your queue.
+            </>
+          )}
+        </Hint>
+        <Hint>
+          <strong>The pay is the same either way.</strong> A rest day that gets worked earns the
+          rest-day premium off the attendance record itself, not off an approval — so this only
+          decides who has to agree before the day is recorded. There is no lateness on a rest day
+          under either setting: there is no shift to be late for.
+        </Hint>
+        <Hint>
+          Turn it off when weekend or rota coverage is routine and the queue would only ever be
+          rubber-stamped. Leave it on when a worked rest day is exceptional and someone should be
+          choosing to spend the premium.
+        </Hint>
+        <Hint>
+          This does not cover <strong>work suspensions</strong> — a typhoon or a shutdown. Whether
+          people may time in on one of those is set per declaration, on{" "}
+          <strong>Company → Holidays &amp; Suspensions</strong>.
         </Hint>
       </SettingsDialog>
 
@@ -1196,6 +1375,16 @@ function AttendancePolicyEditor() {
           <strong>All of these move money now.</strong> Holiday premium, overtime, the rest-day
           premium and the night differential each read their rate here on the next payroll run —
           changing one changes what people are paid.
+        </Hint>
+        {/* Item 9 — the differential compounds, so raising a DAY rate raises the night pay on that
+            day too. Worth saying outright: HR would otherwise read these as five independent
+            numbers and be surprised when moving one moved another line on the payslip. */}
+        <Hint>
+          <strong>The night differential stacks on the day&apos;s own rate.</strong> It is a
+          percentage of what the hour is already worth, not of the basic rate — so a night hour on
+          a regular holiday earns 10% of the <em>200%</em> rate, and a night hour of overtime earns
+          10% of the overtime rate. Raising a holiday, rest-day or overtime rate above therefore
+          raises the night pay on those days with it.
         </Hint>
       </SettingsDialog>
 

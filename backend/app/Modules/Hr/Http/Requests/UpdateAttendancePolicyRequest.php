@@ -46,6 +46,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // silently does nothing is worse than rejecting it — HR would believe a forgotten
             // punch was being charged. Widen this again when the modes are built.
             'missing_clockout_mode' => ['sometimes', 'in:no_deduction_flag_for_review'],
+            // Item 5 — minutes past the scheduled end before an open punch is abandoned. Floored
+            // at 30 so a preview can never resolve someone who is genuinely still on shift, and
+            // capped at 12h so the setting cannot be turned into "never".
+            'missing_timeout_allowance_minutes' => ['sometimes', 'integer', 'min:30', 'max:720'],
 
             // Slice 14 — same: `offset_undertime` and `overtime_eligible` have NO reader
             // anywhere in the codebase. The Rules page already shows this control disabled;
@@ -55,6 +59,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // minutes are WORTH (early_arrival_mode above). AttendanceService::clockIn reads
             // this one. `defer` accepts the punch but stamps it at the shift start.
             'early_clock_in_mode' => ['sometimes', 'in:allow,defer,block'],
+            // Whether a rest day may be worked without asking. Not cross-validated against
+            // anything: pay is identical either way (rest-day premium is priced off the
+            // attendance row, not off an approval), so this only moves who has to agree first.
+            'rest_day_work_requires_request' => ['sometimes', 'boolean'],
 
             // Geofenced clock-in. Deliberately NOT cross-validated against
             // `geofence_enabled` — a half-configured policy must be SAVEABLE (HR pins the
@@ -77,6 +85,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // Philippines, so any figure here is the company's own control, not a legal one.
             'auto_overtime_daily_cap_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
             'auto_overtime_period_cap_minutes' => ['sometimes', 'integer', 'min:0', 'max:65535'],
+            // Item 7 — the review threshold, NOT a cap: it flags a day, it never holds pay back.
+            // 0 turns the flag off. Floored at 30 so it cannot be set to "flag every overrun",
+            // which would bury the queue in the twenty-minute days nobody needs to see.
+            'auto_overtime_review_minutes' => ['sometimes', 'integer', 'min:0', 'max:1440'],
 
             // Premium & overtime rates (Premium Pay epic, Phase 0). Whole-percent multipliers of the
             // hourly/daily rate; each HARD-FLOORED at its DOLE minimum (editable UP, never below).

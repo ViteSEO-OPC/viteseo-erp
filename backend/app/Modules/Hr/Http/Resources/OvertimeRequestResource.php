@@ -28,6 +28,9 @@ class OvertimeRequestResource extends JsonResource
             'cancelled_at' => $this->cancelled_at,
             'cancelled_by' => $this->canceller?->name,
             'cancel_reason' => $this->cancel_reason,
+            // Item 10 — null when the employee filed it themselves, which is the ordinary case.
+            // Present so their own list can say "filed by HR" rather than implying they sent it.
+            'filed_by' => $this->filer?->name,
             'employee' => [
                 'id' => $this->employee_id,
                 'name' => $this->whenLoaded('employee', fn () => $this->employee?->user?->name),

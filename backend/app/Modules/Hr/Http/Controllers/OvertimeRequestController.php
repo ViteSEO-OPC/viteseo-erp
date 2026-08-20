@@ -5,7 +5,9 @@ namespace App\Modules\Hr\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\StoreOvertimeRequestRequest;
+use App\Modules\Hr\Http\Requests\StoreRetroactiveOvertimeRequest;
 use App\Modules\Hr\Http\Resources\OvertimeRequestResource;
+use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Services\AttendanceService;
 use App\Modules\Hr\Services\OvertimeRequestService;
@@ -81,6 +83,19 @@ class OvertimeRequestController extends Controller
         return OvertimeRequestResource::make($this->service->create($employee, $request->validated()))
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    /**
+     * POST /api/v1/hr/overtime-requests/for-employee — HR files overtime for someone, after the
+     * fact (item 10). HR only. Created PENDING, so the ordinary approve flow still rules on it.
+     */
+    public function storeForEmployee(StoreRetroactiveOvertimeRequest $request): JsonResponse
+    {
+        $employee = Employee::findOrFail($request->validated('employee_id'));
+
+        return OvertimeRequestResource::make(
+            $this->service->createFor($employee, $request->validated(), $request->user()),
+        )->response()->setStatusCode(Response::HTTP_CREATED);
     }
 
     // POST /api/v1/hr/overtime-requests/{overtimeRequest}/approve — HR only.

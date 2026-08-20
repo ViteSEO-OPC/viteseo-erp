@@ -28,12 +28,26 @@ class WorkSuspension extends Model
 
     public const STATUS_UNPAID = 'suspended_unpaid';
 
-    protected $fillable = ['date', 'name', 'is_paid', 'note', 'declared_by'];
+    protected $fillable = ['date', 'name', 'is_paid', 'work_requires_request', 'note', 'declared_by'];
 
     protected $casts = [
         'date' => 'date',
         'is_paid' => 'boolean',
+        'work_requires_request' => 'boolean',
     ];
+
+    /**
+     * Does anyone coming in today have to ask HR first?
+     *
+     * False — the default, and what every declaration meant before the column existed — leaves
+     * the time clock alone: a skeleton crew presses Time in and is recorded. True turns that
+     * press into an `hr_work_requests` row of type `suspension`, so management knows who is in
+     * the building on a day it told people to stay home. Pay is identical either way.
+     */
+    public function requiresWorkRequest(): bool
+    {
+        return (bool) $this->work_requires_request;
+    }
 
     /** The attendance status this declaration puts on the day. */
     public function status(): string

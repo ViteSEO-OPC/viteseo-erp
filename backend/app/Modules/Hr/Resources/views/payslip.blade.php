@@ -79,6 +79,34 @@
     ));
 
     /**
+     * THE CORRECTIONS HR HAS MADE TO LINES THAT WERE ALREADY HERE, keyed by the line they name.
+     *
+     * The earnings and deduction rows carry their own correction on them, put there by
+     * PayslipDocument. The government lines do not — they are printed straight from their columns,
+     * in a table of their own — so those are looked up here instead.
+     */
+    $corrections = [];
+
+    foreach ($p['amendments'] ?? [] as $amendment) {
+        if (($amendment['target_key'] ?? null) !== null) {
+            $corrections[$amendment['target_key']] = $amendment;
+        }
+    }
+
+    // How many lines were corrected, and when the most recent of them was issued.
+    $amendedCount = count($corrections);
+    $amendedOn = null;
+
+    foreach ($corrections as $amendment) {
+        if (($amendment['issued_on'] ?? null) !== null && $amendment['issued_on'] > (string) $amendedOn) {
+            $amendedOn = $amendment['issued_on'];
+        }
+    }
+
+    /** The struck-through original, or nothing at all on a line nobody has corrected. */
+    $was = fn ($original) => $original === null ? '' : '<span class="was">' . $amt($original) . '</span>';
+
+    /**
      * ONE PAGE, GUARANTEED — the lists whose length comes from configuration rather than layout.
      *
      * An allowance line per programme the employee is on, a deduction line per benefit share and
@@ -103,7 +131,9 @@
             'name' => $label . ' (' . count($rest) . ' items)',
             'amount' => array_sum(array_map(fn ($l) => (float) $l['amount'], $rest)),
             'note' => null,
-            'key' => 'other',
+            // Inert: the roll-up is a print-only line, so it is neither an attendance row nor a
+            // correctable one. The filters below key off the `other:` prefix, which this is not.
+            'key' => 'rolled',
             'count' => 0,
             'minutes' => null,
             'dates' => [],
@@ -169,9 +199,13 @@
         $rows = array_values(array_filter($rows, fn ($r) => (float) $r['amount'] != 0.0));
     }
 
-    $attendanceRows = array_values(array_filter($rows, fn ($r) => $r['key'] !== 'other'));
+    // Benefit shares, loans and corrections are keyed `other:<name slug>` — a slug rather than a
+    // bare 'other' since a line HR can correct has to be nameable. The prefix is what tells the
+    // two halves of the table apart.
+    $isOther = fn (array $r) => str_starts_with((string) $r['key'], 'other:');
+    $attendanceRows = array_values(array_filter($rows, fn ($r) => ! $isOther($r)));
     $otherRows = $capped(
-        array_values(array_filter($rows, fn ($r) => $r['key'] === 'other')),
+        array_values(array_filter($rows, $isOther)),
         4,
         'Other deductions',
     );
@@ -206,6 +240,11 @@
         td { vertical-align: top; }
 
         .amt { text-align: right; white-space: nowrap; font-family: 'DejaVu Sans Mono', monospace; }
+    /* WHAT THE ENGINE COMPUTED, on a line HR has since corrected. Struck and grey, immediately
+       before the figure that replaced it — the reader is entitled to see that the document was
+       amended and what it said before, which is the whole point of correcting a line in place
+       rather than appending a note underneath the total. */
+    .was { text-decoration: line-through; color: #9ca3af; padding-right: 3px; font-weight: normal; }
         .muted { color: #6b7280; }
         .cap { font-family: 'DejaVu Sans Mono', monospace; font-size: 6.5px;
                text-transform: uppercase; color: #6b7280; letter-spacing: 0.2px; }
@@ -384,12 +423,15 @@
                 @foreach ($earningLines as $line)
                     <tr class="line">
                         <td>
+                            @if (! empty($line['original_name']))
+                                <span class="was">{{ $fit($line['original_name']) }}</span>
+                            @endif
                             {{ $fit($line['name']) }}
                             @if (! empty($line['note']))
                                 <span class="muted">({{ $line['note'] }})</span>
                             @endif
                         </td>
-                        <td class="amt">{{ $amt($line['amount']) }}</td>
+                        <td class="amt">{!! $was($line['original_amount'] ?? null) !!}{{ $amt($line['amount']) }}</td>
                     </tr>
                 @endforeach
                 <tr class="sum"><td>Total Compensation</td><td class="amt">{{ $amt($t['earnings']) }}</td></tr>
@@ -411,12 +453,15 @@
                          checked against the reader's own memory of the month. --}}
                     <tr class="line{{ $dates ? ' pair' : '' }}">
                         <td>
+                            @if (! empty($row['original_name']))
+                                <span class="was">{{ $fit($row['original_name']) }}</span>
+                            @endif
                             {{ $fit($row['name']) }}
                             @if (! empty($row['count']))
                                 <span class="badge">{{ $row['count'] }}</span>
                             @endif
                         </td>
-                        <td class="amt">{{ $amt($row['amount']) }}</td>
+                        <td class="amt">{!! $was($row['original_amount'] ?? null) !!}{{ $amt($row['amount']) }}</td>
                     </tr>
                     @if ($dates)
                         <tr class="why">
@@ -474,13 +519,20 @@
                     by which these rows reach it. The styling says so and the arithmetic enforces it.
                 --}}
                 @foreach ([
-                    ['SSS', $p['sss'], $p['employer_sss'] ?? 0],
-                    ['PhilHealth', $p['philhealth'], $p['employer_philhealth'] ?? 0],
-                    ['Pag-IBIG', $p['pagibig'], $p['employer_pagibig'] ?? 0],
-                ] as [$label, $employeeShare, $employerShare])
+                    ['sss', 'SSS', $p['sss'], $p['employer_sss'] ?? 0],
+                    ['philhealth', 'PhilHealth', $p['philhealth'], $p['employer_philhealth'] ?? 0],
+                    ['pagibig', 'Pag-IBIG', $p['pagibig'], $p['employer_pagibig'] ?? 0],
+                ] as [$key, $label, $employeeShare, $employerShare])
+                    @php $fix = $corrections[$key] ?? null; @endphp
                     <tr class="line{{ $employerShare > 0 ? ' pair' : '' }}">
-                        <td>{{ $label }}</td>
-                        <td class="amt">{{ $amt($employeeShare) }}</td>
+                        <td>
+                            @if (! empty($fix['label_override']))
+                                <span class="was">{{ $label }}</span> {{ $fit($fix['label_override']) }}
+                            @else
+                                {{ $label }}
+                            @endif
+                        </td>
+                        <td class="amt">{!! $was($fix['original_amount'] ?? null) !!}{{ $amt($employeeShare) }}</td>
                     </tr>
                     @if ($employerShare > 0)
                         <tr class="ersub">
@@ -516,7 +568,17 @@
                         }
                     }
                 @endphp
-                <tr class="line {{ $taxWhyLines ? 'pair' : '' }}"><td>Withholding Tax</td><td class="amt">{{ $amt($p['withholding_tax']) }}</td></tr>
+                @php $taxFix = $corrections['withholding_tax'] ?? null; @endphp
+                <tr class="line {{ $taxWhyLines ? 'pair' : '' }}">
+                    <td>
+                        @if (! empty($taxFix['label_override']))
+                            <span class="was">Withholding Tax</span> {{ $fit($taxFix['label_override']) }}
+                        @else
+                            Withholding Tax
+                        @endif
+                    </td>
+                    <td class="amt">{!! $was($taxFix['original_amount'] ?? null) !!}{{ $amt($p['withholding_tax']) }}</td>
+                </tr>
                 {{-- The least checkable figure on the document: an annualised projection of one
                      period, net of contributions, against a dated bracket table. Four steps, none
                      of them visible, ending in a peso amount the reader was expected to trust.
@@ -568,7 +630,15 @@
             <table class="stack">
                 <tr class="thead"><td>Non-Taxable Allowance</td><td class="amt">Amount</td></tr>
                 @foreach ($allowanceLines as $line)
-                    <tr class="line"><td>{{ $fit($line['name']) }}</td><td class="amt">{{ $amt($line['amount']) }}</td></tr>
+                    <tr class="line">
+                        <td>
+                            @if (! empty($line['original_name']))
+                                <span class="was">{{ $fit($line['original_name']) }}</span>
+                            @endif
+                            {{ $fit($line['name']) }}
+                        </td>
+                        <td class="amt">{!! $was($line['original_amount'] ?? null) !!}{{ $amt($line['amount']) }}</td>
+                    </tr>
                 @endforeach
                 @if ($t['allowances'] == 0 && ! $month)
                     <tr class="line"><td>None</td><td class="amt">{{ $amt(0) }}</td></tr>
@@ -661,35 +731,6 @@
     </div>
 @endif
 
-{{-- The corrections themselves. Their amounts are already lines in Compensation above; this is the
-     provenance — when each was issued and why. Capped at three with the remainder counted, for the
-     same reason every other list here is: the page cannot be allowed to grow with data. --}}
-@if (! empty($p['amendments']))
-    @php
-        $shownAmendments = array_slice($p['amendments'], 0, 3);
-        $restAmendments = count($p['amendments']) - count($shownAmendments);
-    @endphp
-    <div class="note" style="border-color: #e5e7eb; background: #f9fafb;">
-        <strong>Corrections to this payslip ({{ count($p['amendments']) }})</strong>
-        @foreach ($shownAmendments as $a)
-            @php
-                // A correction can take money as well as give it, so the sign is spelled out rather
-                // than assumed: "+₱1,000" on a reversal would state the opposite of what happened.
-                $taken = (float) $a['amount'] < 0;
-                $tax = (float) $a['tax'];
-            @endphp
-            <div>
-                {{ $fmt($a['issued_on']) }} — {{ $fitWide($a['note'] ?: $a['reason'], 60) }}
-                · {{ $a['kind_label'] ?? 'Additional pay' }}
-                {{ $taken ? '−' : '+' }}{{ $amt(abs((float) $a['amount'])) }}@if ($tax > 0) less {{ $amt($tax) }} tax @elseif ($tax < 0) plus {{ $amt(abs($tax)) }} tax refunded @endif
-            </div>
-        @endforeach
-        @if ($restAmendments > 0)
-            <div>and {{ $restAmendments }} more — the full list is on the payslip screen.</div>
-        @endif
-    </div>
-@endif
-
 <table class="foot">
     <tr>
         <td style="width: 34%;">
@@ -697,6 +738,23 @@
             <div style="font-size: 8px; padding-top: 1px;">{{ $stamp($p['issued_at']) }}</div>
             <div class="cap" style="padding-top: 4px;">Verified By</div>
             <div style="font-size: 8px; padding-top: 1px;">System Automated Check</div>
+            {{-- THAT THIS DOCUMENT WAS AMENDED, AND WHEN.
+
+                 The corrections used to be listed in a block of their own above the signatures,
+                 because that was the only place they existed: the figures were the engine's and
+                 the block was where a person's disagreement with them lived. Each correction now
+                 sits ON the line it is about, struck through beside the corrected figure, so the
+                 block would be the same information said twice — and the second telling is the one
+                 that made the reader do arithmetic.
+
+                 The date does not survive on the line, though, and a payslip somebody has already
+                 read once is a document they are entitled to know has changed since. --}}
+            @if ($amendedCount > 0)
+                <div class="cap" style="padding-top: 4px;">Amended</div>
+                <div style="font-size: 8px; padding-top: 1px;">
+                    {{ $amendedCount }} line{{ $amendedCount === 1 ? '' : 's' }} corrected{{ $amendedOn ? ' · ' . $fmt($amendedOn) : '' }}
+                </div>
+            @endif
         </td>
         <td class="sig" style="width: 33%;">
             <div style="height: 10px;"></div>

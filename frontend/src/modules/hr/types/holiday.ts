@@ -67,6 +67,12 @@ export interface WorkSuspension {
   date: string;
   name: string;
   is_paid: boolean;
+  /**
+   * Does anyone coming in today have to ask HR first? Off — the default — leaves the time clock
+   * alone, so the skeleton crew simply times in. On turns that press into a work request, which
+   * is how HR knows who is in the building on a day it told people to stay home.
+   */
+  work_requires_request: boolean;
   note: string | null;
   status: "suspended_paid" | "suspended_unpaid";
   declared_by: string | null;
@@ -78,5 +84,6 @@ export interface WorkSuspensionInput {
   date: string;
   name: string;
   is_paid: boolean;
+  work_requires_request?: boolean;
   note?: string | null;
 }

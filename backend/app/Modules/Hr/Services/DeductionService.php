@@ -141,8 +141,15 @@ class DeductionService
 
     /**
      * The window the employee was expected to work. Normally the full schedule; on a
-     * half-day, the half they were NOT off (F-3). Falls back to the full window when the
-     * half-day times aren't configured, so it stays a no-op until HR fills them in.
+     * half-day, the half they were NOT off (F-3).
+     *
+     * AN UNCONFIGURED HALF CHARGES NOTHING. This used to fall back to the full window "so it stays
+     * a no-op until HR fills them in" — but on a half day that fallback is not a no-op at all, it
+     * is a charge: it measures a 1:00 PM arrival against an 8:00 AM start and bills five hours of
+     * lateness against a shift the employee had approved off. Returning nulls skips both the late
+     * and the undertime branch above, which is the only defensible reading of a window nobody set.
+     * Mirrors HalfDayWindowService::windowFor(), which the roster and the clock judge on — the two
+     * have to answer identically or the payslip and the badge disagree again.
      *
      * @param  array<string,mixed>  $ctx
      * @return array{0:int|null,1:int|null}  [start_min, end_min]
@@ -151,11 +158,20 @@ class DeductionService
     {
         $off = $ctx['half_day_off'] ?? null;
 
-        if ($off === 'AM' && isset($ctx['pm_start_min'], $ctx['pm_end_min'])) {
-            return [$ctx['pm_start_min'], $ctx['pm_end_min']];
+        if ($off === 'AM') {
+            return isset($ctx['pm_start_min'], $ctx['pm_end_min'])
+                ? [$ctx['pm_start_min'], $ctx['pm_end_min']]
+                : [null, null];
         }
-        if ($off === 'PM' && isset($ctx['am_start_min'], $ctx['am_end_min'])) {
-            return [$ctx['am_start_min'], $ctx['am_end_min']];
+        if ($off === 'PM') {
+            return isset($ctx['am_start_min'], $ctx['am_end_min'])
+                ? [$ctx['am_start_min'], $ctx['am_end_min']]
+                : [null, null];
+        }
+        // 'BOTH' (or any unrecognised value): the whole day is off, so there is no worked
+        // window and nothing to charge against one.
+        if ($off !== null) {
+            return [null, null];
         }
 
         return [$ctx['start_min'] ?? null, $ctx['end_min'] ?? null];

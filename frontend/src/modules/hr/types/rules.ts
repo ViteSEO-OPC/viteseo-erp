@@ -37,11 +37,24 @@ export interface WorkScheduleInput {
 export type LateDeductionMode = "none" | "per_hour" | "tiered";
 export type LateMinutesFrom = "start_time" | "after_grace";
 export type UndertimeDeductionMode = "none" | "per_hour";
-export type MissingClockoutMode =
-  | "no_deduction_flag_for_review"
-  | "treat_as_undertime_to_now"
-  | "treat_as_absent";
-export type EarlyArrivalMode = "none" | "offset_undertime" | "overtime_eligible";
+/**
+ * SINGLE-VALUED ON PURPOSE (item 8). These two columns once accepted several values apiece, none
+ * of which any engine ever read — `treat_as_undertime_to_now` / `treat_as_absent` and
+ * `offset_undertime` / `overtime_eligible` were settings that silently did nothing, which is worse
+ * than an absent feature because HR believed a forgotten punch was being charged.
+ *
+ * The server now rejects everything else (`UpdateAttendancePolicyRequest`) and migration
+ * `2026_07_28_000012_normalise_inert_policy_modes` collapsed the stored rows, so a union listing
+ * the old values was the last place in the codebase still claiming they were reachable.
+ *
+ * WIDEN THESE AGAIN, don't add a fourth mode elsewhere, if the behaviour is ever built — and widen
+ * the request rule in the same change, or the UI will offer what the API refuses.
+ *
+ * A missing clock-out is handled by `missing_timeout_allowance_minutes` instead: it resolves to the
+ * employee's own scheduled end rather than being deducted or treated as an absence.
+ */
+export type MissingClockoutMode = "no_deduction_flag_for_review";
+export type EarlyArrivalMode = "none";
 /**
  * What happens when someone punches in before their shift starts.
  *  allow — recorded at the time they actually pressed it
@@ -94,9 +107,16 @@ export interface AttendancePolicy {
 
   undertime_deduction_mode: UndertimeDeductionMode;
   missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct
+  // Minutes past the scheduled end before an open punch counts as abandoned rather than still
+  // running. A DURATION, so each employee's cutoff is their own shift end + this. 30–720.
+  missing_timeout_allowance_minutes: number;
 
   early_arrival_mode: EarlyArrivalMode; // what early minutes are WORTH (inert for now)
   early_clock_in_mode: EarlyClockInMode; // what happens to an early punch
+  // Does working a rest day need HR's permission first? On (the default) turns Time in on a
+  // non-workday into a work request; off records the punch straight away. Pay is identical
+  // either way — the rest-day premium is priced off the attendance row, not off an approval.
+  rest_day_work_requires_request: boolean;
 
   // Geofenced clock-in. Off = today's clock-in, untouched; it doubles as the kill switch.
   // On but half-configured (no pin, or no IPs) deliberately behaves as OFF — the server
@@ -114,6 +134,8 @@ export interface AttendancePolicy {
   // Minutes past a cap are not lost: they queue for review and pay once approved.
   auto_overtime_daily_cap_minutes: number;
   auto_overtime_period_cap_minutes: number;
+  /** Item 7 — a day's overtime worth flagging for review. Flags only; withholds nothing. 0 = off. */
+  auto_overtime_review_minutes: number;
 
   // Premium & overtime rates (whole-percent multipliers; HR-editable, hard-floored at the DOLE
   // minimum). night_diff_pct is the add-on percent (10 = +10%). Consumers land in later phases;
@@ -183,6 +205,15 @@ export interface EmployeeSchedule {
   custom_workdays: number[] | null;
   custom_start_time: string | null;
   custom_end_time: string | null;
+  /**
+   * Half-day windows. Null means INHERIT the assigned schedule's value, per field — so an
+   * employee whose afternoons start at 13:30 sets only `custom_pm_start_time` and keeps the
+   * template's end. These are what an approved half day is judged against.
+   */
+  custom_am_start_time: string | null;
+  custom_am_end_time: string | null;
+  custom_pm_start_time: string | null;
+  custom_pm_end_time: string | null;
   custom_grace_minutes: number | null;
   custom_unpaid_break_minutes: number | null;
   custom_paid_break_minutes: number | null;
@@ -194,6 +225,10 @@ export interface EmployeeScheduleInput {
   custom_workdays?: number[] | null;
   custom_start_time?: string | null;
   custom_end_time?: string | null;
+  custom_am_start_time?: string | null;
+  custom_am_end_time?: string | null;
+  custom_pm_start_time?: string | null;
+  custom_pm_end_time?: string | null;
   custom_grace_minutes?: number | null;
   custom_unpaid_break_minutes?: number | null;
   custom_paid_break_minutes?: number | null;

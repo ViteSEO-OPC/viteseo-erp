@@ -101,8 +101,12 @@ class NightShiftClockTest extends HrTestCase
 
         $night = $this->svc->nightMinutesFor($this->employee, '2026-07-01', '2026-07-02');
 
-        // 22:00 → 06:00 is entirely inside the 22:00–06:00 window.
-        $this->assertSame(['2026-07-01' => 480], $night);
+        // 22:00 → 06:00 is entirely inside the 22:00–06:00 window — but the differential is paid
+        // on WORK, and the scheduled 60-minute meal is not work (item 9). A graveyard shift has no
+        // daytime portion to absorb the break, so all 60 come off: 480 span − 60 = 420, which is
+        // exactly the schedule's own `expected_minutes`. Nobody pressed the lunch button here, and
+        // that used to be the difference between 420 and 480.
+        $this->assertSame(['2026-07-01' => 420], $night);
     }
 
     /** A completed scheduled graveyard shift ends on time; crossing midnight is not overtime. */

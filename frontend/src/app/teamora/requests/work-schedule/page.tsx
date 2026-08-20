@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Zap, Check, X, Ban } from "lucide-react";
+import { Zap, Check, X, Ban, CalendarPlus } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
   type Column,
 } from "@/core/components/data-table";
 import { AutoOvertimeReview } from "@/modules/hr/components/auto-overtime-review";
+import { OvertimeCorrectionDialog } from "@/modules/hr/components/overtime-correction-dialog";
 import {
   StatusFilter,
   filterByStatus,
@@ -53,17 +54,17 @@ import {
   useReopenOvertimeRequest,
 } from "@/modules/hr/hooks/use-overtime";
 import {
-  useRestDayRequests,
-  useApproveRestDayRequest,
-  useRejectRestDayRequest,
-  useReopenRestDayRequest,
-} from "@/modules/hr/hooks/use-rest-day";
+  useWorkRequests,
+  useApproveWorkRequest,
+  useRejectWorkRequest,
+  useReopenWorkRequest,
+} from "@/modules/hr/hooks/use-work-request";
 import type {
   LeaveRequest,
   HalfDayRequest,
   EarlyOutRequest,
   OvertimeRequest,
-  RestDayRequest,
+  WorkRequest,
 } from "@/modules/hr/types/leave";
 
 // Pending / Approved / Rejected are the leave + half-day lifecycle states.
@@ -243,7 +244,7 @@ export default function TimeLeavePage() {
     <div className="p-4 sm:p-8">
       <PageHeader
         title="Work Schedule"
-        subtitle="Review and decide on leave, half-day, early-out, overtime and rest-day work requests."
+        subtitle="Review and decide on leave, half-day, early-out, overtime and work requests."
       />
 
       {/* Automation explainer */}
@@ -345,19 +346,19 @@ export default function TimeLeavePage() {
 
       <OvertimeSection />
 
-      <RestDaySection />
+      <WorkRequestSection />
     </div>
   );
 }
 
-// ---- Rest-day work requests (filed by pressing Time in on a non-workday) ----
+// ---- Work requests (filed by pressing Time in on a day nobody was expected in on) ----
 
 /**
  * `expired` is in the filter and nowhere else: a pending request goes stale 24h after the punch
  * it would stamp, and HR needs to be able to find the ones that lapsed — a request that silently
  * vanishes from every view is indistinguishable from one that was never filed.
  */
-const REST_DAY_STATUS_OPTIONS: StatusFilterOption[] = [
+const WORK_REQUEST_STATUS_OPTIONS: StatusFilterOption[] = [
   { value: "all", label: "All" },
   { value: "pending", label: "Pending" },
   { value: "approved", label: "Approved" },
@@ -365,12 +366,26 @@ const REST_DAY_STATUS_OPTIONS: StatusFilterOption[] = [
   { value: "expired", label: "Expired" },
 ];
 
-function RestDaySection() {
-  const { data: requests, isLoading } = useRestDayRequests();
-  const approveMut = useApproveRestDayRequest();
-  const rejectMut = useRejectRestDayRequest();
-  const reopenMut = useReopenRestDayRequest();
-  const [review, setReview] = useState<{ mode: "approve" | "reject"; r: RestDayRequest } | null>(null);
+/** What the day was, in the words the row and every toast use. */
+function dayLabel(r: WorkRequest): string {
+  return r.type === "suspension" ? "suspended day" : "rest day";
+}
+
+/** How the day pays once worked — the only thing the two types price differently. */
+function payLabel(r: WorkRequest) {
+  return r.type === "suspension" ? (
+    <span className="text-success">Paid · ordinary day</span>
+  ) : (
+    <span className="text-success">Paid · rest-day premium</span>
+  );
+}
+
+function WorkRequestSection() {
+  const { data: requests, isLoading } = useWorkRequests();
+  const approveMut = useApproveWorkRequest();
+  const rejectMut = useRejectWorkRequest();
+  const reopenMut = useReopenWorkRequest();
+  const [review, setReview] = useState<{ mode: "approve" | "reject"; r: WorkRequest } | null>(null);
   const [status, setStatus] = useState("all");
   const visible = filterByStatus(requests ?? [], status);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -383,12 +398,12 @@ function RestDaySection() {
       if (mode === "approve") {
         await approveMut.mutateAsync(r.id);
         toast.success(
-          `Approved ${r.employee.name}'s rest-day work`,
+          `Approved ${r.employee.name}'s work on the ${dayLabel(r)}`,
           `Timed in at ${formatTimeManila(r.requested_at)}, when they asked.`,
         );
       } else {
         await rejectMut.mutateAsync({ id: r.id, reason });
-        toast.error(`Declined ${r.employee.name}'s rest-day work`);
+        toast.error(`Declined ${r.employee.name}'s request to work the ${dayLabel(r)}`);
       }
     } catch (err) {
       // Unlike the other four, this one has decisions that legitimately fail — an expired
@@ -403,7 +418,7 @@ function RestDaySection() {
     (rejectMut.isPending && rejectMut.variables?.id) ||
     null;
 
-  function restDayActions(r: RestDayRequest) {
+  function workRequestActions(r: WorkRequest) {
     if (r.status === "pending") {
       return (
         <>
@@ -425,7 +440,7 @@ function RestDaySection() {
     }
     return (
       <ReopenAction
-        subject={`${r.employee.name}'s rest-day work`}
+        subject={`${r.employee.name}'s work on the ${dayLabel(r)}`}
         consequence={
           r.status === "approved"
             ? "The attendance this approval created is removed with it. Refused once the shift has been clocked out."
@@ -436,12 +451,22 @@ function RestDaySection() {
     );
   }
 
-  const columns: Column<RestDayRequest>[] = [
+  const columns: Column<WorkRequest>[] = [
     {
       header: "Employee",
       cell: (r) => <EmployeeCell employee={r.employee} />,
     },
-    { header: "Rest day", cell: (r) => formatDate(r.work_date) },
+    // The two types are the same row with different reasons for existing, and the reason is
+    // what decides the premium — so it is a column, not a footnote in the detail modal.
+    {
+      header: "Day",
+      cell: (r) => (
+        <div>
+          <p className="font-medium text-foreground">{formatDate(r.work_date)}</p>
+          <p className="text-caption text-muted-foreground capitalize">{dayLabel(r)}</p>
+        </div>
+      ),
+    },
     {
       header: "Asked at",
       cell: (r) => (
@@ -450,7 +475,7 @@ function RestDaySection() {
         </span>
       ),
     },
-    { header: "Pay", cell: () => <span className="text-success">Paid · rest-day premium</span> },
+    { header: "Pay", cell: (r) => payLabel(r) },
     {
       header: "Reason",
       cell: (r) => (
@@ -461,21 +486,22 @@ function RestDaySection() {
     {
       header: "Action",
       align: "right",
-      cell: (r) => <RowActions>{restDayActions(r)}</RowActions>,
+      cell: (r) => <RowActions>{workRequestActions(r)}</RowActions>,
     },
   ];
 
   return (
     <div className="mt-10">
-      <h2 className="text-h3 font-bold text-foreground">Rest-Day Work Requests</h2>
+      <h2 className="text-h3 font-bold text-foreground">Work Requests</h2>
       <p className="mt-1 text-caption text-muted-foreground">
-        Filed when someone presses Time in on a day their schedule calls a rest day — there is no
-        form to fill in. Approving times them in at the moment they asked, not now, and the day
-        earns the rest-day premium. Requests lapse 24 hours after that moment.
+        Filed when someone presses Time in on a day nobody was expected in on — a rest day, or a
+        suspension you marked as needing permission. There is no form to fill in. Approving times
+        them in at the moment they asked, not now; a rest day earns the rest-day premium and a
+        suspended day is paid as an ordinary one. Requests lapse 24 hours after that moment.
       </p>
       <div className="mt-4">
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading rest-day requests…</p>
+          <p className="text-sm text-muted-foreground">Loading work requests…</p>
         ) : (
           <DataTable
             columns={columns}
@@ -483,12 +509,12 @@ function RestDaySection() {
             rowKey={(r) => r.id}
             onRowClick={(r) => setDetailId(r.id)}
             needsAction={(r) => r.status === "pending"}
-            getSearchText={(r) => `${r.employee.name ?? ""} ${r.reason ?? ""} ${r.status}`}
+            getSearchText={(r) => `${r.employee.name ?? ""} ${r.reason ?? ""} ${dayLabel(r)} ${r.status}`}
             searchPlaceholder="Search employee, reason…"
             toolbar={
-              <StatusFilter options={REST_DAY_STATUS_OPTIONS} value={status} onChange={setStatus} />
+              <StatusFilter options={WORK_REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
             }
-            empty="No rest-day work requests yet. They appear here when someone times in on a rest day."
+            empty="No work requests yet. They appear here when someone times in on a rest day, or on a suspended day that needs your permission."
           />
         )}
       </div>
@@ -499,7 +525,7 @@ function RestDaySection() {
         mode={review?.mode ?? "approve"}
         subject={
           review
-            ? `${review.r.employee.name}'s rest-day work (${formatDate(review.r.work_date)}, asked at ${formatTimeManila(review.r.requested_at)})`
+            ? `${review.r.employee.name}'s work on the ${dayLabel(review.r)} of ${formatDate(review.r.work_date)} (asked at ${formatTimeManila(review.r.requested_at)})`
             : ""
         }
         onConfirm={onConfirm}
@@ -509,14 +535,17 @@ function RestDaySection() {
         <RequestDetailDialog
           open
           onOpenChange={(o) => !o && setDetailId(null)}
-          title="Rest-Day Work"
+          title="Work Request"
           status={detail.status}
           employee={detail.employee}
           submitted={detail.created_at}
           fields={[
-            { label: "Rest day", value: formatDate(detail.work_date) },
+            {
+              label: detail.type === "suspension" ? "Suspended day" : "Rest day",
+              value: formatDate(detail.work_date),
+            },
             { label: "Times in at", value: formatTimeManila(detail.requested_at) },
-            { label: "Pay", value: <span className="text-success">Paid · rest-day premium</span> },
+            { label: "Pay", value: payLabel(detail) },
           ]}
           note={{ label: "Reason", text: detail.reason ?? "—" }}
           decision={{
@@ -524,7 +553,7 @@ function RestDaySection() {
             at: detail.reviewed_at,
             note: detail.review_note,
           }}
-          actions={restDayActions(detail)}
+          actions={workRequestActions(detail)}
         />
       )}
     </div>
@@ -565,6 +594,26 @@ function HalfDaySection() {
     (rejectMut.isPending && rejectMut.variables?.id) ||
     null;
 
+  /**
+   * The hours the employee still owes on a half day. Shown because approving one is a decision
+   * about the OTHER half: null means their schedule cannot say what that half is, and the
+   * platform will then decline to judge the day's lateness at all.
+   */
+  function workedWindow(r: HalfDayRequest) {
+    if (!r.worked_window) {
+      return (
+        <span className="text-warning">
+          No {r.period === "AM" ? "afternoon" : "morning"} hours set on their schedule
+        </span>
+      );
+    }
+    return (
+      <span className="text-muted-foreground">
+        {r.worked_window.start}–{r.worked_window.end}
+      </span>
+    );
+  }
+
   function halfDayActions(r: HalfDayRequest) {
     if (r.status === "pending") {
       return (
@@ -598,6 +647,7 @@ function HalfDaySection() {
     },
     { header: "Date", cell: (r) => formatDate(r.work_date) },
     { header: "Half", cell: (r) => r.period },
+    { header: "Still works", cell: (r) => workedWindow(r) },
     { header: "Pay", cell: () => <span className="text-danger">Unpaid · 0.5 day</span> },
     { header: "Reason", cell: (r) => <span className="text-muted-foreground">{r.reason}</span> },
     { header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
@@ -655,6 +705,7 @@ function HalfDaySection() {
           fields={[
             { label: "Date", value: formatDate(detail.work_date) },
             { label: "Half", value: detail.period },
+            { label: "Still works", value: workedWindow(detail) },
             { label: "Pay", value: <span className="text-danger">Unpaid · 0.5 day</span> },
           ]}
           note={{ label: "Reason", text: detail.reason }}
@@ -890,6 +941,8 @@ function OvertimeSection() {
     );
   }
 
+  const [filingFor, setFilingFor] = useState(false);
+
   const columns: Column<OvertimeRequest>[] = [
     {
       header: "Employee",
@@ -902,7 +955,17 @@ function OvertimeSection() {
     },
     { header: "Hours", cell: (r) => `${r.hours.toFixed(1)} hrs` },
     { header: "Pay", cell: () => <span className="text-success">Paid · overtime</span> },
-    { header: "Reason", cell: (r) => <span className="text-muted-foreground">{r.reason}</span> },
+    {
+      header: "Reason",
+      cell: (r) => (
+        <span className="text-muted-foreground">
+          {r.reason}
+          {/* Item 10 — a request HR filed on someone's behalf must say so. Without it the row is
+              indistinguishable from one the employee sent, which credits the wrong person. */}
+          {r.filed_by && <span className="block text-xs italic">Filed by {r.filed_by}</span>}
+        </span>
+      ),
+    },
     { header: "Status", cell: (r) => <StatusBadge status={r.status} /> },
     {
       header: "Action",
@@ -917,11 +980,25 @@ function OvertimeSection() {
           table below is where it gets resolved: approving a request for that date releases it. */}
       <AutoOvertimeReview />
 
-      <h2 className="mt-10 text-h3 font-bold text-foreground">Overtime Requests</h2>
-      <p className="mt-1 text-caption text-muted-foreground">
-        Hours worked beyond the schedule. Approving ADDS pay for that period, at the company&apos;s
-        overtime rate for that day (regular / rest day / special day / regular holiday).
-      </p>
+      <OvertimeCorrectionDialog open={filingFor} onOpenChange={setFilingFor} />
+
+      <div className="mt-10 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-h3 font-bold text-foreground">Overtime Requests</h2>
+          <p className="mt-1 max-w-2xl text-caption text-muted-foreground">
+            Hours worked beyond the schedule. Approving ADDS pay for that period, at the
+            company&apos;s overtime rate for that day (regular / rest day / special day / regular
+            holiday).
+          </p>
+        </div>
+        {/* Item 10 — the correction path for overtime that was worked but never filed. Employees
+            cannot back-date their own, so without this the only remedies were editing the
+            attendance record or paying it outside the system. */}
+        <Button variant="outline" onClick={() => setFilingFor(true)}>
+          <CalendarPlus />
+          File for an employee
+        </Button>
+      </div>
       <div className="mt-4">
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading overtime requests…</p>

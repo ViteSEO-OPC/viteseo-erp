@@ -32,7 +32,7 @@ import { useConcerns } from "@/modules/hr/hooks/use-concerns";
 import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
 import { useEarlyOutRequests } from "@/modules/hr/hooks/use-early-out";
 import { useOvertimeRequests } from "@/modules/hr/hooks/use-overtime";
-import { useRestDayRequests } from "@/modules/hr/hooks/use-rest-day";
+import { useWorkRequests } from "@/modules/hr/hooks/use-work-request";
 import { useAllLoans } from "@/modules/hr/hooks/use-employees";
 import { useRemoteCheckins } from "@/modules/hr/hooks/use-remote-checkins";
 
@@ -41,7 +41,7 @@ type Kind =
   | "half_day"
   | "early_out"
   | "overtime"
-  | "rest_day"
+  | "work_request"
   | "loan"
   | "claim"
   | "change"
@@ -66,7 +66,7 @@ const KIND_TAG: Record<Kind, string> = {
   half_day: "Half-day",
   early_out: "Early-out",
   overtime: "Overtime",
-  rest_day: "Rest-day",
+  work_request: "Work",
   loan: "Loan",
   claim: "Expense",
   change: "Profile",
@@ -83,7 +83,7 @@ const KIND_TONE: Record<Kind, string> = {
   half_day: "bg-success-subtle text-success",
   early_out: "bg-warning-subtle text-warning",
   overtime: "bg-info-subtle text-info",
-  rest_day: "bg-info-subtle text-info",
+  work_request: "bg-info-subtle text-info",
   loan: "bg-warning-subtle text-warning",
   claim: "bg-warning-subtle text-warning",
   change: "bg-brand-subtle text-brand-foreground",
@@ -137,10 +137,11 @@ export function PendingApprovals() {
   const { data: halfDays } = useHalfDayRequests();
   const { data: earlyOuts } = useEarlyOutRequests();
   const { data: overtimes } = useOvertimeRequests();
-  // Rest-day work. Navigate-only like the other three: approving one WRITES an attendance
-  // row stamped at the employee's punch, which is not a decision to take from a feed row
-  // that shows neither the day nor the time it would stamp.
-  const { data: restDays } = useRestDayRequests();
+  // Work requests (a rest day, or a suspended day HR is tracking). Navigate-only like the
+  // other three: approving one WRITES an attendance row stamped at the employee's punch, which
+  // is not a decision to take from a feed row that shows neither the day nor the time it would
+  // stamp.
+  const { data: workRequests } = useWorkRequests();
   const { data: loans } = useAllLoans();
   // Already filtered to pending by the endpoint's default.
   const { data: checkins } = useRemoteCheckins();
@@ -197,11 +198,11 @@ export function PendingApprovals() {
         createdAt: o.created_at,
         href: "/teamora/requests/work-schedule",
       })),
-    ...(restDays ?? [])
+    ...(workRequests ?? [])
       .filter((r) => r.status === "pending")
       .map((r) => ({
-        key: `rest_day-${r.id}`,
-        kind: "rest_day" as const,
+        key: `work_request-${r.id}`,
+        kind: "work_request" as const,
         id: r.id,
         name: r.employee?.name ?? "—",
         createdAt: r.created_at,

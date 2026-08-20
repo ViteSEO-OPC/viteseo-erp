@@ -39,10 +39,20 @@ class AttendancePolicyService
         'late_tiers' => null,
         'undertime_deduction_mode' => 'none',
         'missing_clockout_mode' => 'no_deduction_flag_for_review',
+        // Item 5 — how long past the scheduled end an open punch is still "in progress". Past
+        // it the shift is abandoned and pay resolves it to the scheduled end. A DURATION, so
+        // each employee's cutoff is their own; see the migration for why not a clock time.
+        'missing_timeout_allowance_minutes' => 180,
         'early_arrival_mode' => 'none',
         // How an early punch is handled: allow (recorded as-is — today's behaviour),
         // defer (accepted, but stamped at the shift's start time), block (refused).
         'early_clock_in_mode' => 'allow',
+        // Working a day the schedule doesn't cover needs HR to agree first — the rest-day work
+        // request. On is today's behaviour and the sensible default: a rest day worked earns a
+        // premium, so somebody should be choosing to spend it. Off suits companies whose
+        // weekend coverage is routine, where a queue that is always approved is a queue nobody
+        // reads; the punch is then simply recorded, and pays exactly the same either way.
+        'rest_day_work_requires_request' => true,
         // Geofenced clock-in — off is today's behaviour. Also the kill switch: turning it
         // off puts everyone back on the normal clock instantly, with no deploy.
         'geofence_enabled' => false,
@@ -54,6 +64,10 @@ class AttendancePolicyService
         'overtime_threshold_minutes' => 0,
         'auto_overtime_daily_cap_minutes' => 0, // uncapped — FIN-039
         'auto_overtime_period_cap_minutes' => 0,
+        // Item 7 — flags a day for review without withholding a peso of it. Non-zero by default
+        // precisely BECAUSE the caps above are 0: something has to notice a runaway overrun on a
+        // stock install, and a notification is the version of that which cannot underpay anyone.
+        'auto_overtime_review_minutes' => 240,
         // Premium & overtime rates (Phase 0) — seeded to the DOLE legal minimums (no-op).
         'premium_rest_day_pct' => 130,
         'premium_special_day_pct' => 130,

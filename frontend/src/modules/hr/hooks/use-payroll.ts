@@ -20,6 +20,9 @@ import {
   runThirteenthMonth,
   updatePayrollSettings,
   amendPayrollRun,
+  correctPayslipLine,
+  correctRunLine,
+  removePayslipLineCorrection,
   getRerunPreview,
   rerunPayrollRun,
   getRetroFlags,
@@ -30,6 +33,7 @@ import {
   settlePayment,
   reconcilePaymentBatch,
   getDeductionArrears,
+  getAttendanceExceptions,
   getMinimumWageCheck,
   applyMinimumWageAdjustments,
 } from "@/modules/hr/api/payroll";
@@ -70,6 +74,20 @@ export function useMinimumWageCheck(
     queryKey: [...MINIMUM_WAGE_KEY, input],
     queryFn: () => getMinimumWageCheck(input!),
     enabled: !!input?.frequency,
+  });
+}
+
+/**
+ * Item 12 — attendance exceptions for the cycle about to be priced.
+ *
+ * Read at the moment the money is committed, not on whichever screen owns each queue: HR runs
+ * payroll from here, so this is where the counts have to appear.
+ */
+export function useAttendanceExceptions(start?: string, end?: string) {
+  return useQuery({
+    queryKey: ["hr", "payroll", "attendance-exceptions", start ?? "", end ?? ""],
+    queryFn: () => getAttendanceExceptions(start!, end!),
+    enabled: !!start && !!end,
   });
 }
 
@@ -204,6 +222,70 @@ export function useHrPayslip(id: number | undefined) {
     queryKey: ["hr", "payslip", id],
     queryFn: () => getHrPayslip(id!),
     enabled: !!id,
+  });
+}
+
+/**
+ * Waive a line across a whole period.
+ *
+ * Invalidates rather than seeding the cache: this touches every payslip in the run, so there is no
+ * single document to write back — the run detail, the payslips and any later run in the tax year
+ * that may now be flagged stale all have to be re-read.
+ */
+export function useCorrectRunLine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, ...input }: Parameters<typeof correctRunLine>[1] & { runId: number }) =>
+      correctRunLine(runId, input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "payslip"] });
+      qc.invalidateQueries({ queryKey: ["hr", "me", "payslip"] });
+    },
+  });
+}
+
+/**
+ * Correct one line on one payslip — and put the corrected document straight into the cache.
+ *
+ * The mutation returns the whole amended payslip, so the open document updates from the response
+ * rather than from a refetch: HR is looking at the line they just changed, and a round-trip would
+ * show them the old figure for as long as it took. Everything the correction also moved — the run's
+ * totals, a later run in the tax year that may now be flagged stale, the employee's own copy — is
+ * invalidated behind it.
+ */
+export function useCorrectPayslipLine() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      payslipId,
+      ...input
+    }: Parameters<typeof correctPayslipLine>[1] & { payslipId: number }) =>
+      correctPayslipLine(payslipId, input),
+    onSuccess: (payslip) => {
+      qc.setQueryData(["hr", "payslip", payslip.id], payslip);
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "me", "payslip"] });
+      qc.invalidateQueries({ queryKey: RETRO_KEY });
+    },
+  });
+}
+
+/** Put a corrected line back to what the engine computed. Same invalidation as making the edit. */
+export function useRemovePayslipLineCorrection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ payslipId, correctionId }: { payslipId: number; correctionId: number }) =>
+      removePayslipLineCorrection(payslipId, correctionId),
+    onSuccess: (payslip) => {
+      qc.setQueryData(["hr", "payslip", payslip.id], payslip);
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "me", "payslip"] });
+      qc.invalidateQueries({ queryKey: RETRO_KEY });
+    },
   });
 }
 
