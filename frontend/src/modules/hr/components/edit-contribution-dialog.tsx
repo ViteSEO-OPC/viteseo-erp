@@ -42,7 +42,7 @@ export function EditContributionDialog({
   return (
     <Dialog open={!!type} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-xl">
-        {type && <ContributionForm key={type} type={type} onDone={() => onOpenChange(false)} />}
+        {type && <ContributionFormLoader key={type} type={type} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>
   );
@@ -69,11 +69,60 @@ const toPct = (d: number | null | undefined) =>
 const toDecimal = (pct: string) => Number(pct || 0) / 100;
 const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
-function ContributionForm({ type, onDone }: { type: string; onDone: () => void }) {
-  const { data: versions } = useContributionVersions(type);
+/**
+ * Wait for the rates in force before the form exists.
+ *
+ * `ContributionForm` seeds every field from the current version, and it does that ONCE — in its
+ * `useState` initialisers. The versions query is `enabled: !!type`, so it only starts when this
+ * dialog opens: mounting the form in the same render meant the initialisers ran against
+ * `undefined` and the first open showed an empty form, filling in only on the second open once
+ * the response was cached. Worse than blank — saving from there would have written a dated
+ * version with 0% rates and no ceiling. Holding the mount until the data is here removes both.
+ */
+function ContributionFormLoader({ type, onDone }: { type: string; onDone: () => void }) {
+  const { data: versions, isPending, isError, refetch } = useContributionVersions(type);
+  const label = CONTRIBUTION_LABELS[type] ?? type.toUpperCase();
+  const guide = GUIDE[type] ?? { how: "", fields: "range" };
+
+  if (isPending || isError) {
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>{label}</DialogTitle>
+          <DialogDescription>{guide.how}</DialogDescription>
+        </DialogHeader>
+        {isError ? (
+          <div className="mt-5 space-y-3">
+            <p className="text-sm text-destructive">
+              Could not load the rates currently in force. Saving without them would replace
+              them with blanks, so the form waits rather than showing you an empty one.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Try again
+            </Button>
+          </div>
+        ) : (
+          <p className="mt-5 text-sm text-muted-foreground">Loading…</p>
+        )}
+      </>
+    );
+  }
+
+  return <ContributionForm type={type} versions={versions} onDone={onDone} />;
+}
+
+function ContributionForm({
+  type,
+  versions,
+  onDone,
+}: {
+  type: string;
+  versions: ContributionVersion[];
+  onDone: () => void;
+}) {
   const save = useSaveContributionVersion();
 
-  const latest: ContributionVersion | undefined = versions?.[0];
+  const latest: ContributionVersion | undefined = versions[0];
   const label = CONTRIBUTION_LABELS[type] ?? type.toUpperCase();
   const guide = GUIDE[type] ?? { how: "", fields: "range" };
 
@@ -418,7 +467,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
           <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Per SSS Circular 2025-006…" />
         </Field>
 
-        {versions && versions.length > 0 && (
+        {versions.length > 0 && (
           <details className="rounded-card border border-border">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-3">
               <span className="text-sm font-medium text-foreground">
