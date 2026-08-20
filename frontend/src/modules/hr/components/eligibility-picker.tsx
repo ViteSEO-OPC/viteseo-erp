@@ -6,21 +6,7 @@ import { MultiCombobox } from "@/modules/hr/ui/multi-combobox";
 import { EMPLOYMENT_STATUSES, statusLabel, type Employee } from "@/modules/hr/types/employee";
 import { ELIGIBILITY_MODES, type EligibilityMode } from "@/modules/hr/types/benefits";
 
-/**
- * Who an allowance is for — the same control on the add and the edit dialog (Slice B6/B8 follow-up).
- *
- * WHY A RULE RATHER THAN A LIST. Membership used to be a set of employee ids written when HR
- * pressed "Add a Plan". It never re-checked itself: someone enrolled while probationary stayed
- * enrolled after every status change, and anyone hired afterwards was simply missing. A rule is
- * evaluated when payroll runs, so a promotion or a new hire is picked up with nothing to remember.
- *
- * `custom` is the exception and keeps a list, because "these named people" IS the rule.
- *
- * `modes` NARROWS THE CHOICES, and one caller needs it: on a company PLAN the enrolment pivot is
- * the membership, so a `custom` rule would write the same rows that "Who is on it" writes — and
- * silently enrol those people with no tier and no share. A plan therefore offers everything except
- * `custom` (B18).
- */
+/** Who an allowance is for — the same control on the add and the edit dialog (B8 follow-up). */
 export function EligibilityPicker({
   mode,
   statuses,

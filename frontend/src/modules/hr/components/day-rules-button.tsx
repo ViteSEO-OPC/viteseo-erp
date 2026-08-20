@@ -16,20 +16,7 @@ import { Input } from "@/components/ui/input";
 import { useDailyOverride, useUpsertDailyOverride } from "@/modules/hr/hooks/use-attendance";
 import { manilaToday } from "@/modules/hr/lib/manila-date";
 
-/**
- * The two rules HR can bend for ONE date, in one dialog because they are one decision:
- *
- *   • Grace period    — how late an arrival still counts as on time.
- *   • Full day at     — how many hours WORKED make the day whole, however early they leave.
- *
- * The second exists for the days a DOLE advisory (or the company) shortens the compensable
- * day: "six hours is a full day today". Somebody on 8:00–18:00 who clocks out at 15:00 has
- * worked six hours once the unpaid meal is out, so the day is whole — no undertime.
- *
- * IT CAN ONLY EVER FORGIVE. Falling short of the bar costs nothing that it did not already
- * cost, so a part-timer or someone with an approved half-day is priced exactly as before.
- * Lateness is deliberately not forgiven by it either — that is what the grace field is for.
- */
+/** The two rules HR can bend for ONE date, in one dialog because they are one decision: */
 
 /** 360 → "6", 390 → "6.5". The rule is announced in hours; it is stored in minutes. */
 function minutesToHoursInput(minutes: number | null | undefined): string {

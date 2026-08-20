@@ -4,23 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { LocationFix } from "@/modules/hr/types/attendance";
 
-/**
- * Ask the browser where it is BEFORE the employee needs it.
- *
- * A cold geolocation fix takes 2–15 seconds. Requesting it when someone taps "I'm at the
- * office" would make them stand there watching a spinner, and `time_in` is stamped when the
- * request reaches the server — so the delay would read as lateness. Instead the request
- * starts the moment the dialog OPENS, and by the time anyone taps, the answer is already
- * sitting in a ref.
- *
- * The options matter as much as the timing:
- *   • `enableHighAccuracy: false` — high accuracy is what makes GPS slow, and it buys
- *     nothing against a fence measured in hundreds of metres.
- *   • `maximumAge: 60_000` — a fix from the last minute is reused instantly. Reopening the
- *     dialog is then free.
- *   • `timeout: 5_000` — past five seconds we stop waiting. No fix is a legitimate answer:
- *     the office network alone can verify the clock-in.
- */
+/** Ask the browser where it is BEFORE the employee needs it. */
 const FAST_FIX: PositionOptions = {
   enableHighAccuracy: false,
   maximumAge: 60_000,

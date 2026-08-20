@@ -52,7 +52,7 @@ export function useEmployees(status: "active" | "former" | "all" = "active") {
 }
 
 /**
- * MF-18 — the three lifecycle transitions. All invalidate the whole employee key, because each one
+ * The three lifecycle transitions. All invalidate the whole employee key, because each one
  * moves the record between the "active" and "former" lists as well as changing the record itself.
  */
 export function useSeparateEmployee() {
@@ -157,14 +157,7 @@ export function useSalaryHistory(id: number) {
   });
 }
 
-/**
- * Hand-corrections to the two timelines.
- *
- * All six invalidate the whole employee key rather than a narrower one, and that breadth is load-
- * bearing in both directions: the employment timeline is embedded in the employee record itself
- * (`employment_history`), and a compensation edit can move `base_salary` on the record too, because
- * the server re-syncs the column to whichever entry is in force today.
- */
+/** Hand-corrections to the two timelines. */
 export function useCreateEmploymentHistory(employeeId: number) {
   const qc = useQueryClient();
   return useMutation({
@@ -280,7 +273,7 @@ export function useReopenOnboarding() {
   });
 }
 
-/** Loans & cash advances for one employee (Slice 11b). HR only. */
+/** Loans & cash advances for one employee. HR only. */
 export function useEmployeeLoans(id: number | undefined) {
   return useQuery({
     queryKey: [...EMPLOYEES_KEY, id, "loans"] as const,
@@ -315,7 +308,7 @@ export function useReopenEmployeeLoan(id: number) {
   });
 }
 
-// --- The employee's own loans (Slice B15) -----------------------------------------
+// --- The employee's own loans -----------------------------------------
 
 const MY_LOANS_KEY = ["hr", "me", "loans"] as const;
 

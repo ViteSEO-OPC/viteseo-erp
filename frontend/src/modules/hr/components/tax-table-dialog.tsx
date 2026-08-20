@@ -28,23 +28,7 @@ function range(min: number, max: number | null): string {
     : `${peso.format(min)} – ${peso.format(max)}`;
 }
 
-/**
- * The withholding-tax table, readable (FIN-027).
- *
- * The TRAIN bands were moved out of a hardcoded array into `hr_tax_versions` / `hr_tax_brackets`
- * precisely so somebody could check them against the BIR's own schedule — and then nothing exposed
- * them, so the only way to see what payroll withholds against was to query the database. Data nobody
- * can read is not auditable just because it stopped being a constant.
- *
- * READ-ONLY BY DESIGN, and the dialog says so. Tax rates come from statute; a wrong figure here would
- * mis-withhold for every employee at once, and because the versions are effective-dated it would also
- * change what already-closed periods are judged against. Loading them stays a migration, where it goes
- * through review.
- *
- * The date picker exists because there is no single "the" table: `as_of` selects the version in force
- * on that day, which is how you check what a past period was actually priced under rather than what
- * today's rules would say about it.
- */
+/** The withholding-tax table, readable. */
 export function TaxTableDialog({
   open,
   onOpenChange,

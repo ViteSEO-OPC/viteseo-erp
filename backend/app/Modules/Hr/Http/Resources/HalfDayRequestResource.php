@@ -35,12 +35,6 @@ class HalfDayRequestResource extends JsonResource
             // The hours this request actually leaves the employee owing, resolved from their own
             // effective schedule. HR is deciding whether someone may take a morning off; what the
             // afternoon then is, is the other half of that question.
-            //
-            // NULL IS THE WARNING. It means the worked half has no window configured, and the
-            // platform will therefore decline to judge that day's lateness at all rather than
-            // measure it against a shift nobody defined. The schedule form now requires these, so
-            // a null here is a pre-existing schedule that still needs one — surfaced at the moment
-            // it starts to matter instead of discovered later in a payslip.
             'worked_window' => $this->workedWindow(),
             'created_at' => $this->created_at,
         ];

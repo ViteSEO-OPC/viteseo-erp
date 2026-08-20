@@ -18,14 +18,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * HR-declared non-working days — a typhoon, a shutdown (Slice B).
- *
- * One decision (non-working, paid or not) read by three consumers that must never disagree:
- * the roster, the violation engine and payroll. These tests pin all three to the same
- * declaration, and pin the thing that makes the design worth it — flipping paid ⇄ unpaid moves
- * every day at once, because nothing is stored per employee.
- */
+/** HR-declared non-working days — a typhoon, a shutdown. */
 class WorkSuspensionTest extends HrTestCase
 {
     use RefreshDatabase;

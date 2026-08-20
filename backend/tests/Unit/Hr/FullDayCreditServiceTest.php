@@ -8,9 +8,6 @@ use Tests\TestCase;
 /**
  * FullDayCreditService is pure — no DB. These pin the "minimum hours = full day" math before
  * it can move anybody's pay. Times are Manila minute-of-day (08:00 = 480, 18:00 = 1080).
- *
- * The baseline day throughout is 08:00–18:00 with a 12:00–13:00 unpaid meal, so the paid day
- * is nine hours and the declared bar is six.
  */
 class FullDayCreditServiceTest extends TestCase
 {

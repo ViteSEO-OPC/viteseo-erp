@@ -37,9 +37,6 @@ class AttendanceService
     /**
      * HR-declared non-working days in an inclusive range, as 'Y-m-d' => is_paid.
      *
-     * Thin wrapper so every reader in this file goes through one name, the way
-     * nonWorkingHolidays() already does — the service memoizes the query itself.
-     *
      * @return array<string, bool>
      */
     private function suspensionsBetween(string $start, string $end): array
@@ -50,10 +47,6 @@ class AttendanceService
     /**
      * Non-working holidays in an inclusive range, as date 'Y-m-d' => type. Fetched ONCE per
      * caller (never per day) — the day loops below run per employee per date.
-     *
-     * `special_working` is filtered out on purpose: it is an ordinary working day and must keep
-     * behaving like one. Unclassified holidays (type NULL — HR hasn't set them yet) are also
-     * excluded: we never guess whether an unclassified date is a non-working day.
      *
      * @return array<string, string>
      */
@@ -68,12 +61,7 @@ class AttendanceService
     }
 
     /**
-     * Per-request memo of one employee's attendance rows for a date range (Slice 15).
-     *
-     * A payroll run asks the same question four times per employee — unpaidDaysDetailFor,
-     * restDayWorkedMinutesFor, nightMinutesFor and overtimeCapacityFor each ran their own
-     * `where employee_id = ? and work_date between ? and ?`. The filters differ only in whether
-     * they require both punches, which is cheaper to apply in PHP than in a second round trip.
+     * Per-request memo of one employee's attendance rows for a date range.
      *
      * @var array<string, \Illuminate\Database\Eloquent\Collection<int, Attendance>>
      */
@@ -100,10 +88,6 @@ class AttendanceService
     /**
      * Dates in a range with APPROVED overtime, as a 'Y-m-d' => true set.
      *
-     * Range-keyed, like every other per-employee lookup here: keying it by employee alone would
-     * return one range's answer for another and only ever show up in a full payroll run, never
-     * in a test that asks about a single person.
-     *
      * @var array<string, array<string, true>>
      */
     private array $otDatesMemo = [];
@@ -129,17 +113,7 @@ class AttendanceService
         return $this->otDatesMemo[$key];
     }
 
-    /**
-     * Did this day clear the minimum-hours bar HR declared for its date?
-     *
-     * The single place that question is answered, so the payslip and the "Undertime" badge can
-     * never disagree about it — the two read it from here, exactly as they both read the
-     * half-day window from HalfDayWindowService for the same reason.
-     *
-     * Answering `false` always means "treat the day exactly as before": this can only remove a
-     * charge, never add one (see FullDayCreditService). Short-circuits on the common cases, so
-     * an ordinary day — no bar declared, or nobody clocked in — costs nothing to ask about.
-     */
+    /** Did this day clear the minimum-hours bar HR declared for its date? */
     private function creditedFullDay(?Attendance $row, array $eff, bool $overtimeApproved): bool
     {
         if (($eff['min_full_day_minutes'] ?? null) === null || ! $row || ! $row->time_in) {
@@ -178,12 +152,6 @@ class AttendanceService
     /**
      * TODAY's rules for one employee, for their own clock panel — the grace period in force and,
      * when HR declared one, the minimum-hours bar plus the clock time they reach it at.
-     *
-     * WHY THE EMPLOYEE IS TOLD AT ALL. A shortened compensable day that only HR can see benefits
-     * nobody: the whole point is that people may leave once they have put the hours in, and they
-     * cannot act on a rule they were never shown. The hr_daily_overrides endpoint itself is
-     * HR-only (it WRITES the rule for everybody), so the day's answer rides along with the
-     * employee's own attendance instead.
      *
      * @return array<string,mixed>
      */
@@ -247,13 +215,6 @@ class AttendanceService
     /**
      * The employee's shift that is currently IN PROGRESS — clocked in, not yet out — even
      * when it began on an earlier Manila date.
-     *
-     * WHY (Slice 3): a work_date is the Manila date the shift STARTED, so a graveyard shift
-     * clocked in at 22:00 on the 1st is stored on the 1st. Every clock action used to look up
-     * "today's" row, so at 06:00 on the 2nd the employee was told "You have not clocked in
-     * today" and simply could not clock out. Night differential and past-midnight overtime
-     * were therefore unreachable through the UI — only an HR correction could produce such a
-     * row. This resolves the shift instead of the calendar day.
      */
     private function openRow(Employee $employee): ?Attendance
     {
@@ -288,10 +249,6 @@ class AttendanceService
      * Refuse anything that assumes the shift is under way while a DEFERRED punch is still
      * in the future (`early_clock_in_mode = defer`: pressed at 07:30, counts from 08:00).
      *
-     * Without this, clocking out at 07:45 would produce a row whose time_out precedes its
-     * time_in — negative worked minutes, floored to zero, and a day that silently reads as
-     * having worked nothing. Better to say plainly that the shift hasn't started.
-     *
      * @param  string  $field  the error key the calling action already uses
      */
     private function assertShiftStarted(Attendance $att, string $field): void
@@ -323,10 +280,6 @@ class AttendanceService
      * today isn't one of their workdays (there is no shift to be early for), or the
      * schedule has no start time at all — FALLBACK_START is a guess, and a guess must never
      * lock someone out of their own time clock, nor silently move their punch.
-     *
-     * On an approved half day this is the worked half's start, so `block` mode holds an
-     * afternoon-only employee to 1:00 PM rather than waving them in at 8:00 AM, and `defer`
-     * re-stamps an early punch to the half they are actually there for.
      *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
@@ -389,11 +342,6 @@ class AttendanceService
         // HR marked as needing permission — so pressing the button files a request instead of
         // punching in. The panel needs BOTH facts, whether the button asks and how the current
         // request stands, because the same button has three meanings depending on the answer.
-        //
-        // `requiredTypeFor` is the single reader of the two switches that decide this. The panel
-        // never re-derives it: a browser copy of "is today a workday" would ignore custom
-        // workdays and daily overrides, and a browser copy of the switches would go stale the
-        // moment HR changed one.
         $requiredType = $this->workRequests->requiredTypeFor($employee, $today);
 
         // Fetched whenever the day COULD have produced one, not only when it currently requires
@@ -482,15 +430,6 @@ class AttendanceService
         // agree to spend, and a suspension HR flagged this way is a safety decision about who is
         // in the building. The punch is not lost: WorkRequestService records this moment and an
         // approval stamps attendance at it. It is simply not attendance until then.
-        //
-        // Both switches are read through requiredTypeFor(), the same call the clock panel uses,
-        // so the button can never offer something this gate would refuse. A null answer means the
-        // day needs no asking — either it is an ordinary workday, or HR has turned the gate off —
-        // and the punch falls through to be recorded normally.
-        //
-        // Deliberately BEFORE the open-shift and already-clocked-in checks: on an approved
-        // request the row already exists, and "you have already clocked in today" is the right
-        // answer to a second press. This gate is only ever reached without one.
         $requiredType = $this->workRequests->requiredTypeFor($employee, $this->today());
 
         if ($requiredType !== null) {
@@ -557,10 +496,6 @@ class AttendanceService
         // employee gets to press the button when they walk in and stop thinking about it;
         // the company doesn't pay for the early minutes and nobody is turned away at the
         // door. Null once the shift has started — from then on this is an ordinary punch.
-        //
-        // Deliberately re-stamped at write time rather than queued for a background job to
-        // apply later: the shift start is already known, so the two produce an identical
-        // record, and one of them can't fail to run.
         $deferredTo = $this->policy->get()->early_clock_in_mode === 'defer'
             ? $this->deferredStartFor($eff, $local, $offHalf)
             : null;
@@ -571,18 +506,13 @@ class AttendanceService
         $att->time_in = $deferredTo?->copy()->utc() ?? now();
         // Judged at the time it will COUNT as, so a deferred punch is never late: the
         // arrival being re-stamped to the shift start is exactly what "on time" means.
-        //
-        // A rest day only reaches this line with the work-request gate turned OFF, and it has no
-        // shift to be judged against — expectedStart() would fall back to FALLBACK_START and
-        // call a lunchtime start on a Saturday five hours late. `present` is the same status an
-        // approved work request writes, so the two routes onto a rest day agree.
         $att->status = $isWorkday
             ? $this->arrivalStatus($eff, $deferredTo ?? $local, $offHalf)
             : 'present';
         $att->location_verified_by = $verifiedBy;
         $att->save();
 
-        // Slice 16 — a clock-in on an approved paid-leave day gives the credit back, the same
+        // A clock-in on an approved paid-leave day gives the credit back, the same
         // settlement an HR correction performs and from the same fact. Payroll already prices
         // this day as worked off `time_in` alone, so without this the employee was paid AND
         // still charged the credit. Safe here: the guard above throws on a second punch, and
@@ -597,11 +527,6 @@ class AttendanceService
      * effective schedule start plus its grace. Shared by the live clock and by HR's
      * approval of a field time-in, so an approved selfie is marked late on exactly the
      * same rule as a punch at the same minute would have been.
-     *
-     * On an approved half day this is judged against the half they were expected to work, not
-     * against the whole shift: somebody with the morning off who walks in at 1:00 PM is on time,
-     * and calling that five hours late used to cost them a violation and — with the per-N-lates
-     * penalty on — a full day's pay.
      *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $local
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
@@ -621,11 +546,6 @@ class AttendanceService
     /**
      * Write a clock-in that a human has already verified, stamped at the moment it was
      * SUBMITTED rather than the moment it was approved.
-     *
-     * This is the approval half of the off-site selfie path. It deliberately skips the
-     * geofence (HR's eyes on the photo *are* the verification) and the strict-clock-in
-     * window (HR is overriding, which is the point of a manual review), but it keeps the
-     * duplicate guard: two time-ins for one day is a data error whoever creates it.
      *
      * @param  Carbon  $at  when the employee submitted — becomes `time_in` verbatim
      * @param  string  $verifiedBy  an Attendance::LOCATION_* value
@@ -786,18 +706,8 @@ class AttendanceService
      */
     public function adjust(Employee $employee, string $workDate, array $data): Attendance
     {
-        // FIN-008 — attendance is the INPUT payroll priced this day from, so it is frozen once
+        // Attendance is the INPUT payroll priced this day from, so it is frozen once
         // that day has been paid.
-        //
-        // PayrollFreezeService was already injected into the reimbursement, early-out, half-day,
-        // overtime and leave services — every path that can change what a period should have paid
-        // — but not into this one, which is the most direct of them all. HR could rewrite the
-        // attendance behind a disbursed payslip, leaving the record and the payment permanently
-        // disagreeing, with the payment being the one that actually happened and no way to pay the
-        // difference (FIN-010).
-        //
-        // Only a LOCKED run or a DISBURSED payslip freezes (see runCovering) — a merely computed
-        // period stays editable, because re-running it is the correct way to absorb the change.
         $this->freeze->assertOpen($employee->id, $workDate, null, 'adjust this attendance record');
 
         $tz = config('app.timezone_local');
@@ -806,7 +716,7 @@ class AttendanceService
             'work_date' => $workDate,
         ]);
 
-        // F-7: capture the row BEFORE it is overwritten. An HR edit to time_in is an edit
+        // Capture the row BEFORE it is overwritten. An HR edit to time_in is an edit
         // to someone's attendance record — and once minutes become money, to their pay.
         // adjust() overwrites in place, so without this the old values are destroyed.
         $wasExisting = $att->exists;
@@ -818,7 +728,7 @@ class AttendanceService
             'note' => $att->note,
         ] : null;
 
-        // Slice 16 — HR may assert the status outright. Left blank it is DERIVED from the times
+        // HR may assert the status outright. Left blank it is DERIVED from the times
         // exactly as before (no time-in ⇒ absent; otherwise present vs late against the
         // employee's schedule + grace). Given explicitly it WINS, even against the clock: that is
         // the whole point — "he worked, he just forgot to punch in".
@@ -879,12 +789,12 @@ class AttendanceService
         $att->source = Attendance::SOURCE_MANUAL;
         $att->save();
 
-        // Slice 16 — a paid-leave day that turns out to have been WORKED gives the credit back.
+        // A paid-leave day that turns out to have been WORKED gives the credit back.
         // Done here, on a discrete HR action, and stamped: payroll re-runs constantly, so
         // refunding there would inflate the balance a little on every run.
         $this->settleLeaveCreditFor($employee, $att);
 
-        // F-7: log the correction with before/after. Every other service in the module
+        // Log the correction with before/after. Every other service in the module
         // audit-logs its writes; this one silently rewrote attendance until now.
         $employee->loadMissing('user');
         $name = $employee->user?->name ?? $employee->name;
@@ -906,7 +816,7 @@ class AttendanceService
 
         $this->forgetRows(); // the row just changed
 
-        // Slice 16 — recompute the month the EDIT is in, not "this month". recompute() defaults
+        // Recompute the month the EDIT is in, not "this month". recompute() defaults
         // to the current month, so correcting a June date left June's flags untouched: a late
         // added there raised no flag, and a late removed there kept its old one forever.
         // Attendance is the source of truth for violations, so the flags must follow the edit.
@@ -917,24 +827,7 @@ class AttendanceService
 
     /**
      * Give back (or re-take) a paid-leave credit when a leave day turns out to have been worked
-     * — or stops having been worked (Slice 16).
-     *
-     * WHY PER DAY, NOT PER REQUEST. Leave is stored as a date RANGE. Someone who books Mon–Fri
-     * and comes in only on Wednesday must get exactly ONE credit back — cancelling the request
-     * would refund all five and dock the other four. So this refunds a single day at a time.
-     *
-     * WHY IDEMPOTENT. `leave_credit_refunded_at` stamps the row, so editing the same day twice
-     * can't refund twice, and clearing the attendance puts the credit back where it was.
-     *
-     * Unpaid leave draws no credit, so there is nothing to refund — only the pay changes, and
-     * that is handled in the day loop.
-     *
-     * RUNS ON THE EMPLOYEE'S OWN CLOCK-IN TOO, not only on an HR correction. Payroll already
-     * treats a `time_in` as proof the leave wasn't taken (see the day loop) without anyone
-     * approving it, so leaving the credit spent until HR happened to open the row paid the day
-     * and charged the credit anyway. The worry in adjust() about refunding from a path that
-     * re-runs does not apply here: clockIn() writes once per employee per day and throws on a
-     * second punch.
+     * — or stops having been worked.
      */
     private function settleLeaveCreditFor(Employee $employee, Attendance $att): void
     {
@@ -981,23 +874,7 @@ class AttendanceService
         }
     }
 
-    /**
-     * How much balance ONE date inside a leave request actually consumed at approval.
-     *
-     * The refund has to mirror LeaveService::computeDays(), which is what spent the credit in
-     * the first place. A refund bigger than the deduction invents balance out of nothing, and
-     * the `max(0, …)` in moveLeaveCredit() only hides that while the employee has taken no
-     * other leave the same year.
-     *
-     * ZERO FOR A HALF DAY, and not merely because 1.0 ≠ 0.5. On a half day the employee is
-     * SUPPOSED to come in and work the other half, so a clock-in there is expected rather than
-     * evidence the leave went unused — refunding it would hand back the credit of every half
-     * day anyone ever files. The pay side already reasons the same way (see the day loop,
-     * where the half-day branch deliberately runs before the clocked-in check).
-     *
-     * ZERO ON WEEKENDS AND NON-WORKING HOLIDAYS. computeDays() skips them, so a date inside a
-     * leave range that happens to be one never cost a credit, and working it cannot return one.
-     */
+    /** How much balance ONE date inside a leave request actually consumed at approval. */
     private function creditSpentOn(LeaveRequest $leave, Carbon $date): float
     {
         // An UNLIMITED type draws no credits at all (`deducted_from = 'none'` — see
@@ -1019,18 +896,7 @@ class AttendanceService
         return 1.0;
     }
 
-    /**
-     * Settle every day of a leave request against the attendance that ALREADY exists.
-     *
-     * WHY. The two facts can arrive in either order. settleLeaveCreditFor() covers "attendance
-     * lands on a day already on leave" — a clock-in, or an HR correction. This covers the
-     * reverse: leave approved (typically backdated) over days the employee demonstrably worked.
-     * Payroll prices those days as worked off `time_in` either way, so without this the approval
-     * spent a credit for a day it also paid in full.
-     *
-     * Delegates per day, so every rule about WHICH days actually hold a credit — half days,
-     * weekends, non-working holidays, unlimited types — is stated once, in creditSpentOn().
-     */
+    /** Settle every day of a leave request against the attendance that ALREADY exists. */
     public function settleLeaveCreditsFor(LeaveRequest $leave): void
     {
         $employee = $leave->relationLoaded('employee')
@@ -1053,13 +919,7 @@ class AttendanceService
         }
     }
 
-    /**
-     * How much of a leave request's deduction has already been handed back, day by day.
-     *
-     * Reversing an approval must give back what the balance is STILL holding, not the request's
-     * full `days` — the difference is credit invented from nothing. Recomputed from
-     * creditSpentOn() rather than assumed to be 1.0 per stamped row, so the two can never drift.
-     */
+    /** How much of a leave request's deduction has already been handed back, day by day. */
     public function refundedCreditFor(LeaveRequest $leave): float
     {
         return (float) Attendance::where('employee_id', $leave->employee_id)
@@ -1072,15 +932,7 @@ class AttendanceService
             ->sum(fn (Attendance $att) => $this->creditSpentOn($leave, $att->work_date));
     }
 
-    /**
-     * Drop the refund stamps a leave request left on attendance.
-     *
-     * For reopen(): the request goes back to pending, so the days it covered stop being leave
-     * at all and the stamps stop describing anything. Left behind, a re-approval would deduct
-     * the full request again while every stamped row refused to refund a second time (the
-     * settlement is idempotent ON that stamp) — quietly charging the employee for days they
-     * worked. Cleared, the re-approval settles from scratch and lands in the same place.
-     */
+    /** Drop the refund stamps a leave request left on attendance. */
     public function clearLeaveCreditStamps(LeaveRequest $leave): void
     {
         Attendance::where('employee_id', $leave->employee_id)
@@ -1145,7 +997,7 @@ class AttendanceService
         $employees = Employee::with('workSchedule')->get();
         $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
         $onLeaveIds = $this->onLeaveIds($date);
-        // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
+        // A non-working holiday is not an absence — nobody is expected in.
         $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
         // Neither is a day HR cancelled — paid or unpaid, nobody was expected in. Counting
         // the whole company "absent" on a typhoon day is the exact failure this prevents.
@@ -1224,7 +1076,7 @@ class AttendanceService
 
         $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
         $leaveMap = $this->onLeaveMap($date);
-        // A non-working holiday is not an absence (Slice 1) — nobody is expected in.
+        // A non-working holiday is not an absence — nobody is expected in.
         $isHoliday = $this->nonWorkingHolidays($date, $date) !== [];
         // HR cancelled work on this date. Null = an ordinary day; true/false = paid/unpaid.
         // Derived here rather than stored per employee, so flipping the declaration moves the
@@ -1251,7 +1103,7 @@ class AttendanceService
                     : null;
 
                 if ($att && $att->status_override) {
-                    $status = $att->status; // Slice 16 — HR asserted this; it wins outright.
+                    $status = $att->status; // HR asserted this; it wins outright.
                 } elseif ($att && $att->time_in) {
                     $status = $att->status; // present | late
                 } elseif ($leaveName) {
@@ -1302,7 +1154,7 @@ class AttendanceService
                     'break_minutes' => (int) ($att?->break_minutes ?? 0),
                     'hours_worked' => $att ? (float) $att->hours_worked : 0,
                     'status' => $status,
-                    // Slice 16 — lets the UI show HR that this status was set by hand.
+                    // Lets the UI show HR that this status was set by hand.
                     'status_override' => (bool) ($att?->status_override),
                     'leave_type' => $leaveName,
                     // 'AM' | 'PM' | 'BOTH' | null — the half taken OFF (approved half-day request
@@ -1335,14 +1187,9 @@ class AttendanceService
      * @return array<int, string>
      */
     /**
-     * Minutes actually WORKED on a scheduled rest day (RD-1), per date — the basis for the rest-day
+     * Minutes actually WORKED on a scheduled rest day, per date — the basis for the rest-day
      * premium. A rest day is any date the employee's effective schedule says is not a workday; the
      * salary doesn't cover it, so working it is extra work.
-     *
-     * Dates that are also HOLIDAYS are excluded: holidayPremiumFor() already pays those, and stacking
-     * both premiums on one day is the double-premium case left to a later refinement.
-     *
-     * Worked minutes = the clock window minus the unpaid meal. Needs both punches; management earns none.
      *
      * @param  array<string, string>  $holidayMap  date => holiday type (to exclude)
      * @return array<string, int> date 'Y-m-d' => worked minutes
@@ -1401,27 +1248,6 @@ class AttendanceService
      * One row's worked window in work-date minute coordinates — the single place that decides
      * what a shift's punches MEAN, including the one that never got closed (item 5).
      *
-     * ABANDONED SHIFTS ARE DERIVED, NEVER STAMPED. A row with a time-in and no time-out, whose
-     * scheduled end passed more than the policy's allowance ago, resolves to the SCHEDULED END.
-     * Nothing is written: deriving is idempotent, cannot rewrite a paid period, and needs no
-     * scheduler — which this project does not have. The employee is paid a full ordinary shift
-     * including the night differential, and:
-     *
-     *   • OVERTIME IS STRUCTURALLY ZERO, not merely absent. Overtime is `out − scheduled end`,
-     *     and the derived `out` IS the scheduled end, so the subtraction cannot be positive.
-     *     That is the safety property: auto-resolution can never manufacture overtime.
-     *   • AN APPROVED OT REQUEST DOES NOT EXTEND IT. Approval is permission, not proof — deriving
-     *     an end from one would pay overtime nobody clocked, which is the exact failure the
-     *     approved-vs-punched overlap match exists to prevent. Such a day belongs in HR's queue.
-     *
-     * THE ALLOWANCE IS WHAT MAKES THIS SAFE. Without it a mid-cycle preview would resolve an end
-     * for someone who is on shift RIGHT NOW and pay hours not yet worked. Past `scheduled end +
-     * allowance` they are not still working, they forgot.
-     *
-     * NO SCHEDULED END, NO DERIVATION: a rest day or non-workday has no shift to be the end of,
-     * and an employee with no schedule has nothing to resolve against. Those rows stay unpriced
-     * and surface in the review queue instead of being guessed at.
-     *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for the row's date
      * @return array{in:int, out:int, derived:bool}|null null when the row cannot be priced
      */
@@ -1451,18 +1277,6 @@ class AttendanceService
 
     /**
      * `workedWindowFor` with its reasoning exposed.
-     *
-     * The pay paths only ever need the window, so they use the wrapper above and this stays the one
-     * implementation. The review queue needs the DISCARDED branch — which of the refusals fired, and
-     * when the cutoff falls — and deriving that a second time somewhere else is how a queue starts
-     * disagreeing with the payslip it is supposed to be about.
-     *
-     * AN APPROVED HALF DAY MOVES THE END. Somebody who worked the morning and forgot to punch
-     * out went home at noon, not at 5 — resolving to the full-day end credited them five hours
-     * they were not there for, and handed the night-differential window the same five hours to
-     * price. The overtime baseline deliberately does NOT move with it (see
-     * autoOvertimeMinutesFor): overtime is still measured against the full scheduled end, so
-     * working into a half you filed off earns no premium on top of the half-day deduction.
      *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for the row's date
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
@@ -1543,36 +1357,6 @@ class AttendanceService
 
     /**
      * Open shifts HR should look at — the stale-attendance review queue (item 6).
-     *
-     * WHAT IT IS FOR. Auto-closing a forgotten punch at the scheduled end (item 5) settles the pay
-     * for the ordinary case and nothing else. This lists what is left, and it is deliberately two
-     * different kinds of row rather than one undifferentiated pile:
-     *
-     *   • `needs_fix` — the day CANNOT be priced. A rest day has no shift to be the end of, an
-     *     employee with no schedule has nothing to resolve against, and a punch after the person's
-     *     own end is incoherent. These days are being paid wrongly RIGHT NOW and only an HR
-     *     correction fixes them. This is the whole point of the queue.
-     *   • `auto_closed` — the day IS priced, at the scheduled end, and the money is right. The
-     *     record is merely still open, which is untidy and leaves the employee's dashboard saying
-     *     they are clocked in. Hygiene, not an error.
-     *
-     * Mixing the two would bury the handful that cost money under the routine ones, which is the
-     * failure mode the queue exists to avoid, so the status is on every row and the UI defaults to
-     * `needs_fix`.
-     *
-     * TWO DIFFERENT CLOCKS, deliberately. The policy allowance decides when PAY stops waiting;
-     * `MAX_OPEN_SHIFT_HOURS` decides when the EMPLOYEE can no longer close the shift themselves and
-     * the correction must come from HR. They answer different questions and are both reported.
-     *
-     * AN APPROVED OVERTIME REQUEST PROMOTES A ROW. Auto-closure caps the day at the scheduled end,
-     * so an approved request on that date pays nothing — by design (approval is permission, not
-     * proof). But someone approved it, which is evidence the overtime happened, and that
-     * contradiction is exactly what a human should adjudicate. Such a row is never `auto_closed`.
-     *
-     * NOT LISTED: shifts still inside their allowance. Their cutoff has not passed, so the person
-     * may simply still be at work — putting them here would ask HR to chase people who are fine.
-     * The window is short and self-clearing: a cutoff sits on the row's own date, so anything older
-     * than today has necessarily passed it.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -1681,7 +1465,7 @@ class AttendanceService
     public const NIGHT_END_MIN = 6 * 60;
 
     /**
-     * Minutes of a worked window that fall inside the night window (ND-1). Both arguments are
+     * Minutes of a worked window that fall inside the night window. Both arguments are
      * minute-of-day on the work date; `out` may exceed 1440 when the shift crosses midnight. In that
      * coordinate space the night bands are [00:00–06:00] of the work date and [22:00 → next 06:00].
      * Pure/static so the overlap arithmetic is unit-testable without a DB.
@@ -1722,14 +1506,8 @@ class AttendanceService
     }
 
     /**
-     * Night-shift minutes per date (ND-1) — for EVERY worked day, not just overtime, since the PH
+     * Night-shift minutes per date — for EVERY worked day, not just overtime, since the PH
      * night differential applies to all night work. Needs both punches; management earns none.
-     *
-     * UNPAID BREAK: the differential is for hours WORKED, so the unpaid meal has to come out — but the
-     * clock doesn't record when it was taken. We therefore subtract only the part that MUST have fallen
-     * at night: whatever the daytime portion of the shift couldn't absorb. A graveyard 22:00–06:00 with
-     * a 60-min lunch loses exactly 60 (no daytime to absorb it); an evening 14:00–23:30 loses none (its
-     * 8 daytime hours could hold the whole break). Conservative by construction — it never under-pays.
      *
      * @return array<string, int> date 'Y-m-d' => night minutes
      */
@@ -1781,45 +1559,10 @@ class AttendanceService
     }
 
     /**
-     * Auto-detected overtime (OT-5): minutes clocked out PAST the scheduled end, per date. Counted
+     * Auto-detected overtime: minutes clocked out PAST the scheduled end, per date. Counted
      * only on scheduled workdays that have BOTH punches — a missing clock-out is credited to the
      * scheduled end (slice B) and can never become overtime. A day whose overrun is under
      * `thresholdMinutes` is ignored, so trivial overruns don't create pay. Management earns none.
-     *
-     * Rest-day work is deliberately NOT auto-detected: there is no shift to be "beyond", and pricing
-     * a whole worked rest day belongs to the rest-day premium (Phase 3). File it as an OT request.
-     *
-     * Each entry also reports how much of that overrun fell in the NIGHT window, so the night
-     * differential can be compounded onto the overtime rate for those minutes (ND-1 tightening).
-     *
-     * ─────────────────────────────────────────────────────────────────────────────────────────
-     * DO NOT "FIX" THE LATE-ARRIVAL CASE BY NETTING. Measuring from `end_time` is deliberate.
-     *
-     * Arrive an hour late, leave an hour past the shift, and this pays 60 minutes of overtime
-     * while the late hour is separately docked. That looks like the employee profits from being
-     * late, and it is tempting to subtract one from the other. Two settled rulings say no:
-     *
-     *   • Rule 2e — overtime is measured against `end_time`, NEVER against hours worked:
-     *         overtimeMinutes = max(0, time_out − end_time)     ✅
-     *         overtimeMinutes = hoursWorked − expectedHours     ❌ never
-     *     Someone who works 08:00–18:00 straight through their meal has a 10-hour clock reading
-     *     and ZERO overtime, because they left at their scheduled end. Working through lunch is
-     *     not the same as working late.
-     *
-     *   • Finding F-4 — `netOvertime = minutesPastEnd − lateMinutes − undertimeMinutes` is
-     *     NON-COMPLIANT. Labor Code Art. 88 forbids offsetting undertime with overtime, because
-     *     overtime carries a ≥125% premium while undertime is docked at the plain rate — netting
-     *     shortchanges the worker. The deduction ledger and the OT ledger stay separate.
-     *
-     * Note that `workedMinutes − expectedMinutes` is NOT a third option: with the meal equal to
-     * the scheduled break it reduces algebraically to `minutesPastEnd − lateMinutes`, i.e. exactly
-     * the netting F-4 rejected; and with the RECORDED lunch it manufactures overtime out of a
-     * skipped meal, which is the case 2e exists to prevent.
-     *
-     * The answer to the apparent "profit" is that `approved_only` is the default: unapproved
-     * late-staying simply isn't overtime, so there is no premium to game. Auto mode remains
-     * available for companies that want it, and the Rules page warns about exactly this.
-     * ─────────────────────────────────────────────────────────────────────────────────────────
      *
      * @return array<string, array{minutes:int, night:int}> date 'Y-m-d' => overtime minutes
      */
@@ -1866,7 +1609,7 @@ class AttendanceService
 
             $minutes = $outMin - $endMin;
             if ($minutes > 0 && $minutes >= max(0, $thresholdMinutes)) {
-                // FIN-039 — the daily cap is applied HERE, not by the caller, because this is the only
+                // The daily cap is applied HERE, not by the caller, because this is the only
                 // place that knows where the overtime window begins. Night differential is the reason
                 // it matters: capping 300 minutes to 240 has to mean "the first four hours after the
                 // shift", so the night portion is recomputed over the shortened window. Trimming the
@@ -1886,16 +1629,7 @@ class AttendanceService
     }
 
     /**
-     * One date's auto overtime, split into what pays automatically and what needs a human (FIN-039).
-     *
-     * `minutes` is what the run pays; `excess_minutes` is what the cap held back, which is not lost —
-     * it goes to the review queue and pays in full once an overtime request for that date is approved.
-     * `window_start` is carried so the period cap can recompute the night portion just as precisely.
-     *
-     * `$capMinutes` is NULLABLE, and null is not the same as 0: null means uncapped, 0 means nothing
-     * pays automatically. The policy column stores 0 for uncapped (its natural "unset" value), so the
-     * translation happens at the call site — a zero budget left over from the period cap must trim the
-     * day to nothing rather than waving it through.
+     * One date's auto overtime, split into what pays automatically and what needs a human.
      *
      * @return array{minutes:int, night:int, raw_minutes:int, excess_minutes:int, window_start:int}
      */
@@ -2008,38 +1742,7 @@ class AttendanceService
     public const OT_REVIEW_LATE = 'late_and_overtime';
 
     /**
-     * Auto-mode overtime that wants a human's attention (FIN-039, extended by item 7).
-     *
-     * TWO KINDS OF ROW, and the difference is what INACTION costs:
-     *
-     *   • `held` (reason `cap`) — a cap withheld these minutes and they do not pay until an overtime
-     *     request for that date is approved. Doing nothing means the employee is not paid.
-     *   • `flagged` (reasons `long_overtime` / `late_and_overtime`) — the day pays in full, already,
-     *     automatically. It is listed because it looks unusual. Doing nothing means it pays anyway.
-     *
-     * They must never be presented as one list: the first is a decision that withholds someone's
-     * money, the second is a notification, and a reader who confuses them will either sit on wages or
-     * assume a payment is still pending. `kind` exists so the UI cannot blur them.
-     *
-     * WHY THE FLAGGED KIND EXISTS AT ALL. Both caps ship as 0 and this used to return nothing in that
-     * configuration, so a stock install reviewed no overtime whatsoever — and 0 does not mean "no
-     * overtime", it means UNLIMITED. A clock-out corrected to the next morning paid nine hours at
-     * 125% with nobody notified. The review threshold is the version of a cap that cannot underpay
-     * anyone: it raises a flag and touches no money.
-     *
-     * DERIVED ON READ, and writing nothing, which is the whole design. The obvious alternative — having
-     * the payroll run file a pending overtime request for each over-cap day — is the FIN-038 mistake:
-     * a run that mutates the records it reads stops being safe to re-run, and a preview would start
-     * creating requests. Here the queue is a question asked of attendance, so it answers the same way
-     * however many times HR opens it, and re-running payroll changes nothing.
-     *
-     * An APPROVAL REDUCES OR REMOVES A HELD ITEM rather than resolving it, for the same reason. There
-     * is no separate state to clear: only the approved, punch-backed overlap stops being reported. HR's
-     * action is the existing approve button on the existing queue, not a new verb. A FLAGGED row has
-     * nothing to approve — it is already paying — so it stays until the attendance behind it changes.
-     *
-     * Still empty while `overtime_mode` is not `auto_after_threshold`: nothing is paid from the clock
-     * alone in those modes, so there is nothing here that a human did not already authorise.
+     * Auto-mode overtime that wants a human's attention (extended by item 7).
      *
      * @return list<array{employee_id:int, employee_no:string|null, name:string|null, work_date:string,
      *                    paid_minutes:int, excess_minutes:int, raw_minutes:int, approved_minutes:int,
@@ -2171,16 +1874,6 @@ class AttendanceService
     /**
      * Late minutes per date, measured from the scheduled start once the grace period is exhausted.
      *
-     * DELIBERATELY NOT the deduction ledger's figure. DeductionService reports 0 late minutes
-     * whenever `late_deduction_mode` is `none`, because there it is answering "how much do we
-     * charge for this". The question here is "did this person arrive late", which is true or false
-     * regardless of whether the company charges for it — the review queue has to flag the
-     * late-plus-overtime day at a company that never docks anyone, since the surprising half of
-     * that pairing is the overtime being paid, not the lateness being charged.
-     *
-     * Grace is honoured so a two-minute arrival inside a fifteen-minute grace is not "late"; the
-     * minutes reported are counted from the scheduled start, matching the roster's own badge.
-     *
      * @return array<string, int> date 'Y-m-d' => late minutes, omitted on days that were not late
      */
     public function lateMinutesFor(Employee $employee, string $start, string $end): array
@@ -2231,18 +1924,6 @@ class AttendanceService
     /**
      * Undertime minutes per date — how far short of the expected end the employee clocked out.
      *
-     * DELIBERATELY NOT the deduction ledger's figure, for the same reason lateMinutesFor() is not:
-     * DeductionService reports 0 undertime whenever `undertime_deduction_mode` is `none`, because
-     * there it is answering "how much do we charge for this". The question here is "did this person
-     * leave early", which is true or false whether or not the company docks anyone for it — an
-     * employee reading their own month has to see the shortfall even at a company that never
-     * charges it.
-     *
-     * The expected end is the HALF actually owed on a day with an approved half-day (mirroring
-     * DeductionService::workedWindow via HalfDayWindowService), a whole day off is skipped, and a
-     * missing clock-out is skipped rather than treated as leaving at midnight — an abandoned punch
-     * is auto-closed at the scheduled end (item 6), never undertime.
-     *
      * @return array<string, int> date 'Y-m-d' => undertime minutes, omitted on days that ran full
      */
     public function undertimeMinutesFor(Employee $employee, string $start, string $end): array
@@ -2274,9 +1955,6 @@ class AttendanceService
             // was allowed — flagging it would tell the employee they fell short of a rule they
             // actually met. Read through the same helper the payslip uses, so the badge and the
             // money can never disagree about whether the bar was cleared.
-            //
-            // Guarded on the bar existing first: without it this would query approved overtime
-            // for every employee-month anybody opens a report on.
             if (($eff['min_full_day_minutes'] ?? null) !== null) {
                 $otDates = $this->approvedOtDates($employee, $start, $end);
                 if ($this->creditedFullDay($row, $eff, isset($otDates[$day->toDateString()]))) {
@@ -2315,13 +1993,7 @@ class AttendanceService
     }
 
     /**
-     * The cycle-wide ceiling on auto overtime, applied after the daily one (FIN-039).
-     *
-     * Spent CHRONOLOGICALLY. The earliest dates in the cycle consume the budget and later ones fall to
-     * the review queue, because that is the only allocation an employee can predict while the month is
-     * still running: on the 3rd you either were inside the budget or you weren't, and nothing that
-     * happens on the 20th can retroactively take it away. Spending the budget on the largest days, or
-     * prorating it across the cycle, would make each day's pay a function of the whole month.
+     * The cycle-wide ceiling on auto overtime, applied after the daily one.
      *
      * @param  array<string, array<string, int>>  $map
      * @return array<string, array<string, int>>
@@ -2505,16 +2177,6 @@ class AttendanceService
      * Night minutes an hours-only ("legacy") approval earns, by placing its hours inside the
      * overtime the employee actually clocked.
      *
-     * CHRONOLOGICAL, EARLIEST FIRST, and that choice is the whole answer. Overtime accrues from the
-     * scheduled end forward, so an approval covering 2 of the 6 hours clocked authorises the FIRST
-     * two — "you may stay until 20:00", not "you may stay from midnight". It also matches how every
-     * other partial allocation in this module already behaves: `autoOvertimeEntry` caps a day from
-     * its window start, and the period cap is spent oldest-date first. The alternative, back-loading
-     * the hours to maximise the night overlap, would pay the most for the least evidence.
-     *
-     * Minutes already covered by exact approvals are skipped — those windows counted their own night
-     * portion, and counting them twice would inflate the differential.
-     *
      * @param  array{start:int, end:int}  $actual  the punch-backed overtime interval
      * @param  array<int, array{start:int, end:int}>  $windows  merged exact approvals, sorted
      */
@@ -2555,23 +2217,6 @@ class AttendanceService
     /**
      * Everything about this cycle's attendance that a human should see BEFORE payroll prices it
      * (item 12).
-     *
-     * WHY A SUMMARY AND NOT A SIXTH QUEUE. Every check below already exists and already has a
-     * screen — open shifts on Attendance, held and flagged overtime on the Overtime page. What did
-     * not exist was anyone asking them at the moment it matters. HR runs payroll from a different
-     * page entirely, so the queues were only found by whoever happened to visit; this puts the
-     * counts in front of the person about to turn attendance into money.
-     *
-     * COUNTS AND A DESTINATION, NOT ROWS. Each entry says how many and where to fix them, and the
-     * fixing happens on the screen that owns it. Restating the rows here would be a second place to
-     * keep in step with the first, and the queues already explain their own consequences far better
-     * than a strip on the payroll page can.
-     *
-     * ORDERED BY WHAT INACTION COSTS: days that cannot be priced at all, then overtime being
-     * withheld from someone, then approvals that will pay nothing, then things that merely look
-     * odd. `blocking` marks the ones where running now produces a payslip somebody will dispute —
-     * it does NOT stop the run, because a cutoff that cannot close is worse than one that closes
-     * with a known exception on the record.
      *
      * @return list<array{key:string, label:string, count:int, blocking:bool, detail:string, where:string}>
      */
@@ -2640,23 +2285,11 @@ class AttendanceService
         return array_values(array_filter($all, fn (array $e) => $e['count'] > 0));
     }
 
-    /**
-     * A shift long enough to be worth a human look before payroll prices it (item 12).
-     *
-     * 16 HOURS IS NOT AN INVENTED FIGURE — it is the same ceiling `StoreOvertimeRequestRequest`
-     * already puts on a single overtime filing. If the company will not let anyone REQUEST more
-     * than 16 hours of overtime, a punch pair claiming more than 16 hours of work is by the
-     * system's own reckoning implausible, and pricing it silently is the thing to avoid.
-     */
+    /** A shift long enough to be worth a human look before payroll prices it (item 12). */
     public const LONG_SHIFT_MINUTES = 16 * 60;
 
     /**
      * Closed shifts in the period whose punches span an implausible stretch (item 12).
-     *
-     * CLOSED ONLY, deliberately. An OPEN punch of 30 hours is item 6's business and is already
-     * listed there; repeating it here would double-count the same day under two headings. What
-     * this catches is different and quieter: a shift that WAS closed, so nothing flags it, whose
-     * two punches are 18 hours apart because the time-out was corrected to the wrong day.
      *
      * @return list<array{employee_id:int, name:string|null, work_date:string, minutes:int}>
      */
@@ -2703,15 +2336,6 @@ class AttendanceService
 
     /**
      * Approved overtime in the period that the punches cannot back — so it pays NOTHING (item 12).
-     *
-     * THE SILENT FAILURE THIS CATCHES. Since item 2, approved overtime pays only the overlap
-     * between the approved window and the overtime actually clocked. That is correct — an approval
-     * is permission, not proof — but it fails QUIETLY: the employee sees "approved" in their list,
-     * HR sees "approved" in theirs, and the payslip carries nothing. Nobody is told, because from
-     * every screen's point of view the request was granted.
-     *
-     * Legacy hours-only rows are excluded: they have no window to compare, and their capacity is
-     * already bounded by the punches, so they cannot claim time nobody worked in the first place.
      *
      * @return list<array{employee_id:int, name:string|null, work_date:string, window:string}>
      */
@@ -2859,7 +2483,7 @@ class AttendanceService
 
     public function workedDatesBetween(Employee $employee, string $start, string $end): array
     {
-        // Slice 15 — the fifth reader of the same rows; filter in PHP off the shared memo.
+        // The fifth reader of the same rows; filter in PHP off the shared memo.
         return $this->rowsBetween($employee, $start, $end)
             ->filter(fn (Attendance $r) => in_array($r->status, ['present', 'late'], true))
             ->map(fn (Attendance $r) => Carbon::parse($r->work_date)->toDateString())
@@ -2891,11 +2515,6 @@ class AttendanceService
      * days do not count. UNPAID leave (LWOP) is deducted a full day (leave is full-day
      * only). An approved HALF-DAY request deducts 0.5 (two on one day → 1.0). Returns
      * a float so half-days survive.
-     *
-     * Tardiness adds an EXTRA penalty per the attendance policy: when late_penalty_enabled
-     * is on, every N lates in the range deducts one more day. This is now an INDEPENDENT
-     * switch, so it can stack on top of a per-time (per_hour/tiered) charge — that stacking
-     * is deliberate and surfaced in the UI as a double-charge warning.
      */
     public function unpaidDaysFor(Employee $employee, string $start, string $end): float
     {
@@ -2907,22 +2526,7 @@ class AttendanceService
      * the payslip can explain its deduction (step 4b). The total is identical to
      * unpaidDaysFor(); the breakdown is all-zero until a per-hour/tiered mode is enabled.
      */
-    /**
-     * How much of a pay period this employee was actually EMPLOYED for — Slice B10.
-     *
-     * Returns the share of the period's scheduled workdays that fall inside the employment window:
-     * 1.0 for anybody employed throughout, less for a mid-cycle hire or leaver, 0.0 for somebody
-     * the period does not touch at all.
-     *
-     * WHY IT IS NOT `unpaidDaysDetailFor()`. That method answers "how many days is this employee
-     * not owed pay for", which folds together two different things: days they were ABSENT and days
-     * they were NOT YET (or no longer) EMPLOYED. Basic pay is right to charge both. An allowance
-     * must follow only the second — B10's whole point is that an allowance is deliberately not
-     * prorated for absence, but a person hired on the 25th was not owed a full month of it either.
-     *
-     * The DIVISOR is the full period's scheduled workdays, matching the daily-rate basis: shrinking
-     * it would hand a part-period employee a full period's allowance, which is the bug being fixed.
-     */
+    /** How much of a pay period this employee was actually EMPLOYED for. */
     public function employmentFractionFor(Employee $employee, string $start, string $end): float
     {
         $employmentStart = $employee->hire_date?->toDateString();
@@ -2991,7 +2595,7 @@ class AttendanceService
             ->whereDate('end_date', '>=', $start)
             ->get();
 
-        // Approved half-day requests per date, keeping the AM/PM period (F-3 needs to know
+        // Approved half-day requests per date, keeping the AM/PM period ( needs to know
         // which half was worked). AM + PM on one day → 2 halves = a full day.
         $halfDays = HalfDayRequest::where('employee_id', $employee->id)
             ->where('status', 'approved')
@@ -3011,16 +2615,16 @@ class AttendanceService
         // PROPOSED values without touching the saved singleton (step 6b).
         $policy = $policyOverride ?? $this->policy->get();
         // Fast path: with no per-minute mode on, DeductionService always returns zero, so
-        // skip building any context — the loop then behaves exactly as it did pre-Slice-2.
+        // skip building any context — the loop then behaves exactly as it did.
         $deductionsActive = in_array($policy->late_deduction_mode, ['per_hour', 'tiered'], true)
             || $policy->undertime_deduction_mode === 'per_hour';
 
-        // Non-working holidays in the cycle (Slice 1). One query for the whole range.
+        // Non-working holidays in the cycle. One query for the whole range.
         $holidays = $this->nonWorkingHolidays($start, $end);
         // HR-declared non-working days, date => is_paid. Same shape, same one-query rule.
         $suspensions = $this->suspensionsBetween($start, $end);
 
-        // The employment window (Slice 4). The DIVISOR deliberately stays the full period's
+        // The employment window. The DIVISOR deliberately stays the full period's
         // scheduled workdays — under the `period_workdays` basis, shrinking it would raise the
         // daily rate and hand a part-period employee a full period's pay. Proration belongs on
         // the unpaid side, which is what the loop does.
@@ -3038,10 +2642,6 @@ class AttendanceService
         /**
          * The per-date ledger behind the totals — what the payslip shows when someone asks
          * "which days?".
-         *
-         * Every charge below records a line, so the ledger always sums to `$unpaid`. That
-         * property is the whole point: a breakdown that does not reconcile with the figure it
-         * explains is worse than no breakdown, because it invites the reader to trust it.
          */
         $lines = [];
         $charge = function (string $date, string $kind, float $days = 0.0, ?string $detail = null) use (&$lines) {
@@ -3082,7 +2682,7 @@ class AttendanceService
 
             $dateStr = $d->toDateString();
 
-            // --- Outside the employment window (Slice 4) ----------------------------------
+            // --- Outside the employment window ----------------------------------
             // Days before the hire date or after the last working day are simply not owed.
             // This must run BEFORE the past/future test below: a mid-cycle leaver's remaining
             // days are still in the FUTURE, and the "no record yet, so don't charge it" rule
@@ -3102,14 +2702,10 @@ class AttendanceService
                 continue;
             }
 
-            // --- Non-working holiday (Slice 1) -------------------------------------------
+            // --- Non-working holiday -------------------------------------------
             // The monthly salary already covers a regular / special non-working holiday, so
             // NOT working one is never an absence. Before this, every unworked holiday was
             // charged a full day's pay (verified: Independence Day cost one day).
-            //
-            // A holiday that WAS worked falls through to the normal paid-day path below, so
-            // late/undertime still price normally and PayrollService::holidayPremiumFor()
-            // pays the premium on top. Only the unworked case short-circuits here.
             $holidayType = $holidays[$dateStr] ?? null;
             if ($holidayType !== null) {
                 $holidayRow = $rows->get($dateStr);
@@ -3127,17 +2723,9 @@ class AttendanceService
                 }
             }
 
-            // --- HR-declared work suspension (Slice B) -----------------------------------
+            // --- HR-declared work suspension -----------------------------------
             // The company cancelled the day. Whether it still costs anyone a day's pay is the
             // single decision HR recorded, and it is priced here and nowhere else.
-            //
-            // Ranked AFTER the holiday branch: a holiday is already covered by salary, so a
-            // suspension declared over one must not be able to turn a paid statutory day into
-            // an unpaid one.
-            //
-            // Someone who WORKED through it falls through to the ordinary paid-day path — they
-            // are paid for the day they worked, with no premium: this is the company's own
-            // cancellation, not a legal holiday, so no statutory rate attaches to it.
             $suspensionIsPaid = $suspensions[$dateStr] ?? null;
             if ($suspensionIsPaid !== null) {
                 $suspensionRow = $rows->get($dateStr);
@@ -3164,7 +2752,7 @@ class AttendanceService
 
             $row = $rows->get($dateStr);
 
-            // --- HR's explicit status wins (Slice 16) -------------------------------------
+            // --- HR's explicit status wins -------------------------------------
             // HR asserting a status beats BOTH the clock and the leave table: it exists exactly
             // for the cases the automatic rules get wrong ("he worked, he just forgot to clock
             // in", "that was a rest day for her"). Every value is priced here — a status with no
@@ -3203,7 +2791,7 @@ class AttendanceService
                             && $dateStr <= Carbon::parse($l->end_date)->toDateString());
                         $isUnpaidLeave = $covering && $covering->leaveType && ! $covering->leaveType->is_paid;
                         if ($isUnpaidLeave) {
-                            // FIN-034 — a HALF day of LWOP costs half a day. HR stamping the row
+                            // A HALF day of LWOP costs half a day. HR stamping the row
                             // `on_leave` must not turn it into a whole one; that would charge double
                             // for the same absence and disagree with the half-day branch below.
                             $days = ($covering && $covering->is_half_day) ? 0.5 : 1.0;
@@ -3221,25 +2809,10 @@ class AttendanceService
 
             // Approved leave covering this day: paid leave → no deduction; unpaid leave
             // (LWOP) → the full day is deducted (leave is full-day only).
-            //
-            // Slice 16 — UNLESS THEY ACTUALLY CAME IN. A clock-in is proof the leave wasn't
-            // taken, so the day is worked and paid. Before this the leave branch ran first and
-            // always `continue`d, so someone on unpaid leave who turned up was docked a full day
-            // despite working it, and HR marking them present changed nothing.
             $leave = $leaves->first(fn ($l) => $dateStr >= Carbon::parse($l->start_date)->toDateString()
                 && $dateStr <= Carbon::parse($l->end_date)->toDateString());
 
-            // FIN-034 — HALF-DAY LEAVE, which cannot go through either branch below.
-            //
-            // The full-day branch is guarded on `! ($row && $row->time_in)`, because a clock-in is
-            // proof the leave wasn't taken. On a half day that reasoning inverts: the employee is
-            // SUPPOSED to clock in and work the other half, so reaching that guard would silently
-            // void the leave and dock nothing — while the balance had already been spent.
-            //
-            // Half of PAID leave costs nothing (the credit pays it); half of LWOP costs 0.5 of a
-            // day. Either way the remaining half is expected worked, so lateness and undertime are
-            // still priced against it — the same treatment an approved half-day request gets, which
-            // is the point: the two are now the same shape with different funding.
+            // HALF-DAY LEAVE, which cannot go through either branch below.
             if ($leave && $leave->is_half_day) {
                 // The day's minimum-hours bar is judged BEFORE anything is charged, because
                 // clearing it makes the day WHOLE — it has to be able to cancel the half itself,
@@ -3303,12 +2876,6 @@ class AttendanceService
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
                     // Recorded per DAY, unlike the running totals above.
-                    //
-                    // These sit inside the deduction block deliberately, which means no `late`
-                    // line exists when no late-deduction mode is on. That is the correct scope,
-                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
-                    // policy that charges nothing prints no minutes either. The note explains the
-                    // figure beside it, and the two can never disagree about whether it exists.
                     if ($ded->lateMinutes > 0) {
                         $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
                     }
@@ -3339,18 +2906,12 @@ class AttendanceService
 
             // Approved half-day request(s): 0.5 each. With two halves the whole day is off.
             // With one half off, the employee is expected to work the OTHER half — so a
-            // per-minute mode still prices late/undertime against that half (F-3).
+            // per-minute mode still prices late/undertime against that half.
             if ($dayHalves = ($halfDays[$dateStr] ?? null)) {
                 // Item 5 — clamp at one full day. The API blocks a duplicate date+period while
                 // pending/approved, so AM+PM = 1.0 is the practical maximum, but that check is a
                 // form-request `exists()` with no unique index behind it: two concurrent submits
                 // can both pass. Cheap defence against that and against direct inserts.
-                //
-                // ...unless the day cleared HR's minimum-hours bar. The half-day was the
-                // employee's own request, so nothing here forces them to reach the bar — but if
-                // they choose to work on into the half they had off and do reach it, the day is
-                // whole and the half stops costing them. That is the entire point of the
-                // escape hatch: the bar is a floor to be met, never a penalty to be missed.
                 $credited = $creditedFullDay($row, $eff, $dateStr);
 
                 $halfUnpaid = $credited ? 0.0 : min(1.0, 0.5 * $dayHalves->count());
@@ -3371,9 +2932,6 @@ class AttendanceService
                 // never added earlyOutFraction, while `governed_by_early_out` told
                 // DeductionService not to price the undertime either. Charge it here, capped by
                 // whatever of the day is still payable.
-                //
-                // Two halves off is the whole day, which earlyOutFraction() prices at zero:
-                // nothing is left for an early departure to shorten.
                 $offHalf = $dayHalves->count() > 1
                     ? HalfDayWindowService::BOTH
                     : (string) $dayHalves->first()->period;
@@ -3402,12 +2960,6 @@ class AttendanceService
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
                     // Recorded per DAY, unlike the running totals above.
-                    //
-                    // These sit inside the deduction block deliberately, which means no `late`
-                    // line exists when no late-deduction mode is on. That is the correct scope,
-                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
-                    // policy that charges nothing prints no minutes either. The note explains the
-                    // figure beside it, and the two can never disagree about whether it exists.
                     if ($ded->lateMinutes > 0) {
                         $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
                     }
@@ -3460,12 +3012,6 @@ class AttendanceService
                     $undertimeDays += $ded->undertimeFraction;
                     $flags = array_merge($flags, $ded->flags);
                     // Recorded per DAY, unlike the running totals above.
-                    //
-                    // These sit inside the deduction block deliberately, which means no `late`
-                    // line exists when no late-deduction mode is on. That is the correct scope,
-                    // not a gap: `late_minutes` on the payslip comes from this same block, so a
-                    // policy that charges nothing prints no minutes either. The note explains the
-                    // figure beside it, and the two can never disagree about whether it exists.
                     if ($ded->lateMinutes > 0) {
                         $charge($dateStr, 'late', $ded->lateFraction, $ded->lateMinutes . ' min late');
                     }
@@ -3593,18 +3139,6 @@ class AttendanceService
      * scheduled span (end − start), clamped to [0, 1]. Returns 0.5 when the schedule
      * window is unknown (a sane, non-zero fallback rather than free undertime).
      *
-     * THE SHORTFALL IS MEASURED AGAINST THE HALF ACTUALLY WORKED. Leaving at 10:00 on a day whose
-     * afternoon is already approved off is two hours short of a noon finish, not seven hours short
-     * of a five o'clock one — and the old reading charged the seven: half a day on top of the half
-     * already unpaid, so a two-hour early departure cost the WHOLE day. The `1.0 − halfUnpaid` cap
-     * at the call sites hid how big the error was by clamping a wrong number instead of computing
-     * a right one.
-     *
-     * THE DENOMINATOR IS DELIBERATELY UNCHANGED — still the full scheduled span, the same basis
-     * every ordinary early-out is priced on. Pricing the shortfall against the HALF instead (so
-     * half a morning costs 0.25 of a day rather than 0.222) is a different pay model, not a bug
-     * fix, and that is HR's call rather than this method's.
-     *
      * @param  array<string, mixed>  $eff
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      */
@@ -3650,11 +3184,6 @@ class AttendanceService
      * The start of the window the employee was ACTUALLY expected to work on $localDay — the
      * worked half's start on an approved half day, the schedule's start otherwise.
      *
-     * NULL MEANS THERE IS NO START TO BE LATE FOR — both halves off, or a half day whose worked
-     * half has no window configured. Every caller has to treat that as "not late" rather than
-     * falling back to the schedule: measuring someone against a shift nobody defined for them is
-     * the bug this replaces, and the full-day start is the most wrong answer available.
-     *
      * @param  array<string, mixed>  $eff  the employee's effective schedule for $localDay
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      */
@@ -3682,9 +3211,6 @@ class AttendanceService
     /**
      * Classify an arrival against the schedule: early (before start), on_time
      * (within grace), or late (past grace) with minutes past start.
-     *
-     * Half-day aware, for the same reason arrivalStatus() is: the badge on the roster and the
-     * status stored on the row are two renderings of one fact, and they must not disagree.
      *
      * @param  array<string, mixed>  $eff
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day

@@ -9,14 +9,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\AllowanceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B12 — the employee's own benefits page says what each benefit is worth.
- *
- * IT USED TO SAY NOTHING. The resource carried a name, a category and a status; the three fields
- * meant to hold content are empty on every programme. So the only benefits screen an employee has
- * told them less than their payslip did, and it could not be fixed in the frontend because the
- * money was never sent.
- */
+/** The employee's own benefits page says what each benefit is worth. */
 class MyBenefitsTest extends HrTestCase
 {
     use RefreshDatabase;

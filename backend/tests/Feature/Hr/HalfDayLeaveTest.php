@@ -17,23 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-034 — half a day OF LEAVE, which the spec always asked for and the build never wired up.
- *
- * `POD 1 (Employee View) Features.md` puts a half-day toggle inside the Leave Request Form. What got
- * built was `HalfDayRequest`: a separate attendance-side record that is ALWAYS UNPAID and touches no
- * balance. Useful, but a different thing — it made "half a day of my vacation leave" unexpressible, so
- * an employee wanting a paid afternoon off had to burn a whole day's credit or take the unpaid half.
- *
- * The capability was already there and unreachable. `LeaveService::computeDays()` has always known how
- * to return 0.5, the `is_half_day` / `half_day_period` columns have always existed, and the balance
- * columns are decimal(5,1). One hardcoded `false` at the single call site was the whole gap.
- *
- * THE PAYROLL ASSERTIONS ARE THE ONES TO READ. The full-day leave branch is guarded on "no clock-in",
- * because clocking in proves the leave wasn't taken. On a half day that reasoning inverts — the
- * employee is supposed to come in and work the other half — so without a dedicated branch a half-day
- * leave would be silently voided while its balance had already been spent.
- */
+/** Half a day OF LEAVE, which the spec always asked for and the build never wired up. */
 class HalfDayLeaveTest extends HrTestCase
 {
     use RefreshDatabase;

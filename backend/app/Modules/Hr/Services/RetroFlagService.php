@@ -8,17 +8,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Records that a decision changed what a period SHOULD have paid, after it was already paid
- * (FIN-009).
- *
- * The four request services call `flagIfSettled()` on approve, and on cancel-of-approved. If the
- * days involved sit inside a locked run or a disbursed payslip, the decision still goes through —
- * the leave was taken, the overtime was worked, refusing does not undo it — but a row is written
- * saying money is outstanding and in which direction.
- *
- * That is the whole point: the previous behaviour left the difference to somebody's memory.
- */
+/** Records that a decision changed what a period SHOULD have paid, after it was already paid */
 class RetroFlagService
 {
     public function __construct(
@@ -85,7 +75,7 @@ class RetroFlagService
     }
 
     /**
-     * Mark a difference settled — typically after an adjustment run has paid it (FIN-010).
+     * Mark a difference settled — typically after an adjustment run has paid it.
      *
      * The note is required: "resolved" with no explanation is the same dead end as the manual
      * settlement this whole mechanism replaced.

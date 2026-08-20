@@ -12,17 +12,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Composing and sending candidate emails.
- *
- * The board used to send these on one click from a hardcoded template — HR could not change a
- * word, and nothing recorded what went out. Now the button opens a compose modal and this
- * service sits on both sides of it: `draft()` produces what the modal opens with, `send()`
- * takes back whatever HR made of it.
- *
- * The templates below are therefore starting points, not the message. They exist so the common
- * case is one click plus a glance, and so a rushed send still reads like the company wrote it.
- */
+/** Composing and sending candidate emails. */
 class CandidateEmailService
 {
     /** Attachments live on the private disk, reachable only through a signed URL. */
@@ -34,11 +24,6 @@ class CandidateEmailService
 
     /**
      * What the compose modal opens with for this candidate and email type.
-     *
-     * A previous send of the same type wins over the template: re-sending should continue
-     * from what the candidate already received, not silently revert to boilerplate and lose
-     * whatever HR had tailored. Attachments are not carried over — re-attaching is a decision,
-     * and repeating a file the candidate already has is the wrong default.
      *
      * @return array{to: string, cc: array<int, string>, bcc: array<int, string>, reply_to: ?string, subject: string, body_html: string, previous_sent_at: ?string}
      */
@@ -75,11 +60,6 @@ class CandidateEmailService
 
     /**
      * Send a composed email and record it.
-     *
-     * The log row is written before the transport is touched and updated after, so a send that
-     * fails still leaves evidence of what was attempted. Unlike the old behaviour, a failure is
-     * raised rather than swallowed: the candidate is NOT marked as having received the email,
-     * because they did not.
      *
      * @param  array{type: string, to: string, cc?: array<int, string>, bcc?: array<int, string>, reply_to?: ?string, subject: string, body_html: string, deadline?: ?string}  $data
      * @param  array<int, UploadedFile>  $files

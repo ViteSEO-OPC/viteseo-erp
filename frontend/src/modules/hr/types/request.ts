@@ -1,4 +1,4 @@
-// Phase-2 Slice 19 — document + profile-change requests.
+// Phase-2 — document + profile-change requests.
 
 import type { EmployeeRef } from "@/modules/hr/types/employee";
 

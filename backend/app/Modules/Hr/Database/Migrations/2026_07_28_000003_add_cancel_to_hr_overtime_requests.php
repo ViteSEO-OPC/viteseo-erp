@@ -4,14 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice 6 (2026-07-28 audit) — let HR undo an approved overtime request.
- *
- * `approve()`/`reject()` both guard on `pending`, so an approved request was frozen: if the
- * work never happened, the overtime was paid anyway and nobody could stop it. Mirrors the
- * leave-cancel columns (`cancelled_at` / `cancelled_by` / `cancel_reason`) so both request
- * flows read the same way.
- */
+/** (2026-07-28 audit) — let HR undo an approved overtime request. */
 return new class extends Migration
 {
     public function up(): void

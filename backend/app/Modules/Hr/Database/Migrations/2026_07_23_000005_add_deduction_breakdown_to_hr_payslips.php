@@ -4,17 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Slice 1, step 4b — BLOCKER for step 7 (payslip breakdown display).
-//
-// hr_payslips today stores only money TOTALS; there is no unpaid_days, daily_rate or
-// working_days anywhere, so a payslip cannot explain its own deduction. Worse, payroll
-// recomputes against the LIVE policy singleton, so re-running a closed period reprices it
-// under today's rules ("my payslip said X, the system now says Y" — unanswerable).
-//
-// Rule this enforces: a payslip must be reproducible from what it STORED, not from what
-// the rules say today. Persist first (this migration), compute second (step 5).
-//
-// All default 0, so existing payslips are untouched and the run keeps working unchanged.
+// Step 4b — BLOCKER for step 7 (payslip breakdown display).
 return new class extends Migration
 {
     public function up(): void

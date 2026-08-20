@@ -14,17 +14,7 @@ use App\Modules\Hr\Services\ViolationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 9 (2026-07-28 audit) — the break rule was configurable and did nothing.
- *
- * `max_break_minutes_per_day` was a flat company ceiling (120) duplicating the per-schedule
- * entitlement (60 unpaid + 20 paid = 80), so someone could take 50% more break than they were
- * entitled to and never trip it. And the `long_break` flag it produced was never stored or shown,
- * and was only computed at all when a late/undertime deduction mode happened to be on.
- *
- * Now: measured against the EMPLOYEE'S OWN entitlement + a company tolerance, raised by
- * ViolationService (so it works with every deduction mode off), and surfaced as a real violation.
- */
+/** (2026-07-28 audit) — the break rule was configurable and did nothing. */
 class ViolationBreakFlagTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -40,20 +30,7 @@ class ViolationBreakFlagTest extends HrTestCase
 
         $tz = config('app.timezone_local');
 
-        // THE CLOCK IS FROZEN ON PURPOSE (FIN-051, payroll audit 2026-08-04).
-        //
-        // This seeds one attendance row and asserts a violation flag on it, and
-        // ViolationService::recompute() scans the CURRENT month only, up to today
-        // (ViolationService:113-121). The day used to be derived from the real clock as
-        // "yesterday, or the last past weekday" — so the result depended on which weekday
-        // the suite happened to run on: on a Monday that resolves to the previous Friday,
-        // which in most months falls in the PREVIOUS month, outside the scan window, and
-        // every assertion in this file failed. The suite was red on Mon 2026-08-03 and green
-        // on Tue 2026-08-04 with no code change between them.
-        //
-        // A fixed mid-month Wednesday keeps the seeded day (Tuesday the 16th) and the scan
-        // window in the same month on every run. Laravel resets the test clock in
-        // InteractsWithTestCaseLifecycle::tearDown, so nothing leaks into other tests.
+        // THE CLOCK IS FROZEN ON PURPOSE (payroll audit 2026-08-04).
         $this->travelTo(Carbon::parse('2026-06-17 12:00', $tz));
         $this->day = Carbon::parse('2026-06-16', $tz)->startOfDay();
 

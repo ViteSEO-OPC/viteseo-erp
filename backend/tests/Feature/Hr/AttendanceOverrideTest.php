@@ -19,18 +19,7 @@ use App\Modules\Hr\Services\LeaveService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 16 — attendance is the source of truth, and HR has the final say over it.
- *
- * Three things were wrong:
- *   1. Approved leave beat the clock. Someone on UNPAID leave who came in anyway was docked a
- *      full day for a day they worked, and HR marking them present changed nothing.
- *   2. Paid leave kept the credit even when the day was worked, and HR could not give it back
- *      (an approved leave can only be cancelled before it starts).
- *   3. Violations only recomputed the CURRENT month, so correcting a June record left June's
- *      flags exactly as they were — a late added there raised nothing, a late removed there
- *      stayed flagged forever.
- */
+/** Attendance is the source of truth, and HR has the final say over it. */
 class AttendanceOverrideTest extends HrTestCase
 {
     use RefreshDatabase;

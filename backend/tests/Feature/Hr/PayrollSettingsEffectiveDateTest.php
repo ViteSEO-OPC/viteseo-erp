@@ -16,21 +16,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-025 — payroll settings are effective-dated, so re-running an old cycle cannot reprice it.
- *
- * WHY THIS TEST EXISTS SEPARATELY. Slice 7 asks for effective-date tests across tax versions,
- * payroll settings and contribution versions. Two of those were already covered —
- * `TaxVersionTest::test_an_older_cycle_uses_the_older_table` and
- * `ContributionVersionTest::test_an_older_period_uses_the_older_rate`. Payroll settings were not:
- * `ScheduledPayDateTest` covers `pay_delay_days`, which affects the date printed on a payslip but
- * not a single peso of it. Nothing asserted that a setting which MOVES MONEY stays put.
- *
- * `deduction_timing` is the one chosen because it is the sharpest. Under `every`, SSS is split
- * across both cutoffs of a month; under `last`, the whole amount lands on the second one. Flip it
- * and re-run an earlier cutoff without dating, and that cutoff's statutory deduction changes — on a
- * payslip that has already been reviewed, for a period nothing about which has changed.
- */
+/** Payroll settings are effective-dated, so re-running an old cycle cannot reprice it. */
 class PayrollSettingsEffectiveDateTest extends HrTestCase
 {
     use RefreshDatabase;

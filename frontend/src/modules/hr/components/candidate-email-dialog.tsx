@@ -84,17 +84,7 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-/**
- * Compose-on-send for every candidate email on the recruitment board.
- *
- * The board used to fire four of the five stage emails straight from a hardcoded template
- * on one click — HR could not change a word, correct a wrong address, copy the hiring
- * manager, or attach anything. This is that click's new destination: the server supplies
- * the stage template as a starting point, and everything in it is editable before it goes.
- *
- * What was sent is recorded, so reopening this for a type already sent starts from the last
- * message rather than reverting to boilerplate.
- */
+/** Compose-on-send for every candidate email on the recruitment board. */
 export function CandidateEmailDialog({
   candidate,
   type,
@@ -287,8 +277,10 @@ export function CandidateEmailDialog({
             className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto"
             noValidate
           >
-            {/* Recipients — the header block, laid out like a mail client rather than
-                a stack of labelled fields. */}
+            {/*
+             * Recipients — the header block, laid out like a mail client rather than
+             * a stack of labelled fields.
+             */}
             <div className="rounded-lg border border-line">
               <HeaderRow label="To" htmlFor="email-to" invalid={!!errors.to}>
                 <input

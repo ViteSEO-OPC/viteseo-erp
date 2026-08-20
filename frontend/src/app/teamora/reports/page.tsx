@@ -52,7 +52,7 @@ const REPORTS: {
     icon: CalendarRange,
   },
   {
-    // MF-11 — its own card rather than a panel inside Absences: this is an accounting figure that
+    // Its own card rather than a panel inside Absences: this is an accounting figure that
     // finance reconciles, not an HR utilisation chart, and it exports as a CSV of rows.
     key: "leave_liability",
     title: "Leave Liability",
@@ -60,7 +60,7 @@ const REPORTS: {
     icon: Wallet,
   },
   {
-    // FIN-042 — the pre-disbursement review screen. Sits next to Payroll & Cost because it is the
+    // The pre-disbursement review screen. Sits next to Payroll & Cost because it is the
     // per-employee detail behind that report's totals.
     key: "payroll_register",
     title: "Payroll Register",
@@ -68,7 +68,7 @@ const REPORTS: {
     icon: ClipboardList,
   },
   {
-    // FIN-055 — the year-end check. Sits beside the register because it answers the question the
+    // The year-end check. Sits beside the register because it answers the question the
     // register cannot: not "what did we pay" but "was the tax on it right".
     key: "tax_reconciliation",
     title: "Year-End Tax Reconciliation",

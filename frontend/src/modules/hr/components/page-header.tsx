@@ -1,20 +1,7 @@
 import { PageHeader as CorePageHeader } from "@/core/components/page-header";
 import { cn } from "@/lib/utils";
 
-/**
- * TeamOra's page header — the core one with responsive stacking added.
- *
- * `core/components/page-header` lays the title and its `actions` slot out as a
- * single non-wrapping row, so on narrow screens the action buttons get pushed
- * off the right edge (this affected ~30 TeamOra pages — "New requisition" on
- * Recruitment was the visible symptom). Below `sm` the actions drop onto their
- * own line beneath the title instead.
- *
- * This wraps rather than forks: the markup still comes from core, so nav/title
- * changes there flow through. It lives in `modules/hr/` only to keep the shared
- * component untouched for the other pods — the fix arguably belongs in core, and
- * this file should collapse into it if that ever gets approved.
- */
+/** TeamOra's page header — the core one with responsive stacking added. */
 export function PageHeader({
   className,
   actions,

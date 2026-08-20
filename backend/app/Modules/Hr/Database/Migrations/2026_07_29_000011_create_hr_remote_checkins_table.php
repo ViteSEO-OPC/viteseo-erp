@@ -7,9 +7,6 @@ use Illuminate\Support\Facades\Schema;
 // Field/outside time-ins awaiting HR review. Kept OUT of `hr_attendances` on purpose: a row
 // only lands there once HR has approved, so every attendance record stays a real, counted
 // shift and none of the payroll/violation math has to learn a "pending" state.
-//
-// `created_at` IS the official time-in. The employee is timestamped when they submit the
-// selfie, never when HR gets round to reviewing it — the review delay is HR's, not theirs.
 return new class extends Migration
 {
     public function up(): void

@@ -126,16 +126,12 @@ class EmployeeDemoSeeder extends Seeder
                 },
                 'currency' => 'PHP',
                 'bank_account_type' => 'Savings', 'bank_account_name' => $e->user->name,
-                // Slice B7 — the three statutory columns are deliberately NOT seeded. They are
+                // The three statutory columns are deliberately NOT seeded. They are
                 // per-employee OVERRIDES that switch off the government rates for that person,
                 // and seeding them gave every demo employee the identical ₱1,350 / ₱450 / ₱200
                 // regardless of a salary range from ₱30k to ₱160k — suppressing ₱15,375/month of
                 // deductions and producing employee/employer pairs that exist on no SSS table.
                 // A demo dataset must show the engine working, not a company-wide exception.
-                //
-                // Slice B9 — the three allowance columns are not seeded either. Payroll reads
-                // allowances from Company → Benefits, so a figure here is a number on the profile
-                // that no payslip agrees with.
             ]);
             // Note: EmployeeService::create already opened each person's employment
             // history with their starting role, so no entry is created here.

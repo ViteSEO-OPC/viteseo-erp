@@ -16,30 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Slice 7 — the edges of a payroll run, where the arithmetic stops being ordinary.
- *
- * Four of the five cases the audit names. The fifth — a holiday worked on a rest day — is already
- * covered by `PayCorrectnessTest::test_a_holiday_worked_on_a_rest_day_pays_the_full_rate`, and the
- * separate open item to harden that test to assert `gross` is blocked on NV-3, so it is deliberately not
- * duplicated here.
- *
- * WHAT MAKES THESE WORTH TESTING is that each one is a case where the obvious implementation is wrong in a
- * way nobody notices until it happens to a real person:
- *
- *   · **negative net** — deductions can exceed gross on a thin period, and `max(0, …)` is only half a
- *     fix. What was not collected has to be recorded, or the company silently forgives it and the
- *     employee's obligation quietly vanishes (FIN-005 / FIN-053).
- *   · **zero-workday period** — a divisor. `workingDays` reaches a `daily_rate` calculation, so a period
- *     with no scheduled days is a division by zero. The system's answer turned out to be better than the
- *     one I went looking for: it REFUSES and names the employee whose schedule cannot be priced, rather
- *     than producing a NaN or a silent zero. These tests assert that refusal, and that it is actionable.
- *   · **hire and leaver on one run** — the two prorations run in opposite directions and share one code
- *     path. Getting one right does not mean the other is.
- *   · **cross-midnight shift** — `time_out < time_in` is not an error, it is a night shift. Treated as an
- *     error it produces a negative worked span, and the sign propagates into overtime and night
- *     differential.
- */
+/** The edges of a payroll run, where the arithmetic stops being ordinary. */
 class PayrollBoundaryTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -124,7 +101,7 @@ class PayrollBoundaryTest extends HrTestCase
     /**
      * AND THE SHORTFALL IS RECORDED, which is the half that matters. Clamping at zero without recording
      * what went uncollected means the company silently forgives the difference and the employee's
-     * obligation vanishes (FIN-005 / FIN-053).
+     * obligation vanishes.
      */
     public function test_an_uncollectable_deduction_is_carried_not_forgiven(): void
     {
@@ -180,17 +157,7 @@ class PayrollBoundaryTest extends HrTestCase
 
     // --- a period with no working days -----------------------------------------------------------
 
-    /**
-     * A DIVISOR — and the system's answer is better than the one I went looking for.
-     *
-     * `workingDays` feeds the daily-rate calculation, so a period with no scheduled days is a division by
-     * zero. I expected to find either a NaN or a silent zero; instead the run **REFUSES and names the
-     * employee whose schedule cannot be priced**. That is the right call: a payroll run that cannot derive
-     * a daily rate should stop and say whose record to fix, not guess a figure and pay it.
-     *
-     * So this asserts the refusal, and that the message is actionable — a guard nobody can act on is
-     * only marginally better than the crash.
-     */
+    /** A DIVISOR — and the system's answer is better than the one I went looking for. */
     public function test_a_period_containing_no_scheduled_workdays_is_refused_by_name(): void
     {
         $employee = $this->employee('E-001');

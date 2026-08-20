@@ -15,22 +15,7 @@ use App\Modules\Hr\Services\ReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * MF-11 — the peso value of unused paid leave, which was nowhere on the books.
- *
- * It is a liability, not a statistic. Unused paid leave becomes cash the moment somebody leaves —
- * `runFinalPay()` converts it at the daily rate — and for the five-day Service Incentive Leave the
- * Labour Code requires that conversion whether the employee asks or not (Art. 95). So the company owes
- * it now, and a balance sheet without it understates payroll obligations by the whole accrued balance.
- * The existing Absences report even promised "liability accrual" in its own description and computed
- * none.
- *
- * THE TEST THAT MATTERS IS `test_it_agrees_with_what_final_pay_actually_converts`. The report values
- * leave through `PayrollService::leaveLiabilityFor()`, which is built on the same two functions final
- * pay uses. A report that did its own arithmetic would eventually disagree with the payslip it is
- * predicting, and accounting would accrue one figure while payroll paid another — with nothing to say
- * which was wrong.
- */
+/** The peso value of unused paid leave, which was nowhere on the books. */
 class LeaveLiabilityReportTest extends HrTestCase
 {
     use RefreshDatabase;

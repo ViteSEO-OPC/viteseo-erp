@@ -23,25 +23,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\DataProvider;
 
-/**
- * A separation must not take a list endpoint down.
- *
- * THE BUG THIS EXISTS FOR. `separate()` soft-deletes the employee, and `belongsTo(Employee::class)`
- * applies the SoftDeletes global scope — so the moment somebody left, every record still pointing
- * at them resolved `->employee` to NULL. Any Resource reading a name through it threw
- * "Attempt to read property on null", and because a Resource collection is serialised as a whole,
- * ONE leaver's row returned a 500 for the ENTIRE page. HR's leave requests table went down the day
- * an employee with three leave requests was separated, and payroll runs went with it.
- *
- * It failed one endpoint at a time, too: reimbursements, overtime, loans and the rest were all
- * carrying the same flaw and looked healthy only because no leaver happened to have that kind of
- * record yet. So this test gives ONE separated employee a row of EVERY type and asserts each list
- * still answers — a new list with the same flaw fails here rather than in production months later.
- *
- * The fix is `withTrashed()` on the relation, not a null check: their history does not stop being
- * theirs when they leave, and a row that cannot say whose it is is barely better than a crash.
- * The resources are null-guarded as well, for a genuinely missing row.
- */
+/** A separation must not take a list endpoint down. */
 class SeparatedEmployeeHistoryTest extends HrTestCase
 {
     use RefreshDatabase;

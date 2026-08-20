@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * An overtime request: an employee asks for N overtime HOURS on a date; an approved one is paid at
- * the configured OT rate by payroll (OT-3). Mirrors EarlyOutRequest (the undertime flow).
+ * the configured OT rate by payroll. Mirrors EarlyOutRequest (the undertime flow).
  */
 class OvertimeRequest extends Model
 {
@@ -30,7 +30,7 @@ class OvertimeRequest extends Model
         'review_note',
         'reviewed_by',
         'reviewed_at',
-        // Slice 6 — HR can undo an approved request before it is paid.
+        // HR can undo an approved request before it is paid.
         'cancelled_at',
         'cancelled_by',
         'cancel_reason',
@@ -43,15 +43,7 @@ class OvertimeRequest extends Model
         'cancelled_at' => 'datetime',
     ];
 
-    /**
-     * The employee this belongs to — `withTrashed()` because a SEPARATION SOFT-DELETES THEM.
-     *
-     * Without it the default scope resolves this to null the moment somebody leaves, and every
-     * Resource that reads a name through it throws, taking the whole list endpoint down with it —
-     * one 500 for the entire page because one row belonged to a leaver. Their history does not
-     * stop being theirs when they go, and a record that cannot say whose it is is worse than one
-     * that names someone who has left.
-     */
+    /** The employee this belongs to — `withTrashed()` because a SEPARATION SOFT-DELETES THEM. */
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class)->withTrashed();

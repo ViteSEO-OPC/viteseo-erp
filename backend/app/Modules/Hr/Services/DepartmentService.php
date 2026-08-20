@@ -120,8 +120,6 @@ class DepartmentService
      * (they stay in the department — department_id is required). Legacy/free-text
      * roles that aren't in this department's catalog are never touched.
      *
-     * Call this AFTER syncPositions so the catalog reflects the latest roles.
-     *
      * @param  array<int, array{employee_id?: mixed, role?: mixed}>  $assignments
      */
     private function syncAssignments(Department $department, array $assignments): void

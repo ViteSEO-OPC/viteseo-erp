@@ -16,9 +16,6 @@ const WEEKDAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 /**
  * The selected month as a calendar, each day coloured by how it read — the same shape as the
  * time-off calendar on Work Schedule, so the two months line up visually.
- *
- * CONTROLLED, deliberately. The arrows move the page's month filter rather than a private view
- * state: a calendar showing March beside a table showing February is two answers to one question.
  */
 export function MyAttendanceCalendar({
   month,
@@ -121,8 +118,10 @@ export function MyAttendanceCalendar({
                 )}
               >
                 {cell.day}
-                {/* A dot for the minute-level facts a colour cannot carry: this day was late,
-                    ran short, or earned overtime on top of whatever its status says. */}
+                {/*
+                 * A dot for the minute-level facts a colour cannot carry: this day was late,
+                 * ran short, or earned overtime on top of whatever its status says.
+                 */}
                 {day && (day.late_minutes > 0 || day.undertime_minutes > 0 || day.overtime_minutes > 0) && (
                   <span className="mt-0.5 flex gap-0.5">
                     {day.late_minutes > 0 && <Pip className="bg-warning" />}

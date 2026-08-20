@@ -26,7 +26,7 @@ class EmployeeLoanResource extends JsonResource
             'reference' => $this->reference,
             'principal' => (float) $this->principal,
             'per_period_amount' => (float) $this->per_period_amount,
-            // FIN-032 — the terms. `per_period_amount` is the PRINCIPAL instalment; interest and any
+            // The terms. `per_period_amount` is the PRINCIPAL instalment; interest and any
             // fee are charged on top, so the employee's actual deduction is larger than this figure
             // and the UI has to say so rather than let them assume it is the total.
             'interest_rate' => (float) $this->interest_rate,
@@ -36,7 +36,7 @@ class EmployeeLoanResource extends JsonResource
             'start_date' => $this->start_date?->format('Y-m-d'),
             'status' => $this->status,
             'notes' => $this->notes,
-            // Slice B15 — the policy it was issued under, and the consent that makes any deduction
+            // The policy it was issued under, and the consent that makes any deduction
             // lawful. `authorized_at` being null is the whole reason a loan may sit uncollected.
             'benefit_program_id' => $this->benefit_program_id,
             'policy_name' => $this->whenLoaded('policy', fn () => $this->policy?->name),

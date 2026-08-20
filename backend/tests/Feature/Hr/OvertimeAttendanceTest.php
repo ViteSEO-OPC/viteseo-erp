@@ -16,14 +16,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Role;
 
-/**
- * Slice 6 (2026-07-28 audit) — overtime is paid against the clock, and HR can undo it.
- *
- * `approvedOvertimeMinutes()` read the request table alone, so an approved request paid in
- * full even on a day the employee never showed up — while that same day was ALSO docked as
- * an absence. And once approved a request was frozen: `approve()`/`reject()` both guard on
- * `pending`, so there was no way to stop overtime that never happened.
- */
+/** (2026-07-28 audit) — overtime is paid against the clock, and HR can undo it. */
 class OvertimeAttendanceTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -184,12 +177,6 @@ class OvertimeAttendanceTest extends HrTestCase
     /**
      * An employee cannot cancel their own APPROVED request — that stays HR's, because an approved
      * request whose period is already paid raises an overpayment only they can settle.
-     *
-     * The refusal is a ValidationException, not an AuthorizationException, since employees may now
-     * withdraw their own PENDING overtime: they are permitted to cancel, just not from this state.
-     * Same shape as `LeaveService::cancel()`, and it gives them an actionable message instead of a
-     * bare 403. A cancel by someone who is NOT the owner is still an AuthorizationException —
-     * see CancelWorkScheduleRequestTest.
      */
     public function test_an_employee_cannot_cancel_their_own_approved_request(): void
     {

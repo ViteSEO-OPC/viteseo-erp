@@ -4,39 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * A correction can now be an EDIT TO A LINE that is already on the payslip.
- *
- * WHAT CHANGED. An amendment used to be an extra line appended to the document: the engine computed
- * "Late ₱500", HR disagreed, and the payslip ended up saying "Late ₱500" with "Correction +₱200"
- * underneath it. Both figures were true and the document was still wrong about the only thing the
- * reader wanted to know, which is what the late charge actually was. An override instead REPLACES
- * the figure on the line, and the payslip prints the engine's original struck through beside it.
- *
- * THE VALUE STORED IS ABSOLUTE, NOT A DELTA, and that is the whole design. HR types "the late
- * charge is ₱300", not "take ₱200 off the late charge". A delta would silently re-decide the answer
- * every time the period was re-run — fix the underlying attendance so the engine computes ₱450 and
- * a stored delta would produce ₱250, a figure nobody ever chose. The absolute value survives the
- * re-run intact, which is the behaviour asked for: an edit disappears when HR removes it and at no
- * other time.
- *
- * `original_amount` IS THE ENGINE'S FIGURE, refreshed on every run rather than frozen at first edit.
- * It is what the document prints struck through, and comparing it to what the engine produces on
- * the next run is how a run reports that an override has outlived the problem it was fixing — the
- * attendance was corrected, the engine now agrees, and the override is quietly suppressing nothing.
- * Frozen instead, it would keep printing a figure the engine had stopped producing.
- *
- * `engine_snapshot` ON THE PAYSLIP is what makes an edit removable. Overrides are applied to the
- * stored columns by delta, so the computed figure they replaced is no longer anywhere in the row:
- * without the snapshot, "undo this edit" would have nothing to restore to, and a second edit to the
- * same line would have nothing to measure the engine's original against. Written on every run, and
- * lazily on the first override for payslips computed before this migration.
- *
- * WHY THIS LANDS ON THE AMENDMENT TABLE rather than one of its own. An override and an appended
- * correction are the same act — a person overruling the engine on one payslip, for a stated reason,
- * on a date — and they must be re-applied together and in order after a recompute. Two ledgers
- * would be two replay paths, and the second one to be written would be the one that got it wrong.
- */
+/** A correction can now be an EDIT TO A LINE that is already on the payslip. */
 return new class extends Migration
 {
     public function up(): void

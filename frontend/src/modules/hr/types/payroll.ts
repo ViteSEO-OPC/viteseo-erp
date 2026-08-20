@@ -16,20 +16,20 @@ export interface PayrollSettings {
   deduction_timing: string; // every | first | last
   tax_timing: string;
   /**
-   * FIN-048 — which cutoff the MONTHLY allowance lands on. `every` splits it across the month's
+   * Which cutoff the MONTHLY allowance lands on. `every` splits it across the month's
    * cutoffs (the long-standing behaviour, which is why ₱1,500/month reads as ₱750 twice on a
    * semi-monthly payslip); `first`/`last` pay it whole on one of them.
    */
   allowance_timing: string;
   anchor_date: string | null;
   pay_delay_days: number;
-  /** Slice 10 -- annual ceiling above which allowances become taxable. null = no ceiling. */
-  /** ₱90,000 statutory: 13th month pay AND other benefits, NOT de minimis (B16). */
+  /** Annual ceiling above which allowances become taxable. null = no ceiling. */
+  /** ₱90,000 statutory: 13th month pay AND other benefits, NOT de minimis. */
   other_benefits_annual_cap: number | null;
-  /** FIN-030 — regional minimum DAILY wage from the applicable DOLE wage order. Null = not set. */
+  /** Regional minimum DAILY wage from the applicable DOLE wage order. Null = not set. */
   minimum_daily_wage: number | null;
   /**
-   * FIN-046 — how many employees have NO explicit `pay_frequency` and therefore follow this
+   * How many employees have NO explicit `pay_frequency` and therefore follow this
    * default. Changing `frequency` moves every one of them into a different pay group, writing
    * nothing to their records — so the number has to be visible BEFORE the change is saved.
    */
@@ -78,7 +78,7 @@ export interface PayrollRun {
   employee_count: number;
   run_at: string | null;
   run_by: string | null;
-  /** Slice 5 — a locked run can no longer be recomputed. */
+  /** A locked run can no longer be recomputed. */
   locked_at: string | null;
   locked_by: string | null;
   is_locked: boolean;
@@ -93,11 +93,11 @@ export interface PayrollRun {
   is_tax_stale: boolean;
   tax_stale_at: string | null;
   tax_stale_reason: string | null;
-  /** Slice 8 — the rules in force when this run executed. Detail view only. */
+  /** The rules in force when this run executed. Detail view only. */
   policy_snapshot?: PolicySnapshot | null;
   rules_drift?: RulesDriftEntry[];
   /**
-   * FIN-051 — payslips this run left untouched because they were already disbursed. Present on
+   * Payslips this run left untouched because they were already disbursed. Present on
    * the response to a run that just executed; null when a run is merely read back.
    */
   skipped_disbursed?: number | null;
@@ -105,7 +105,7 @@ export interface PayrollRun {
 }
 
 /**
- * How the year-end tax settlement on a December (or final-pay) payslip was arrived at (FIN-054).
+ * How the year-end tax settlement on a December (or final-pay) payslip was arrived at.
  * Absent on every other payslip. All figures are for the whole tax year, not the period.
  */
 export interface TaxAnnualisationBasis {
@@ -120,7 +120,7 @@ export interface TaxAnnualisationBasis {
   settled_this_period: number;
 }
 
-/** How one statutory contribution on a payslip was arrived at (FIN-049). */
+/** How one statutory contribution on a payslip was arrived at. */
 export interface ContributionBasis {
   overridden: boolean;
   basis?: "bracket" | "percentage";
@@ -146,7 +146,7 @@ export interface RulesDriftEntry {
 
 /**
  * Whether the company operates a statutory contribution at all. Its `config` column is DEAD —
- * a pre-Slice-B9 leftover that is no longer written and no longer prices anything. The rates
+ * a leftover that is no longer written and no longer prices anything. The rates
  * live on `contribution_versions`; read them from there, never from here.
  */
 export interface PolicySnapshotContribution {
@@ -171,7 +171,7 @@ export interface PolicySnapshotContributionVersion {
 }
 
 /**
- * Everything that priced a payroll run (Slice 8). `version` guards the shape — v1 runs
+ * Everything that priced a payroll run. `version` guards the shape — v1 runs
  * stored a flat map of deduction fields only.
  */
 export interface PolicySnapshot {
@@ -180,7 +180,7 @@ export interface PolicySnapshot {
   attendance_policy?: Record<string, unknown>;
   /** Enrolment only ("does the company operate this?") — NOT the rates. */
   contributions?: PolicySnapshotContribution[];
-  /** The rates that actually priced the run. Absent on runs from before Slice B3a. */
+  /** The rates that actually priced the run. Absent on runs from before. */
   contribution_versions?: PolicySnapshotContributionVersion[];
   payroll_setting?: Record<string, unknown>;
 }
@@ -201,14 +201,7 @@ export interface PayslipSummary {
   hardcopy_status: HardcopyStatus;
 }
 
-/**
- * WHAT A CORRECTION LEAVES ON A LINE.
- *
- * HR can overrule the engine on any leaf line of a payslip — the engine said ₱500 for Late, HR says
- * ₱300 — and the document then prints the original struck through beside the figure that replaced
- * it. These fields are how the line says so. Absent on every line nobody has corrected, which is
- * almost all of them.
- */
+/** WHAT A CORRECTION LEAVES ON A LINE. */
 export interface PayslipLineCorrection {
   /** The engine's own figure, struck through beside the corrected one. */
   original_amount?: number | null;
@@ -234,7 +227,7 @@ export interface PayslipLine extends PayslipLineCorrection {
   name: string;
   amount: number;
   /**
-   * FIN-011 — the small grey qualifier beside the label ("2.5 hrs", "Tax-exempt", "6 day(s)").
+   * The small grey qualifier beside the label ("2.5 hrs", "Tax-exempt", "6 day(s)").
    * Optional because `allowances_breakdown` predates it and carries none.
    */
   note?: string | null;
@@ -250,11 +243,6 @@ export interface PayslipLine extends PayslipLineCorrection {
 /**
  * The document's subtotals, derived by the API so the screen and the PDF can't disagree.
  * They satisfy `compensation - deductions - government = net_pay`.
- *
- * `uncollected` was a term in that identity until FIN-053. The stored deduction components used
- * to hold the full computed amount while the total was capped at gross, so the shortfall had to
- * be credited back for the document to close. The components now hold what was actually
- * collected — `uncollected` is a disclosure, and adding it back would overstate net pay.
  */
 export interface PayslipTotals {
   /** Full period basic + every earning line, allowances included. */
@@ -278,20 +266,13 @@ export interface PayslipTotals {
   /** Deductions pay couldn't cover. Disclosed, not summed into net — see the note above. */
   uncollected: number;
   /**
-   * Which obligations that shortfall belongs to (FIN-053), keyed by column name. Empty when
+   * Which obligations that shortfall belongs to, keyed by column name. Empty when
    * nothing went short, and on payslips issued before the split — the migration doesn't backfill.
    */
   uncollected_breakdown: Partial<Record<PayslipDeductionKey, number>>;
 }
 
-/**
- * One row of the Deductions table: a REASON, its dates, and its money.
- *
- * The pesos are apportioned by the API from the two authoritative figures rather than multiplied
- * out from `days × daily_rate` — basic pay clamps at zero, so on a heavily-absent period the
- * multiplied figures each look defensible and their column does not add up to the total printed
- * beneath it. See PayslipResource::deductionsBreakdown.
- */
+/** One row of the Deductions table: a REASON, its dates, and its money. */
 export interface PayslipDeductionRow extends PayslipLineCorrection {
   /**
    * `absent` · `undertime` · `half_day` · `late` · `suspended_unpaid` · …, or `other:<name slug>`
@@ -382,22 +363,7 @@ export interface PayslipMonthPeriod {
   is_current: boolean;
 }
 
-/**
- * The whole month, carried by its LAST cutoff (FIN — payslip redesign).
- *
- * With the contribution/tax/allowance timings set to `last`, the month's deductions all land on
- * one slip and no single slip is a picture of the month. This is that picture: every cutoff
- * restated and carried through the same four steps.
- *
- * Summed across the month's slips, never inferred from this one — that shortcut holds only under
- * `last` and under-reports the month under `every`. The identity:
- *
- *     total_current - government = initial_net
- *     initial_net + allowances = total_month = the month's net pay
- *     total_month - already_paid = this slip's own net pay
- *
- * Null unless this is the last cutoff of a month with more than one, where an earlier one ran.
- */
+/** The whole month, carried by its LAST cutoff (FIN — payslip redesign). */
 export interface PayslipMonthSummary {
   periods: PayslipMonthPeriod[];
   total_current: number;
@@ -440,12 +406,12 @@ export interface Payslip {
   allowances: number;
   /** Allowances split by component, snapshot at run time. */
   allowances_breakdown: PayslipLine[];
-  // FIN-011 — every earning as a named line, built by PayslipResource so the screen and the PDF
+  // Every earning as a named line, built by PayslipResource so the screen and the PDF
   // render the same list. Sums to `totals.compensation` for every run type.
   earnings_breakdown: PayslipLine[];
-  // FIN-032 — interest collected on loans this period, also itemised in other_deductions_breakdown.
+  // Interest collected on loans this period, also itemised in other_deductions_breakdown.
   loan_interest: number;
-  // Stored all along and never serialised until FIN-011 — a 13th-month payslip showed a gross with
+  // Stored all along and never serialised until — a 13th-month payslip showed a gross with
   // every earnings line at zero and a tax figure with no visible basis.
   thirteenth_month: number;
   other_benefits: number;
@@ -469,7 +435,7 @@ export interface Payslip {
   philhealth: number;
   pagibig: number;
   withholding_tax: number;
-  /** Slice 11a — recurring benefit shares (HMO, union dues) and loans. Post-tax. */
+  /** Recurring benefit shares (HMO, union dues) and loans. Post-tax. */
   other_deductions: number;
   other_deductions_breakdown: PayslipLine[];
   /** The Deductions table, one row per reason with the dates behind it. */
@@ -479,10 +445,6 @@ export interface Payslip {
   /**
    * WHAT ACTUALLY LEFT THE COMPANY for this payslip, frozen when it was marked paid. Null while
    * unpaid.
-   *
-   * Equal to `net_pay` on every payslip that has not been corrected after being paid, which is
-   * nearly all of them. It differs only when an amendment raised the net afterwards — and without
-   * it the document would claim the correction had already been transferred.
    */
   disbursed_amount: number | null;
   /** `net_pay - disbursed_amount` — what is still to be paid. */
@@ -501,7 +463,7 @@ export interface Payslip {
   employer_philhealth?: number;
   employer_pagibig?: number;
   /**
-   * FIN-049 — what each statutory contribution was charged on, keyed by type. `salary` is the
+   * What each statutory contribution was charged on, keyed by type. `salary` is the
    * figure it was computed FROM, `charged_on` the figure the rate was applied TO; they differ
    * whenever a cap, floor or SSS bracket sits between them, which is precisely when a deduction
    * looks wrong. Absent for payslips predating the snapshot, and `{ overridden: true }` alone
@@ -509,18 +471,18 @@ export interface Payslip {
    */
   contribution_basis?: Record<string, ContributionBasis>;
   /**
-   * FIN-054 — the year's figures behind a December settlement. Present only on the payslip that
+   * The year's figures behind a December settlement. Present only on the payslip that
    * closes a tax year (or a final-pay slip), null everywhere else.
    */
   tax_annualisation_basis?: TaxAnnualisationBasis | null;
   /**
-   * Slice B7 — which statutory deductions came from a per-employee amount on the profile rather
+   * Which statutory deductions came from a per-employee amount on the profile rather
    * than the government rates. HR-only, and empty on payslips run before the column existed.
    * An override moves the employee half only, so these lines do not pair with the employer ones.
    */
   contribution_overrides?: ("sss" | "philhealth" | "pagibig")[];
   /**
-   * Slice B19 — the monthly salary figure each contribution was actually charged on. HR-only.
+   * The monthly salary figure each contribution was actually charged on. HR-only.
    * Null on payslips run before the column existed, and on the 13th-month, final-pay and
    * adjustment runs, which take no statutory contributions at all. Keyed by type because the
    * three no longer share one number: PhilHealth is charged on basic salary by law while SSS
@@ -546,23 +508,20 @@ export interface Payslip {
   /** Whole days charged by the per-N-lates penalty (item 13b.13). */
   late_penalty_days: number;
   /**
-   * FIN-055 — the per-date ledger behind `unpaid_days` and `late_minutes`, grouped by the two
+   * The per-date ledger behind `unpaid_days` and `late_minutes`, grouped by the two
    * questions people actually ask. Null on payslips issued before the column existed, which the
    * document renders by simply not showing the note.
-   *
-   * The `days` across `unpaid` sum to `unpaid_days`. `late` entries can carry `days: 0` — the
-   * minutes happened even where the policy charges nothing for them.
    */
   attendance_lines: {
     unpaid: AttendanceChargeLine[];
     late: AttendanceChargeLine[];
   } | null;
   /**
-   * FIN-055 — the rule that turned late/undertime minutes into a fraction of a day, from the
+   * The rule that turned late/undertime minutes into a fraction of a day, from the
    * run's own policy snapshot. Null when nothing was charged, or on runs predating the snapshot.
    */
   deduction_rule: DeductionRule | null;
-  /** FIN-055 — how `withholding_tax` was arrived at. Null when nothing was withheld. */
+  /** How `withholding_tax` was arrived at. Null when nothing was withheld. */
   tax_basis: TaxBasis | null;
   /** Deductions that gross couldn't cover (item 13a.1). */
   deduction_carryover: number;
@@ -576,7 +535,7 @@ export interface PayslipYtd {
 }
 
 // One row of the HR 13th-month view: basic earned this year ÷ 12, per employee.
-/** What a 13th-month RUN would pay one employee (Slice B17) — not the projection. */
+/** What a 13th-month RUN would pay one employee — not the projection. */
 export interface ThirteenthMonthPayRow {
   employee_id: number;
   name: string | null;
@@ -603,14 +562,7 @@ export interface NextPayday {
   frequency: string;
 }
 
-/**
- * Which way a correction moves money, and what it does to the tax.
- *
- * `pay` adds taxable pay the period missed. `pay_reversal` unwinds pay that should not have been
- * paid, so the tax withheld on it is refunded with it. `deduction` adds a deduction the period
- * missed — it comes off net only, leaving gross, taxable pay and the tax exactly where they are,
- * which is why it cannot simply be negative pay.
- */
+/** Which way a correction moves money, and what it does to the tax. */
 export type AmendmentKind = "pay" | "pay_reversal" | "deduction";
 
 /**
@@ -663,13 +615,7 @@ export interface RerunPreviewMeta {
   clears_tax_stale: boolean;
 }
 
-/**
- * One correction already standing against a payslip.
- *
- * The ledger the payslip's `adjustment_pay` totals. Each carries the date it was ISSUED, which is
- * the only thing distinguishing two corrections to the same period — and is not the period itself,
- * that being the payslip this hangs off.
- */
+/** One correction already standing against a payslip. */
 export interface PayslipAmendment {
   id: number;
   kind: AmendmentKind;
@@ -703,13 +649,7 @@ export interface PayslipAmendment {
   issued_by: string | null;
 }
 
-/**
- * An outstanding retroactive pay difference (FIN-009).
- *
- * Written when a leave/overtime/half-day/early-out decision lands on a period payroll has already
- * settled. `owed` is paid with an adjustment run; `overpaid` has no automated path, because
- * recovering paid wages is a deduction that needs the employee's consent (Art. 113).
- */
+/** An outstanding retroactive pay difference. */
 export interface RetroFlag {
   id: number;
   employee: { id: number | null; name: string | null };
@@ -727,7 +667,7 @@ export interface RetroFlag {
   created_at: string | null;
 }
 
-// --- Disbursement (FIN-015) ------------------------------------------------------------------
+// --- Disbursement ------------------------------------------------------------------
 
 /** How the money leaves the company. One method per batch — a bank file is per payment rail. */
 export type PaymentMethod = "bank_transfer" | "cash" | "check";
@@ -755,7 +695,7 @@ export interface Payment {
   method: PaymentMethod;
   status: PaymentStatus;
   bank_name: string | null;
-  /** Masked to the last four digits. The full number is never served to a screen (FIN-022). */
+  /** Masked to the last four digits. The full number is never served to a screen. */
   bank_account_masked: string | null;
   bank_account_type: string | null;
   /** Both null until reconciliation — the gap between "we sent it" and "it arrived". */
@@ -820,13 +760,7 @@ export interface PaymentReconcileResult {
   rows: number;
 }
 
-/**
- * A statutory or benefit deduction a thin payslip could not collect, still outstanding (FIN-005).
- *
- * Recovery is automatic — the next run with room takes it, statutory first. This type exists for
- * the amounts that CANNOT be recovered: an employee on long unpaid leave, or one who has left, for
- * whom there is no future payslip. The company still owes the agency the full contribution.
- */
+/** A statutory or benefit deduction a thin payslip could not collect, still outstanding. */
 export interface DeductionArrear {
   employee: {
     id: number;
@@ -840,7 +774,7 @@ export interface DeductionArrear {
 }
 
 /**
- * FIN-027 — the withholding-tax table, exposed so it can be checked against the BIR schedule.
+ * The withholding-tax table, exposed so it can be checked against the BIR schedule.
  *
  * `max_annual` is derived server-side (the next band's floor − 0.01) because the table stores only
  * floors, while the BIR prints ranges — and a range is what makes it checkable. Null on the top band.
@@ -863,13 +797,7 @@ export interface TaxTable {
   versions: { effective_from: string | null; note: string | null }[];
 }
 
-/**
- * FIN-030b — one employee this run would pay below the regional minimum daily wage.
- *
- * The rate is DERIVED (salary ÷ the basis on the attendance policy), which is the whole reason the
- * row exists: nobody typing a monthly figure can see what it implies per day, and the per-day
- * figure is what a wage order governs.
- */
+/** One employee this run would pay below the regional minimum daily wage. */
 export interface MinimumWageRow {
   employee: { id: number; name: string | null; employee_no: string | null; job_title: string | null };
   base_salary: number;
@@ -902,18 +830,11 @@ export interface MinimumWageMeta {
 export interface MinimumWageApplyResult {
   applied: { employee_id: number; name: string | null; from: number; to: number }[];
   skipped: { employee_id: number; name: string | null; reason: string }[];
-  /** Periods already settled when the raise takes effect — recorded as back pay owed (FIN-009). */
+  /** Periods already settled when the raise takes effect — recorded as back pay owed. */
   back_pay_flagged: number;
 }
 
-/**
- * One attendance problem worth seeing before a cycle is priced (item 12).
- *
- * Counts and a destination, never rows: each exception is listed in full on the screen that owns
- * it, and the fixing happens there. `blocking` marks the ones where running now produces a payslip
- * somebody will dispute — it does not stop the run, because a cutoff that cannot close is worse
- * than one that closes with a known exception on the record.
- */
+/** One attendance problem worth seeing before a cycle is priced (item 12). */
 export interface AttendanceException {
   key:
     | "unpriced_days"

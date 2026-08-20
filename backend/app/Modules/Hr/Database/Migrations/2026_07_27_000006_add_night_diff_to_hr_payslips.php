@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// ND-1: night-shift differential — a positive pay line for work between 22:00 and 06:00, folded
+// night-shift differential — a positive pay line for work between 22:00 and 06:00, folded
 // into gross like holiday_premium / overtime_pay. Default 0; a payslip only carries an amount when
 // the employee actually clocked night hours.
 return new class extends Migration

@@ -17,19 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Corrections applied to the payslip of the period they correct.
- *
- * WHAT THIS REPLACES. FIN-010 paid a correction by raising a separate run and a second payslip. The
- * money was right, but one period ended up described by two documents that referenced each other
- * nowhere: a March payslip stating a figure that was wrong, and an unexplained payslip dated April.
- *
- * The two tests that matter most here are the disbursed-balance pair and the re-run one. Amending a
- * paid payslip is the case the feature exists for, and it is only honest if the payslip keeps saying
- * what actually left the bank — otherwise every total downstream inherits a payment that never
- * happened. And a correction that a later recompute of the same period silently reverses would be
- * worse than no correction at all, because nothing would say it had gone.
- */
+/** Corrections applied to the payslip of the period they correct. */
 class PayslipAmendmentTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -182,10 +170,6 @@ class PayslipAmendmentTest extends HrTestCase
      * TAX IS MARGINAL, not a fresh calculation on the amount alone — the same method the 13th month
      * uses for its excess over ₱90,000, and for the same reason: taxing ₱5,000 in isolation applies
      * the lowest bracket to money that actually sits on top of a year's earnings.
-     *
-     * Which is why it takes a year of earnings to see it at all. With one cutoff behind it the year
-     * is still under the ₱250,000 exemption and the correct withholding on a correction is genuinely
-     * nothing; the assertion is that the SAME correction costs tax once the year is above it.
      */
     public function test_a_correction_on_top_of_a_taxed_year_is_withheld_on(): void
     {
@@ -682,13 +666,7 @@ class PayslipAmendmentTest extends HrTestCase
         $this->assertSame(round($net - 750, 2), (float) $this->slip($run)->net_pay);
     }
 
-    /**
-     * ONE CALL, EVERY EMPLOYEE IN THE PERIOD — the shape the "everyone in this period" button posts.
-     *
-     * Worth its own test because a batch correction is the case where a mistake is multiplied: the
-     * lines have to be applied per payslip, each with its own ledger row, rather than summed onto
-     * whichever payslip the loop happened to hold.
-     */
+    /** ONE CALL, EVERY EMPLOYEE IN THE PERIOD — the shape the "everyone in this period" button posts. */
     public function test_one_call_can_correct_every_employee_in_the_period(): void
     {
         $second = Employee::create([
@@ -746,13 +724,7 @@ class PayslipAmendmentTest extends HrTestCase
 
     // --- what the screens and the document are told -------------------------------------------
 
-    /**
-     * The route that raised a second payslip is GONE, not deprecated.
-     *
-     * Leaving it reachable would mean anything still pointed at it kept producing the exact
-     * documents this feature exists to stop — and it would do so silently, since it returned a
-     * perfectly successful run.
-     */
+    /** The route that raised a second payslip is GONE, not deprecated. */
     public function test_the_retired_adjustment_route_no_longer_exists(): void
     {
         $this->hrPost('/api/v1/hr/payroll/adjustment', [
@@ -762,14 +734,7 @@ class PayslipAmendmentTest extends HrTestCase
         ])->assertNotFound();
     }
 
-    /**
-     * The run's breakdown carries the employee and both money figures.
-     *
-     * `employee_id` is what a correction is addressed to: with only a display name on the row, the
-     * form offering to correct this period had to fetch the whole directory and match on text.
-     * `disbursed`/`outstanding` are what make an amended row readable — the net alone says the
-     * payslip is worth more than was paid without saying that anything is owed.
-     */
+    /** The run's breakdown carries the employee and both money figures. */
     public function test_the_run_breakdown_names_the_employee_and_states_the_balance(): void
     {
         $run = $this->paidPeriod();
@@ -808,21 +773,8 @@ class PayslipAmendmentTest extends HrTestCase
         $this->assertStringContainsString('back-dated raise', $data['amendments'][0]['reason']);
     }
 
-    /**
-     * THE PDF SAYS SO TOO, which is the copy the employee keeps.
-     *
-     * A document stating a net larger than the amount in their account, with nothing accounting for
-     * the difference, is the one error a payslip cannot make — and the PDF is the surface where
-     * nobody can click through for the explanation.
-     */
-    /**
-     * A correction that ADDS a line is printed as that line, with the date it was issued.
-     *
-     * The standalone "Corrections to this payslip" block below the signatures is gone. It existed
-     * when the figures above were the engine's and a person's disagreement with them had nowhere
-     * else to live; corrections now sit on the line they are about — an added line IS a line — so
-     * the block would be the same information said twice.
-     */
+    /** THE PDF SAYS SO TOO, which is the copy the employee keeps. */
+    /** A correction that ADDS a line is printed as that line, with the date it was issued. */
     public function test_the_pdf_states_what_was_transferred_and_shows_the_correction_as_a_line(): void
     {
         $run = $this->paidPeriod();
@@ -941,13 +893,7 @@ class PayslipAmendmentTest extends HrTestCase
         return $run;
     }
 
-    /**
-     * A settled cutoff earlier in the year carrying `$taxable` of taxable pay.
-     *
-     * Written directly rather than run, because what the marginal-tax rule reads is the YEAR's
-     * taxable pay from its completed regular runs — and eleven real cutoffs would take a minute to
-     * compute to establish a single figure.
-     */
+    /** A settled cutoff earlier in the year carrying `$taxable` of taxable pay. */
     private function seedYearToDateTaxable(float $taxable): void
     {
         $run = PayrollRun::create([

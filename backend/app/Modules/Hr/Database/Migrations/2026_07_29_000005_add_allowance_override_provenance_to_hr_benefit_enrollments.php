@@ -5,18 +5,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Slice B6 — tell a DELIBERATE per-employee allowance override apart from one the B1 backfill
+ * Tell a DELIBERATE per-employee allowance override apart from one the B1 backfill
  * froze on.
- *
- * WHY. B1 wrote every employee's old `hr_employees` column value onto their enrolment so the
- * switch to Company → Benefits paid identically on day one. That left 56 pinned rows which are
- * indistinguishable, in the data, from an amount HR typed on purpose — and the whole point of B6
- * is to work through the frozen ones without disturbing a real arrangement. A row that carries
- * WHO set it and WHEN was set by a person; a row with a non-null `amount` and neither is a
- * leftover from the migration.
- *
- * Deliberately NOT a boolean flag: "set by Joshua on 12 Aug" answers the question HR will
- * actually ask when they meet an override, and a flag does not.
  */
 return new class extends Migration
 {

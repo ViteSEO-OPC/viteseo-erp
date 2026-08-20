@@ -230,10 +230,6 @@ class RecruitmentService
     /**
      * Reject a candidate: move to the rejected stage with a reason. A hired candidate
      * can't be rejected.
-     *
-     * Rejecting no longer sends anything. The rejection email is composed like every other
-     * candidate email — the dialog rejects first, then opens the compose modal — so this
-     * method's job ends at the stage change and the reason.
      */
     public function reject(Candidate $candidate, string $reason, ?string $note): Candidate
     {
@@ -283,7 +279,7 @@ class RecruitmentService
                 'job_title' => $requisition->title,
                 'employment_status' => 'probationary',
                 // New hire carries the "Onboarding" tag until HR marks it complete
-                // (Slice 17). Applies to part-timers/OJT too.
+                // . Applies to part-timers/OJT too.
                 'onboarding_status' => 'pending',
                 'hire_date' => now(config('app.timezone_local'))->toDateString(),
                 'base_salary' => 0, // draft — HR sets pay after

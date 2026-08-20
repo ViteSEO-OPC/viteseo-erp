@@ -173,8 +173,6 @@ class ChangeRequestService
      * reverting a newer, deliberate edit to a stale value would be worse than leaving it:
      * in that case the request reopens and the record is left as HR last set it.
      *
-     * The return flag says which happened, so the UI can be honest about it.
-     *
      * @return array{request: ChangeRequest, restored: bool}
      */
     public function reopen(ChangeRequest $request, ?string $reason = null): array

@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * One statutory contribution's rates, in force from `effective_from` until a later version
- * supersedes it (Slice B3a). There is no end date — the next version's start IS this one's end,
+ * supersedes it. There is no end date — the next version's start IS this one's end,
  * which makes gaps and overlaps impossible to express.
  */
 class ContributionVersion extends Model
@@ -21,15 +21,8 @@ class ContributionVersion extends Model
     public const BASES = ['percentage', 'bracket'];
 
     /**
-     * WHICH salary figure the rate is applied to (Slice B19) — not to be confused with `BASES`
+     * WHICH salary figure the rate is applied to — not to be confused with `BASES`
      * above, which is how the charge is worked out once a figure is chosen.
-     *
-     *   basic     the employee's profile monthly rate, whatever they actually earned
-     *   earnings  what the period actually paid: basic net of absences and lates, plus overtime,
-     *             the night differential, holiday and rest-day premium, plus the allowances
-     *             marked contributable — expressed as a monthly equivalent
-     *
-     * PhilHealth is `basic` by law (Circular 2019-0009); SSS and Pag-IBIG measure compensation.
      */
     public const SALARY_BASES = ['basic', 'earnings'];
 
@@ -59,7 +52,7 @@ class ContributionVersion extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
-    /** MSC bands, lowest first — only meaningful when `basis` is `bracket` (Slice B3b). */
+    /** MSC bands, lowest first — only meaningful when `basis` is `bracket`. */
     public function brackets(): HasMany
     {
         return $this->hasMany(ContributionBracket::class, 'contribution_version_id')
@@ -118,15 +111,15 @@ class ContributionVersion extends Model
             'fixed_employer_add_on' => (float) $this->fixed_employer_add_on,
             'add_on_min_salary' => $this->add_on_min_salary !== null ? (float) $this->add_on_min_salary : null,
             'basis' => $this->basis,
-            // Slice B19 — which salary figure goes in. Defaulted rather than left absent so a
+            // Which salary figure goes in. Defaulted rather than left absent so a
             // version written before this column existed reads as `basic`, which is what it was.
             'salary_basis' => $this->salary_basis ?: 'basic',
-            // Slice B3b — the MSC bands, when this version prices by bracket.
+            // The MSC bands, when this version prices by bracket.
             'brackets' => $this->basis === 'bracket'
                 ? $this->brackets->map(fn ($b) => [
                     'min_salary' => (float) $b->min_salary,
                     'msc' => (float) $b->msc,
-                    // Slice B8 — the EC printed for this band; null falls back to the rule above.
+                    // The EC printed for this band; null falls back to the rule above.
                     'employer_add_on' => $b->employer_add_on !== null ? (float) $b->employer_add_on : null,
                 ])->values()->all()
                 : null,

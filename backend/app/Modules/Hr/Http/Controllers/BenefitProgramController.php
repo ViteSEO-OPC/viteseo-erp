@@ -55,15 +55,7 @@ class BenefitProgramController extends Controller
         return response()->noContent();
     }
 
-    /**
-     * GET /api/v1/hr/employees/{employee}/allowances — Slice B14, hr_officer only.
-     *
-     * What this employee is actually paid, allowance by allowance: the programme's amount, their
-     * own amount where one has been set, and who set it. Built from the CATALOGUE rather than a
-     * fixed list of fields — HR adds and deletes allowances, so the screen has to follow.
-     *
-     * Not `/benefits`: that path is the statutory checklist (B5 item 8's naming collision).
-     */
+    /** GET /api/v1/hr/employees/{employee}/allowances, hr_officer only. */
     public function employeeAllowances(Employee $employee): JsonResponse
     {
         $overrides = $this->service->overridesFor($employee);
@@ -94,7 +86,7 @@ class BenefitProgramController extends Controller
     }
 
     /**
-     * PUT /api/v1/hr/employees/{employee}/allowances/{benefitProgram} — Slice B14, hr_officer only.
+     * PUT /api/v1/hr/employees/{employee}/allowances/{benefitProgram}, hr_officer only.
      *
      * `amount: null` hands the employee back to the programme. Any other value is a deliberate
      * figure and is stamped with who set it.
@@ -127,7 +119,7 @@ class BenefitProgramController extends Controller
     }
 
     /**
-     * GET /api/v1/hr/benefit-programs/{benefitProgram}/enrollments — Slice B2, hr_officer only.
+     * GET /api/v1/hr/benefit-programs/{benefitProgram}/enrollments, hr_officer only.
      *
      * Who is on this plan, at what tier and share, since when — plus everyone the plan's rule
      * allows who is NOT on it, because "who could I add" is the other half of the screen.
@@ -137,13 +129,7 @@ class BenefitProgramController extends Controller
         return response()->json($this->enrolmentPayload($benefitProgram));
     }
 
-    /**
-     * PUT /api/v1/hr/benefit-programs/{benefitProgram}/enrollments — Slice B2, hr_officer only.
-     *
-     * Enrol people on a plan, or change their tier, share or dates. A row the plan's rule does not
-     * cover, or one naming a tier the plan does not have, is REPORTED BACK rather than written —
-     * the two faults B5 items 1 and 2 closed for the assignment path that has since been deleted.
-     */
+    /** PUT /api/v1/hr/benefit-programs/{benefitProgram}/enrollments, hr_officer only. */
     public function updatePlanEnrollments(Request $request, BenefitProgram $benefitProgram): JsonResponse
     {
         if ($benefitProgram->kind !== 'plan') {
@@ -176,7 +162,7 @@ class BenefitProgramController extends Controller
     }
 
     /**
-     * DELETE /api/v1/hr/benefit-programs/{benefitProgram}/enrollments/{employee} — Slice B2.
+     * DELETE /api/v1/hr/benefit-programs/{benefitProgram}/enrollments/{employee}.
      *
      * Ends the enrolment on a date rather than deleting the row: the row is what lets a past
      * payslip explain the deduction it charged.
@@ -229,14 +215,7 @@ class BenefitProgramController extends Controller
         ];
     }
 
-    /**
-     * GET /api/v1/hr/me/benefit-programs — the caller's own benefits, with what each is worth.
-     *
-     * Slice B12 — the money comes from `AllowanceService`, the same code payroll runs, so the
-     * total on this page and the allowance line on the payslip cannot disagree. A second
-     * implementation of "what an allowance is worth" is exactly the drift this audit exists to
-     * remove.
-     */
+    /** GET /api/v1/hr/me/benefit-programs — the caller's own benefits, with what each is worth. */
     public function mine(Request $request, AllowanceService $allowances): JsonResponse
     {
         $employee = $request->user()->employee;
@@ -245,7 +224,7 @@ class BenefitProgramController extends Controller
             return response()->json(['data' => []]);
         }
 
-        // Monthly, per programme, honouring frequency and this employee's own amount (B14).
+        // Monthly, per programme, honouring frequency and this employee's own amount.
         $lines = collect($allowances->linesFor($employee))->keyBy('program_id');
 
         $programs = $this->service->forEmployee($employee)->each(function (BenefitProgram $program) use ($lines) {

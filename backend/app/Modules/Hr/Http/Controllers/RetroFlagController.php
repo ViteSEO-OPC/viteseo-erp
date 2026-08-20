@@ -9,12 +9,7 @@ use App\Modules\Hr\Services\RetroFlagService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-/**
- * Outstanding retroactive pay differences (FIN-009).
- *
- * The queue that replaces "HR settles the difference manually" — which previously meant no record,
- * no workflow and no reconciliation.
- */
+/** Outstanding retroactive pay differences. */
 class RetroFlagController extends Controller
 {
     public function __construct(private readonly RetroFlagService $service) {}

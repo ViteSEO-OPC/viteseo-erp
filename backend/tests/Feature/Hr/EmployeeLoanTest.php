@@ -16,16 +16,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Slice 11b (2026-07-28 audit) — loans and cash advances repaid through payroll.
- *
- * The design point under test is RE-RUN SAFETY: a loan has no `balance` column. The balance is
- * `principal − SUM(payments)`, payments are unique per (loan, payroll run), and a recompute
- * REPLACES that period's row. A stored balance decremented per run would double-count on every
- * re-run — the failure mode Slices 5 and 12 exist to prevent.
- *
- * Shortfall rule (decision 2026-07-28): collect what the payslip can afford, carry the rest.
- */
+/** (2026-07-28 audit) — loans and cash advances repaid through payroll. */
 class EmployeeLoanTest extends HrTestCase
 {
     use RefreshDatabase;

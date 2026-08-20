@@ -7,10 +7,6 @@ use Illuminate\Support\Facades\Schema;
 // Geofenced clock-in (MVP). The office lives on the policy row rather than a new settings
 // table because there is exactly ONE office in the MVP and Company → Rules already owns
 // every clock-in rule — multi-office is an explicit non-goal.
-//
-// `geofence_enabled` is the master switch AND the kill switch: off (the default) is today's
-// clock-in, untouched. A half-configured policy (on, but no pin or no IPs) deliberately
-// behaves as off rather than locking the company out — see AttendanceService.
 return new class extends Migration
 {
     public function up(): void

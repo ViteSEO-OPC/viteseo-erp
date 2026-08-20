@@ -167,7 +167,7 @@ export function TimeClockPanel() {
   const needsWorkRequest = requiredType !== null && state === "not_clocked_in";
   const workReqMut = useCreateWorkRequest();
 
-  // Work suspended today (Slice B). Usually shown and not enforced: the button stays live
+  // Work suspended today. Usually shown and not enforced: the button stays live
   // because a skeleton crew does come in, and someone who works a cancelled day must still be
   // able to record it. What changes is what the panel SAYS. The exception is a declaration HR
   // marked `work_requires_request`, which routes the same press through the queue above.
@@ -353,8 +353,10 @@ export function TimeClockPanel() {
     <div className="grid grid-cols-1 gap-6 rounded-card bg-dark-teal p-8 text-white lg:grid-cols-[1fr_auto_420px] lg:gap-x-0">
       {/* Left: status + clock + actions */}
       <div>
-        {/* pr keeps the alert off the divider — the row is the only thing that
-            reaches the column's right edge. */}
+        {/*
+         * pr keeps the alert off the divider — the row is the only thing that
+         * reaches the column's right edge.
+         */}
         <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 lg:pr-5">
           <div className="flex items-center gap-2">
             <span
@@ -380,16 +382,20 @@ export function TimeClockPanel() {
           {alertFlag && <AttendanceAlertBanner violation={alertFlag} />}
         </div>
 
-        {/* Smaller + tighter below `sm`: at 320px the card's inner width is
-            ~240px, and "01:30:45 PM" at text-4xl/tracking-wider needs ~253px,
-            which wrapped the AM/PM onto its own line. */}
+        {/*
+         * Smaller + tighter below `sm`: at 320px the card's inner width is
+         * ~240px, and "01:30:45 PM" at text-4xl/tracking-wider needs ~253px,
+         * which wrapped the AM/PM onto its own line.
+         */}
         <p className="mt-6 font-mono text-3xl font-bold tracking-wide whitespace-nowrap text-brand sm:text-4xl sm:tracking-wider">
           {clockText}
         </p>
 
         <p className="mt-3 text-sm text-white/70">
-          {/* The request branch comes FIRST: on a day that needs asking, "you haven't clocked
-              in yet today" is not merely unhelpful, it implies they still can. */}
+          {/*
+           * The request branch comes FIRST: on a day that needs asking, "you haven't clocked
+           * in yet today" is not merely unhelpful, it implies they still can.
+           */}
           {state === "not_clocked_in" && needsWorkRequest &&
             (workReqPending
               ? `Sent to HR at ${formatTimeManila(workReq?.requested_at)} — you'll be timed in at that moment once they approve it.`
@@ -400,12 +406,16 @@ export function TimeClockPanel() {
                   : requiredType === "suspension"
                     ? `${suspension?.name ?? "Work is suspended today"} — work is suspended and HR is keeping track of who comes in. Ask to work it and you'll be timed in from the moment you ask, not when they approve.`
                     : "Today isn't one of your workdays. Ask HR to work it — you'll be timed in from the moment you ask, not when they approve.")}
-          {/* A rest day nobody has to ask about: the day still isn't theirs, so say so rather
-              than implying an ordinary shift is waiting. */}
+          {/*
+           * A rest day nobody has to ask about: the day still isn't theirs, so say so rather
+           * than implying an ordinary shift is waiting.
+           */}
           {state === "not_clocked_in" && !needsWorkRequest && !isWorkday &&
             "Today isn't one of your workdays. You can still time in — the day is paid at the rest-day rate."}
-          {/* A cancelled day outranks every ordinary not-clocked-in message: "you haven't
-              clocked in yet today" is actively wrong when nobody was asked to. */}
+          {/*
+           * A cancelled day outranks every ordinary not-clocked-in message: "you haven't
+           * clocked in yet today" is actively wrong when nobody was asked to.
+           */}
           {state === "not_clocked_in" && !needsWorkRequest && isWorkday && suspension &&
             `${suspension.name} — work is suspended today, so you don't need to time in. ${
               suspension.is_paid
@@ -433,9 +443,11 @@ export function TimeClockPanel() {
           {state === "clocked_out" && "You've clocked out for today."}
         </p>
 
-        {/* Stacked full-width on phones with a wider gap: wrapped side-by-side
-            buttons put "Time out" a few pixels from "Start break", which is an
-            easy mis-tap when the two do very different things. */}
+        {/*
+         * Stacked full-width on phones with a wider gap: wrapped side-by-side
+         * buttons put "Time out" a few pixels from "Start break", which is an
+         * easy mis-tap when the two do very different things.
+         */}
         <div className="mt-5 grid gap-3 sm:flex sm:flex-wrap sm:gap-2">
           <button
             // Awaiting review disables it too: a second submission would be refused by the
@@ -517,11 +529,11 @@ export function TimeClockPanel() {
         </div>
 
         {/*
-          The day's shortened-hours rule, on the employee's OWN panel. HR declaring "six hours
-          is a full day today" helps nobody who never hears about it — they work the whole shift
-          anyway. The clock time is the part that matters: the rule is "six hours", but what a
-          person can act on is "you reach it at 3:00 PM", which depends on when THEY clocked in.
-        */}
+         * The day's shortened-hours rule, on the employee's OWN panel. HR declaring "six hours
+         * is a full day today" helps nobody who never hears about it — they work the whole shift
+         * anyway. The clock time is the part that matters: the rule is "six hours", but what a
+         * person can act on is "you reach it at 3:00 PM", which depends on when THEY clocked in.
+         */}
         {dayRules?.min_full_day_minutes != null && (
           <div className="mt-3 rounded-lg bg-white/10 px-3 py-2">
             <p className="text-sm font-semibold text-brand">
@@ -567,9 +579,11 @@ export function TimeClockPanel() {
         </DialogContent>
       </Dialog>
 
-      {/* Work request — replaces the plain confirm when today needs HR's permission. Its own
-          dialog rather than a fourth `confirm` mode: this one takes an input and promises
-          something the others don't. */}
+      {/*
+       * Work request — replaces the plain confirm when today needs HR's permission. Its own
+       * dialog rather than a fourth `confirm` mode: this one takes an input and promises
+       * something the others don't.
+       */}
       <Dialog
         open={workReqOpen}
         onOpenChange={(o) => {
@@ -627,8 +641,10 @@ export function TimeClockPanel() {
         </DialogContent>
       </Dialog>
 
-      {/* Geofenced clock-in — replaces the plain confirm above when the server is
-          enforcing a location check. Opening it starts the GPS fix immediately. */}
+      {/*
+       * Geofenced clock-in — replaces the plain confirm above when the server is
+       * enforcing a location check. Opening it starts the GPS fix immediately.
+       */}
       <ClockInLocationDialog
         open={locationOpen}
         onOpenChange={setLocationOpen}

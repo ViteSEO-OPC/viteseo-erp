@@ -22,14 +22,7 @@ import {
 } from "@/modules/hr/hooks/use-remote-checkins";
 import type { RemoteCheckin } from "@/modules/hr/types/attendance";
 
-/**
- * Off-site time-ins waiting on HR, above the day's roster.
- *
- * Approving is deliberately NOT a one-click action from a list: the whole point is that a
- * human looks at the photo first, so the row opens a dialog showing it full size. The card
- * hides itself entirely when the queue is empty and the filter is on "pending", so it costs
- * nothing on the ordinary days when nobody is in the field.
- */
+/** Off-site time-ins waiting on HR, above the day's roster. */
 export function FieldTimeInQueue() {
   const [status, setStatus] = useState("pending");
   const { data: rows, isLoading } = useRemoteCheckins(status);

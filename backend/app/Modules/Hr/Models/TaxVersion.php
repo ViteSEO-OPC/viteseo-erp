@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-/** A dated BIR graduated withholding-tax table (FIN-027). */
+/** A dated BIR graduated withholding-tax table. */
 class TaxVersion extends Model
 {
     use HasFactory;

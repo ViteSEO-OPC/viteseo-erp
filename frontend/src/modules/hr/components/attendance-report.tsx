@@ -22,11 +22,6 @@ import {
 /**
  * The Attendance Summary screen: three month-scoped views of the same period — per-employee
  * totals, the daily time record, and leave usage — behind one filter bar.
- *
- * WHY ONE COMPONENT FOR THREE REPORTS. The server returns them in a shared envelope (same month
- * picker, same department list, same working-day count) and only the row payload differs. The
- * tabs are real routes rather than local state so a month someone is looking at can be linked to,
- * and the filters ride along in the query string so switching tabs keeps the period you chose.
  */
 
 const ALL_DEPARTMENTS = "all";

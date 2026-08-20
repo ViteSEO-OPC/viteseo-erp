@@ -10,11 +10,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 /**
  * Permission to work a day nobody was expected in on.
  *
- * Two kinds, one lifecycle. TYPE_REST_DAY is a day the employee's own schedule does not cover;
- * TYPE_SUSPENSION is an ordinary workday HR has cancelled and marked as needing permission to
- * come in on. Both are filed by pressing Time in and refused a punch, both hold that moment in
- * `requested_at`, and both approve into an attendance row stamped at it.
- *
  * @see \App\Modules\Hr\Services\WorkRequestService for the lifecycle.
  */
 class WorkRequest extends Model
@@ -29,18 +24,7 @@ class WorkRequest extends Model
     /** A scheduled workday HR suspended, with `work_requires_request` set on the declaration. */
     public const TYPE_SUSPENSION = 'suspension';
 
-    /**
-     * How long a pending request stays decidable, measured from the punch it would stamp.
-     *
-     * WHY IT EXPIRES AT ALL: approving one WRITES an attendance row at `requested_at`, so a
-     * request left pending for a week and then approved back-dates a shift nobody watched
-     * happen — and, on a rest day, pays a premium for it. Expiry is what stops a stale queue
-     * from turning into retroactive attendance.
-     *
-     * WHY 24 HOURS AND NOT "END OF THE DAY": a rest-day shift can start at 22:00 and run past
-     * midnight, and an end-of-day rule would expire that request 90 minutes into the work it
-     * was asking permission for. One duration, measured from the punch, has no such seam.
-     */
+    /** How long a pending request stays decidable, measured from the punch it would stamp. */
     public const EXPIRES_AFTER_HOURS = 24;
 
     protected $fillable = [

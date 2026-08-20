@@ -84,7 +84,7 @@ class HalfDayRequestService
             $request,
         );
 
-        // FIN-009 — a half-day shortens a paid day, so approving one for a cutoff payroll has
+        // A half-day shortens a paid day, so approving one for a cutoff payroll has
         // already settled means the employee was paid for time the record now says they did not
         // work. The approval stands; the difference is recorded rather than left to memory.
         // OVERPAID, not OWED: recovering it is a wage deduction needing consent (Art. 113).

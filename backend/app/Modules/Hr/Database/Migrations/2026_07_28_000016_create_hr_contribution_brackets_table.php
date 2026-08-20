@@ -4,22 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice B3b — SSS Monthly Salary Credit brackets.
- *
- * SSS does not charge a percentage of actual salary. A salary falls into a bracket, and the
- * bracket's MSC is what the rate applies to: earn ₱20,100 and the base is exactly ₱20,000, not
- * ₱20,100. Percentage-of-salary is wrong for almost everyone, in both directions, on every
- * payslip — and wrong for the employer remittance that actually gets filed.
- *
- * ONE BOUNDARY PER ROW, not two. Each bracket stores `min_salary` and runs up to the next
- * bracket's `min_salary`; the highest runs to infinity (bounded by the version's `salary_cap`).
- * Storing min AND max invites gaps and overlaps that have to be validated against — with a single
- * boundary they cannot be expressed at all. Same reasoning as `effective_from` having no end date.
- *
- * Brackets hang off a VERSION, so they are date-effective for free: a new schedule is a new
- * version with its own rows, and old periods keep pricing on the old table.
- */
+/** SSS Monthly Salary Credit brackets. */
 return new class extends Migration
 {
     public function up(): void

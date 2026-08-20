@@ -9,12 +9,9 @@ use Illuminate\Http\Resources\Json\JsonResource;
 class EmployeeResource extends JsonResource
 {
     /**
-     * FIN-030b — opt-in, because the minimum-wage check is not free: deriving one daily rate reads
+     * opt-in, because the minimum-wage check is not free: deriving one daily rate reads
      * the employee's schedule for the current period. On a single record that is nothing; on a
      * 200-row directory it is 200 schedule lookups for a field the directory does not show.
-     *
-     * Off by default so a new list endpoint cannot silently acquire the cost. The single-employee
-     * responses that feed the Compensation screen turn it on.
      */
     private bool $withPayrollChecks = false;
 
@@ -47,7 +44,7 @@ class EmployeeResource extends JsonResource
             'employee_role' => $this->employee_role,
             'onboarding_status' => $this->onboarding_status,
             'hire_date' => $this->hire_date?->format('Y-m-d'),
-            // MF-18 — the employment lifecycle, so the UI can tell an active employee from a former
+            // The employment lifecycle, so the UI can tell an active employee from a former
             // one and offer the right action. `separation_date` is the last WORKING day (what payroll
             // prorates against); `deleted_at` is kept in sync with it by `EmployeeService::separate()`.
             'separation_type' => $this->separation_type,
@@ -66,12 +63,12 @@ class EmployeeResource extends JsonResource
             'emergency_contact_relationship' => $this->emergency_contact_relationship,
             'emergency_contact_phone' => $this->emergency_contact_phone,
             'bank_name' => $this->bank_name,
-            // FIN-022 — MASKED. `••••4471` is enough to confirm the right account and useless to
+            // MASKED. `••••4471` is enough to confirm the right account and useless to
             // anyone else. The full value is available only from the audited reveal endpoint, so a
             // list of 200 employees no longer ships 200 bank accounts to the browser.
             'bank_account' => Employee::maskSensitive($this->bank_account),
             'pay_frequency' => $this->pay_frequency ?? 'semi_monthly',
-            // FIN-030 — the DERIVED daily rate, and the configured regional floor when there is
+            // The DERIVED daily rate, and the configured regional floor when there is
             // one. Included because the daily rate is not something anyone can see from the monthly
             // figure they typed: it is salary ÷ the basis on the attendance policy. A warning, not
             // validation — the floor varies by region, industry and establishment size, and a block

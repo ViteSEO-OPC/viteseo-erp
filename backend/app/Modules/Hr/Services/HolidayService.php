@@ -43,7 +43,7 @@ class HolidayService
     public function __construct(private readonly AuditService $audit) {}
 
     /**
-     * Per-request memo of typedHolidaysBetween(), keyed by range (Slice 15). A payroll run asks
+     * Per-request memo of typedHolidaysBetween(), keyed by range. A payroll run asks
      * for the same cycle's holidays once per employee, plus once each in AttendanceService and
      * ViolationService. Every write below clears it.
      *

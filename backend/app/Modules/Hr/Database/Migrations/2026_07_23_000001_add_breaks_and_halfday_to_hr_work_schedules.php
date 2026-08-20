@@ -4,11 +4,11 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Slice 1 (attendance→pay). Extends the EXISTING work-schedule template so the paid
+//  (attendance→pay). Extends the EXISTING work-schedule template so the paid
 // day, breaks, and half-day windows are HR-editable data — not a hard-coded constant.
 //   - unpaid_break_minutes: the meal period, SUBTRACTED from the paid day (denominator).
 //   - paid_break_minutes: compensable short break, INSIDE the paid day (flag threshold only).
-//   - am_/pm_*_time: the half-day windows, so a half-day's hours are known, not guessed (F-3).
+//   - am_/pm_*_time: the half-day windows, so a half-day's hours are known, not guessed.
 // All non-null defaults / nullable, so a plain `migrate` on existing rows is a no-op.
 return new class extends Migration
 {

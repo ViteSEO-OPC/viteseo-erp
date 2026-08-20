@@ -6,22 +6,7 @@ use App\Modules\Hr\Support\PayslipLines;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Validator;
 
-/**
- * A correction to a line that is ALREADY on a payslip.
- *
- * NO KIND HERE, and that is the difference from AmendPayrollRunRequest. That request had to ask
- * whether a correction was extra pay, reversed pay or a deduction, because a line appended to the
- * bottom of a document carries no clue about what it is. A correction to `late` or to `sss` does:
- * the line's own class decides what moves and what happens to the tax, so the question is not
- * asked and cannot be answered wrongly.
- *
- * NO EMPLOYEE EITHER — the payslip comes from the route, so a correction cannot be pointed at the
- * wrong person, at a period that was never run, or at an employee this period does not pay.
- *
- * THE AMOUNT IS ALWAYS A POSITIVE MAGNITUDE, on either side of the document. HR states what the
- * line IS — "the late charge is ₱300" — which is how a person says it, and which leaves no way to
- * type a deduction that quietly pays.
- */
+/** A correction to a line that is ALREADY on a payslip. */
 class CorrectPayslipLineRequest extends FormRequest
 {
     public function authorize(): bool

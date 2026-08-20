@@ -23,13 +23,7 @@ function daysAgo(days: number): string {
   return d.toLocaleDateString("en-CA");
 }
 
-/**
- * Why the row is here, in HR's words rather than the engine's.
- *
- * An approved overtime request is checked FIRST and outranks everything else: it is the only
- * case where the pay engine is confident and a human still disagrees with it, so saying
- * "auto-closed at 18:00" there would describe the mechanism and hide the actual problem.
- */
+/** Why the row is here, in HR's words rather than the engine's. */
 function describe(row: OpenShiftRow): { label: string; tone: Tone; detail: string } {
   if (row.approved_overtime_hours !== null) {
     return {
@@ -72,30 +66,7 @@ function describe(row: OpenShiftRow): { label: string; tone: Tone; detail: strin
   }
 }
 
-/**
- * Open shifts HR should look at — the stale-attendance review queue (item 6).
- *
- * WHY THIS IS TWO LISTS IN ONE TABLE. Auto-closing a forgotten punch at the scheduled end
- * settles the ordinary case by itself, which is most of them. What is left splits in half, and
- * the halves want opposite things from HR:
- *
- *   • Needs fixing — the day CANNOT be priced (a rest day, no schedule, a punch after their own
- *     end) or is priced but contradicted by an approved overtime request. Somebody is being paid
- *     the wrong amount right now and only a correction fixes it. This is the point of the queue.
- *   • Auto-closed — the money is already correct; the record is merely still open, which leaves
- *     the employee's own dashboard claiming they are clocked in.
- *
- * Showing them as one undifferentiated pile would bury the first kind under the second, which is
- * exactly the "HR has to fix everything by hand" problem auto-closure was built to remove. So the
- * filter starts on "Needs fixing" and the count in the heading counts only those.
- *
- * NOT LISTED: a shift still inside its allowance, because the person may simply still be at work.
- * Chasing those would recreate the same noise from the other direction.
- *
- * No action of its own, deliberately: `onFix` hands the row back to the page, which moves the
- * roster to that date and opens the correction dialog HR already uses. A second correction path
- * would be a second thing to keep in step with payroll.
- */
+/** Open shifts HR should look at — the stale-attendance review queue (item 6). */
 export function OpenShiftQueue({ onFix }: { onFix: (row: OpenShiftRow) => void }) {
   const { data: policy } = useAttendancePolicy();
   const [from, setFrom] = useState(() => daysAgo(LOOKBACK_DAYS));

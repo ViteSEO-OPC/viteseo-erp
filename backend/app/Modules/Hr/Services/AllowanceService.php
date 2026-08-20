@@ -4,23 +4,7 @@ namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\Employee;
 
-/**
- * What an employee's allowances are worth per month, read from Company → Benefits (Slice B1).
- *
- * WHY THIS EXISTS. Allowances lived in two places that disagreed: the Benefits page showed four
- * programmes (₱77,000/month across the company) while payroll paid three hard-coded columns on
- * `hr_employees` (₱42,000/month). Editing the page changed nobody's payslip, and Gas Allowance had
- * no column at all so it could never be paid. Benefits is now the single source of truth.
- *
- * ONE AMOUNT PER ALLOWANCE, UNLESS SOMEONE DELIBERATELY SAYS OTHERWISE (B6, amended by B14 on
- * 2026-08-03). The programme's amount is what everybody gets, so editing it reaches everybody —
- * that is the property this whole audit exists to guarantee. A per-employee figure exists only
- * where a person typed one, and it is stamped with who and when.
- *
- * The difference from the bug B1 shipped is provenance, not mechanism: B1's migration wrote an
- * amount onto all 56 enrolments, so "has its own amount" meant nothing and the Benefits page drove
- * nobody's pay. Here the column is written by a person or not at all.
- */
+/** What an employee's allowances are worth per month, read from Company → Benefits. */
 class AllowanceService
 {
     public function __construct(private readonly BenefitProgramService $programs) {}
@@ -34,20 +18,7 @@ class AllowanceService
         return round(array_sum(array_column($this->linesFor($employee, $asOf), 'amount')), 2);
     }
 
-    /**
-     * The slice of the monthly allowance that counts toward the statutory contribution base
-     * (Slice B19).
-     *
-     * NOT A DEDUCTION FROM PAY. Everything `monthlyFor()` returns is still paid in full and still
-     * lands in gross — this figure never touches what the employee receives. It answers only "how
-     * much of it is remuneration for SSS and Pag-IBIG purposes", which is a per-allowance decision
-     * HR records on the programme.
-     *
-     * A SEPARATE QUESTION FROM TAX, deliberately, which is why this is not another bucket on
-     * `monthlyTaxBucketsFor()`. A taxable allowance can sit outside the contribution base and a
-     * de-minimis one can sit inside it — SSS expressly includes the mandated COLA, which is
-     * de-minimis for tax. Folding the two into one flag would force a wrong answer on one of them.
-     */
+    /** The slice of the monthly allowance that counts toward the statutory contribution base */
     public function monthlyContributableFor(Employee $employee, ?string $asOf = null): float
     {
         $lines = array_filter(
@@ -69,15 +40,10 @@ class AllowanceService
         // The programmes whose RULE covers this employee ON THIS CYCLE — not a stored enrolment
         // list. A status change is therefore followed automatically, which is the drift B5 item 3
         // and B10 both described.
-        //
-        // FIN-047 — $asOf now reaches eligibility, not just pricing. It was passed for the amount
-        // and dropped here, so re-running August priced the allowance at August's rate while
-        // deciding WHO GOT IT from today's enrolment. One half of the answer was dated and the
-        // other was live.
         $programmes = $this->programs->allowancesFor($employee, $asOf);
         $overrides = $this->programs->overridesFor($employee);
 
-        // Slice B11 — what each allowance was worth ON THIS CYCLE, not today. Re-running an old
+        // What each allowance was worth ON THIS CYCLE, not today. Re-running an old
         // period used to price it at the current figure, so a September rise silently rewrote
         // August. Null asOf ⇒ today, which is what every screen wants.
         $pricing = $asOf === null ? [] : $this->programs->pricingAsOf($asOf);
@@ -85,11 +51,11 @@ class AllowanceService
         $lines = [];
 
         foreach ($programmes as $programme) {
-            // Slice B14 — a deliberate per-employee amount wins over the programme's. Null (the
+            // A deliberate per-employee amount wins over the programme's. Null (the
             // normal case) means this person follows the programme, so an edit there reaches them.
             $version = $pricing[(int) $programme->id] ?? null;
 
-            // A deliberate per-employee amount (B14) still wins: it is a figure a person typed for
+            // A deliberate per-employee amount still wins: it is a figure a person typed for
             // this employee, not a company-wide price, so it is not versioned alongside one.
             $amount = $overrides[(int) $programme->id]
                 ?? ($version->amount ?? $programme->amount)
@@ -100,25 +66,19 @@ class AllowanceService
                 'program_id' => (int) $programme->id,
                 'name' => (string) $programme->name,
                 'amount' => $this->toMonthly((float) $amount, $frequency),
-                // Slice B4 — payroll needs this to know which allowances are compensation.
+                // Payroll needs this to know which allowances are compensation.
                 // Unknown values fall back to `de_minimis`, matching the column default: guessing
                 // "taxable" for a value we don't understand would over-withhold.
                 'tax_treatment' => ($version->tax_treatment ?? $programme->tax_treatment) === 'taxable'
                     ? 'taxable'
                     : 'de_minimis',
-                // Slice B16 — this benefit's own statutory ceiling, and the period it is stated
+                // This benefit's own statutory ceiling, and the period it is stated
                 // in. Null means none recorded, which keeps the whole amount exempt.
                 'deminimis_ceiling' => $version->deminimis_ceiling ?? $programme->deminimis_ceiling,
                 'ceiling_period' => $version->ceiling_period ?? $programme->ceiling_period,
-                // Slice B19 — does this allowance count toward the statutory contribution base?
+                // Does this allowance count toward the statutory contribution base?
                 // Read from the dated version first for the same reason the amount is: a switch
                 // flipped in September must not change what August was charged on.
-                //
-                // `?? true` rather than `?? $programme->contributable` on a null: the column is
-                // NOT NULL with a default, so a version only reads null when it predates the
-                // column, and an allowance that existed before this slice counted. Falling back to
-                // the programme's CURRENT flag there would let today's setting rewrite history —
-                // the exact drift versioning exists to stop.
                 'contributable' => (bool) ($version
                     ? ($version->contributable ?? true)
                     : ($programme->contributable ?? true)),
@@ -129,24 +89,7 @@ class AllowanceService
     }
 
     /**
-     * The employee's monthly allowances split into the three things tax does with them (B16).
-     *
-     * THE CHAIN, which the old single-cap version collapsed into two steps:
-     *
-     *   exempt          a de-minimis benefit UP TO its own statutory ceiling. Ceilings are per
-     *                   item and cannot be pooled — a small uniform allowance does not create
-     *                   room for a large rice subsidy.
-     *   other_benefits  the amount ABOVE that ceiling. NOT taxable by itself: it joins the
-     *                   13th-month-and-other-benefits bucket, which is exempt up to ₱90,000 a
-     *                   year. Taxing it directly over-withheld for everyone under that figure.
-     *   taxable         an allowance HR marked taxable — compensation in full, no ceiling.
-     *
-     * A de-minimis programme with NO ceiling recorded is treated as fully exempt, which is what
-     * it does today: guessing a statutory limit for an allowance nobody has classified would
-     * change pay on an assumption.
-     *
-     * The three buckets sum to `monthlyFor()` exactly — every line is already 2dp, so splitting
-     * them cannot move gross pay.
+     * The employee's monthly allowances split into the three things tax does with them.
      *
      * @return array{exempt: float, other_benefits: float, taxable: float}
      */
@@ -198,19 +141,7 @@ class AllowanceService
     }
 
     /**
-     * The employee's monthly allowance split by tax treatment (Slice B4).
-     *
-     * WHY THIS EXISTS. Every allowance programme has a de-minimis / taxable switch that HR can set,
-     * and payroll ignored it — everything was treated as tax-free. Nothing was marked taxable yet,
-     * so nobody was affected, but the moment someone flipped that switch the company would have
-     * been under-withholding with no sign that anything was wrong.
-     *
-     * The two halves are taxed differently, which is the whole point of the split:
-     *   de_minimis → tax-free up to the company's annual ceiling; only the EXCESS is taxable
-     *   taxable    → compensation in full, and the ceiling does not apply to it
-     *
-     * The buckets sum to `monthlyFor()` exactly — every line amount is already rounded to two
-     * decimals, so partitioning them cannot introduce a rounding difference in gross pay.
+     * The employee's monthly allowance split by tax treatment.
      *
      * @return array{de_minimis: float, taxable: float}
      */
@@ -225,13 +156,7 @@ class AllowanceService
         return ['de_minimis' => round($split['de_minimis'], 2), 'taxable' => round($split['taxable'], 2)];
     }
 
-    /**
-     * Normalise a programme's amount to a monthly figure.
-     *
-     * `frequency` is validated only as a free-text string (`['sometimes','string','max:20']`), so
-     * an unrecognised value is possible. Unknown ⇒ treat as monthly, which is what every existing
-     * programme is — guessing a divisor for a value we don't understand would silently change pay.
-     */
+    /** Normalise a programme's amount to a monthly figure. */
     private function toMonthly(float $amount, string $frequency): float
     {
         return round(match ($frequency) {

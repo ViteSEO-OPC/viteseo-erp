@@ -9,15 +9,6 @@ use ZipArchive;
 /**
  * Reads an .xlsx into a grid of strings. Also accepts CSV, so HR can hand over whichever file the
  * agency published.
- *
- * WHY NO LIBRARY. An .xlsx is a zip of XML, and the two extensions needed to open one (`zip`,
- * `simplexml`) are already required by this app. The alternative is a heavyweight dependency for
- * one screen that reads one government table — and the CLAUDE.md rule is not to add libraries
- * without asking. What is deliberately NOT supported: formulas (the cached value is read instead),
- * the older binary .xls, and styling. A published contribution schedule has none of those.
- *
- * Everything comes back as a STRING, exactly as the cell reads. Parsing "5,250 - 5,749.99" into a
- * number is the importer's job, not the reader's — the reader must not guess what a column means.
  */
 class SpreadsheetReader
 {

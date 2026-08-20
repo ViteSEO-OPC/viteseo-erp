@@ -8,27 +8,12 @@ use App\Modules\Hr\Services\TaxService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-/**
- * The withholding-tax table, readable (FIN-027).
- *
- * The TRAIN bands moved out of a hardcoded PHP array into `hr_tax_versions` / `hr_tax_brackets`
- * precisely so a human could check them against the BIR's own schedule — and then nothing exposed
- * them, so the only way to see what payroll was withholding against was to query the database. A
- * table nobody can read is not auditable just because it is data.
- *
- * READ-ONLY, and that is deliberate. Editing tax bands is not an HR task: the rates come from
- * statute, a wrong figure silently mis-withholds for every employee at once, and the effective-dated
- * versioning means a bad row would also rewrite what closed periods are judged against. Loading them
- * stays a migration/seeder job where it goes through review.
- */
+/** The withholding-tax table, readable. */
 class TaxTableController extends Controller
 {
     /**
      * GET /api/v1/hr/tax-table?as_of=YYYY-MM-DD — the bands in force on a date, plus every version
      * so the UI can say which table applied when.
-     *
-     * `as_of` defaults to today rather than to the latest version: what matters is which table was in
-     * force for the period being looked at, and those differ the moment a future-dated version lands.
      */
     public function show(Request $request, TaxService $tax): JsonResponse
     {

@@ -27,7 +27,7 @@ class RunPayrollRequest extends FormRequest
             'frequency' => ['required', Rule::in(array_keys(PayScheduleService::PERIODS_PER_YEAR))],
             'cycle_start' => ['required', 'date'],
             'cycle_end' => ['required', 'date', 'after_or_equal:cycle_start'],
-            // FIN-030b — proceed past a minimum-wage breach, with the reason on the record.
+            // Proceed past a minimum-wage breach, with the reason on the record.
             'minimum_wage_ack' => ['sometimes', 'boolean'],
             'minimum_wage_ack_reason' => [
                 'nullable',
@@ -93,24 +93,7 @@ class RunPayrollRequest extends FormRequest
         });
     }
 
-    /**
-     * FIN-030b — a minimum-wage breach stops the run ONCE, and any answer gets past it.
-     *
-     * WHY THIS BLOCKS WHEN THE PROFILE BAND DOES NOT. The band informs whoever opens a profile,
-     * which for a compliant-looking employee is nobody. This is the moment money is committed for
-     * the period, and paying below the floor is not a preference — it creates wage differentials
-     * and, under RA 8188, double indemnity. Letting that happen with nothing on the record is the
-     * failure; the payment itself may well be correct.
-     *
-     * So it is a speed bump, not a wall. Everything the check cannot see — a granted exemption, a
-     * part-time schedule, an order that does not apply — is still a legitimate reason to proceed,
-     * and the acknowledgement carries the reason rather than refusing. The permanent version of
-     * that answer is the per-employee exemption flag, which takes the person out of the check for
-     * good; this is for the one-off.
-     *
-     * Silent when no floor is configured: `flagged_count` is 0, so nothing about today's behaviour
-     * changes until somebody enters a wage order.
-     */
+    /** A minimum-wage breach stops the run ONCE, and any answer gets past it. */
     private function assertMinimumWageSeen(Validator $validator, string $frequency, string $start, string $end): void
     {
         if ((bool) $this->input('minimum_wage_ack')) {

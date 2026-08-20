@@ -11,14 +11,6 @@ import { cn } from "@/lib/utils";
  * dropdown so the options menu is styled with our tokens (and keyboard/ARIA
  * accessible). Trigger height/radius mirror the shared `Input` so a Select sits
  * flush next to text inputs in a form.
- *
- * Two ways to use it:
- *  - Compositional: <Select><SelectTrigger><SelectValue/></SelectTrigger>
- *    <SelectContent><SelectItem value="x">X</SelectItem>…</SelectContent></Select>
- *  - Convenience:  <SimpleSelect value onValueChange options={[{value,label}]} />
- *
- * Note: Radix values must be non-empty strings — there is no `value=""` option.
- * Use a sentinel like "all" for a catch-all/placeholder choice.
  */
 function Select(props: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root data-slot="select" {...props} />;

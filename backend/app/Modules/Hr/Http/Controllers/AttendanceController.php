@@ -69,9 +69,6 @@ class AttendanceController extends Controller
     /**
      * GET /api/v1/hr/me/attendance-report?month=YYYY-MM — the caller's OWN month, day by day,
      * with the twelve-month context around it.
-     *
-     * The employee is resolved from the token, never from the query string: this returns one
-     * person's punches, lateness and leave, and a client-supplied id would make it everyone's.
      */
     public function myReport(Request $request): JsonResponse
     {
@@ -144,13 +141,7 @@ class AttendanceController extends Controller
         return response()->json(['data' => $this->service->summary($request->query('date'))]);
     }
 
-    /**
-     * GET /api/v1/hr/attendance/open-shifts?from=&to= — the stale-attendance review queue (item 6).
-     *
-     * Shifts with a punch in and none out, split into the ones auto-closure could not price
-     * (`needs_fix`, the pay is wrong until HR corrects it) and the ones it could (`auto_closed`,
-     * tidy-up only). Corrections go back through `attendance/adjust` below — this only finds them.
-     */
+    /** GET /api/v1/hr/attendance/open-shifts?from=&to= — the stale-attendance review queue (item 6). */
     public function openShifts(Request $request): JsonResponse
     {
         $data = $request->validate([

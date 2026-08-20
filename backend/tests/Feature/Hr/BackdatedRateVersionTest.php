@@ -10,21 +10,7 @@ use App\Modules\Hr\Services\ContributionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-026 — a backdated rate version could silently reprice a completed payroll run.
- *
- * `StoreContributionVersionRequest` accepted any date, and nothing checked whether payroll had
- * already priced that window. The run's `policy_snapshot` records the rates used but does not
- * REPLAY them — `PayrollService::run()` resolves the rates in force today — so once a backdated
- * version exists, a completed-but-unlocked run's payslips disagree with what a recompute would
- * produce, and the next re-run of that period for any unrelated reason silently changes statutory
- * deductions on payslips HR has already reviewed. Locked runs escape only because they refuse
- * re-runs outright.
- *
- * Backdating is not blocked, because it is legitimate: agencies publish circulars that take effect
- * earlier than they are issued. What is blocked is doing it WITHOUT BEING TOLD. HR is shown which
- * runs are affected and has to send the acknowledgement to proceed.
- */
+/** A backdated rate version could silently reprice a completed payroll run. */
 class BackdatedRateVersionTest extends HrTestCase
 {
     use RefreshDatabase;

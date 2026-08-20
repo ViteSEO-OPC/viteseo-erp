@@ -5,39 +5,6 @@ namespace App\Modules\Hr\Services;
 /**
  * Decides whether ONE day cleared the "minimum hours = full day" threshold that HR declared for
  * that date (hr_daily_overrides.min_full_day_minutes).
- *
- * PURE: no DB, no queries, no clock — every input is passed in, so it is unit-testable without
- * building a payroll run. Same contract as DeductionService, and for the same reason.
- *
- * WHY IT EXISTS. A DOLE advisory (or the company) can shorten the compensable day: "six hours
- * of work is a full day today". An employee on an 8:00–18:00 schedule who leaves at 15:00 has
- * worked six hours once the unpaid meal is taken out, so the day is WHOLE — no undertime, no
- * early-out charge, no half-day charge — even though they left three hours before their
- * scheduled end.
- *
- * THE ONE INVARIANT: this service can only ever REMOVE a deduction, never add one. Callers must
- * treat `met() === false` as "nothing changes", not as "charge them". That is what keeps the
- * feature safe for the people it would otherwise hurt most — a part-timer on a four-hour
- * schedule, or somebody with an approved half-day, can never clear a six-hour bar, and must not
- * be docked for failing to. They are priced exactly as they were before this existed.
- *
- * WHAT COUNTS AS WORKED (all three rules are deliberate):
- *   1. Time OUTSIDE the scheduled window does not count, so the bar cannot be cleared by
- *      arriving two hours early or staying two hours late. Unauthorised time is not credited
- *      here for the same reason it is not paid anywhere else in the module.
- *   2. UNLESS overtime was approved for that date, in which case time past the scheduled end
- *      does count — HR authorised it, so it is real work. This is not a nicety: an employee
- *      whose afternoon is off finishes at 18:00 having worked five hours, and approved OT is
- *      the only honest way for them to reach a six-hour bar at all.
- *   3. The unpaid meal comes out, but only the part of it the employee was actually still
- *      present for. Somebody who leaves at 11:00 never took lunch and must not be charged for
- *      one; somebody who leaves at 15:00 did, and must be.
- *
- * The meal is measured against the SCHEDULE (the gap between am_end_time and pm_start_time),
- * not against the break button the employee taps. Self-reported minutes decide pay nowhere else
- * in this module, and a threshold that could be cleared by forgetting to press "lunch" is not a
- * threshold. The tapped figure is used only when the schedule has no half-day windows to derive
- * a meal from, which is the one case where there is nothing better to fall back on.
  */
 class FullDayCreditService
 {
@@ -67,15 +34,6 @@ class FullDayCreditService
 
     /**
      * Credited worked minutes for the day, or null when the day cannot be judged at all.
-     *
-     * Null (not zero) for a missing punch, because the two mean different things and only one of
-     * them is safe: zero would read as "worked nothing, so below the bar", which is the correct
-     * answer here only because failing the bar costs nothing. Keeping them distinct stops the
-     * next caller from inheriting that accident.
-     *
-     * A missing clock-out is NOT credited to the scheduled end the way pay treats it (item 6).
-     * Auto-closing an abandoned punch is a defensible way to avoid charging somebody for a
-     * forgotten button; using that same invented time to hand them a full day's pay is not.
      *
      * @param  array<string,mixed>  $ctx
      */
@@ -109,12 +67,6 @@ class FullDayCreditService
         }
 
         // --- clamp to the authorised window -------------------------------------------------
-        //
-        // The window is the FULL schedule even on a half-day. That is the whole point of the
-        // employee's escape hatch: somebody whose afternoon is approved off may simply work the
-        // afternoon anyway to reach the bar, and every minute of it is inside their normal
-        // schedule, so all of it counts. Clamping to the half they were owed would make that
-        // impossible and leave them working for free.
         if ($start !== null) {
             $in = max($in, $start);
         }
@@ -130,21 +82,6 @@ class FullDayCreditService
     /**
      * The earliest clock-out that would reach the threshold, as a Manila minute-of-day, or null
      * when it cannot be reached at all (or there is nothing to reach).
-     *
-     * This is the number the employee actually needs: "six hours today" is a rule, but "you
-     * reach a full day at 3:12 PM" is an instruction. Announcing the rule without it leaves
-     * every employee doing meal-window arithmetic in their head, and getting it wrong costs
-     * them pay.
-     *
-     * Scans rather than solving algebraically: worked-minutes is monotonic in the clock-out but
-     * flat across the meal (sitting through lunch earns nothing), so the closed form is a stack
-     * of cases that would have to be kept in step with workedMinutes() by hand. Asking the same
-     * method the payslip uses, once per minute of one day, cannot drift from it — and this runs
-     * once per page load, not once per employee-day of a payroll run.
-     *
-     * OVERNIGHT SHIFTS RETURN NULL. The scan walks raw minute-of-day values, which the
-     * cross-midnight roll in workedMinutes() would reinterpret; rather than quietly print a
-     * wrong time, the panel simply shows the rule without the hint.
      *
      * @param  array<string,mixed>  $ctx  as met(), with `time_out_min` ignored
      */
@@ -180,10 +117,6 @@ class FullDayCreditService
 
     /**
      * How much of the unpaid meal this employee actually sat through.
-     *
-     * The OVERLAP, not the whole meal: leaving at 12:30 on a 12:00–13:00 lunch costs thirty
-     * minutes, not sixty. Capped at the schedule's unpaid_break_minutes so a wide am_end→pm_start
-     * gap cannot deduct more meal than the schedule says is unpaid.
      *
      * @param  array<string,mixed>  $ctx
      */

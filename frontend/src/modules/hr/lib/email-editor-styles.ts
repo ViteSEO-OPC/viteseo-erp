@@ -1,13 +1,6 @@
 /**
  * Prose styling for the candidate-email editor, as Tailwind arbitrary variants on the
  * editor's wrapper. `.tiptap` is the class Tiptap puts on its editable root.
- *
- * Kept local to HR rather than shared: the rules are chosen for what an EMAIL can contain
- * — which is the backend sanitiser's allow-list, not everything a rich-text editor can
- * produce — and they must not leak onto any other surface.
- *
- * The same string styles the read-only rendering of a sent email in the history view, so
- * what HR typed and what HR later reads back look the same.
  */
 export const EMAIL_PROSE_CLASSES = [
   "[&_.tiptap]:outline-none",

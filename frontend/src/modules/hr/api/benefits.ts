@@ -11,7 +11,7 @@ export async function getContributionSettings(): Promise<ContributionSetting[]> 
 
 /**
  * Whether the company operates this contribution at all — NOT its rates (those are dated
- * versions, see `saveContributionVersion`). Slice B9 item 5 removed the free-form `config`
+ * versions, see `saveContributionVersion`). removed the free-form `config`
  * write: it edited a field payroll stopped pricing from in B3a.
  */
 export async function updateContributionSetting(
@@ -50,7 +50,7 @@ export async function updateEmployeeBenefits(
   return res.data.data;
 }
 
-// --- Dated statutory rate versions (Slice B3a) -----------------------------------
+// --- Dated statutory rate versions -----------------------------------
 
 /**
  * One version of a government contribution's rates, in force from `effective_from` until a
@@ -63,7 +63,7 @@ export interface ContributionVersion {
   /** HOW the charge is worked out: `percentage` of the salary, or the `bracket` table's MSC. */
   basis: string;
   /**
-   * Slice B19 — WHICH salary figure goes in, which is a different question from `basis` above:
+   * WHICH salary figure goes in, which is a different question from `basis` above:
    * `basic` (the profile's monthly rate) or `earnings` (what the period actually paid).
    */
   salary_basis: string;
@@ -77,13 +77,13 @@ export interface ContributionVersion {
   add_on_min_salary: number | null;
   note: string | null;
   created_by: string | null;
-  /** Slice B3b — MSC bands, lowest first. Each runs up to the next band's start. */
+  /** MSC bands, lowest first. Each runs up to the next band's start. */
   brackets: ContributionBand[];
 }
 
 /**
  * One MSC band. `employer_add_on` is that band's employer-only EC amount as the agency prints it
- * (Slice B8) — null falls back to the version's flat add-on rule.
+ * Null falls back to the version's flat add-on rule.
  */
 export interface ContributionBand {
   min_salary: number;
@@ -98,7 +98,7 @@ export type ContributionVersionInput = Omit<
   basis?: string;
   brackets?: ContributionBand[];
   /**
-   * FIN-026 — HR has been shown which completed payroll runs this date reaches into, and wants to
+   * HR has been shown which completed payroll runs this date reaches into, and wants to
    * save anyway. Omitted on a first attempt: the backend refuses and names the affected runs, and
    * the UI turns that into a confirmation rather than a dead end.
    */
@@ -120,7 +120,7 @@ export async function saveContributionVersion(
 }
 
 /**
- * What the importer made of an uploaded schedule (Slice B8). A DRY RUN — nothing is saved until
+ * What the importer made of an uploaded schedule. A DRY RUN — nothing is saved until
  * HR confirms the reading and the version is created in the usual way.
  */
 export interface ScheduleImportResult {

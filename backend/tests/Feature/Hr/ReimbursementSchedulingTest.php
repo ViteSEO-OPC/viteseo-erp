@@ -13,16 +13,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice 12 (2026-07-28 audit) — computing payroll is not paying it.
- *
- * `run()` flipped approved claims straight to `paid` at COMPUTE time, before a peso had left
- * the company. Worse, if a later re-run dropped that employee (pay-group change, separation)
- * the claim stayed `paid` and linked to a run that no longer had a payslip for them.
- *
- * Now: folding a claim into a payslip marks it `scheduled`; it becomes `paid` only when HR
- * marks that payslip disbursed, and it is released back to `approved` if the run drops them.
- */
+/** (2026-07-28 audit) — computing payroll is not paying it. */
 class ReimbursementSchedulingTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -160,7 +151,7 @@ class ReimbursementSchedulingTest extends HrTestCase
         $this->assertSame(0.0, (float) $this->slip()->reimbursements);
     }
 
-    // --- FIN-023: claims approved after their own cycle has closed ----------------------
+    // ---: claims approved after their own cycle has closed ----------------------
 
     /**
      * THE BUG. A run folded in only claims dated INSIDE its own cycle, and no later run looked

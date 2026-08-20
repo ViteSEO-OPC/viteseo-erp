@@ -15,22 +15,7 @@ use App\Modules\Hr\Services\ScheduleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Where a half day's window COMES FROM, and what happens when there isn't one.
- *
- * Two halves of the same decision:
- *
- *  • PER-EMPLOYEE OVERRIDE. The half-day windows used to be the one schedule field with no
- *    override, so an employee whose afternoons really start at 13:30 was judged against their
- *    template's 13:00 and the difference was billable lateness every time they took a morning off.
- *    They now coalesce field by field, exactly like start/end/grace.
- *
- *  • NO WINDOW, NO JUDGEMENT. A blank window used to fall back to the FULL shift, which on a half
- *    day is not a neutral default but a charge: it measured a 1:00 PM arrival against 8:00 AM and
- *    called it five hours late. It cannot be derived either — the schedule stores how long the
- *    unpaid break is but never when it falls, and the two seeded schedules split differently
- *    (Office 4h/5h, Field 4h/4h). So the platform declines to judge rather than judge on a guess.
- */
+/** Where a half day's window COMES FROM, and what happens when there isn't one. */
 class HalfDayWindowConfigTest extends HrTestCase
 {
     use RefreshDatabase;

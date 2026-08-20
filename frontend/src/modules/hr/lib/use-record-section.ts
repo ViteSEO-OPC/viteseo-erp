@@ -35,7 +35,7 @@ export function useRecordSection<TValues extends FieldValues>({
    * Take over a 422 before it is painted onto the fields. Return true when handled.
    *
    * `retry` re-sends the same values with extra keys merged in — the acknowledgement pattern the
-   * backend uses for backdated salary changes (FIN-007).
+   * backend uses for backdated salary changes.
    */
   interceptError?: (
     errors: Record<string, string[]>,
@@ -87,7 +87,7 @@ export function useRecordSection<TValues extends FieldValues>({
       if (err instanceof AxiosError && err.response?.status === 422) {
         const errors: Record<string, string[]> = err.response.data?.errors ?? {};
 
-        // FIN-007 — some 422s are QUESTIONS, not failures. Backdating a salary over a completed
+        // Some 422s are QUESTIONS, not failures. Backdating a salary over a completed
         // payroll run is refused until HR confirms, and the message names the affected runs. A
         // section can intercept that, show a confirmation, and retry with the acknowledgement.
         // Without this the refusal is a dead end and the salary simply cannot be saved.

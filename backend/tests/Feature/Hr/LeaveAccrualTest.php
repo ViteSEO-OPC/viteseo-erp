@@ -12,23 +12,7 @@ use App\Modules\Hr\Services\LeaveAccrualService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-034 (`R` half) / MF-10 — leave that accrues, carries over and expires.
- *
- * Balances were seeded for the hire year and hand-edited forever: nothing accrued them monthly, nothing
- * rolled them into January, nothing expired what carried. Every new year, HR re-entered the company by
- * hand or everyone's leave read zero.
- *
- * THE IDEMPOTENCE TESTS ARE THE ONES TO READ. The engine recomputes each total from stored components
- * (`accrued_days` + `carried_days`) instead of adding a month's worth per run, so a cron that fires
- * twice, a manual catch-up, or an HR officer running it to look cannot over-credit. Anything that
- * incremented would be a benefit that grows every time the scheduler hiccups.
- *
- * TWO POLICY FIGURES ARE DELIBERATELY ABSENT. The carry-over cap and its expiry are company rules, not
- * law — Philippine law addresses only the five-day Service Incentive Leave (Art. 95), which cannot
- * simply be forfeited. So null cap = everything carries, null expiry = nothing lapses, and accrual is
- * off entirely until HR switches a type over. No number here was invented.
- */
+/** (`R` half) / — leave that accrues, carries over and expires. */
 class LeaveAccrualTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -129,9 +113,7 @@ class LeaveAccrualTest extends HrTestCase
         $this->assertSame(5.0, (float) $this->balance($type)->accrued_days);
     }
 
-    /**
-     * THE ONE THAT PROTECTS THE PAYROLL. Running twice must not credit twice.
-     */
+    /** THE ONE THAT PROTECTS THE PAYROLL. Running twice must not credit twice. */
     public function test_running_twice_credits_the_same_days(): void
     {
         $type = $this->type();

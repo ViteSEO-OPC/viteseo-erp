@@ -4,8 +4,8 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Overtime requests (Premium Pay epic, Phase 1 / OT-1). An employee requests N overtime HOURS on a
-// date; payroll pays each APPROVED one at the configured OT rate (see PayrollService, OT-3). Mirrors
+// Overtime requests (Premium Pay epic, Phase 1 /). An employee requests N overtime HOURS on a
+// date; payroll pays each APPROVED one at the configured OT rate (see PayrollService). Mirrors
 // the early-out (undertime) request flow — opposite sign (positive pay, not a deduction).
 return new class extends Migration
 {

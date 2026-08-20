@@ -13,19 +13,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B4 — the de-minimis / taxable switch on an allowance actually taxes.
- *
- * Every allowance programme has this switch and payroll ignored it: everything was treated as
- * tax-free. Nothing was marked taxable yet, so nobody was affected — but it was a control that
- * did nothing, and the first time HR used it the company would have under-withheld silently.
- *
- * The two halves are taxed on different rules, which is why they cannot share a number:
- *   de_minimis → tax-free up to the company's annual ceiling; only the EXCESS is compensation
- *   taxable    → compensation in full, ceiling does not apply
- *
- * Gross pay is identical under both. Only withholding moves.
- */
+/** The de-minimis / taxable switch on an allowance actually taxes. */
 class TaxableAllowanceTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -73,7 +61,7 @@ class TaxableAllowanceTest extends HrTestCase
         return BenefitProgram::create([
             'name' => $name, 'category' => 'allowance', 'kind' => 'allowance',
             'amount' => $amount, 'frequency' => 'monthly', 'tax_treatment' => $treatment,
-            // Slice B16 — the benefit's OWN de-minimis ceiling. Null keeps it fully exempt.
+            // The benefit's OWN de-minimis ceiling. Null keeps it fully exempt.
             'deminimis_ceiling' => $ceiling,
             'ceiling_period' => $ceiling === null ? null : 'monthly',
             'eligibility' => 'custom',
@@ -162,7 +150,7 @@ class TaxableAllowanceTest extends HrTestCase
      * REWRITTEN FOR B16. This used to prove that the de-minimis excess is taxed immediately
      * against one pooled cap. It is not, and it never was: the excess over a benefit's OWN
      * ceiling joins the ₱90,000 exemption for 13th month pay and other benefits, and only the
-     * amount over THAT is compensation. What survives from Slice 10 is the shape — an excess is
+     * amount over THAT is compensation. What survives from is the shape — an excess is
      * eventually taxable — not the arithmetic.
      */
     public function test_the_excess_over_a_benefits_ceiling_is_taxed_only_above_the_annual_bucket(): void

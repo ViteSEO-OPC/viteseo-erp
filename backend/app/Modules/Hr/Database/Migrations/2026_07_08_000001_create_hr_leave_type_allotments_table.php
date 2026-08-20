@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 13. Default leave credits per employment status — used ONLY as a
+// Phase-2. Default leave credits per employment status — used ONLY as a
 // template when a new employee is created (EmployeeService::create). Each person's
 // actual, editable credits live in hr_leave_balances (per-person override).
 // Config table: no soft-deletes (rows are upserted by leave_type + status).

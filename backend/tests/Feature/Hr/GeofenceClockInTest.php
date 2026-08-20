@@ -15,19 +15,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\DataProvider;
 
-/**
- * Geofenced clock-in — the verification ladder (Slice 2).
- *
- * Three properties matter more than the rest, and each has a test whose failure would be a
- * real incident rather than a cosmetic regression:
- *
- *   1. OFF changes nothing. It is the kill switch; if it ever stops being a no-op, the
- *      documented "toggle it off and everyone clocks in normally" recovery is a lie.
- *   2. Misconfiguration FAILS OPEN. A half-set policy must never lock a company out of its
- *      own time clock.
- *   3. The office IP is MANDATORY. GPS may excuse itself when the fix is poor; the network
- *      never may, or the geofence is decorative.
- */
+/** Geofenced clock-in — the verification ladder. */
 class GeofenceClockInTest extends HrTestCase
 {
     use RefreshDatabase;

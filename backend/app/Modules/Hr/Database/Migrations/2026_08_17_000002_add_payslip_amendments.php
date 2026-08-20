@@ -5,39 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Corrections land ON the payslip of the period they correct, instead of on a payslip of their own.
- *
- * WHAT CHANGED AND WHY. FIN-010's adjustment run paid a correction by creating a whole separate run
- * and a second payslip. It worked, but it produced two documents for one period that referenced
- * each other nowhere: the employee got a March payslip saying ₱20,000 and, weeks later, an
- * unexplained ₱1,000 payslip dated April. Nobody reading either could tell that the first was
- * wrong, or that the second was the rest of it.
- *
- * So an amendment now adds a line to the period's OWN payslip. One document per period, with its
- * corrections on it — which is how an amended payslip works everywhere outside this system.
- *
- * THE PART THAT MAKES THAT SAFE IS `disbursed_amount`. Amending a payslip changes its net, and a
- * payslip that had already been paid would then claim a figure that never left the bank: status
- * `disbursed`, net ₱21,000, ₱20,000 actually transferred. Every register, report and total would
- * inherit that. So the amount actually disbursed is frozen on the payslip at the moment it is paid,
- * and what is still owed is `net_pay − disbursed_amount` — a derived balance, not a stored one, for
- * the same reason `deductionArrearsFor()` derives arrears rather than decrementing a column.
- *
- * THE AMENDMENT LEDGER IS THE SOURCE OF TRUTH, not `adjustment_pay`. That column is the running
- * total, kept for the payslip document and for every query that already reads it; the rows here are
- * what it is a total OF. It has to work that way because a period can be RE-RUN: recomputing a
- * payslip rewrites every earnings column from attendance, which would silently erase a correction
- * unless the corrections can be re-applied from a record the recompute does not own. Each row
- * therefore carries the tax that was withheld on it as well as the amount, so re-applying it
- * reproduces what was actually withheld rather than re-deciding it against today's YTD.
- *
- * `tax_stale_at` ON THE RUN is the other half. Withholding on a 13th-month, a final pay, an
- * adjustment and December's year-end true-up are all computed against the year's earlier payslips.
- * Amending an earlier period moves that basis, so any later run of those kinds is now settled
- * against numbers that no longer exist. December re-reads the year live, so this is invisible right
- * up until it matters — the run is therefore marked, rather than left for someone to notice.
- */
+/** Corrections land ON the payslip of the period they correct, instead of on a payslip of their own. */
 return new class extends Migration
 {
     public function up(): void

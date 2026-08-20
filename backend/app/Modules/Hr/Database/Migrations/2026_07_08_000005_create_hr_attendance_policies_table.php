@@ -4,8 +4,8 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 14. Singleton row of handbook thresholds the violation engine
-// (Slice 16) reads: how many consecutive lates become an absence, whether the
+// Phase-2. Singleton row of handbook thresholds the violation engine
+//  reads: how many consecutive lates become an absence, whether the
 // late tally resets monthly, the AWOL threshold, and the task-checklist format
 // rule (tasks written in English, uniform caps).
 return new class extends Migration

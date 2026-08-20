@@ -10,12 +10,12 @@ class PayrollSetting extends Model
 
     protected $fillable = [
         'frequency', 'deduction_timing', 'tax_timing', 'anchor_date', 'pay_delay_days',
-        // FIN-048 — which cutoff the monthly allowance lands on. Same three values as the two
+        // Which cutoff the monthly allowance lands on. Same three values as the two
         // timings above; `every` is the even split that was previously the only behaviour.
         'allowance_timing',
-        // Slice 10 — annual ceiling above which allowances become taxable (null = none).
+        // Annual ceiling above which allowances become taxable (null = none).
         'other_benefits_annual_cap',
-        // FIN-030 — the regional minimum DAILY wage. Null = not configured, warns about nothing.
+        // The regional minimum DAILY wage. Null = not configured, warns about nothing.
         // Versioned with the rest of this row, so a wage order's date is respected.
         'minimum_daily_wage',
     ];
@@ -35,22 +35,13 @@ class PayrollSetting extends Model
      */
     protected static ?string $pendingEffectiveFrom = null;
 
-    /** Declare the effective date for the write that is about to happen (FIN-025). */
+    /** Declare the effective date for the write that is about to happen. */
     public static function effectiveFrom(?string $date): void
     {
         static::$pendingEffectiveFrom = $date;
     }
 
-    /**
-     * Every write to this row records a version — automatically (FIN-025).
-     *
-     * WHY A MODEL HOOK RATHER THAN ASKING CALLERS TO REMEMBER. Once payroll resolves settings via
-     * `asOf()`, a plain `update()` that does not record a version has NO EFFECT ON PAY: the run
-     * keeps resolving the last recorded version and the change silently does nothing. That is a
-     * far worse failure than the one FIN-025 fixes, and it would be invisible — the settings
-     * screen would show the new value while every payslip kept using the old one. Hooking the
-     * write means a caller cannot get it wrong by omission, only by intent.
-     */
+    /** Every write to this row records a version — automatically. */
     protected static function booted(): void
     {
         static::updated(function (): void {
@@ -60,7 +51,7 @@ class PayrollSetting extends Model
             static::recordVersion($date);
         });
 
-        // FIN-030b — any write invalidates the resolved-settings memo, including the `created` that
+        // Any write invalidates the resolved-settings memo, including the `created` that
         // `current()` performs on a fresh install. `recordVersion()` covers the versioned path; this
         // covers the rest.
         static::saved(fn () => static::flushAsOfMemo());
@@ -82,17 +73,7 @@ class PayrollSetting extends Model
         ]);
     }
 
-    /**
-     * The settings that were in force on a date (FIN-025).
-     *
-     * Payroll resolves salary, statutory rates, allowances and the attendance policy as of the
-     * cycle end; this is the fifth. Without it, `frequency` — which divides annual pay into a
-     * period amount and annualises the withholding base — was read live, so changing it mid-year
-     * and re-running an earlier period re-sliced everyone's pay and annualised their tax against
-     * a different number of periods.
-     *
-     * Null date means "right now", for callers with no period in hand.
-     */
+    /** The settings that were in force on a date. */
     public static function asOf(?string $date = null): self
     {
         if ($date === null) {
@@ -133,7 +114,7 @@ class PayrollSetting extends Model
      * Drop the memo. "Per-request" is only true in a request: anything with a longer life — a
      * queue worker, an artisan command, a test process — outlives it, and there the memo is a
      * cache that nothing was invalidating on a plain `->update()`. `recordVersion()` already
-     * cleared it; this covers the writes that do not go through versioning (FIN-030b).
+     * cleared it; this covers the writes that do not go through versioning.
      */
     public static function flushAsOfMemo(): void
     {

@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 19. Profile change requests (phone/address/bank). Approving writes
+// Phase-2. Profile change requests (phone/address/bank). Approving writes
 // new_value onto the employee record (in a transaction) and audit-logs before/after.
 return new class extends Migration
 {

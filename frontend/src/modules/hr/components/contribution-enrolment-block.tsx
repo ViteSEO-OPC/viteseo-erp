@@ -13,21 +13,7 @@ import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
 /** The three the engine knows about, in display order. */
 const TYPES = ["sss", "philhealth", "pagibig"] as const;
 
-/**
- * Which government contributions this employee pays into — Slice B9 item 3.
- *
- * WHAT WAS MISSING. Everybody was enrolled in everything, always. The endpoints to change that
- * existed and worked, the hooks were written, and nothing in the product called either — so an
- * exempt employee (a foreign national covered at home, a rehired retiree) could not be excluded,
- * and the only way anyone found to express "this person is different" was to type a peso amount
- * into the override boxes above. That override replaces the employee half alone and produces a
- * remittance pair that cannot be filed, which is why B7 item 4 pointed at this screen: un-enrolling
- * is the clean way to say it, because it takes BOTH halves off the payslip together.
- *
- * SAVES ON THE SPOT, deliberately outside the section's Edit/Save cycle. It writes to a different
- * endpoint from the profile fields, and a toggle that silently waits for a Save button two
- * headings away is how people end up believing they changed something they did not.
- */
+/** Which government contributions this employee pays into. */
 export function ContributionEnrolmentBlock({
   employeeId,
   canEdit = true,

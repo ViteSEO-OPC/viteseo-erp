@@ -17,29 +17,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-003 (payroll audit, §3) — the loan ledger and the payslip disagree about when money moved.
- *
- * WRITTEN TO FAIL. Like FIN-001, this finding was reached by tracing control flow rather than by
- * observing a run, and the audit's instruction is to reproduce it before fixing it. If a test here
- * passes on unmodified code, that half of the finding is wrong and should be struck.
- *
- * EmployeeLoanTest already covers the design that WORKS: no stored balance, one payment row per
- * (loan, run), and a re-run that replaces rather than accumulates. This file covers the two places
- * that invariant breaks.
- *
- * (a) COMPUTE CREDITS THE LOAN. `collectForPeriod()` writes a `LoanPayment` while the payslip is
- *     still `computed` — before anyone asserts the money was paid. `reopenPayslip()` reverses the
- *     payslip and its reimbursements but never the loan payment, so reversing a payment leaves the
- *     employee's debt written down against money the company did not pay. Slice 12 established
- *     exactly this invariant for reimbursements; loans never got it.
- *
- * (b) RE-RUNNING THE SETTLING PERIOD STRANDS THE LOAN. `collectForPeriod()` loads only
- *     `status = 'active'` loans, then deletes this run's payment rows for any loan NOT in that
- *     set. A loan that the previous compute of the SAME run marked `settled` is therefore excluded
- *     — so its final payment row is deleted while the loan stays `settled`. The balance reappears
- *     but `isCollectible()` is false, so payroll can never collect it again.
- */
+/** (payroll audit, §3) — the loan ledger and the payslip disagree about when money moved. */
 class LoanLedgerDisbursementTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -191,7 +169,7 @@ class LoanLedgerDisbursementTest extends HrTestCase
         );
     }
 
-    // --- FIN-031: the schedule is frozen once payroll has paid against it ---------------------
+    // ---: the schedule is frozen once payroll has paid against it ---------------------
 
     /**
      * Editing the amount after a payslip has been PAID would leave the employee holding a document
@@ -229,8 +207,10 @@ class LoanLedgerDisbursementTest extends HrTestCase
         $this->assertSame(1500.0, (float) $loan->fresh()->per_period_amount);
     }
 
-    /** Labels are not the schedule — refusing a reference fix would push HR to cancel and re-issue,
-     *  which throws away the consent record. */
+    /**
+     * Labels are not the schedule — refusing a reference fix would push HR to cancel and re-issue,
+     *  which throws away the consent record.
+     */
     public function test_labels_stay_editable_after_disbursement(): void
     {
         $loan = $this->loan(12000, 1000);

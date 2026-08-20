@@ -25,7 +25,7 @@ class UpdateLeaveTypeRequest extends FormRequest
             ],
             // Per-status credits live in hr_leave_type_allotments; base default is optional.
             'days_per_year' => ['sometimes', 'numeric', 'min:0', 'max:365'],
-            // FIN-034 — accrual. 'none' is the default and means hand-managed exactly as before.
+            // Accrual. 'none' is the default and means hand-managed exactly as before.
             'accrual_mode' => ['sometimes', 'in:none,monthly,annual'],
             'prorate_first_year' => ['sometimes', 'boolean'],
             // NULL = everything carries over; 0 = nothing does. No default figure — the cap and its

@@ -17,23 +17,7 @@ use App\Modules\Hr\Services\AttendanceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * The per-day "minimum hours = full day" override (hr_daily_overrides.min_full_day_minutes).
- *
- * HR declares that N hours of work makes the day whole — a DOLE advisory shortening the
- * compensable day. Somebody on 08:00–18:00 who clocks out at 15:00 has worked six hours once
- * the unpaid meal is out, so the day is whole: no undertime, no early-out charge, no half-day
- * charge.
- *
- * THE INVARIANT UNDER TEST, more than any single figure: the bar can only ever REMOVE a
- * deduction. Every "not met" case below asserts the day is priced identically to a day where
- * no bar was declared at all — because the people who cannot reach a company-wide bar are
- * exactly the part-timers and half-day takers it must never punish.
- *
- * The one thing it does NOT forgive is lateness. That is a separate instrument (the grace
- * period on the same record): a shortened day says how much work earns a full day, not that
- * turning up late is free.
- */
+/** The per-day "minimum hours = full day" override (hr_daily_overrides.min_full_day_minutes). */
 class MinimumHoursFullDayTest extends HrTestCase
 {
     use RefreshDatabase;

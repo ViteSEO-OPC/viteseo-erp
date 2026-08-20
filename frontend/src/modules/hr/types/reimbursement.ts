@@ -12,7 +12,7 @@ export const REIMBURSEMENT_CATEGORIES = [
 
 /**
  * pending → approved → scheduled → paid.
- * `scheduled` (Slice 12) = folded into a payslip that hasn't been disbursed yet. Computing
+ * `scheduled` = folded into a payslip that hasn't been disbursed yet. Computing
  * payroll no longer marks a claim paid; disbursing the payslip does.
  */
 export type ReimbursementStatus =

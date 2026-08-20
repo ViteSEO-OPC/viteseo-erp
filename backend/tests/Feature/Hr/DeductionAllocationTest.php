@@ -15,22 +15,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * FIN-053 — when pay cannot cover the deductions, the payslip has to say WHICH one went short.
- *
- * THE DEFECT. `total_deductions` was capped at gross, but `sss`, `philhealth`, `pagibig`,
- * `withholding_tax` and `other_deductions` kept their full computed values. The parts summed to
- * more than the whole. One payslip at a time this was hidden — the document credited the aggregate
- * shortfall back as an `uncollected` line and resolved — but the government remittance report sums
- * those columns straight out of the table, so it reported more withheld from SSS, PhilHealth,
- * Pag-IBIG and BIR than was ever taken off anyone's pay. A filing built on it over-reports employee
- * contributions the company cannot evidence from its own payslips.
- *
- * WHAT IS PINNED HERE. The invariant (parts == whole), the priority order that decides who goes
- * short, that the ordinary full-pay payslip is untouched, that a year-end tax refund is not
- * cannibalised to pay a contribution, and that the remittance report now agrees with the payslips
- * it is built from. That last one is the finding: the rest is how it is achieved.
- */
+/** When pay cannot cover the deductions, the payslip has to say WHICH one went short. */
 class DeductionAllocationTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -103,16 +88,7 @@ class DeductionAllocationTest extends HrTestCase
         return Payslip::where('employee_id', $this->employee->id)->firstOrFail();
     }
 
-    /**
-     * A payslip whose gross cannot even cover the STATUTORY deductions.
-     *
-     * Harder to produce than it looks. Contributions are charged on the full monthly salary while
-     * gross scales with days worked — but they are also split across the month's cutoffs, so one
-     * day at ₱20,000/month still grosses ₱1,000 against ~₱850 of per-cutoff contributions and
-     * covers them comfortably. What does not cover them is a LOW salary: the PhilHealth ₱10,000
-     * floor and the lowest SSS bracket hold the contribution up while the daily rate falls with
-     * the salary. ₱5,000/month, one day worked → ₱250 gross against ₱300 of contributions.
-     */
+    /** A payslip whose gross cannot even cover the STATUTORY deductions. */
     private function oneDayOnALowSalary(): Payslip
     {
         $this->employee->update(['base_salary' => 5000]);
@@ -271,7 +247,7 @@ class DeductionAllocationTest extends HrTestCase
         );
 
         // Pag-IBIG went uncollected, so the column the remittance sums must read ₱0 — not the
-        // ₱50 that was owed. Remitting ₱50 the employee never paid is the filing error FIN-053
+        // ₱50 that was owed. Remitting ₱50 the employee never paid is the filing error
         // describes, and it is this column that produces it.
         $this->assertEqualsWithDelta(0.0, (float) $slip->pagibig, 0.01);
         $this->assertEqualsWithDelta(50.0, (float) $slip->deduction_carryover, 0.01);

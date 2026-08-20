@@ -1,31 +1,4 @@
-{{--
-    The payslip PDF — the same document `payslip-document.tsx` renders on screen.
-
-    Nested tables rather than flex because DomPDF has no flexbox. Every subtotal comes from
-    `$p['totals']`, computed once in PayslipResource, so this and the UI cannot drift apart.
-
-    DejaVu Sans / DejaVu Sans Mono ship with DomPDF, so no font is installed. Amounts are bare
-    numbers with a single "PHP" on the net line — DomPDF's fonts have no ₱ glyph and would
-    render it as a blank box.
-
-    One document for both audiences: HR's download and the employee's are byte-identical. That
-    includes the employer's share, shown under each statutory line — it is never a term in any total.
-
-    THE 2026-08-14 REBUILD. The document was re-cut to the four-step walk the screen now prints
-    (earnings → deductions → contributions → allowances) and the workings were dropped with it: the
-    computation-basis table, the per-contribution derivations, and the identity block's government
-    numbers and address are all gone. What remains is what was earned, what was taken, and what was
-    paid.
-
-    THE COLUMNS CARRY THAT WALK, they do not interrupt it. Left is the period on its own — earned,
-    charged, and the subtotal those two produce. Right is what happens to that subtotal — the month
-    restated, the government's share, and the allowances paid on top. The conclusions run full width
-    beneath both, so the figure the reader is looking for is never in a column.
-
-    ONE PAGE, ALWAYS. See `$capped`, `$fit` and `$fitDates` below: every variable-length list is
-    bounded and anything that could wrap is trimmed, so the document's height cannot grow with data.
-    Overflow does not truncate the top — it pushes the net pay and signatures onto page two.
---}}
+{{-- The payslip PDF — the same document `payslip-document.tsx` renders on screen. --}}
 @php
     $t = $p['totals'];
     $month = $p['month_summary'] ?? null;
@@ -43,10 +16,6 @@
      * The rows the Compensation table shows even at zero, in the order it shows them — matching
      * the screen. A reader checking a payslip is checking a list they already expect, and a
      * missing "Overtime" row is indistinguishable from overtime that was silently dropped.
-     *
-     * ONLY AN ORDINARY PERIOD HAS A SKELETON. A 13th-month, adjustment or final-pay run has no
-     * basic pay and no overtime; five zero rows above the one line carrying the money would
-     * describe it as an ordinary period that paid nothing, which is the exact defect FIN-011 fixed.
      */
     $skeleton = ['Basic Pay', 'Overtime', 'Night Differential', 'Rest Day', 'Holiday'];
 
@@ -78,13 +47,7 @@
         fn ($l) => ($l['kind'] ?? null) === 'allowance',
     ));
 
-    /**
-     * THE CORRECTIONS HR HAS MADE TO LINES THAT WERE ALREADY HERE, keyed by the line they name.
-     *
-     * The earnings and deduction rows carry their own correction on them, put there by
-     * PayslipDocument. The government lines do not — they are printed straight from their columns,
-     * in a table of their own — so those are looked up here instead.
-     */
+    /** THE CORRECTIONS HR HAS MADE TO LINES THAT WERE ALREADY HERE, keyed by the line they name. */
     $corrections = [];
 
     foreach ($p['amendments'] ?? [] as $amendment) {
@@ -106,19 +69,7 @@
     /** The struck-through original, or nothing at all on a line nobody has corrected. */
     $was = fn ($original) => $original === null ? '' : '<span class="was">' . $amt($original) . '</span>';
 
-    /**
-     * ONE PAGE, GUARANTEED — the lists whose length comes from configuration rather than layout.
-     *
-     * An allowance line per programme the employee is on, a deduction line per benefit share and
-     * loan, an earnings line per premium. Nothing caps them, so with enough of any the payslip runs
-     * onto a second page — and it takes the net pay and the signature block with it, which is the
-     * half that matters.
-     *
-     * `$capped` keeps the first few and ROLLS THE REMAINDER INTO ONE LABELLED LINE. It is not a
-     * truncation: the rolled line carries the summed amount and says how many items it covers, so
-     * the column still adds up to the same total and no peso goes unaccounted for. The full
-     * itemisation is always on screen, where there is no page boundary.
-     */
+    /** ONE PAGE, GUARANTEED — the lists whose length comes from configuration rather than layout. */
     $capped = function (array $lines, int $max, string $label) {
         if (count($lines) <= $max) {
             return $lines;
@@ -155,11 +106,6 @@
     /**
      * The dates behind a deduction row, as one grey line — "Aug 5, Aug 10", or "Aug 1 180m ·
      * Aug 5 120m" once minutes are what varies.
-     *
-     * TRIMMED BY DATE COUNT, not by characters: cutting mid-date reads as a rendering fault, and
-     * a period with twenty absences is exactly the period whose row must not wrap onto four lines.
-     * The count badge beside the label already states how many there were, so the tail is
-     * summarised rather than silently dropped.
      */
     $fitDates = function (array $row) {
         $dates = $row['dates'] ?? [];
@@ -213,13 +159,7 @@
     $earningLines = $capped($earningLines, 9, 'Other earnings');
     $allowanceLines = $capped($allowanceLines, 5, 'Other allowances');
 
-    /**
-     * The employer's counterpart contributions — DISCLOSED, NEVER A TERM IN ANY TOTAL.
-     *
-     * Only used to decide whether the footnote appears at all: a run that takes no statutory
-     * contributions (13th month, final pay, an adjustment) has nothing to say. The figures
-     * themselves are read per line beside the employee's own.
-     */
+    /** The employer's counterpart contributions — DISCLOSED, NEVER A TERM IN ANY TOTAL. */
     $erTotal = (float) ($p['employer_sss'] ?? 0)
         + (float) ($p['employer_philhealth'] ?? 0)
         + (float) ($p['employer_pagibig'] ?? 0);
@@ -349,8 +289,10 @@
     <tr>
         <td style="width: 22%;">
             <div class="cap">Pay Type</div>
-            {{-- FIN-011 — the resolved label, not the raw `frequency`: for a final-pay run that
-                 string is "final_pay:<employee id>". --}}
+            {{--
+                The resolved label, not the raw `frequency`: for a final-pay run that
+                string is "final_pay:<employee id>".
+            --}}
             <div class="val">{{ $p['run_type_label'] }}</div>
         </td>
         <td>
@@ -360,8 +302,10 @@
     </tr>
 </table>
 
-{{-- Name, role and the three rates the deduction arithmetic is quoted in. The government numbers,
-     employee id, department and address were removed on 2026-08-14 (Joshua's call). --}}
+{{--
+    Name, role and the three rates the deduction arithmetic is quoted in. The government numbers,
+    employee id, department and address were removed on 2026-08-14 (Joshua's call).
+--}}
 <div class="card" style="margin-top: 8px;">
     <table>
         <tr>
@@ -383,8 +327,10 @@
             <td colspan="2">
                 <table>
                     <tr>
-                        {{-- Em dashes, not zeroes: management staff are not paid by the day, and
-                             "Per Day 0.00" states that a day of their time is worth nothing. --}}
+                        {{--
+                            Em dashes, not zeroes: management staff are not paid by the day, and
+                            "Per Day 0.00" states that a day of their time is worth nothing.
+                        --}}
                         <td style="width: 34%;">
                             <div class="cap">Per Day</div>
                             <div class="val">{{ $rate($p['rates']['daily']) }}</div>
@@ -404,16 +350,7 @@
     </table>
 </div>
 
-{{--
-    TWO INDEPENDENT COLUMNS.
-
-    WHY ONE TABLE AND NOT TWO STACKED. A table row is as tall as its tallest cell, so a second
-    `cols` table could not start until the first finished on BOTH sides — leaving a band of dead
-    space under whichever column was shorter, growing with every allowance line opposite it. One
-    row, one cell per column, each holding its own stack of tables: the columns flow independently.
-    It is also never taller — max(a,b) + max(c,d) >= max(a+c, b+d) — so the one-page guarantee can
-    only improve.
---}}
+{{-- TWO INDEPENDENT COLUMNS. --}}
 <table class="sect cols">
     <tr>
         {{-- LEFT: the period on its own — earned, charged, and the subtotal those two produce. --}}
@@ -448,9 +385,11 @@
                         $dates = $fitDates($row);
                         $minutes = empty($row['minutes']) ? '' : $row['minutes'] . ' min';
                     @endphp
-                    {{-- The count badge and the date line are the point of the row: "Absences
-                         1,316.00" has to be taken on trust; "Absences (2) Aug 5, Aug 10" can be
-                         checked against the reader's own memory of the month. --}}
+                    {{--
+                        The count badge and the date line are the point of the row: "Absences
+                        1,316.00" has to be taken on trust; "Absences (2) Aug 5, Aug 10" can be
+                        checked against the reader's own memory of the month.
+                    --}}
                     <tr class="line{{ $dates ? ' pair' : '' }}">
                         <td>
                             @if (! empty($row['original_name']))
@@ -483,13 +422,17 @@
 
         <td class="gap"></td>
 
-        {{-- RIGHT: what happens to that subtotal — the month restated, the government's share,
-             and the allowances paid on top of a salary that was already taxed. --}}
+        {{--
+            RIGHT: what happens to that subtotal — the month restated, the government's share,
+            and the allowances paid on top of a salary that was already taxed.
+        --}}
         <td>
-            {{-- THE MONTH, RESTATED — carried by its last cutoff only. Each earlier cutoff is
-                 restated by its Total Current Amount rather than its net pay: the two are equal
-                 only on a cutoff that took no contributions, which is exactly what this must not
-                 silently depend on. --}}
+            {{--
+                THE MONTH, RESTATED — carried by its last cutoff only. Each earlier cutoff is
+                restated by its Total Current Amount rather than its net pay: the two are equal
+                only on a cutoff that took no contributions, which is exactly what this must not
+                silently depend on.
+            --}}
             @if ($month)
                 <table>
                     <tr class="thead"><td>Salary Summary</td><td class="amt">Amount</td></tr>
@@ -509,14 +452,6 @@
                     Each statutory line carries the EMPLOYER's counterpart directly beneath it —
                     indented, smaller, italic and grey, so it reads as a note on the line above
                     rather than as another deduction.
-
-                    Beside the employee's own figure it means something: they can see that P875 of
-                    their pay went to SSS and the company put P1,765 in alongside it. Detached from
-                    that comparison it was just another number.
-
-                    IT IS NEVER IN THE TOTAL. That row is `$t['government']`, computed by
-                    `documentTotals()` from the employee's deductions alone — there is no code path
-                    by which these rows reach it. The styling says so and the arithmetic enforces it.
                 --}}
                 @foreach ([
                     ['sss', 'SSS', $p['sss'], $p['employer_sss'] ?? 0],
@@ -579,17 +514,21 @@
                     </td>
                     <td class="amt">{!! $was($taxFix['original_amount'] ?? null) !!}{{ $amt($p['withholding_tax']) }}</td>
                 </tr>
-                {{-- The least checkable figure on the document: an annualised projection of one
-                     period, net of contributions, against a dated bracket table. Four steps, none
-                     of them visible, ending in a peso amount the reader was expected to trust.
-                     Kept when the other derivations were dropped, because December's tax line can
-                     go NEGATIVE and nothing else on the page would account for that. --}}
+                {{--
+                    The least checkable figure on the document: an annualised projection of one
+                    period, net of contributions, against a dated bracket table. Four steps, none
+                    of them visible, ending in a peso amount the reader was expected to trust.
+                    Kept when the other derivations were dropped, because December's tax line can
+                    go NEGATIVE and nothing else on the page would account for that.
+                --}}
                 @foreach ($taxWhyLines as $line)
                     <tr class="why {{ $loop->last ? '' : 'open' }}"><td colspan="2">{{ $line }}</td></tr>
                 @endforeach
-                {{-- FIN-054 — the year-end settlement, shown as its derivation. On the common case
-                     the line above is NEGATIVE and net pay exceeds gross; the printed payslip is
-                     the copy an employee keeps and queries against. Absent on every other payslip. --}}
+                {{--
+                    The year-end settlement, shown as its derivation. On the common case
+                    the line above is NEGATIVE and net pay exceeds gross; the printed payslip is
+                    the copy an employee keeps and queries against. Absent on every other payslip.
+                --}}
                 @if (($p['tax_annualisation_basis'] ?? null) !== null)
                     @php $tb = $p['tax_annualisation_basis']; $isRefund = $tb['settled_this_period'] < 0; @endphp
                     <tr class="ernote"><td colspan="2"><strong>Year-end tax settlement · {{ $tb['year'] }}</strong></td></tr>
@@ -599,10 +538,12 @@
                     <tr class="ersub"><td class="erlbl">{{ $isRefund ? 'Refunded on this payslip' : 'Collected on this payslip' }}</td><td class="amt">{{ $amt(abs($tb['settled_this_period'])) }}</td></tr>
                     <tr class="ernote"><td colspan="2">Tax is withheld each period on an estimate of the year. Yours came out {{ $isRefund ? 'higher' : 'lower' }} than the year needed, so the difference is {{ $isRefund ? 'paid back' : 'collected' }} here.</td></tr>
                 @endif
-                {{-- When the month's contributions did not all land here, BOTH figures are printed:
-                     the rows above sum to the first, and the walk continues from the second. One
-                     row labelled "monthly" sitting under rows that do not add up to it would be
-                     the one error a payslip cannot make. --}}
+                {{--
+                    When the month's contributions did not all land here, BOTH figures are printed:
+                    the rows above sum to the first, and the walk continues from the second. One
+                    row labelled "monthly" sitting under rows that do not add up to it would be
+                    the one error a payslip cannot make.
+                --}}
                 @if ($month && $differs($month['government'], $t['government']))
                     <tr class="sum"><td>Total Benefits (This Cut-Off)</td><td class="amt">{{ $amt($t['government']) }}</td></tr>
                 @endif
@@ -624,9 +565,11 @@
                 </tr>
             </table>
 
-            {{-- Allowances sit BELOW the contributions rather than among the earnings: they are
-                 paid on top of a salary that was already taxed, and printing them inside
-                 Compensation made them look like part of the base the deductions came out of. --}}
+            {{--
+                Allowances sit BELOW the contributions rather than among the earnings: they are
+                paid on top of a salary that was already taxed, and printing them inside
+                Compensation made them look like part of the base the deductions came out of.
+            --}}
             <table class="stack">
                 <tr class="thead"><td>Non-Taxable Allowance</td><td class="amt">Amount</td></tr>
                 @foreach ($allowanceLines as $line)
@@ -656,7 +599,7 @@
 </table>
 
 {{--
-    Disclosure, NOT a term in the total (FIN-053). The government and deduction figures above are
+    Disclosure, NOT a term in the total. The government and deduction figures above are
     what was actually collected, so this is no longer credited back — it is shown because the
     employee is entitled to know a deduction they owe went unpaid, and which one.
 --}}
@@ -692,9 +635,11 @@
     </div>
 @endif
 
-{{-- The conclusions run FULL WIDTH beneath both columns: the figure the reader is looking for is
-     never in a column. The month total sits below this cutoff's net rather than instead of it —
-     the employee is owed both answers, what lands in their account now and what the month came to. --}}
+{{--
+    The conclusions run FULL WIDTH beneath both columns: the figure the reader is looking for is
+    never in a column. The month total sits below this cutoff's net rather than instead of it —
+    the employee is owed both answers, what lands in their account now and what the month came to.
+--}}
 <table class="net">
     <tr>
         <td class="lbl">{{ $netLabel }}</td>
@@ -711,13 +656,7 @@
     </table>
 @endif
 
-{{-- WHAT WAS ACTUALLY TRANSFERRED, when the net above is no longer that figure.
-
-     Silent on an ordinary payslip, where the net IS what was paid — which is nearly all of them.
-     It appears when a correction landed after payment: the bar above then states an amount larger
-     than the one in the employee's account, and the amount in their account is the one fact on this
-     document they can check independently. Both figures, each with its date, and the difference
-     named rather than left to be inferred. --}}
+{{-- WHAT WAS ACTUALLY TRANSFERRED, when the net above is no longer that figure. --}}
 @if ($p['disbursed_amount'] !== null && $differs($p['disbursed_amount'], $p['net_pay']))
     @php $owed = (float) $p['amount_outstanding']; @endphp
     <div class="note">
@@ -738,17 +677,7 @@
             <div style="font-size: 8px; padding-top: 1px;">{{ $stamp($p['issued_at']) }}</div>
             <div class="cap" style="padding-top: 4px;">Verified By</div>
             <div style="font-size: 8px; padding-top: 1px;">System Automated Check</div>
-            {{-- THAT THIS DOCUMENT WAS AMENDED, AND WHEN.
-
-                 The corrections used to be listed in a block of their own above the signatures,
-                 because that was the only place they existed: the figures were the engine's and
-                 the block was where a person's disagreement with them lived. Each correction now
-                 sits ON the line it is about, struck through beside the corrected figure, so the
-                 block would be the same information said twice — and the second telling is the one
-                 that made the reader do arithmetic.
-
-                 The date does not survive on the line, though, and a payslip somebody has already
-                 read once is a document they are entitled to know has changed since. --}}
+            {{-- THAT THIS DOCUMENT WAS AMENDED, AND WHEN. --}}
             @if ($amendedCount > 0)
                 <div class="cap" style="padding-top: 4px;">Amended</div>
                 <div style="font-size: 8px; padding-top: 1px;">

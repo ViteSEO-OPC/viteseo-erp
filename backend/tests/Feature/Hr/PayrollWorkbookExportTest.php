@@ -16,19 +16,7 @@ use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use OpenSpout\Reader\XLSX\Reader;
 
-/**
- * The run export as a WORKBOOK — the copy HR opens rather than the copy a script parses.
- *
- * WHAT THIS GUARDS. The breakdown sheet does not print stored columns: basic pay is shown gross of
- * absences, the absence charge is split back out across the deduction columns by the same code the
- * payslip document uses, and two residual columns absorb whatever those named columns do not name.
- * That is three places for a figure to go missing, and a spreadsheet says nothing when one does —
- * it just quietly stops adding up. So every assertion here is an IDENTITY over what the file
- * actually contains, read back out of the file, not a check that some method was called.
- *
- * THE CSV IS ASSERTED TOO. `?format=xlsx` was added to an endpoint that already had readers, and
- * "the workbook works" is worth nothing if the plain request stopped returning a CSV.
- */
+/** The run export as a WORKBOOK — the copy HR opens rather than the copy a script parses. */
 class PayrollWorkbookExportTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -126,10 +114,6 @@ class PayrollWorkbookExportTest extends HrTestCase
     /**
      * The index of the table's header row.
      *
-     * Searched for rather than hardcoded: the reader drops the blank spacer rows the letterhead is
-     * built from, so where the header sits in this array is not where it sits in the file — and a
-     * test that pins it to a number would fail the first time the letterhead gained a line.
-     *
      * @param  list<list<mixed>>  $rows
      */
     private function headerRow(array $rows): int
@@ -196,7 +180,7 @@ class PayrollWorkbookExportTest extends HrTestCase
 
         $this->assertSame(['Payroll Export', 'Source Data'], array_keys($sheets));
 
-        // Slice B7's remittance columns are the whole reason the second sheet is there.
+        // 's remittance columns are the whole reason the second sheet is there.
         $register = $sheets['Source Data'][0];
         foreach (['Employer SSS', 'Employer PhilHealth', 'Employer Pag-IBIG', 'Overridden'] as $column) {
             $this->assertContains($column, $register);
@@ -308,7 +292,7 @@ class PayrollWorkbookExportTest extends HrTestCase
     }
 
     /**
-     * FIN-019, in its XLSX shape. A name opening with `=` is a FORMULA to Excel — OpenSpout's own
+     * In its XLSX shape. A name opening with `=` is a FORMULA to Excel — OpenSpout's own
      * `Cell::fromValue()` would hand it over as one. The writer must have printed it.
      */
     public function test_a_name_that_looks_like_a_formula_is_written_as_text(): void

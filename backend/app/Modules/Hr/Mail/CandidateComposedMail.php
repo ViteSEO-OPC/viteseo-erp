@@ -12,17 +12,7 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-/**
- * A candidate email exactly as HR composed it.
- *
- * This replaces the old one-class-five-hardcoded-templates Mailable. The templates did not
- * go away — they moved to CandidateEmailService, which uses them to pre-fill the compose
- * modal. By the time a message reaches this class the subject and body are whatever HR
- * decided they should be, so there is nothing left here to choose.
- *
- * Everything is read off the log row, which is written before the send. That is deliberate:
- * what was recorded and what was transmitted cannot drift, because they are the same values.
- */
+/** A candidate email exactly as HR composed it. */
 class CandidateComposedMail extends Mailable
 {
     use Queueable, SerializesModels;

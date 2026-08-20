@@ -5,18 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice 4 (2026-07-28 audit) — the employee's last day.
- *
- * Separation was recorded as `separation_type` plus a soft-delete, with `deleted_at`
- * standing in for the date. That made a final payslip impossible: payroll couldn't tell
- * WHEN someone left, and soft-deleted rows are invisible to `Employee::query()` anyway, so
- * anyone who separated mid-cycle simply vanished from the run they had worked.
- *
- * `deleted_at` is an audit timestamp, not a business date — HR can restore an employee, and
- * an accidental delete/restore would silently move someone's last working day. Hence an
- * explicit column, backfilled from the existing `deleted_at` for rows already separated.
- */
+/** (2026-07-28 audit) — the employee's last day. */
 return new class extends Migration
 {
     public function up(): void

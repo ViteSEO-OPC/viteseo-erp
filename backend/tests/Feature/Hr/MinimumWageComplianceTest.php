@@ -14,23 +14,7 @@ use App\Modules\Hr\Services\PayrollService;
 use App\Modules\Hr\Services\PayScheduleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * FIN-030b — turning the minimum-wage warning into something that can actually be acted on.
- *
- * THE CONFUSION THIS EXISTS TO SETTLE. One salary produces two different daily rates depending on
- * the divisor, and only one of them can be compared to a wage order. ₱20,000/month is ₱657.53 a day
- * over 365 (the salary covers every calendar day, rest days and holidays included) and ₱919.54 a
- * day over 261 (it covers workdays only). Same money, opposite verdicts against a ₱750 floor —
- * because they are not the same deal. The divisor does not DECIDE compliance; it records which days
- * the salary is paying for, and the check is only ever as right as that setting.
- *
- * WHAT THE FIRST VERSION LEFT UNDONE. It put an advisory band on a profile page, which is seen by
- * whoever opens that profile — for a compliant-looking employee, nobody. Underpayment is not a
- * preference: it creates wage differentials and, under RA 8188, double indemnity, and a contract
- * cannot agree to less than the floor. So the same question is now asked where money is committed,
- * and the fix is one click with a person's name on it — never a background job, because salary is
- * a contractual term and a raise nobody approved is not a raise.
- */
+/** Turning the minimum-wage warning into something that can actually be acted on. */
 class MinimumWageComplianceTest extends HrTestCase
 {
     use RefreshDatabase;

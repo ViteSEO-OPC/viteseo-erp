@@ -10,17 +10,6 @@ use Illuminate\Validation\ValidationException;
 /**
  * Withdrawing a request you filed yourself.
  *
- * Claims, payroll inquiries and concerns all answer this the same way, so the rule lives here
- * once rather than three times: the owner (or HR) may withdraw it, but only while it is still
- * `pending` — once HR has picked it up, the way out is their decision, not the employee's.
- *
- * Cancelling is deliberately NOT the same as being declined. A rejection is HR's verdict on the
- * request and belongs in `review_note`; a cancellation is the employee changing their mind, and
- * it is recorded separately so the two are never confused when the record is read back later.
- *
- * The reason is required by the Form Request rather than defaulted here — "cancelled" with no
- * explanation is the dead end this replaced.
- *
  * @see \App\Modules\Hr\Services\LeaveService::cancel() the older, leave-specific version of this
  *      rule; leave keeps its own because an APPROVED leave is also cancellable (by HR, before it
  *      starts) and that unwinds a balance, which none of these three have to do.

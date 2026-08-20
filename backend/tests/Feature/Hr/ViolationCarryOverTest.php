@@ -14,7 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
 /**
- * Slice D (2026-07-27): the late tally can carry across months (`monthly_late_reset` OFF), and a
+ *  (2026-07-27): the late tally can carry across months (`monthly_late_reset` OFF), and a
  * resolved violation stops counting toward escalation. Default ladder: green@1, yellow@3, orange@4,
  * red@6. Three unresolved lates last month + two this month ⇒ this month's colour depends on the
  * toggle and on what HR has resolved. Flags only — no pay effect.
@@ -35,17 +35,7 @@ class ViolationCarryOverTest extends HrTestCase
 
         $tz = config('app.timezone_local');
 
-        // THE CLOCK IS FROZEN ON PURPOSE (FIN-051, payroll audit 2026-08-04).
-        //
-        // setUp() seeds the first TWO weekdays of the current month as lates, and
-        // ViolationService::recompute() never scans past today (ViolationService:113-121).
-        // Run during the opening days of a month, the second seeded date was still in the
-        // FUTURE, so only one late was counted and every severity assertion below was one
-        // short. Anchoring to a fixed mid-month date puts both seeded days — and the three
-        // in the prior month — safely in the past on every run.
-        //
-        // Laravel resets the test clock in InteractsWithTestCaseLifecycle::tearDown, so the
-        // freeze does not leak into other tests.
+        // THE CLOCK IS FROZEN ON PURPOSE (payroll audit 2026-08-04).
         $this->travelTo(Carbon::parse('2026-06-17 12:00', $tz));
 
         WorkSchedule::create([

@@ -38,19 +38,15 @@ class PayrollRunResource extends JsonResource
             'employee_count' => $this->employee_count,
             'run_at' => $this->run_at,
             'run_by' => $this->runner?->name,
-            // FIN-051 — how many payslips this run left untouched because they were already
+            // How many payslips this run left untouched because they were already
             // disbursed. Present only on the response to a run that just executed; null when the
             // run is merely being read back, where it would describe an event, not a state.
             'skipped_disbursed' => $this->resource->skippedDisbursedCount,
-            // Slice 5 — a locked run can no longer be recomputed.
+            // A locked run can no longer be recomputed.
             'locked_at' => $this->locked_at,
             'locked_by' => $this->locker?->name,
             'is_locked' => $this->locked_at !== null,
             // Whether every payslip has been paid out IN FULL — the precondition for locking.
-            //
-            // The balance test is not redundant with the status one. A payslip amended after it was
-            // disbursed keeps that status while owing the difference, so status alone would let a run
-            // be sealed — permanently, that being what locking means — over money still outstanding.
             'can_lock' => $this->whenLoaded('payslips', fn () => $this->locked_at === null
                 && $this->payslips->isNotEmpty()
                 && $this->payslips->every(fn (Payslip $p) => $p->status === 'disbursed'
@@ -61,7 +57,7 @@ class PayrollRunResource extends JsonResource
             'is_tax_stale' => $this->tax_stale_at !== null,
             'tax_stale_at' => $this->tax_stale_at,
             'tax_stale_reason' => $this->tax_stale_reason,
-            // Slice 8 — the rules in force when this run executed. Detail view only: it's a
+            // The rules in force when this run executed. Detail view only: it's a
             // sizeable blob and the runs LIST would carry one per row for no reason.
             'policy_snapshot' => $this->whenLoaded('payslips', fn () => $this->policy_snapshot),
             // Which of those captured rules would price this cycle differently TODAY. Without
@@ -103,16 +99,6 @@ class PayrollRunResource extends JsonResource
 
     /**
      * The run's headline figures, summed on the SAME definition as each payslip's.
-     *
-     * WHY IT IS NOT SIMPLY THE STORED COLUMNS. The summary cards sit directly above the breakdown
-     * table, so if the rows state gross before absences and the cards state it after, the cards
-     * stop being the sum of the column beneath them — trading one inconsistency for a worse one
-     * that is visible on a single screen.
-     *
-     * Reads aggregates the query already loaded (`listRuns()` and `runWithBreakdown()` both add
-     * them) and falls back to ONE grouped query otherwise, so a run rendered straight after an
-     * action reports the same figures as the list it returns to. A run with no payslips keeps its
-     * stored totals: there is nothing to re-state and zeroes would be a claim, not a restatement.
      *
      * @return array{gross: float, deductions: float, net: float}
      */

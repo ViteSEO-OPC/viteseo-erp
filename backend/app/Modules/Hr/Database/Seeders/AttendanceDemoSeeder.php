@@ -14,11 +14,6 @@ use Illuminate\Database\Seeder;
  * (08:00), Leo runs late (08:35 → drives the tardiness escalation), and Carlo is
  * absent the first two weekdays (→ an orange unauthorised-absence flag). Times are
  * stored UTC. Maya (employee) + Dana (HR) stay un-clocked today for the live demos (§8).
- *
- * Slice 1 step 1c — the seeder is deliberately ADVERSARIAL. Every employee used to be
- * well-behaved, so the awkward cases the deduction engine must handle (forgotten
- * clock-out, over-long break/lunch, an open break punch, an early leave, a half-day
- * plus a late arrival) had NO test data at all. seedEdgeCases() plants one of each.
  */
 class AttendanceDemoSeeder extends Seeder
 {
@@ -130,7 +125,7 @@ class AttendanceDemoSeeder extends Seeder
 
         // [label, mutator] — each returns the column changes for that day's row.
         $cases = [
-            // F-6 / 2a: clocked in, never clocked out. THE most common real case (20% of rows).
+            //  / 2a: clocked in, never clocked out. THE most common real case (20% of rows).
             ['Forgot to clock out', fn ($day) => [
                 'time_out' => null,
                 'lunch_minutes' => 0,
@@ -138,23 +133,23 @@ class AttendanceDemoSeeder extends Seeder
                 'hours_worked' => 0,
                 'note' => 'Forgot to clock out',
             ]],
-            // F-5: break well over the 20-min paid allowance — flagged, never deducted.
+            // Break well over the 20-min paid allowance — flagged, never deducted.
             ['40-minute break', fn ($day) => [
                 'break_minutes' => 40,
                 'note' => 'Long coffee break',
             ]],
-            // F-5: lunch over the 60-min allowance — flagged, never deducted.
+            // Lunch over the 60-min allowance — flagged, never deducted.
             ['90-minute lunch', fn ($day) => [
                 'lunch_minutes' => 90,
                 'note' => 'Long lunch',
             ]],
-            // F-6: a break started and never ended (auto-closed at clock-out → garbage minutes).
+            // A break started and never ended (auto-closed at clock-out → garbage minutes).
             ['Open break punch', fn ($day) => [
                 'break_started_at' => $day->copy()->setTime(15, 0)->utc(),
                 'break_minutes' => 180,
                 'note' => 'Break never ended — suspected missing punch',
             ]],
-            // P1-2: left early with no early-out request — clock-derived undertime.
+            // Left early with no early-out request — clock-derived undertime.
             ['Early leave (undertime)', fn ($day) => [
                 'time_out' => $day->copy()->setTime(15, 0)->utc(),
                 'hours_worked' => 6.0,
@@ -175,7 +170,7 @@ class AttendanceDemoSeeder extends Seeder
             }
         }
 
-        // F-3: an approved half-day AND a late arrival on the same day — the case where
+        // An approved half-day AND a late arrival on the same day — the case where
         // "what does a minute cost?" is undefined until the half-day windows are read.
         $halfDaySubject = $subjects->last();
         $halfDay = $days[count($days) - 1];

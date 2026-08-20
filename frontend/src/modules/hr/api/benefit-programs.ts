@@ -50,7 +50,7 @@ export async function createBenefitPlan(
   return res.data.data;
 }
 
-// ---- Company-plan enrolment (Slice B2) ----
+// ---- Company-plan enrolment ----
 
 /** Who is on this plan, and who its rule allows but is not on it yet. */
 export async function getPlanEnrollments(programId: number): Promise<PlanEnrollments> {
@@ -90,14 +90,11 @@ export async function endPlanEnrollment(
   return res.data;
 }
 
-// ---- One employee's own allowance amounts (Slice B14) ----
+// ---- One employee's own allowance amounts ----
 
 /**
  * What this employee is paid, allowance by allowance. Built from the catalogue server-side, so a
  * new allowance appears here with no code change.
- *
- * NOT `/benefits` — that path is the statutory SSS/PhilHealth/Pag-IBIG checklist, a different
- * table with a near-identical name.
  */
 export async function getEmployeeAllowances(
   employeeId: number,

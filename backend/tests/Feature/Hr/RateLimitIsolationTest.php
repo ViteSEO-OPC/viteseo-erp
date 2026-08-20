@@ -5,25 +5,7 @@ namespace Tests\Feature\Hr;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
 
-/**
- * Each rate-limited action gets its OWN counter (regression on the FIN-006 limiters).
- *
- * THE BUG. `ThrottleRequests::resolveRequestSignature()` keys an authenticated request on
- * `sha1($user->id)` and nothing else — the route is not part of it. Every unprefixed `throttle:`
- * in the module therefore shared one counter per user, and the HR group's own `throttle:120,1`
- * incremented that counter on every single request. `payroll/run` then compared the shared number
- * against its limit of 5.
- *
- * The effect was not subtle: five requests to anything at all — less than one screen load —
- * left the payroll run answering "Too Many Attempts" for the rest of the minute. The limiter
- * intended to stop a run being submitted repeatedly was instead throttling all HR activity to
- * 5/min, and it read as a broken payroll rather than as a rate limit.
- *
- * WHY THIS IS TESTED AT THE ROUTE TABLE rather than by firing 5 real requests: the actions behind
- * these limiters run payroll, pay people and build files. Asserting on the middleware string is
- * what makes the check cheap enough to cover EVERY limited route, including ones added later —
- * which is the case that actually matters, because the bug is invisible until someone hits it.
- */
+/** Each rate-limited action gets its OWN counter (regression on the limiters). */
 class RateLimitIsolationTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -120,13 +102,7 @@ class RateLimitIsolationTest extends HrTestCase
         );
     }
 
-    /**
-     * The HR group carries TWO windows, and every route must be under both.
-     *
-     * The per-minute limit alone bounds a burst but not a grind — 119 requests a minute is inside
-     * policy indefinitely. The hourly ceiling is what makes patient scraping cost something, so a
-     * route escaping it is the same class of hole as one escaping the minute limit.
-     */
+    /** The HR group carries TWO windows, and every route must be under both. */
     public function test_every_hr_route_is_under_both_group_windows(): void
     {
         $missing = [];
@@ -150,17 +126,7 @@ class RateLimitIsolationTest extends HrTestCase
         $this->assertSame([], $missing, "these HR routes escape a group rate-limit window:\n" . implode("\n", $missing));
     }
 
-    /**
-     * The expensive endpoints carry a limit tighter than the 120/min the group gives everything.
-     *
-     * 120/min is tuned for dashboard reads and is far too loose for these: the upload routes
-     * accept up to 5 files of 5-10MB each, so at the group limit one account could write several
-     * GB a minute; the email route spends sender reputation that cannot be reclaimed; the PDF and
-     * bulk routes are synchronous CPU that competes with a payroll run.
-     *
-     * Asserted as a MINIMUM per family — a route may be added to one of these later, and the point
-     * is that none of them silently loses its limit.
-     */
+    /** The expensive endpoints carry a limit tighter than the 120/min the group gives everything. */
     public function test_the_expensive_endpoints_carry_a_tighter_limit(): void
     {
         $expected = [

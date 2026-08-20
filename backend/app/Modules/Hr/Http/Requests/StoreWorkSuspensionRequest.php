@@ -4,13 +4,7 @@ namespace App\Modules\Hr\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-/**
- * Declaring (or amending) a non-working day.
- *
- * `is_paid` is required on create and has no default: whether the company still pays for a
- * cancelled day is the entire decision being recorded, and a default would let it be made by
- * omission. On an amendment it is optional, so a caller can rename a day without restating it.
- */
+/** Declaring (or amending) a non-working day. */
 class StoreWorkSuspensionRequest extends FormRequest
 {
     public function authorize(): bool

@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 /**
  * Government-contribution config (Company → Benefits): the editable SSS / PhilHealth
- * / Pag-IBIG settings and the per-employee enrolment checklist. Payroll v2 (Slice 22)
+ * / Pag-IBIG settings and the per-employee enrolment checklist. Payroll v2
  * calls effectiveFor() to know which contributions to apply and at what rate.
  */
 class ContributionService
@@ -20,7 +20,7 @@ class ContributionService
     public function __construct(private readonly AuditService $audit) {}
 
     /**
-     * Per-request memo (Slice 15). A payroll run calls settings() twice per employee — once via
+     * Per-request memo. A payroll run calls settings() twice per employee — once via
      * benefitsFor(), once via effectiveFor() — for a single, unchanging table. Any write below
      * clears it, so it can't go stale within a request.
      */
@@ -36,16 +36,12 @@ class ContributionService
     {
         // Item 13b.12 — this decides whether a statutory deduction appears on every payslip in
         // the company, so the audit line carries the old and new value, not just "updated".
-        //
-        // Slice B9 item 5 — `config` is no longer writable here. The rates live on
-        // `hr_contribution_versions` and this row is now only "does the company operate this
-        // contribution at all".
         $before = ['is_active' => (bool) $setting->is_active];
 
         $setting->update(['is_active' => $data['is_active'] ?? $setting->is_active]);
         $this->settingsMemo = null;
 
-        // FIN-038 — switching a contribution ON is one of the two moments an enrolment row can
+        // Switching a contribution ON is one of the two moments an enrolment row can
         // start being missing, so the back-fill happens HERE rather than inside the next payroll
         // run. Before, the first run after an activation enrolled the whole company as a side
         // effect of computing pay.
@@ -82,21 +78,7 @@ class ContributionService
     }
 
     /**
-     * Completed payroll runs whose cycle a new rate version would reach back into (FIN-026).
-     *
-     * WHY THIS IS NOT SIMPLY BLOCKED. Backdating is legitimate and common — an agency publishes a
-     * circular in March that takes effect in January, and the correct action is to record it with
-     * the January date. The danger is not the backdating, it is that it happens SILENTLY.
-     *
-     * `policySnapshot()` records the rates a run used but does not replay them: a re-run resolves
-     * the rates in force TODAY. So after a backdated version is saved, a completed-but-unlocked
-     * run's payslips and its own snapshot disagree with what a recompute would now produce, and
-     * the next re-run of that period — for any unrelated reason — silently reprices statutory
-     * deductions on payslips that have already been reviewed. A locked run is safe only because
-     * it refuses re-runs at all.
-     *
-     * So HR is shown exactly which runs are affected and has to confirm. Returned rather than
-     * thrown so the caller can decide whether this is a warning or a refusal.
+     * Completed payroll runs whose cycle a new rate version would reach back into.
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, \App\Modules\Hr\Models\PayrollRun>
      */
@@ -120,7 +102,7 @@ class ContributionService
      */
     public function saveVersion(array $data, User $actor): ContributionVersion
     {
-        // FIN-026 — a date that reaches back over a completed run needs eyes on it first.
+        // A date that reaches back over a completed run needs eyes on it first.
         $acknowledged = (bool) ($data['acknowledge_repricing'] ?? false);
         unset($data['acknowledge_repricing']);
 
@@ -150,7 +132,7 @@ class ContributionService
         $before = $existing?->only([
             'employee_rate', 'employer_rate', 'salary_floor', 'salary_cap',
             'employee_amount_cap', 'employer_amount_cap', 'fixed_employer_add_on', 'add_on_min_salary',
-            // Slice B19 — moving a contribution between the basic and earnings base changes what
+            // Moving a contribution between the basic and earnings base changes what
             // every payslip is charged on, which is a bigger change than any rate on this list.
             'salary_basis',
         ]);
@@ -163,7 +145,7 @@ class ContributionService
             [...$data, 'created_by' => $actor->id],
         );
 
-        // Slice B3b — bands are REPLACED wholesale, never merged. A schedule is published as a
+        // Bands are REPLACED wholesale, never merged. A schedule is published as a
         // complete table; merging would leave stale bands from the previous one silently in play.
         if ($brackets !== null) {
             $version->brackets()->delete();
@@ -173,7 +155,7 @@ class ContributionService
                     ->map(fn ($b) => [
                         'min_salary' => $b['min_salary'],
                         'msc' => $b['msc'],
-                        // Slice B8 — the band's own EC amount, when the published table printed one.
+                        // The band's own EC amount, when the published table printed one.
                         'employer_add_on' => $b['employer_add_on'] ?? null,
                     ])
                     ->values()
@@ -191,7 +173,7 @@ class ContributionService
                 . $version->effective_from->format('M j, Y')
                 . ' — employee ' . round($version->employee_rate * 100, 3) . '%'
                 . ', employer ' . round($version->employer_rate * 100, 3) . '%'
-                // Slice B19 — named in the sentence, not just the diff. "Charged on actual
+                // Named in the sentence, not just the diff. "Charged on actual
                 // earnings" is the part of this change a reader needs to see without opening the
                 // before/after, because it moves what every payslip is measured against.
                 . ', charged on ' . ($version->salary_basis === 'earnings'
@@ -211,11 +193,8 @@ class ContributionService
     }
 
     /**
-     * Remove a version (Slice B8) — a schedule saved against the wrong date has to be removable,
+     * Remove a version — a schedule saved against the wrong date has to be removable,
      * or the only way out is to enter a corrected one on top and leave the mistake in the history.
-     *
-     * The caller checks that this is not the last version for its type. Bands go with it through
-     * the cascade on `hr_contribution_brackets`.
      */
     public function deleteVersion(ContributionVersion $version): void
     {
@@ -239,15 +218,7 @@ class ContributionService
      * contribution they don't have one for yet.
      */
     /**
-     * The active contributions this employee is enrolled in — reading only (FIN-038).
-     *
-     * A MISSING ROW MEANS ENROLLED, and that default is the whole reason this method can be
-     * read-only safely. `benefitsFor()` back-fills a missing row as `enrolled => true`, so the
-     * absence of a row has always meant "enrolled, nobody has said otherwise". Treating absence as
-     * NOT enrolled would have been the tidier-looking change and a serious bug: an employee whose
-     * row had not been created yet would silently stop having SSS deducted, with a run that looks
-     * perfectly successful — the same failure FIN-035 exists to prevent, arrived at from the other
-     * direction.
+     * The active contributions this employee is enrolled in — reading only.
      *
      * @return array<int, string>
      */
@@ -264,15 +235,7 @@ class ContributionService
     }
 
     /**
-     * Create the enrolment rows an employee is missing, where the change actually happens (FIN-038).
-     *
-     * Called on employee creation and when a contribution type is switched on — the two moments a
-     * row can start being missing. Payroll no longer does it, so it no longer writes while pricing.
-     *
-     * IT IS NOT A CORRECTNESS DEPENDENCY, deliberately. `enrolledActiveTypesFor()` treats a missing
-     * row as enrolled, so pay is right whether or not this has run. Its job is to give the enrolment
-     * checklist real rows to show and toggle, which is a UI concern rather than a payroll one — if it
-     * were load-bearing for money, a missed call would silently change someone's deductions.
+     * Create the enrolment rows an employee is missing, where the change actually happens.
      *
      * @return int rows created
      */
@@ -312,7 +275,7 @@ class ContributionService
 
     public function benefitsFor(Employee $employee): Collection
     {
-        // Slice 15 — read the employee's existing rows ONCE and only back-fill what is genuinely
+        // Read the employee's existing rows ONCE and only back-fill what is genuinely
         // missing. This used to fire a firstOrCreate per active contribution per employee (3 × N
         // SELECTs on a payroll run) purely to discover that the rows were already there.
         $existing = $employee->benefits()->orderBy('contribution_type')->get();
@@ -343,7 +306,7 @@ class ContributionService
      */
     public function updateBenefits(Employee $employee, array $rows): Collection
     {
-        // Slice B9 — record WHAT changed, not that something did. Un-enrolling somebody removes a
+        // Record WHAT changed, not that something did. Un-enrolling somebody removes a
         // statutory deduction from every payslip they get from then on; "Updated contribution
         // enrolment for Dana Reyes" cannot answer "who stopped her SSS, and when?". Same
         // correction B5 item 5 made for programme enrolments.
@@ -383,7 +346,7 @@ class ContributionService
      */
     public function effectiveFor(Employee $employee, ?string $asOf = null): array
     {
-        // FIN-038 — READ ONLY. This used to call benefitsFor(), which back-fills missing enrolment
+        // READ ONLY. This used to call benefitsFor(), which back-fills missing enrolment
         // rows with firstOrCreate — so pricing a payslip WROTE to hr_employee_benefits from inside
         // run()'s transaction. Three consequences: a read path mutated enrolment data, a large run
         // added N × types INSERTs and their locks to the critical path, and the first run after
@@ -395,9 +358,9 @@ class ContributionService
             return [];
         }
 
-        // Slice B3a — the rates IN FORCE for this pay period, not whatever they are today.
+        // The rates IN FORCE for this pay period, not whatever they are today.
         // Without the date a re-run of an old cycle would silently reprice at the current rate,
-        // exactly the bug payroll Slice 13c fixed for salaries.
+        // exactly the bug payroll fixed for salaries.
         $asOf ??= now(config('app.timezone_local'))->toDateString();
 
         return $this->versionsAsOf($asOf)
@@ -414,23 +377,6 @@ class ContributionService
      */
     /**
      * Refuse to price a period for which an active contribution type has no rate in force
-     * (FIN-035).
-     *
-     * THE FAILURE THIS PREVENTS is silent, which is what makes it dangerous. `versionsAsOf()`
-     * returns only the types with an `effective_from` on or before the cycle, and `effectiveFor()`
-     * filters against that list — so a type with no version simply DROPS OUT. Payroll then
-     * deducts ₱0 for it, the run completes, the totals reconcile, and every payslip looks
-     * perfectly ordinary. Nothing anywhere says a statutory contribution was skipped.
-     *
-     * Two ways in. A newly added contribution type is active from the moment it is created but
-     * has no dated version until someone adds one — deleting a version is already guarded
-     * (`BenefitController::destroyVersion`), creating a type is not. And any cycle dated before
-     * the earliest version has the same hole: back-fill a 2024 period against a schedule that
-     * starts 2025-01-01 and it deducts nothing.
-     *
-     * Blocking the run is the right response rather than warning: an under-deducted payslip is
-     * one the company must chase the employee for later, and the agencies are owed the full
-     * contribution regardless of what was collected.
      *
      * @throws ValidationException naming every type that has no version in force
      */

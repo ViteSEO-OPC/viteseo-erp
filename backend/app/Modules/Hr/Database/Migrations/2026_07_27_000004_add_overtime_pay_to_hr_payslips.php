@@ -4,8 +4,8 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// OT-1: payslip columns for the overtime pay line — folded into gross by OT-3, exactly like
-// holiday_premium. Default 0, so no-op until an approved OT request is priced (Phase 1, OT-3).
+// Payslip columns for the overtime pay line — folded into gross by, exactly like
+// holiday_premium. Default 0, so no-op until an approved OT request is priced (Phase 1).
 return new class extends Migration
 {
     public function up(): void

@@ -4,33 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice B15 — a loan becomes a product HR defines, and a deduction the employee has agreed to.
- *
- * WHAT EXISTS ALREADY (Slice 11b): `hr_employee_loans` + `hr_loan_payments`, a per-employee
- * balance repaid through payroll, re-run safe by construction — there is no balance column, the
- * balance is `principal − SUM(payments)`, and a payment is unique per (loan, run). None of that
- * changes here.
- *
- * WHAT WAS MISSING is everything around it. HR could not say what may be borrowed, by whom, or
- * over how long: `type` was a free-text string with no product behind it. And nothing recorded the
- * employee's consent.
- *
- * THE AUTHORIZATION IS A LEGAL REQUIREMENT, NOT A WORKFLOW PREFERENCE. Labor Code Art. 113 permits
- * a deduction for a debt owed to the employer only with the employee's explicit written consent.
- * So both routes into a loan end at the same gate, and the gate is what makes the deduction lawful:
- *
- *   HR issues        → the employee sees it → the employee AUTHORIZES → payroll may collect
- *   Employee asks    → HR approves          → the employee AUTHORIZES → payroll may collect
- *
- * A loan therefore no longer starts `active`. It starts `pending_authorization`, and
- * `LoanService::collectForPeriod()` only ever looks at `active` — so an unauthorized loan cannot
- * be collected by construction rather than by a check somebody has to remember.
- *
- * GOVERNMENT LOANS ARE OUT OF SCOPE (Joshua, 2026-08-03). SSS salary loans and Pag-IBIG MPLs carry
- * an employer duty to deduct and remit with statutory penalties, and must be settled in full from
- * final pay. Company loans only.
- */
+/** A loan becomes a product HR defines, and a deduction the employee has agreed to. */
 return new class extends Migration
 {
     public function up(): void

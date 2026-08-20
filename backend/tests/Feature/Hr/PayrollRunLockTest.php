@@ -15,17 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Slice 5 (2026-07-28 audit) — money already paid out must stop moving.
- *
- * `run()` recomputes payslips in place, which is what makes a re-run safe while a cycle is
- * still open. But it also rewrote the AMOUNTS on payslips that were already disbursed (only
- * the status was preserved), so editing a salary and re-running an old cycle silently
- * changed what someone had been paid.
- *
- * Two layers: a disbursed payslip is skipped by every recompute, and a fully-disbursed run
- * can be locked so it refuses to recompute at all.
- */
+/** (2026-07-28 audit) — money already paid out must stop moving. */
 class PayrollRunLockTest extends HrTestCase
 {
     use RefreshDatabase;

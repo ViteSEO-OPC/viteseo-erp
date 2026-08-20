@@ -40,14 +40,7 @@ const CHANGE_TYPES = [
 const MONTH = (iso: string) =>
   new Date(iso).toLocaleDateString("en-PH", { month: "short", year: "numeric" });
 
-/**
- * Pull the server's message out of a 422, and say WHICH field it landed on.
- *
- * The field matters here in a way it does not elsewhere: `effective_date` is the repricing question
- * (answerable by confirming), while `id` is the refusal that has no answer. Treating them the same
- * would either offer a confirm button for something that can never go through, or hide the confirm
- * for something that can.
- */
+/** Pull the server's message out of a 422, and say WHICH field it landed on. */
 function fieldError(err: unknown): { field: string | null; message: string } {
   if (err instanceof AxiosError && err.response?.status === 422) {
     const errors: Record<string, string[]> = err.response.data?.errors ?? {};
@@ -60,20 +53,7 @@ function fieldError(err: unknown): { field: string | null; message: string } {
   return { field: null, message: "Could not save this entry. Please try again." };
 }
 
-/**
- * The compensation timeline, with hand-corrections (Compensation tab).
- *
- * STILL WRITTEN AUTOMATICALLY, exactly as before: changing the base salary on this tab appends an
- * entry. These controls are for correcting what was recorded — and unlike the employment timeline,
- * a correction here is not free.
- *
- * WHY THIS ONE ASKS QUESTIONS. Payroll prices every run from these rows: an employee is paid the
- * latest entry effective on or before the cycle end. So an entry a completed run has already priced
- * against cannot simply be rewritten — the server refuses it once, names the periods, and lets it
- * through on a second call carrying an acknowledgement, raising an outstanding difference. And it
- * cannot be deleted at all, because a payslip with a corrected basis is recoverable while a payslip
- * with no basis is not. Both refusals arrive as 422s and are surfaced where HR is working.
- */
+/** The compensation timeline, with hand-corrections (Compensation tab). */
 export function CompensationHistorySection({
   employeeId,
   canEdit,
@@ -105,8 +85,10 @@ export function CompensationHistorySection({
             : null;
         return (
           <div className="min-w-0">
-            {/* Monthly, because monthly is what is stored and what payroll prices from. An
-                annualised headline here was a derived figure presented as the real one. */}
+            {/*
+             * Monthly, because monthly is what is stored and what payroll prices from. An
+             * annualised headline here was a derived figure presented as the real one.
+             */}
             <p className="text-sm font-semibold text-foreground">
               {formatPeso(h.base_salary)}
               <span className="text-caption font-normal text-muted-foreground"> / mo</span>
@@ -256,13 +238,7 @@ export function CompensationHistorySection({
   );
 }
 
-/**
- * Add or correct one compensation entry.
- *
- * The two-step confirm is the FIN-007 pattern: send once, and if the server comes back saying the
- * date prices completed runs, show what it said and offer to resend with the acknowledgement. HR
- * therefore never confirms in the abstract — the periods are named before they agree to anything.
- */
+/** Add or correct one compensation entry. */
 function SalaryHistoryDialog({
   employeeId,
   entry,

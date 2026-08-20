@@ -5,36 +5,22 @@ namespace App\Modules\Hr\Services;
 use App\Modules\Hr\Models\DailyOverride;
 use Illuminate\Support\Carbon;
 
-/**
- * The day's rule overrides — one row per date, company-wide, both fields optional:
- *
- *   - grace_minutes         how long after the schedule start an arrival still counts on time
- *   - min_full_day_minutes  how many minutes actually worked make the day count WHOLE
- *
- * They are the same record because they are the same decision ("today's rules"), taken by the
- * same person, for the same date, usually in the same breath — a typhoon morning gets a longer
- * grace AND a shorter compensable day.
- */
+/** The day's rule overrides — one row per date, company-wide, both fields optional: */
 class DailyOverrideService
 {
     public function __construct(private readonly AuditService $audit) {}
 
     /**
-     * Per-instance memo of the day's rules (F-10). effectiveFor() reads these once per
+     * Per-instance memo of the day's rules. effectiveFor() reads these once per
      * employee-per-day, and a payroll run is O(employees × days), so an uncached query here
      * meant thousands of identical hits. This service is resolved once per run, so caching by
      * date collapses them to one query per distinct date.
-     *
-     * Holds the whole row (not one field) so that adding a second rule did not double the
-     * queries it was written to eliminate.
      *
      * @var array<string, ?DailyOverride>
      */
     private array $cache = [];
 
-    /**
-     * Get the override row for a date (null = no override set that day).
-     */
+    /** Get the override row for a date (null = no override set that day). */
     public function get(?string $date = null): ?DailyOverride
     {
         $date ??= now(config('app.timezone_local'))->toDateString();
@@ -42,9 +28,7 @@ class DailyOverrideService
         return $this->cached($date);
     }
 
-    /**
-     * Get the grace_minutes override for a date, or null if none set.
-     */
+    /** Get the grace_minutes override for a date, or null if none set. */
     public function graceForDate(Carbon|string $date): ?int
     {
         return $this->cached($this->key($date))?->grace_minutes;

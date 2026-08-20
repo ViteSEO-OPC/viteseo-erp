@@ -11,17 +11,7 @@ use App\Modules\Hr\Models\OvertimeRequest;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * Withdrawing the Work Schedule requests an employee files themselves.
- *
- * Leave could already be cancelled; half-day and early-out had no endpoint at all, and overtime's
- * was HR-only. So three of the four request types on that screen could only be undone by asking HR
- * to DECLINE them — a refusal on the record for what was a change of mind.
- *
- * Overtime keeps a split the other two do not need: the OWNER may withdraw a PENDING request, but
- * cancelling an APPROVED one stays HR-only, because an approved request whose period is already
- * paid raises an overpayment that only HR can settle.
- */
+/** Withdrawing the Work Schedule requests an employee files themselves. */
 class CancelWorkScheduleRequestTest extends HrTestCase
 {
     use RefreshDatabase;

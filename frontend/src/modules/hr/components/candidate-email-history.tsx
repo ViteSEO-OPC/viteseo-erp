@@ -15,13 +15,7 @@ const TYPE_LABEL: Record<string, string> = Object.values(STAGE_EMAIL).reduce(
   {},
 );
 
-/**
- * Every email sent to a candidate, newest first.
- *
- * Failed sends are listed alongside the delivered ones rather than hidden — a rejection
- * that bounced is exactly the thing HR needs to notice, and before this existed a failure
- * was indistinguishable from a success.
- */
+/** Every email sent to a candidate, newest first. */
 export function CandidateEmailHistory({ candidateId }: { candidateId: number }) {
   const { data, isLoading } = useCandidateEmails(candidateId);
 
@@ -97,8 +91,10 @@ function EmailRow({ email }: { email: CandidateEmail }) {
             {email.sent_by && <MetaRow label="Sent by" value={email.sent_by} />}
           </dl>
 
-          {/* Server-sanitised on the way in (HtmlSanitizer), and re-read from the same
-              column that was transmitted — this is the message as the candidate got it. */}
+          {/*
+           * Server-sanitised on the way in (HtmlSanitizer), and re-read from the same
+           * column that was transmitted — this is the message as the candidate got it.
+           */}
           <div
             className={cn("rounded-lg border border-border bg-muted/40 px-3 py-2", EMAIL_PREVIEW_CLASSES)}
             dangerouslySetInnerHTML={{ __html: email.body_html }}

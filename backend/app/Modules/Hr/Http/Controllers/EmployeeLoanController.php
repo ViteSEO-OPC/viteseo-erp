@@ -17,7 +17,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 
-/** Loans and cash advances repaid through payroll (Slice 11b). HR-only. */
+/** Loans and cash advances repaid through payroll. HR-only. */
 class EmployeeLoanController extends Controller
 {
     public function __construct(private readonly LoanService $service) {}
@@ -70,7 +70,7 @@ class EmployeeLoanController extends Controller
     }
 
     /**
-     * POST /api/v1/hr/loans/{loan}/approve — Slice B15, hr_officer only.
+     * POST /api/v1/hr/loans/{loan}/approve, hr_officer only.
      *
      * Approving does NOT start collection. The employee still has to authorize the deduction:
      * Labor Code Art. 113 wants their consent, not the company's decision.
@@ -118,22 +118,10 @@ class EmployeeLoanController extends Controller
         )->response()->setStatusCode(Response::HTTP_CREATED);
     }
 
-    /**
-     * POST /api/v1/hr/me/loans/{loan}/authorize — the employee consents to the deduction.
-     *
-     * The gate the whole slice exists to reach: nothing is deducted from anyone's pay until they
-     * have agreed to it in writing. Any authenticated user may call it; the service refuses
-     * anybody but the borrower.
-     */
+    /** POST /api/v1/hr/me/loans/{loan}/authorize — the employee consents to the deduction. */
     // Named `authorizeDeduction`: the base Controller already has an `authorize($ability, …)`,
     // and overriding it with a different signature is a fatal error, not a warning.
-    /**
-     * GET /api/v1/hr/loans/{loan}/schedule — the projected amortisation (FIN-032).
-     *
-     * Open to the loan's OWNER as well as HR, deliberately: this is what an employee is consenting to
-     * under Art. 113, and consent to a deduction they cannot see the shape of is not meaningful consent.
-     * The schedule is what shows that a diminishing-balance rate falls as the loan is repaid.
-     */
+    /** GET /api/v1/hr/loans/{loan}/schedule — the projected amortisation. */
     public function schedule(Request $request, EmployeeLoan $loan): JsonResponse
     {
         $isOwner = $request->user()?->employee?->id === $loan->employee_id;

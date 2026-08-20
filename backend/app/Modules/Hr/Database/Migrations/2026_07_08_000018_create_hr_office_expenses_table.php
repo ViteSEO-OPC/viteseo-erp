@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 23. Company/office spending (holiday expenses, supplies, etc.),
+// Phase-2. Company/office spending (holiday expenses, supplies, etc.),
 // recorded by HR and then approved. status: recorded → approved | rejected.
 return new class extends Migration
 {

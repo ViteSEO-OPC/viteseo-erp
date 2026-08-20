@@ -4,25 +4,7 @@ namespace App\Modules\Hr\Services;
 
 use App\Modules\Hr\Models\TaxVersion;
 
-/**
- * Annual withholding tax, from the table that was in force for the period being priced (FIN-027).
- *
- * WHAT THIS REPLACES. A `match (true)` literal inside `PayrollService`, holding the TRAIN 2023+
- * brackets. It worked, and the figures were right, but it could not be dated: re-pricing a 2022
- * cycle used the 2023 table, changing a bracket meant a deploy, and HR had no way to see or check
- * the numbers that decided everyone's tax.
- *
- * THE FALLBACK IS DELIBERATE AND IT MATTERS. If no version is on or before the cycle, this uses
- * the EARLIEST table rather than refusing or returning zero. FIN-035 argues the opposite for
- * statutory contributions — block the run rather than deduct ₱0 — and the difference is real:
- * a missing contribution version means a rate nobody has entered, whereas a cycle before the
- * earliest tax table is a cycle from before the company recorded its tax history, and the seeded
- * opening table already reproduces what the hardcoded `match` did for every date. Falling back
- * therefore preserves existing behaviour exactly; refusing would make old cycles un-runnable for
- * a reason that has nothing to do with them.
- *
- * Memoised per resolved date: a payroll run prices every employee against the same table.
- */
+/** Annual withholding tax, from the table that was in force for the period being priced. */
 class TaxService
 {
     /** @var array<string, array<int, array{min: float, base: float, rate: float}>> */
@@ -65,11 +47,6 @@ class TaxService
     /**
      * The band an annual taxable income falls in, or null when it is below the first floor
      * (the exempt tier) or no table exists.
-     *
-     * Exposed so a payslip can CITE the bracket it was priced under rather than restate a peso
-     * figure the reader has no way to check. Same selection as annualTax() — deliberately the
-     * same loop rather than a second reading of the table, because a citation that disagrees
-     * with the charge is worse than no citation.
      *
      * @return array{min: float, base: float, rate: float}|null
      */

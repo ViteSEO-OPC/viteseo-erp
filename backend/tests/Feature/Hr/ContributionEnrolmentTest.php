@@ -10,14 +10,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeBenefit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B9 item 3 — un-enrolling an employee from a government contribution.
- *
- * WHY IT MATTERS. Everyone was enrolled in everything with no way to say otherwise, so the only
- * way to express "this person is exempt" was a peso override on their profile — which replaces the
- * employee half alone and leaves a remittance pair that exists on no agency table (B7). Un-enrolling
- * takes BOTH halves off, which is the thing an exemption actually means.
- */
+/** un-enrolling an employee from a government contribution. */
 class ContributionEnrolmentTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -68,26 +61,8 @@ class ContributionEnrolmentTest extends HrTestCase
         ]);
     }
 
-    /**
-     * Un-enrolling one contribution leaves the others alone.
-     *
-     * This used to read the per-employee statutory PREVIEW endpoint, which existed to show what the
-     * rates would charge beside the override suppressing them. Overrides are gone — every employee
-     * is charged the company rates for their bracket — so that endpoint went with them, and the
-     * enrolment list is now the thing that answers "who pays what".
-     *
-     * The half that mattered most here (un-enrolling drops the EMPLOYER side too, which is what an
-     * override never did) is asserted against a real payslip in `StatutoryOverrideTest`, where the
-     * attendance fixture to produce one already lives.
-     */
-    /**
-     * The employee's own Compensation tab renders this block, and the HR reader is hr_officer-only.
-     *
-     * With no self-service source it fetched a 403, got no rows, and every toggle fell back to its
-     * "enrolled" default — drawing three ticked, clickable checkboxes for a change the server was
-     * always going to refuse. Seeing what comes off your pay is reasonable (the payslip itemises it
-     * already); deciding it is HR's, which is why only the READ is exposed.
-     */
+    /** Un-enrolling one contribution leaves the others alone. */
+    /** The employee's own Compensation tab renders this block, and the HR reader is hr_officer-only. */
     public function test_an_employee_can_read_their_own_enrolment(): void
     {
         $this->actingAs($this->employee->user)

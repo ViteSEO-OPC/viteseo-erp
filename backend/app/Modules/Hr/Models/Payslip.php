@@ -19,41 +19,41 @@ class Payslip extends Model
         // Payslip redesign — the full period basic, the absence charge taken off it, and the
         // per-component allowance split, so the document can show the derivation.
         'period_base', 'absence_deduction', 'allowances_breakdown',
-        // Positive pay lines (OT-1 / ND-1) — must be fillable or run()'s updateOrCreate drops them.
+        // Positive pay lines — must be fillable or run()'s updateOrCreate drops them.
         'overtime_pay', 'overtime_minutes', 'night_diff_pay', 'night_diff_minutes',
         'rest_day_premium', 'rest_day_minutes',
-        // Slice B17 — what this slip paid as 13th month, this period's contribution to the
+        // What this slip paid as 13th month, this period's contribution to the
         // ₱90,000 bucket, and the taxable pay behind it. Stored so a year can be read back from
         // what was actually paid rather than recomputed from today's configuration.
         'thirteenth_month', 'other_benefits', 'taxable_pay',
-        // FIN-028 — the year-end true-up portion of withholding_tax. Signed: positive collected,
+        // The year-end true-up portion of withholding_tax. Signed: positive collected,
         // negative refunded.
         'tax_annualisation',
-        // FIN-054 — the year's taxable pay, tax due and prior withholding behind that adjustment.
+        // The year's taxable pay, tax due and prior withholding behind that adjustment.
         'tax_annualisation_basis',
-        // FIN-010 — an off-cycle corrective amount and what it is for.
+        // An off-cycle corrective amount and what it is for.
         'adjustment_pay', 'adjustment_note',
-        // FIN-014 — the terminal amounts on a final-pay payslip.
+        // The terminal amounts on a final-pay payslip.
         'separation_pay', 'separation_pay_taxable',
         'leave_conversion', 'leave_conversion_days', 'loan_settlement',
         'sss', 'philhealth', 'pagibig', 'withholding_tax',
-        // Slice 11a — non-statutory deductions (benefit shares) + their breakdown.
+        // non-statutory deductions (benefit shares) + their breakdown.
         'other_deductions', 'other_deductions_breakdown',
-        // FIN-032 — interest collected on loans this period. Its own field so the payslip can show
+        // Interest collected on loans this period. Its own field so the payslip can show
         // the cost of borrowing separately from the repayment, and it must be fillable or run()'s
         // updateOrCreate silently drops it.
         'loan_interest',
         'employer_sss', 'employer_philhealth', 'employer_pagibig',
-        // Slice B7 — which statutory deductions came from a per-employee override, not the rates.
+        // Which statutory deductions came from a per-employee override, not the rates.
         'contribution_overrides',
-        // Slice B19 — the salary figure each contribution was actually charged on. Not derivable
+        // The salary figure each contribution was actually charged on. Not derivable
         // after the fact once a contribution moves onto the earnings basis.
         'contribution_bases',
         'total_deductions', 'deduction_carryover', 'deduction_carryover_breakdown',
-        // FIN-005 — arrears from earlier periods recovered on this payslip.
+        // Arrears from earlier periods recovered on this payslip.
         'arrears_recovered', 'arrears_recovered_breakdown',
         'net_pay', 'status',
-        // FIN-033 — who declared this paid, when, and the request key that did it.
+        // Who declared this paid, when, and the request key that did it.
         'disbursed_at', 'disbursed_by', 'disbursement_key',
         // What actually left the company, frozen at disbursement. See the amendments migration:
         // amending a paid payslip raises its net, and without this the difference would read as
@@ -115,13 +115,13 @@ class Payslip extends Model
         'employer_philhealth' => 'decimal:2',
         'employer_pagibig' => 'decimal:2',
         'contribution_overrides' => 'array',
-        // Slice B19 — contribution type => the monthly salary figure it was charged on.
+        // Contribution type => the monthly salary figure it was charged on.
         'contribution_bases' => 'array',
-        // FIN-054 — how the year-end tax settlement was arrived at.
+        // How the year-end tax settlement was arrived at.
         'tax_annualisation_basis' => 'array',
         'total_deductions' => 'decimal:2',
         'deduction_carryover' => 'decimal:2',
-        // FIN-053 — obligation => uncollected amount. Null when nothing went short.
+        // Obligation => uncollected amount. Null when nothing went short.
         'deduction_carryover_breakdown' => 'array',
         'arrears_recovered' => 'decimal:2',
         'arrears_recovered_breakdown' => 'array',
@@ -130,17 +130,7 @@ class Payslip extends Model
         'disbursed_at' => 'datetime',
     ];
 
-    /**
-     * WHAT IS STILL OWED ON THIS PAYSLIP — its net less what has actually been paid against it.
-     *
-     * Zero for the ordinary case in both directions: an unpaid payslip owes its whole net and has
-     * disbursed nothing, a paid one disbursed exactly its net. It only becomes non-zero when a
-     * payslip is amended after being paid, which is precisely the case the balance exists to state.
-     *
-     * DERIVED, never stored. A running "remaining" column would have to be decremented by every
-     * path that pays or amends, and the first one that forgot would leave a payslip quietly claiming
-     * the wrong balance for good.
-     */
+    /** WHAT IS STILL OWED ON THIS PAYSLIP — its net less what has actually been paid against it. */
     public function amountOutstanding(): float
     {
         return round((float) $this->net_pay - (float) ($this->disbursed_amount ?? 0), 2);
@@ -154,23 +144,6 @@ class Payslip extends Model
 
     /**
      * THE THREE HEADLINE FIGURES — gross, everything taken off it, and what was paid.
-     *
-     * WHY THIS EXISTS. The stored `gross` column is ALREADY NET OF ABSENCES: payroll subtracts the
-     * absence charge before writing it, and `total_deductions` therefore holds only what was taken
-     * AFTER that point (the statutory contributions and any benefit shares or loans). The payroll
-     * register printed those two columns raw, so a period that cost an employee ₱14,000 in absences
-     * read as "Gross ₱69,889.20 · Deductions ₱2,162.50" — a near-full-pay period with the single
-     * largest thing that happened to it invisible, while the payslip beside it showed the charge in
-     * full. Both were internally consistent and they described different months.
-     *
-     * So the register now states gross the way the document does — the FULL period earnings, before
-     * the absence charge — and counts that charge among the deductions where the reader can see it.
-     * `deductions` is derived as `gross − net` rather than summed from the components, which makes
-     * the row reconcile by construction; it comes to exactly
-     * `absence_deduction + other_deductions + SSS + PhilHealth + Pag-IBIG + withholding tax`.
-     *
-     * NOT a replacement for the stored columns, which stay as the engine's own record and are what
-     * the BIR reports and the reconciliation report read. This is how the figures are PRESENTED.
      *
      * @return array{gross: float, deductions: float, net: float}
      */
@@ -191,27 +164,13 @@ class Payslip extends Model
         return $this->belongsTo(PayrollRun::class);
     }
 
-    /**
-     * The employee this belongs to — `withTrashed()` because a SEPARATION SOFT-DELETES THEM.
-     *
-     * Without it the default scope resolves this to null the moment somebody leaves, and every
-     * Resource that reads a name through it throws, taking the whole list endpoint down with it —
-     * one 500 for the entire page because one row belonged to a leaver. Their history does not
-     * stop being theirs when they go, and a record that cannot say whose it is is worse than one
-     * that names someone who has left.
-     */
+    /** The employee this belongs to — `withTrashed()` because a SEPARATION SOFT-DELETES THEM. */
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class)->withTrashed();
     }
 
-    /**
-     * The transfers raised against this payslip (FIN-015).
-     *
-     * Normally one. More than one is legitimate after a failed transfer is re-issued, which is why
-     * this is a `hasMany` and why "has it been paid?" is a question about payment STATUS rather
-     * than about the existence of a row.
-     */
+    /** The transfers raised against this payslip. */
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);

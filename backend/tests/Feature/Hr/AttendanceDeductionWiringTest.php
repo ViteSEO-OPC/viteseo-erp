@@ -14,7 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
 /**
- * Guards the Slice 2 wiring where DeductionService feeds unpaidDaysFor(). The headline
+ * Guards the wiring where DeductionService feeds unpaidDaysFor(). The headline
  * assertion is the NO-OP GATE: with the seeded default policy, the detail total equals
  * the legacy float and the breakdown is all-zero — enabling per_hour is the ONLY thing
  * that moves a peso.

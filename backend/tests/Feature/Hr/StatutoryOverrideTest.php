@@ -16,24 +16,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice B7 is REVERSED: there is no per-employee statutory amount any more.
- *
- * What used to be here. Three peso boxes on the compensation form wrote `sss_contribution` and
- * friends, and payroll used the amount instead of the government rates — but only on the EMPLOYEE
- * side. The employer half kept following the brackets, so one payslip could carry a pair that
- * exists on no SSS table (₱1,350 employee against ₱3,530 employer) and a remittance built from it
- * could not be filed. Slice B7 responded by LABELLING the mismatch on the payslip and beside the
- * form field, which made it visible without making it correct.
- *
- * The columns are dropped, the form block is gone and payroll no longer looks for them.
- * Contributions are now uniform: everyone is charged the company rates for their bracket, and
- * un-enrolling someone is the only supported way to say a person does not pay one — a statement a
- * remittance can actually represent.
- *
- * This file stays as the guard against reintroducing it, because the feature LOOKED reasonable —
- * three ordinary-seeming peso fields — and its cost was two layers away in a file nobody reads.
- */
+/** Is REVERSED: there is no per-employee statutory amount any more. */
 class StatutoryOverrideTest extends HrTestCase
 {
     use RefreshDatabase;

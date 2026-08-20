@@ -9,17 +9,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * HR-declared non-working days (work suspensions).
- *
- * One decision per date — non-working, and paid or not — read by three places that must never
- * disagree: the roster (the day's status), the violation engine (nobody is expected in, so
- * nothing is flagged) and payroll (paid costs nothing; unpaid costs one day).
- *
- * Nothing is written per employee. The status is DERIVED from this table wherever a day is
- * classified, exactly as holidays and rest days are, so flipping `is_paid` after the fact moves
- * every affected day at once rather than leaving a trail of rows asserting the old answer.
- */
+/** HR-declared non-working days (work suspensions). */
 class WorkSuspensionService
 {
     public function __construct(private readonly AuditService $audit) {}
@@ -47,9 +37,6 @@ class WorkSuspensionService
     /**
      * Suspended dates in an inclusive range, as 'Y-m-d' => is_paid.
      *
-     * The value is the paid flag rather than the model because every caller wants exactly that
-     * one bit, and handing out models invites a second reader deciding what a suspension means.
-     *
      * @return array<string, bool>
      */
     public function betweenAsMap(string $start, string $end): array
@@ -69,10 +56,6 @@ class WorkSuspensionService
 
     /**
      * Declare a date non-working.
-     *
-     * Returns the row plus, in `warning`, the payroll run that has already priced this date
-     * without knowing about it. Not a refusal: the declaration is usually made AFTER the storm,
-     * and blocking it would leave the day permanently wrong. Re-running the cycle applies it.
      *
      * @param  array<string, mixed>  $data
      * @return array{suspension: WorkSuspension, warning: string|null}
@@ -206,13 +189,7 @@ class WorkSuspensionService
         );
     }
 
-    /**
-     * A LOCKED payroll run is the one hard stop.
-     *
-     * Everything else about a suspension can be corrected by re-running the cycle, but a locked
-     * run cannot be recomputed at all — so changing what one of its days means would leave the
-     * declaration and the payslips permanently disagreeing, with no way to reconcile them.
-     */
+    /** A LOCKED payroll run is the one hard stop. */
     private function assertNotLocked(string $date, string $action): void
     {
         $locked = $this->runCovering($date, lockedOnly: true);
@@ -258,9 +235,6 @@ class WorkSuspensionService
      * A run whose cycle covers this date. Company-wide, unlike PayrollFreezeService's
      * per-employee equivalent — a suspension is not about one person, so "has anyone been paid
      * for this day" is the wrong question and "has this period been priced" is the right one.
-     *
-     * 13th-month and adjustment runs are excluded for the reason PayrollFreezeService documents:
-     * neither reads attendance, so neither can be made wrong by a day changing meaning.
      */
     private function runCovering(string $date, bool $lockedOnly): ?PayrollRun
     {

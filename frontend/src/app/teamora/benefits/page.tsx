@@ -9,12 +9,6 @@ import { useContributionSettings } from "@/modules/hr/hooks/use-benefits";
 /**
  * The employee's own benefits, in the same two sections HR sees on Company → Benefits:
  * the statutory contributions first, then the programs they are enrolled in.
- *
- * DISPLAY ONLY. The government card is the same component HR uses, minus the edit action — the
- * rates are legislation and system-managed, and there is nothing here an employee may change.
- * Sharing the component rather than copying it is deliberate: the employee is being shown the
- * rate that produced the deduction on their own payslip, so a second copy of that markup would
- * eventually disagree with HR's.
  */
 export default function BenefitsPage() {
   const { data: benefits, isLoading, isError } = useMyBenefits();

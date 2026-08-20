@@ -4,11 +4,11 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Premium Pay epic — Phase 0 / P0-1 (2026-07-27). HR-editable premium & overtime rates. Each is a
+// Premium Pay epic — Phase 0 / (2026-07-27). HR-editable premium & overtime rates. Each is a
 // whole-percent multiplier of the hourly/daily rate (e.g. 200 = ×2.0), EXCEPT night_diff_pct, which
 // is the ADD-ON percent that stacks (10 = +10%). Every default equals its DOLE legal minimum, so this
 // migration moves no pesos — nothing reads these yet. Validation hard-floors each field at its minimum.
-// Consumers land later: holiday premium (P0-2), overtime (Phase 1), night diff (Phase 2), rest-day (Phase 3).
+// Consumers land later: holiday premium, overtime (Phase 1), night diff (Phase 2), rest-day (Phase 3).
 return new class extends Migration
 {
     public function up(): void

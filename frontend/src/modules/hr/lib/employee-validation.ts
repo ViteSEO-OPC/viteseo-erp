@@ -6,9 +6,6 @@ import { manilaToday } from "@/modules/hr/lib/manila-date";
  * Field-level validators shared by the employee record's inline section forms and the
  * "Add employee" dialog, so both surfaces reject the same input. These mirror the
  * server rules in EmployeeProfileRules — keep the two in step.
- *
- * Every form value is a string (empty = "not set"); conversion to numbers happens when
- * the payload is built.
  */
 
 /** Digits plus the separators people actually type: +63 917 555 0142, (02) 8123-4567. */

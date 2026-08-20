@@ -7,12 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
-/** An outstanding payroll difference caused by a decision made after the period was paid (FIN-009). */
+/** An outstanding payroll difference caused by a decision made after the period was paid. */
 class RetroFlag extends Model
 {
     protected $table = 'hr_retro_flags';
 
-    /** The employee was underpaid — settle it with an adjustment run (FIN-010). */
+    /** The employee was underpaid — settle it with an adjustment run. */
     public const OWED = 'owed';
 
     /** The employee was overpaid — recovery is a wage deduction and needs their consent. */

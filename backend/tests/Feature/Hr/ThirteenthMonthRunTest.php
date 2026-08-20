@@ -13,14 +13,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B17 — 13th month pay is paid by payroll and withheld on.
- *
- * WHAT THIS CLOSES. It was a report and nothing else: Σ basic ÷ 12, on a screen, never on a
- * payslip. So no tax was ever withheld on it — and it is the largest item in the ₱90,000 exemption
- * it shares with the excess de minimis (B16). Anyone whose 13th month cleared that figure was
- * under-withheld, and the company would have found out at year-end.
- */
+/** 13th month pay is paid by payroll and withheld on. */
 class ThirteenthMonthRunTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -117,7 +110,7 @@ class ThirteenthMonthRunTest extends HrTestCase
         $this->assertSame(112500.0, (float) $slip->net_pay);
     }
 
-    /** The bucket is shared — excess de minimis eats into the same ₱90,000 (B16). */
+    /** The bucket is shared — excess de minimis eats into the same ₱90,000. */
     public function test_the_years_other_benefits_use_up_the_same_exemption(): void
     {
         $employee = $this->employee('E-001', 85000);

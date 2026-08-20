@@ -40,7 +40,7 @@ export interface Employee {
   employee_role: string | null;
   onboarding_status: "pending" | "complete" | null;
   hire_date: string;
-  // MF-18 — the employment lifecycle. `separation_date` is the last WORKING day (what payroll
+  // The employment lifecycle. `separation_date` is the last WORKING day (what payroll
   // prorates against and what final pay requires); `separated_at` is the archive stamp, kept in sync
   // with it. `previous_hire_date` is set only by a rehire, so restarting tenure doesn't erase when
   // this person first joined.
@@ -59,16 +59,7 @@ export interface Employee {
   bank_name: string | null;
   bank_account: string | null; // account number
   pay_frequency: string | null;
-  /**
-   * FIN-030 — the DERIVED daily rate, and the configured regional floor when there is one.
-   *
-   * Present only on single-employee responses (FIN-030b made it opt-in server-side, so the
-   * directory does not derive a rate per row for a column it never shows). `minimum` is null when
-   * no wage order has been entered — nothing to warn about, and never a guessed threshold.
-   *
-   * `below` is the arithmetic truth; `flagged` is `below` minus anyone marked exempt, and it is
-   * what the warning and the pre-run gate read.
-   */
+  /** The DERIVED daily rate, and the configured regional floor when there is one. */
   minimum_wage_check?: {
     daily_rate: number;
     /** How the rate was derived: salary ÷ the divisor, or ÷ this period's scheduled workdays. */
@@ -84,7 +75,7 @@ export interface Employee {
     exempt: boolean;
     exempt_reason: string | null;
   } | null;
-  /** FIN-030b — excluded from the minimum-wage check, with the reason on the record. */
+  /** Excluded from the minimum-wage check, with the reason on the record. */
   minimum_wage_exempt: boolean;
   minimum_wage_exempt_reason: string | null;
   currency: string | null;
@@ -147,7 +138,7 @@ export interface EmployeeInput {
   hire_date: string;
   base_salary: number;
   is_management?: boolean; // fixed salary + exempt from attendance
-  /** FIN-030b — out of the minimum-wage check. The reason is required when this is true. */
+  /** Out of the minimum-wage check. The reason is required when this is true. */
   minimum_wage_exempt?: boolean;
   minimum_wage_exempt_reason?: string;
   phone?: string;
@@ -186,10 +177,10 @@ export interface EmployeeInput {
   // Audit inputs (only meaningful on update when the value actually changes).
   salary_change_reason?: string;
   salary_change_type?: string;
-  /** FIN-007 — when the new salary takes effect. Null/omitted means today. */
+  /** When the new salary takes effect. Null/omitted means today. */
   salary_effective_date?: string | null;
   /**
-   * FIN-007 — HR has been shown which completed payroll runs this date reaches into and wants to
+   * HR has been shown which completed payroll runs this date reaches into and wants to
    * record it anyway. The backend refuses without it and names the periods.
    */
   acknowledge_repricing?: boolean;

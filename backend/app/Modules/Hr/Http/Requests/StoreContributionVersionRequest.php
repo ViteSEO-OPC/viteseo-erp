@@ -7,13 +7,7 @@ use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-/**
- * Slice B3a — a new dated version of a statutory contribution.
- *
- * Every field is validated on its own. The old endpoint took `'config' => ['sometimes','array']`,
- * so a typo (`raet` instead of `rate`) saved cleanly and silently zeroed that deduction on every
- * payslip. Unknown keys are now impossible: the request is a fixed shape, not a free-form blob.
- */
+/** A new dated version of a statutory contribution. */
 class StoreContributionVersionRequest extends FormRequest
 {
     public function authorize(): bool
@@ -30,7 +24,7 @@ class StoreContributionVersionRequest extends FormRequest
             'type' => ['required', Rule::in(ContributionVersion::TYPES)],
             'effective_from' => ['required', 'date'],
             'basis' => ['sometimes', Rule::in(ContributionVersion::BASES)],
-            // Slice B19 — WHICH salary figure the rate applies to, as opposed to `basis` above,
+            // WHICH salary figure the rate applies to, as opposed to `basis` above,
             // which is how the charge is worked out once a figure is chosen. Omitted means
             // `basic`, the column default and what every version recorded before B19 did.
             'salary_basis' => ['sometimes', Rule::in(ContributionVersion::SALARY_BASES)],
@@ -50,17 +44,17 @@ class StoreContributionVersionRequest extends FormRequest
 
             'note' => ['nullable', 'string', 'max:255'],
 
-            // FIN-026 — HR's explicit acknowledgement that this date reaches back over payroll
+            // HR's explicit acknowledgement that this date reaches back over payroll
             // runs already completed. The service refuses without it and names the runs, so this
             // can only be sent by someone who has been told what it affects.
             'acknowledge_repricing' => ['sometimes', 'boolean'],
 
-            // Slice B3b — MSC bands, lowest first. Each runs up to the next band's `min_salary`,
+            // MSC bands, lowest first. Each runs up to the next band's `min_salary`,
             // so there is no `max` to keep in step.
             'brackets' => ['sometimes', 'array', 'max:200'],
             'brackets.*.min_salary' => ['required', 'numeric', 'min:0', 'max:99999999'],
             'brackets.*.msc' => ['required', 'numeric', 'min:0', 'max:99999999'],
-            // Slice B8 — the employer-only EC printed for this band. Null falls back to the
+            // The employer-only EC printed for this band. Null falls back to the
             // version's `fixed_employer_add_on` rule.
             'brackets.*.employer_add_on' => ['nullable', 'numeric', 'min:0', 'max:99999'],
         ];
@@ -88,7 +82,7 @@ class StoreContributionVersionRequest extends FormRequest
                 );
             }
 
-            // Slice B3b — a bracket version needs bands, and they must start at 0 so that every
+            // A bracket version needs bands, and they must start at 0 so that every
             // salary lands in one. A band list starting above 0 would leave the lowest earners
             // with no bracket and no contribution at all.
             $brackets = $this->input('brackets');

@@ -135,8 +135,10 @@ export default function DepartmentsPage() {
         department={editing}
       />
 
-      {/* Departments are soft-deleted, so the copy deliberately avoids the
-          "cannot be undone" wording the other deletes use. */}
+      {/*
+       * Departments are soft-deleted, so the copy deliberately avoids the
+       * "cannot be undone" wording the other deletes use.
+       */}
       <DeleteConfirmDialog
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(null)}

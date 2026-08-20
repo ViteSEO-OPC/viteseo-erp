@@ -15,23 +15,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * THE PAYROLL SCREEN AND THE PAYSLIP MUST DESCRIBE THE SAME PERIOD.
- *
- * They did not. The stored `gross` column is already net of the absence charge — payroll subtracts
- * it before writing the row — and `total_deductions` therefore holds only what came off AFTER that
- * point. The run breakdown printed both raw, so an employee who lost five figures to absences read
- * as "Gross ₱69,889.20 · Deductions ₱2,162.50": a near-full-pay period with the largest single
- * thing that happened to it nowhere on the row, while their payslip showed the charge in full.
- *
- * Neither figure was wrong. They were two different cuts of the same money presented as the same
- * quantity, which is the worst of both — an HR officer reconciling the screen against the document
- * finds two numbers that disagree and no statement of why.
- *
- * The breakdown now states gross the way the document does, and these tests pin the three ways that
- * can silently come apart again: the row against the payslip, the row against itself, and the
- * summary cards against the column they sit above.
- */
+/** THE PAYROLL SCREEN AND THE PAYSLIP MUST DESCRIBE THE SAME PERIOD. */
 class PayrollBreakdownAgreesWithPayslipTest extends HrTestCase
 {
     use RefreshDatabase;

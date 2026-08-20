@@ -4,13 +4,7 @@ namespace App\Modules\Hr\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-/**
- * Withdrawing a claim, payroll inquiry or concern.
- *
- * Ownership and status rules live in the service (`CancelsOwnRequest`) — this only insists on the
- * reason, which is the whole point: a cancelled record with no explanation is indistinguishable
- * from one that vanished.
- */
+/** Withdrawing a claim, payroll inquiry or concern. */
 class CancelOwnRequestRequest extends FormRequest
 {
     public function authorize(): bool

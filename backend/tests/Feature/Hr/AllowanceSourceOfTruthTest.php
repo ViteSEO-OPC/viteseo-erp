@@ -13,19 +13,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B1 — Company → Benefits is the source of truth for allowances.
- *
- * Allowances lived in two places that disagreed: the Benefits page showed ₱77,000/month across
- * the company, payroll paid ₱42,000 from three hard-coded `hr_employees` columns. Editing the page
- * changed nobody's payslip, and Gas Allowance had no column at all so it could never be paid.
- *
- * The behaviour that matters most here is that there is ONE amount per allowance: the programme's.
- * Editing it reaches everyone enrolled. B1 shipped with a per-employee override on the enrolment
- * and a backfill that pinned all 56 of them, which meant an edit reached nobody at all; the
- * override was dropped outright on 2026-07-29 (B6) — the company does not want per-employee
- * amounts, so the enrolment carries no figure to disagree with.
- */
+/** Company → Benefits is the source of truth for allowances. */
 class AllowanceSourceOfTruthTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -51,7 +39,7 @@ class AllowanceSourceOfTruthTest extends HrTestCase
             'base_salary' => 30000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
         ]);
 
-        // Deliberately set, and deliberately NOT through the model: Slice B9 took these three off
+        // Deliberately set, and deliberately NOT through the model: took these three off
         // `$fillable`, so mass assignment would drop them silently and the test below would pass
         // without ever putting a number in the columns it exists to prove are dead.
         \Illuminate\Support\Facades\DB::table('hr_employees')->where('id', $this->employee->id)->update([
@@ -123,11 +111,6 @@ class AllowanceSourceOfTruthTest extends HrTestCase
      * `amount` column — a shape guard written by B6 so the "editing an allowance reaches nobody"
      * bug could not creep back unnoticed. B14 re-adds the column on Joshua's instruction, so the
      * guard has to be retired by a decision rather than deleted quietly when it went red.
-     *
-     * WHAT REPLACES IT is the property that actually mattered: an enrolment carries no amount
-     * UNLESS a person set one. B1's bug was a migration writing amounts onto all 56 rows, not the
-     * existence of the column — so the test now pins the default (attach ⇒ follows the programme)
-     * and `AllowanceOverrideTest` covers the deliberate case.
      */
     public function test_an_enrolment_follows_the_programme_unless_someone_sets_otherwise(): void
     {
@@ -159,12 +142,7 @@ class AllowanceSourceOfTruthTest extends HrTestCase
 
     // --- deleting an allowance --------------------------------------------------------
 
-    /**
-     * Deleting stops future pay but must not rewrite what was already paid.
-     *
-     * `allowanceBreakdown()` snapshots the lines onto the payslip when the run happens, so the
-     * document keeps naming an allowance that no longer exists — which is what a payslip is for.
-     */
+    /** Deleting stops future pay but must not rewrite what was already paid. */
     public function test_deleting_an_allowance_stops_future_pay_but_keeps_past_payslips(): void
     {
         $meal = $this->programme('Meal Allowance', 2000);
@@ -205,13 +183,7 @@ class AllowanceSourceOfTruthTest extends HrTestCase
 
     // --- new hires -------------------------------------------------------------------
 
-    /**
-     * A new hire picks up everything their rule covers, with nothing to remember.
-     *
-     * This used to enrol them explicitly in the open programmes, which meant a hire made before a
-     * new allowance existed never got it. Eligibility is a rule now, so the answer is computed
-     * rather than stored — and "Managers Only" correctly passes them by.
-     */
+    /** A new hire picks up everything their rule covers, with nothing to remember. */
     public function test_a_new_hire_gets_the_allowances_their_rule_covers(): void
     {
         $open = $this->programme('Meal Allowance', 2000);

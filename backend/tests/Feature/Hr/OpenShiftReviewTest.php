@@ -14,17 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * The stale-attendance review queue (item 6).
- *
- * The queue's whole value is that it agrees with the payslip: a row says `auto_closed` exactly
- * when the pay engine priced the day, and `needs_fix` exactly when it refused to. These tests
- * pin that correspondence branch by branch, because a queue that quietly disagrees with payroll
- * is worse than no queue — it tells HR a wrongly-paid day is fine.
- *
- * The clock is parked at 2026-08-20 12:00 Manila, so every August date below is safely past its
- * own allowance cutoff unless a test moves the clock on purpose.
- */
+/** The stale-attendance review queue (item 6). */
 class OpenShiftReviewTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -156,13 +146,7 @@ class OpenShiftReviewTest extends HrTestCase
         $this->assertNull($row['scheduled_end']);
     }
 
-    /**
-     * The one case where the engine is confident and a human still disagrees with it.
-     *
-     * Auto-closure caps the day at the scheduled end, so the approval pays nothing — correct by
-     * design, since an approval is permission rather than proof. But somebody approved it, and
-     * that contradiction has to reach a person instead of being filed as tidy.
-     */
+    /** The one case where the engine is confident and a human still disagrees with it. */
     public function test_an_approved_overtime_request_promotes_an_auto_closed_day(): void
     {
         $this->openPunch('2026-08-03', '08:00');

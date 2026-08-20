@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 20 (Priority: High). A "Request Inquiry" from an employee's payslip
+// Phase-2 (Priority: High). A "Request Inquiry" from an employee's payslip
 // view raises a payroll question for HR. HR moves it pending → in_progress → done,
 // with an optional resolution note. Both request + resolution times are kept for
 // turnaround/audit. (Telegram follow-up is out of scope — in-app only.)

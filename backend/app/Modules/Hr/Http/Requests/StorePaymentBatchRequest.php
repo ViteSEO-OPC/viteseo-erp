@@ -6,14 +6,7 @@ use App\Modules\Hr\Models\PaymentBatch;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-/**
- * Raise the payment batch for a completed run (FIN-015).
- *
- * Almost nothing is supplied by the caller on purpose. WHICH payslips get paid, and for how much,
- * is derived from the run — if the amounts were typed they would be a second, unreconciled source
- * of truth for what payroll owes, which is the class of defect this whole slice exists to close.
- * The only real decision is HOW the money leaves.
- */
+/** Raise the payment batch for a completed run. */
 class StorePaymentBatchRequest extends FormRequest
 {
     public function authorize(): bool

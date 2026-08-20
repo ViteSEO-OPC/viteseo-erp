@@ -68,9 +68,6 @@ export interface ClockInWindow {
    * Non-null means Time in files a REQUEST rather than punching in, and names why — a rest day
    * with the company rule on, or a suspension HR marked as needing permission. Null means the
    * ordinary punch, including on a rest day when HR has turned that rule off.
-   *
-   * The server's answer, never re-derived here: it combines the effective schedule with two
-   * switches, and a browser copy of either would go stale the moment HR changed one.
    */
   work_request_required: WorkRequestType | null;
   /**
@@ -89,11 +86,6 @@ export interface ClockInWindow {
   /**
    * HR has cancelled work today (typhoon, shutdown). Null on an ordinary day and on the
    * employee's own rest day, where saying "work is cancelled" would be noise.
-   *
-   * On its own it does NOT disable the time clock: a skeleton crew still comes in, and blocking
-   * them would leave the people who actually worked with no record of it. `work_requires_request`
-   * is HR's per-declaration exception — on it, the button asks instead of punching, which is
-   * what `work_request_required` reports.
    */
   suspension: {
     name: string;
@@ -225,17 +217,13 @@ export interface HrAttendanceRow {
   break_minutes: number;
   hours_worked: number;
   status: string;
-  /** Slice 16 — a human asserted this status; it beats the clock and the leave table. */
+  /** A human asserted this status; it beats the clock and the leave table. */
   status_override: boolean;
   leave_type: string | null;
   /**
    * Which half of the day is approved OFF — an unpaid half-day request or half-day leave,
    * the two being the same shape with different funding. `'BOTH'` is a whole day reached by
    * filing each half separately. Null on an ordinary day.
-   *
-   * The board shows it because the shift on such a day is genuinely shorter: without it a
-   * 1:00 PM arrival read as an unexplained one, and the person reading the row had no way to
-   * tell an approved afternoon from someone who simply turned up late.
    */
   half_day_off: "AM" | "PM" | "BOTH" | null;
   timing: AttendanceTiming | null;

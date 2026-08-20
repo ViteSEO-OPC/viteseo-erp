@@ -14,29 +14,6 @@ use Illuminate\Validation\ValidationException;
 /**
  * Hand-editing the compensation timeline — which is NOT the same kind of thing as editing the
  * employment one, and the difference is the whole design of this service.
- *
- * THESE ROWS ARE NOT A LOG. `PayrollService::salariesAsOf()` prices every run from this table: for
- * a cycle ending on date D, an employee is paid the latest row with `effective_date <= D`. So a row
- * here is not a note about a raise that happened — it IS the raise, as far as every future payroll
- * run is concerned. Change one and the money changes with it.
- *
- * That makes a settled row different from an unsettled one, and the two are treated differently:
- *
- *   · A row no completed run has priced against is free. Edit it, delete it — nothing has been paid
- *     on it yet, so nothing can disagree with it.
- *   · A row a completed run HAS priced against may be corrected, but only deliberately: the edit is
- *     refused once, with the affected periods named, and goes through on a second call carrying an
- *     acknowledgement. It then raises a retro flag, because a correction to an already-paid period
- *     is an outstanding difference and the flag is the only thing that tracks one (FIN-009).
- *   · A row a completed run has priced against CANNOT BE DELETED, with no override. An edit leaves
- *     a corrected basis for the payslip that was issued; a delete leaves none at all, and payroll
- *     silently falls back to whatever `hr_employees.base_salary` currently says — which reprices a
- *     period that was already paid, using a figure from the future. There is no confirmation dialog
- *     that makes that a good idea, so there isn't one.
- *
- * This mirrors what already happens when a BACKDATED raise is entered through the record
- * (`EmployeeService::assertSalaryDateIsSafe()` + `flagIfSettled()`); the same event arriving by a
- * different door gets the same treatment.
  */
 class SalaryHistoryService
 {
@@ -211,16 +188,7 @@ class SalaryHistoryService
         );
     }
 
-    /**
-     * Keep `hr_employees.base_salary` agreeing with the timeline.
-     *
-     * The column is what the record page shows and what payroll falls back to; the timeline is what
-     * payroll actually prices from. Editing the newest entry without this leaves the two saying
-     * different numbers on the same screen, and the wrong one looks authoritative.
-     *
-     * "Current" means the latest entry in force TODAY — a raise dated next month is recorded but is
-     * not yet what the person earns.
-     */
+    /** Keep `hr_employees.base_salary` agreeing with the timeline. */
     private function syncCurrentSalary(Employee $employee): void
     {
         $today = now(config('app.timezone_local'))->toDateString();

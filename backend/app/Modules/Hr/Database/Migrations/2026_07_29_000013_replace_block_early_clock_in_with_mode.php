@@ -6,16 +6,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 // Clocking in early stops being a yes/no and becomes three choices:
-//
-//   allow  — time in whenever you arrive; the early time is what's recorded (today's OFF)
-//   defer  — time in early if you like, but the shift's START time is what's recorded.
-//            The punch is accepted and queued rather than refused, so nobody is left
-//            standing at the door, and nobody is paid for turning up early either.
-//   block  — refuse the punch until the shift has started (today's ON)
-//
-// A REPLACEMENT, not an addition: leaving the old boolean alongside the mode would give
-// two sources of truth for the same rule, and they would drift the first time somebody
-// wrote to one and not the other.
 return new class extends Migration
 {
     public function up(): void

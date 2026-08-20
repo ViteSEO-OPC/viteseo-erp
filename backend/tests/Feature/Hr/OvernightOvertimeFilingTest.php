@@ -12,26 +12,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * Item 11 — "overtime starts after your shift ends", on a shift that ends the next morning.
- *
- * `assertAfterShift` was the one place the overnight roll from item 1 never reached. It compared
- * raw minute-of-day, and on a 22:00–06:00 schedule the end (360) is a SMALLER number than the
- * start (1320), so the comparison answered nonsense: a 23:00 filing — squarely inside the shift —
- * passed, and so did a 19:00 one three hours before the employee had even clocked in.
- *
- * WHY IT MATTERED RATHER THAN JUST LOOKING WRONG. Such a request was then approved and paid
- * NOTHING, because item 2 only pays the overlap between the approved window and the punches
- * actually recorded. The employee ended up holding an approved request worth zero pesos with
- * nothing anywhere to explain why.
- *
- * The fix places a bare `HH:MM` on the alignment NEAREST THE SHIFT END — the same choice
- * `bestWindowOverlap()` makes when payroll matches the request against the punches later. A filing
- * rule that resolved times differently from the engine would keep accepting what the engine will
- * not pay, which is the whole failure being fixed.
- *
- * The clock is parked at Thu 2026-08-20, a scheduled workday, so requests can be filed for "today".
- */
+/** Item 11 — "overtime starts after your shift ends", on a shift that ends the next morning. */
 class OvernightOvertimeFilingTest extends HrTestCase
 {
     use RefreshDatabase;

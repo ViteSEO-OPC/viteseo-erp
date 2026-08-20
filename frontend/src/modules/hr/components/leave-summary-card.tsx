@@ -16,10 +16,6 @@ export interface LeaveTypeRow {
  * The employee's leave standing in a single card: the headline balance with its
  * progress bar, the pending-request count, then the per-type breakdown — three
  * sections split by rules.
- *
- * The headline is the shared pool in shared mode and the total across every paid
- * type otherwise, which is why it takes a label and plain numbers rather than
- * reading the summary itself.
  */
 export function LeaveSummaryCard({
   featuredLabel,

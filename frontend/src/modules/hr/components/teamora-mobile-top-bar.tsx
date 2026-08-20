@@ -13,20 +13,6 @@ import { useSearch, type SearchGroup } from "@/core/use-search";
 /**
  * TeamOra's phone/tablet top bar — rendered below `lg`, where `core/TopBar`
  * takes over.
- *
- * Two reasons this exists rather than reusing the shared bar:
- * - `core/TopBar`'s notification dropdown is a fixed `w-80` (320px) anchored
- *   `right-0`, which overflows a 320px viewport. The dropdown markup is
- *   internal to that component, so there is no slot to constrain it from
- *   outside — this one spans `inset-x-4` instead.
- * - It absorbs the drawer's hamburger, so mobile gets one 56px bar instead of
- *   a hamburger strip stacked on top of the desktop-shaped bar.
- *
- * Search collapses to an icon and expands over the full bar width when tapped,
- * so a 320px screen doesn't spend permanent width on a search field.
- *
- * State/data all come from the shared hooks (`useNotificationCenter`,
- * `useSearch`) — only the layout is duplicated, not the logic.
  */
 export function TeamoraMobileTopBar({
   variant,
@@ -195,8 +181,10 @@ export function TeamoraMobileTopBar({
             onClick={() => setBellOpen(false)}
             aria-hidden="true"
           />
-          {/* `inset-x-4` rather than a fixed width — this is the overflow that
-              core/TopBar's `w-80` dropdown causes at 320px. */}
+          {/*
+           * `inset-x-4` rather than a fixed width — this is the overflow that
+           * core/TopBar's `w-80` dropdown causes at 320px.
+           */}
           <div className="absolute inset-x-4 top-full z-20 mt-2 overflow-hidden rounded-xl border border-border bg-popover shadow-lg">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <p className="text-sm font-semibold text-foreground">

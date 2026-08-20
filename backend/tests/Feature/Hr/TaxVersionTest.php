@@ -7,23 +7,7 @@ use App\Modules\Hr\Services\TaxService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use PHPUnit\Framework\Attributes\DataProvider;
 
-/**
- * FIN-027 — the withholding table is dated data instead of a `match` in PHP.
- *
- * THE FIRST TEST IS THE IMPORTANT ONE. Moving a tax table is only safe if it changes nothing, so
- * the replacement is checked against the exact arithmetic of the code it replaced:
- *
- *     $t <= 250000  => 0
- *     $t <= 400000  => 0.15 * ($t - 250000)
- *     $t <= 800000  => 22500 + 0.20 * ($t - 400000)
- *     $t <= 2000000 => 102500 + 0.25 * ($t - 800000)
- *     $t <= 8000000 => 402500 + 0.30 * ($t - 2000000)
- *     default       => 2202500 + 0.35 * ($t - 8000000)
- *
- * Every bracket boundary is included, plus a value either side of each, because an off-by-one on a
- * band edge is the failure this refactor could plausibly introduce and the one nobody would notice
- * until someone's payslip was wrong.
- */
+/** The withholding table is dated data instead of a `match` in PHP. */
 class TaxVersionTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -89,7 +73,7 @@ class TaxVersionTest extends HrTestCase
 
     /**
      * A cycle predating every recorded table uses the earliest one rather than withholding ₱0.
-     * See TaxService's docblock for why this differs from FIN-035's block-the-run stance.
+     * See TaxService's docblock for why this differs from 's block-the-run stance.
      */
     public function test_a_cycle_before_the_earliest_table_falls_back_rather_than_taxing_nothing(): void
     {
@@ -102,7 +86,7 @@ class TaxVersionTest extends HrTestCase
         );
     }
 
-    // --- the viewer (FIN-027) -------------------------------------------------------------------
+    // --- the viewer -------------------------------------------------------------------
 
     /**
      * The bands moved into `hr_tax_versions` / `hr_tax_brackets` so a human could check them against

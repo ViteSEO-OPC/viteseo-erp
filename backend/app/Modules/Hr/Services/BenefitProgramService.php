@@ -48,7 +48,7 @@ class BenefitProgramService
         $program->update($this->attributes($data, $program));
         $this->allowanceMemo = null;
 
-        // Slice B11 — a new dated version only when what the allowance COSTS changed. Renaming it
+        // A new dated version only when what the allowance COSTS changed. Renaming it
         // or recolouring its card must not create a price.
         if ($this->pricing($program->fresh()) !== $before) {
             $this->recordVersion($program->fresh(), $data);
@@ -68,16 +68,7 @@ class BenefitProgramService
         return $program->load('employees:id');
     }
 
-    /**
-     * Delete a programme. Soft, so the row survives for anything that references it.
-     *
-     * PAST PAYSLIPS ARE SAFE. `PayrollService::allowanceBreakdown()` snapshots the lines onto each
-     * payslip when the run happens, so a deleted allowance keeps appearing on the payslips that
-     * actually paid it, named as it was named then.
-     *
-     * FUTURE PAY CHANGES, and that is the point: everyone the rule covered stops being paid it
-     * from the next run. The count is in the audit line so the decision is legible afterwards.
-     */
+    /** Delete a programme. Soft, so the row survives for anything that references it. */
     public function delete(BenefitProgram $program): void
     {
         $covered = $this->eligibleCount($program);
@@ -97,11 +88,7 @@ class BenefitProgramService
     }
 
     /**
-     * The fields that decide what an allowance costs — Slice B11.
-     *
-     * Deliberately NOT the name, colour or eligibility rule: renaming an allowance should not
-     * create a new price, and who it covers is answered as of today on purpose (somebody who has
-     * since left should not reappear on a re-run of an old cycle).
+     * The fields that decide what an allowance costs.
      *
      * @return array<string, mixed>
      */
@@ -113,7 +100,7 @@ class BenefitProgramService
             'tax_treatment' => $program->tax_treatment,
             'deminimis_ceiling' => $program->deminimis_ceiling === null ? null : (string) $program->deminimis_ceiling,
             'ceiling_period' => $program->ceiling_period,
-            // Slice B19 — whether the allowance counts toward the statutory contribution base.
+            // Whether the allowance counts toward the statutory contribution base.
             // Versioned with the amount for the same reason: it decides what a payslip was
             // charged on, so an old cycle must reprice to the flag that was in force then.
             'contributable' => (bool) $program->contributable,
@@ -122,14 +109,6 @@ class BenefitProgramService
 
     /**
      * Write the dated version an old payroll run will resolve against.
-     *
-     * `effective_from` defaults to TODAY rather than to the cycle currently open: an amount HR
-     * types now is the amount from now, and back-dating it silently would rewrite payslips that
-     * have already been computed. HR can pass a date deliberately when a rise is agreed in arrears.
-     *
-     * Saving twice on the same date UPDATES that version rather than failing on the unique index —
-     * correcting a figure typed a minute ago is the common case, and a duplicate-key error is a
-     * poor way to say so.
      *
      * @param  array<string, mixed>  $data
      */
@@ -152,11 +131,7 @@ class BenefitProgramService
     }
 
     /**
-     * Every allowance's amount as it stood on a date, keyed by programme id — Slice B11.
-     *
-     * ONE QUERY FOR THE WHOLE RUN. Payroll asks per employee; resolving per employee would be an
-     * N+1 in the same shape `allowancesFor()` and the override map already avoid. Memoized per
-     * date, because a run resolves one date for everybody.
+     * Every allowance's amount as it stood on a date, keyed by programme id.
      *
      * @return array<int, BenefitProgramVersion>
      */
@@ -187,15 +162,7 @@ class BenefitProgramService
     private array $versionMemo = [];
 
     /**
-     * Set a programme's enrolment list WITHOUT destroying the pivot of anyone who stays (B5.6).
-     *
-     * `sync()` leaves an existing row alone, so editing a programme never wiped the amount or tier
-     * of someone still in the list. But `sync()` DELETES the row of anyone dropped — so removing an
-     * employee and re-adding them later loses their per-employee amount, tier and share, and they
-     * come back on the programme default with nothing to say they were ever different.
-     *
-     * `syncWithoutDetaching()` plus an explicit detach makes the removal the only destructive act,
-     * which is what HR actually asked for when they dropped someone.
+     * Set a programme's enrolment list WITHOUT destroying the pivot of anyone who stays.
      *
      * @param  array<int, int>  $ids
      */
@@ -218,9 +185,6 @@ class BenefitProgramService
 
     /**
      * The employee ids a programme covers, per its rule.
-     *
-     * `custom` is the only mode that reads the enrolment pivot — for the others the rule IS the
-     * membership, so the answer is always current rather than a snapshot of who HR once picked.
      *
      * @return array<int, int>
      */
@@ -263,7 +227,7 @@ class BenefitProgramService
     public function covers(BenefitProgram $program, Employee $employee, ?string $asOf = null): bool
     {
         return match ($program->eligibility) {
-            // FIN-047 — dated, for the reason `allowancesFor()` documents: an enrolment that has
+            // Dated, for the reason `allowancesFor()` documents: an enrolment that has
             // ended is not membership, and this is what the roster, the headcount and the
             // override guard all ask. Defaults to today, so every existing caller is unaffected
             // except in the case that was wrong.
@@ -276,26 +240,6 @@ class BenefitProgramService
 
     /**
      * The active ALLOWANCE programmes this employee qualifies for right now.
-     *
-     * This is what payroll reads (via `AllowanceService`). Deliberately a fresh evaluation rather
-     * than a stored list: an employee who moves from probationary to regular starts or stops
-     * qualifying on their next payslip, with no enrolment to remember to update.
-     *
-     * COST. The catalogue is read ONCE per request and the rule is then evaluated in PHP — a
-     * payroll run walks every employee, and a query each would be an N+1 by construction (the
-     * performance test caught exactly that). The `custom` pivot is only read when a custom
-     * allowance actually exists, which today is never.
-     *
-     * ENROLMENT DATES ARE HONOURED (FIN-047). `enrolled_at` / `ended_at` live on the pivot and
-     * are written by the Benefits screen, but nothing here ever read them: an allowance ended
-     * last year kept paying forever, and one dated to start next year paid immediately. Deleting
-     * the row was the only thing that actually stopped an allowance — which defeats the point of
-     * recording an end date, and loses the history of who had what.
-     *
-     * $asOf makes membership resolvable for a PAST CYCLE, the way the amount already is
-     * (`pricingAsOf`, Slice B11). Without it the two halves disagreed: re-running August priced
-     * the allowance at August's rate but applied TODAY's membership list. Null means "now", which
-     * is what every screen wants.
      *
      * @param  ?string  $asOf  Manila calendar date (Y-m-d); null = today
      * @return Collection<int, BenefitProgram>
@@ -335,11 +279,6 @@ class BenefitProgramService
 
     /**
      * The programme ids this employee's enrolment covers on $on.
-     *
-     * A null `enrolled_at` means "since forever" and a null `ended_at` means "still current" —
-     * both are the normal case, and the comparison must not exclude them. `ended_at` is treated
-     * as INCLUSIVE: an allowance ended on the 15th was still held on the 15th, which matches how
-     * `separation_date` is read as a last working day rather than a first absent one.
      *
      * @return list<int>
      */
@@ -392,15 +331,7 @@ class BenefitProgramService
     }
 
     /**
-     * This employee's deliberate per-allowance amounts (B14), as `program_id => amount`.
-     *
-     * Empty for almost everybody: an override exists only where somebody typed one, so the common
-     * answer is `[]` and the employee is paid what each programme says.
-     *
-     * ONE QUERY FOR THE WHOLE RUN, not one per employee. Payroll walks every employee and asks
-     * this for each; a query each is the N+1 the performance test already caught once in
-     * `allowancesFor()`. Only rows that actually carry an amount are read, which today is a
-     * handful at most.
+     * This employee's deliberate per-allowance amounts, as `program_id => amount`.
      *
      * @return array<int, float>
      */
@@ -432,17 +363,7 @@ class BenefitProgramService
     /** @var array<int, array<int, float>>|null */
     private ?array $overrideMemo = null;
 
-    /**
-     * Set or clear one employee's own amount for one allowance (B14).
-     *
-     * `$amount === null` hands them back to the programme. Anything else is a deliberate figure,
-     * recorded with who set it and when — without that, a typed amount and a migrated one look
-     * identical, which is precisely what made B6's 56 frozen rows impossible to work through.
-     *
-     * REFUSED IF THE RULE DOES NOT COVER THEM. An override is not a way onto an allowance:
-     * membership is the eligibility rule, and an amount for someone outside it would pay nothing
-     * while looking on screen like an arrangement. Returns false so the caller can 422.
-     */
+    /** Set or clear one employee's own amount for one allowance. */
     public function setAllowanceAmount(
         BenefitProgram $program,
         Employee $employee,
@@ -483,14 +404,7 @@ class BenefitProgramService
     }
 
     /**
-     * Who is on a company plan, what tier, what they pay — Slice B2.
-     *
-     * A PLAN'S MEMBERSHIP IS AN EXPLICIT LIST, not a rule, and that is the decision this slice
-     * takes (B5 item 3's last open piece). An allowance is the same for everybody it covers, so a
-     * rule can decide membership; a plan carries a per-person tier and share that only an
-     * enrolment can hold, and nothing can derive "Dana is on Family at ₱500" from a rule. The
-     * eligibility rule still applies as a GATE — it says who may be enrolled — but being enrolled
-     * stays a deliberate act.
+     * Who is on a company plan, what tier, what they pay.
      *
      * @param  array<int, array{employee_id:int, tier?:?string, employee_share?:?float, enrolled_at?:?string, ended_at?:?string}>  $rows
      * @return array{enrolled:int, rejected:array<int, string>}
@@ -561,13 +475,7 @@ class BenefitProgramService
         return ['enrolled' => count($applied), 'rejected' => $rejected];
     }
 
-    /**
-     * Take someone off a plan. Soft in effect: the row keeps the dates that priced past payslips.
-     *
-     * Returns false when they were not on it. `updateExistingPivot` is a SILENT no-op for a
-     * missing row — it would answer "done" and change nothing, which is the exact trap B6 found
-     * on the override endpoints.
-     */
+    /** Take someone off a plan. Soft in effect: the row keeps the dates that priced past payslips. */
     public function endPlanEnrolment(BenefitProgram $program, Employee $employee, ?string $on = null): bool
     {
         $enrolled = $program->employees()->whereKey($employee->id)->exists();
@@ -592,10 +500,6 @@ class BenefitProgramService
 
     /**
      * How many of the people a programme covers follow it, and how many carry their own amount.
-     *
-     * The edit dialog claims an edit will reach N people; without this it counted enrolments and
-     * was wrong for every one of them (B6). An override means the edit does NOT reach that person,
-     * which is the one thing HR needs to know before saving a new figure.
      *
      * @return array{following: int, overridden: int}
      */
@@ -627,19 +531,6 @@ class BenefitProgramService
     /**
      * Everyone currently employed — the population every rule is evaluated against.
      *
-     * SEPARATED EMPLOYEES ARE EXCLUDED (B13 item 6). This used to be a bare `Employee::query()`,
-     * so a leaver still counted toward "everyone (14 people)" on the allowance card and toward the
-     * "N employees stop being paid this" warning on delete, while `PayrollService` had already
-     * stopped paying them. The filter is the same one payroll calls "currently employed": no
-     * separation recorded, and not soft-deleted (Eloquent's own scope).
-     *
-     * A future-dated hire IS counted, deliberately: the programme does cover them, and their first
-     * payslip is the thing that waits for their start date.
-     *
-     * ONE QUERY, not one per programme. The catalogue endpoint asks for a count per card, and
-     * `BenefitProgramResource` resolves this service for each — a count query each was an N+1 in
-     * the same shape the payroll performance test caught in `allowancesFor()`.
-     *
      * @return Collection<int, Employee>
      */
     private function roster(): Collection
@@ -668,7 +559,7 @@ class BenefitProgramService
             // Allowance config.
             'frequency' => $data['frequency'] ?? $existing?->frequency ?? 'monthly',
             'tax_treatment' => $data['tax_treatment'] ?? $existing?->tax_treatment ?? 'de_minimis',
-            // Slice B16 — the per-item de-minimis ceiling. Cleared when the allowance is marked
+            // The per-item de-minimis ceiling. Cleared when the allowance is marked
             // taxable, because a ceiling on compensation-in-full means nothing and would come
             // back to life if the treatment were switched again.
             'deminimis_ceiling' => ($data['tax_treatment'] ?? $existing?->tax_treatment) === 'taxable'
@@ -677,7 +568,7 @@ class BenefitProgramService
             'ceiling_period' => ($data['tax_treatment'] ?? $existing?->tax_treatment) === 'taxable'
                 ? null
                 : (array_key_exists('ceiling_period', $data) ? $data['ceiling_period'] : $existing?->ceiling_period),
-            // Slice B19 — NOT cleared when the tax treatment changes, unlike the ceiling above.
+            // NOT cleared when the tax treatment changes, unlike the ceiling above.
             // Tax treatment and contributability are independent questions (a taxable allowance can
             // sit outside the SSS base; the mandated COLA is de-minimis for tax and inside it), so
             // touching one must not silently reset the other. Defaults to counting.
@@ -690,7 +581,7 @@ class BenefitProgramService
             'eligibility_statuses' => ($data['eligibility'] ?? $existing?->eligibility) === 'status'
                 ? array_values($data['eligibility_statuses'] ?? $existing?->eligibility_statuses ?? [])
                 : null,
-            // Slice B15 — loan-policy config, kept only on a loan policy so a kind change cannot
+            // loan-policy config, kept only on a loan policy so a kind change cannot
             // leave a maximum behind on an allowance.
             'loan_max_principal' => ($data['kind'] ?? $existing?->kind) === 'loan_policy'
                 ? ($data['loan_max_principal'] ?? $existing?->loan_max_principal)

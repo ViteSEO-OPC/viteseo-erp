@@ -20,9 +20,9 @@ class StoreReimbursementRequest extends FormRequest
     {
         return [
             'category' => ['required', Rule::in(ReimbursementService::CATEGORIES)],
-            // FIN-032 — min:0.01, not min:0. A ₱0 claim reimburses nothing and was accepted.
+            // min:0.01, not min:0. A ₱0 claim reimburses nothing and was accepted.
             'amount' => ['required', 'numeric', 'min:0.01'],
-            // FIN-032 — the submitter has been shown a look-alike claim and says this is separate.
+            // The submitter has been shown a look-alike claim and says this is separate.
             'acknowledge_duplicate' => ['sometimes', 'boolean'],
             'expense_date' => ['required', 'date'],
             'description' => ['required', 'string', 'max:1000'],

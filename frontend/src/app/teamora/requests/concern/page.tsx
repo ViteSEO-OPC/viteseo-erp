@@ -132,13 +132,7 @@ export default function ConcernsPage() {
   );
 }
 
-/**
- * HR asking an anonymous reporter to identify themselves.
- *
- * The copy does the work the old eye toggle pretended to do. Pressing this reveals nothing —
- * it sends a question the reporter can refuse, and the refusal is a complete answer. Saying so
- * plainly is what stops HR reading a decline as obstruction.
- */
+/** HR asking an anonymous reporter to identify themselves. */
 function RevealRequestDialog({
   concern,
   onOpenChange,
@@ -224,14 +218,7 @@ function RevealRequestDialog({
   );
 }
 
-/**
- * The submitter cell for an anonymous concern.
- *
- * The eye used to toggle a name the browser already had — the masking was decoration over a
- * payload that carried the identity regardless. Now there is no name to toggle: the button
- * ASKS, and what it shows afterwards is the state of that question. `stopPropagation` keeps a
- * press off the row-click that opens the detail modal.
- */
+/** The submitter cell for an anonymous concern. */
 function AnonymousSubmitter({ concern, onAsk }: { concern: Concern; onAsk: () => void }) {
   const ask = concern.reveal_request;
   const revealed = concern.identity_revealed_at !== null;
@@ -534,11 +521,6 @@ function ConcernDetail({
 /**
  * Where the anonymity of a concern is explained to HR, and where the negotiation over it is
  * shown once one has started.
- *
- * Four states, each a different sentence rather than a different shade of the same one: nobody
- * has asked; an ask is waiting; the reporter refused, and here is why in their words; the
- * reporter agreed, and the name above is now real. The refusal is given the most room on
- * purpose — it is the state most likely to be misread as the system failing.
  */
 function AnonymityPanel({ concern, onAsk }: { concern: Concern; onAsk: () => void }) {
   const ask = concern.reveal_request;

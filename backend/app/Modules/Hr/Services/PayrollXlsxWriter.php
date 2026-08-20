@@ -17,24 +17,7 @@ use OpenSpout\Writer\XLSX\Entity\SheetView;
 use OpenSpout\Writer\XLSX\Options;
 use OpenSpout\Writer\XLSX\Writer;
 
-/**
- * THE PAYROLL BREAKDOWN AS A WORKBOOK — the styling half of the run export.
- *
- * WHY XLSX AND NOT CSV. The export is read by a person before it is read by a machine: HR opens it
- * to check a period before releasing payslips. A CSV cannot carry the banding, the negative-in-
- * parentheses convention or the peso format that make a 26-column table legible, and Excel then
- * guesses at the columns it was handed. The CSV endpoint stays for the machine readers (see
- * PayrollService::runCsv) — this is the copy meant to be looked at.
- *
- * IT KNOWS NOTHING ABOUT PAYROLL. Every figure arrives already computed and already reconciled;
- * this class decides only what a column looks like. The arithmetic lives in PayrollService and
- * PayslipDocument, which is what keeps the workbook agreeing with the PDF payslip.
- *
- * TEXT IS WRITTEN AS StringCell, NEVER Cell::fromValue(). `fromValue()` turns any string opening
- * with `=` into a FormulaCell — the XLSX shape of the injection CsvWriter neutralises for the CSV
- * (FIN-019). Employee and department names are free text somebody typed, and this file is opened
- * on a finance workstation.
- */
+/** THE PAYROLL BREAKDOWN AS A WORKBOOK — the styling half of the run export. */
 final class PayrollXlsxWriter
 {
     /** Matches the payslip PDF, which hardcodes the same name (payslip.blade.php). */
@@ -106,11 +89,6 @@ final class PayrollXlsxWriter
         $writer->addRow(new Row([]));
 
         // --- the four cards -------------------------------------------------------------------
-        //
-        // Each spans three columns: the label sits in the first and the neighbours are written as
-        // EMPTY STYLED CELLS rather than merged. A merge would carry the fill across but leaves
-        // the run's own filter and sort behaving oddly over the table below it, and the cards are
-        // decoration — nothing should have to reason about a merged region to read this file.
         $labels = [];
         $values = [];
 
@@ -175,10 +153,6 @@ final class PayrollXlsxWriter
     /**
      * Sheet 2 — the register, unstyled, exactly the columns the CSV has always carried.
      *
-     * It exists so nothing is LOST by the redesign: the employer shares and the override marker
-     * that finance reconciles remittances against have no place on a one-line-per-employee
-     * breakdown, and dropping them to make room would quietly break that job.
-     *
      * @param  array<string, mixed>  $source
      */
     private static function writeSource(Writer $writer, array $source): void
@@ -221,11 +195,6 @@ final class PayrollXlsxWriter
 
     /**
      * One table row, styled per its column's type.
-     *
-     * A CHARGE IS NEGATED HERE rather than by the caller. Payroll stores every deduction as the
-     * positive amount it took, and the sheet shows it as `(1,809.50)` — the sign is a reading
-     * convention of this document, and letting it leak back into the service is how a figure ends
-     * up subtracted twice.
      *
      * @param  list<array{label: string, type: string, width: float}>  $columns
      * @param  list<float|int|string|null>  $values

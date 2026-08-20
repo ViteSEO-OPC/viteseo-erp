@@ -12,23 +12,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Company → Rules remembers what it used to say.
- *
- * THE GAP THIS CLOSES. Salary, the statutory rates and allowances were each given dated versions
- * in their own slice (13c, B3a, B11). The attendance policy — the divisor, the late-deduction
- * modes, the premium rates — was the fourth pricing input and the only one still read live at
- * compute time, so re-running any cycle that was not locked or disbursed repriced it with today's
- * rules. `policy_snapshot` did not prevent that: it is rewritten on every run, so it recorded the
- * drift rather than stopping it.
- *
- * THE TWO DIRECTIONS, and both matter:
- *   forward   a change dated today must not reach a cycle that already ended
- *   backward  HR must still be able to correct a cycle that already ran, by back-dating
- *
- * Without the second, versioning would have broken the ordinary "run payroll, spot a wrong
- * divisor, fix it, re-run" workflow — trading one trap for another.
- */
+/** Company → Rules remembers what it used to say. */
 class AttendancePolicyHistoryTest extends HrTestCase
 {
     use RefreshDatabase;

@@ -14,19 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Clocking in before your shift starts — `early_clock_in_mode`.
- *
- *   allow  today's behaviour: recorded at the moment they pressed it
- *   defer  accepted, but re-stamped to the shift's start time. Arrive at 07:30 for an
- *          08:00 shift and you are recorded as timing in at 08:00 — nobody waits at the
- *          door, and nobody is paid for the early half hour.
- *   block  refused until the shift has started
- *
- * The rule only applies when there is a real shift to be early FOR. On a non-workday, or
- * with no scheduled start, every mode records the punch as-is: FALLBACK_START is a guess,
- * and a guess must never silently move somebody's time in.
- */
+/** Clocking in before your shift starts — `early_clock_in_mode`. */
 class EarlyClockInModeTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -167,10 +155,6 @@ class EarlyClockInModeTest extends HrTestCase
     /**
      * No shift that day ⇒ nothing to be early for, so the punch is recorded as-is. Moving
      * it to a start time that doesn't exist would be inventing data.
-     *
-     * RD-2 changed how the punch GETS there — a rest day now goes through an HR approval
-     * rather than straight into attendance — but not this rule: the stamped time is the
-     * moment the employee pressed the button, whatever the early-clock-in mode says.
      */
     public function test_defer_does_not_touch_an_approved_rest_day_punch(): void
     {

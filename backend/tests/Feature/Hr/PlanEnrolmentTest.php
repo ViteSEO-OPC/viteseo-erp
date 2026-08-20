@@ -10,17 +10,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\BenefitDeductionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B2 — enrolling people on a company plan.
- *
- * WHAT WAS BROKEN. The deduction engine has worked since Slice 11a and could never fire: deleting
- * "Add a Plan" removed the only screen that could put anyone on a plan or set their share, so the
- * HMO sat published, with tiers and a per-cutoff cadence, and nobody on it.
- *
- * The guards here are the ones B5 items 1 and 2 closed for the assignment path that was later
- * deleted — an ineligible employee, and a tier the plan does not have — arriving through the new
- * door rather than the old one.
- */
+/** Enrolling people on a company plan. */
 class PlanEnrolmentTest extends HrTestCase
 {
     use RefreshDatabase;

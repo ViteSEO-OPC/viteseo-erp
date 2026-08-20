@@ -86,20 +86,7 @@ class PayrollDemoSeeder extends Seeder
         }
     }
 
-    /**
-     * A naive Mon–Fri count, for demo payslips only (FIN-046).
-     *
-     * WHY IT LIVES HERE NOW. This was `PayScheduleService::workingDays()` — a weekend-only counter
-     * sitting on the payroll schedule service, directly beside the schedule-aware
-     * `AttendanceService::scheduledWorkdaysFor()` that real payroll actually uses. It was never
-     * dead code (this seeder was its only caller), which made it worse than dead: two methods that
-     * answer "how many workdays" differently, one of them on the service a future author would
-     * reach for first, and nothing at the call site to say which was correct.
-     *
-     * It stays naive on purpose. Demo payslips only need plausible figures, and pulling the real
-     * resolver in here would make seeding depend on each demo employee having a work schedule.
-     * The name says what it does, so nobody mistakes it for the pay-critical one.
-     */
+    /** A naive Mon–Fri count, for demo payslips only. */
     private function weekdaysBetween(string $start, string $end): int
     {
         $count = 0;

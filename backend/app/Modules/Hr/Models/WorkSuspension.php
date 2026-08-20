@@ -36,14 +36,7 @@ class WorkSuspension extends Model
         'work_requires_request' => 'boolean',
     ];
 
-    /**
-     * Does anyone coming in today have to ask HR first?
-     *
-     * False — the default, and what every declaration meant before the column existed — leaves
-     * the time clock alone: a skeleton crew presses Time in and is recorded. True turns that
-     * press into an `hr_work_requests` row of type `suspension`, so management knows who is in
-     * the building on a day it told people to stay home. Pay is identical either way.
-     */
+    /** Does anyone coming in today have to ask HR first? */
     public function requiresWorkRequest(): bool
     {
         return (bool) $this->work_requires_request;

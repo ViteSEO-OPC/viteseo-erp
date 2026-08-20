@@ -22,23 +22,7 @@ import { useRetroFlags, useResolveRetroFlag, useDeductionArrears } from "@/modul
 import type { RetroFlag } from "@/modules/hr/types/payroll";
 import { formatPeso } from "@/core/lib/format";
 
-/**
- * Retroactive pay differences waiting to be settled (FIN-009).
- *
- * WHY THIS SCREEN IS THE FEATURE. When HR approves overtime — or cancels approved overtime — for a
- * cutoff that has already been paid, the decision still goes through (the overtime was worked;
- * refusing the approval would leave the attendance record wrong too) and the backend records that
- * money is outstanding. Before, that difference was left to somebody's memory: the service
- * docblock said "HR settles the difference manually", with no record, queue or reconciliation.
- * A list nobody can open is the same as no list, which is why this dialog is not optional polish.
- *
- * THE TWO DIRECTIONS ARE NOT SYMMETRIC, and the UI says so rather than showing one flat table:
- *
- *   owed      the employee was underpaid → settle it with an adjustment run, which is right here
- *   overpaid  the employee was overpaid  → NO automated path. Recovering paid wages is a wage
- *             deduction and needs the employee's written consent under Art. 113, so this is a
- *             person's job and the screen must not imply otherwise.
- */
+/** Retroactive pay differences waiting to be settled. */
 export function RetroFlagsDialog({
   open,
   onOpenChange,
@@ -139,8 +123,10 @@ export function RetroFlagsDialog({
                     <CircleAlert className="size-3.5" />
                     Uncollected deductions ({arrears.length})
                   </h3>
-                  {/* Recovery is automatic, so say so — otherwise this reads as a to-do list and HR
-                      chases amounts the next run will take by itself. */}
+                  {/*
+                   * Recovery is automatic, so say so — otherwise this reads as a to-do list and HR
+                   * chases amounts the next run will take by itself.
+                   */}
                   <p className="mb-2 rounded-md bg-muted px-3 py-2 text-caption text-muted-foreground">
                     The next payroll run with enough room recovers these automatically, statutory
                     contributions first. Only the ones marked <strong>separated</strong> need chasing

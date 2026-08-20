@@ -12,11 +12,6 @@ import { ReopenDialog } from "@/modules/hr/components/reopen-dialog";
 /**
  * The row-level "undo this mark" control: a quiet Reopen button that opens the
  * confirmation, then reports the outcome.
- *
- * Every queue reverses something different but fails the same way — the API refuses
- * with a 422 whose message explains why (a locked payroll run, a payslip already out
- * the door). Surfacing that message verbatim is the whole point: a generic "could not
- * reopen" would hide the one thing HR needs to know to get unstuck.
  */
 export function ReopenAction<T>({
   subject,

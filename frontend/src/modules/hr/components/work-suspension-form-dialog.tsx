@@ -25,18 +25,7 @@ import {
 } from "@/modules/hr/hooks/use-work-suspensions";
 import type { WorkSuspension } from "@/modules/hr/types/holiday";
 
-/**
- * Declare a day non-working, or amend one.
- *
- * The paid/unpaid choice is two large buttons rather than a checkbox or a select, and neither
- * is preselected on a new declaration. It is the only thing on this form that moves money, and
- * a default is how it gets chosen by not being read — the server refuses a create without it
- * for the same reason.
- *
- * The time-clock choice below it is a checkbox instead, and deliberately: it HAS a safe default
- * (leave the clock alone, which is what every suspension meant before the option existed) and
- * it moves no money either way, so unlike paid/unpaid it can be left unread.
- */
+/** Declare a day non-working, or amend one. */
 export function WorkSuspensionFormDialog({
   open,
   onOpenChange,

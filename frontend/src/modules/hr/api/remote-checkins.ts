@@ -4,9 +4,6 @@ import type { LocationFix, RemoteCheckin } from "@/modules/hr/types/attendance";
 /**
  * File an off-site time-in. Multipart so the selfie rides along; axios sets the boundary
  * itself for a FormData body.
- *
- * `fix` is optional — a phone indoors or a denied permission simply has no position, and
- * the photo is what HR actually reviews.
  */
 export async function submitRemoteCheckin(
   photo: File,

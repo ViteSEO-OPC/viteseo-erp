@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 17. New hires created from Recruitment (Slice 18) carry an
+// Phase-2. New hires created from Recruitment carry an
 // "Onboarding" tag = 'pending'; HR flips it to 'complete' from Job Info once
 // onboarding is done. NULL = a normally-created employee, not in onboarding.
 return new class extends Migration

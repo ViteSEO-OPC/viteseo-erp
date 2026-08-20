@@ -15,33 +15,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-001 and FIN-012 (payroll audit, §3) — where a 13th-month run collides with December.
- *
- * WRITTEN TO FAIL. These tests exist to establish that two findings the audit reached by TRACING
- * control flow are real before anyone edits PayrollService for them. The audit is explicit that
- * both were derived, not observed, and that a trace which turns out to be wrong should be struck
- * rather than fixed around. If any test here passes on unmodified code, the corresponding finding
- * is wrong.
- *
- * THE MECHANISM (FIN-001). `run()`'s double-pay guard asks "does this employee already have a
- * payslip in another run whose period overlaps this cycle?" and it filters on dates alone — no
- * `type`, no `frequency`. `runThirteenthMonth()` creates its run at cycle_start {year}-12-01 /
- * cycle_end {year}-12-31, which overlaps every December regular cycle exactly. So a 13th-month
- * payslip reads as "already paid for December".
- *
- * Two outcomes, both tested below: December has not run yet (nobody gets paid), or December has
- * already run (its computed payslips are force-deleted, because `$keep` empties and Laravel
- * compiles `whereNotIn` over an empty array to `1 = 1`).
- *
- * THE MECHANISM (FIN-012). `runThirteenthMonth()` writes with a bare `updateOrCreate` — it lacks
- * both guards `run()` has: the `status === 'disbursed'` skip, and the cleanup that force-deletes
- * payslips for employees who fall out of the computed set on a re-run.
- *
- * THE CLOCK IS FROZEN (the FIN-051 lesson). December 2026 has to be wholly in the past for the
- * regular run to price it from attendance rather than from a half-elapsed month, so `now()` is
- * pinned to January 2027 instead of being left to whatever day the suite runs on.
- */
+/** And (payroll audit, §3) — where a 13th-month run collides with December. */
 class PayrollThirteenthMonthOverlapTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -142,7 +116,6 @@ class PayrollThirteenthMonthOverlapTest extends HrTestCase
             ->first();
     }
 
-    // --- FIN-001 -----------------------------------------------------------------------
 
     /**
      * (a) 13th month is paid mid-December, then the December cutoff closes. Every employee should
@@ -187,17 +160,7 @@ class PayrollThirteenthMonthOverlapTest extends HrTestCase
         );
     }
 
-    /**
-     * THE GUARD MUST STILL FIRE FOR THE CASE IT WAS BUILT FOR.
-     *
-     * The FIN-001 fix narrows the overlap guard from "any overlapping run" to "any overlapping run
-     * of the SAME type". The scenario it exists for — an employee moved to a different pay group
-     * after already being run — is two REGULAR runs, so it must still be caught.
-     *
-     * This is a regression guard, not a reproduction: it passed before the fix too. It is here
-     * because nothing covered the guard's original purpose, and narrowing a safety check with no
-     * test on the behaviour you are preserving is how one fix becomes the next finding.
-     */
+    /** THE GUARD MUST STILL FIRE FOR THE CASE IT WAS BUILT FOR. */
     public function test_an_employee_already_paid_by_an_overlapping_regular_run_is_not_paid_twice(): void
     {
         $employee = $this->employee('E-001'); // created in the monthly pay group
@@ -216,16 +179,11 @@ class PayrollThirteenthMonthOverlapTest extends HrTestCase
         $this->assertSame(1, Payslip::where('employee_id', $employee->id)->count());
     }
 
-    // --- FIN-013 -----------------------------------------------------------------------
 
     /**
      * ONE BASIS, THREE READERS. The preview dialog, the accrual report and the run itself each
      * had their own query with a different combination of `type` and `status`, so the figure HR
      * reviewed, the figure shown before confirming, and the figure actually paid could all differ.
-     *
-     * Both contaminants are present here: a `processing` run (half-written by definition) and a
-     * prior 13th-month run (not basic salary). A correct basis excludes both, so all three
-     * readers must land on 11 months × 30,000 ÷ 12 = 27,500.
      */
     public function test_preview_report_and_run_agree_on_the_same_basis(): void
     {
@@ -268,7 +226,6 @@ class PayrollThirteenthMonthOverlapTest extends HrTestCase
         $this->assertSame($expected, (float) $ytd['thirteenth_month'], 'YTD projection disagrees');
     }
 
-    // --- FIN-012 -----------------------------------------------------------------------
 
     /** A 13th-month payslip that has been paid out must not be rewritten by a re-run. */
     public function test_re_running_thirteenth_month_leaves_a_disbursed_payslip_alone(): void

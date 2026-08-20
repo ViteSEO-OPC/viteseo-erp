@@ -20,27 +20,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Slice 7 — what happens when something that changes a settled period arrives late.
- *
- * THE ITEM'S PREMISE IS TRUE FOR ONE OF ITS THREE SCENARIOS, and that is the finding here. It asks that a
- * back-dated raise, a back-dated attendance correction and a late-approved reimbursement "each produce a
- * correct adjustment payslip". Only the first does. The other two are handled by different mechanisms,
- * deliberately, and asserting an adjustment payslip for them would mean changing working code to match a
- * sentence rather than the other way round:
- *
- *   · a **back-dated raise** raises a retro flag, and an off-cycle adjustment run settles it (FIN-007 →
- *     FIN-009 → FIN-010). That is the journey this file walks end to end.
- *   · a **back-dated attendance correction** is REFUSED while the period is settled (FIN-008): attendance
- *     is the input payroll priced the day from, so rewriting it behind a disbursed payslip would leave the
- *     record and the payment permanently disagreeing. Unlock the run, or don't change it.
- *   · a **late-approved reimbursement** needs no adjustment at all — an approved claim is picked up by the
- *     next run, which is what the feature spec says should happen ("approved claims roll into the next
- *     payroll run").
- *
- * So each scenario is tested against the behaviour the system actually implements, and the mismatch with
- * the checklist wording is recorded rather than papered over.
- */
+/** What happens when something that changes a settled period arrives late. */
 class RetroAndOffCycleTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -107,7 +87,7 @@ class RetroAndOffCycleTest extends HrTestCase
         app(EmployeeService::class)->update($this->employee, [
             'base_salary' => 50000,
             'salary_effective_date' => '2026-08-01',
-            // FIN-007 — backdating into a finished run is refused unless it is acknowledged. The UI
+            // Backdating into a finished run is refused unless it is acknowledged. The UI
             // raises a confirm dialog for exactly this; the flag is what the user pressing OK sends.
             'acknowledge_repricing' => true,
         ], $this->hrUser());
@@ -119,14 +99,7 @@ class RetroAndOffCycleTest extends HrTestCase
         $this->assertSame($this->employee->id, $flag->employee_id);
     }
 
-    /**
-     * A raise into a period NOTHING has paid yet needs no flag — the next run simply prices it.
-     *
-     * Note the two different thresholds this exposes, which is worth stating: the backdating CONFIRM
-     * gate (FIN-007) trips on any `completed` run, while the retro FLAG (FIN-009) only fires once a run
-     * is locked or its payslip disbursed. A merely computed period is past the first and short of the
-     * second — so it warns and records nothing, which is right: re-running it absorbs the change.
-     */
+    /** A raise into a period NOTHING has paid yet needs no flag — the next run simply prices it. */
     public function test_a_raise_with_no_paid_period_behind_it_is_not_flagged(): void
     {
         // No run at all for August yet.
@@ -158,7 +131,7 @@ class RetroAndOffCycleTest extends HrTestCase
 
     /**
      * THE FULL JOURNEY. Raise → flag → off-cycle adjustment run → an adjustment payslip carrying the
-     * difference, with the flag cleared. This is the path the audit's FIN-007 → FIN-009 → FIN-010 chain
+     * difference, with the flag cleared. This is the path the audit's → → chain
      * was built for, and nothing walked it from end to end before.
      */
     public function test_an_adjustment_run_settles_the_flagged_difference(): void
@@ -168,14 +141,14 @@ class RetroAndOffCycleTest extends HrTestCase
         app(EmployeeService::class)->update($this->employee, [
             'base_salary' => 50000,
             'salary_effective_date' => '2026-08-01',
-            // FIN-007 — backdating into a finished run is refused unless it is acknowledged. The UI
+            // Backdating into a finished run is refused unless it is acknowledged. The UI
             // raises a confirm dialog for exactly this; the flag is what the user pressing OK sends.
             'acknowledge_repricing' => true,
         ], $this->hrUser());
 
         $flag = RetroFlag::whereNull('resolved_at')->latest('id')->firstOrFail();
 
-        // What the raise is worth for the settled half — HR enters the figure, as FIN-010 intends.
+        // What the raise is worth for the settled half — HR enters the figure, as intends.
         $difference = 5000.00;
 
         $run = app(PayrollService::class)->runAdjustment(
@@ -199,7 +172,7 @@ class RetroAndOffCycleTest extends HrTestCase
         // The adjustment is taxable — back pay is compensation, not a gift.
         $this->assertSame($difference, round((float) $slip->taxable_pay, 2));
 
-        // And it explains itself on the document (FIN-011).
+        // And it explains itself on the document.
         $this->assertNotNull($slip->adjustment_note);
 
         // Resolving the flag takes a note and clears it from the queue.
@@ -231,7 +204,7 @@ class RetroAndOffCycleTest extends HrTestCase
     // --- scenario two: a back-dated attendance correction -----------------------------------------
 
     /**
-     * REFUSED, not adjusted (FIN-008). Attendance is the input payroll priced the day from; rewriting it
+     * REFUSED, not adjusted. Attendance is the input payroll priced the day from; rewriting it
      * behind a disbursed payslip would leave the record and the payment permanently disagreeing, with the
      * payment being the thing that actually happened.
      */

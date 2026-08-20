@@ -15,20 +15,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 
-/**
- * FIN-035 — a contribution type with no rate in force silently deducted ₱0.
- *
- * `ContributionService::versionsAsOf()` returns only the types with an `effective_from` on or
- * before the cycle, and `effectiveFor()` filters against that list — so a type with no version
- * DROPS OUT rather than erroring. Payroll then deducted nothing for it and the run completed
- * normally: totals reconciled, payslips looked ordinary, and nothing recorded that a statutory
- * contribution had been skipped. The employee's contribution record is short and the company
- * still owes the agency the full amount.
- *
- * Two entry points, both covered here: a cycle dated before the earliest schedule, and a newly
- * created contribution type that nobody has added a version for yet. Deleting a version was
- * already guarded; creating a type was not.
- */
+/** A contribution type with no rate in force silently deducted ₱0. */
 class ContributionRatesInForceTest extends HrTestCase
 {
     use RefreshDatabase;

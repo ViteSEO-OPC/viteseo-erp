@@ -8,15 +8,6 @@ use App\Modules\Hr\Models\ContributionVersion;
  * One statutory contribution, from a resolved rate config and a salary. Pure arithmetic — no
  * database, no dependencies — so both payroll and anything that needs to SHOW what payroll would
  * charge can call the same code.
- *
- * WHY IT LIVES HERE (Slice B7). This was private to `PayrollService`. The employee form needs the
- * calculated figure next to a per-employee override so HR can see what the override is suppressing
- * — and a second implementation of "what SSS costs" is precisely the drift this whole audit is
- * about. One copy, called twice.
- *
- * Deliberately NOT injected anywhere as a dependency: `ContributionService` resolves the config
- * and `PayrollService` owns the payslip, and having either construct the other would be circular.
- * Static because there is no state to hold.
  */
 class ContributionCalculator
 {
@@ -34,9 +25,6 @@ class ContributionCalculator
      * The employer's monthly share, including the flat employer-only add-on (SSS's Employees'
      * Compensation fund) where the salary clears its threshold.
      *
-     * The add-on is applied AFTER the amount cap and is never mirrored on the employee side: it is
-     * the company's cost and must not reach net pay or the withholding base.
-     *
      * @param  array<string, mixed>  $config
      */
     public static function employer(array $config, float $base): float
@@ -49,13 +37,6 @@ class ContributionCalculator
 
     /**
      * The employer-only add-on for this salary (SSS's Employees' Compensation fund).
-     *
-     * Slice B8 — the BAND's own amount wins when the published schedule carried one. SSS charges
-     * ₱10 up to MSC ₱14,500 and ₱30 from MSC ₱15,000, keyed off the MSC rather than the raw
-     * salary; the version-level "₱X above ₱Y" rule could express only one of the two amounts and
-     * tested the wrong number (someone on ₱14,900 sits in the ₱15,000 band and owes ₱30, but their
-     * salary is below the threshold). The rule remains as the fallback for percentage versions and
-     * for any band that does not print an amount.
      *
      * @param  array<string, mixed>  $config
      */
@@ -86,12 +67,9 @@ class ContributionCalculator
      */
     private static function amount(array $config, float $base, string $rateKey, string $capKey): float
     {
-        // Slice B3b — a bracket-based contribution (SSS) charges on the band's Monthly Salary
+        // A bracket-based contribution (SSS) charges on the band's Monthly Salary
         // Credit, NOT on the salary itself: ₱20,100 is charged on ₱20,000. Percentage-of-salary
         // is wrong for almost everyone, in both directions.
-        //
-        // A bracket version with no bands falls through to the percentage path rather than
-        // charging zero — an unfinished table must not silently wipe a statutory deduction.
         $creditable = null;
         if (($config['basis'] ?? 'percentage') === 'bracket' && ! empty($config['brackets'])) {
             $creditable = ContributionVersion::mscFor($config['brackets'], $base);

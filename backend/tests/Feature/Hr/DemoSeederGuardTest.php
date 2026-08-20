@@ -9,19 +9,7 @@ use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\Payslip;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * FIN-021 — demo seeders must not fabricate payroll outside local/testing.
- *
- * `php artisan db:seed` is the documented reset path and the default a deploy hook reaches for.
- * It called every HR demo seeder, which create demo employees on real salaries, fabricated
- * payroll runs and fabricated payslips. Afterwards nothing tells them apart from real ones: they
- * count in every report, in YTD, in the 13th-month basis and in the audit trail, and there is no
- * flag to filter them back out. One accidental seed against a live database is unrecoverable
- * without a restore.
- *
- * The assertion is about PRODUCTION, so the test has to actually be in production to mean
- * anything — hence the environment swap rather than a unit test of the guard method.
- */
+/** Demo seeders must not fabricate payroll outside local/testing. */
 class DemoSeederGuardTest extends HrTestCase
 {
     use RefreshDatabase;

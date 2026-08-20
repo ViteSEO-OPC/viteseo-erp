@@ -16,27 +16,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-032 / MF-06 — loan interest, fees and collection priority.
- *
- * `LoanService` collected principal only. An `interest_rate` field once existed on the UI and was
- * REMOVED during this audit rather than fixed, because it was the most misleading thing on the page: HR
- * read "6% a year" as the terms of the product while the engine charged nothing.
- *
- * DIMINISHING BALANCE, AND ONLY DIMINISHING. Interest each period is charged on the balance still owed,
- * so the rate HR types is the rate the employee actually pays. Flat (add-on) interest computes once on
- * the full principal and splits it evenly, which turns a stated 6% into roughly 11% effective —
- * recreating in a new place exactly the gap that got the old field deleted. It is also what every salary
- * loan a Philippine employee already holds uses: SSS and Pag-IBIG are both diminishing.
- *
- * `test_interest_never_reduces_the_balance_it_is_charged_on` IS THE ONE THAT MATTERS. `outstanding()`
- * derives from `principal_amount`, not the total `amount`. Had interest gone into the same column it
- * would reduce the balance it was just charged on, and a loan would pay itself off out of its own
- * interest — settling early for less than was borrowed.
- *
- * EVERYTHING DEFAULTS TO ZERO, so no existing loan or payslip changes. A 0% loan is a real product (an
- * interest-free company advance), not a missing configuration.
- */
+/** / — loan interest, fees and collection priority. */
 class LoanInterestTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -388,14 +368,7 @@ class LoanInterestTest extends HrTestCase
         $this->assertSame(0.0, $rows[1]['fee']);
     }
 
-    /**
-     * A schedule too long to project is CUT and says so, rather than being presented as complete.
-     *
-     * Note what this does NOT test, because it cannot happen here: interest never blocks amortisation.
-     * Principal is `min(instalment, balance)`, charged on top of interest rather than out of it, so the
-     * balance always falls. The cap is a runaway guard against a tiny instalment — ₱12,000 at ₱10 a
-     * period is 1,200 paydays — not a "cannot amortise" case.
-     */
+    /** A schedule too long to project is CUT and says so, rather than being presented as complete. */
     public function test_a_schedule_too_long_to_project_is_reported_as_truncated(): void
     {
         $loan = $this->loan(['interest_rate' => 12, 'per_period_amount' => 10]);

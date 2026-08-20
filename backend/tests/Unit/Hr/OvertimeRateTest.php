@@ -8,7 +8,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Tests\TestCase;
 
 /**
- * OT-3: which OT rate applies for a given day. Pure/static, no DB — runs everywhere.
+ * Which OT rate applies for a given day. Pure/static, no DB — runs everywhere.
  * Defaults are the DOLE minimums: ordinary 125, rest/special 169, regular holiday 260.
  */
 class OvertimeRateTest extends TestCase

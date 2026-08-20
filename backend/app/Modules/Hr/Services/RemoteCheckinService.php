@@ -10,13 +10,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Off-site time-ins: the employee submits a selfie, HR looks at it and decides.
- *
- * There is no automated check here on purpose — no face matching, no liveness. A person
- * looking at a photo is the verification, which is both the cheapest honest answer and the
- * one that doesn't put biometric data in the schema.
- */
+/** Off-site time-ins: the employee submits a selfie, HR looks at it and decides. */
 class RemoteCheckinService
 {
     /** Where selfies live on the public disk (served via /storage, like receipts). */
@@ -51,12 +45,6 @@ class RemoteCheckinService
 
         // Already on the clock — approving this later would collide with that row, and the
         // employee would have waited for a review that could never succeed. Say so now.
-        //
-        // This also catches the overnight case: a shift still running from a previous date
-        // is the row `todayFor()` resolves to, and starting a second one would leave the
-        // first open and silently unpaid. The live clock refuses it for the same reason;
-        // refusing at SUBMIT time means the employee finds out now rather than after
-        // waiting through a review that was always going to fail.
         $open = $this->attendance->todayFor($employee);
         if ($open?->time_in !== null) {
             $startedToday = $open->work_date->toDateString()

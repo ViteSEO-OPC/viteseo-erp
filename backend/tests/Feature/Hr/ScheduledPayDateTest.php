@@ -16,22 +16,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 
 /**
- * Also exercises FIN-025: the delay is recorded effective 2026-01-01, BEFORE the cycle it prices.
+ * Also exercises: the delay is recorded effective 2026-01-01, BEFORE the cycle it prices.
  * Settings are now resolved as of the cycle end, so a change dated today would (correctly) not
  * reach back into a March cycle.
- *
- * FIN-036 — a payslip's stated pay date used to move after it was issued.
- *
- * Nothing recorded when a run was due to pay. `PayslipResource::payDate()` derived it every time
- * it was read, as `cycle_end + pay_delay_days`, taking the delay from the run's `policy_snapshot`
- * if there was one and from the LIVE setting otherwise. Change `pay_delay_days` and every payslip
- * without a snapshot restated its own pay date — including ones the employee already had a copy
- * of. A payslip is a legally consequential document; it must say the same thing tomorrow.
- *
- * The date is now stamped on the run when the run is created, and read back rather than
- * recomputed. Deliberately named `scheduled_pay_date`: it is when payment was PLANNED. When money
- * actually moved is not something this system can observe today — `markDone()` is a manual
- * assertion — and that belongs on the payment records FIN-015 will introduce.
  */
 class ScheduledPayDateTest extends HrTestCase
 {

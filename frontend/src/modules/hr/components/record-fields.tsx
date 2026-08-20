@@ -31,25 +31,15 @@ export interface FieldSpec<T extends FieldValues> {
   hint?: string;
 }
 
-/*
-  `min-w-0` + `break-words` is the pair that keeps a value inside its card.
-
-  These render as grid items, and a grid item's automatic minimum is its
-  min-content width. An unbreakable token — an email address, a long URL, a
-  no-spaces address line — therefore widens its own column, and the grid pushes
-  past the card instead of wrapping. `min-w-0` drops that floor so the column
-  takes its `1fr` share, and `break-words` lets the token break rather than
-  spill out of the narrower column. Neither alone is enough: without `min-w-0`
-  the column still inflates (`overflow-wrap: break-word` deliberately does not
-  change intrinsic size), and without `break-words` the text just overflows a
-  correctly-sized column.
-*/
+/* `min-w-0` + `break-words` is the pair that keeps a value inside its card. */
 export function Detail({ label, value }: { label: string; value?: string | null }) {
   return (
     <div className="min-w-0">
-      {/* The label breaks too, not just the value: "University/College" and
-          "Health concern/condition" are ~160px at 13px uppercase, and nothing in
-          them is a break opportunity a browser will take on its own. */}
+      {/*
+       * The label breaks too, not just the value: "University/College" and
+       * "Health concern/condition" are ~160px at 13px uppercase, and nothing in
+       * them is a break opportunity a browser will take on its own.
+       */}
       <p className="text-label font-bold uppercase tracking-wide break-words text-muted-foreground">
         {label}
       </p>
@@ -58,27 +48,7 @@ export function Detail({ label, value }: { label: string; value?: string | null 
   );
 }
 
-/*
-  Column counts come from the *card's* width, not the viewport's.
-
-  `sm:grid-cols-2 lg:grid-cols-3` was the bug behind labels escaping their card.
-  These grids sit in the record's right-hand panel, beside a fixed 300px rail —
-  so the panel is always the viewport minus a constant, and the two widths are
-  not proportional. `lg:grid-cols-3` fired at a 1024px viewport, where the card
-  is 332px wide and each of the three columns gets 89px. "University/College" is
-  ~160px at 13px uppercase, so it had nowhere to go but out.
-
-  A container query asks the question that actually matters — "is this card wide
-  enough for three columns?" — so the grid can never outrun its own box. The
-  thresholds hold every column to 208px or wider, against a ~160px worst-case
-  label. They are also picked so the two dialogs that render `Section` keep the
-  counts they have today; only the broken 1024–1500px range on the record
-  changes.
-
-  The `@container` wrapper pays a second dividend: `container-type: inline-size`
-  applies size containment, so the grid's contents can no longer inflate the
-  wrapper's own width either.
-*/
+/* Column counts come from the *card's* width, not the viewport's. */
 const FIELD_GRID = "grid grid-cols-1 gap-x-8 gap-y-5 @md/fields:grid-cols-2";
 
 // A titled subsection (teal header) with a detail grid, matching the expanded

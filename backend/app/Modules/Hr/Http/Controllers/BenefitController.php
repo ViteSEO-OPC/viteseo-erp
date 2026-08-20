@@ -30,14 +30,7 @@ class BenefitController extends Controller
 
     /**
      * PUT/PATCH /hr/contribution-settings/{contributionSetting} — whether the company operates
-     * this contribution at all. NOT the rates: those are dated versions (B3a).
-     *
-     * Slice B9 item 5 — `config` is no longer accepted. It took `['sometimes','array']`, so
-     * anything at all saved cleanly into a field payroll has not priced from since B3a: a typo
-     * (`raet`) was a 200, and the only thing still reading it was the Compensation report's
-     * legend, which item 2 has now pointed at the version in force. An unvalidated write to a
-     * dead field, behind a button labelled "update rates", is the exact trap this audit keeps
-     * finding. The column stays for the historical run snapshots that captured it.
+     * this contribution at all. NOT the rates: those are dated versions.
      */
     public function updateSetting(Request $request, ContributionSetting $contributionSetting): JsonResponse
     {
@@ -50,7 +43,7 @@ class BenefitController extends Controller
         return ContributionSettingResource::make($setting)->response();
     }
 
-    // GET /hr/contribution-versions?type=sss — Slice B3a, the rate history.
+    // GET /hr/contribution-versions?type=sss, the rate history.
     public function versionsIndex(Request $request): JsonResponse
     {
         return response()->json([
@@ -59,7 +52,7 @@ class BenefitController extends Controller
                 'type' => $v->type,
                 'effective_from' => $v->effective_from?->format('Y-m-d'),
                 'basis' => $v->basis,
-                // Slice B19 — WITHOUT THIS the edit dialog seeds its selector from the version in
+                // WITHOUT THIS the edit dialog seeds its selector from the version in
                 // force, finds nothing, defaults to `basic`, and the next rate change silently
                 // moves the contribution back off the earnings basis.
                 'salary_basis' => $v->salary_basis ?: 'basic',
@@ -96,17 +89,7 @@ class BenefitController extends Controller
         return EmployeeBenefitResource::collection($this->service->benefitsFor($employee))->response();
     }
 
-    /**
-     * GET /api/v1/hr/me/benefits — which contributions the CALLER pays into, read-only.
-     *
-     * The reader above is hr_officer-only, and without this the employee's own Compensation tab
-     * rendered the enrolment block against a 403: with no rows, every toggle fell back to its
-     * "enrolled" default and drew three ticked, clickable checkboxes for a change the server was
-     * always going to refuse. Seeing which contributions come off your pay is reasonable; deciding
-     * it is HR's.
-     *
-     * Identity comes from the token, never a client-sent id.
-     */
+    /** GET /api/v1/hr/me/benefits — which contributions the CALLER pays into, read-only. */
     public function myBenefits(Request $request): JsonResponse
     {
         $employee = $request->user()->employee;
@@ -121,17 +104,7 @@ class BenefitController extends Controller
         return $this->employeeBenefitsIndex($employee);
     }
 
-    /**
-     * POST /hr/contribution-versions/import-schedule — Slice B8.
-     *
-     * Reads the agency's own published spreadsheet and returns the bands it found, the columns it
-     * used, and anything it is unsure about. It saves NOTHING: HR confirms the reading, then the
-     * ordinary create-a-version endpoint writes it. A schedule imported with a column misread is
-     * worse than no schedule, so the confirmation step is not optional.
-     *
-     * `columns` lets HR re-point a column the detection got wrong (`{"msc": "D"}`), which is what
-     * makes a differently-laid-out circular importable without a code change.
-     */
+    /** POST /hr/contribution-versions/import-schedule. */
     public function importSchedule(
         Request $request,
         SpreadsheetReader $reader,
@@ -161,7 +134,7 @@ class BenefitController extends Controller
         return response()->json(['data' => $importer->parse($rows, $columns)]);
     }
 
-    // DELETE /hr/contribution-versions/{contributionVersion} — Slice B8.
+    // DELETE /hr/contribution-versions/{contributionVersion}.
     // So a version saved with the wrong date can be removed rather than worked around.
     public function destroyVersion(ContributionVersion $contributionVersion): JsonResponse
     {
@@ -188,7 +161,7 @@ class BenefitController extends Controller
     {
         $data = $request->validate([
             'benefits' => ['required', 'array'],
-            // Slice B9 — the type is checked against the three that exist. It was `['required',
+            // The type is checked against the three that exist. It was `['required',
             // 'string']`, so a typo saved a checklist row matching no contribution: the write
             // answered 200, the screen showed the change, and nothing was ever deducted or not
             // deducted because of it. Same shape as the mistyped tier B5 item 2 closed.

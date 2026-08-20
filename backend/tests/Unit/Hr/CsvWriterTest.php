@@ -6,16 +6,7 @@ use App\Modules\Hr\Services\CsvWriter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
-/**
- * FIN-019 — spreadsheet formula injection in the payroll and report exports.
- *
- * A cell beginning `=`, `+`, `-` or `@` is executed as a formula by Excel, LibreOffice and Sheets.
- * Employee names, department names, audit descriptions and concern text are all user-controlled
- * and all reach a CSV that finance opens on their own machine.
- *
- * Unit-level on purpose: this is pure string handling, and a rule this cheap to test should not
- * need a payroll run to exercise it.
- */
+/** Spreadsheet formula injection in the payroll and report exports. */
 class CsvWriterTest extends TestCase
 {
     public static function dangerousCells(): array

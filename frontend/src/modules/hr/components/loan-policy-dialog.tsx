@@ -27,17 +27,7 @@ import { EligibilityPicker } from "@/modules/hr/components/eligibility-picker";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import type { BenefitProgram, EligibilityMode } from "@/modules/hr/types/benefits";
 
-/**
- * A loan policy — Slice B15. The PRODUCT, not a loan.
- *
- * HR defines what may be borrowed, by whom and over how long; issuing one to a person creates an
- * entry in that employee's loan ledger, which is where the debt lives. A loan cannot be a
- * programme itself: its balance decrements to zero, so modelling it as one would mean a new
- * programme per borrower.
- *
- * "Who may borrow" reuses the SAME eligibility rule an allowance uses — it is the same question,
- * and a second rule engine would be a second thing to get wrong.
- */
+/** A loan policy. The PRODUCT, not a loan. */
 export function LoanPolicyDialog({
   open,
   policy,

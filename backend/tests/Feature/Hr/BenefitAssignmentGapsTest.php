@@ -10,18 +10,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\BenefitProgramService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * Slice B5 — the assignment and validation gaps, batched.
- *
- * None of these were costing money on the live data. They are the kind of gap that costs money the
- * first time someone uses the feature as designed: an eligibility rule that only half applies, a
- * dropdown typo that enrols someone on nothing, an allowance saved without an amount.
- *
- * REWRITTEN 2026-07-29. "Add a Plan" and its `assign()` endpoint are gone, and eligibility is a
- * rule (everyone / these statuses / management / these named people) evaluated when payroll runs
- * rather than a list frozen at assignment. The tier and share tests went with the modal that was
- * the only way to reach them — see B2, which is where an HMO enrolment screen belongs.
- */
+/** The assignment and validation gaps, batched. */
 class BenefitAssignmentGapsTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -174,9 +163,7 @@ class BenefitAssignmentGapsTest extends HrTestCase
 
     // --- 6. dropping and re-adding must not destroy the pivot ------------------------
 
-    /**
-     * Latent today (the only caller is unreachable from the UI) and real the moment it is wired up.
-     */
+    /** Latent today (the only caller is unreachable from the UI) and real the moment it is wired up. */
     public function test_editing_a_programme_keeps_the_pivot_of_someone_who_stays(): void
     {
         $stays = $this->employee('E-STAY');

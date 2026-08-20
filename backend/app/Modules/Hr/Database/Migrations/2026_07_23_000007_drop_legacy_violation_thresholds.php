@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Slice — violation ladder (finding P1-5). The colour thresholds now live in the
+// Violation ladder. The colour thresholds now live in the
 // `violation_rules` ladder, which ViolationService reads. Two legacy scalar fields are
 // retired so there is ONE source of truth (the audit's "don't leave both"):
 //   - awol_days_threshold: was a DEAD field — validated/seeded/shown but read by nobody.

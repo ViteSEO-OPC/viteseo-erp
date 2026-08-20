@@ -62,7 +62,7 @@ export function usePayrollRuns() {
 }
 
 /**
- * FIN-030b — who the selected cycle would pay below the floor.
+ * Who the selected cycle would pay below the floor.
  *
  * Fetched with the pay group so the payroll screen can warn BEFORE the run rather than after, and
  * disabled until there is a cycle to ask about.
@@ -158,7 +158,7 @@ export function useReopenPayslip() {
   });
 }
 
-/** Lock / unlock a run (Slice 5). Same invalidation as marking a payslip disbursed. */
+/** Lock / unlock a run. Same invalidation as marking a payslip disbursed. */
 export function useSetPayrollRunLock() {
   const qc = useQueryClient();
   return useMutation({
@@ -178,7 +178,7 @@ export function useThirteenthMonth(year?: number) {
   });
 }
 
-/** Slice B17 — what the run would pay, so the confirmation shows real figures. */
+/** What the run would pay, so the confirmation shows real figures. */
 export function useThirteenthMonthPreview(year?: number, enabled = true) {
   return useQuery({
     queryKey: ["hr", "payroll", "thirteenth-month", "preview", year ?? "current"],
@@ -225,13 +225,7 @@ export function useHrPayslip(id: number | undefined) {
   });
 }
 
-/**
- * Waive a line across a whole period.
- *
- * Invalidates rather than seeding the cache: this touches every payslip in the run, so there is no
- * single document to write back — the run detail, the payslips and any later run in the tax year
- * that may now be flagged stale all have to be re-read.
- */
+/** Waive a line across a whole period. */
 export function useCorrectRunLine() {
   const qc = useQueryClient();
   return useMutation({
@@ -246,15 +240,7 @@ export function useCorrectRunLine() {
   });
 }
 
-/**
- * Correct one line on one payslip — and put the corrected document straight into the cache.
- *
- * The mutation returns the whole amended payslip, so the open document updates from the response
- * rather than from a refetch: HR is looking at the line they just changed, and a round-trip would
- * show them the old figure for as long as it took. Everything the correction also moved — the run's
- * totals, a later run in the tax year that may now be flagged stale, the employee's own copy — is
- * invalidated behind it.
- */
+/** Correct one line on one payslip — and put the corrected document straight into the cache. */
 export function useCorrectPayslipLine() {
   const qc = useQueryClient();
   return useMutation({
@@ -289,14 +275,7 @@ export function useRemovePayslipLineCorrection() {
   });
 }
 
-/**
- * Correct a period on its own payslips.
- *
- * Invalidates more than the adjustment run it replaces, because it changes documents rather than
- * creating one: the amended payslips (open or not), the run detail whose totals moved, the run list
- * — where a LATER run in the tax year may now be flagged stale — and the retro-flag queue, since a
- * correction is usually how an `owed` difference gets settled.
- */
+/** Correct a period on its own payslips. */
 export function useAmendPayrollRun() {
   const qc = useQueryClient();
   return useMutation({
@@ -312,14 +291,7 @@ export function useAmendPayrollRun() {
   });
 }
 
-/**
- * What recomputing a period would change.
- *
- * `enabled` is the caller's, and it should be the dialog's own open state: this costs a full payroll
- * computation server-side, so it must not be fetched to fill a table nobody has asked to see.
- * Never cached — the answer depends on attendance and salaries as they are right now, and a stale
- * diff is worse than a spinner.
- */
+/** What recomputing a period would change. */
 export function useRerunPreview(runId: number | undefined, enabled = true) {
   return useQuery({
     queryKey: ["hr", "payroll", "rerun-preview", runId],
@@ -349,7 +321,7 @@ export function useRerunPayrollRun() {
   });
 }
 
-/** Retroactive pay differences still outstanding (FIN-009). */
+/** Retroactive pay differences still outstanding. */
 export function useRetroFlags() {
   return useQuery({ queryKey: RETRO_KEY, queryFn: getRetroFlags });
 }
@@ -362,7 +334,7 @@ export function useResolveRetroFlag() {
   });
 }
 
-// --- Disbursement (FIN-015) ------------------------------------------------------------------
+// --- Disbursement ------------------------------------------------------------------
 
 /** Every payment batch, newest first. Pass a run id to narrow it to one payroll. */
 export function usePaymentBatches(payrollRunId?: number) {
@@ -438,7 +410,7 @@ export function useReconcilePaymentBatch() {
 }
 
 /**
- * Uncollected deductions still outstanding (FIN-005).
+ * Uncollected deductions still outstanding.
  *
  * Invalidated by a payroll run, because a run with room recovers them automatically — leaving a
  * stale queue on screen would show HR debts that were just settled.

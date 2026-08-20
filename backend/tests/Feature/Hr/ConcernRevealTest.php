@@ -14,14 +14,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Anonymity on concerns, and the negotiation that can lift it.
- *
- * The rule these tests exist to hold: HR sees `Anonymous` until the person who filed the
- * concern has been asked and has said yes. Every assertion below is written against what the
- * RESOURCE emits rather than what the service returns, because the resource is what actually
- * reaches a browser — a privacy rule enforced anywhere else is a rule with a way around it.
- */
+/** Anonymity on concerns, and the negotiation that can lift it. */
 class ConcernRevealTest extends HrTestCase
 {
     use RefreshDatabase;

@@ -1,4 +1,4 @@
-// Company → Rules (Phase-2 Slice 14).
+// Company → Rules (Phase-2).
 
 export interface WorkSchedule {
   id: number;
@@ -42,16 +42,6 @@ export type UndertimeDeductionMode = "none" | "per_hour";
  * of which any engine ever read — `treat_as_undertime_to_now` / `treat_as_absent` and
  * `offset_undertime` / `overtime_eligible` were settings that silently did nothing, which is worse
  * than an absent feature because HR believed a forgotten punch was being charged.
- *
- * The server now rejects everything else (`UpdateAttendancePolicyRequest`) and migration
- * `2026_07_28_000012_normalise_inert_policy_modes` collapsed the stored rows, so a union listing
- * the old values was the last place in the codebase still claiming they were reachable.
- *
- * WIDEN THESE AGAIN, don't add a fourth mode elsewhere, if the behaviour is ever built — and widen
- * the request rule in the same change, or the UI will offer what the API refuses.
- *
- * A missing clock-out is handled by `missing_timeout_allowance_minutes` instead: it resolves to the
- * employee's own scheduled end rather than being deducted or treated as an absence.
  */
 export type MissingClockoutMode = "no_deduction_flag_for_review";
 export type EarlyArrivalMode = "none";
@@ -90,7 +80,7 @@ export interface ViolationRules {
   late?: ViolationRule[];
   absence?: ViolationRule[];
   missed_time_out?: ViolationRule[];
-  /** Slice 9 — days where break + lunch ran past the schedule allowance. Flag only. */
+  /** Days where break + lunch ran past the schedule allowance. Flag only. */
   long_break?: ViolationRule[];
 }
 
@@ -130,7 +120,7 @@ export interface AttendancePolicy {
   your_ip?: string | null;
   overtime_mode: OvertimeMode; // takes effect when OT requests ship
   overtime_threshold_minutes: number;
-  // FIN-039 — ceilings on auto-mode overtime that pays with no approval. 0 = uncapped.
+  // Ceilings on auto-mode overtime that pays with no approval. 0 = uncapped.
   // Minutes past a cap are not lost: they queue for review and pay once approved.
   auto_overtime_daily_cap_minutes: number;
   auto_overtime_period_cap_minutes: number;
@@ -161,7 +151,7 @@ export interface AttendancePolicy {
   hours_per_day_divisor: number;
 
   // Breaks are FLAGGED, never deducted.
-  /** Slice 9 -- tolerance over each schedule's own allowance before flagging. 0 = none. */
+  /** Tolerance over each schedule's own allowance before flagging. 0 = none. */
   lunch_grace_minutes: number;
   break_grace_minutes: number;
 
@@ -175,9 +165,6 @@ export interface AttendancePolicy {
  * What a save to Company → Rules sends. WRITE-ONLY: `effective_from` is not part of the policy
  * resource, it dates the version payroll resolves against, so it is deliberately absent from
  * `AttendancePolicy` above — reading the policy back never returns it.
- *
- * Omitted means today. Set it to a date inside a cycle that has already been run to correct
- * that cycle; payroll prices each cycle on the rules in force on its last day.
  */
 export type AttendancePolicyUpdate = Partial<Omit<AttendancePolicy, "id">> & {
   effective_from?: string;

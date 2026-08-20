@@ -4,23 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * HR-declared non-working days — a typhoon, a flood, a power outage, a company shutdown.
- *
- * WHY THIS IS NOT A ROW IN `hr_holidays`. That table is a legal calendar: dates synced from
- * Nager and classified regular / special non-working / special working, where the class decides
- * the premium a worked day earns (a worked regular holiday pays 200%). A suspension is the
- * company's own decision about one date, and the only thing it decides is whether the day is
- * still paid. Filing it as a holiday would put an unclassifiable row through the classifier and
- * hand anyone who worked through the typhoon a statutory premium they are not owed.
- *
- * `is_paid` is the whole feature: paid means the salary still covers the day and nobody owes
- * anything; unpaid means the day costs one day's pay. Either way nobody is expected in, so the
- * day raises no absence and no violation.
- *
- * Company-wide by design. A per-department or per-branch suspension is a real thing and a real
- * next slice, but a scope column nothing reads would be a promise the module does not keep.
- */
+/** HR-declared non-working days — a typhoon, a flood, a power outage, a company shutdown. */
 return new class extends Migration
 {
     public function up(): void

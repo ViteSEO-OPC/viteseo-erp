@@ -8,18 +8,7 @@ use App\Modules\Hr\Models\OfficeExpense;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * Setting an office expense's review state from the add/edit form.
- *
- * The form previously could not touch `status` at all: the column existed and the
- * approve/reject/reopen endpoints existed, but nothing in the UI reached them, so every expense
- * sat on `recorded` forever.
- *
- * The point of these tests is that the form is not a second way to write the column. It routes
- * through the same service transitions the action buttons use, so an approval made from the form
- * is attributed, timestamped and audited exactly like one made from the list — and the
- * "already reviewed" guard is reopened past rather than bypassed.
- */
+/** Setting an office expense's review state from the add/edit form. */
 class OfficeExpenseStatusTest extends HrTestCase
 {
     use RefreshDatabase;

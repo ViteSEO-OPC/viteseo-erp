@@ -12,14 +12,7 @@ use App\Modules\Hr\Services\ReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice B13 — the state and counting rules the page depends on.
- *
- * WHAT THESE PROTECT. Each one is a number HR reads and acts on: how many people an allowance
- * covers, how many are enrolled in a contribution, and whether a programme is live. All three had
- * a way of counting someone the rest of the system had already stopped counting — a leaver, a
- * deleted employee, a programme switched off through a column nothing could switch back on.
- */
+/** The state and counting rules the page depends on. */
 class BenefitHygieneTest extends HrTestCase
 {
     use RefreshDatabase;

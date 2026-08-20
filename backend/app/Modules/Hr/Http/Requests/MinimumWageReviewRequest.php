@@ -7,13 +7,7 @@ use App\Modules\Hr\Services\PayScheduleService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
-/**
- * FIN-030b — which pay group and which cycle to judge against the floor.
- *
- * The dates are optional and default to the group's CURRENT period, because the common case is
- * "what would happen if I ran payroll now". Passing them explicitly is for reviewing a period
- * that has already been run, which resolves the floor and the policy as they stood then.
- */
+/** Which pay group and which cycle to judge against the floor. */
 class MinimumWageReviewRequest extends FormRequest
 {
     public function authorize(): bool

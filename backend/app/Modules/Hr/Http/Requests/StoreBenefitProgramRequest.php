@@ -23,25 +23,25 @@ class StoreBenefitProgramRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'category' => ['sometimes', 'string', 'max:50'],
             'kind' => ['sometimes', Rule::in(BenefitProgram::KINDS)],
-            // Slice B5.4 — required for an allowance (it would otherwise pay ₱0 silently);
+            // Required for an allowance (it would otherwise pay ₱0 silently);
             // nullable for a company plan, which prices by tier instead.
             'amount' => ['required_if:kind,allowance', 'nullable', 'numeric', 'min:0'],
             'description' => ['sometimes', 'nullable', 'string', 'max:1000'],
             'color' => ['sometimes', 'nullable', 'string', 'max:20'],
             'frequency' => ['sometimes', 'string', 'max:20'],
             'tax_treatment' => ['sometimes', 'in:de_minimis,taxable'],
-            // Slice B16 — this benefit's OWN statutory ceiling. Null = none recorded, which keeps
+            // This benefit's OWN statutory ceiling. Null = none recorded, which keeps
             // the whole amount exempt. Ceilings are per item and are never pooled.
-            // Slice B11 — the date this price applies from. Defaults to today; HR sets it
+            // The date this price applies from. Defaults to today; HR sets it
             // deliberately when a rise is agreed in arrears.
             'effective_from' => ['sometimes', 'nullable', 'date'],
             'deminimis_ceiling' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:9999999.99'],
-            // Slice B15 — loan-policy config. Typed per kind rather than shared into one loose
+            // loan-policy config. Typed per kind rather than shared into one loose
             // shape: a loan policy and an HMO have nothing in common but a name.
             'loan_max_principal' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999'],
             'loan_term_periods' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:600'],
             'ceiling_period' => ['sometimes', 'nullable', 'in:monthly,semester,annual'],
-            // Slice B19 — whether this allowance counts toward the statutory contribution base.
+            // Whether this allowance counts toward the statutory contribution base.
             // Separate from `tax_treatment`: a taxable allowance can sit outside the SSS base and
             // the mandated COLA is de-minimis for tax but inside it. Defaults to counting.
             'contributable' => ['sometimes', 'boolean'],
@@ -74,7 +74,7 @@ class StoreBenefitProgramRequest extends FormRequest
     public function withValidator(\Illuminate\Contracts\Validation\Validator $validator): void
     {
         $validator->after(function ($v) {
-            // Slice B5.4 — an allowance with no amount renders as ₱0 and pays ₱0, with nothing to
+            // An allowance with no amount renders as ₱0 and pays ₱0, with nothing to
             // say it was never finished. `amount` stays nullable for company plans (HMO), which
             // price by tier rather than by a single figure.
             $kind = $this->input('kind', 'allowance');

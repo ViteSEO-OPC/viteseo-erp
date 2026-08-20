@@ -17,14 +17,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { useCorrectRunLine } from "@/modules/hr/hooks/use-payroll";
 
-/**
- * THE CHARGES A WHOLE PERIOD CAN BE WRONG ABOUT.
- *
- * Mirrors the attendance classes in Support\PayslipLines, and stops there deliberately. Waiving an
- * absence charge across a payroll is a real instruction — the badge readers were down, the office
- * was shut, a suspension was recorded twice. Waiving SSS for everybody is not a decision HR is
- * allowed to make, and putting it in this list would suggest otherwise.
- */
+/** THE CHARGES A WHOLE PERIOD CAN BE WRONG ABOUT. */
 const WAIVABLE = [
   { value: "late", label: "Late" },
   { value: "undertime", label: "Undertime" },
@@ -37,21 +30,7 @@ const WAIVABLE = [
   { value: "late_penalty", label: "Tardiness Penalty" },
 ];
 
-/**
- * WAIVE ONE CHARGE FOR EVERYONE THE PERIOD PAYS.
- *
- * WHY THIS IS SEPARATE FROM CORRECTING A PAYSLIP. A correction to one payslip is a judgement about
- * one person's month; this is a judgement about the payroll — a system outage, a closure, a rule
- * that should not have run this cutoff. Doing it employee by employee is the same decision retyped
- * fifteen times, and the fifteenth is where the typo lives.
- *
- * IT ONLY WAIVES. "Set everyone's late charge to ₱300" is nonsense — each person's is a different
- * number — so the amount is not a field. The API takes one, because the rule is the caller's to
- * state, but the only form of it that means anything across a payroll is zero.
- *
- * PAYSLIPS WITHOUT THE CHARGE ARE LEFT ALONE, and the count says how many were actually touched:
- * "corrected 12 payslips" would read as "corrected everyone" when it was 12 of 15.
- */
+/** WAIVE ONE CHARGE FOR EVERYONE THE PERIOD PAYS. */
 export function RunLineWaiverDialog({
   runId,
   runLabel,

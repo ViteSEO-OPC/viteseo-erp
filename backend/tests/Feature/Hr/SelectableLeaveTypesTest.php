@@ -12,21 +12,7 @@ use App\Modules\Hr\Models\LeaveTypeAllotment;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 
-/**
- * Which leave types an employee is actually offered.
- *
- * Every type used to be listed for everyone, so a paid type the employee held no credits for
- * appeared in the picker and was then refused by the 422 on submit — which reads as a broken form,
- * not as "you are not entitled to this". Zero credits now means the type is not theirs.
- *
- * The rule has to survive two things that look like zero but are not:
- *
- *  - An UNLIMITED type (LWOP ships this way) has 0 days and no allotment by design — it is
- *    uncapped, so there is no entitlement to be zero, and it must always be filable.
- *  - SHARED mode gives every paid type one common pool, so a per-type number means nothing there.
- *
- * HR is exempt from all of it: the same endpoint feeds the Company → Leave Type config screen.
- */
+/** Which leave types an employee is actually offered. */
 class SelectableLeaveTypesTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -249,16 +235,7 @@ class SelectableLeaveTypesTest extends HrTestCase
         $this->assertContains('AL', $this->offeredCodes());
     }
 
-    /**
-     * Deleting a leave type must not take the employee's whole balance list down with it.
-     *
-     * WHAT HAPPENED. `deleteType()` only SOFT-deletes, so every `hr_leave_balances` row still
-     * points at the type — but `belongsTo(LeaveType)` resolves a trashed parent to NULL, and
-     * `LeaveBalanceResource` read `$this->leaveType->id` straight through it. One deleted type
-     * therefore 500'd `/me/leave-balances` for every employee who had ever held that leave, and
-     * the Work Schedule page rendered empty credit cards in BOTH allotment modes because the
-     * request never returned at all.
-     */
+    /** Deleting a leave type must not take the employee's whole balance list down with it. */
     public function test_deleting_a_leave_type_does_not_break_the_balance_list(): void
     {
         $year = now(config('app.timezone_local'))->year;

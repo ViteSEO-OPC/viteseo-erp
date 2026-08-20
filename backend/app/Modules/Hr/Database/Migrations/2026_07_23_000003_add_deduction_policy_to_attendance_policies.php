@@ -4,18 +4,9 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Slice 1 (attendance→pay), step 3 + 3b. The deduction-policy surface: every rule HR
+//  (attendance→pay), step 3 + 3b. The deduction-policy surface: every rule HR
 // can set becomes a column here instead of living in code. Follows the precedent
 // migration 2026_07_10_000120_add_late_deduction_to_attendance_policies.php.
-//
-// EVERY default below is the CURRENT behaviour, so applying this migration changes
-// no pesos — it is a verified no-op until someone flips a mode in the UI (Slice 3).
-//   - late_deduction_mode already exists ('none'); step 3 only widens its allowed values.
-//   - deduction_rounding defaults to 'exact' (proportionate) per PH Labor Code Art. 113;
-//     the round_* modes are an explicit, warned opt-in (see audit §9).
-//   - daily_rate_basis defaults to 'period_workdays' (today's fluctuating divisor);
-//     'fixed_divisor' + annual_divisor (261/313/365/custom) is the DOLE-style option.
-//   - hours_per_day_divisor is the DOLE 8-hour day: hourly rate = dailyRate ÷ 8.
 return new class extends Migration
 {
     public function up(): void

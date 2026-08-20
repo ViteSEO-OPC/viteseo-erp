@@ -124,12 +124,12 @@ function RequestTabs({
     <div
       role="tablist"
       /*
-        `max-w`, not `w` — and no `shrink-0`. This was `sm:w-[440px] shrink-0`, a rigid width that
-        could not give way, so from `lg` up (where the page becomes a 3-column grid and this card
-        takes 2 of them) 440px of tabs plus the heading beside them exceeded the ~410px the card
-        actually has, and they ran out of the card and off-screen. Worst exactly at 1024px, where
-        the grid kicks in while the viewport is still narrow.
-      */
+       * `max-w`, not `w` — and no `shrink-0`. This was `sm:w-[440px] shrink-0`, a rigid width that
+       * could not give way, so from `lg` up (where the page becomes a 3-column grid and this card
+       * takes 2 of them) 440px of tabs plus the heading beside them exceeded the ~410px the card
+       * actually has, and they ran out of the card and off-screen. Worst exactly at 1024px, where
+       * the grid kicks in while the viewport is still narrow.
+       */
       className="flex w-full min-w-0 gap-1 rounded-xl bg-muted p-1 sm:max-w-[440px]"
     >
       {tabs.map((t) => {
@@ -494,8 +494,10 @@ export default function TimeOffPage() {
         />
 
         <div className="rounded-card border border-border bg-card p-6 lg:col-span-2">
-          {/* Side by side only from xl. Between sm and lg the heading and a 4-tab switcher do not
-              fit on one line inside a 2-of-3 column card, which is what pushed the tabs out. */}
+          {/*
+           * Side by side only from xl. Between sm and lg the heading and a 4-tab switcher do not
+           * fit on one line inside a 2-of-3 column card, which is what pushed the tabs out.
+           */}
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <h2 className="text-h3 font-bold text-foreground">{REQUEST_TITLES[tab]}</h2>
             <RequestTabs value={tab} onChange={setTab} />

@@ -5,14 +5,7 @@ namespace App\Modules\Hr\Http\Resources;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/**
- * One ask, and its answer.
- *
- * Emitted to BOTH sides, unredacted, on purpose: the reporter must see who is asking and why
- * before deciding, and HR must see the refusal and its reason rather than a silence. Nothing
- * here carries the reporter's identity — that lives on the concern, behind
- * `identity_revealed_at`, and is not restated in this shape.
- */
+/** One ask, and its answer. */
 class ConcernRevealRequestResource extends JsonResource
 {
     /**

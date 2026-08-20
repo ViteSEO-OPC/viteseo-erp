@@ -9,9 +9,6 @@ use Illuminate\Support\Facades\DB;
  * no rows would silently hand new hires the leave type's raw base days instead of a
  * status-appropriate default (EmployeeService::create falls back to
  * $type->days_per_year).
- *
- * Factors mirror LeaveTypeAllotmentSeeder: project-based tracks contract at 0.75;
- * interns start at 0 and HR grants credits per person where warranted.
  */
 return new class extends Migration
 {

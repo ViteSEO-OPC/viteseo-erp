@@ -90,8 +90,10 @@ export function DeleteConfirmDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-[440px] gap-0 p-0">
         <DialogHeader className="mb-0 px-7 pt-6 pb-5">
-          {/* Sizes restated because cn()'s tailwind-merge runs on its default
-              config and strips the project's custom text-* scale. */}
+          {/*
+           * Sizes restated because cn()'s tailwind-merge runs on its default
+           * config and strips the project's custom text-* scale.
+           */}
           <DialogTitle className="text-[length:var(--text-h3)] font-bold text-danger">
             {snap.title}
           </DialogTitle>

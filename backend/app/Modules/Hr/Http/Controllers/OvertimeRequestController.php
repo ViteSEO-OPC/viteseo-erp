@@ -34,12 +34,8 @@ class OvertimeRequestController extends Controller
 
     /**
      * GET /api/v1/hr/overtime-requests/auto-review?start=&end= — auto-mode overtime the caps held
-     * back (FIN-039). HR only, and read-only: the list is derived from attendance every time, so it
+     * back. HR only, and read-only: the list is derived from attendance every time, so it
      * writes nothing and re-running payroll cannot change it.
-     *
-     * There is no resolve action. An item leaves the queue when an overtime request covering that
-     * date is APPROVED through the ordinary flow — which is also what releases the minutes for
-     * payment. Anything left here is overtime that will not be paid until somebody says yes.
      */
     public function autoReview(Request $request, AttendanceService $attendance): JsonResponse
     {
@@ -114,7 +110,7 @@ class OvertimeRequestController extends Controller
         )->response();
     }
 
-    // POST /api/v1/hr/overtime-requests/{overtimeRequest}/cancel — HR only (Slice 6).
+    // POST /api/v1/hr/overtime-requests/{overtimeRequest}/cancel — HR only.
     // Undoes a request that was already approved but whose overtime is not happening.
     public function cancel(Request $request, OvertimeRequest $overtimeRequest): JsonResponse
     {

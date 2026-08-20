@@ -6,37 +6,21 @@ use App\Modules\Hr\Models\AttendancePolicy;
 
 /**
  * Prices ONE worked day's late + undertime shortfall into a fraction of a day
- * (Slice 2, audit §7 step 4). PURE: no DB, no queries, no clock — every input is
+ * (audit §7 step 4). PURE: no DB, no queries, no clock — every input is
  * passed in, so it is unit-testable without building a payroll run.
- *
- * The model (audit §7, revised 2026-07-23):
- *   lateMinutes      = max(0, time_in − effectiveStart)      ← effectiveStart per late_minutes_from
- *   undertimeMinutes = max(0, workedEnd − time_out)          ← workedEnd is the half's end on a half-day
- *   rawShortfall     = (charged late) + (charged undertime)  ← breaks & lunch NEVER contribute
- *   billable         = applyRounding(rawShortfall)           ← exact by default (PH Art. 113, §9)
- *   unpaidFraction   = min(capRemaining, billable ÷ (hoursPerDay × 60))   ← hourly = dailyRate ÷ 8 (DOLE)
- *
- * NO-OP GUARANTEE: with the seeded defaults (late_deduction_mode=none,
- * undertime_deduction_mode=none) this returns DeductionResult::zero() for every day,
- * so wiring it in changes no pesos until HR flips a mode.
- *
- * Coordination with approved early-out requests: those are priced elsewhere
- * (unpaidDaysFor's earlyOutFraction, ÷ scheduled span) and left untouched to preserve
- * the no-op. The caller passes `governed_by_early_out = true` for such days and this
- * service returns zero undertime for them, so the two paths can never double-charge.
  */
 class DeductionService
 {
     /**
      * @param  array<string,mixed>  $ctx  the day's facts (all times as Manila minute-of-day ints):
      *   - start_min, end_min: int|null           schedule window
-     *   - grace_min: int                          resolved grace (via effectiveFor → daily overrides, F-8)
+     *   - grace_min: int                          resolved grace (via effectiveFor → daily overrides)
      *   - time_in_min: int|null                   clock-in (null ⇒ not a worked day; returns zero)
      *   - time_out_min: int|null                  clock-out (null ⇒ missing punch; see missing_clockout_mode)
      *   - half_day_off: 'AM'|'PM'|null            which half is off (worked window is the OTHER half)
-     *   - am_start_min, am_end_min, pm_start_min, pm_end_min: int|null   half windows (F-3)
+     *   - am_start_min, am_end_min, pm_start_min, pm_end_min: int|null   half windows
      *   - governed_by_early_out: bool             an approved early-out already prices this day's undertime
-     *   - amnesty: bool                           force-majeure waiver for this date (F-8/§9) ⇒ zero
+     *   - amnesty: bool                           force-majeure waiver for this date (§9) ⇒ zero
      *   - full_day_credited: bool                 the day cleared HR's minimum-hours bar ⇒ zero undertime
      *   - cap_remaining: float                    max fraction this day may still cost (1.0 full day; 0.5 left on a half-day)
      */
@@ -53,7 +37,7 @@ class DeductionService
         }
 
         // Break/lunch overage is never charged, and is no longer detected here: ViolationService
-        // owns it (Slice 9), so it is flagged against the employee's own schedule entitlement and
+        // owns it, so it is flagged against the employee's own schedule entitlement and
         // works whether or not a deduction mode is switched on. Breaks are not a pay input.
         $flags = [];
 
@@ -65,10 +49,6 @@ class DeductionService
         // any post-midnight punches rolled past 24h before these raw minute-of-day values can be
         // compared. Without it a 00:30 arrival computed max(0, 30 − 1320) = 0 late, and a 23:00
         // departure looked like no undertime at all — a graveyard worker could never be charged.
-        //
-        // Which side of midnight a punch belongs to is decided by the midpoint of the off-shift
-        // gap: for 22:00–06:00 that is 14:00, so 00:30 is the next day while 21:00 is an early
-        // arrival on the same one.
         if ($workStart !== null && $workEnd !== null && $workEnd < $workStart) {
             $boundary = intdiv($workEnd + $workStart, 2);
             $roll = static fn (?int $t): ?int => $t !== null && $t <= $boundary ? $t + 1440 : $t;
@@ -89,12 +69,6 @@ class DeductionService
         }
 
         // --- undertime (clock-derived; approved early-out days are handled elsewhere) ---
-        //
-        // `full_day_credited` — the day cleared the minimum-hours bar HR declared for that date
-        // (FullDayCreditService), so leaving before the scheduled end is not undertime at all:
-        // the company shortened the compensable day. It zeroes the undertime branch ONLY.
-        // Lateness below is untouched and still charges, which is the decision: a shortened day
-        // says how much work earns a full day, it does not say arriving late is free.
         $undertimeMinutes = 0;
         if (
             $policy->undertime_deduction_mode === 'per_hour'
@@ -149,15 +123,7 @@ class DeductionService
 
     /**
      * The window the employee was expected to work. Normally the full schedule; on a
-     * half-day, the half they were NOT off (F-3).
-     *
-     * AN UNCONFIGURED HALF CHARGES NOTHING. This used to fall back to the full window "so it stays
-     * a no-op until HR fills them in" — but on a half day that fallback is not a no-op at all, it
-     * is a charge: it measures a 1:00 PM arrival against an 8:00 AM start and bills five hours of
-     * lateness against a shift the employee had approved off. Returning nulls skips both the late
-     * and the undertime branch above, which is the only defensible reading of a window nobody set.
-     * Mirrors HalfDayWindowService::windowFor(), which the roster and the clock judge on — the two
-     * have to answer identically or the payslip and the badge disagree again.
+     * half-day, the half they were NOT off.
      *
      * @param  array<string,mixed>  $ctx
      * @return array{0:int|null,1:int|null}  [start_min, end_min]

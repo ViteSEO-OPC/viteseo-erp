@@ -15,24 +15,7 @@ use App\Modules\Hr\Services\ReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-042 — the payroll register, and FIN-041 / FIN-017 — filters on the payroll reports.
- *
- * The only per-employee financial listing was the run CSV export: a file you download, open in a
- * spreadsheet and add up by hand. No on-screen register, no department subtotal, no comparison against
- * the previous period — so the standard pre-disbursement check (register → totals → variance) had no
- * supporting screen. The payroll report itself listed every completed run ever with no way to narrow it.
- *
- * `test_the_register_reconciles_to_the_runs_own_totals` IS THE FINDING'S OWN VALIDATION, and the reason
- * `pesoExact()` had to exist. `ReportService::peso()` is `number_format($n, 0)` — fine for a headline
- * stat, fatal for a reconciliation view, because rounding every row to whole pesos guarantees the totals
- * cannot match `hr_payroll_runs.total_*`. A reconciliation screen that does not reconcile is worse than
- * none: it looks authoritative while being off by the sum of everyone's centavos.
- *
- * THE FILTER TESTS CHECK THE LABELS, not just the figures. A number labelled "YTD" while a date range is
- * applied is precisely the FIN-052 defect in a new place — there, a "Net paid" label sat over a sum of
- * merely-computed runs. Scope belongs in the label.
- */
+/** The payroll register, and / — filters on the payroll reports. */
 class PayrollRegisterTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -108,9 +91,7 @@ class PayrollRegisterTest extends HrTestCase
 
     // --- the register ----------------------------------------------------------------------------
 
-    /**
-     * THE FINDING'S VALIDATION. Register totals must equal the run's stored figures to the centavo.
-     */
+    /** THE FINDING'S VALIDATION. Register totals must equal the run's stored figures to the centavo. */
     public function test_the_register_reconciles_to_the_runs_own_totals(): void
     {
         $run = $this->staffAndRun();
@@ -291,7 +272,7 @@ class PayrollRegisterTest extends HrTestCase
             ->assertSuccessful();
     }
 
-    // --- FIN-041 / FIN-017: filters on the payroll + compensation reports -------------------------
+    // --- /: filters on the payroll + compensation reports -------------------------
 
     /** @param array<string, mixed> $filters */
     private function payrollReport(array $filters = []): array
@@ -314,7 +295,7 @@ class PayrollRegisterTest extends HrTestCase
     }
 
     /**
-     * THE LABEL FOLLOWS THE FILTER. A figure labelled YTD while a range is applied is the FIN-052
+     * THE LABEL FOLLOWS THE FILTER. A figure labelled YTD while a range is applied is the
      * defect in a new place.
      */
     public function test_the_payroll_labels_state_their_own_scope(): void

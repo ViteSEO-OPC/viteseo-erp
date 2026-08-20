@@ -31,21 +31,7 @@ import { ScheduleUpload } from "@/modules/hr/components/schedule-upload";
 import { CONTRIBUTION_LABELS, SALARY_BASES } from "@/modules/hr/types/benefits";
 import { cn } from "@/lib/utils";
 
-/**
- * Record a dated change to a government contribution's rates (Slices B3a / B3b).
- *
- * The form is shaped per contribution rather than showing every knob to everyone. The three work
- * differently and an earlier version of this dialog exposed all of it at once — a salary floor, a
- * salary ceiling, two amount caps and a bracket toggle — which read as six interchangeable boxes.
- * It also let a version save with no ceiling at all, which charged a ₱95,000 earner 5% of their
- * whole salary.
- *
- *   SSS         salary brackets (MSC) · employer EC add-on
- *   PhilHealth  percentage between a floor and a ceiling
- *   Pag-IBIG    percentage with a maximum deduction
- *
- * Rates are entered as PERCENTAGES (how the agencies publish them); the API stores decimals.
- */
+/** Record a dated change to a government contribution's rates. */
 export function EditContributionDialog({
   type,
   onOpenChange,
@@ -100,12 +86,12 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
   const [addOn, setAddOn] = useState(String(latest?.fixed_employer_add_on ?? 0));
   const [addOnMin, setAddOnMin] = useState(String(latest?.add_on_min_salary ?? ""));
   const [note, setNote] = useState("");
-  // Slice B19 — WHICH salary figure the rate applies to, as opposed to the bracket/percentage
+  // WHICH salary figure the rate applies to, as opposed to the bracket/percentage
   // choice above, which is how the charge is worked out once a figure is chosen. Defaults to
   // whatever the version in force already does, so opening this dialog and saving without
   // touching it never moves a contribution onto a different base by accident.
   const [salaryBasis, setSalaryBasis] = useState(latest?.salary_basis ?? "basic");
-  // Slice B8 — the bands in play: whatever an upload produced, else whatever this version
+  // The bands in play: whatever an upload produced, else whatever this version
   // already has. Sixty rows of government figures are never retyped.
   const [imported, setImported] = useState<ScheduleImportResult | null>(null);
 
@@ -123,7 +109,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
     : (latest?.brackets ?? []);
   const bandsValid = !bracketsApply || bands.length > 0;
 
-  // Slice B8 — does the table carry its own EC? If it does, the flat add-on below is dead weight:
+  // Does the table carry its own EC? If it does, the flat add-on below is dead weight:
   // `ContributionCalculator` prefers the band's amount, so anything typed there would be ignored
   // for every band that has one.
   const ecAmounts = [
@@ -154,7 +140,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
   const employerPays = (salary: number) => {
     const raw = chargeableFor(salary) * toDecimal(employerRate);
     const capped = maxAmount.trim() === "" ? raw : Math.min(raw, Number(maxAmount));
-    // Slice B8 — the band's own EC wins when the published table printed one, so the worked
+    // The band's own EC wins when the published table printed one, so the worked
     // example shows what payroll will really charge rather than the flat-rule approximation.
     const band = bracketsApply
       ? [...bands].reverse().find((b) => salary >= b.min_salary)
@@ -185,16 +171,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
     }
   }
 
-  /**
-   * FIN-026 — HR's acknowledgement that this date reaches back over completed payroll runs.
-   *
-   * The backend refuses a backdated version unless it is told the risk is understood, and its
-   * message names the affected runs. Backdating itself is legitimate and common: an agency
-   * publishes a circular in March that took effect in January. What must not happen silently is
-   * that a completed-but-unlocked run's next recompute reprices its statutory deductions.
-   *
-   * Without this dialog the refusal is a dead end — the rate simply cannot be saved.
-   */
+  /** HR's acknowledgement that this date reaches back over completed payroll runs. */
   const [repricingWarning, setRepricingWarning] = useState<string | null>(null);
 
   async function submit(acknowledgeRepricing = false) {
@@ -218,7 +195,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
           : numOrNull(salaryCap),
         employee_amount_cap: bracketsApply ? null : numOrNull(maxAmount),
         employer_amount_cap: bracketsApply ? null : numOrNull(maxAmount),
-        // Slice B8 — when the table prints an EC per band, the flat rule must be cleared rather
+        // When the table prints an EC per band, the flat rule must be cleared rather
         // than carried over. It would be inert for every band that has an amount, and then apply
         // silently to any band that does not — a surprise nobody could see coming.
         fixed_employer_add_on: ecFromTable ? 0 : Number(addOn) || 0,
@@ -234,7 +211,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
     } catch (err) {
       const errors = err instanceof AxiosError ? err.response?.data?.errors : null;
 
-      // FIN-026 — this one is a question, not a failure: show what it would reprice and let HR
+      // This one is a question, not a failure: show what it would reprice and let HR
       // decide. Any other error stays an error.
       const backdated = errors?.effective_from?.[0];
       if (backdated) {
@@ -266,9 +243,11 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
           />
         </Field>
 
-        {/* Slice B19 — the salary the rate is applied to. Placed above the rate because it is the
-            larger of the two decisions: changing it moves what every payslip is measured against,
-            while a rate change only moves the multiplier. */}
+        {/*
+         * The salary the rate is applied to. Placed above the rate because it is the
+         * larger of the two decisions: changing it moves what every payslip is measured against,
+         * while a rate change only moves the multiplier.
+         */}
         <Section title="The salary it is charged on">
           <div className="flex flex-wrap gap-2">
             {SALARY_BASES.map((option) => (
@@ -292,9 +271,11 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
               ? "Charged on what the period actually paid: basic pay after absences and lates, plus overtime, night differential, holiday and rest-day premium, and the allowances marked as counting toward contributions."
               : "Charged on the employee's basic monthly salary from their profile, whatever they actually earned in the period."}
           </p>
-          {/* Not blocked — a company may have a reason — but PhilHealth's basis is set by
-              regulation rather than by preference, and saying so is cheaper than a correction
-              after a quarter of remittances. */}
+          {/*
+           * Not blocked — a company may have a reason — but PhilHealth's basis is set by
+           * regulation rather than by preference, and saying so is cheaper than a correction
+           * after a quarter of remittances.
+           */}
           {type === "philhealth" && salaryBasis === "earnings" && (
             <p className="mt-2 text-caption text-warning">
               PhilHealth premiums are set on the fixed <strong>basic</strong> monthly salary
@@ -340,11 +321,13 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
           </Section>
         )}
 
-        {/* Pag-IBIG — the cap can be expressed either way, and BOTH are shown because both can be
-            in force. The rule Pag-IBIG actually publishes is a cap on the salary the rate applies
-            to ("fund salary"), and that is what the seeded version uses. Showing only the amount
-            cap hid the ₱10,000 salary cap that was really in force — the form said "no maximum"
-            while payroll was capping every contribution at ₱200. */}
+        {/*
+         * Pag-IBIG — the cap can be expressed either way, and BOTH are shown because both can be
+         * in force. The rule Pag-IBIG actually publishes is a cap on the salary the rate applies
+         * to ("fund salary"), and that is what the seeded version uses. Showing only the amount
+         * cap hid the ₱10,000 salary cap that was really in force — the form said "no maximum"
+         * while payroll was capping every contribution at ₱200.
+         */}
         {!bracketsApply && guide.fields === "maximum" && (
           <Section title="Maximum contribution">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -370,13 +353,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
           </Section>
         )}
 
-        {/* SSS EC — employer-only, so it lives on its own.
-
-            Slice B8 — when the imported table prints an EC per band, THAT is what payroll charges
-            and these two fields are ignored entirely. Leaving them editable made a control that
-            looks live and isn't: type ₱50 here, and every band with its own amount keeps charging
-            what the schedule says. So they only appear when the table has no EC column of its
-            own, which is the one case the flat rule is still needed for. */}
+        {/* SSS EC — employer-only, so it lives on its own. */}
         {bracketsApply && ecFromTable && (
           <Section title="Employer-only add-on">
             <p className="text-caption text-muted-foreground">
@@ -473,7 +450,7 @@ function ContributionForm({ type, onDone }: { type: string; onDone: () => void }
           {save.isPending ? "Saving…" : "Save"}
         </Button>
       </DialogFooter>
-      {/* FIN-026 — backdating is allowed, but never silently. */}
+      {/* Backdating is allowed, but never silently. */}
       <Dialog open={repricingWarning !== null} onOpenChange={(o) => !o && setRepricingWarning(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>

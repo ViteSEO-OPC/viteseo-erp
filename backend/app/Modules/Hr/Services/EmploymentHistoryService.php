@@ -8,23 +8,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
-/**
- * Hand-editing the employment-history timeline.
- *
- * The timeline is written automatically — opened at hire, moved by a job-title change, closed by a
- * separation — and that stays exactly as it was. This service is the escape hatch for the thing
- * automation cannot do: fix a mistake. A title typed wrong two promotions ago, a role someone
- * forgot to record, a duplicate left by a mis-click. Without it the only correction available was
- * the `correction` change type, which renames the CURRENT role and nothing else.
- *
- * Nothing downstream reads this table — it is a record for people, not an input to payroll — so
- * these edits are free in a way the compensation timeline's deliberately are not (see
- * SalaryHistoryService, where every row prices a payslip).
- *
- * The one invariant worth keeping is ONE OPEN ROLE. `recordRoleChange()` finds the role to close by
- * looking for the row with no end date; two of those and a promotion closes an arbitrary one of
- * them. So an edit that would leave a second role open is refused rather than quietly accepted.
- */
+/** Hand-editing the employment-history timeline. */
 class EmploymentHistoryService
 {
     /** A role still being held has no end date; every other status describes how it ended. */

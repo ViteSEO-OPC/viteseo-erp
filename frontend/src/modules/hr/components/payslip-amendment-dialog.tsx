@@ -28,17 +28,7 @@ interface DraftLine {
   note: string;
 }
 
-/**
- * The three corrections, in the words HR uses for them — and what each does to the tax.
- *
- * ONE CHOICE FOR THE WHOLE BATCH, not per line. A batch already shares one reason and one issue
- * date: it is one correction applied to several people, and a batch that both paid and deducted
- * would need two reasons to explain itself.
- *
- * SPELLING OUT THE TAX IS THE POINT. "Minus ₱1,000" describes both of the last two, and they are
- * not the same money: reversing pay gives back the tax withheld on it, while a missed deduction
- * must not, or the correction quietly hands back tax the BIR is owed.
- */
+/** The three corrections, in the words HR uses for them — and what each does to the tax. */
 const KINDS: Record<
   AmendmentKind,
   { label: string; hint: string; amountLabel: string; placeholder: string; verb: string }
@@ -66,13 +56,7 @@ const KINDS: Record<
   },
 };
 
-/**
- * How a period reads in the picker.
- *
- * A 13th month and a final pay are named by what they are, since neither describes a cutoff — but
- * both are real documents that can be wrong, so both are correctable. The retired adjustment runs
- * are not listed at all; see the filter in the form.
- */
+/** How a period reads in the picker. */
 function runLabel(run: PayrollRun): string {
   const year = run.cycle_end.slice(0, 4);
   if (run.type === "thirteenth_month") return `13th month · ${year}`;
@@ -80,35 +64,7 @@ function runLabel(run: PayrollRun): string {
   return `${formatDate(run.cycle_start)} – ${formatDate(run.cycle_end)} · ${payFrequencyLabel(run.frequency)}`;
 }
 
-/**
- * Correct a period on its own payslips.
- *
- * WHAT CHANGED, AND WHY THE FORM LOOKS DIFFERENT. This replaces the off-cycle adjustment RUN, which
- * paid a correction by issuing a second payslip in a window HR typed by hand. The employee then held
- * two documents for one period and had to add them together, and the run they were paid under
- * matched no cutoff on the calendar. A correction now lands on the payslip it belongs to: the period
- * is CHOSEN from the runs that exist, so it cannot be pointed at dates nothing was ever paid for.
- *
- * WHAT IT STILL DOES NOT DO. It recomputes nothing — no attendance, no proration, no statutory
- * contributions, which are monthly and were already taken on the period being corrected. HR states
- * who and how much; the backend withholds tax on top of what the employee has been taxed this year.
- * Re-running the period later re-applies these corrections rather than erasing them.
- *
- * AMENDING AN ALREADY-PAID PAYSLIP IS ALLOWED, and is the main reason this exists. The payslip's net
- * rises while what actually left the bank stays where it is, so the difference shows as a balance
- * still to pay — the row and the document both say so, and the run cannot be locked until it is
- * settled. The form says which of the chosen employees are in that position BEFORE submitting,
- * because "this raises their net" and "this owes them money" are different sentences to sign off.
- *
- * A CORRECTION CAN ALSO TAKE MONEY, in one of two ways that look identical on a payslip and are not
- * the same thing — see KINDS. Amounts are always typed as positive figures and the kind carries the
- * direction, so there is no way to enter a deduction that accidentally pays.
- *
- * TAKING MONEY BACK FROM A PAID PAYSLIP IS STATED, NEVER TAKEN. It leaves the payslip's net below
- * what was transferred, and that difference is shown as an overpayment for a person to act on:
- * recovering wages already paid needs the employee's written consent under Art. 113, so no future
- * payslip collects it automatically.
- */
+/** Correct a period on its own payslips. */
 export function PayslipAmendmentDialog({
   open,
   onOpenChange,
@@ -137,13 +93,7 @@ export function PayslipAmendmentDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/*
-          The form is its own component so the draft lives and dies with the open dialog.
-
-          Radix unmounts the content on close, so every open starts from the prefills as state
-          initialisers — no effect re-seeding fields, and no path where a previous correction's
-          amounts survive into the next one.
-        */}
+        {/* The form is its own component so the draft lives and dies with the open dialog. */}
         <AmendmentForm
           prefillRunId={prefillRunId}
           prefillEmployeeId={prefillEmployeeId}
@@ -178,39 +128,31 @@ function AmendmentForm({
     { employee_id: prefillEmployeeId ?? "", amount: "", note: "" },
   ]);
   /*
-    EVERYONE AT ONE AMOUNT — the shape a company-wide correction actually has: a benefit share that
-    started mid-period, an allowance the whole payroll was owed. It is a MODE rather than a button
-    that fills the rows, because the figure is one decision, not N identical ones: typed once, it
-    cannot drift between employees, and there is a single field to change when it turns out wrong.
-
-    Opened per-employee when the dialog was given someone to correct — that prefill IS the answer to
-    "who", and it comes from a difference owed to one person.
-  */
+   * EVERYONE AT ONE AMOUNT — the shape a company-wide correction actually has: a benefit share that
+   * started mid-period, an allowance the whole payroll was owed. It is a MODE rather than a button
+   * that fills the rows, because the figure is one decision, not N identical ones: typed once, it
+   * cannot drift between employees, and there is a single field to change when it turns out wrong.
+   */
   const [everyone, setEveryone] = useState(false);
   const [bulkAmount, setBulkAmount] = useState("");
   const [bulkNote, setBulkNote] = useState("");
 
   /*
-    A locked run can never be recomputed, so a correction on it could never be re-applied — and an
-    incomplete one has no payslips to correct. Both are refused by the backend; leaving them out of
-    the picker is how HR finds that out before typing amounts.
-
-    THE RETIRED ADJUSTMENT RUNS ARE OUT TOO. Each invented a one-day window for itself instead of
-    covering a cutoff, so it appears in a list of periods as a date with no range — and correcting
-    one would amend that stray payslip rather than the period whose figure was wrong. They are
-    history to be read, not periods to be corrected.
-  */
+   * A locked run can never be recomputed, so a correction on it could never be re-applied — and an
+   * incomplete one has no payslips to correct. Both are refused by the backend; leaving them out of
+   * the picker is how HR finds that out before typing amounts.
+   */
   const amendable = useMemo(
     () => runs.filter((r) => r.status === "completed" && !r.is_locked && r.type !== "adjustment"),
     [runs],
   );
 
   /*
-    DERIVED, not stored. The picker opens on the period it was given, but that period may not be
-    amendable — the run list arrives after this mounts, and a prefilled run can be locked. Falling
-    back to the newest amendable run keeps the form usable either way, without an effect writing
-    over a choice HR has already made.
-  */
+   * DERIVED, not stored. The picker opens on the period it was given, but that period may not be
+   * amendable — the run list arrives after this mounts, and a prefilled run can be locked. Falling
+   * back to the newest amendable run keeps the form usable either way, without an effect writing
+   * over a choice HR has already made.
+   */
   const runId = amendable.some((r) => r.id === pickedRunId)
     ? pickedRunId
     : (amendable[0]?.id ?? null);
@@ -222,13 +164,7 @@ function AmendmentForm({
   const takesMoney = kind !== "pay";
   const spec = KINDS[kind];
 
-  /**
-   * WHAT WILL BE POSTED, whichever way it was entered.
-   *
-   * Both modes reduce to the same list here, so the total, every warning and the submit read one
-   * shape. The alternative — each of them asking "are we in bulk mode?" — is how a form ends up
-   * warning about the rows on screen while sending something else.
-   */
+  /** WHAT WILL BE POSTED, whichever way it was entered. */
   const payloadLines = everyone
     ? Number(bulkAmount) > 0
       ? breakdown.map((row) => ({
@@ -362,8 +298,10 @@ function AmendmentForm({
             <label htmlFor="amend-issued" className="text-caption font-medium">
               Issued on
             </label>
-            {/* When the correction is issued — NOT the period being fixed, which is the field
-                beside it. It prints on the payslip beside the amount. */}
+            {/*
+             * When the correction is issued — NOT the period being fixed, which is the field
+             * beside it. It prints on the payslip beside the amount.
+             */}
             <DatePicker id="amend-issued" value={issuedOn} onChange={setIssuedOn} />
           </div>
         </div>
@@ -415,9 +353,11 @@ function AmendmentForm({
             )}
           </p>
 
-          {/* The whole period at one figure, for the corrections that are company-wide by nature.
-              Beside the heading rather than at the foot of the rows: it decides what the rest of
-              this section even looks like. */}
+          {/*
+           * The whole period at one figure, for the corrections that are company-wide by nature.
+           * Beside the heading rather than at the foot of the rows: it decides what the rest of
+           * this section even looks like.
+           */}
           <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
             <input
               type="checkbox"
@@ -509,8 +449,10 @@ function AmendmentForm({
                       <span className="sr-only">Remove</span>
                     </Button>
                   </div>
-                  {/* What this payslip currently says, so the amount is entered against the figure
-                      it is correcting rather than from memory. */}
+                  {/*
+                   * What this payslip currently says, so the amount is entered against the figure
+                   * it is correcting rather than from memory.
+                   */}
                   {row && (
                     <p className="pl-1 text-caption text-muted-foreground">
                       Net {formatPeso(row.net)}
@@ -518,8 +460,10 @@ function AmendmentForm({
                       {row.disbursed != null &&
                         row.outstanding > 0 &&
                         ` · ${formatPeso(row.outstanding)} outstanding`}
-                      {/* What the payslip cannot cover, said against the line that causes it rather
-                          than as a total afterwards. */}
+                      {/*
+                       * What the payslip cannot cover, said against the line that causes it rather
+                       * than as a total afterwards.
+                       */}
                       {kind === "deduction" && Number(line.amount) > row.net && (
                         <span className="text-warning">
                           {" "}
@@ -567,8 +511,10 @@ function AmendmentForm({
           </p>
         )}
 
-        {/* In bulk mode there are no rows to say this beside, and it is the case bulk mode makes
-            likely: one figure against a payroll where somebody had a thin period. */}
+        {/*
+         * In bulk mode there are no rows to say this beside, and it is the case bulk mode makes
+         * likely: one figure against a payroll where somebody had a thin period.
+         */}
         {everyone && shortfalls.length > 0 && (
           <div className="rounded-card border border-warning/40 bg-warning/10 p-3">
             <p className="text-sm font-medium text-foreground">
@@ -596,8 +542,10 @@ function AmendmentForm({
           </div>
         )}
 
-        {/* The one consequence that is not obvious from the form: a period finance has already
-            settled no longer matches what was transferred. */}
+        {/*
+         * The one consequence that is not obvious from the form: a period finance has already
+         * settled no longer matches what was transferred.
+         */}
         {alreadyPaid.length > 0 && (
           <div className="rounded-card border border-warning/40 bg-warning/10 p-3">
             <p className="text-sm font-medium text-foreground">

@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Built in Slice 4 (not 5) because EmployeeService::create seeds a leave balance
+// Built in (not 5) because EmployeeService::create seeds a leave balance
 // per leave type on hire — so the types must exist first.
 return new class extends Migration
 {

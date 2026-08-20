@@ -12,11 +12,6 @@ class LeaveTypesSeeder extends Seeder
         // Unplanned leave (sick / emergency / bereavement) is commonly filed after the
         // fact, so those allow backdating within a 14-day window. Planned leave (annual,
         // SIL) and LWOP must be filed for today/future.
-        //
-        // `is_unlimited` is stated for every row rather than left to the column default: the
-        // migration that added it backfills unpaid types, but `migrate:fresh --seed` seeds AFTER
-        // migrating, so a fresh database would otherwise create LWOP capped at its 0 days — i.e.
-        // unfilable. It is a separate switch from `is_paid` on purpose; HR can cap LWOP later.
         $types = [
             ['name' => 'Annual Leave', 'code' => 'ANL', 'days_per_year' => 15, 'is_paid' => true, 'is_unlimited' => false, 'color' => '#4FDBD7', 'allow_backdated' => false, 'backdate_limit_days' => null],
             ['name' => 'Sick Leave', 'code' => 'SCK', 'days_per_year' => 10, 'is_paid' => true, 'is_unlimited' => false, 'color' => '#22C554', 'allow_backdated' => true, 'backdate_limit_days' => 14],

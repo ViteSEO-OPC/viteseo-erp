@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 18. Requisitions gain a `pipeline` (standard vs OJT) that decides
+// Phase-2. Requisitions gain a `pipeline` (standard vs OJT) that decides
 // the candidate stage flow; candidates gain applicant-card fields + a marker for
 // the interview-invitation email.
 return new class extends Migration

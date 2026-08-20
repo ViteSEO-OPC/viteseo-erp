@@ -98,7 +98,7 @@ export interface AdjustAttendanceInput {
   time_in: string | null;
   time_out: string | null;
   /**
-   * Slice 16 — null/omitted derives the status from the times (the old behaviour). A value
+   * null/omitted derives the status from the times (the old behaviour). A value
    * here is an explicit HR override that wins over both the clock and the leave table.
    */
   status?: string | null;

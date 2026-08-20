@@ -247,21 +247,10 @@ export function EmployeeFormDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/*
-        One scroller, not two. The dialog used to scroll itself (`max-h-[90svh]
-        overflow-y-auto`) around a body that also scrolled at `max-h-[60vh]`, so
-        a tall form showed a scrollbar inside a scrollbar.
-
-        The dialog is now a flex column capped at `90svh` with a non-scrolling
-        header and footer, and the body is the only thing that moves. Dropping
-        `overflow-x-hidden` here matters as much as dropping `overflow-y-auto`:
-        a non-`visible` value on one axis forces the other to compute to `auto`,
-        so leaving it would have kept the outer scrollbar anyway. The body still
-        carries it, which is where the horizontal clipping was wanted.
-
-        Sizing the body with `flex-1 min-h-0` instead of `max-h-[60vh]` also
-        drops the guess — it takes whatever height is left over after the header
-        and footer, at any viewport height, rather than 60% of the viewport.
-      */}
+       * One scroller, not two. The dialog used to scroll itself (`max-h-[90svh]
+       * overflow-y-auto`) around a body that also scrolled at `max-h-[60vh]`, so
+       * a tall form showed a scrollbar inside a scrollbar.
+       */}
       <DialogContent className="flex max-h-[90svh] max-w-[calc(100%-3rem)] flex-col sm:max-w-lg">
         <DialogHeader className="shrink-0">
           <DialogTitle>Add employee</DialogTitle>
@@ -549,16 +538,22 @@ export function EmployeeFormDialog({
               <Field label="Bank account name" error={errors.bank_account_name?.message}>
                 <Input placeholder="Juan Dela Cruz" {...register("bank_account_name")} />
               </Field>
-              {/* No per-employee SSS / Pag-IBIG / PhilHealth amounts. They replaced the
-                  EMPLOYEE side of the deduction while the employer side kept following the
-                  brackets, so one payslip could carry a pair on no government table. Everyone
-                  is charged the company rates; un-enrolling is how someone stops paying one. */}
-              {/* Slice B9 — no allowance boxes here. Allowances are programmes in
-                  Company → Benefits: the catalogue grows and shrinks, so three fixed fields
-                  could never describe it, and payroll stopped reading these columns in B1. */}
+              {/*
+               * No per-employee SSS / Pag-IBIG / PhilHealth amounts. They replaced the
+               * EMPLOYEE side of the deduction while the employer side kept following the
+               * brackets, so one payslip could carry a pair on no government table. Everyone
+               * is charged the company rates; un-enrolling is how someone stops paying one.
+               */}
+              {/*
+               * No allowance boxes here. Allowances are programmes in
+               * Company → Benefits: the catalogue grows and shrinks, so three fixed fields
+               * could never describe it, and payroll stopped reading these columns in B1.
+               */}
 
-              {/* Membership numbers, not amounts — these print on the payslip header.
-                  Kept apart from the ₱ overrides above so "SSS" can't mean two things. */}
+              {/*
+               * Membership numbers, not amounts — these print on the payslip header.
+               * Kept apart from the ₱ overrides above so "SSS" can't mean two things.
+               */}
               <div className="border-t border-border pt-4 sm:col-span-2">
                 <p className="text-label font-semibold uppercase tracking-wide text-brand">
                   Government IDs

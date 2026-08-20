@@ -173,9 +173,11 @@ export function FaqFormDialog({
         className={cn("max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto gap-0 p-0", isEdit ? "sm:max-w-[560px]" : "sm:max-w-[500px]")}
       >
         <DialogHeader className={cn("mb-0", pad, isEdit ? "pt-6 pb-5" : "py-6")}>
-          {/* Sizes restated here for the same tailwind-merge reason as labelClass:
-              the kit's own text-h3 / text-caption are stripped from DialogTitle
-              and DialogDescription before they reach the DOM. */}
+          {/*
+           * Sizes restated here for the same tailwind-merge reason as labelClass:
+           * the kit's own text-h3 / text-caption are stripped from DialogTitle
+           * and DialogDescription before they reach the DOM.
+           */}
           <DialogTitle
             className={cn(
               "text-[length:var(--text-h3)]",
@@ -235,8 +237,10 @@ export function FaqFormDialog({
               )}
             </div>
 
-            {/* Create picks a category from chips; edit uses a dot select beside
-                Status. Both frames are drawn that way. */}
+            {/*
+             * Create picks a category from chips; edit uses a dot select beside
+             * Status. Both frames are drawn that way.
+             */}
             {isEdit ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">

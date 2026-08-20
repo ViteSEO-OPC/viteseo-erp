@@ -23,11 +23,6 @@ class LeaveController extends Controller
     /**
      * GET /api/v1/hr/leave-types — any authenticated user (the filing form needs it).
      *
-     * HR sees every type, because this is also what the Company → Leave Type screen configures.
-     * An EMPLOYEE sees only the types they can actually file: a paid type they hold no credits
-     * for was previously offered in the picker and then refused by the 422 on submit, which read
-     * as a bug rather than as "you are not entitled to this".
-     *
      * @see LeaveService::selectableTypesFor() for the rule, including why unpaid leave always shows.
      */
     public function leaveTypes(Request $request): JsonResponse

@@ -13,20 +13,7 @@ import {
 } from "@/modules/hr/hooks/use-benefit-programs";
 import { frequencyLabel, type EmployeeAllowance } from "@/modules/hr/types/benefits";
 
-/**
- * What this employee is paid per allowance, and the one place to give them a different amount —
- * Slice B14.
- *
- * WHY IT LOOKS LIKE THIS. It replaces three fixed boxes (Food / Transportation / Load) that
- * payroll had stopped reading, so HR could raise a figure here and the payslip would not move.
- * The list is built from the allowance catalogue, which HR adds to and deletes from — four today,
- * any number tomorrow — so there is nothing fixed left to go stale.
- *
- * THE DEFAULT IS "FOLLOWS THE PROGRAMME", and it has to stay that way. The bug this whole audit
- * began with was every employee carrying their own frozen figure, which meant editing an allowance
- * on the Benefits page changed nobody's pay. A row here only stops following when somebody
- * deliberately types an amount, and it says who did and when.
- */
+/** What this employee is paid per allowance, and the one place to give them a different amount — */
 export function EmployeeAllowancesBlock({ employeeId }: { employeeId: number }) {
   const { data: rows, isLoading, isError } = useEmployeeAllowances(employeeId);
 
@@ -154,8 +141,10 @@ function AllowanceRow({ employeeId, row }: { employeeId: number; row: EmployeeAl
         )}
       </div>
 
-      {/* Provenance is the whole difference between a deliberate arrangement and a leftover —
-          B6 had 56 rows nobody could tell apart, and that is why they were all cleared. */}
+      {/*
+       * Provenance is the whole difference between a deliberate arrangement and a leftover —
+       * B6 had 56 rows nobody could tell apart, and that is why they were all cleared.
+       */}
       {overridden && row.set_by && (
         <p className="mt-2 text-caption text-muted-foreground">
           Own amount set by {row.set_by}

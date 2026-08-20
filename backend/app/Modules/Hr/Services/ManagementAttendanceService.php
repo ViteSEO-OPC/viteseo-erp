@@ -8,34 +8,7 @@ use App\Modules\Hr\Models\LeaveRequest;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
-/**
- * Generates the attendance rows for management staff.
- *
- * Management is exempt from the time clock — they never scan in or out. Until now
- * that meant they had NO attendance rows at all, and every consumer of attendance
- * had to special-case them: the roster does, payroll does, and the violation engine
- * did not — so management accumulated an unbroken AWOL streak for every past
- * workday since their hire date.
- *
- * Rather than add an nth `isManagement()` guard, we write the rows the exempt
- * arrangement implies: on each scheduled workday, present for their full shift.
- * Every present and future consumer of attendance is then correct for free.
- *
- * The rows are marked `source = 'system'` so an audit or a payroll dispute can
- * always tell system-generated presence from a human's attestation. Nothing else
- * in the app writes that value, and the violation engine deliberately ignores
- * these rows when it works out when the org started tracking attendance.
- *
- * Rules, in order:
- *   - Only `is_management` employees (soft-deleted employees are out of scope).
- *   - Never before the employee's hire date.
- *   - Only days their EFFECTIVE schedule says are workdays (override → assigned →
- *     default), so a management member on a Tue–Sat schedule gets Tue–Sat.
- *   - Never on a day covered by an approved leave request — leave is the truth there.
- *   - Never overwrite a human: an existing row that is not `source = 'system'` is
- *     left exactly as it is, and so is a soft-deleted row (deleting was deliberate).
- *   - Idempotent: re-running refreshes only the rows this job owns.
- */
+/** Generates the attendance rows for management staff. */
 class ManagementAttendanceService
 {
     public function __construct(
@@ -138,15 +111,6 @@ class ManagementAttendanceService
 
     /**
      * Populate a row from the employee's effective schedule for the day.
-     *
-     * Times are built as Manila wall-clock and converted to UTC before storing —
-     * Eloquent writes the Carbon's own wall-clock into the column without
-     * converting, so a Manila-tz Carbon would land 8 hours off.
-     *
-     * Hours mirror the schedule's paid day (`expected_minutes` = full span minus the
-     * UNPAID meal period). The paid break is paid by definition, so it is not
-     * deducted — which keeps `gross - lunch_minutes - break_minutes` equal to
-     * `hours_worked`, the same identity a real clock-out produces.
      *
      * @param  array<string, mixed>  $eff
      */

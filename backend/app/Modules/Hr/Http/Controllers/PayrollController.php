@@ -48,7 +48,7 @@ class PayrollController extends Controller
         $setting = PayrollSetting::current();
         $validated = $request->validated();
 
-        // FIN-025 — the effective date governs the VERSION, it is not a settings field. Pulled
+        // The effective date governs the VERSION, it is not a settings field. Pulled
         // out before the diff below so it never appears in the audit line as a changed setting.
         $effectiveFrom = $validated['effective_from'] ?? null;
         unset($validated['effective_from']);
@@ -70,7 +70,7 @@ class PayrollController extends Controller
         // after it they are indistinguishable from anyone else in the destination group.
         $inheriting = app(PayScheduleService::class)->inheritingDefaultCount();
 
-        // FIN-025 — declare the effective date, then save: the model's `updated` hook records the
+        // Declare the effective date, then save: the model's `updated` hook records the
         // version, so there is exactly one writer and no way to update without versioning.
         PayrollSetting::effectiveFrom($effectiveFrom);
         $setting->update($validated);
@@ -78,7 +78,7 @@ class PayrollController extends Controller
         if ($before !== []) {
             $description = 'Payroll settings updated: ' . implode(', ', array_keys($before));
 
-            // FIN-046 — a frequency change is not just a setting: every employee with no explicit
+            // A frequency change is not just a setting: every employee with no explicit
             // `pay_frequency` follows it, so this line silently re-assigns them to a different pay
             // group. Nothing is written to their records, so without this the move leaves no trace
             // anywhere and only surfaces when a run stops finding them.
@@ -107,13 +107,13 @@ class PayrollController extends Controller
             'frequency' => $setting->frequency,
             'deduction_timing' => $setting->deduction_timing,
             'tax_timing' => $setting->tax_timing,
-            // FIN-048 — which cutoff the monthly allowance lands on.
+            // Which cutoff the monthly allowance lands on.
             'allowance_timing' => $setting->allowance_timing,
             'anchor_date' => $setting->anchor_date?->toDateString(),
             'pay_delay_days' => $setting->pay_delay_days,
             'other_benefits_annual_cap' => $setting->other_benefits_annual_cap === null ? null : (float) $setting->other_benefits_annual_cap,
             'minimum_daily_wage' => $setting->minimum_daily_wage === null ? null : (float) $setting->minimum_daily_wage,
-            // FIN-046 — how many people this default actually decides the pay group for, so the
+            // How many people this default actually decides the pay group for, so the
             // Rules screen can say so BEFORE the frequency is changed rather than after.
             'inheriting_employee_count' => app(PayScheduleService::class)->inheritingDefaultCount(),
             'periods_per_year' => PayScheduleService::periodsPerYear($setting->frequency),
@@ -129,19 +129,10 @@ class PayrollController extends Controller
         return PayrollRunResource::collection($this->service->listRuns())->response();
     }
 
-    /**
-     * GET /api/v1/hr/payroll/minimum-wage-check — who this run would pay below the floor (FIN-030b).
-     *
-     * Read-only and safe to poll: it prices nothing and writes nothing. The payroll screen asks it
-     * before offering the run button, which is the point — a compliance warning is only worth
-     * anything at the moment money is about to be committed.
-     */
+    /** GET /api/v1/hr/payroll/minimum-wage-check — who this run would pay below the floor. */
     /**
      * GET /api/v1/hr/payroll/attendance-exceptions?start=&end= — what to look at before pricing
      * this cycle (item 12). HR only, read-only, derived on every call.
-     *
-     * Returns counts and destinations, not rows: each exception is already listed in full on the
-     * screen that owns it, and a second copy here would be the one that drifts.
      */
     public function attendanceExceptions(Request $request, AttendanceService $attendance): JsonResponse
     {
@@ -179,13 +170,7 @@ class PayrollController extends Controller
         ]);
     }
 
-    /**
-     * POST /api/v1/hr/payroll/minimum-wage-adjustments — raise the named employees to the floor.
-     *
-     * Not a run: it writes dated salary changes through the same path as any other raise, and flags
-     * back pay where the effective date reaches a settled period. Rate-limited like the write
-     * endpoints it resembles — it can change many salaries in one call.
-     */
+    /** POST /api/v1/hr/payroll/minimum-wage-adjustments — raise the named employees to the floor. */
     public function applyMinimumWage(ApplyMinimumWageRequest $request): JsonResponse
     {
         $result = $this->service->applyMinimumWageAdjustments(
@@ -201,7 +186,7 @@ class PayrollController extends Controller
     // POST /api/v1/hr/payroll/run — execute payroll for a cycle.
     public function run(RunPayrollRequest $request, AuditService $audit): JsonResponse
     {
-        // FIN-030b — the run was allowed past a minimum-wage breach. The reason is the record that
+        // The run was allowed past a minimum-wage breach. The reason is the record that
         // somebody decided this, rather than the run simply having been clicked; without it the
         // override would be invisible the moment it is questioned.
         if ($request->validated('minimum_wage_ack')) {
@@ -226,13 +211,7 @@ class PayrollController extends Controller
             ->setStatusCode(Response::HTTP_CREATED);
     }
 
-    /**
-     * GET /api/v1/hr/payroll/runs/{payrollRun}/rerun-preview — what recomputing would change.
-     *
-     * Read-only: the computation runs for real and is rolled back (see `rerunPreview()`). It is not
-     * cheap — it is a whole payroll run — so it carries a write endpoint's rate limit rather than a
-     * read's, and the screen asks for it only when HR opens the confirmation.
-     */
+    /** GET /api/v1/hr/payroll/runs/{payrollRun}/rerun-preview — what recomputing would change. */
     public function rerunPreview(PayrollRun $payrollRun, Request $request): JsonResponse
     {
         $preview = $this->service->rerunPreview($payrollRun, $request->user());
@@ -257,16 +236,7 @@ class PayrollController extends Controller
         return PayrollRunResource::make($run)->response();
     }
 
-    /**
-     * POST /api/v1/hr/payroll/runs/{payrollRun}/amendments — correct a period on its own payslips.
-     *
-     * The route every other correction in this module depends on: a back-dated raise, a fixed
-     * attendance record, a late-approved overtime request or reimbursement all produce a difference
-     * that has to be payable without rewriting what a period computed.
-     *
-     * Returns the amended run, so the caller re-reads the period rather than a batch of its own —
-     * the period IS the record now.
-     */
+    /** POST /api/v1/hr/payroll/runs/{payrollRun}/amendments — correct a period on its own payslips. */
     public function amendRun(PayrollRun $payrollRun, AmendPayrollRunRequest $request): JsonResponse
     {
         $run = $this->service->amendRun(
@@ -281,14 +251,7 @@ class PayrollController extends Controller
         return PayrollRunResource::make($run)->response();
     }
 
-    /**
-     * POST /api/v1/hr/payroll/runs/{payrollRun}/line-corrections — one line, the whole period.
-     *
-     * The whole-payroll form of a correction: a system outage that made everyone late, a charge
-     * that should not have run this cutoff. See PayrollService::overrideLineForRun() for why it
-     * sets a figure rather than nudging one, and why a payslip without that line is named in the
-     * response instead of failing the batch.
-     */
+    /** POST /api/v1/hr/payroll/runs/{payrollRun}/line-corrections — one line, the whole period. */
     public function overrideRunLine(PayrollRun $payrollRun, CorrectRunLineRequest $request): JsonResponse
     {
         $result = $this->service->overrideLineForRun(
@@ -314,13 +277,7 @@ class PayrollController extends Controller
             ->response();
     }
 
-    /**
-     * POST /api/v1/hr/employees/{employee}/final-pay — the terminal payslip a leaver is owed.
-     *
-     * FIN-014 — deliberately separate from the regular run, which already prorates the leaver's last
-     * cycle. This pays what that run cannot: unused leave converted to cash, separation pay, the
-     * outstanding loan balance, and the year's tax trued up against what was actually earned.
-     */
+    /** POST /api/v1/hr/employees/{employee}/final-pay — the terminal payslip a leaver is owed. */
     public function runFinalPay(RunFinalPayRequest $request, \App\Modules\Hr\Models\Employee $employee): JsonResponse
     {
         $run = $this->service->runFinalPay($employee, $request->validated(), $request->user());
@@ -341,13 +298,7 @@ class PayrollController extends Controller
         ]);
     }
 
-    /**
-     * GET /api/v1/hr/payroll/thirteenth-month/preview — Slice B17, hr_officer only.
-     *
-     * Exactly what the run would pay, computed and saved nowhere. The accrual table HR is looking
-     * at is a projection built from a different query; confirming a payroll run against a figure
-     * it will not pay is a small dishonesty that costs trust the first time somebody checks.
-     */
+    /** GET /api/v1/hr/payroll/thirteenth-month/preview, hr_officer only. */
     public function previewThirteenthMonth(Request $request): JsonResponse
     {
         $year = (int) ($request->query('year') ?: now(config('app.timezone_local'))->year);
@@ -369,13 +320,7 @@ class PayrollController extends Controller
         ]);
     }
 
-    /**
-     * POST /api/v1/hr/payroll/thirteenth-month/run — Slice B17, hr_officer only.
-     *
-     * Pays the year's 13th month as a real payroll run and withholds on whatever it pushes past
-     * the ₱90,000 exemption. Re-runnable: it recomputes the same run in place, like an ordinary
-     * cycle, and refuses once the run is locked.
-     */
+    /** POST /api/v1/hr/payroll/thirteenth-month/run, hr_officer only. */
     public function runThirteenthMonth(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -396,7 +341,7 @@ class PayrollController extends Controller
     }
 
     // POST /api/v1/hr/payroll/runs/{payrollRun}/lock — seal a fully-disbursed cycle so it
-    // can never be recomputed (Slice 5).
+    // can never be recomputed.
     public function lockRun(Request $request, PayrollRun $payrollRun): JsonResponse
     {
         return PayrollRunResource::make(
@@ -412,14 +357,7 @@ class PayrollController extends Controller
         )->response();
     }
 
-    /**
-     * POST /api/v1/hr/payslips/{payslip}/mark-done — declare one payslip paid.
-     *
-     * FIN-033 — accepts an idempotency key, from the `Idempotency-Key` header or the body. A repeat
-     * carrying the same key is answered as success without disbursing twice; a repeat with a
-     * different key is refused as a genuine second attempt. The header is the conventional home for
-     * it, and the body is accepted so a client that cannot set headers is not locked out.
-     */
+    /** POST /api/v1/hr/payslips/{payslip}/mark-done — declare one payslip paid. */
     public function markDone(Request $request, Payslip $payslip): JsonResponse
     {
         $key = $request->header('Idempotency-Key') ?? $request->input('idempotency_key');
@@ -443,10 +381,6 @@ class PayrollController extends Controller
     }
 
     // GET /api/v1/hr/payroll/runs/{payrollRun}/export — the run as a file (HR only).
-    //
-    // `?format=xlsx` returns the styled workbook — the breakdown as HR reads it, plus the register
-    // on a second sheet. Anything else returns the CSV, which is what the machine readers of this
-    // endpoint have always received and must keep receiving.
     public function exportRun(Request $request, PayrollRun $payrollRun): SymfonyResponse
     {
         if ($request->query('format') === 'xlsx') {
@@ -480,17 +414,7 @@ class PayrollController extends Controller
         return PayslipResource::make($payslip)->response();
     }
 
-    /**
-     * POST /api/v1/hr/payslips/{payslip}/line-corrections — overrule the engine on ONE line.
-     *
-     * The correction lands ON the line it corrects, and the payslip prints the engine's figure
-     * struck through beside it. See PayrollService::overrideLine() for what each kind of line does
-     * to the tax, and why HR is not asked.
-     *
-     * `updateOrCreate` semantics: correcting the same line twice replaces the correction rather
-     * than stacking a second one on it, and the struck-through figure stays the ENGINE's — an edit
-     * is always a correction of the computation, never of the previous edit.
-     */
+    /** POST /api/v1/hr/payslips/{payslip}/line-corrections — overrule the engine on ONE line. */
     public function overridePayslipLine(Payslip $payslip, CorrectPayslipLineRequest $request): JsonResponse
     {
         $payslip->loadMissing('payrollRun');
@@ -510,13 +434,7 @@ class PayrollController extends Controller
         return PayslipResource::make($slip)->response();
     }
 
-    /**
-     * DELETE /api/v1/hr/payslips/{payslip}/line-corrections/{amendment} — put a line back.
-     *
-     * Restores the figure the engine computed, from the snapshot taken before anyone corrected it.
-     * The correction itself is soft-deleted rather than erased: "who changed this payslip, and who
-     * changed it back" has to stay answerable.
-     */
+    /** DELETE /api/v1/hr/payslips/{payslip}/line-corrections/{amendment} — put a line back. */
     public function removePayslipLineCorrection(Payslip $payslip, PayslipAmendment $amendment): JsonResponse
     {
         $payslip->loadMissing('payrollRun');

@@ -14,23 +14,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * FIN-039 — a ceiling on overtime nobody approved.
- *
- * `overtime_mode = auto_after_threshold` paid every minute clocked past the shift's end, unbounded, with
- * no human in the loop. The failure mode is not fraud, it is the ordinary forgotten clock-out: leave at
- * 18:00, remember at 23:00, get paid five hours at 125%. Nothing noticed.
- *
- * THE CAP IS NOT A PAY CUT, and that is the assertion set to read. Minutes past the cap are neither
- * discarded nor silently paid — they are held, they appear in a review queue, and an approved overtime
- * request for that date releases them in full. Cap = "pays automatically"; past the cap = "pays once
- * somebody says yes". A design that simply refused the excess would just be wage theft with a policy
- * column, and one that paid it anyway would fix nothing.
- *
- * Both caps default to 0 (uncapped) on purpose: there is no statutory maximum on overtime in the
- * Philippines, so any figure is a company control. `test_the_shipped_default_changes_nothing` is the
- * guard on that — this migration must not move a single existing payslip.
- */
+/** A ceiling on overtime nobody approved. */
 class AutoOvertimeCapTest extends HrTestCase
 {
     use RefreshDatabase;
@@ -71,13 +55,7 @@ class AutoOvertimeCapTest extends HrTestCase
         ], $attrs));
     }
 
-    /**
-     * A workday (2026-08-03 is a Monday) clocked in at 08:00 Manila and out at $timeOut Manila.
-     *
-     * Punches are STORED UTC and read back as a Manila minute-of-day, so the conversion has to happen
-     * here — passing a bare '08:00:00' stores 08:00 UTC, which is 16:00 Manila, and every figure in
-     * this suite would be eight hours out.
-     */
+    /** A workday (2026-08-03 is a Monday) clocked in at 08:00 Manila and out at $timeOut Manila. */
     private function worked(string $date, string $timeOut): void
     {
         $tz = config('app.timezone_local');
@@ -405,7 +383,7 @@ class AutoOvertimeCapTest extends HrTestCase
         $this->assertSame([], app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'));
     }
 
-    /** Read-only: opening the queue must not create requests or touch attendance (cf. FIN-038). */
+    /** Read-only: opening the queue must not create requests or touch attendance (cf.). */
     public function test_the_queue_writes_nothing(): void
     {
         $this->policy(['auto_overtime_daily_cap_minutes' => 240]);

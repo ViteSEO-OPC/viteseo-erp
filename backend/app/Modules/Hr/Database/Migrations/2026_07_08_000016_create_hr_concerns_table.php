@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Phase-2 Slice 21 (privacy-critical). Employee concerns/complaints. employee_id is
+// Phase-2 (privacy-critical). Employee concerns/complaints. employee_id is
 // ALWAYS stored (needed to route meeting invites back to the submitter's own view),
 // but for is_anonymous concerns it is NEVER emitted by the HR-facing Resource —
 // enforced in ConcernResource, not just the UI (§14.3g). reference_no is the public

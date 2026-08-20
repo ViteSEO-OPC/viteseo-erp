@@ -4,16 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice 11b (2026-07-28 audit) — loans and cash advances.
- *
- * These can't live in Company → Benefits like a recurring share (Slice 11a): each is one
- * employee, one amount, amortising to zero — a benefit "programme" per loan would be absurd.
- *
- * NOTE THE MISSING COLUMN: there is no `balance` here. A stored balance decremented each run
- * would double-deduct on every re-run, which is the exact class of bug Slices 5 and 12 exist to
- * fix. The balance is DERIVED from the payment ledger (`hr_loan_payments`).
- */
+/** (2026-07-28 audit) — loans and cash advances. */
 return new class extends Migration
 {
     public function up(): void

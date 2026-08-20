@@ -40,19 +40,7 @@ function toMinutes(hm: string): number {
   return h * 60 + m;
 }
 
-/**
- * Is `timeFrom` before the shift ends, once both are placed on a real day? (Item 11.)
- *
- * MIRRORS `OvertimeRequestService::assertAfterShift` DELIBERATELY, including the tiebreak. A bare
- * HH:MM has no day attached, so it has to be placed on one, and the alignment chosen is the one
- * nearest the shift end — the same choice the server makes and the same one payroll's window match
- * makes later. Comparing the raw numbers instead (as this did) got a 22:00–06:00 shift backwards:
- * it waved through 23:00, an hour INTO the shift, and refused 01:00 after a day shift, which is
- * ordinary overtime past midnight.
- *
- * Returns false when the schedule is unknown or the day has no shift — a rest day has nothing to
- * be "beyond", so nothing to guard.
- */
+/** Is `timeFrom` before the shift ends, once both are placed on a real day? (Item 11.) */
 function startsBeforeShiftEnd(
   timeFrom: string,
   shiftStart: string | null,

@@ -16,15 +16,15 @@ class PayrollRun extends Model
 
     protected $fillable = [
         'cycle_start', 'cycle_end', 'frequency', 'status',
-        // FIN-036 — fixed when the run is created; never re-derived from live settings.
+        // Fixed when the run is created; never re-derived from live settings.
         'scheduled_pay_date',
-        // Slice B17 — 'regular' or 'thirteenth_month'; FIN-010 adds 'adjustment'.
+        // 'regular' or 'thirteenth_month'; adds 'adjustment'.
         'type',
-        // FIN-010 — why an off-cycle adjustment exists. Mandatory for that type.
+        // Why an off-cycle adjustment exists. Mandatory for that type.
         'reason',
         'total_gross', 'total_deductions', 'total_net',
         'employee_count', 'run_at', 'run_by',
-        // Slice 5 — a locked run can never be recomputed.
+        // A locked run can never be recomputed.
         'locked_at', 'locked_by',
         // Step 4b — the attendance policy as it stood when this run executed.
         'policy_snapshot',
@@ -48,11 +48,7 @@ class PayrollRun extends Model
 
     /**
      * How many payslips this run REFUSED to recompute because they were already disbursed
-     * (FIN-051). Set by `PayrollService::run()`, never stored.
-     *
-     * A real declared property rather than a magic attribute: Eloquent's `__set` would otherwise
-     * file it among the model's attributes and the next `save()` would try to write a column that
-     * does not exist. Declaring it keeps it off the attribute bag entirely.
+     * . Set by `PayrollService::run()`, never stored.
      */
     public ?int $skippedDisbursedCount = null;
 
@@ -76,13 +72,7 @@ class PayrollRun extends Model
         return $this->locked_at !== null;
     }
 
-    /**
-     * Was this run's withholding computed against a year-to-date that has since been amended?
-     *
-     * True only for the run types whose tax depends on the year's earlier payslips — a 13th month, a
-     * final pay, a correction, and the cutoff that closes the tax year. An ordinary mid-year period
-     * annualises its own pay and is unaffected by what happened before it.
-     */
+    /** Was this run's withholding computed against a year-to-date that has since been amended? */
     public function isTaxStale(): bool
     {
         return $this->tax_stale_at !== null;

@@ -13,18 +13,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * The backfill that clears `late` marks already stored against approved half days.
- *
- * The service fix only corrects rows written from now on; nothing downstream re-derives the
- * status, so the stored column is what payroll and the violation ladder keep reading. The
- * migration is raw SQL by convention, which is exactly why it needs a test: it re-implements the
- * schedule resolution rather than calling the service, and a drift between the two would quietly
- * clear the wrong rows.
- *
- * The migration is invoked directly — RefreshDatabase has already run it against an empty
- * database, and the point is what it does to rows that exist.
- */
+/** The backfill that clears `late` marks already stored against approved half days. */
 class HalfDayLateBackfillTest extends HrTestCase
 {
     use RefreshDatabase;

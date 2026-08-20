@@ -5,29 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-/**
- * Slice B2 — `kind` says what the money DOES, so it has to be precise enough to say it.
- *
- * WHY. The catalogue had two kinds: `allowance` (adds to gross) and `company` (everything else).
- * "Everything else" is not one behaviour — an HMO deducts a fixed share every period, while a loan
- * deducts against a balance that decrements to zero. They share a section on the page and nothing
- * else: different config, different enrolment, different payroll path. One loose kind meant one
- * loose validation shape covering both, which is how a field ends up unvalidated.
- *
- *   company → plan          deducts a fixed amount each period (HMO, insurance, retirement)
- *             loan_policy   a product a loan is issued under (B15). NOT a loan: the debt itself
- *                           lives in `hr_employee_loans`, because a balance that decrements to
- *                           zero cannot be a programme without one programme per borrower.
- *
- * Nothing moves to `loan_policy` here — no loan policies exist yet. The value is reserved so B15
- * adds screens rather than another migration.
- *
- * ALSO: `enrolled_at` / `ended_at` on the enrolment, promoted from Known gaps. An enrolment
- * recorded no dates at all, so a plan joined mid-month was charged a full period's share and a
- * leaver's last deduction could not be dated. They must exist BEFORE anyone is enrolled: adding
- * them afterwards means guessing when everybody joined. `enrolled_at` is backfilled from the
- * row's own `created_at`, which is the closest thing to the truth that exists.
- */
+/** `kind` says what the money DOES, so it has to be precise enough to say it. */
 return new class extends Migration
 {
     public function up(): void

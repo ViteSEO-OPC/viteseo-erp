@@ -17,22 +17,7 @@ use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
-/**
- * Item 9 — the night differential where it meets the day's own rate.
- *
- * The differential is a percentage OF THE APPLICABLE HOURLY RATE, not of the base rate. On a
- * regular holiday the applicable rate is 200%, so a night hour there earns hourly × 200% × 10%.
- * Paying hourly × 10% on every day alike under-paid every night hour worked on a holiday or a
- * rest day by exactly the day's own premium — the flat half of a two-part rule where only the
- * overtime half had been built.
- *
- * RATIOS, NOT PESOS. Each case prices the same shift twice and compares the two night-differential
- * figures. That pins the rule being tested (the multiplier) without also pinning the daily-rate
- * basis, the divisor, or the rounding, none of which this item touches.
- *
- * Also covered here: an hours-only overtime approval can now prove a night portion, and the unpaid
- * meal is carved from the differential using the SCHEDULED break rather than a button nobody pressed.
- */
+/** Item 9 — the night differential where it meets the day's own rate. */
 class NightPremiumCompoundingTest extends HrTestCase
 {
     use RefreshDatabase;

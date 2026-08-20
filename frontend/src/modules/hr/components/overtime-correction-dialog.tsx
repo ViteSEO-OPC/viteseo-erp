@@ -31,23 +31,7 @@ function daysAgo(days: number): string {
   return d.toLocaleDateString("en-CA");
 }
 
-/**
- * HR files overtime for an employee on a date that has already passed (item 10).
- *
- * THE CASE: somebody worked late, never filed, and the cutoff is closing. Until now the only
- * remedies were to edit the attendance record — which changes what was CLOCKED, not what was
- * AUTHORISED — or to pay it outside the system entirely.
- *
- * IT DOES NOT APPROVE ANYTHING. The request lands pending in the queue below, exactly where an
- * employee's own would, and somebody still has to approve it. That is the point rather than an
- * oversight: approving is where the audit entry and the settled-period retro flag live, and a
- * dialog that filed and approved in one press would skip both. It also leaves room for the officer
- * who files and the one who signs off to be different people.
- *
- * Errors are surfaced from the server rather than re-validated here. The date bounds, the overlap
- * rule and "overtime starts after the shift ends" all live in one place on the server, and a second
- * copy in this dialog would be the copy that goes stale.
- */
+/** HR files overtime for an employee on a date that has already passed (item 10). */
 export function OvertimeCorrectionDialog({
   open,
   onOpenChange,

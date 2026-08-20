@@ -5,8 +5,8 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 // Singleton company setting for the leave allotment model:
-//   not_shared = each leave type carries its own per-status credits (default)
-//   shared     = one pool per employment status, spent across any leave type
+// not_shared = each leave type carries its own per-status credits (default)
+// shared     = one pool per employment status, spent across any leave type
 return new class extends Migration
 {
     public function up(): void

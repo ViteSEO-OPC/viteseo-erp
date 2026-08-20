@@ -198,8 +198,10 @@ export function CandidateCard({
         <CandidateCardView candidate={candidate} footer={footer} />
       </div>
 
-      {/* Kept outside the draggable element: a portal still bubbles its events through
-          the React tree, so clicks inside the dialog would reach the drag listeners. */}
+      {/*
+       * Kept outside the draggable element: a portal still bubbles its events through
+       * the React tree, so clicks inside the dialog would reach the drag listeners.
+       */}
       {composeOpen && stageEmail && (
         <CandidateEmailDialog
           candidate={candidate}

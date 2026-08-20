@@ -29,7 +29,7 @@ class EmployeeController extends Controller
     // GET /api/v1/hr/employees?search= — HR directory.
     public function index(Request $request): JsonResponse
     {
-        // MF-18 — `?status=former` lists people who have left, so they can be found and rehired.
+        // `?status=former` lists people who have left, so they can be found and rehired.
         // Anything unrecognised falls back to 'active', which is the directory's existing behaviour.
         $status = $request->query('status');
         $status = in_array($status, ['active', 'former', 'all'], true) ? $status : 'active';
@@ -54,7 +54,7 @@ class EmployeeController extends Controller
     {
         $employee->load(['user.roles', 'department', 'manager.user', 'employmentHistories']);
 
-        // FIN-030b — the Compensation screen needs the derived daily rate. Asked for explicitly
+        // The Compensation screen needs the derived daily rate. Asked for explicitly
         // here and on update(); the directory does not carry the cost.
         return EmployeeResource::make($employee)->withPayrollChecks()->response();
     }
@@ -147,13 +147,7 @@ class EmployeeController extends Controller
     }
 
     // POST /api/v1/hr/employees/{employee}/hr-role — grant/revoke HR-officer access.
-    /**
-     * POST /api/v1/hr/employees/{employee}/separate — end someone's employment (MF-18).
-     *
-     * Records the last working day and archives the record. This is the step that makes final pay
-     * reachable: `runFinalPay()` refuses to run without `separation_date`, and before this nothing
-     * outside the demo seeder ever wrote one.
-     */
+    /** POST /api/v1/hr/employees/{employee}/separate — end someone's employment. */
     public function separate(SeparateEmployeeRequest $request, Employee $employee): JsonResponse
     {
         return EmployeeResource::make(
@@ -174,12 +168,7 @@ class EmployeeController extends Controller
         )->response();
     }
 
-    /**
-     * POST /api/v1/hr/employees/{employee}/rehire — a NEW employment relationship (MF-18).
-     *
-     * Tenure restarts, leave is seeded fresh for the year, and any outstanding loan drops back to
-     * `pending_authorization` so it is not collected under the old relationship's consent (Art. 113).
-     */
+    /** POST /api/v1/hr/employees/{employee}/rehire — a NEW employment relationship. */
     public function rehire(RehireEmployeeRequest $request, Employee $employee): JsonResponse
     {
         return EmployeeResource::make(

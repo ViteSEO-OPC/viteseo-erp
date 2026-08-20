@@ -3,53 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Slice B13, items 1–3 — three pieces of leftover DATA, none of them a schema change.
- *
- * WHY A MIGRATION AND NOT A CONSOLE SESSION. Each of these is a correction to rows that exist on
- * the live database and nowhere else: the seeders no longer produce any of them, so a
- * `migrate:fresh --seed` starts clean and this file is a no-op there. Doing it by hand instead
- * would leave the fix unrecorded and unrepeatable on any other copy of the database.
- *
- * EVERY STEP IS GUARDED AND IDEMPOTENT. They match the exact leftover, not a shape a real record
- * could grow into later — a migration that cleared "any override" or deleted "any
- * duplicate-looking version" would quietly undo deliberate work the next time anyone ran it.
- *
- * 1. THE JUNK EMPLOYEE (B5 item 10). A test row typed into the employee form months ago. It is a
- *    live employee to every rule in the system: covered by all four allowance programmes, counted
- *    in each "14 people" caption on Company → Benefits, and worth ₱5,500/month of the company
- *    allowance total. Soft-deleted, not erased, so it is restorable and its payslips and checklist
- *    rows stay attached to it. Its `users` row is deliberately left alone — that table is shared
- *    with the other pods and is not this module's to write.
- *
- * 2. THE TEN STATUTORY OVERRIDES (B5 item 9 / B7 item 3). Ten employees carry an identical
- *    ₱1,350 / ₱450 / ₱200 typed onto their profile across a ₱30k–₱160k salary range — seed data,
- *    not per-person figures, written by `EmployeeDemoSeeder` until B7 removed it. An override
- *    replaces the EMPLOYEE half only, so their payslips show an employee/employer pair that exists
- *    on no SSS or PhilHealth table and cannot be filed.
- *
- *    THIS CHANGES PAY, which is why it waited for a decision (taken 2026-08-03) and for B8 to put
- *    the real schedule in force. Clearing them raises employee deductions by ₱15,375/month across
- *    the ten — from ₱450/month (Ella Reyes) to ₱2,450 (Marco Cruz, Maya Villanueva) each — and
- *    lowers take-home by the same. PhilHealth is ₱13,725 of it: pinned at ₱450 against 2.5% of
- *    salary. Only the exact placeholder trio is cleared, so a deliberate override entered later is
- *    never touched by a re-run.
- *
- * 3. THE DUPLICATE SSS VERSION (new, 2026-08-03). Verifying B8's importer left a second `sss`
- *    version dated 2026-07-29 whose 61 bands and rates are identical to the real 2025-01-01 one —
- *    so it prices every payslip exactly the same, and the row actually in force is the one with no
- *    circular reference on it. Only a version with NO note is removed, and only when an earlier
- *    version of the same type produces the same numbers; the published schedules all carry their
- *    circular in `note`.
- *
- *    Safe with respect to history: `PayrollService::policySnapshot()` copies the version's VALUES
- *    onto the run, not its id, so no past run points at the row being deleted.
- *
- * ROLLBACK. `down()` restores the employee. It does NOT restore the ten overrides or re-create the
- * duplicate version: re-suppressing statutory deductions would be a pay change made by a rollback,
- * and a rollback should not resurrect a row whose only property was being redundant. The figures
- * are recorded above if they are ever needed.
- */
+/** Items 1–3 — three pieces of leftover DATA, none of them a schema change. */
 return new class extends Migration
 {
     /** The seeder's placeholder trio — the only override values this migration will touch. */
@@ -135,11 +89,6 @@ return new class extends Migration
     /**
      * What a version actually CHARGES, as a comparable string. Two versions with the same
      * signature produce the same peso amount for every salary.
-     *
-     * The salary floor and cap are excluded for a bracket version that has bands, because
-     * `ContributionCalculator::amount()` takes the MSC from the band table and never consults
-     * them — the duplicate this migration exists to remove differs from the real version in
-     * exactly that field, and treating it as a difference would leave it in place.
      */
     private function signatureOf(object $version): string
     {

@@ -18,7 +18,7 @@ export interface LeaveType {
   allow_backdated: boolean;
   /** Max days a past-dated request may reach back; null = no limit (only when allow_backdated). */
   backdate_limit_days: number | null;
-  // FIN-034 — accrual. "none" = hand-managed (the default for every existing type).
+  // Accrual. "none" = hand-managed (the default for every existing type).
   accrual_mode: "none" | "monthly" | "annual";
   prorate_first_year: boolean;
   /** null = all unused days carry over; 0 = none do. Company policy, so no shipped default. */
@@ -55,20 +55,7 @@ export interface HalfDayRequest {
 /** Which question a work request answered — see {@link WorkRequest}. */
 export type WorkRequestType = "rest_day" | "suspension";
 
-/**
- * Work requests — permission to work a day nobody was expected in on.
- *
- * Two kinds, one lifecycle. `rest_day` is a day the employee's own schedule doesn't cover;
- * `suspension` is an ordinary workday HR cancelled and marked as needing permission to come in
- * on. Which one applies is the server's call, from the company rule and the declaration.
- *
- * Unlike every other request here, there is no form: it is filed by pressing Time in.
- * `requested_at` is that press, and approving stamps attendance at it — so the field is the
- * paid time-in, not metadata about the row.
- *
- * `expired` is its own status: a pending request goes stale 24h after `requested_at`, because
- * approving one later would back-date a shift.
- */
+/** Work requests — permission to work a day nobody was expected in on. */
 export interface WorkRequest {
   id: number;
   type: WorkRequestType;
@@ -137,14 +124,7 @@ export interface OvertimeSettings {
   note: string;
 }
 
-/**
- * One day of auto-mode overtime the policy caps held back (FIN-039).
- *
- * `paid_minutes` pays on the run regardless; `excess_minutes` pays only once an overtime request for
- * that date is approved. So this is not a list of rejections — it is a list of overtime that is
- * waiting for somebody to say yes, which is usually either a genuine long evening or a forgotten
- * clock-out. `raw_minutes` is the whole overrun, so the two cases are easy to tell apart.
- */
+/** One day of auto-mode overtime the policy caps held back. */
 /**
  * Why a day is in the overtime review queue — mirrors AttendanceService's OT_REVIEW_* constants.
  * `cap` withholds money; the other two do not. See {@link AutoOvertimeReviewItem.kind}.
@@ -237,7 +217,7 @@ export interface StoreLeaveInput {
   start_date: string;
   end_date: string;
   reason: string;
-  // FIN-034 — half a day of THIS leave type: 0.5 off the balance, paid when the type is paid.
+  // Half a day of THIS leave type: 0.5 off the balance, paid when the type is paid.
   // Omitted for a full-day request; the period is only sent alongside a true flag.
   is_half_day?: boolean;
   half_day_period?: "AM" | "PM";

@@ -6,15 +6,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 // Lateness deductions split into two INDEPENDENT switches (2026-07-27):
-//   1. per-time deduction  → late_deduction_mode ('none' | 'per_hour' | 'tiered')
-//   2. per-N-lates penalty → the new `late_penalty_enabled` boolean + lates_per_deduction
-//
-// Previously these were one mutually-exclusive enum, so a company could not BOTH charge
-// the actual minutes late AND add a full-day penalty for every N lates. They now compose.
-//
-// No-op by default: late_penalty_enabled defaults false, so nothing changes until HR turns
-// it on. Any existing row still on the retired 'per_lates' enum is migrated to
-// (enabled=true, mode='none') so its behaviour is preserved exactly.
+// 1. per-time deduction  → late_deduction_mode ('none' | 'per_hour' | 'tiered')
+// 2. per-N-lates penalty → the new `late_penalty_enabled` boolean + lates_per_deduction
 return new class extends Migration
 {
     public function up(): void

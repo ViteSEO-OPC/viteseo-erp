@@ -24,18 +24,7 @@ import {
 } from "@/modules/hr/hooks/use-benefit-programs";
 import type { BenefitProgram, PlanEnrollment } from "@/modules/hr/types/benefits";
 
-/**
- * Who is on a company plan, at what tier, paying what — Slice B2.
- *
- * WHY IT HAD TO BE BUILT. Deleting "Add a Plan" (2026-07-29) removed the only screen that could
- * enrol anybody in a plan or set their share. The deduction engine has worked since Slice 11a and
- * could never fire: the HMO is published with three tiers and a per-cutoff cadence, and has nobody
- * on it. A plan that cannot be joined is a brochure.
- *
- * MEMBERSHIP IS AN EXPLICIT LIST HERE, unlike an allowance. An allowance is the same for everyone
- * it covers, so a rule can decide who gets it; a plan carries a per-person tier and share that no
- * rule can derive. The eligibility rule still gates who MAY be added.
- */
+/** Who is on a company plan, at what tier, paying what. */
 export function PlanEnrollmentDialog({
   program,
   onOpenChange,
@@ -149,8 +138,10 @@ function Members({ program }: { program: BenefitProgram }) {
               <div className="flex flex-wrap items-end gap-2">
                 <div className="min-w-48 flex-1 space-y-1.5">
                   <Label htmlFor="pe-emp">Employee</Label>
-                  {/* `undefined`, not "" — the kit's selects reject an empty value and show the
-                      placeholder instead (see ui/select.tsx). */}
+                  {/*
+                   * `undefined`, not "" — the kit's selects reject an empty value and show the
+                   * placeholder instead (see ui/select.tsx).
+                   */}
                   <SimpleSelect
                     id="pe-emp"
                     value={adding === "" ? undefined : String(adding)}
@@ -185,8 +176,10 @@ function Members({ program }: { program: BenefitProgram }) {
             )}
           </div>
 
-          {/* Past members stay listed: their enrolment is what a past payslip's deduction line
-              refers to, so it is ended by date rather than deleted. */}
+          {/*
+           * Past members stay listed: their enrolment is what a past payslip's deduction line
+           * refers to, so it is ended by date rather than deleted.
+           */}
           {enrolled.some((e) => e.ended_at !== null) && (
             <div>
               <p className="mb-1.5 text-label font-bold uppercase tracking-wide text-muted-foreground">

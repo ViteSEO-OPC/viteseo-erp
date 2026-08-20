@@ -1,4 +1,4 @@
-// Company → Leave Type (Phase-2 Slice 13). Reuses LeaveType/LeaveBalance from
+// Company → Leave Type (Phase-2). Reuses LeaveType/LeaveBalance from
 // types/leave.ts; adds the allotment-default and config-input shapes.
 
 import {
@@ -15,8 +15,8 @@ export interface LeaveTypeAllotment {
 }
 
 // Company-wide leave allotment model:
-//   not_shared = each leave type has its own per-status credits (default)
-//   shared     = one pool per employment status, spent across any leave type
+// not_shared = each leave type has its own per-status credits (default)
+// shared     = one pool per employment status, spent across any leave type
 export type AllotmentMode = "not_shared" | "shared";
 
 export interface LeaveSetting {
@@ -48,7 +48,7 @@ export interface LeaveTypeInput {
   description?: string | null;
   allow_backdated: boolean;
   backdate_limit_days?: number | null;
-  // FIN-034 — accrual settings. Declared here so the dialog's payload is type-checked rather than
+  // Accrual settings. Declared here so the dialog's payload is type-checked rather than
   // silently carrying fields the API contract doesn't mention.
   accrual_mode?: "none" | "monthly" | "annual";
   prorate_first_year?: boolean;

@@ -35,15 +35,7 @@ import {
   type EligibilityMode,
 } from "@/modules/hr/types/benefits";
 
-/**
- * Add or edit an allowance — one form for both (Slice B6/B8 follow-up).
- *
- * WHY ONE FORM. Adding used to happen inside "Add a Plan", a two-tab modal that also assigned HMO
- * tiers and could create a plan inline; editing happened somewhere else with different fields. The
- * two disagreed about what an allowance even is. An allowance is an amount, a tax treatment, and
- * a rule saying who gets it — so there is one form that says exactly that, opened either empty or
- * on an existing row.
- */
+/** Add or edit an allowance — one form for both (B8 follow-up). */
 export function AllowanceFormDialog({
   open,
   program,
@@ -88,17 +80,17 @@ function AllowanceForm({
   const [amount, setAmount] = useState(program?.amount ?? "");
   const [frequency, setFrequency] = useState(program?.frequency ?? "monthly");
   const [tax, setTax] = useState(program?.tax_treatment ?? "de_minimis");
-  // Slice B16 — this allowance's OWN de-minimis ceiling. Blank means none recorded, which keeps
+  // This allowance's OWN de-minimis ceiling. Blank means none recorded, which keeps
   // the whole amount tax-free; ceilings are per item and are never pooled with another benefit's.
   const [ceiling, setCeiling] = useState(program?.deminimis_ceiling ?? "");
   const [ceilingPeriod, setCeilingPeriod] = useState(program?.ceiling_period ?? "monthly");
-  // Slice B19 — whether this allowance counts toward the SSS / Pag-IBIG contribution base. A new
+  // Whether this allowance counts toward the SSS / Pag-IBIG contribution base. A new
   // allowance counts, matching the column default: excluding one has to be a decision somebody
   // made, not something that happens by leaving a field alone.
   const [contributable, setContributable] = useState(
     (program?.contributable ?? true) ? "yes" : "no",
   );
-  // Slice B11 — the date this amount applies FROM. An old cycle re-run before it keeps the
+  // The date this amount applies FROM. An old cycle re-run before it keeps the
   // figure that applied then, so this is the field that decides whose payslip moves.
   const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [mode, setMode] = useState<EligibilityMode>(
@@ -202,9 +194,11 @@ function AllowanceForm({
               options={ALLOWANCE_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
             />
           </div>
-          {/* Slice B11 — payroll prices an allowance as of the cycle END, so a period that closed
-              before this date keeps whatever applied then. Without it, raising an amount rewrote
-              every payslip that had not yet been paid out. */}
+          {/*
+           * Payroll prices an allowance as of the cycle END, so a period that closed
+           * before this date keeps whatever applied then. Without it, raising an amount rewrote
+           * every payslip that had not yet been paid out.
+           */}
           <div className="space-y-1.5">
             <Label htmlFor="a-eff">Applies from</Label>
             <Input
@@ -223,9 +217,11 @@ function AllowanceForm({
 
         <Segmented label="Tax treatment" options={TAX_TREATMENTS} value={tax} onChange={setTax} />
 
-        {/* Slice B16 — a de-minimis benefit is exempt only UP TO its own statutory ceiling, and
-            the ceilings cannot be pooled. Anything above joins the ₱90,000 13th-month-and-other-
-            benefits exemption rather than being taxed outright. */}
+        {/*
+         * A de-minimis benefit is exempt only UP TO its own statutory ceiling, and
+         * the ceilings cannot be pooled. Anything above joins the ₱90,000 13th-month-and-other-
+         * benefits exemption rather than being taxed outright.
+         */}
         {tax !== "taxable" && (
           <div className="rounded-lg border border-border bg-card p-3">
             <div className="flex flex-wrap items-end gap-3">
@@ -266,10 +262,12 @@ function AllowanceForm({
           </div>
         )}
 
-        {/* Slice B19 — a company can pay an allowance in full while keeping it out of the base
-            SSS and Pag-IBIG are charged on. Deliberately its own control rather than a line in
-            the tax block: the two are independent, and reading "non-taxable" as "not
-            contributable" is the mistake this switch exists to make impossible. */}
+        {/*
+         * A company can pay an allowance in full while keeping it out of the base
+         * SSS and Pag-IBIG are charged on. Deliberately its own control rather than a line in
+         * the tax block: the two are independent, and reading "non-taxable" as "not
+         * contributable" is the mistake this switch exists to make impossible.
+         */}
         <Segmented
           label="Government contributions"
           options={CONTRIBUTION_TREATMENTS}
@@ -294,10 +292,12 @@ function AllowanceForm({
           onEmployeeIdsChange={setEmployeeIds}
         />
 
-        {/* Slice B14 — say who this edit actually REACHES. The old copy promised it applied to
-            everyone, which stopped being true the moment one person could be paid their own
-            amount; B6's version of this dialog claimed "14 enrolled employees will be affected"
-            when the true answer was nought, and that is the mistake worth not repeating. */}
+        {/*
+         * Say who this edit actually REACHES. The old copy promised it applied to
+         * everyone, which stopped being true the moment one person could be paid their own
+         * amount; B6's version of this dialog claimed "14 enrolled employees will be affected"
+         * when the true answer was nought, and that is the mistake worth not repeating.
+         */}
         <div className="rounded-lg border border-warning/40 bg-warning-subtle px-3 py-2.5 text-xs text-foreground">
           {isNew ? (
             "Everyone this covers is paid it from the next payroll cutoff."
@@ -350,8 +350,10 @@ function AllowanceForm({
       </DialogFooter>
 
       {!isNew && (
-        /* The confirmation names the pay consequence rather than asking "are you sure": the
-           number of people who stop being paid is the thing worth pausing over. */
+        /*
+         * The confirmation names the pay consequence rather than asking "are you sure": the
+         * number of people who stop being paid is the thing worth pausing over.
+         */
         <DeleteConfirmDialog
           open={confirming}
           onOpenChange={setConfirming}

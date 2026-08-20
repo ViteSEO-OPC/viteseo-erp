@@ -113,14 +113,7 @@ export function ClaimForm() {
     setReceipts((prev) => prev.filter((_, i) => i !== index));
   }
 
-  /**
-   * FIN-032 — the look-alike-claim confirmation.
-   *
-   * The backend refuses a claim matching one already on file (same employee, date, amount and
-   * category) unless told it is genuinely separate. Two ₱180 taxi rides on one day is an ordinary
-   * Tuesday, so this asks rather than blocks — but without this dialog the refusal is a dead end and
-   * the second legitimate claim cannot be filed at all.
-   */
+  /** The look-alike-claim confirmation. */
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
 
   async function onSubmit(v: FormValues, acknowledgeDuplicate = false) {
@@ -154,7 +147,7 @@ export function ClaimForm() {
         if (err.response?.status === 422) {
           const serverErrors: Record<string, string[]> = err.response.data?.errors ?? {};
 
-          // FIN-032 — a look-alike claim is a QUESTION, not a failure. Shown as a confirmation so
+          // A look-alike claim is a QUESTION, not a failure. Shown as a confirmation so
           // the submitter can say "this is a separate expense" instead of being stuck.
           const looksDuplicate = serverErrors.amount?.find((m) => m.includes("already on file"));
           if (looksDuplicate) {
@@ -299,7 +292,7 @@ export function ClaimForm() {
         </p>
       </form>
 
-      {/* FIN-032 — a look-alike claim asks rather than refuses. */}
+      {/* A look-alike claim asks rather than refuses. */}
       <Dialog open={duplicateWarning !== null} onOpenChange={(o) => !o && setDuplicateWarning(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>

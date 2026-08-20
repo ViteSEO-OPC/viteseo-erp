@@ -29,15 +29,7 @@ class Concern extends Model
         'cancelled_at' => 'datetime',
     ];
 
-    /**
-     * The employee this belongs to — `withTrashed()` because a SEPARATION SOFT-DELETES THEM.
-     *
-     * Without it the default scope resolves this to null the moment somebody leaves, and every
-     * Resource that reads a name through it throws, taking the whole list endpoint down with it —
-     * one 500 for the entire page because one row belonged to a leaver. Their history does not
-     * stop being theirs when they go, and a record that cannot say whose it is is worse than one
-     * that names someone who has left.
-     */
+    /** The employee this belongs to — `withTrashed()` because a SEPARATION SOFT-DELETES THEM. */
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class)->withTrashed();
@@ -54,13 +46,7 @@ class Concern extends Model
         return $this->hasMany(ConcernRevealRequest::class)->latest('id');
     }
 
-    /**
-     * May a viewer see who filed this?
-     *
-     * The one question the whole anonymity feature turns on, answered in one place so that a
-     * new screen cannot accidentally answer it differently. A named concern: always. An
-     * anonymous one: only HR, and only once the reporter has agreed to be named.
-     */
+    /** May a viewer see who filed this? */
     public function identityVisibleTo(?\App\Models\User $viewer): bool
     {
         if (! $this->is_anonymous) {

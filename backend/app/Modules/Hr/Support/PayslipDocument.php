@@ -4,25 +4,7 @@ namespace App\Modules\Hr\Support;
 
 use Illuminate\Support\Str;
 
-/**
- * THE PAYSLIP AS A DOCUMENT — its lines, its rows, and the subtotals they foot to.
- *
- * EXTRACTED FROM PayslipResource, and the reason is no longer only "the PDF renders it too". HR can
- * now EDIT a printed line, and an edit needs the same answer the reader sees: to know what changing
- * "Late" to ₱300 costs, the service has to know what "Late" currently prints as — which, for the
- * attendance rows, is not any single stored column but an apportionment of two authoritative
- * totals (see rows()). A second implementation of that arithmetic living in the service would
- * disagree with the document the first time basic pay clamped at zero, and HR would be editing a
- * figure nobody was shown.
- *
- * SO THIS WORKS ON A PLAIN ARRAY, not on a model. The same function then reads a saved payslip, a
- * payslip mid-computation inside run(), and the `engine_snapshot` of what a payslip looked like
- * before anyone corrected it — which is exactly the set of things an override has to be measured
- * against.
- *
- * EVERY LINE CARRIES A KEY, from PayslipLines. That key is what an override names, what the UI
- * sends back, and what survives a re-run: names are for reading and keys are for pointing at.
- */
+/** THE PAYSLIP AS A DOCUMENT — its lines, its rows, and the subtotals they foot to. */
 final class PayslipDocument
 {
     /** How the attendance charge ledger's `kind` reads on the document. */
@@ -47,15 +29,6 @@ final class PayslipDocument
 
     /**
      * Every earning on this payslip as a named, keyed line.
-     *
-     * A line appears only when it carries money, EXCEPT Basic Pay on an ordinary run: a regular
-     * period that genuinely paid no basic (a full month of unpaid leave) still has to say so rather
-     * than silently omit the row the whole document is built around.
-     *
-     * Allowances are `kind => 'allowance'` because the redesigned document prints them in their own
-     * table BELOW the net-of-contributions subtotal. Splitting them HERE keeps this list the single
-     * description of what a run paid — a second, presentation-side rule for "is this an allowance?"
-     * is the duplication the breakdown was introduced to end.
      *
      * @param  array<string, mixed>  $slip
      * @param  list<array<string, mixed>>|null  $amendments  appended corrections; null when the
@@ -114,13 +87,6 @@ final class PayslipDocument
         $add('thirteenth_month', '13th Month Pay', $f('thirteenth_month'));
 
         // --- corrections ADDED to this period ----------------------------------------------------
-        //
-        // One line per amendment, each carrying the date it was issued, because that date is the
-        // only thing distinguishing two corrections to the same period.
-        //
-        // AN OVERRIDE IS NOT ONE OF THESE. It changes a line that is already printed above rather
-        // than adding one, so it must never also appear here — it would then be counted twice and
-        // the document would overstate what it paid.
         if ($amendments !== null && $amendments !== []) {
             foreach ($amendments as $amendment) {
                 if (($amendment['target_key'] ?? null) !== null) {
@@ -149,7 +115,7 @@ final class PayslipDocument
             $add('adjustment', 'Adjustment', $f('adjustment_pay'), ($slip['adjustment_note'] ?? null) ?: null);
         }
 
-        // --- final pay (FIN-014) ---------------------------------------------------------------
+        // --- final pay ---------------------------------------------------------------
         $add('separation_pay', 'Separation Pay', $f('separation_pay'),
             ! empty($slip['separation_pay_taxable']) ? 'Taxable' : 'Tax-exempt');
         $add('leave_conversion', 'Unused Leave Converted', $f('leave_conversion'),
@@ -186,24 +152,6 @@ final class PayslipDocument
 
     /**
      * The rows on the Deductions table: one per REASON, with its dates and its money.
-     *
-     * WHY THE PESOS ARE APPORTIONED RATHER THAN MULTIPLIED OUT. The obvious construction —
-     * `days × daily_rate` per reason — does not add up to what was taken. Basic pay clamps at zero,
-     * so a period deep enough in unpaid days has an absence charge SMALLER than its days imply, and
-     * the late/undertime figures are clamped again on top of that. Rows built by multiplication
-     * would each look defensible and their total would contradict the total printed beneath them —
-     * the one error a payslip cannot make.
-     *
-     * So the two authoritative figures are split instead: `totals.absences` across the day-costing
-     * reasons in proportion to their days, `totals.late_undertime` across the two time reasons in
-     * proportion to their own charges. Both splits carry their rounding residual onto the largest
-     * row, which keeps `Σ rows == totals.deductions` exact rather than approximately true.
-     *
-     * AN OVERRIDDEN ROW IS PINNED AND TAKEN OUT OF ITS POOL FIRST. HR typed that figure and the
-     * document must print it, not a re-apportionment that lands near it — and the remaining rows
-     * then share what is left, so the table still foots to its own total. Without the pin, editing
-     * "Half-Days" to ₱800 would move the pool by ₱200 and then hand each row a proportional share
-     * of the smaller pool: every row would change and none of them would say ₱800.
      *
      * @param  array<string, mixed>  $slip
      * @param  array<string, array{amount?: float|null, label?: string|null, original?: float|null}>  $overrides
@@ -279,10 +227,6 @@ final class PayslipDocument
         }
 
         // --- everything that is not attendance: benefit shares, loans, cash advances -------------
-        //
-        // Keyed by a slug of the NAME, which is the only handle these have: neither a benefit share
-        // nor a loan repayment carries an id onto the payslip. An index would be worse — inserting
-        // a line above would silently re-point every override below it.
         foreach ($slip['other_deductions_breakdown'] ?? [] as $line) {
             $rows[] = [
                 'key' => PayslipLines::keyForName(PayslipLines::OTHER_PREFIX, (string) $line['name']),
@@ -300,23 +244,6 @@ final class PayslipDocument
 
     /**
      * The subtotals the payslip document is built from.
-     *
-     * The identity they satisfy, for every payslip:
-     *
-     *     earnings − deductions = current
-     *     current − government  = initial_net
-     *     initial_net + allowances = net_pay
-     *
-     * `compensation` leads with the FULL period basic, so the absence charge has to reappear on the
-     * deductions side for the two to cancel — that is why `deductions` is
-     * `absence_deduction + other_deductions` rather than the stored `total_deductions`.
-     *
-     * `late_undertime` is clamped to the absence charge because basic pay clamps at zero: past that
-     * point the raw minute-level figures exceed the reduction that was really applied. The clamp
-     * keeps both absence rows non-negative and their sum exact.
-     *
-     * `uncollected` is DISCLOSURE, not arithmetic (FIN-053). The components store what was
-     * collected, so crediting the shortfall back here would credit it twice.
      *
      * @param  array<string, mixed>  $slip
      * @return array<string, mixed>
@@ -361,11 +288,6 @@ final class PayslipDocument
     /**
      * Split `$total` across `$weights` in proportion, exactly.
      *
-     * The residual left by rounding each share to centavos is carried onto the largest weight, so
-     * the parts sum to the whole rather than to the whole ± a centavo per row. With no positive
-     * weight the total cannot be attributed to anything and every share is zero — the caller's
-     * skeleton rows then print 0.00, which is the truthful outcome.
-     *
      * @param  array<string, float>  $weights
      * @return array<string, float>
      */
@@ -390,11 +312,6 @@ final class PayslipDocument
 
     /**
      * Apportion a pool after paying out the rows HR has pinned to a figure of their own.
-     *
-     * The pinned rows come off the top and the rest share what remains, so an edited row prints
-     * exactly what was typed and the table still sums to its total. If the pins alone exhaust the
-     * pool the remaining rows are zero rather than negative — a payslip cannot print a negative
-     * charge, and the pins are what the person signing this document chose.
      *
      * @param  array<string, float>  $weights
      * @param  array<string, array{amount?: float|null}>  $overrides
@@ -424,11 +341,6 @@ final class PayslipDocument
 
     /**
      * Stamp each line with the correction standing against it, if any.
-     *
-     * `original` is the ENGINE's figure — what the document prints struck through beside the one HR
-     * typed. It is carried on the line rather than looked up separately because every surface that
-     * renders a line has to render its correction: the React document, the PDF and the edit dialog
-     * would otherwise each need their own join back to the ledger.
      *
      * @param  list<array<string, mixed>>  $lines
      * @param  array<string, array{amount?: float|null, label?: string|null, original?: float|null}>  $overrides
@@ -474,15 +386,6 @@ final class PayslipDocument
 
     /**
      * The per-date charge ledger, grouped into the two questions people actually ask.
-     *
-     * `unpaid` — WHERE THE FIGURE COMES FROM, and specifically where its decimal comes from. It
-     * carries every line that cost a fraction of a day, lateness included, because "4.5 unpaid
-     * days" beside a list of four absences leaves the .5 unexplained.
-     *
-     * `late` — HOW THE MINUTES BECAME MONEY. Every late/undertime line, whether or not it was
-     * charged, so the minute counts can be traced to their days.
-     *
-     * A late line therefore appears in BOTH, deliberately: they answer different questions.
      *
      * @param  array<string, mixed>  $slip
      * @return array{unpaid: list<array<string, mixed>>, late: list<array<string, mixed>>}|null

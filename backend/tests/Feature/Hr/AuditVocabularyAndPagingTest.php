@@ -7,30 +7,12 @@ use App\Modules\Hr\Services\AuditService;
 use App\Modules\Hr\Services\ReportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/**
- * FIN-040 and FIN-041 — the audit trail lied about itself in two different ways.
- *
- * FIN-040: five verbs were written and absent from `AuditService::ACTIONS` — `ran`, `requested`,
- * `authorized`, `cancelled`, `rejected`. That list is what the report's action filter offers, so
- * those entries were invisible to anyone filtering by action. They are also the most consequential
- * entries in the system: `ran` is a payroll run, `authorized` is an employee consenting to a wage
- * deduction under Art. 113. A filter that silently omits those is worse than no filter, because it
- * looks authoritative.
- *
- * FIN-041: the report took 300 rows and said nothing about it. An export presented as complete was
- * not — with 500 entries in range, 200 were absent and the file looked finished. For the report whose
- * whole purpose is "who did what", silent truncation is the failure that matters, because the missing
- * rows are undetectable from the output.
- *
- * THE FIRST TEST IS THE ENFORCEMENT. It scans the module for every `->log('verb'` and asserts the
- * verb is listed — so the next one added cannot go missing the same way. The runtime guard in
- * `AuditService` catches only what a scan cannot see, a verb built at runtime.
- */
+/** And — the audit trail lied about itself in two different ways. */
 class AuditVocabularyAndPagingTest extends HrTestCase
 {
     use RefreshDatabase;
 
-    // --- FIN-040: the vocabulary ------------------------------------------------------------
+    // ---: the vocabulary ------------------------------------------------------------
 
     public function test_every_verb_the_module_writes_is_in_the_allowed_list(): void
     {
@@ -95,7 +77,7 @@ class AuditVocabularyAndPagingTest extends HrTestCase
         $this->assertSame(1, AuditLog::where('action', 'teleported')->count());
     }
 
-    // --- FIN-041: paging instead of silent truncation ----------------------------------------
+    // ---: paging instead of silent truncation ----------------------------------------
 
     private function seedEntries(int $count): void
     {

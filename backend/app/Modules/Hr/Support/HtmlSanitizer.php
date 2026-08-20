@@ -6,24 +6,7 @@ use DOMDocument;
 use DOMElement;
 use DOMNode;
 
-/**
- * An allow-list sanitiser for the HTML a rich-text editor produces.
- *
- * HR composes candidate emails in a WYSIWYG editor, so the body arrives as HTML from the
- * browser. Trusting it would be trusting whatever a request body contains — the editor is
- * not the only thing that can POST to the endpoint, and the stored body is later rendered
- * back into the compose modal and the sent-history view. So the server keeps its own idea
- * of what a candidate email may contain and discards everything else.
- *
- * WHY NOT HTMLPURIFIER. Adding a composer dependency needs sign-off, and the surface here is
- * small and fixed: the marks and blocks the toolbar can emit, nothing more. DOMDocument is in
- * the standard library and the allow-list below is short enough to read in one sitting.
- *
- * The policy: unknown ELEMENTS are unwrapped (their text survives, the tag does not) rather
- * than deleted, so a paste from Word loses its formatting instead of its words. Script-bearing
- * elements are the exception — they are removed whole, contents and all. Unknown ATTRIBUTES are
- * always dropped, which is what kills `onclick`, `style`-based exfiltration and `srcdoc`.
- */
+/** An allow-list sanitiser for the HTML a rich-text editor produces. */
 final class HtmlSanitizer
 {
     /** Tags the editor can produce, plus the ones a reasonable paste brings with it. */
