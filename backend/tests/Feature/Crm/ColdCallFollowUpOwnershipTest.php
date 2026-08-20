@@ -270,7 +270,17 @@ class ColdCallFollowUpOwnershipTest extends TestCase
         $this->assertSame($bd->id, $events->first()->assigned_to);
     }
 
-    public function test_qualifying_an_unowned_unscheduled_prospect_creates_nothing(): void
+    /**
+     * The COLD-CALL materializer still creates nothing for an unscheduled prospect.
+     *
+     * ⚠️ Superseded in part by BR-NQ-01 (PO-approved): qualification now also mints a first-touch
+     * Todo, so this lead is no longer event-free. The invariant this test exists to protect is
+     * narrower and unchanged — `materializeOnOwnershipAcquired()` must not fire without
+     * `cold_calling = 'scheduled'` — so the assertion is scoped to that creator by its `source`
+     * (`outreach`) rather than counting every event on the lead. The first-touch Todo carries
+     * `source = 'nearby'` and is covered by {@see NearbyQualificationFirstTouchTest}.
+     */
+    public function test_qualifying_an_unowned_unscheduled_prospect_creates_no_cold_call_follow_up(): void
     {
         $bd = $this->user('crm_bd');
         $prospect = Lead::factory()->create([
@@ -283,7 +293,11 @@ class ColdCallFollowUpOwnershipTest extends TestCase
         Sanctum::actingAs($bd);
         $this->postJson("/api/v1/crm/leads/{$prospect->id}/qualify")->assertCreated();
 
-        $this->assertCount(0, $this->eventsFor($prospect));
+        $this->assertCount(
+            0,
+            $this->eventsFor($prospect)->where('source', 'outreach'),
+            'materializeOnOwnershipAcquired() must not fire without cold_calling = scheduled.',
+        );
     }
 
     public function test_qualifying_an_already_owned_prospect_transfers_without_duplicating(): void

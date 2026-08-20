@@ -2,6 +2,8 @@
 
 namespace App\Modules\Crm\Services\Planner;
 
+use App\Models\User;
+use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\LeadController;
 use App\Modules\Crm\Controllers\LeadQualificationController;
 use App\Modules\Crm\Controllers\PlannerEventController;
@@ -138,6 +140,67 @@ class FollowUpScheduler
         }
 
         return $this->scheduleForColdCall($lead);
+    }
+
+    /**
+     * BR-NQ-01 — the first-touch Todo a BD owes a prospect they just qualified out of Nearby Clients.
+     *
+     * THIS IS THE ONE PLACE THE SYSTEM ORIGINATES WORK. Every other creator in this class reconciles
+     * intent the BD already expressed (`cold_calling = 'scheduled'`); this one is triggered by the
+     * qualification itself. That is a deliberate, PO-approved departure from the rule stated in
+     * {@see materializeOnOwnershipAcquired()} — "a reassignment transfers work and must never invent
+     * it" — and it is why the two live in separate methods rather than one. Qualification is a
+     * lifecycle CROSSING: it is irreversible, it removes the business from a shared pool, and it
+     * stamps ownership, so the obligation to make first contact exists from that instant whether or
+     * not a row records it. Assignment and reassignment carry no such meaning and keep the old rule.
+     *
+     * Deliberately NOT reached from `LeadController::assign()`. The assign/qualify parity that
+     * {@see materializeOnOwnershipAcquired()} enforces is broken here ON PURPOSE: the trigger is the
+     * `qualified_at` transition, not the acquisition of an owner.
+     *
+     * BD-ONLY, and this changes no authorization. `LeadPolicy::qualify()` is permission-only, so a
+     * `crm_admin` (or `super_admin` via Gate::before) can technically qualify through the API — that
+     * existing behaviour is preserved untouched. But the Planner is a BD workspace (`/zerem/planner`
+     * is `allowedRoles: ["crm_bd"]`, excluding even Super Admin), so minting for a non-BD would create
+     * work nobody can open. The guard lives here, in new code, rather than in the policy.
+     *
+     * CREATES NO EMAIL, and cannot. This mints a Planner row and nothing else: `SendScheduledEmailsJob`
+     * only ever selects EXISTING `crm_emails` rows (`direction=outbound`, `status=scheduled`), and the
+     * sole creator of those is a BD posting `scheduled_at` in the composer
+     * ({@see EmailController}). `planner_event_id` filters emails that already exist; it never
+     * creates one.
+     *
+     * Idempotent twice over: qualification itself is 409-guarded under `lockForUpdate`, so the
+     * transition cannot repeat; and the existing cold-call dedupe is reused unchanged below, so a
+     * prospect that already carries open follow-up work gets nothing new.
+     *
+     * @param  User  $actor  The user performing the qualification — the Todo's owner.
+     */
+    public function scheduleFirstTouch(Lead $lead, User $actor): ?PlannerEvent
+    {
+        if (! $actor->hasRole('crm_bd')) {
+            return null;
+        }
+
+        if ($this->coldCallFollowUpIsRedundant($lead)) {
+            return null;
+        }
+
+        return $this->create($lead, [
+            // Undated backlog, exactly like scheduleForColdCall(): qualification carries no deadline,
+            // and inventing one would both fabricate urgency and pull the row into the "Follow-ups
+            // Due" card, whose query requires `starts_at IS NOT NULL`.
+            'status' => 'todo',
+            'starts_at' => null,
+            // Already in the accepted vocabulary (StorePlannerEventRequest) and already used by the
+            // Nearby "Plan Visit" action, so the origin is legible without a new enum value.
+            'source' => 'nearby',
+            // The qualifier owns the work. Qualification has already set the lead's `assigned_to` to
+            // the same id; passing it explicitly keeps this independent of that ordering.
+            'assigned_to' => $actor->id,
+            'created_by' => $actor->id,
+            'description' => 'First touch — qualified from Nearby Clients.',
+        ]);
     }
 
     /**
