@@ -12,23 +12,59 @@ export type TeamUser = {
   createdAt: string | null;
 };
 
-export type CreateUserPayload = {
+/**
+ * A centralized Vite SEO account discovered by exact email (GET /users/lookup).
+ *
+ * Distinct from {@link TeamUser}: this is a platform identity that may have no CRM access at all —
+ * a TeamOra/Sprintly colleague the admin is about to grant Zerem access to.
+ */
+export type CentralUser = {
+  id: string;
   name: string;
   email: string;
+  /** Every platform role the account holds (hr_*, crm_*, pm_*). */
+  roles: string[];
+  /** Product names of the systems they can already reach, e.g. ["TeamOra", "Sprintly"]. */
+  systems: string[];
+  /** Their CRM role, or null when they cannot reach Zerem yet. */
+  crmRole: string | null;
+};
+
+/**
+ * POST /users serves both shapes. `name`/`password` are sent ONLY when creating a new account —
+ * for an existing centralized user the API rejects them outright, because granting CRM access must
+ * not be able to rename the person or touch their password.
+ */
+export type CreateUserPayload = {
+  email: string;
   role: string;
+  name?: string;
   status?: TeamUserStatus;
-  /** Optional admin-supplied temp password; server generates one when omitted. */
+  /** Optional admin-supplied temp password; server generates one when omitted. New accounts only. */
   password?: string;
 };
 
+/**
+ * PATCH /users/{id}. `role` is sent ONLY when the admin changed it — omitting it leaves the role
+ * pivot untouched, so a rename or suspend never rewrites roles. `null` is the explicit "no CRM
+ * access" choice; it removes CRM roles only and never touches HRIS/Projects access.
+ */
 export type UpdateUserPayload = {
   name?: string;
-  role?: string;
+  role?: string | null;
   status?: TeamUserStatus;
 };
 
-/** POST /users response: the created user plus the one-time temporary password. */
+/**
+ * POST /users response. Two shapes behind one endpoint:
+ *
+ *  - `granted: false` — a new account was created; `temporaryPassword` carries the one-time
+ *    credential to hand over.
+ *  - `granted: true`  — an existing centralized user was given CRM access. There is no
+ *    `temporaryPassword`, by design: they keep the password they already sign in with.
+ */
 export type CreatedUser = {
   user: TeamUser;
-  temporaryPassword: string;
+  granted: boolean;
+  temporaryPassword?: string;
 };

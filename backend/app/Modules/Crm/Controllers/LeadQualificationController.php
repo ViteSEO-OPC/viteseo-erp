@@ -97,6 +97,21 @@ class LeadQualificationController extends Controller
             // assigned it or a BD claimed it.
             $followUps->materializeOnOwnershipAcquired($locked, $previousOwnerId);
 
+            // BR-NQ-01 (PO-approved) — the first-touch Todo. A discovered prospect can never arrive
+            // `cold_calling = 'scheduled'` (IngestDiscoveredLeadsRequest rejects the field, and the
+            // column defaults to 'not-called'), so the line above is a documented no-op for the
+            // Nearby path and the lead would otherwise land in the CRM owned, scored, and with no
+            // work attached to it — invisible to Outreach, which is derived purely from pending
+            // Planner follow-up/email events.
+            //
+            // Runs AFTER materializeOnOwnershipAcquired so the two can never both fire: that call
+            // creates an open follow-up for an already-`scheduled` prospect, which this one's dedupe
+            // then sees and declines. Order is the guarantee of "exactly one", not a coincidence.
+            //
+            // BD-only, and it mints a Planner row ONLY — no email is created or scheduled here; see
+            // the method docblock for why that is structural rather than conventional.
+            $followUps->scheduleFirstTouch($locked, $request->user());
+
             return response()->json([
                 'data' => new LeadResource($locked->refresh()),
             ], 201);

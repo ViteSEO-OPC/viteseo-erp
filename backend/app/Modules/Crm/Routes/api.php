@@ -292,6 +292,9 @@ Route::prefix('v1/crm')->group(function (): void {
         // Team Accounts (user management). Policy-guarded (users.* permissions); Super Admin bypasses
         // via Gate::before. BD Manager has no users.* permission → 403.
         Route::get('/users', [UserController::class, 'index'])->can('viewAny', User::class);
+        // Email-first Create Account: does this address already belong to a centralized user?
+        // Declared before any /users/{user} wildcard so "lookup" is never captured as an id.
+        Route::get('/users/lookup', [UserController::class, 'lookup'])->can('viewAny', User::class);
         Route::post('/users', [UserController::class, 'store'])->can('create', User::class);
         Route::match(['put', 'patch'], '/users/{user}', [UserController::class, 'update'])->can('update', 'user');
         Route::delete('/users/{user}', [UserController::class, 'destroy'])->can('delete', 'user');

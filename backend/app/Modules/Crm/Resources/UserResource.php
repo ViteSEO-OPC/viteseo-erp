@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Resources;
 
 use App\Models\User;
+use App\Modules\Crm\Services\CrmAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Collection;
@@ -23,9 +24,12 @@ class UserResource extends JsonResource
             'name' => $this->name,
             'email' => $this->email,
             'phone' => $this->phone,
-            // Primary role (the app uses exactly one role per account) alongside the full
-            // roles/permissions arrays the auth layer relies on.
-            'role' => $roles->first(),
+            // The account's CRM role, alongside the full roles/permissions arrays the auth layer
+            // relies on. Resolved by RANK, not by pivot order: a BD who is also an HRIS employee
+            // holds `hr_employee` (role id 3) and `crm_bd` (5), and the unordered pivot returns the
+            // lower id first — so reading "the first role" labelled every multi-module colleague
+            // with a role the CRM UI cannot render. Null for a user with no CRM access.
+            'role' => app(CrmAccessService::class)->primaryCrmRole($this->resource),
             'roles' => $roles,
             'permissions' => $permissions,
             'status' => $this->status,
