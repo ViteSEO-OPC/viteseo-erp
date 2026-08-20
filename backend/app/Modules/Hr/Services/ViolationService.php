@@ -176,6 +176,18 @@ class ViolationService
         $computed = [];
 
         foreach (Employee::with('workSchedule')->get() as $emp) {
+            // Management is exempt from the time clock, so no violation category applies to
+            // them: their rows are written by `hr:generate-management-attendance`, not scanned.
+            // Guarding HERE rather than relying on those rows existing is the point — a night
+            // the job did not run (or any day before an employee was made management) left a
+            // missing row, and the absence branch below reads a missing row as an unauthorised
+            // absence, escalating to red AWOL. The roster, the reports and payroll all already
+            // exempt them (AttendanceService::allForDate, unpaidDaysDetailFor); this was the one
+            // layer that did not, so the board showed 'Present' beside an AWOL flag.
+            if ($emp->isManagement()) {
+                continue;
+            }
+
             $rows = Attendance::where('employee_id', $emp->id)
                 ->whereBetween('work_date', [$monthStart->toDateString(), $scanEnd->toDateString()])
                 ->get()
