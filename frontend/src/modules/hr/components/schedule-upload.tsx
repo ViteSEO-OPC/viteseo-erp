@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { formatPeso } from "@/core/lib/format";
 import { notify as toast } from "@/core/lib/notify";
 import { useImportContributionSchedule } from "@/modules/hr/hooks/use-benefits";
+import { Explainer } from "@/modules/hr/ui/explainer";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import type { ContributionBand, ScheduleImportResult } from "@/modules/hr/api/benefits";
 
@@ -75,12 +76,16 @@ export function ScheduleUpload({
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-caption text-muted-foreground">
-        Upload the schedule as the agency publishes it — an Excel file (.xlsx) or a CSV. The
-        system finds the table by its headings, so the title lines and the extra columns can stay
-        exactly as they are. Nothing is saved until you press Save below.
-      </p>
+    // Its own `group/explain` as well as the Section's, so the text still reveals if this is
+    // ever used somewhere that is not a Section.
+    <div className="group/explain space-y-3">
+      <Explainer>
+        <p className="text-caption text-muted-foreground">
+          Upload the schedule as the agency publishes it — an Excel file (.xlsx) or a CSV. The
+          system finds the table by its headings, so the title lines and the extra columns can
+          stay exactly as they are. Nothing is saved until you press Save below.
+        </p>
+      </Explainer>
 
       <input
         ref={input}
@@ -157,16 +162,18 @@ function ImportSummary({
        * any of them can be re-pointed without a code change.
        */}
       <div className="space-y-3">
-        <p className="text-caption text-muted-foreground">
-          These are the only columns the system reads. The first three are saved as the bracket
-          table; the last two are not saved at all — they are the amounts the agency printed, read
-          back to check our own maths. Every other column in your file is a component of one of
-          these and is ignored.
-        </p>
+        <Explainer>
+          <p className="text-caption text-muted-foreground">
+            These are the only columns the system reads. The first three are saved as the bracket
+            table; the last two are not saved at all — they are the amounts the agency printed,
+            read back to check our own maths. Every other column in your file is a component of
+            one of these and is ignored.
+          </p>
+        </Explainer>
         <div className="grid gap-3 sm:grid-cols-3">
           {FIELDS.map((field) => (
-            <div key={field.key} className="space-y-1.5">
-              <Label className="text-label">
+            <div key={field.key}>
+              <Label className="mb-1.5 block text-label">
                 {field.label}
                 {field.role === "checked" && (
                   <span className="ml-1.5 font-normal normal-case text-muted-foreground">
@@ -182,7 +189,9 @@ function ImportSummary({
                   ...COLUMN_LETTERS.map((c) => ({ value: c, label: `Column ${c}` })),
                 ]}
               />
-              <p className="text-caption text-muted-foreground">{field.hint}</p>
+              <Explainer>
+                <p className="text-caption text-muted-foreground">{field.hint}</p>
+              </Explainer>
             </div>
           ))}
         </div>

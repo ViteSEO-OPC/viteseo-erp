@@ -77,15 +77,25 @@ export default function BenefitsPage() {
         <section className="space-y-3">
           <div className="flex items-center gap-2">
             <h2 className="text-h3 font-bold text-foreground">Government mandated</h2>
-            <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-semibold text-muted-foreground">
-              System managed
-            </span>
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {(settings ?? []).map((s) => (
               <GovCard key={s.id} setting={s} onEdit={() => setEditContribution(s.type)} />
             ))}
           </div>
+          {/*
+           * The three are installed with the database and have no "add" action, so an empty
+           * section is a deployment fault, not a state HR can fix from here. It used to render
+           * as a bare heading over nothing, which is how it shipped unnoticed — and the same
+           * missing rows mean payroll deducts nothing, so the message says that out loud.
+           */}
+          {settings?.length === 0 && (
+            <p className="rounded-card border border-dashed border-border p-5 text-sm text-muted-foreground">
+              Government contributions are not installed in this environment, so no SSS,
+              PhilHealth or Pag-IBIG will be deducted on a payroll run. This needs a database
+              migration — ask your administrator.
+            </p>
+          )}
         </section>
 
         {/* Allowances — HR editable. */}
