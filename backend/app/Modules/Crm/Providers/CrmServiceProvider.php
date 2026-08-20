@@ -47,6 +47,7 @@ use App\Modules\Crm\Policies\PlannerEventPolicy;
 use App\Modules\Crm\Policies\UserPolicy;
 use App\Modules\Crm\Services\BusinessRules\ScoringConfigProvider;
 use App\Modules\Crm\Services\Kpi\KpiConfig;
+use App\Modules\Crm\Services\NicheCanonicalizer;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
 use App\Modules\Crm\Services\Mail\Contracts\GoogleCredentialSource;
 use App\Modules\Crm\Services\Mail\Google\GoogleCredentialSourceFactory;
@@ -94,6 +95,12 @@ class CrmServiceProvider extends ServiceProvider
             ScoringConfig::class,
             fn ($app): ScoringConfig => $app->make(ScoringConfigProvider::class)->resolve(),
         );
+
+        // Business Niche registry lookup for the Nearby Clients surface. SCOPED (one instance per
+        // request) on purpose: the canonicalizer memoizes the registry, so serializing a whole
+        // prospect pool costs one query instead of one per row — while a long-lived singleton would
+        // serve a stale registry to later requests after a niche is created or renamed.
+        $this->app->scoped(NicheCanonicalizer::class);
 
         // BD KPI Engine parameters (status sets + rolling window) from config/kpi.php.
         $this->app->singleton(KpiConfig::class, fn ($app): KpiConfig => KpiConfig::fromArray(

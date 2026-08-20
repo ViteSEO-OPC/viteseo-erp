@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\NicheCanonicalizer;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Str;
@@ -27,7 +28,13 @@ class NearbyClientResource extends JsonResource
             'id' => (string) $this->id,
             'business' => $this->business_name,
             'initials' => $this->initialsFor($this->business_name),
-            'niche' => $this->industry,
+            // The Business Niche registry's spelling when this industry is registered, otherwise the
+            // raw value. Discovery derives `industry` from provider tags and knows nothing about the
+            // CRM registry, so `pharmacy` and `Pharmacy` would otherwise be two separate filter
+            // options that each miss the other's leads. Every other CRM surface already matches
+            // niches case-insensitively ({@see \App\Modules\Crm\Models\Niche}); this gives Nearby the
+            // same view. Unregistered values pass through unchanged — see NicheCanonicalizer.
+            'niche' => app(NicheCanonicalizer::class)->canonical($this->industry),
             // Human area label — most specific administrative unit available.
             'area' => $this->city ?? $this->province ?? $this->region,
             'contact' => $this->contact_name,
