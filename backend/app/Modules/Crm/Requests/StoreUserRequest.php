@@ -64,18 +64,18 @@ class StoreUserRequest extends FormRequest
                 ? ['prohibited']
                 : ['required', 'string', 'max:255'],
 
-            // On the grant path the address is expected to exist, so `unique` is dropped. The create
-            // path keeps the ORIGINAL rule verbatim, soft-delete clause included — this milestone
-            // changes no create-path behavior.
+            // On the grant path the address is expected to exist, so `unique` is dropped.
             //
-            // Known pre-existing gap, deliberately left alone and tracked separately: `users.email`
-            // carries a plain UNIQUE index that a soft-delete does not free, so an address belonging
-            // to a soft-deleted account passes this rule and then fails at the database. Fixing it
-            // means dropping `whereNull('deleted_at')`, which is a create-path behavior change and
-            // therefore belongs in its own commit, not in the CRM-access one.
+            // On the create path the rule now matches the DATABASE exactly. `users.email` carries a
+            // plain UNIQUE index (`users_email_unique`) that a soft-delete does not free, so the
+            // previous `->whereNull('deleted_at')` clause made the validator MORE permissive than
+            // the schema: an address belonging to a soft-deleted account passed validation and then
+            // died at the insert with an integrity violation — a 500 where the admin needed a
+            // sentence. Dropping the clause turns that into a clean 422. It relaxes nothing: the
+            // index already refused the write.
             'email' => $granting
                 ? ['required', 'email', 'max:255']
-                : ['required', 'email', 'max:255', Rule::unique('users', 'email')->whereNull('deleted_at')],
+                : ['required', 'email', 'max:255', Rule::unique('users', 'email')],
 
             // Only roles the creator may assign (Super Admin → admin/BDM, Admin → BDM). Never
             // super-admin. This is what stops a CRM Admin escalating anyone (themselves included)
@@ -102,6 +102,17 @@ class StoreUserRequest extends FormRequest
             'name.prohibited' => 'This email already belongs to a Vite SEO account — granting CRM access cannot change their name.',
             'status.prohibited' => 'This email already belongs to a Vite SEO account — granting CRM access cannot change their status.',
             'password.prohibited' => 'This email already belongs to a Vite SEO account — granting CRM access never changes their password.',
+
+            // `email.unique` is only ever evaluated on the CREATE path, and a LIVE account can never
+            // reach it: `existingUser()` resolves an active address first and routes the request to
+            // the grant branch, where this rule is absent. So a failure here means exactly one
+            // thing — the address belongs to a soft-deleted account — and the copy can say so.
+            //
+            // ⚠️ This message's accuracy depends on that upstream interception. If the grant branch
+            // ever stops catching active addresses, an active duplicate would land here and be told
+            // the account is "deleted". Revisit this string alongside any change to `existingUser()`
+            // or to the `$granting` split above.
+            'email.unique' => 'This email belongs to a deleted Vite SEO account. Restoring it is a developer operation — ask an administrator rather than creating a second account.',
         ];
     }
 }

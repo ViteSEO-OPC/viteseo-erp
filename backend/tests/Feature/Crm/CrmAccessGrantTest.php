@@ -296,11 +296,17 @@ class CrmAccessGrantTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'nameless@example.test']);
     }
 
+    // --- Soft-deleted addresses (Concern #3) --------------------------------
+    //
+    // `users.email` carries a plain UNIQUE index that a soft-delete does NOT free, while the
+    // validator used to exempt trashed rows via `->whereNull('deleted_at')`. That mismatch let a
+    // deleted colleague's address pass validation and then die at the insert with an integrity
+    // violation — a 500. The rule now matches the index, so the same request fails at 422 with an
+    // explanation. Nothing about who may delete, or about the centralized account model, changes.
+
     /**
      * A soft-deleted account is NOT a grant target — `existingUser()` excludes trashed rows, so such
-     * an address falls through to the create path and is governed by the unchanged `unique` rule.
-     * (That rule's soft-delete gap is a known pre-existing issue tracked as its own slice; this test
-     * pins only that a grant never resurrects a deleted account.)
+     * an address falls through to the create path and is caught by `unique` there.
      */
     public function test_a_soft_deleted_account_is_never_resurrected_by_a_grant(): void
     {
@@ -314,6 +320,115 @@ class CrmAccessGrantTest extends TestCase
             ['hr_employee', 'pm_member'],
             $this->roleNames(User::withTrashed()->findOrFail($deleted->id)),
         );
+    }
+
+    /** The fix: a clean 422 on the `email` field, not an integrity-violation 500. */
+    public function test_a_soft_deleted_email_is_rejected_with_a_validation_error(): void
+    {
+        $deleted = $this->centralUser('archived@example.test');
+        $deleted->delete();
+
+        $this->actingAs($this->actor('super_admin'))
+            ->postJson('/api/v1/crm/users', [
+                'name' => 'Someone Else',
+                'email' => 'archived@example.test',
+                'role' => 'crm_bd',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('email');
+    }
+
+    /** The address stays owned by the deleted account: no second row, no resurrection, no role churn. */
+    public function test_a_rejected_soft_deleted_email_creates_no_second_account(): void
+    {
+        $deleted = $this->centralUser('archived2@example.test');
+        $deleted->delete();
+        $rowBefore = $this->rawRow($deleted->id);
+
+        $this->actingAs($this->actor('super_admin'))
+            ->postJson('/api/v1/crm/users', [
+                'name' => 'Someone Else',
+                'email' => 'archived2@example.test',
+                'role' => 'crm_bd',
+            ])
+            ->assertStatus(422);
+
+        $this->assertSame(1, User::withTrashed()->where('email', 'archived2@example.test')->count());
+        $this->assertTrue($deleted->fresh()->trashed());
+        $this->assertEquals($rowBefore, $this->rawRow($deleted->id));
+        $this->assertSame(
+            ['hr_employee', 'pm_member'],
+            $this->roleNames(User::withTrashed()->findOrFail($deleted->id)),
+        );
+    }
+
+    /**
+     * An ACTIVE address never reaches the `unique` rule — it is intercepted upstream and granted.
+     * This is what makes the `email.unique` message ("belongs to a deleted account") accurate.
+     */
+    public function test_an_active_email_is_granted_rather_than_hitting_the_unique_rule(): void
+    {
+        $active = $this->centralUser('active.dupe@example.test');
+        $actor = $this->actor('super_admin');
+        $countBefore = User::withTrashed()->count();
+
+        $this->actingAs($actor)
+            ->postJson('/api/v1/crm/users', ['email' => 'active.dupe@example.test', 'role' => 'crm_bd'])
+            ->assertOk()
+            ->assertJsonPath('granted', true);
+
+        $this->assertSame($countBefore, User::withTrashed()->count());
+        $this->assertSame(['crm_bd', 'hr_employee', 'pm_member'], $this->roleNames($active));
+    }
+
+    // --- Deletion authorization is FROZEN: Super Admin only -----------------
+
+    public function test_super_admin_may_delete_a_bd_account(): void
+    {
+        $bd = $this->centralUser('deletable.bd@example.test');
+        $bd->assignRole('crm_bd');
+
+        $this->actingAs($this->actor('super_admin'))
+            ->deleteJson("/api/v1/crm/users/{$bd->id}")
+            ->assertNoContent();
+
+        $this->assertTrue($bd->fresh()->trashed());
+    }
+
+    public function test_crm_admin_may_not_delete_an_account(): void
+    {
+        $bd = $this->centralUser('protected.bd@example.test');
+        $bd->assignRole('crm_bd');
+
+        $this->actingAs($this->actor('crm_admin'))
+            ->deleteJson("/api/v1/crm/users/{$bd->id}")
+            ->assertForbidden();
+
+        $this->assertFalse($bd->fresh()->trashed());
+    }
+
+    public function test_bd_may_not_delete_an_account(): void
+    {
+        $bd = $this->centralUser('protected2.bd@example.test');
+        $bd->assignRole('crm_bd');
+
+        $this->actingAs($this->actor('crm_bd'))
+            ->deleteJson("/api/v1/crm/users/{$bd->id}")
+            ->assertForbidden();
+
+        $this->assertFalse($bd->fresh()->trashed());
+    }
+
+    public function test_a_super_admin_account_cannot_be_deleted(): void
+    {
+        $owner = $this->centralUser('undeletable@example.test');
+        $owner->assignRole('super_admin');
+
+        $this->actingAs($this->actor('super_admin'))
+            ->deleteJson("/api/v1/crm/users/{$owner->id}")
+            ->assertStatus(422);
+
+        $this->assertFalse($owner->fresh()->trashed());
     }
 
     // --- Editing an existing CRM user ---------------------------------------
