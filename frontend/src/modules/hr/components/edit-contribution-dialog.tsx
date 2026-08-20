@@ -28,6 +28,8 @@ import type {
   ScheduleImportResult,
 } from "@/modules/hr/api/benefits";
 import { ScheduleUpload } from "@/modules/hr/components/schedule-upload";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { Explainer } from "@/modules/hr/ui/explainer";
 import { CONTRIBUTION_LABELS, SALARY_BASES } from "@/modules/hr/types/benefits";
 import { cn } from "@/lib/utils";
 
@@ -87,10 +89,7 @@ function ContributionFormLoader({ type, onDone }: { type: string; onDone: () => 
   if (isPending || isError) {
     return (
       <>
-        <DialogHeader>
-          <DialogTitle>{label}</DialogTitle>
-          <DialogDescription>{guide.how}</DialogDescription>
-        </DialogHeader>
+        <ContributionHeader label={label} how={guide.how} />
         {isError ? (
           <div className="mt-5 space-y-3">
             <p className="text-sm text-destructive">
@@ -274,21 +273,17 @@ function ContributionForm({
 
   return (
     <>
-      <DialogHeader>
-        <DialogTitle>{label}</DialogTitle>
-        <DialogDescription>{guide.how}</DialogDescription>
-      </DialogHeader>
+      <ContributionHeader label={label} how={guide.how} />
 
       <div className="mt-5 space-y-5">
         <Field
           label="Takes effect from"
           hint="Payslips before this date keep the rates they were calculated with."
         >
-          <Input
-            type="date"
+          <DatePicker
             className="max-w-xs"
             value={effectiveFrom}
-            onChange={(e) => setEffectiveFrom(e.target.value)}
+            onChange={setEffectiveFrom}
           />
         </Field>
 
@@ -315,11 +310,13 @@ function ContributionForm({
               </button>
             ))}
           </div>
-          <p className="mt-2 text-caption text-muted-foreground">
-            {salaryBasis === "earnings"
-              ? "Charged on what the period actually paid: basic pay after absences and lates, plus overtime, night differential, holiday and rest-day premium, and the allowances marked as counting toward contributions."
-              : "Charged on the employee's basic monthly salary from their profile, whatever they actually earned in the period."}
-          </p>
+          <Explainer>
+            <p className="text-caption text-muted-foreground">
+              {salaryBasis === "earnings"
+                ? "Charged on what the period actually paid: basic pay after absences and lates, plus overtime, night differential, holiday and rest-day premium, and the allowances marked as counting toward contributions."
+                : "Charged on the employee's basic monthly salary from their profile, whatever they actually earned in the period."}
+            </p>
+          </Explainer>
           {/*
            * Not blocked — a company may have a reason — but PhilHealth's basis is set by
            * regulation rather than by preference, and saying so is cheaper than a correction
@@ -353,6 +350,21 @@ function ContributionForm({
               imported={imported}
               onImported={applyImport}
             />
+            {/*
+             * The EC belongs to the table, so it is described where the table is. It used to have
+             * a section of its own, which was a heading over a paragraph with nothing to set —
+             * the form asking for the reader's attention to tell them there was nothing to do.
+             */}
+            {ecFromTable && (
+              <Explainer>
+                <p className="text-caption text-muted-foreground">
+                  The schedule also prints the employer&apos;s EC for every bracket — currently{" "}
+                  <strong>{ecRange}</strong> depending on the bracket, paid by the company on top
+                  and never deducted from the employee. There is nothing to set for it: the flat
+                  add-on fields only appear when an uploaded schedule has no EC column.
+                </p>
+              </Explainer>
+            )}
           </Section>
         )}
 
@@ -393,35 +405,21 @@ function ContributionForm({
                 <Input type="number" step="0.01" min={0} placeholder="no maximum" value={maxAmount} onChange={(e) => setMaxAmount(e.target.value)} />
               </Field>
             </div>
-            <p className="mt-2 text-caption text-muted-foreground">
-              These are two ways of saying the same thing at a flat rate — a {formatPeso(10000)}{" "}
-              salary ceiling at 2% and a {formatPeso(200)} amount ceiling both come to{" "}
-              {formatPeso(200)}. Prefer the salary ceiling: it stays correct if the rate ever
-              changes.
-            </p>
+            <Explainer>
+              <p className="text-caption text-muted-foreground">
+                These are two ways of saying the same thing at a flat rate — a {formatPeso(10000)}{" "}
+                salary ceiling at 2% and a {formatPeso(200)} amount ceiling both come to{" "}
+                {formatPeso(200)}. Prefer the salary ceiling: it stays correct if the rate ever
+                changes.
+              </p>
+            </Explainer>
           </Section>
         )}
 
-        {/* SSS EC — employer-only, so it lives on its own. */}
-        {bracketsApply && ecFromTable && (
-          <Section title="Employer-only add-on">
-            <p className="text-caption text-muted-foreground">
-              Taken from the uploaded schedule, which prints an amount for every bracket — so
-              there is nothing to set here. Currently{" "}
-              <strong>{ecRange}</strong> depending on the bracket, paid by the company on top and
-              never deducted from the employee.
-            </p>
-          </Section>
-        )}
-
+        {/* SSS EC — employer-only, and only when the uploaded table did not print one. */}
         {bracketsApply && !ecFromTable && (
           <Section title="Employer-only add-on">
-            <p className="text-caption text-muted-foreground">
-              A flat amount the company pays on top, above a salary threshold. Never deducted from
-              the employee. The published schedule normally prints this per bracket — if your
-              uploaded file has that column, point at it above and these two fields disappear.
-            </p>
-            <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Amount (₱)">
                 <Input type="number" step="0.01" min={0} value={addOn} onChange={(e) => setAddOn(e.target.value)} />
               </Field>
@@ -429,6 +427,14 @@ function ContributionForm({
                 <Input type="number" step="0.01" min={0} placeholder="none" value={addOnMin} onChange={(e) => setAddOnMin(e.target.value)} />
               </Field>
             </div>
+            <Explainer>
+              <p className="text-caption text-muted-foreground">
+                A flat amount the company pays on top, above a salary threshold. Never deducted
+                from the employee. The published schedule normally prints this per bracket — if
+                your uploaded file has that column, point at it above and these two fields
+                disappear.
+              </p>
+            </Explainer>
           </Section>
         )}
 
@@ -524,9 +530,21 @@ function ContributionForm({
   );
 }
 
+/** The contribution's name, with the how-it-works paragraph one hover away. */
+function ContributionHeader({ label, how }: { label: string; how: string }) {
+  return (
+    <DialogHeader className="group/explain space-y-0">
+      <DialogTitle>{label}</DialogTitle>
+      <Explainer>
+        <DialogDescription>{how}</DialogDescription>
+      </Explainer>
+    </DialogHeader>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div>
+    <div className="group/explain">
       <p className="mb-2 text-label font-bold uppercase tracking-wide text-muted-foreground">
         {title}
       </p>
@@ -545,10 +563,16 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
+    // Deliberately not `space-y-*`: a collapsed hint is zero-height but would still take the
+    // stack's margin, leaving a stray gap under every field. The label carries its own instead.
+    <div className="group/explain">
+      <Label className="mb-2 block">{label}</Label>
       {children}
-      {hint && <p className="text-caption text-muted-foreground">{hint}</p>}
+      {hint && (
+        <Explainer>
+          <p className="text-caption text-muted-foreground">{hint}</p>
+        </Explainer>
+      )}
     </div>
   );
 }

@@ -145,6 +145,11 @@ class ContributionScheduleImportTest extends HrTestCase
     {
         $path = $this->xlsxFixture();
 
+        // A DELTA, not a count of zero. The published SSS schedule is now installed by migration
+        // rather than seeded, so a bracket version exists in every database before this test
+        // uploads anything — and "nothing was written" was only ever about what the upload adds.
+        $before = ContributionVersion::where('basis', 'bracket')->count();
+
         $this->actingAsHr()
             ->postJson('/api/v1/hr/contribution-versions/import-schedule', [
                 'file' => new UploadedFile($path, 'schedule.xlsx', null, null, true),
@@ -153,7 +158,7 @@ class ContributionScheduleImportTest extends HrTestCase
             ->assertJsonPath('data.suggested.employee_rate', 0.05)
             ->assertJsonPath('data.columns.msc', 'D');
 
-        $this->assertSame(0, ContributionVersion::where('basis', 'bracket')->count(),
+        $this->assertSame($before, ContributionVersion::where('basis', 'bracket')->count(),
             'a dry run — HR confirms the reading before anything is written');
     }
 

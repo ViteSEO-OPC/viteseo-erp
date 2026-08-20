@@ -18,6 +18,8 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { DatePicker } from "@/modules/hr/ui/date-picker";
+import { Explainer } from "@/modules/hr/ui/explainer";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import {
   useCreateBenefitProgram,
@@ -155,11 +157,13 @@ function AllowanceForm({
 
   return (
     <>
-      <DialogHeader>
+      <DialogHeader className="group/explain space-y-0">
         <DialogTitle>{isNew ? "Add an allowance" : `Edit ${program.name}`}</DialogTitle>
-        <DialogDescription>
-          A fixed amount added to pay each period, on top of salary.
-        </DialogDescription>
+        <Explainer>
+          <DialogDescription>
+            A fixed amount added to pay each period, on top of salary.
+          </DialogDescription>
+        </Explainer>
       </DialogHeader>
 
       <div className="space-y-4">
@@ -173,47 +177,45 @@ function AllowanceForm({
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="a-amount">Amount per period</Label>
-            <Input
-              id="a-amount"
-              type="number"
-              min="0"
-              step="0.01"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
+        <div className="group/explain">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="a-amount">Amount per period</Label>
+              <Input
+                id="a-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="a-freq">Frequency</Label>
+              <SimpleSelect
+                id="a-freq"
+                value={frequency}
+                onValueChange={setFrequency}
+                options={ALLOWANCE_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
+              />
+            </div>
+            {/*
+             * Payroll prices an allowance as of the cycle END, so a period that closed
+             * before this date keeps whatever applied then. Without it, raising an amount rewrote
+             * every payslip that had not yet been paid out.
+             */}
+            <div className="space-y-1.5">
+              <Label htmlFor="a-eff">Applies from</Label>
+              <DatePicker id="a-eff" value={effectiveFrom} onChange={setEffectiveFrom} />
+            </div>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="a-freq">Frequency</Label>
-            <SimpleSelect
-              id="a-freq"
-              value={frequency}
-              onValueChange={setFrequency}
-              options={ALLOWANCE_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
-            />
-          </div>
-          {/*
-           * Payroll prices an allowance as of the cycle END, so a period that closed
-           * before this date keeps whatever applied then. Without it, raising an amount rewrote
-           * every payslip that had not yet been paid out.
-           */}
-          <div className="space-y-1.5">
-            <Label htmlFor="a-eff">Applies from</Label>
-            <Input
-              id="a-eff"
-              type="date"
-              value={effectiveFrom}
-              onChange={(e) => setEffectiveFrom(e.target.value)}
-            />
-          </div>
+          <Explainer>
+            <p className="text-caption text-muted-foreground">
+              Payslips for periods that ended before <strong>{effectiveFrom}</strong> keep the
+              amount that applied then, even if they are re-run.
+            </p>
+          </Explainer>
         </div>
-
-        <p className="text-caption text-muted-foreground">
-          Payslips for periods that ended before <strong>{effectiveFrom}</strong> keep the amount
-          that applied then, even if they are re-run.
-        </p>
 
         <Segmented label="Tax treatment" options={TAX_TREATMENTS} value={tax} onChange={setTax} />
 
@@ -223,7 +225,7 @@ function AllowanceForm({
          * benefits exemption rather than being taxed outright.
          */}
         {tax !== "taxable" && (
-          <div className="rounded-lg border border-border bg-card p-3">
+          <div className="group/explain rounded-lg border border-border bg-card p-3">
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-40 flex-1 space-y-1.5">
                 <Label htmlFor="a-ceiling">Tax-free ceiling for this allowance</Label>
@@ -253,12 +255,14 @@ function AllowanceForm({
                 </div>
               )}
             </div>
-            <p className="mt-2 text-caption text-muted-foreground">
-              BIR sets a limit per benefit — rice ₱2,500/month, uniform ₱8,000/year, medical cash
-              allowance ₱2,000/semester. Anything above the limit is not taxed straight away: it
-              counts toward the ₱90,000 covering 13th month pay and other benefits. Leave blank if
-              this allowance has no statutory limit.
-            </p>
+            <Explainer>
+              <p className="text-caption text-muted-foreground">
+                BIR sets a limit per benefit — rice ₱2,500/month, uniform ₱8,000/year, medical
+                cash allowance ₱2,000/semester. Anything above the limit is not taxed straight
+                away: it counts toward the ₱90,000 covering 13th month pay and other benefits.
+                Leave blank if this allowance has no statutory limit.
+              </p>
+            </Explainer>
           </div>
         )}
 
@@ -268,19 +272,24 @@ function AllowanceForm({
          * the tax block: the two are independent, and reading "non-taxable" as "not
          * contributable" is the mistake this switch exists to make impossible.
          */}
-        <Segmented
-          label="Government contributions"
-          options={CONTRIBUTION_TREATMENTS}
-          value={contributable}
-          onChange={setContributable}
-        />
-        <p className="text-caption text-muted-foreground">
-          {contributable === "yes"
-            ? "This allowance is part of the salary SSS and Pag-IBIG are charged on, so it raises both the employee's and the company's share."
-            : "The employee still receives this allowance in full — it is only left out of the salary SSS and Pag-IBIG are charged on."}{" "}
-          PhilHealth is charged on basic salary by law and is unaffected either way. This setting
-          does nothing until a contribution is switched to the earnings basis in Company → Benefits.
-        </p>
+        <div className="group/explain">
+          <Segmented
+            label="Government contributions"
+            options={CONTRIBUTION_TREATMENTS}
+            value={contributable}
+            onChange={setContributable}
+          />
+          <Explainer>
+            <p className="text-caption text-muted-foreground">
+              {contributable === "yes"
+                ? "This allowance is part of the salary SSS and Pag-IBIG are charged on, so it raises both the employee's and the company's share."
+                : "The employee still receives this allowance in full — it is only left out of the salary SSS and Pag-IBIG are charged on."}{" "}
+              PhilHealth is charged on basic salary by law and is unaffected either way. This
+              setting does nothing until a contribution is switched to the earnings basis in
+              Company → Benefits.
+            </p>
+          </Explainer>
+        </div>
 
         <EligibilityPicker
           mode={mode}
