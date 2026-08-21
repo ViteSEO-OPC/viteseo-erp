@@ -12,35 +12,17 @@
     /** Two peso figures that differ by more than rounding. */
     $differs = fn ($a, $b) => abs((float) $a - (float) $b) > 0.005;
 
-    /**
-     * The rows the Compensation table shows even at zero, in the order it shows them — matching
-     * the screen. A reader checking a payslip is checking a list they already expect, and a
-     * missing "Overtime" row is indistinguishable from overtime that was silently dropped.
+    /*
+     * The rows an ordinary period shows even at zero arrive as REAL LINES from
+     * PayslipDocument::earningLines(), in the order it shows them — the screen reads the same
+     * list. This used to rebuild that skeleton here by NAME, which both duplicated the rule and
+     * printed a renamed line twice: once as an empty placeholder under its old name and again
+     * under the one HR gave it.
      */
-    $skeleton = ['Basic Pay', 'Overtime', 'Night Differential', 'Rest Day', 'Holiday'];
-
     $earningLines = array_values(array_filter(
         $p['earnings_breakdown'],
         fn ($l) => ($l['kind'] ?? 'earning') !== 'allowance',
     ));
-
-    if ($p['run_type'] === 'regular') {
-        $bySkeleton = [];
-        foreach ($skeleton as $name) {
-            $found = null;
-            foreach ($earningLines as $l) {
-                if ($l['name'] === $name) { $found = $l; break; }
-            }
-            $bySkeleton[] = $found ?? ['name' => $name, 'amount' => 0.0, 'note' => null];
-        }
-
-        $extra = array_values(array_filter(
-            $earningLines,
-            fn ($l) => ! in_array($l['name'], $skeleton, true),
-        ));
-
-        $earningLines = array_merge($bySkeleton, $extra);
-    }
 
     $allowanceLines = array_values(array_filter(
         $p['earnings_breakdown'],
@@ -56,15 +38,27 @@
         }
     }
 
-    // How many lines were corrected, and when the most recent of them was issued.
-    $amendedCount = count($corrections);
+    /*
+     * WHAT WAS AMENDED, AND WHEN. Counted over EVERY amendment, not only the ones that changed a
+     * line already here: a payslip that had a line added to it has been amended just as much, and
+     * used to carry no stamp at all.
+     */
+    $correctedCount = count($corrections);
+    $addedCount = count($p['amendments'] ?? []) - $correctedCount;
+    $amendedCount = $correctedCount + $addedCount;
     $amendedOn = null;
 
-    foreach ($corrections as $amendment) {
+    foreach ($p['amendments'] ?? [] as $amendment) {
         if (($amendment['issued_on'] ?? null) !== null && $amendment['issued_on'] > (string) $amendedOn) {
             $amendedOn = $amendment['issued_on'];
         }
     }
+
+    /** Said as what actually happened — three corrected and one added is not "4 corrected". */
+    $amendedWhat = implode(' · ', array_filter([
+        $correctedCount > 0 ? $correctedCount . ' line' . ($correctedCount === 1 ? '' : 's') . ' corrected' : null,
+        $addedCount > 0 ? $addedCount . ' line' . ($addedCount === 1 ? '' : 's') . ' added' : null,
+    ]));
 
     /** The struck-through original, or nothing at all on a line nobody has corrected. */
     $was = fn ($original) => $original === null ? '' : '<span class="was">' . $amt($original) . '</span>';
@@ -741,7 +735,7 @@
             @if ($amendedCount > 0)
                 <div class="cap" style="padding-top: 4px;">Amended</div>
                 <div style="font-size: 8px; padding-top: 1px;">
-                    {{ $amendedCount }} line{{ $amendedCount === 1 ? '' : 's' }} corrected{{ $amendedOn ? ' · ' . $fmt($amendedOn) : '' }}
+                    {{ $amendedWhat }}{{ $amendedOn ? ' · ' . $fmt($amendedOn) : '' }}
                 </div>
             @endif
         </td>

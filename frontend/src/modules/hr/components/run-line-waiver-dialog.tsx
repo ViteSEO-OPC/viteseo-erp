@@ -113,7 +113,7 @@ export function RunLineWaiverDialog({
           <DialogClose asChild>
             <Button variant="outline">Cancel</Button>
           </DialogClose>
-          <Button onClick={submit} disabled={waiveMut.isPending || reason.trim().length < 5}>
+          <Button onClick={submit} disabled={waiveMut.isPending || reason.trim() === ""}>
             {waiveMut.isPending ? "Waiving…" : "Waive for everyone"}
           </Button>
         </DialogFooter>

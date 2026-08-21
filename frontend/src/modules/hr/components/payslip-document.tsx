@@ -35,9 +35,6 @@ const COMPANY_NAME = "VITE SEO DIGITAL ADVERTISING OPC";
 const COMPANY_ADDRESS =
   "26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines";
 
-/** The rows the Compensation table shows even at zero, in the order it shows them. */
-const EARNING_SKELETON = ["Basic Pay", "Overtime", "Night Differential", "Rest Day", "Holiday"];
-
 /** Bare grouped amount — no ₱. The document states its currency once, on the net pay bar. */
 function amount(n: number): string {
   return new Intl.NumberFormat("en-PH", {
@@ -157,7 +154,7 @@ export function PayslipDocument({
    * document where every row is a control needs a way out that is not hunting for a Cancel button.
    */
   const pick = (key?: string) =>
-    edit && key
+    edit && key && !isAddedLine(key)
       ? {
           onSelect: () => edit.onSelect(edit.selected === key ? null : key),
           active: edit.selected === key,
@@ -475,19 +472,17 @@ export function PayslipDocument({
   );
 }
 
-/** The Compensation table's rows: the ordinary period's skeleton, then whatever else this run paid. */
+/**
+ * The Compensation table's rows, in the API's own order.
+ *
+ * The rows an ordinary period shows even at zero come from the API as REAL LINES — keys and all —
+ * rather than being painted in here. Synthesising them client-side gave them no key, which is why
+ * only Basic Pay used to be correctable; and matching them to the API's lines BY NAME made a line
+ * HR had renamed fail to match, so it printed twice: once as an empty placeholder and again with
+ * its new name.
+ */
 function earningRows(p: Payslip): PayslipLine[] {
-  const earnings = p.earnings_breakdown.filter((line) => line.kind !== "allowance");
-
-  if (p.run_type !== "regular") {
-    return earnings;
-  }
-
-  const skeleton = EARNING_SKELETON.map(
-    (name) => earnings.find((line) => line.name === name) ?? { name, amount: 0, note: null },
-  );
-
-  return [...skeleton, ...earnings.filter((line) => !EARNING_SKELETON.includes(line.name))];
+  return p.earnings_breakdown.filter((line) => line.kind !== "allowance");
 }
 
 /**
@@ -680,23 +675,52 @@ function SettlementNote({ payslip }: { payslip: Payslip }) {
   );
 }
 
-/** THAT THIS DOCUMENT WAS AMENDED, AND WHEN — one sentence, in with the rest of the provenance. */
+/**
+ * THAT THIS DOCUMENT WAS AMENDED, AND WHEN — one sentence, in with the rest of the provenance.
+ *
+ * Counts every amendment, not only the ones that changed a line that was already here. A payslip
+ * that had a line ADDED to it has been amended just as much, and used to carry no stamp at all.
+ */
 function AmendedNote({ amendments }: { amendments: Payslip["amendments"] }) {
-  const corrections = (amendments ?? []).filter((a) => a.target_key !== null);
+  const all = amendments ?? [];
 
-  if (corrections.length === 0) return null;
+  if (all.length === 0) return null;
 
-  const latest = corrections.reduce((a, b) => ((a.issued_on ?? "") > (b.issued_on ?? "") ? a : b));
+  const corrected = all.filter((a) => a.target_key !== null).length;
+  const added = all.length - corrected;
+  const latest = all.reduce((a, b) => ((a.issued_on ?? "") > (b.issued_on ?? "") ? a : b));
+
+  // Said as what actually happened: three lines corrected and one added is not "4 lines corrected".
+  const what = [
+    corrected > 0 && `${corrected} line${corrected === 1 ? "" : "s"} corrected`,
+    added > 0 && `${added} line${added === 1 ? "" : "s"} added`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <Meta label="Amended">
       <span className="text-xs font-normal">
-        {corrections.length} line{corrections.length === 1 ? "" : "s"} corrected
+        {what}
         {latest.issued_on ? ` · ${longDate(latest.issued_on)}` : null}
         {latest.issued_by ? ` · ${latest.issued_by}` : null}
       </span>
     </Meta>
   );
+}
+
+/**
+ * A line an amendment ADDED, rather than one it corrected — on either side of the document.
+ *
+ * Not correctable, and the API says so both times. A correction replaces a figure the ENGINE
+ * produced, measured against the payslip's engine snapshot; an added line is not in that snapshot
+ * by definition. An added earning is refused as "That is not a line on a payslip" (its
+ * `amendment:` key is not in the line catalogue), an added deduction as "This payslip has no such
+ * line". Offering the control anyway is how HR reached both. Not selectable is the honest state
+ * until an added line has an edit-and-remove control of its own.
+ */
+function isAddedLine(key: string): boolean {
+  return key.startsWith("amendment:") || key.startsWith("other:amend-");
 }
 
 function Row({

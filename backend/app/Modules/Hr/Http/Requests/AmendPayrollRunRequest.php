@@ -18,9 +18,10 @@ class AmendPayrollRunRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // Mandatory, and long enough to say what is being corrected and why. A correction with
-            // no reason is indistinguishable from an error once anyone has forgotten it.
-            'reason' => ['required', 'string', 'min:5', 'max:500'],
+            // Mandatory, with no minimum length. A correction with no reason is indistinguishable
+            // from an error once anyone has forgotten it; a floor on how MANY characters that
+            // reason runs to only ever refused the short true ones. See CorrectPayslipLineRequest.
+            'reason' => ['required', 'string', 'max:500'],
 
             // WHICH DIRECTION THIS BATCH GOES, and — for the two that take money — what it does to
             // the tax. See the kind migration: reversing pay refunds the tax withheld on it, a

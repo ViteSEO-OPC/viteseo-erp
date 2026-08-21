@@ -18,7 +18,12 @@ import { notify as toast } from "@/core/lib/notify";
 import { formatDate, formatPeso } from "@/core/lib/format";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { SimpleSelect } from "@/modules/hr/ui/select";
-import { useAmendPayrollRun, usePayrollRun, usePayrollRuns } from "@/modules/hr/hooks/use-payroll";
+import {
+  useAmendPayrollRun,
+  useCorrectRunLine,
+  usePayrollRun,
+  usePayrollRuns,
+} from "@/modules/hr/hooks/use-payroll";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
 import type { AmendmentKind, PayrollRun } from "@/modules/hr/types/payroll";
 
@@ -56,6 +61,59 @@ const KINDS: Record<
   },
 };
 
+/**
+ * THE LINES A PERIOD-WIDE CORRECTION CAN NAME.
+ *
+ * Ordered by what this is actually for. The attendance charges lead because they are the case that
+ * is genuinely one decision for a whole payroll — a system that charged everybody late through an
+ * outage, a suspension day priced wrong for the office. The rest are offered because the API
+ * accepts them and HR is entitled to them, not because a single figure across a payroll is usually
+ * the right answer for them; VARIES_BY_EMPLOYEE says so on the ones where it is not.
+ *
+ * The `__` entries are group headings — disabled, so they read as labels rather than choices.
+ */
+const CORRECTABLE_LINES: { value: string; label: string; disabled?: boolean }[] = [
+  { value: "__charges", label: "Attendance charges", disabled: true },
+  { value: "late", label: "Late" },
+  { value: "undertime", label: "Undertime" },
+  { value: "absent", label: "Absences" },
+  { value: "half_day", label: "Half-Days" },
+  { value: "suspended_unpaid", label: "Work Suspension" },
+  { value: "leave_unpaid", label: "Leave Without Pay" },
+  { value: "holiday_forfeited", label: "Holiday Forfeited" },
+  { value: "early_out", label: "Early Out" },
+  { value: "late_penalty", label: "Tardiness Penalty" },
+  { value: "not_employed", label: "Outside Employment" },
+  { value: "__pay", label: "Compensation", disabled: true },
+  { value: "basic", label: "Basic Pay" },
+  { value: "overtime", label: "Overtime" },
+  { value: "night_diff", label: "Night Differential" },
+  { value: "rest_day", label: "Rest Day" },
+  { value: "holiday", label: "Holiday" },
+  { value: "thirteenth_month", label: "13th Month Pay" },
+  { value: "reimbursement", label: "Reimbursement" },
+  { value: "__government", label: "Government", disabled: true },
+  { value: "sss", label: "SSS" },
+  { value: "philhealth", label: "PhilHealth" },
+  { value: "pagibig", label: "Pag-IBIG" },
+  { value: "withholding_tax", label: "Withholding Tax" },
+];
+
+/**
+ * Lines whose right figure normally DIFFERS from one employee to the next.
+ *
+ * Not blocked — a period-wide correction on one of these is occasionally exactly right, and the
+ * reason field and the audit trail record the decision either way. Said out loud because setting
+ * every payslip in a payroll to one salary figure is the kind of mistake that looks like a
+ * successful action.
+ */
+const VARIES_BY_EMPLOYEE = [
+  "basic", "overtime", "night_diff", "rest_day", "holiday", "thirteenth_month",
+  "reimbursement", "sss", "philhealth", "pagibig", "withholding_tax",
+];
+
+const lineLabel = (key: string) => CORRECTABLE_LINES.find((l) => l.value === key)?.label ?? key;
+
 /** How a period reads in the picker. */
 function runLabel(run: PayrollRun): string {
   const year = run.cycle_end.slice(0, 4);
@@ -84,12 +142,11 @@ export function PayslipAmendmentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] max-w-[calc(100%-3rem)] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add a line to payslips</DialogTitle>
+          <DialogTitle>Correct a period&rsquo;s payslips</DialogTitle>
           <DialogDescription>
-            Adds a dated line to the period&rsquo;s existing payslips — no new payslip, no re-run.
-            For money the payroll engine never priced: back pay, an allowance it missed, a deduction
-            that should have been taken. To change a figure that is <em>already</em> on a payslip,
-            open that payslip and correct the line itself.
+            The two changes that reach a whole period at once, on payslips it has already produced —
+            no new payslip, no re-run. Correcting <em>one</em> person&rsquo;s payslip is still done
+            on that payslip, where the wrong figure is in front of you.
           </DialogDescription>
         </DialogHeader>
 
@@ -119,6 +176,17 @@ function AmendmentForm({
   const today = new Date().toISOString().slice(0, 10);
   const { data: runs = [] } = usePayrollRuns();
   const amendMut = useAmendPayrollRun();
+  const correctMut = useCorrectRunLine();
+
+  /*
+   * THE TWO PERIOD-WIDE JOBS, on one screen.
+   *
+   * They share everything that makes them period-wide — which period, who in it, why, and the date
+   * it was issued — and differ only in the middle: a line the payslips never had, or a line they
+   * already have and got wrong. Splitting them across two dialogs put the second one out of reach:
+   * the only run-wide correction that ever shipped was waiving a charge to zero.
+   */
+  const [mode, setMode] = useState<"add" | "correct">("add");
 
   const [pickedRunId, setPickedRunId] = useState<number | null>(prefillRunId ?? null);
   const [issuedOn, setIssuedOn] = useState(today);
@@ -136,6 +204,12 @@ function AmendmentForm({
   const [everyone, setEveryone] = useState(false);
   const [bulkAmount, setBulkAmount] = useState("");
   const [bulkNote, setBulkNote] = useState("");
+
+  // --- correcting a line the payslips already have ---------------------------------------------
+  const [targetKey, setTargetKey] = useState("late");
+  // Blank is not zero: the API takes a null amount as "leave the figure, change the wording".
+  const [correctAmount, setCorrectAmount] = useState("");
+  const [correctLabel, setCorrectLabel] = useState("");
 
   /*
    * A locked run can never be recomputed, so a correction on it could never be re-applied — and an
@@ -183,14 +257,24 @@ function AmendmentForm({
 
   const total = payloadLines.reduce((s, l) => s + l.amount, 0);
 
+  /** The employees NAMED for a correction — everyone this period paid, or the rows chosen. */
+  const correctIds = everyone
+    ? breakdown.map((row) => row.employee_id)
+    : [...new Set(lines.filter((l) => l.employee_id !== "").map((l) => Number(l.employee_id)))];
+
+  /** WHOSE PAYSLIP THIS TOUCHES, whichever mode entered it. */
+  const affectedIds = mode === "add" ? payloadLines.map((l) => l.employee_id) : correctIds;
+
+  const parsedCorrection = correctAmount.trim() === "" ? null : Number(correctAmount);
+
   /**
    * The chosen employees whose payslip has already been paid out.
    *
    * Paying them leaves a balance owed; taking money off them leaves the company overpaid — two
    * different sentences, and the one that involves recovering wages is the one to be sure about.
    */
-  const alreadyPaid = payloadLines
-    .map((l) => breakdown.find((r) => r.employee_id === l.employee_id))
+  const alreadyPaid = affectedIds
+    .map((id) => breakdown.find((r) => r.employee_id === id))
     .filter((row) => row?.disbursed != null);
 
   /**
@@ -215,12 +299,19 @@ function AmendmentForm({
         })
       : [];
 
+  const busy = amendMut.isPending || correctMut.isPending;
+
   const canSubmit =
     !!runId &&
-    reason.trim().length >= 5 &&
-    payloadLines.length > 0 &&
-    overReversed.length === 0 &&
-    !amendMut.isPending;
+    reason.trim() !== "" &&
+    !busy &&
+    (mode === "add"
+      ? payloadLines.length > 0 && overReversed.length === 0
+      : // A correction that changes neither the figure nor the wording is not a correction — the
+        // API refuses it, so the button does too.
+        (parsedCorrection !== null || correctLabel.trim() !== "") &&
+        (parsedCorrection === null || (!Number.isNaN(parsedCorrection) && parsedCorrection >= 0)) &&
+        (everyone || correctIds.length > 0));
 
   function update(index: number, patch: Partial<DraftLine>) {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
@@ -228,6 +319,13 @@ function AmendmentForm({
 
   async function submit() {
     if (!runId) return;
+
+    if (mode === "correct") {
+      await submitCorrection(runId);
+
+      return;
+    }
+
     try {
       await amendMut.mutateAsync({
         runId,
@@ -257,6 +355,46 @@ function AmendmentForm({
     }
   }
 
+  /** ONE LINE, SET TO ONE FIGURE, ACROSS THE PERIOD. */
+  async function submitCorrection(id: number) {
+    try {
+      const { applied, skipped } = await correctMut.mutateAsync({
+        runId: id,
+        target_key: targetKey,
+        amount: parsedCorrection,
+        label: correctLabel.trim() || null,
+        reason: reason.trim(),
+        issued_on: issuedOn,
+        // Absent means everyone. An empty array does not — see the API's own note on it.
+        employee_ids: everyone ? null : correctIds,
+      });
+
+      const what = `${lineLabel(targetKey)} corrected on ${applied} payslip(s)`;
+
+      // NOT A SUCCESS WHEN IT MISSED SOMEBODY. "Corrected 12 payslips" reads as "corrected
+      // everyone" when it was 12 of 15, and the three it could not touch are the ones that
+      // need a person.
+      if (skipped.length > 0) {
+        toast.warning(
+          `${what} — ${skipped.length} could not be changed`,
+          <ul className="list-disc space-y-1 pl-4">
+            {skipped.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>,
+        );
+      } else {
+        toast.success(what);
+      }
+
+      onClose();
+    } catch (e) {
+      const err = e as AxiosError<{ message?: string; errors?: Record<string, string[]> }>;
+      const first = Object.values(err.response?.data?.errors ?? {})[0]?.[0];
+      toast.error(first ?? err.response?.data?.message ?? "Could not apply the correction");
+    }
+  }
+
   if (amendable.length === 0) {
     return (
       <>
@@ -276,6 +414,36 @@ function AmendmentForm({
   return (
     <>
       <div className="space-y-4">
+        {/*
+         * WHICH OF THE TWO JOBS. A segmented control rather than a dropdown: there are exactly two,
+         * and which one you are doing changes what the rest of the form means — that is not a
+         * setting to go hunting for in a list.
+         */}
+        <div className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted/40 p-1">
+          {(["add", "correct"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              aria-pressed={mode === m}
+              className={
+                "rounded-md px-3 py-1.5 text-sm font-medium transition-colors " +
+                (mode === m
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground")
+              }
+            >
+              {m === "add" ? "Add a line" : "Correct a line"}
+            </button>
+          ))}
+        </div>
+
+        <p className="text-caption text-muted-foreground">
+          {mode === "add"
+            ? "For money the payroll engine never priced: back pay, an allowance it missed, a deduction that should have been taken. Each person can be given a different amount."
+            : "For a figure the payroll engine got wrong on a line the payslips already have — a charge to waive after an outage, a benefit share priced wrong for everybody. One figure, applied to every payslip named."}
+        </p>
+
         <div className="grid gap-3 sm:grid-cols-[1fr_10rem]">
           <div className="space-y-1.5">
             <label htmlFor="amend-run" className="text-caption font-medium">
@@ -306,22 +474,103 @@ function AmendmentForm({
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <label htmlFor="amend-kind" className="text-caption font-medium">
-            What kind of correction
-          </label>
-          <SimpleSelect
-            id="amend-kind"
-            value={kind}
-            onValueChange={(v) => setKind(v as AmendmentKind)}
-            options={(Object.keys(KINDS) as AmendmentKind[]).map((k) => ({
-              value: k,
-              label: KINDS[k].label,
-            }))}
-          />
-          {/* What it does to the tax, which is the whole difference between the last two. */}
-          <p className="text-caption text-muted-foreground">{spec.hint}</p>
-        </div>
+        {mode === "add" ? (
+          <div className="space-y-1.5">
+            <label htmlFor="amend-kind" className="text-caption font-medium">
+              What kind of correction
+            </label>
+            <SimpleSelect
+              id="amend-kind"
+              value={kind}
+              onValueChange={(v) => setKind(v as AmendmentKind)}
+              options={(Object.keys(KINDS) as AmendmentKind[]).map((k) => ({
+                value: k,
+                label: KINDS[k].label,
+              }))}
+            />
+            {/* What it does to the tax, which is the whole difference between the last two. */}
+            <p className="text-caption text-muted-foreground">{spec.hint}</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label htmlFor="amend-line" className="text-caption font-medium">
+                Which line to correct
+              </label>
+              <SimpleSelect
+                id="amend-line"
+                value={targetKey}
+                onValueChange={setTargetKey}
+                options={CORRECTABLE_LINES}
+              />
+              <p className="text-caption text-muted-foreground">
+                Every payslip named below will read exactly this figure for{" "}
+                {lineLabel(targetKey)}. The figure the payroll engine computed stays on each
+                payslip, struck through beside yours.
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-[10rem_1fr]">
+              <div className="space-y-1.5">
+                <label htmlFor="amend-figure" className="text-caption font-medium">
+                  Corrected amount
+                </label>
+                <Input
+                  id="amend-figure"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  className="font-mono tabular-nums"
+                  value={correctAmount}
+                  onChange={(e) => setCorrectAmount(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="amend-label" className="text-caption font-medium">
+                  Label{" "}
+                  <span className="text-muted-foreground">
+                    (optional — what the line should be called)
+                  </span>
+                </label>
+                <Input
+                  id="amend-label"
+                  maxLength={100}
+                  placeholder={lineLabel(targetKey)}
+                  value={correctLabel}
+                  onChange={(e) => setCorrectLabel(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/*
+             * ZERO IS THE COMMON ANSWER and blank is not zero — one waives the charge, the other
+             * leaves the figure alone and changes only the wording. Two very different outcomes
+             * from an empty box, so the box says which is which.
+             */}
+            {parsedCorrection === null && correctLabel.trim() !== "" && (
+              <p className="text-caption text-muted-foreground">
+                No amount entered, so this renames the line and leaves every figure as it is. Enter
+                0 to waive the charge instead.
+              </p>
+            )}
+
+            {/* Offered, not blocked — see VARIES_BY_EMPLOYEE. */}
+            {parsedCorrection !== null && VARIES_BY_EMPLOYEE.includes(targetKey) && (
+              <div className="rounded-card border border-warning/40 bg-warning/10 p-3">
+                <p className="text-sm font-medium text-foreground">
+                  {lineLabel(targetKey)} normally differs from one employee to the next
+                </p>
+                <p className="text-caption text-muted-foreground">
+                  This sets every payslip named below to the same {formatPeso(parsedCorrection)}.
+                  That is occasionally right — but if only some people are wrong, name them below
+                  rather than applying it to everyone.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="space-y-1.5">
           <label htmlFor="amend-reason" className="text-caption font-medium">
@@ -344,7 +593,11 @@ function AmendmentForm({
 
         <div className="space-y-2">
           <p className="text-caption font-medium">
-            {takesMoney ? "Who it comes off" : "Who is owed it"}
+            {mode === "correct"
+              ? "Whose payslip to correct"
+              : takesMoney
+                ? "Who it comes off"
+                : "Who is owed it"}
             {selectedRun && (
               <span className="font-normal text-muted-foreground">
                 {" "}
@@ -367,16 +620,18 @@ function AmendmentForm({
               onChange={(e) => setEveryone(e.target.checked)}
             />
             <span className="text-sm text-foreground">
-              Apply the same amount to everyone in this period
+              {mode === "correct"
+                ? "Correct this line on everyone in this period"
+                : "Apply the same amount to everyone in this period"}
               <span className="block text-caption text-muted-foreground">
-                One figure for all {breakdown.length || selectedRun?.employee_count} employees — for
-                a deduction or an amount the whole payroll shares. Untick to set different amounts
-                per employee.
+                {mode === "correct"
+                  ? `All ${breakdown.length || selectedRun?.employee_count} employees — for a charge to waive or a figure priced wrong across the payroll. Untick to name only the people whose payslip is wrong. Anyone whose payslip has no such line is reported, not silently skipped.`
+                  : `One figure for all ${breakdown.length || selectedRun?.employee_count} employees — for a deduction or an amount the whole payroll shares. Untick to set different amounts per employee.`}
               </span>
             </span>
           </label>
 
-          {everyone ? (
+          {everyone && mode === "correct" ? null : everyone ? (
             <div className="flex flex-wrap items-start gap-2">
               <Input
                 aria-label={spec.amountLabel}
@@ -421,23 +676,32 @@ function AmendmentForm({
                         ),
                       }))}
                     />
-                    <Input
-                      aria-label={spec.amountLabel}
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      className="w-32"
-                      placeholder={spec.placeholder}
-                      value={line.amount}
-                      onChange={(e) => update(i, { amount: e.target.value })}
-                    />
-                    <Input
-                      aria-label="Note"
-                      className="w-40"
-                      placeholder="Note (optional)"
-                      value={line.note}
-                      onChange={(e) => update(i, { note: e.target.value })}
-                    />
+                    {/*
+                     * ONLY WHEN ADDING. A correction is one figure across everyone named — the
+                     * amount is above, entered once, so these rows are a list of people and
+                     * nothing else.
+                     */}
+                    {mode === "add" && (
+                      <>
+                        <Input
+                          aria-label={spec.amountLabel}
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          className="w-32"
+                          placeholder={spec.placeholder}
+                          value={line.amount}
+                          onChange={(e) => update(i, { amount: e.target.value })}
+                        />
+                        <Input
+                          aria-label="Note"
+                          className="w-40"
+                          placeholder="Note (optional)"
+                          value={line.note}
+                          onChange={(e) => update(i, { note: e.target.value })}
+                        />
+                      </>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -464,7 +728,7 @@ function AmendmentForm({
                        * What the payslip cannot cover, said against the line that causes it rather
                        * than as a total afterwards.
                        */}
-                      {kind === "deduction" && Number(line.amount) > row.net && (
+                      {mode === "add" && kind === "deduction" && Number(line.amount) > row.net && (
                         <span className="text-warning">
                           {" "}
                           · only {formatPeso(row.net)} can be taken —{" "}
@@ -493,7 +757,20 @@ function AmendmentForm({
           )}
         </div>
 
-        {payloadLines.length > 0 && (
+        {mode === "correct" && affectedIds.length > 0 && (
+          <p className="text-body">
+            <span className="text-muted-foreground">Correcting </span>
+            <span className="font-semibold">{lineLabel(targetKey)}</span>
+            <span className="text-muted-foreground">
+              {parsedCorrection === null
+                ? " — wording only, no figure changes"
+                : ` to ${formatPeso(parsedCorrection)}`}{" "}
+              on {everyone ? breakdown.length || 0 : affectedIds.length} payslip(s)
+            </span>
+          </p>
+        )}
+
+        {mode === "add" && payloadLines.length > 0 && (
           <p className="text-body">
             <span className="text-muted-foreground">
               {takesMoney ? "Total to take off: " : "Total correction: "}
@@ -515,7 +792,7 @@ function AmendmentForm({
          * In bulk mode there are no rows to say this beside, and it is the case bulk mode makes
          * likely: one figure against a payroll where somebody had a thin period.
          */}
-        {everyone && shortfalls.length > 0 && (
+        {mode === "add" && everyone && shortfalls.length > 0 && (
           <div className="rounded-card border border-warning/40 bg-warning/10 p-3">
             <p className="text-sm font-medium text-foreground">
               {shortfalls.length} payslip{shortfalls.length === 1 ? "" : "s"} cannot cover{" "}
@@ -552,9 +829,11 @@ function AmendmentForm({
               {alreadyPaid.length} of these payslip(s) have already been paid
             </p>
             <p className="text-caption text-muted-foreground">
-              {takesMoney
-                ? "What was transferred does not change, so the payslip will show that they were overpaid by the difference. Nothing collects it automatically — recovering wages already paid needs the employee's written consent, so this records it for someone to arrange."
-                : "The correction does not change what was transferred — it will show as a balance still to pay on the payslip and in the run, and the run cannot be locked until it is settled."}
+              {mode === "correct"
+                ? "What was transferred does not change. Each payslip will show the difference as a balance still to pay, or as an overpayment where the correction lowers it — and the run cannot be locked until what it still owes is settled."
+                : takesMoney
+                  ? "What was transferred does not change, so the payslip will show that they were overpaid by the difference. Nothing collects it automatically — recovering wages already paid needs the employee's written consent, so this records it for someone to arrange."
+                  : "The correction does not change what was transferred — it will show as a balance still to pay on the payslip and in the run, and the run cannot be locked until it is settled."}
             </p>
           </div>
         )}
@@ -565,7 +844,7 @@ function AmendmentForm({
           Cancel
         </Button>
         <Button disabled={!canSubmit} onClick={submit}>
-          {amendMut.isPending ? "Applying…" : "Apply correction"}
+          {busy ? "Applying…" : mode === "add" ? "Add the line" : "Apply correction"}
         </Button>
       </DialogFooter>
     </>

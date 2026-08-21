@@ -101,6 +101,11 @@ export interface PayrollRun {
    * the response to a run that just executed; null when a run is merely read back.
    */
   skipped_disbursed?: number | null;
+  /**
+   * Corrections this recompute found the engine has since disagreed with — one sentence each.
+   * Present on the response to a run that just executed; null when a run is merely read back.
+   */
+  override_notes?: string[] | null;
   breakdown?: PayrollBreakdownRow[];
 }
 

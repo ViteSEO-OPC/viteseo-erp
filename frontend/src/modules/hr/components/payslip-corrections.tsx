@@ -239,8 +239,8 @@ function LineEditor({
           <Button
             size="sm"
             onClick={save}
-            disabled={busy || !changed || reason.trim().length < 5}
-            title={reason.trim().length < 5 ? "Say what was wrong with this line first" : undefined}
+            disabled={busy || !changed || reason.trim() === ""}
+            title={reason.trim() === "" ? "Say what was wrong with this line first" : undefined}
           >
             {correctMut.isPending ? "Saving…" : "Save correction"}
           </Button>
@@ -368,8 +368,8 @@ function AddLine({
           <Button
             size="sm"
             onClick={submit}
-            disabled={amendMut.isPending || reason.trim().length < 5}
-            title={reason.trim().length < 5 ? "Say what this line is for first" : undefined}
+            disabled={amendMut.isPending || reason.trim() === ""}
+            title={reason.trim() === "" ? "Say what this line is for first" : undefined}
           >
             {amendMut.isPending ? "Adding…" : "Add line"}
           </Button>

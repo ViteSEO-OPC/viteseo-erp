@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { notify as toast } from "@/core/lib/notify";
+import { notifyOverrideDrift } from "@/modules/hr/lib/override-drift";
 import { formatDate, formatPeso } from "@/core/lib/format";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { useRerunPayrollRun, useRerunPreview } from "@/modules/hr/hooks/use-payroll";
@@ -119,12 +120,15 @@ function RerunBody({
 
   async function submit() {
     try {
-      await rerunMut.mutateAsync({ runId: run.id, reason: reason.trim() });
+      const recomputed = await rerunMut.mutateAsync({ runId: run.id, reason: reason.trim() });
       toast.success(
         moving > 0
           ? `Period recomputed — ${moving} payslip(s) changed`
           : "Period recomputed — no figures moved",
       );
+      // Beside the result, not instead of it: the recompute did succeed, and separately it found
+      // corrections the engine has stopped agreeing with.
+      notifyOverrideDrift(recomputed);
       onClose();
     } catch (e) {
       const err = e as AxiosError<{ message?: string; errors?: Record<string, string[]> }>;

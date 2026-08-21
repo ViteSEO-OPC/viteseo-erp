@@ -2189,7 +2189,7 @@ class PayrollService
                     }
                 }
 
-                PayslipAmendment::create([
+                $amendment = PayslipAmendment::create([
                     'payslip_id' => $slip->id,
                     'kind' => $kind,
                     'amount' => $signed,
@@ -2200,7 +2200,7 @@ class PayrollService
                     'created_by' => $actor->id,
                 ]);
 
-                $this->applyAmendmentTo($slip, $kind, $signed, $tax, $line['note'] ?? null, $reason);
+                $this->applyAmendmentTo($slip, $kind, $signed, $tax, $line['note'] ?? null, $reason, (int) $amendment->id);
 
                 $employeeIds[] = $employeeId;
                 $total = round($total + $magnitude, 2);
@@ -2254,10 +2254,10 @@ class PayrollService
     }
 
     /** Fold one correction into a payslip's stored figures. */
-    private function applyAmendmentTo(Payslip $slip, string $kind, float $amount, float $tax, ?string $note, string $reason): void
+    private function applyAmendmentTo(Payslip $slip, string $kind, float $amount, float $tax, ?string $note, string $reason, ?int $amendmentId = null): void
     {
         if ($kind === 'deduction') {
-            $this->applyAmendmentDeductionTo($slip, abs($amount), $note ?: $reason);
+            $this->applyAmendmentDeductionTo($slip, abs($amount), $note ?: $reason, $amendmentId);
 
             return;
         }
@@ -2279,7 +2279,7 @@ class PayrollService
     }
 
     /** Fold a MISSED DEDUCTION into a payslip — a benefit share, a uniform, an unrecorded obligation. */
-    private function applyAmendmentDeductionTo(Payslip $slip, float $amount, string $label): void
+    private function applyAmendmentDeductionTo(Payslip $slip, float $amount, string $label, ?int $amendmentId = null): void
     {
         $available = max(0.0, round((float) $slip->net_pay, 2));
         $taken = round(min($amount, $available), 2);
@@ -2296,7 +2296,11 @@ class PayrollService
             // read what was taken off them rather than one larger unexplained figure.
             'other_deductions_breakdown' => [
                 ...($slip->other_deductions_breakdown ?? []),
-                ['name' => 'Correction — ' . Str::limit($label, 60), 'amount' => $taken],
+                // THE AMENDMENT'S OWN ID, carried onto the line it created. Every other row in this
+                // breakdown is keyed by a slug of its name, and two corrections entered under the
+                // same label would slug to one key: correcting either would edit the first and mark
+                // both as corrected. A row that knows which amendment made it cannot collide.
+                ['name' => 'Correction — ' . Str::limit($label, 60), 'amount' => $taken, 'amendment_id' => $amendmentId],
             ],
             'total_deductions' => round((float) $slip->total_deductions + $taken, 2),
             'net_pay' => round(max(0, (float) $slip->net_pay - $taken), 2),
@@ -2791,7 +2795,25 @@ class PayrollService
                 }
 
                 if (str_starts_with($key, PayslipLines::ALLOWANCE_PREFIX)) {
-                    $slip = $this->setNamedLine($slip, 'allowances_breakdown', $key, PayslipLines::ALLOWANCE_PREFIX, $to);
+                    /*
+                     * A PAYSLIP FROM BEFORE THE ALLOWANCE SPLIT has no breakdown to edit. The
+                     * document prints its `allowances` column as ONE aggregate line — see
+                     * PayslipDocument::allowanceLines() — and that column IS the line, so the
+                     * `allowances` move below carries the whole correction on its own.
+                     *
+                     * Routing it through setNamedLine() instead searched an empty breakdown and
+                     * refused with "this payslip no longer has that line", about a line that is
+                     * plainly on the payslip. The two cases cannot be confused: the aggregate is
+                     * only ever printed WHEN the breakdown is empty, so a genuine component that
+                     * happens to be named "Allowances" still resolves by name.
+                     */
+                    $aggregate = (array) ($slip['allowances_breakdown'] ?? []) === []
+                        && $key === PayslipLines::keyForName(PayslipLines::ALLOWANCE_PREFIX, 'Allowances');
+
+                    if (! $aggregate) {
+                        $slip = $this->setNamedLine($slip, 'allowances_breakdown', $key, PayslipLines::ALLOWANCE_PREFIX, $to);
+                    }
+
                     $add('allowances', $delta);
                 }
 
@@ -2847,10 +2869,20 @@ class PayrollService
     {
         $lines = (array) ($slip[$field] ?? []);
         $slug = substr($key, strlen($prefix));
+        // The two key spaces are kept DISJOINT: an amendment-keyed line is matched only by its id,
+        // and a slug-keyed line only by its name. Without that a deduction genuinely called
+        // "Amend 7" would answer to the key of amendment #7.
+        $amendmentId = PayslipLines::amendmentIdIn($key, $prefix);
         $found = false;
 
         foreach ($lines as $i => $line) {
-            if (PayslipDocument::slug((string) $line['name']) === $slug) {
+            $lineAmendment = $line['amendment_id'] ?? null;
+
+            $matches = $amendmentId === null
+                ? $lineAmendment === null && PayslipDocument::slug((string) $line['name']) === $slug
+                : (int) $lineAmendment === $amendmentId;
+
+            if ($matches) {
                 $lines[$i]['amount'] = round($to, 2);
                 $found = true;
                 break;
@@ -4066,8 +4098,11 @@ class PayrollService
                 );
             }
 
-            // And TELL THE CALLER, not just the audit log.
+            // And TELL THE CALLER, not just the audit log. A note nobody reads is the same as no
+            // note: the audit trail answers "what happened to this run" after the fact, and these
+            // are for the person standing in front of the recompute right now.
             $run->skippedDisbursedCount = count($skippedDisbursed);
+            $run->overrideNotes = $overrideNotes;
 
             // One summary line for the reimbursements this run auto-paid.
             if ($reimbPaidCount > 0) {
