@@ -403,6 +403,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Documents tab: list / upload / delete.
         Route::get('employees/{employee}/documents', [EmployeeController::class, 'documentsIndex']);
         Route::post('employees/{employee}/documents', [EmployeeController::class, 'storeDocument'])->middleware('throttle:20,1,hr-upload:');
+        Route::patch('employees/{employee}/documents/{document}', [EmployeeController::class, 'renameDocument']);
         Route::delete('employees/{employee}/documents/{document}', [EmployeeController::class, 'destroyDocument']);
 
         // Company → Departments: archive/restore (HR only). CRUD is above.

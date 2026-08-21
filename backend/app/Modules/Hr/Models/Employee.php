@@ -36,7 +36,21 @@ class Employee extends Model
         'previous_hire_date',
         'hire_date',
         'phone',
+        // The two addresses, as parts. `address` / `current_address` are the
+        // pre-split free-text values, kept read-only for what was recorded before.
         'address',
+        'address_house_no',
+        'address_street',
+        'address_barangay',
+        'address_city',
+        'address_province',
+        'address_zip',
+        'current_address_house_no',
+        'current_address_street',
+        'current_address_barangay',
+        'current_address_city',
+        'current_address_province',
+        'current_address_zip',
         'emergency_contact_name',
         'emergency_contact_phone',
         'bank_name',
@@ -154,6 +168,54 @@ class Employee extends Model
      *
      * @return array<string, string|null>
      */
+    /**
+     * The name as a roster lists it: "Dela Cruz Jr., Juan Santos".
+     *
+     * A suffix belongs to the surname, not to the given names — "Dela Cruz, Juan Jr." files the
+     * Jr. under Juan and reads as a second given name. Records from before the name was split have
+     * no `last_name` to file under, so they keep the composed name rather than being guessed at.
+     */
+    public function listingName(): ?string
+    {
+        $last = trim((string) $this->last_name);
+
+        if ($last === '') {
+            return $this->user?->name;
+        }
+
+        $suffix = trim((string) $this->name_extension);
+        $surname = $suffix === '' ? $last : "{$last} {$suffix}";
+
+        $given = implode(' ', array_filter(
+            [trim((string) $this->first_name), trim((string) $this->middle_name)],
+            fn (string $part) => $part !== '',
+        ));
+
+        return $given === '' ? $surname : "{$surname}, {$given}";
+    }
+
+    /**
+     * One of the two addresses as a single line, composed from its parts.
+     *
+     * Falls back to the pre-split free-text column when no part has been filled in yet, so a record
+     * nobody has re-entered since the split still reads as an address rather than as nothing.
+     *
+     * @param  string  $prefix  'address' (home) or 'current_address'
+     */
+    public function addressLine(string $prefix = 'address'): ?string
+    {
+        $part = fn (string $name) => trim((string) $this->{"{$prefix}_{$name}"});
+
+        $street = trim($part('house_no').' '.$part('street'));
+
+        $pieces = array_values(array_filter(
+            [$street, $part('barangay'), $part('city'), $part('province'), $part('zip')],
+            fn (string $piece) => $piece !== '',
+        ));
+
+        return $pieces === [] ? $this->{$prefix} : implode(', ', $pieces);
+    }
+
     public function maskedSensitive(): array
     {
         $out = [];

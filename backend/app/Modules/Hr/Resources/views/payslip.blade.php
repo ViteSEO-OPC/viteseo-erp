@@ -97,82 +97,6 @@
         ? '—'
         : (mb_strlen((string) $v) > $max ? mb_substr((string) $v, 0, $max - 1) . '…' : (string) $v);
 
-    /**
-     * The dates behind a deduction row, as one grey line — "Aug 5, Aug 10", or "Aug 1 180m ·
-     * Aug 5 120m" once minutes are what varies.
-     */
-    $fitDates = function (array $row) {
-        $dates = $row['dates'] ?? [];
-
-        if ($dates === []) {
-            return null;
-        }
-
-        $isTime = ($row['minutes'] ?? null) !== null;
-        $max = 6;
-        $shown = array_slice($dates, 0, $max);
-        $parts = [];
-
-        foreach ($shown as $d) {
-            $day = empty($d['date'])
-                ? '—'
-                : \Illuminate\Support\Carbon::parse($d['date'])->format('M j');
-
-            if ($isTime && preg_match('/^(\d+)\s*min/', (string) ($d['detail'] ?? ''), $m)) {
-                $day .= ' ' . $m[1] . 'm';
-            }
-
-            $parts[] = $day;
-        }
-
-        $text = implode($isTime ? ' · ' : ', ', $parts);
-        $rest = count($dates) - count($shown);
-
-        return $rest > 0 ? $text . ' +' . $rest . ' more' : $text;
-    };
-
-    /**
-     * The days behind an EARNINGS line — Holiday is the only one that has any. Unlike a
-     * deduction's dates these are not joined into one string: each day carries its own money, and
-     * running them together would leave the reader dividing a total by an unknown number of
-     * unequal parts. Trimmed to the printed column's width, and capped like every other list here.
-     *
-     * @return list<array{text: string, amount: string}>
-     */
-    $earningDates = function (array $line) use ($amt, $fitWide) {
-        $dates = $line['dates'] ?? [];
-
-        if (! is_array($dates) || $dates === []) {
-            return [];
-        }
-
-        $max = 4;
-        $shown = array_slice($dates, 0, $max);
-        $out = [];
-
-        foreach ($shown as $d) {
-            $day = empty($d['date'])
-                ? '—'
-                : \Illuminate\Support\Carbon::parse($d['date'])->format('M j');
-            // The print form, which is short by construction. `detail` is the screen's fuller
-            // wording and is only the fallback for a payslip serialised before `short` existed.
-            $detail = trim((string) ($d['short'] ?? $d['detail'] ?? ''));
-
-            $out[] = [
-                'text' => $detail === '' ? $day : $day . ' · ' . $fitWide($detail, 40),
-                'amount' => ($d['amount'] ?? null) === null ? '' : $amt((float) $d['amount']),
-            ];
-        }
-
-        $rest = count($dates) - count($shown);
-
-        if ($rest > 0) {
-            $out[] = ['text' => '+' . $rest . ' more', 'amount' => ''];
-        }
-
-        return $out;
-    };
-
     // Attendance reasons are bounded by the number of charge kinds; benefit shares and loans are
     // not, so only those are capped.
     $rows = $p['deductions_breakdown'] ?? [];
@@ -290,12 +214,6 @@
         /* Said once, under the total it is deliberately absent from. */
         .ernote td { padding: 2px 6px 0; font-size: 6.5px; font-style: italic; color: #6b7280; }
 
-        /* The dates behind a count, and the tax derivation. Spans both columns because it is a
-           sentence, not an amount. */
-        .why td { border-bottom: 1px solid #e5e7eb; padding: 0 6px 2px 6px;
-                  font-size: 6.5px; color: #6b7280; }
-        .why.open td { border-bottom: none; padding-bottom: 1px; }
-
         /* Footer */
         .foot { margin-top: 9px; page-break-inside: avoid; }
         .foot td { vertical-align: bottom; }
@@ -394,12 +312,7 @@
             <table>
                 <tr class="thead"><td>Compensation</td><td class="amt">Amount</td></tr>
                 @foreach ($earningLines as $line)
-                    @php
-                        // Assembled here rather than inline, for the reason the deductions loop
-                        // below gives: Blade's directive scanner fails the whole VIEW, not the line.
-                        $days = $earningDates($line);
-                    @endphp
-                    <tr class="line{{ $days ? ' pair' : '' }}">
+                    <tr class="line">
                         <td>
                             @if (! empty($line['original_name']))
                                 <span class="was">{{ $fit($line['original_name']) }}</span>
@@ -411,19 +324,6 @@
                         </td>
                         <td class="amt">{!! $was($line['original_amount'] ?? null) !!}{{ $amt($line['amount']) }}</td>
                     </tr>
-                    {{--
-                        WHICH holidays the figure above was earned on. "Holiday 2,100.00" has to be
-                        taken on trust; "Aug 21 · Independence Day · Regular holiday 200%" can be
-                        checked against the reader's own memory of the month.
-                    --}}
-                    @foreach ($days as $day)
-                        {{-- Only the LAST day of a line closes it off; a rule between two days of
-                             the same figure would read as two separate lines. --}}
-                        <tr class="why{{ $loop->last ? '' : ' open' }}">
-                            <td>{{ $day['text'] }}</td>
-                            <td class="amt">{{ $day['amount'] }}</td>
-                        </tr>
-                    @endforeach
                 @endforeach
                 <tr class="sum"><td>Total Compensation</td><td class="amt">{{ $amt($t['earnings']) }}</td></tr>
             </table>
@@ -431,20 +331,9 @@
             <table class="stack">
                 <tr class="thead"><td>Deductions</td><td class="amt">Amount</td></tr>
                 @foreach (array_merge($attendanceRows, $otherRows) as $row)
-                    @php
-                        // Assembled here rather than with inline directives. Blade's directive
-                        // scanner is unreliable when a conditional opens or closes flush against
-                        // adjacent text, and it fails the whole VIEW rather than the line — which
-                        // is how the first draft of this loop 500'd every payslip download.
-                        $dates = $fitDates($row);
-                        $minutes = empty($row['minutes']) ? '' : $row['minutes'] . ' min';
-                    @endphp
-                    {{--
-                        The count badge and the date line are the point of the row: "Absences
-                        1,316.00" has to be taken on trust; "Absences (2) Aug 5, Aug 10" can be
-                        checked against the reader's own memory of the month.
-                    --}}
-                    <tr class="line{{ $dates ? ' pair' : '' }}">
+                    {{-- The count badge carries the quantity: "Absences (2)". The days behind it
+                         are no longer printed. --}}
+                    <tr class="line">
                         <td>
                             @if (! empty($row['original_name']))
                                 <span class="was">{{ $fit($row['original_name']) }}</span>
@@ -456,12 +345,6 @@
                         </td>
                         <td class="amt">{!! $was($row['original_amount'] ?? null) !!}{{ $amt($row['amount']) }}</td>
                     </tr>
-                    @if ($dates)
-                        <tr class="why">
-                            <td>{{ $dates }}</td>
-                            <td class="amt">{{ $minutes }}</td>
-                        </tr>
-                    @endif
                 @endforeach
                 <tr class="sum"><td>Total Deduction</td><td class="amt">{{ $amt($t['deductions']) }}</td></tr>
             </table>
@@ -530,35 +413,8 @@
                         </tr>
                     @endif
                 @endforeach
-                @php
-                    // Built here rather than with inline directives: Blade will not parse a
-                    // conditional that directly follows a digit ("÷ 12" then a directive compiles
-                    // the closing tag and leaves the opener literal), and the sentence reads
-                    // better assembled than stitched out of six template fragments.
-                    $taxWhy = $p['tax_basis'] ?? null;
-                    $taxWhyLines = [];
-
-                    if ($taxWhy) {
-                        $taxWhyLines[] = '(' . $amt($taxWhy['taxable_monthly']) . ' taxable − '
-                            . $amt($taxWhy['contributions_monthly']) . ' contributions) × 12 = '
-                            . $amt($taxWhy['annual_taxable']) . ' a year';
-
-                        if (! empty($taxWhy['band'])) {
-                            $bandRate = rtrim(rtrim(number_format($taxWhy['band']['rate'] * 100, 3), '0'), '.');
-                            $over = $taxWhy['band']['base'] > 0
-                                ? ' plus ' . $amt($taxWhy['band']['base'])
-                                : '';
-                            $split = $taxWhy['timing_factor'] != 1
-                                ? ' × ' . $taxWhy['timing_factor']
-                                : '';
-
-                            $taxWhyLines[] = $bandRate . '% over ' . $amt($taxWhy['band']['min']) . $over
-                                . ' = ' . $amt($taxWhy['annual_tax']) . ' a year ÷ 12' . $split;
-                        }
-                    }
-                @endphp
                 @php $taxFix = $corrections['withholding_tax'] ?? null; @endphp
-                <tr class="line {{ $taxWhyLines ? 'pair' : '' }}">
+                <tr class="line">
                     <td>
                         @if (! empty($taxFix['label_override']))
                             <span class="was">Withholding Tax</span> {{ $fit($taxFix['label_override']) }}
@@ -568,16 +424,6 @@
                     </td>
                     <td class="amt">{!! $was($taxFix['original_amount'] ?? null) !!}{{ $amt($p['withholding_tax']) }}</td>
                 </tr>
-                {{--
-                    The least checkable figure on the document: an annualised projection of one
-                    period, net of contributions, against a dated bracket table. Four steps, none
-                    of them visible, ending in a peso amount the reader was expected to trust.
-                    Kept when the other derivations were dropped, because December's tax line can
-                    go NEGATIVE and nothing else on the page would account for that.
-                --}}
-                @foreach ($taxWhyLines as $line)
-                    <tr class="why {{ $loop->last ? '' : 'open' }}"><td colspan="2">{{ $line }}</td></tr>
-                @endforeach
                 {{--
                     The year-end settlement, shown as its derivation. On the common case
                     the line above is NEGATIVE and net pay exceeds gross; the printed payslip is

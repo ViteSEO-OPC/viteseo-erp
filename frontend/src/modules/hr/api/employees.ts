@@ -206,6 +206,16 @@ export async function uploadEmployeeDocument(
   return res.data.data;
 }
 
+/** Rename a document. The stored file is untouched — only the name on the record changes. */
+export async function renameEmployeeDocument(
+  id: number,
+  documentId: number,
+  name: string,
+): Promise<EmployeeDocument> {
+  const res = await apiClient.patch(`/hr/employees/${id}/documents/${documentId}`, { name });
+  return res.data.data;
+}
+
 export async function deleteEmployeeDocument(id: number, documentId: number): Promise<void> {
   await apiClient.delete(`/hr/employees/${id}/documents/${documentId}`);
 }

@@ -74,7 +74,7 @@
     @if (!empty($r['movement']))
         <h2>Movement (12 months)</h2>
         <table>
-            <tr><th>Month</th><th class="r">Joiners</th><th class="r">Leavers</th><th class="r">Net</th></tr>
+            <tr><th>Month</th><th class="r">Onboard</th><th class="r">Off-board</th><th class="r">Net</th></tr>
             @foreach ($r['movement'] as $m)
                 <tr><td>{{ $m['label'] }}</td><td class="r">{{ $m['joiners'] }}</td><td class="r">{{ $m['leavers'] }}</td><td class="r">{{ $m['net'] }}</td></tr>
             @endforeach

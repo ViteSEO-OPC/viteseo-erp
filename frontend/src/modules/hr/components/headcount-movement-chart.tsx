@@ -1,6 +1,6 @@
 import type { MovementPoint } from "@/modules/hr/types/reports";
 
-// Grouped bars (Joiners / Leavers) + a Net-change line, drawn as plain SVG so we
+// Grouped bars (Onboard / Off-board) + a Net-change line, drawn as plain SVG so we
 // stay free of a chart library. Colors come from the design tokens.
 const W = 1000;
 const H = 380;
@@ -45,10 +45,10 @@ export function HeadcountMovementChart({ data }: { data: MovementPoint[] }) {
           Net change
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="size-3 rounded-sm" style={{ background: "var(--info)" }} /> Joiners
+          <span className="size-3 rounded-sm" style={{ background: "var(--info)" }} /> Onboard
         </span>
         <span className="inline-flex items-center gap-2">
-          <span className="size-3 rounded-sm" style={{ background: "var(--danger)" }} /> Leavers
+          <span className="size-3 rounded-sm" style={{ background: "var(--danger)" }} /> Off-board
         </span>
       </div>
 
