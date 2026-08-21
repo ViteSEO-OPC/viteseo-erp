@@ -24,6 +24,7 @@ import {
   usePayrollRun,
   usePayrollRuns,
 } from "@/modules/hr/hooks/use-payroll";
+import { ToastNoteList } from "@/modules/hr/components/toast-note-list";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
 import type { AmendmentKind, PayrollRun } from "@/modules/hr/types/payroll";
 
@@ -377,11 +378,7 @@ function AmendmentForm({
       if (skipped.length > 0) {
         toast.warning(
           `${what} — ${skipped.length} could not be changed`,
-          <ul className="list-disc space-y-1 pl-4">
-            {skipped.map((line, i) => (
-              <li key={i}>{line}</li>
-            ))}
-          </ul>,
+          <ToastNoteList notes={skipped} />,
         );
       } else {
         toast.success(what);

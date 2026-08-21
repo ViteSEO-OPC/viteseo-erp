@@ -265,6 +265,11 @@ Route::middleware('auth:sanctum')->group(function () {
             ->middleware('throttle:30,1,payslip-correction:');
         Route::delete('payslips/{payslip}/line-corrections/{amendment}', [PayrollController::class, 'removePayslipLineCorrection'])
             ->middleware('throttle:30,1,payslip-correction:');
+        // "Seen it, my figure still stands" — clears the drift warning a recompute raises when the
+        // engine's own figure moved out from under a correction. Moves no money, so it shares the
+        // correction limit rather than the heavier run limits.
+        Route::post('payslips/{payslip}/line-corrections/{amendment}/acknowledge', [PayrollController::class, 'acknowledgePayslipLineCorrection'])
+            ->middleware('throttle:30,1,payslip-correction:');
         Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf'])->middleware('throttle:20,1,hr-pdf:');
 

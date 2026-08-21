@@ -654,6 +654,10 @@ export interface PayslipAmendment {
   override_amount: number | null;
   /** What the engine computed — the struck-through figure, refreshed on every run. */
   original_amount: number | null;
+  /** The engine figure this was corrected AGAINST, frozen when HR entered it. */
+  edited_against: number | null;
+  /** The two above disagree: the engine has changed its mind since, and HR has not confirmed. */
+  has_drifted: boolean;
   /** The wording HR gave the line. Display only: the line keeps its key. */
   label_override: string | null;
   /** Signed: negative for a reversal or a deduction, positive for extra pay. */

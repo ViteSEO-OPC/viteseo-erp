@@ -2680,6 +2680,47 @@ class PayrollService
         });
     }
 
+    /**
+     * "I have seen the new figure, and my correction still stands."
+     *
+     * A recompute can move the engine's own figure out from under a correction that was entered
+     * against an older one — `withLineOverrides()` reports that as drift, and keeps reporting it
+     * on every subsequent run because it cannot tell "reviewed and still right" from "nobody
+     * looked". This is how HR says the former. It moves NO money: the correction was already
+     * winning and still is, and only the baseline the drift note is measured against is restamped.
+     *
+     * A route of its own rather than a side effect of re-saving the correction. Re-saving does
+     * have the same effect (overrideLine writes `edited_against` afresh), but it is not something
+     * anyone would guess, and it makes HR retype an amount and a reason to change nothing.
+     */
+    public function acknowledgeLineOverride(Payslip $payslip, PayslipAmendment $override, User $actor): Payslip
+    {
+        $run = $payslip->payrollRun;
+
+        $this->assertCorrectable($run);
+
+        if ((int) $override->payslip_id !== (int) $payslip->id || $override->target_key === null) {
+            throw ValidationException::withMessages([
+                'override' => ['That correction does not belong to this payslip.'],
+            ]);
+        }
+
+        // `original_amount` is refreshed to the engine's current figure on every run, so it is
+        // already the number HR is being shown and asked to accept — recomputing the snapshot to
+        // rediscover it would only introduce a way for the two to disagree.
+        $override->update(['edited_against' => $override->original_amount]);
+
+        $this->audit->log(
+            'updated', 'Payroll',
+            'Confirmed the correction on ' . ($override->targetLabel() ?? $override->target_key)
+                . ' still stands — ' . $this->employeeName((int) $payslip->employee_id)
+                . ', ' . $run->cycle_end->format('M Y') . ' payslip',
+            $run,
+        );
+
+        return $payslip->fresh()->load(['amendments.creator', 'employee.user', 'payrollRun']);
+    }
+
     /** A period can be corrected only while it is finished and still open. */
     private function assertCorrectable(?PayrollRun $run): void
     {

@@ -104,14 +104,75 @@ class DeductionServiceTest extends TestCase
         $this->assertEqualsWithDelta(60 / 480, $r->unpaidFraction, 1e-9);
     }
 
+    /**
+     * `late_minutes_from` moves what the MONEY is measured from, not what is reported — both
+     * bases report the same minutes past the scheduled start.
+     */
     public function test_late_minutes_from_after_grace_forgives_the_grace_window(): void
     {
-        // 08:30 arrival, 15-min grace: start_time basis = 30 late; after_grace = 15 late.
+        // 08:30 arrival, 15-min grace: start_time prices 30 minutes, after_grace prices 15.
         $fromStart = $this->svc->forDay($this->ctx(['time_in_min' => 510]), $this->policy(['late_deduction_mode' => 'per_hour', 'late_minutes_from' => 'start_time']));
         $fromGrace = $this->svc->forDay($this->ctx(['time_in_min' => 510]), $this->policy(['late_deduction_mode' => 'per_hour', 'late_minutes_from' => 'after_grace']));
 
+        $this->assertEqualsWithDelta(30 / 480, $fromStart->unpaidFraction, 1e-9);
+        $this->assertEqualsWithDelta(15 / 480, $fromGrace->unpaidFraction, 1e-9);
+
         $this->assertSame(30, $fromStart->lateMinutes);
-        $this->assertSame(15, $fromGrace->lateMinutes);
+        $this->assertSame(30, $fromGrace->lateMinutes);
+    }
+
+    /**
+     * Grace is a GATE under BOTH bases. `start_time` used to discard it for pay, so an arrival
+     * the attendance screen called "on time" was still charged on the payslip.
+     */
+    public function test_an_arrival_inside_grace_is_never_late_under_either_basis(): void
+    {
+        foreach (['start_time', 'after_grace'] as $basis) {
+            $policy = $this->policy(['late_deduction_mode' => 'per_hour', 'late_minutes_from' => $basis]);
+
+            // 08:10 — inside the 15-min grace.
+            $inside = $this->svc->forDay($this->ctx(['time_in_min' => 490]), $policy);
+            $this->assertSame(0.0, $inside->unpaidFraction, $basis);
+            $this->assertSame(0, $inside->lateMinutes, $basis);
+
+            // 08:15 — the last forgiven minute, the same boundary arrivalCategory() uses.
+            $edge = $this->svc->forDay($this->ctx(['time_in_min' => 495]), $policy);
+            $this->assertSame(0.0, $edge->unpaidFraction, $basis);
+        }
+
+        // 08:16 — one minute past the gate. Both report the full 16 minutes past 08:00; the
+        // start_time basis prices all 16, after_grace prices only the minute outside the window.
+        $fromStart = $this->svc->forDay($this->ctx(['time_in_min' => 496]), $this->policy(['late_deduction_mode' => 'per_hour', 'late_minutes_from' => 'start_time']));
+        $fromGrace = $this->svc->forDay($this->ctx(['time_in_min' => 496]), $this->policy(['late_deduction_mode' => 'per_hour', 'late_minutes_from' => 'after_grace']));
+
+        $this->assertSame(16, $fromStart->lateMinutes);
+        $this->assertSame(16, $fromGrace->lateMinutes);
+        // 1e-6, not 1e-9: neither sixteenth nor 480th of a day is exact, and forDay() rounds
+        // the fraction to 6 places before returning it.
+        $this->assertEqualsWithDelta(16 / 480, $fromStart->unpaidFraction, 1e-6);
+        $this->assertEqualsWithDelta(1 / 480, $fromGrace->unpaidFraction, 1e-6);
+    }
+
+    /**
+     * The question the basis actually answers for HR: with a 15-min grace and a "more than 30
+     * minutes ⇒ 1h" rule, which minute does the money start at? 08:31 on start_time, 08:46 on
+     * after_grace — and nobody inside grace pays under either.
+     */
+    public function test_the_basis_decides_which_minute_the_threshold_bites_at(): void
+    {
+        $tiers = [['over' => 30, 'hours' => 1]];
+        $at = fn (int $min, string $basis): float => $this->svc->forDay(
+            $this->ctx(['time_in_min' => $min]),
+            $this->policy(['late_deduction_mode' => 'tiered', 'late_tiers' => $tiers, 'late_minutes_from' => $basis]),
+        )->unpaidFraction;
+
+        // start_time: 08:30 is 30 chargeable minutes, which is not MORE than 30. 08:31 is.
+        $this->assertSame(0.0, $at(510, 'start_time'));
+        $this->assertEqualsWithDelta(60 / 480, $at(511, 'start_time'), 1e-9);
+
+        // after_grace: the same 31st chargeable minute lands 15 minutes later on the clock.
+        $this->assertSame(0.0, $at(525, 'after_grace'));                        // 08:45 → 30
+        $this->assertEqualsWithDelta(60 / 480, $at(526, 'after_grace'), 1e-9);  // 08:46 → 31
     }
 
     // --- undertime ---
@@ -211,7 +272,8 @@ class DeductionServiceTest extends TestCase
     /**
      * The recurring flag turns the single rung into a repeating BLOCK. The rule HR writes as
      * "30 min late = 1h docked" then means what it says at every multiple, instead of charging
-     * one hour whether somebody was 31 minutes or four hours late.
+     * one hour whether somebody was 31 minutes or four hours late. Every block boundary is
+     * strictly-more-than, exactly like the flat rung.
      */
     public function test_recurring_tier_charges_once_per_block_of_lateness(): void
     {
@@ -221,14 +283,20 @@ class DeductionServiceTest extends TestCase
             'late_tier_recurring' => true,
         ]);
 
-        // 60 late (09:00 in) → two 30-min blocks → 2h = 120/480.
+        // 60 late (09:00 in) → still ONE block: 60 is not MORE than the second block's 60.
         $r60 = $this->svc->forDay($this->ctx(['time_in_min' => 540]), $policy);
-        $this->assertEqualsWithDelta(120 / 480, $r60->unpaidFraction, 1e-9);
+        $this->assertEqualsWithDelta(60 / 480, $r60->unpaidFraction, 1e-9);
         $this->assertSame(60, $r60->lateMinutes); // the CLOCK figure is untouched by the charge
 
-        // 90 late → three blocks → 3h.
+        // 61 late → the second block opens.
+        $r61 = $this->svc->forDay($this->ctx(['time_in_min' => 541]), $policy);
+        $this->assertEqualsWithDelta(120 / 480, $r61->unpaidFraction, 1e-9);
+
+        // 90 late → two blocks; the third needs 91.
         $r90 = $this->svc->forDay($this->ctx(['time_in_min' => 570]), $policy);
-        $this->assertEqualsWithDelta(180 / 480, $r90->unpaidFraction, 1e-9);
+        $this->assertEqualsWithDelta(120 / 480, $r90->unpaidFraction, 1e-9);
+        $r91 = $this->svc->forDay($this->ctx(['time_in_min' => 571]), $policy);
+        $this->assertEqualsWithDelta(180 / 480, $r91->unpaidFraction, 1e-9);
 
         // 45 late → one whole block only; the leftover 15 min does NOT buy a second.
         $r45 = $this->svc->forDay($this->ctx(['time_in_min' => 525]), $policy);
@@ -236,33 +304,29 @@ class DeductionServiceTest extends TestCase
     }
 
     /**
-     * The boundary the recurring mode deliberately moves. Flat is strictly "more than 30", so
-     * exactly 30 costs nothing; a block count is floor(late ÷ 30), so exactly 30 is one block.
-     * Pinned because it is the one case where switching the toggle on changes an existing
-     * policy's answer at a value it already handled.
+     * The toggle changes how OFTEN the rung is charged, never when it starts: at exactly the
+     * threshold both modes charge nothing, and one minute past it both charge the first rung.
+     * Pinned because this used to differ — recurring counted floor(late ÷ over) and so billed an
+     * hour at exactly 30, meaning flipping the toggle re-priced a day the policy already handled.
      */
-    public function test_recurring_charges_the_block_at_exactly_the_threshold(): void
+    public function test_recurring_and_flat_share_the_same_threshold_boundary(): void
     {
         $tiers = [['over' => 30, 'hours' => 1]];
+        $price = fn (int $min, bool $recurring): float => $this->svc->forDay(
+            $this->ctx(['time_in_min' => $min]),
+            $this->policy(['late_deduction_mode' => 'tiered', 'late_tiers' => $tiers, 'late_tier_recurring' => $recurring]),
+        )->unpaidFraction;
 
-        $flat = $this->svc->forDay(
-            $this->ctx(['time_in_min' => 510]), // exactly 30 late
-            $this->policy(['late_deduction_mode' => 'tiered', 'late_tiers' => $tiers]),
-        );
-        $this->assertSame(0.0, $flat->unpaidFraction);
+        // Exactly 30 late (08:30) is not MORE than 30 — nothing, either way.
+        $this->assertSame(0.0, $price(510, false));
+        $this->assertSame(0.0, $price(510, true));
 
-        $recurring = $this->svc->forDay(
-            $this->ctx(['time_in_min' => 510]),
-            $this->policy(['late_deduction_mode' => 'tiered', 'late_tiers' => $tiers, 'late_tier_recurring' => true]),
-        );
-        $this->assertEqualsWithDelta(60 / 480, $recurring->unpaidFraction, 1e-9);
+        // 31 late buys the first rung, either way.
+        $this->assertEqualsWithDelta(60 / 480, $price(511, false), 1e-9);
+        $this->assertEqualsWithDelta(60 / 480, $price(511, true), 1e-9);
 
         // One minute short of the block is still nothing under either mode.
-        $under = $this->svc->forDay(
-            $this->ctx(['time_in_min' => 509]),
-            $this->policy(['late_deduction_mode' => 'tiered', 'late_tiers' => $tiers, 'late_tier_recurring' => true]),
-        );
-        $this->assertSame(0.0, $under->unpaidFraction);
+        $this->assertSame(0.0, $price(509, true));
     }
 
     /**

@@ -117,11 +117,16 @@ function tiers(value: unknown): string {
     .join(" · ");
 }
 
-/** The same rung when it REPEATS: "every 30 min late → 1h". A different sentence, not a suffix. */
+/**
+ * The same rung when it REPEATS. It keeps the flat sentence's "over N min" opening on purpose:
+ * both modes start charging at the same minute (strictly MORE than `over`), and only how often
+ * the rung is billed differs. "every 30 min late → 1h" read as though the first hour landed at
+ * exactly 30, which is not what DeductionService::tierMinutes() does.
+ */
 function recurringTier(value: unknown): string {
   const t = Array.isArray(value) ? value[0] : null;
   if (!t) return "None set";
-  return `every ${t?.over ?? "?"} min late → ${t?.hours ?? 0}h`;
+  return `over ${t?.over ?? "?"} min → ${t?.hours ?? 0}h, repeating per ${t?.over ?? "?"} min`;
 }
 
 function display(key: string, value: unknown, policy?: Record<string, unknown>): string {

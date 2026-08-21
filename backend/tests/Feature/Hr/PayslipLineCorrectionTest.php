@@ -10,6 +10,7 @@ use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\Reimbursement;
 use App\Modules\Hr\Models\Payslip;
+use App\Modules\Hr\Models\PayslipAmendment;
 use App\Modules\Hr\Models\WorkSchedule;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
@@ -369,6 +370,83 @@ class PayslipLineCorrectionTest extends HrTestCase
 
         // And the correction still stands — this is a message, not a rollback.
         $this->assertSame(1500.0, $this->rows($slip->fresh())['absent']);
+    }
+
+    /**
+     * ACKNOWLEDGING A DRIFTED CORRECTION SILENCES IT — and only it.
+     *
+     * The drift note cannot tell "reviewed and still right" from "nobody looked", so it repeats on
+     * every run until HR says which. Confirming must move NO money: the correction was already
+     * winning, and the payslip is expected to come out of this byte-identical.
+     */
+    public function test_acknowledging_a_drifted_correction_stops_it_being_reported(): void
+    {
+        $this->attend(absentOn: ['2026-08-04']);
+
+        $run = $this->payrollRun();
+        $slip = $run->payslips()->first();
+
+        $this->correct($slip, 'absent', 1500.0);
+
+        Attendance::create([
+            'employee_id' => $this->employee->id,
+            'work_date' => '2026-08-04',
+            'time_in' => Carbon::parse('2026-08-04 08:00', config('app.timezone_local'))->utc(),
+            'time_out' => Carbon::parse('2026-08-04 17:00', config('app.timezone_local'))->utc(),
+            'status' => 'present',
+        ]);
+
+        $this->actingAs($this->hrUser())
+            ->postJson("/api/v1/hr/payroll/runs/{$run->id}/rerun", ['reason' => 'Attendance corrected'])
+            ->assertOk();
+
+        $override = $slip->fresh()->amendments()->whereNotNull('target_key')->firstOrFail();
+        $this->assertTrue($override->hasDrifted(), 'the run must have left this line drifted');
+
+        $netBefore = (float) $slip->fresh()->net_pay;
+
+        $this->actingAs($this->hrUser())
+            ->postJson("/api/v1/hr/payslips/{$slip->id}/line-corrections/{$override->id}/acknowledge")
+            ->assertOk()
+            ->assertJsonPath('data.amendments.0.has_drifted', false);
+
+        // The money is untouched, and HR's figure is still the one on the line.
+        $this->assertSame($netBefore, (float) $slip->fresh()->net_pay);
+        $this->assertSame(1500.0, $this->rows($slip->fresh())['absent']);
+
+        // And the next run no longer reports what HR has now seen.
+        $notes = $this->actingAs($this->hrUser())
+            ->postJson("/api/v1/hr/payroll/runs/{$run->id}/rerun", ['reason' => 'Routine recompute'])
+            ->assertOk()
+            ->json('data.override_notes');
+
+        $this->assertSame([], $notes);
+    }
+
+    /**
+     * An ADDED line is not a correction to one, so there is no engine figure under it to have
+     * drifted — acknowledging one is refused rather than silently writing a null baseline.
+     */
+    public function test_acknowledging_something_that_is_not_a_line_correction_is_refused(): void
+    {
+        $this->attend();
+
+        $slip = $this->payrollRun()->payslips()->first();
+
+        $added = PayslipAmendment::create([
+            'payslip_id' => $slip->id,
+            'kind' => 'pay',
+            'target_key' => null, // an added line, not an override of a computed one
+            'amount' => 500.0,
+            'tax' => 0,
+            'reason' => 'Referral bonus',
+            'issued_on' => '2026-08-15',
+        ]);
+
+        $this->actingAs($this->hrUser())
+            ->postJson("/api/v1/hr/payslips/{$slip->id}/line-corrections/{$added->id}/acknowledge")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('override');
     }
 
     /** A recompute that finds nothing says nothing — an empty list, not a reassuring sentence. */

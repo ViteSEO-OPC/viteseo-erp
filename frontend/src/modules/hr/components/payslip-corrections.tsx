@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AxiosError } from "axios";
-import { Plus, RotateCcw } from "lucide-react";
+import { Check, Plus, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { formatPeso } from "@/core/lib/format";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import { PayslipDocument } from "@/modules/hr/components/payslip-document";
 import {
+  useAcknowledgePayslipLineCorrection,
   useAmendPayrollRun,
   useCorrectPayslipLine,
   useRemovePayslipLineCorrection,
@@ -129,6 +130,7 @@ function LineEditor({
 
   const correctMut = useCorrectPayslipLine();
   const removeMut = useRemovePayslipLineCorrection();
+  const ackMut = useAcknowledgePayslipLineCorrection();
 
   // NOT RE-SEEDED AFTER A SAVE. The editor closes on success and is remounted — keyed by the line
   // — the next time a line is opened, so the figures it starts from are always the ones currently
@@ -173,7 +175,25 @@ function LineEditor({
     }
   };
 
-  const busy = correctMut.isPending || removeMut.isPending;
+  /**
+   * "Seen it, my figure still stands." Moves no money — it re-stamps the engine figure this
+   * correction is measured against, which is what stops every future run reporting it as drift.
+   * Without this the only way to say so was to re-save the correction unchanged, which nobody
+   * would guess and which makes HR retype an amount and a reason to change nothing.
+   */
+  const confirmStands = async () => {
+    if (!correction) return;
+
+    try {
+      await ackMut.mutateAsync({ payslipId: payslip.id, correctionId: correction.id });
+      toast.success(`${line.name} confirmed — it won't be flagged again.`);
+      onDone();
+    } catch (error) {
+      toast.error(firstError(error) ?? "Could not confirm that correction.");
+    }
+  };
+
+  const busy = correctMut.isPending || removeMut.isPending || ackMut.isPending;
 
   return (
     <div className="border-b border-border bg-muted/40 px-4 py-4">
@@ -210,6 +230,34 @@ function LineEditor({
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
         </Field>
+
+        {/*
+         * THE DRIFT NOTICE, put where the correction is. The run's toast names these lines once
+         * and is then gone; this is the only place the person deciding can see both figures at
+         * the same time — the one they overruled, and the one the engine produces now.
+         */}
+        {correction?.has_drifted && (
+          <div className="rounded-lg border border-warning bg-warning-subtle p-3">
+            <p className="text-caption font-semibold text-foreground">
+              Payroll has changed its mind about this line
+            </p>
+            <p className="mt-0.5 text-caption text-muted-foreground">
+              You corrected it when the engine computed{" "}
+              <span className="font-mono font-semibold tabular-nums text-foreground">
+                {formatPeso(correction.edited_against ?? 0)}
+              </span>
+              . It now computes{" "}
+              <span className="font-mono font-semibold tabular-nums text-foreground">
+                {formatPeso(correction.original_amount ?? 0)}
+              </span>
+              . Your figure stands either way — confirm it if it is still right, or change it above.
+            </p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={confirmStands} disabled={busy}>
+              <Check />
+              {ackMut.isPending ? "Confirming…" : "My figure still stands"}
+            </Button>
+          </div>
+        )}
 
         {/*
          * WHAT THE ENGINE SAID, stated in the editor as well as on the line. HR is about to

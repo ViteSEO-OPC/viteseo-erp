@@ -14,7 +14,9 @@ class DeductionService
     /**
      * @param  array<string,mixed>  $ctx  the day's facts (all times as Manila minute-of-day ints):
      *   - start_min, end_min: int|null           schedule window
-     *   - grace_min: int                          resolved grace (via effectiveFor → daily overrides)
+     *   - grace_min: int                          resolved grace (via effectiveFor → daily overrides);
+     *                                             an arrival inside it is never late, whatever
+     *                                             `late_minutes_from` says
      *   - time_in_min: int|null                   clock-in (null ⇒ not a worked day; returns zero)
      *   - time_out_min: int|null                  clock-out (null ⇒ missing punch; see missing_clockout_mode)
      *   - half_day_off: 'AM'|'PM'|null            which half is off (worked window is the OTHER half)
@@ -63,14 +65,27 @@ class DeductionService
         }
 
         // --- late ---
+        // Grace is a GATE, not a measurement: an arrival inside it is not late at all, whichever
+        // point `late_minutes_from` names. Before this, `start_time` threw the grace window away
+        // for pay — an 08:10 arrival on an 08:00 shift with 15 min grace read "on time" on the
+        // attendance screen and was still charged 10 minutes on the payslip. The `<=` boundary
+        // matches AttendanceService::arrivalCategory(), so the gate and the screen never disagree.
+        //
+        // Past the gate the setting decides what the MONEY is measured from: `start_time` bites
+        // sooner (a 30-min threshold lands at 08:31), `after_grace` later (08:46). The REPORTED
+        // figure is always minutes past the scheduled start — the one number the attendance page,
+        // the deduction ledger line and the payslip all show.
         $lateMode = $policy->late_deduction_mode;
-        $lateMinutes = 0;
+        $lateForCharge = 0;
+        $lateForDisplay = 0;
         $effectiveStart = null;
         if ($workStart !== null && ($lateMode === 'per_hour' || $lateMode === 'tiered')) {
-            $effectiveStart = $policy->late_minutes_from === 'after_grace'
-                ? $workStart + (int) ($ctx['grace_min'] ?? 0)
-                : $workStart;
-            $lateMinutes = max(0, $timeIn - $effectiveStart);
+            $graceEnd = $workStart + max(0, (int) ($ctx['grace_min'] ?? 0));
+            if ($timeIn > $graceEnd) {
+                $effectiveStart = $policy->late_minutes_from === 'after_grace' ? $graceEnd : $workStart;
+                $lateForCharge = max(0, $timeIn - $effectiveStart);
+                $lateForDisplay = max(0, $timeIn - $workStart);
+            }
         }
 
         // --- undertime (clock-derived; approved early-out days are handled elsewhere) ---
@@ -116,8 +131,8 @@ class DeductionService
         $chargedLate = ($lateMode === 'tiered')
             // A ladder, not a span: the rung is chosen by how late they were, so there is no
             // stretch of clock inside it for the meal to be double-counted in.
-            ? $this->tierMinutes($lateMinutes, $policy)
-            : max(0, $lateMinutes - $mealWithin($effectiveStart, $timeIn));
+            ? $this->tierMinutes($lateForCharge, $policy)
+            : max(0, $lateForCharge - $mealWithin($effectiveStart, $timeIn));
         $chargedUndertime = max(0, $undertimeMinutes - $mealWithin($timeOut, $workEnd));
 
         // Item 9 — the audit spec rounds the shortfall ONCE. Rounding each component separately
@@ -145,7 +160,7 @@ class DeductionService
 
         return new DeductionResult(
             unpaidFraction: round($unpaidFraction, 6),
-            lateMinutes: $lateMinutes,
+            lateMinutes: $lateForDisplay,
             undertimeMinutes: $undertimeMinutes,
             lateFraction: round($lateFraction, 6),
             undertimeFraction: round($undertimeFraction, 6),
@@ -217,15 +232,15 @@ class DeductionService
      * exceeds decides the charged HOURS (converted to minutes). No rung matched ⇒ 0.
      *
      * With `late_tier_recurring` on, the single rung stops being a one-off charge and becomes
-     * a repeating BLOCK: the charge is billed once per whole `over` minutes of lateness, so a
-     * "30 min ⇒ 1h" rule costs 1h at 30–59 late, 2h at 60–89, 3h at 90–119. The flag is
-     * validated to a single rung with `over >= 1` (UpdateAttendancePolicyRequest), so a ladder
+     * a repeating BLOCK: the charge is billed once per whole `over` minutes of lateness. The flag
+     * is validated to a single rung with `over >= 1` (UpdateAttendancePolicyRequest), so a ladder
      * can never reach the recurring branch and there is no "which rung repeats?" ambiguity.
      *
-     * Note the boundary difference the recurring mode deliberately accepts: the flat rule is
-     * strictly MORE than `over` (exactly 30 late ⇒ 0), while a block count is floor(late ÷ over)
-     * (exactly 30 late ⇒ one block). Charging nothing at 30 and two hours at 60 would make the
-     * rule HR wrote — "every 30 minutes" — untrue for every block after the first.
+     * Both modes share ONE boundary: strictly MORE than `over`. A "30 min ⇒ 1h" rule costs
+     * nothing at exactly 30 late, 1h at 31–60, 2h at 61–90, 3h at 91–120 — hence the `- 1`,
+     * which shifts every block, not just the first. Repeating changes how OFTEN the rung is
+     * charged, never when it starts, so turning the toggle on can no longer make a policy answer
+     * differently at a value it already handled.
      *
      * Nothing here bounds the result: 4h late under a 30 ⇒ 1h rule computes 8h. forDay() caps
      * the day at `daily_deduction_cap` (one day's pay by default), which is the existing rail.
@@ -241,7 +256,10 @@ class DeductionService
             // A zero/negative block is rejected at save time; falling through to the flat rule
             // rather than dividing by it keeps a hand-edited or legacy row from fataling a run.
             if ($over > 0) {
-                return intdiv(max(0, $lateMinutes), $over) * $charge;
+                // `- 1` before the divide is what makes each block strictly-more-than: at exactly
+                // `over` the count is still 0, at `over + 1` it turns 1. max(0, …) keeps a
+                // not-late day (0 minutes) out of the negative side of intdiv().
+                return intdiv(max(0, $lateMinutes - 1), $over) * $charge;
             }
         }
 

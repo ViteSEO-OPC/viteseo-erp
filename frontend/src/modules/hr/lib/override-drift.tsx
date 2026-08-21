@@ -1,4 +1,5 @@
 import { notify as toast } from "@/core/lib/notify";
+import { ToastNoteList } from "@/modules/hr/components/toast-note-list";
 import type { PayrollRun } from "@/modules/hr/types/payroll";
 
 /**
@@ -21,10 +22,6 @@ export function notifyOverrideDrift(run: PayrollRun | undefined | null): void {
 
   toast.warning(
     `${notes.length} correction${notes.length === 1 ? "" : "s"} may no longer be right`,
-    <ul className="list-disc space-y-1 pl-4">
-      {notes.map((note, i) => (
-        <li key={i}>{note}</li>
-      ))}
-    </ul>,
+    <ToastNoteList notes={notes} />,
   );
 }

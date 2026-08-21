@@ -446,6 +446,19 @@ class PayrollController extends Controller
         return PayslipResource::make($slip)->response();
     }
 
+    // POST /api/v1/hr/payslips/{payslip}/line-corrections/{amendment}/acknowledge — HR confirming
+    // a drifted correction still stands. Changes no figure; only stops the run reporting it.
+    public function acknowledgePayslipLineCorrection(Payslip $payslip, PayslipAmendment $amendment): JsonResponse
+    {
+        $payslip->loadMissing('payrollRun');
+
+        $slip = $this->service->acknowledgeLineOverride($payslip, $amendment, request()->user());
+
+        $slip->load(['payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator']);
+
+        return PayslipResource::make($slip)->response();
+    }
+
     // GET /api/v1/hr/payslips/{payslip}/pdf — one employee's payslip as a PDF (HR only).
     public function payslipPdf(Payslip $payslip): SymfonyResponse
     {

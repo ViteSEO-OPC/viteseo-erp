@@ -23,6 +23,7 @@ import {
   correctPayslipLine,
   correctRunLine,
   removePayslipLineCorrection,
+  acknowledgePayslipLineCorrection,
   getRerunPreview,
   rerunPayrollRun,
   getRetroFlags,
@@ -265,6 +266,22 @@ export function useRemovePayslipLineCorrection() {
   return useMutation({
     mutationFn: ({ payslipId, correctionId }: { payslipId: number; correctionId: number }) =>
       removePayslipLineCorrection(payslipId, correctionId),
+    onSuccess: (payslip) => {
+      qc.setQueryData(["hr", "payslip", payslip.id], payslip);
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+      qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
+      qc.invalidateQueries({ queryKey: ["hr", "me", "payslip"] });
+      qc.invalidateQueries({ queryKey: RETRO_KEY });
+    },
+  });
+}
+
+/** Confirm a drifted correction still stands. Same invalidation: the run's notes change. */
+export function useAcknowledgePayslipLineCorrection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ payslipId, correctionId }: { payslipId: number; correctionId: number }) =>
+      acknowledgePayslipLineCorrection(payslipId, correctionId),
     onSuccess: (payslip) => {
       qc.setQueryData(["hr", "payslip", payslip.id], payslip);
       qc.invalidateQueries({ queryKey: RUNS_KEY });
