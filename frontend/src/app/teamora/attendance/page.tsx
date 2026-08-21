@@ -88,7 +88,9 @@ export default function AttendancePage() {
 
   const filtered = useMemo(() => {
     return (rows ?? []).filter((r) => {
-      if (search && !(r.name ?? "").toLowerCase().includes(search.toLowerCase())) return false;
+      const q = search.trim().toLowerCase();
+      const matches = (value: string | null) => (value ?? "").toLowerCase().includes(q);
+      if (q && !matches(r.name) && !matches(r.list_name)) return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (timingFilter !== "all" && r.timing?.category !== timingFilter) return false;
       return true;
@@ -98,7 +100,9 @@ export default function AttendancePage() {
   const columns: Column<HrAttendanceRow>[] = [
     {
       header: "Employee",
-      cell: (r) => <span className="font-semibold text-foreground">{r.name ?? "—"}</span>,
+      cell: (r) => (
+        <span className="font-semibold text-foreground">{r.list_name ?? r.name ?? "—"}</span>
+      ),
     },
     { header: "Dept", cell: (r) => r.department ?? "—" },
     {

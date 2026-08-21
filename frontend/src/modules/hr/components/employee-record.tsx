@@ -26,6 +26,16 @@ import { EmploymentHistorySection } from "@/modules/hr/components/employment-his
 import { CompensationHistorySection } from "@/modules/hr/components/compensation-history-section";
 import { EmployeeCompensationSection } from "@/modules/hr/components/employee-compensation-section";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 import { formatDate } from "@/core/lib/format";
 import { type Employee, type MyDocument } from "@/modules/hr/types/employee";
 import {
@@ -36,6 +46,7 @@ import {
   useMyDocuments,
   useUploadEmployeeDocument,
   useDeleteEmployeeDocument,
+  useRenameEmployeeDocument,
   useUploadEmployeePhoto,
   useDeleteEmployeePhoto,
 } from "@/modules/hr/hooks/use-employees";
@@ -432,12 +443,101 @@ function MyDocuments({ onRequestDocument }: { onRequestDocument?: () => void }) 
   );
 }
 
+/**
+ * Rename a document.
+ *
+ * The stored file is never touched — this is the name on the record, which is also the filename
+ * the browser saves the download as. So the extension is not the reader's problem: if they type
+ * "Contract" over "contract-signed.pdf", the server puts the `.pdf` back.
+ *
+ * The document is SNAPSHOT when the dialog opens, for the reason DeleteConfirmDialog keeps its
+ * own copy: clearing the caller's state closes the dialog, and without a snapshot the name in the
+ * title blanks out mid-animation on the way out.
+ */
+function RenameDocumentDialog({
+  doc,
+  onOpenChange,
+  onRename,
+  isPending,
+}: {
+  doc: { id: number; name: string } | null;
+  onOpenChange: (open: boolean) => void;
+  onRename: (id: number, name: string) => Promise<void>;
+  isPending: boolean;
+}) {
+  const [snap, setSnap] = useState(doc);
+  const [prev, setPrev] = useState(doc);
+  const [name, setName] = useState(doc?.name ?? "");
+
+  // Refill from the document each time it OPENS — derived during render rather than in an effect,
+  // so the input never paints one frame of the previous document's name.
+  if (doc !== prev) {
+    setPrev(doc);
+    if (doc) {
+      setSnap(doc);
+      setName(doc.name);
+    }
+  }
+
+  const trimmed = name.trim();
+  const unchanged = trimmed === (snap?.name ?? "");
+  const canSave = trimmed !== "" && !unchanged && !isPending;
+
+  return (
+    <Dialog open={!!doc} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-[calc(100%-3rem)] sm:max-w-[440px]">
+        <DialogHeader>
+          <DialogTitle className="text-[length:var(--text-h3)] font-bold">
+            Rename document
+          </DialogTitle>
+          <DialogDescription>
+            This changes the name on the record and on the downloaded file. The document itself is
+            unchanged.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          id="rename-document"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSave && snap) void onRename(snap.id, trimmed);
+          }}
+        >
+          <label htmlFor="document-name" className="text-caption font-medium">
+            Document name
+          </label>
+          <Input
+            id="document-name"
+            className="mt-1.5"
+            value={name}
+            autoFocus
+            onChange={(e) => setName(e.target.value)}
+          />
+        </form>
+
+        <DialogFooter className="gap-3">
+          <DialogClose asChild>
+            <Button type="button" variant="ghost" disabled={isPending}>
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button type="submit" form="rename-document" disabled={!canSave}>
+            {isPending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function DocumentsTab({ employeeId }: { employeeId: number }) {
   const { data: docs, isLoading } = useEmployeeDocuments(employeeId);
   const upload = useUploadEmployeeDocument(employeeId);
   const remove = useDeleteEmployeeDocument(employeeId);
+  const rename = useRenameEmployeeDocument(employeeId);
   const fileRef = useRef<HTMLInputElement>(null);
   const [removing, setRemoving] = useState<{ id: number; name: string } | null>(null);
+  const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
 
   async function onFile(file?: File) {
     if (!file) return;
@@ -448,6 +548,16 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
       toast.error("Could not upload the document.");
     }
     if (fileRef.current) fileRef.current.value = ""; // allow re-uploading the same file
+  }
+
+  async function performRename(id: number, name: string) {
+    try {
+      await rename.mutateAsync({ documentId: id, name });
+      setRenaming(null);
+      toast.success("Document renamed");
+    } catch {
+      toast.error("Could not rename the document.");
+    }
   }
 
   async function performRemove(id: number) {
@@ -504,6 +614,16 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
               <Button
                 variant="ghost"
                 size="icon-sm"
+                disabled={rename.isPending}
+                onClick={() => setRenaming({ id: d.id, name: d.name })}
+                aria-label={`Rename ${d.name}`}
+                title="Rename"
+              >
+                <Pencil />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 disabled={remove.isPending}
                 onClick={() => setRemoving({ id: d.id, name: d.name })}
                 aria-label={`Remove ${d.name}`}
@@ -515,6 +635,13 @@ function DocumentsTab({ employeeId }: { employeeId: number }) {
           ))}
         </div>
       )}
+
+      <RenameDocumentDialog
+        doc={renaming}
+        onOpenChange={(o) => !o && setRenaming(null)}
+        onRename={performRename}
+        isPending={rename.isPending}
+      />
 
       <DeleteConfirmDialog
         open={!!removing}

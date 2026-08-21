@@ -24,6 +24,7 @@ const columns: Column<HrAttendanceRow>[] = [
     cell: (r) => (
       <EmployeeCell
         employee={{ id: r.employee_id, name: r.name, photo_url: r.photo_url }}
+        displayName={r.list_name}
       />
     ),
   },
@@ -58,8 +59,11 @@ export function CheckinBoard() {
   const filteredRoster = useMemo(() => {
     if (!roster) return [];
     return roster.filter((r) => {
-      const name = (r.name ?? "").toLowerCase();
-      if (query && !name.includes(query.trim().toLowerCase())) return false;
+      // Either form matches: the board shows "Dela Cruz, Juan", but "juan dela" is how most
+      // people look someone up.
+      const q = query.trim().toLowerCase();
+      const matches = (value: string | null) => (value ?? "").toLowerCase().includes(q);
+      if (q && !matches(r.name) && !matches(r.list_name)) return false;
       if (statusFilter !== "all") {
         if (statusFilter === "checked_in" && !r.time_in) return false;
         if (statusFilter === "on_leave" && !r.leave_type) return false;

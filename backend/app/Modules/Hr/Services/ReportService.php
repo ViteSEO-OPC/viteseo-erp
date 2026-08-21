@@ -267,7 +267,7 @@ class ReportService
 
         return [
             'title' => 'Headcount & Movement',
-            'description' => 'Joiners, leavers, transfers; net change by department and month; filterable by department, location, date range.',
+            'description' => 'Onboard, off-board, transfers; net change by department and month; filterable by department, location, date range.',
             'mock' => false,
             'summary' => [
                 ['label' => 'Total headcount', 'value' => (string) $total],

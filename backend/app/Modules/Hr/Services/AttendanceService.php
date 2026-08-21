@@ -1190,6 +1190,10 @@ class AttendanceService
                 return [
                     'employee_id' => $emp->id,
                     'name' => $emp->user?->name,
+                    // The same person as the roster files them: "Dela Cruz, Juan Santos". The
+                    // natural name above is kept for the places that address the person rather
+                    // than list them — a correction dialog says "Juan Dela Cruz", not the index form.
+                    'list_name' => $emp->listingName(),
                     'photo_url' => $emp->photo_url,
                     'department' => $emp->department?->name,
                     'hire_date' => $emp->hire_date?->format('Y-m-d'),
@@ -1228,7 +1232,10 @@ class AttendanceService
                     'source' => $att?->source,
                 ];
             })
-            ->sortBy('name')
+            // Filed under the SURNAME, which is the order the listing form implies — a roster
+            // that reads "Dela Cruz, Juan" but sorts under J is harder to scan than one that
+            // never re-ordered at all.
+            ->sortBy(fn (array $row) => mb_strtolower((string) $row['list_name']))
             ->values()
             ->all();
     }

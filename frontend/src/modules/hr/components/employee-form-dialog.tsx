@@ -70,8 +70,18 @@ const schema = z
     nationality: optionalText(100),
     date_of_birth: optionalPastDate("Date of birth"),
     place_of_birth: optionalText(),
-    address: optionalText(500),
-    current_address: optionalText(500),
+    address_house_no: optionalText(50),
+    address_street: optionalText(150),
+    address_barangay: optionalText(150),
+    address_city: optionalText(150),
+    address_province: optionalText(150),
+    address_zip: optionalText(20),
+    current_address_house_no: optionalText(50),
+    current_address_street: optionalText(150),
+    current_address_barangay: optionalText(150),
+    current_address_city: optionalText(150),
+    current_address_province: optionalText(150),
+    current_address_zip: optionalText(20),
     mothers_maiden_name: optionalText(),
     fathers_name: optionalText(),
     siblings: z.array(z.object({ name: requiredText("Sibling's name"), gender: z.string() })),
@@ -129,7 +139,9 @@ type FormValues = z.infer<typeof schema>;
 const EMPTY: FormValues = {
   first_name: "", last_name: "", middle_name: "", name_extension: "", email: "",
   phone: "", gender: "", civil_status: "", nationality: "", date_of_birth: "",
-  place_of_birth: "", address: "", current_address: "", mothers_maiden_name: "",
+  place_of_birth: "", mothers_maiden_name: "",
+  address_house_no: "", address_street: "", address_barangay: "", address_city: "", address_province: "", address_zip: "",
+  current_address_house_no: "", current_address_street: "", current_address_barangay: "", current_address_city: "", current_address_province: "", current_address_zip: "",
   fathers_name: "", siblings: [], number_of_siblings: "", high_school: "",
   college_course: "", university: "", emergency_contact_name: "",
   emergency_contact_relationship: "", emergency_contact_phone: "",
@@ -187,8 +199,18 @@ export function EmployeeFormDialog({
       base_salary: Number(v.base_salary),
       is_management: v.is_management,
       phone: s(v.phone),
-      address: s(v.address),
-      current_address: s(v.current_address),
+      address_house_no: s(v.address_house_no),
+      address_street: s(v.address_street),
+      address_barangay: s(v.address_barangay),
+      address_city: s(v.address_city),
+      address_province: s(v.address_province),
+      address_zip: s(v.address_zip),
+      current_address_house_no: s(v.current_address_house_no),
+      current_address_street: s(v.current_address_street),
+      current_address_barangay: s(v.current_address_barangay),
+      current_address_city: s(v.current_address_city),
+      current_address_province: s(v.current_address_province),
+      current_address_zip: s(v.current_address_zip),
       gender: s(v.gender),
       civil_status: s(v.civil_status),
       nationality: s(v.nationality),
@@ -330,11 +352,43 @@ export function EmployeeFormDialog({
               <Field label="Place of birth" error={errors.place_of_birth?.message}>
                 <Input {...register("place_of_birth")} />
               </Field>
-              <Field label="Home address" error={errors.address?.message}>
-                <Input placeholder="City, Province" {...register("address")} />
+              <Legend>Home address</Legend>
+              <Field label="House / unit no." error={errors.address_house_no?.message}>
+                <Input placeholder="42" {...register("address_house_no")} />
               </Field>
-              <Field label="Current address" error={errors.current_address?.message}>
-                <Input {...register("current_address")} />
+              <Field label="Street" error={errors.address_street?.message}>
+                <Input placeholder="Jasmine St" {...register("address_street")} />
+              </Field>
+              <Field label="Barangay" error={errors.address_barangay?.message}>
+                <Input placeholder="Brgy. Holy Spirit" {...register("address_barangay")} />
+              </Field>
+              <Field label="City / municipality" error={errors.address_city?.message}>
+                <Input placeholder="Quezon City" {...register("address_city")} />
+              </Field>
+              <Field label="Province" error={errors.address_province?.message}>
+                <Input placeholder="Metro Manila" {...register("address_province")} />
+              </Field>
+              <Field label="ZIP code" error={errors.address_zip?.message}>
+                <Input placeholder="1127" {...register("address_zip")} />
+              </Field>
+              <Legend>Current address</Legend>
+              <Field label="House / unit no." error={errors.current_address_house_no?.message}>
+                <Input placeholder="42" {...register("current_address_house_no")} />
+              </Field>
+              <Field label="Street" error={errors.current_address_street?.message}>
+                <Input placeholder="Jasmine St" {...register("current_address_street")} />
+              </Field>
+              <Field label="Barangay" error={errors.current_address_barangay?.message}>
+                <Input placeholder="Brgy. Holy Spirit" {...register("current_address_barangay")} />
+              </Field>
+              <Field label="City / municipality" error={errors.current_address_city?.message}>
+                <Input placeholder="Quezon City" {...register("current_address_city")} />
+              </Field>
+              <Field label="Province" error={errors.current_address_province?.message}>
+                <Input placeholder="Metro Manila" {...register("current_address_province")} />
+              </Field>
+              <Field label="ZIP code" error={errors.current_address_zip?.message}>
+                <Input placeholder="1127" {...register("current_address_zip")} />
               </Field>
               <Field label="Mother's maiden name" error={errors.mothers_maiden_name?.message}>
                 <Input {...register("mothers_maiden_name")} />
@@ -602,6 +656,14 @@ export function EmployeeFormDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function Legend({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="pt-2 text-label font-semibold uppercase tracking-wide text-brand sm:col-span-2">
+      {children}
+    </p>
   );
 }
 

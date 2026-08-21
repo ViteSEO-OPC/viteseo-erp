@@ -37,7 +37,8 @@ class PayslipResource extends JsonResource
                 'employee_no' => $this->employee?->employee_no,
                 'job_title' => $this->employee?->job_title,
                 'department' => $this->employee?->department?->name,
-                'address' => $this->employee?->address,
+                // Composed from the split parts, falling back to the pre-split text.
+                'address' => $this->employee?->addressLine(),
                 // FULL for the employee reading their OWN payslip, masked for anyone
                 // else. A payslip has to be usable as evidence of employment and income, which
                 // means the person it belongs to must see their own government numbers on it.

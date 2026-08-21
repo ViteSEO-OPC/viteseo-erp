@@ -8,7 +8,18 @@ import type { EmployeeRef } from "@/modules/hr/types/employee";
  * looks the same in the leave queue, the claims table and the attendance roster — and so
  * the photo, once uploaded, shows up in all of them at once.
  */
-export function EmployeeCell({ employee }: { employee: EmployeeRef }) {
+export function EmployeeCell({
+  employee,
+  displayName,
+}: {
+  employee: EmployeeRef;
+  /**
+   * What to PRINT, when a listing wants a different form of the name — "Dela Cruz, Juan" on a
+   * roster filed by surname. The avatar still reads `employee.name`, because initials come off
+   * the natural order: "Reyes, Dana" would otherwise initial as RD.
+   */
+  displayName?: string | null;
+}) {
   const name = employee.name ?? "?";
 
   return (
@@ -19,7 +30,7 @@ export function EmployeeCell({ employee }: { employee: EmployeeRef }) {
         colorSeed={employee.id}
         size="sm"
       />
-      <span className="font-semibold text-foreground">{name}</span>
+      <span className="font-semibold text-foreground">{displayName || name}</span>
     </div>
   );
 }

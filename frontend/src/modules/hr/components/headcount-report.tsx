@@ -44,7 +44,7 @@ export function HeadcountReport() {
     <div className="p-8">
       <PageHeader
         title={report?.title ?? "Headcount & Movement"}
-        subtitle={report?.description ?? "Joiners, leavers, transfers; net change by department and month."}
+        subtitle={report?.description ?? "Onboard, off-board, transfers; net change by department and month."}
         actions={
           <div className="flex items-center gap-2">
             <Button variant="outline" asChild>

@@ -62,7 +62,12 @@ class EmployeeService
         'employment_type', 'work_location', 'employee_role', 'is_management',
         'first_name', 'middle_name', 'last_name', 'name_extension',
         'gender', 'civil_status', 'nationality', 'date_of_birth', 'place_of_birth',
-        'phone', 'address', 'current_address',
+        'phone',
+        // The two addresses. The bare `address` / `current_address` are the pre-split
+        // free text, still writable so an old change request can still be approved.
+        'address', 'current_address',
+        'address_house_no', 'address_street', 'address_barangay', 'address_city', 'address_province', 'address_zip',
+        'current_address_house_no', 'current_address_street', 'current_address_barangay', 'current_address_city', 'current_address_province', 'current_address_zip',
         'mothers_maiden_name', 'fathers_name', 'siblings', 'number_of_siblings',
         'high_school', 'college_course', 'university',
         'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
@@ -818,6 +823,45 @@ class EmployeeService
 
         $employee->load('user');
         $this->audit->log('updated', 'People', "Uploaded document '{$document->name}' to {$employee->user?->name}", $document);
+
+        return $document;
+    }
+
+    /**
+     * Rename a document — the LABEL on the record, not the file on disk.
+     *
+     * The stored path never changes, so nothing that already points at the file breaks. The
+     * extension is carried over when the new name drops it: `name` is what the browser saves the
+     * download as, and "Contract" with no `.pdf` downloads as a file the OS cannot open.
+     */
+    public function renameDocument(EmployeeDocument $document, string $name): EmployeeDocument
+    {
+        $before = $document->name;
+        $name = trim($name);
+
+        $extension = pathinfo((string) $before, PATHINFO_EXTENSION);
+
+        if ($extension !== '' && strcasecmp(pathinfo($name, PATHINFO_EXTENSION), $extension) !== 0) {
+            $name .= '.'.$extension;
+        }
+
+        if ($name === $before) {
+            return $document;
+        }
+
+        $document->update(['name' => $name]);
+
+        $document->loadMissing('employee.user');
+        $employee = $document->employee?->user?->name ?? $document->employee?->name;
+
+        $this->audit->log(
+            'updated',
+            'People',
+            "Renamed document '{$before}' to '{$name}' on {$employee}",
+            $document,
+            ['name' => $before],
+            ['name' => $name],
+        );
 
         return $document;
     }

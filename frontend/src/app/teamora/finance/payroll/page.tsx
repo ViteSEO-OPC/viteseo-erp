@@ -450,26 +450,8 @@ export default function PayrollPage() {
             : "Loading pay schedule…"
         }
         actions={
-          /* THE TWO VERBS THAT CARRY THE WORKFLOW, then everything else behind `⋯`. */
+          /* Everything else behind `⋯`, then THE TWO VERBS THAT CARRY THE WORKFLOW. */
           <>
-            {/*
-             * The disbursement layer. Only a completed run has anything to pay,
-             * and the dialog is where the bank file comes from.
-             */}
-            <Button
-              variant="outline"
-              onClick={() => setPayOpen(true)}
-              disabled={!currentRun || currentRun.status !== "completed"}
-              title={
-                currentRun?.status === "completed"
-                  ? "Build the payment batch and bank file for this run"
-                  : "Run this period first — only a completed run can be paid"
-              }
-            >
-              <Banknote />
-              Pay run
-            </Button>
-
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" title="More payroll tools">
@@ -551,6 +533,24 @@ export default function PayrollPage() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/*
+             * The disbursement layer. Only a completed run has anything to pay,
+             * and the dialog is where the bank file comes from.
+             */}
+            <Button
+              variant="outline"
+              onClick={() => setPayOpen(true)}
+              disabled={!currentRun || currentRun.status !== "completed"}
+              title={
+                currentRun?.status === "completed"
+                  ? "Build the payment batch and bank file for this run"
+                  : "Run this period first — only a completed run can be paid"
+              }
+            >
+              <Banknote />
+              Pay run
+            </Button>
 
             <Button
               className="bg-warning text-white hover:bg-warning/90 disabled:opacity-50"
