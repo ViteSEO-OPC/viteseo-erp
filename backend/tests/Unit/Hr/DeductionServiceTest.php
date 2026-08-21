@@ -240,4 +240,92 @@ class DeductionServiceTest extends TestCase
         $this->assertEqualsWithDelta($r->lateFraction + $r->undertimeFraction, $r->unpaidFraction, 1e-9);
         $this->assertEqualsWithDelta(60 / 480, $r->unpaidFraction, 1e-9);
     }
+
+    // --- the unpaid meal, which is never worked and so is never charged ---
+
+    public function test_the_unpaid_meal_is_not_charged_as_undertime(): void
+    {
+        // Left at noon on an 08:00–18:00 shift: 360 clock minutes short of the end, but an hour
+        // of that is the 12:00–13:00 meal nobody was paying them for. 300 minutes of work lost.
+        $r = $this->svc->forDay(
+            $this->ctx(['time_out_min' => 720, 'unpaid_break_minutes' => 60]),
+            $this->policy(['undertime_deduction_mode' => 'per_hour']),
+        );
+
+        $this->assertSame(360, $r->undertimeMinutes, 'the reported shortfall stays raw');
+        $this->assertEqualsWithDelta(300 / 480, $r->unpaidFraction, 1e-9);
+    }
+
+    public function test_the_unpaid_meal_is_not_charged_as_lateness_either(): void
+    {
+        // Arrived at 14:00: 360 minutes late by the clock, over the same 300 minutes of work.
+        $r = $this->svc->forDay(
+            $this->ctx(['time_in_min' => 840, 'unpaid_break_minutes' => 60]),
+            $this->policy(['late_deduction_mode' => 'per_hour', 'late_minutes_from' => 'start_time']),
+        );
+
+        $this->assertSame(360, $r->lateMinutes);
+        $this->assertEqualsWithDelta(300 / 480, $r->unpaidFraction, 1e-9);
+    }
+
+    public function test_a_shortfall_that_never_reaches_the_meal_is_untouched(): void
+    {
+        $r = $this->svc->forDay(
+            $this->ctx(['time_out_min' => 1050, 'unpaid_break_minutes' => 60]),
+            $this->policy(['undertime_deduction_mode' => 'per_hour']),
+        );
+
+        $this->assertEqualsWithDelta(30 / 480, $r->unpaidFraction, 1e-9);
+    }
+
+    public function test_only_the_meal_the_schedule_declares_is_excused(): void
+    {
+        // The gap between the halves is 60 minutes, but this schedule pays for half of it.
+        $r = $this->svc->forDay(
+            $this->ctx(['time_out_min' => 720, 'unpaid_break_minutes' => 30]),
+            $this->policy(['undertime_deduction_mode' => 'per_hour']),
+        );
+
+        $this->assertEqualsWithDelta(330 / 480, $r->unpaidFraction, 1e-9);
+    }
+
+    public function test_a_schedule_with_no_declared_meal_excuses_nothing(): void
+    {
+        $r = $this->svc->forDay(
+            $this->ctx(['time_out_min' => 720]), // no unpaid_break_minutes at all
+            $this->policy(['undertime_deduction_mode' => 'per_hour']),
+        );
+
+        $this->assertEqualsWithDelta(360 / 480, $r->unpaidFraction, 1e-9);
+    }
+
+    public function test_a_half_days_shortfall_never_touches_the_meal(): void
+    {
+        // Afternoon off, so the owed window is 08:00–12:00 and the meal sits outside it entirely:
+        // leaving at 11:30 is 30 minutes short, with nothing to excuse.
+        $r = $this->svc->forDay(
+            $this->ctx(['half_day_off' => 'PM', 'time_out_min' => 690, 'unpaid_break_minutes' => 60, 'cap_remaining' => 0.5]),
+            $this->policy(['undertime_deduction_mode' => 'per_hour']),
+        );
+
+        $this->assertSame(30, $r->undertimeMinutes);
+        $this->assertEqualsWithDelta(30 / 480, $r->unpaidFraction, 1e-9);
+    }
+
+    public function test_an_overnight_shift_charges_its_span_whole(): void
+    {
+        // 22:00–06:00 with no configured halves: there is no meal window to place, so the roll
+        // is left to do its job and the shortfall is charged as measured.
+        $r = $this->svc->forDay([
+            'start_min' => 1320, 'end_min' => 360, 'grace_min' => 0,
+            'am_start_min' => null, 'am_end_min' => null, 'pm_start_min' => null, 'pm_end_min' => null,
+            'time_in_min' => 1320, 'time_out_min' => 300, // clocked out an hour early, at 05:00
+            'half_day_off' => null, 'governed_by_early_out' => false, 'amnesty' => false,
+            'cap_remaining' => 1.0, 'break_minutes' => 0, 'lunch_minutes' => 0,
+            'unpaid_break_minutes' => 60,
+        ], $this->policy(['undertime_deduction_mode' => 'per_hour']));
+
+        $this->assertSame(60, $r->undertimeMinutes);
+        $this->assertEqualsWithDelta(60 / 480, $r->unpaidFraction, 1e-9);
+    }
 }

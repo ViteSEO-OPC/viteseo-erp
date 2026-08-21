@@ -306,6 +306,14 @@ class AttendanceService
             return null;
         }
 
+        // An approved half day is the one case where arriving "early" is real work rather than
+        // an employee jumping the gun: the excused half is now credited back against the
+        // half-day charge (unpaidDaysFor), so turning them away at the door would destroy the
+        // only record that they worked it — and cost them the pay it buys back.
+        if ($offHalf !== null) {
+            return null;
+        }
+
         return $this->shiftStartFor($eff, $local, $offHalf);
     }
 
@@ -399,6 +407,12 @@ class AttendanceService
      */
     private function deferredStartFor(array $eff, Carbon $local, ?string $offHalf = null): ?Carbon
     {
+        // Same reason as clockInOpensAt(): re-stamping an 8:00 AM punch to 1:00 PM on a day whose
+        // morning is excused erases the very minutes pay wants to credit.
+        if ($offHalf !== null) {
+            return null;
+        }
+
         $start = $this->shiftStartFor($eff, $local, $offHalf);
 
         return $start !== null && $local->lt($start) ? $start : null;
@@ -2826,6 +2840,15 @@ class AttendanceService
                 // half still cost them, they would have worked those hours for nothing.
                 $credited = $creditedFullDay($row, $eff, $dateStr);
 
+                // The same buy-back as an approved half-day REQUEST below: minutes worked inside
+                // the half they took off discount the charge, minute for minute. It can only move
+                // UNPAID leave — a paid half day is already whole — and it deliberately moves the
+                // PAY only: handing the leave credit back instead is the separate accounting
+                // decision noted in the `$credited` branch.
+                $excusedMinutes = $credited
+                    ? 0
+                    : $this->excusedHalfWorkedMinutes($row, $eff, (string) $leave->half_day_period);
+
                 $halfUnpaid = ($leave->leaveType && ! $leave->leaveType->is_paid) ? 0.5 : 0.0;
                 if ($credited) {
                     $halfUnpaid = 0.0;
@@ -2833,10 +2856,13 @@ class AttendanceService
                     // and clearing the bar does not hand it back. Refunding the balance is a
                     // separate decision about leave accounting, not about this day's pay.
                     $charge($dateStr, 'full_day_credited', 0.0, "Worked the day's minimum hours");
+                } else {
+                    $halfUnpaid = max(0.0, $halfUnpaid - $this->fractionOfDeclaredDay($excusedMinutes, $policy));
                 }
                 $unpaid += $halfUnpaid;
                 if ($halfUnpaid > 0) {
-                    $charge($dateStr, 'leave_unpaid', $halfUnpaid, 'Half day leave without pay');
+                    $charge($dateStr, 'leave_unpaid', $halfUnpaid, 'Half day leave without pay'
+                        . ($excusedMinutes > 0 ? ' (worked ' . $this->hoursAndMinutes($excusedMinutes) . ' of the half off)' : ''));
                 }
 
                 if ($row && $row->status === 'late') {
@@ -2851,6 +2877,7 @@ class AttendanceService
                         $eoFrac += $this->earlyOutFraction(
                             (string) $eo->early_out_time,
                             $eff,
+                            $policy,
                             (string) $leave->half_day_period,
                         );
                     }
@@ -2919,12 +2946,27 @@ class AttendanceService
                 // can both pass. Cheap defence against that and against direct inserts.
                 $credited = $creditedFullDay($row, $eff, $dateStr);
 
-                $halfUnpaid = $credited ? 0.0 : min(1.0, 0.5 * $dayHalves->count());
+                $offHalf = $dayHalves->count() > 1
+                    ? HalfDayWindowService::BOTH
+                    : (string) $dayHalves->first()->period;
+
+                // Time worked INSIDE the half they had off is time the company asked for nothing
+                // and got anyway, so it buys the charge back minute for minute: two hours into
+                // their own morning costs 0.25 instead of 0.5, and working the excused half in
+                // full costs nothing at all. That last case is the attendance record overriding
+                // the request — no cancellation, no HR edit, and it re-prices itself the moment
+                // HR corrects a punch. Floored at zero: a half day can refund, never overpay.
+                $excusedMinutes = $credited ? 0 : $this->excusedHalfWorkedMinutes($row, $eff, $offHalf);
+
+                $halfUnpaid = $credited
+                    ? 0.0
+                    : max(0.0, min(1.0, 0.5 * $dayHalves->count()) - $this->fractionOfDeclaredDay($excusedMinutes, $policy));
                 $unpaid += $halfUnpaid;
                 if ($credited) {
                     $charge($dateStr, 'full_day_credited', 0.0, "Worked the day's minimum hours");
                 } else {
-                    $charge($dateStr, 'half_day', $halfUnpaid, 'Approved half-day request');
+                    $charge($dateStr, 'half_day', $halfUnpaid, 'Approved half-day request'
+                        . ($excusedMinutes > 0 ? ' (worked ' . $this->hoursAndMinutes($excusedMinutes) . ' of the half off)' : ''));
                 }
 
                 // Item 8 — a late arrival on a half-day used to escape the per-N-lates penalty
@@ -2937,14 +2979,10 @@ class AttendanceService
                 // never added earlyOutFraction, while `governed_by_early_out` told
                 // DeductionService not to price the undertime either. Charge it here, capped by
                 // whatever of the day is still payable.
-                $offHalf = $dayHalves->count() > 1
-                    ? HalfDayWindowService::BOTH
-                    : (string) $dayHalves->first()->period;
-
                 $eoFrac = 0.0;
                 if (! $credited) {
                     foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
-                        $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff, $offHalf);
+                        $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff, $policy, $offHalf);
                     }
                     $eoFrac = min(max(0.0, 1.0 - $halfUnpaid), $eoFrac);
                 }
@@ -2999,7 +3037,7 @@ class AttendanceService
                     $charge($dateStr, 'full_day_credited', 0.0, "Worked the day's minimum hours");
                 } else {
                     foreach (($earlyOuts[$dateStr] ?? []) as $eo) {
-                        $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff);
+                        $eoFrac += $this->earlyOutFraction((string) $eo->early_out_time, $eff, $policy);
                     }
                     $eoFrac = min(1.0, $eoFrac);
                 }
@@ -3104,6 +3142,9 @@ class AttendanceService
             'full_day_credited' => $fullDayCredited,
             'break_minutes' => (int) $row->break_minutes,
             'lunch_minutes' => (int) $row->lunch_minutes,
+            // The schedule's unpaid meal — how much of a late/undertime span may be excused as
+            // time nobody was being paid for anyway.
+            'unpaid_break_minutes' => (int) ($eff['unpaid_break_minutes'] ?? 0),
         ];
     }
 
@@ -3140,14 +3181,14 @@ class AttendanceService
     // --- helpers ---
 
     /**
-     * The unpaid fraction of a day for one early-out: undertime (end − time) over the
-     * scheduled span (end − start), clamped to [0, 1]. Returns 0.5 when the schedule
-     * window is unknown (a sane, non-zero fallback rather than free undertime).
+     * The unpaid fraction of a day for one early-out: undertime (end − time) over the DECLARED
+     * day, clamped to [0, 1]. Returns 0.5 when the schedule window is unknown (a sane, non-zero
+     * fallback rather than free undertime).
      *
      * @param  array<string, mixed>  $eff
      * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value, or null for a full day
      */
-    private function earlyOutFraction(string $time, array $eff, ?string $offHalf = null): float
+    private function earlyOutFraction(string $time, array $eff, AttendancePolicy $policy, ?string $offHalf = null): float
     {
         $toMinutes = static function (?string $hm): ?int {
             if (! $hm) {
@@ -3179,10 +3220,86 @@ class AttendanceService
 
         $workedEnd = $toMinutes($workedEndTime) ?? $end;
 
-        $span = $end - $start;
-        $undertime = max(0, min($span, $workedEnd - $chosen));
+        return $this->fractionOfDeclaredDay($workedEnd - $chosen, $policy);
+    }
 
-        return $undertime / $span;
+    /**
+     * Minutes → a fraction of the DECLARED day (Company → Rules `hours_per_day_divisor`, the DOLE
+     * 8-hour day), clamped to [0, 1].
+     *
+     * The declared day is the ONLY denominator pay uses. It is deliberately not the schedule's
+     * span: an 08:00–18:00 shift spans 600 minutes and pays for 540 of them, so pricing one
+     * shortfall over the span and another over the declared day made the same missed hour cost
+     * two different amounts depending on which path caught it.
+     */
+    private function fractionOfDeclaredDay(int $minutes, AttendancePolicy $policy): float
+    {
+        $minutesPerDay = max(1, (int) $policy->hours_per_day_divisor * 60);
+
+        return max(0, min($minutesPerDay, $minutes)) / $minutesPerDay;
+    }
+
+    /**
+     * Minutes actually worked INSIDE the half the employee had approved off — time the company
+     * never asked for and is therefore not entitled to keep the half-day charge for.
+     *
+     * Both punches are required: an open shift proves someone arrived, not how long they stayed,
+     * and resolveWorkedWindow() closes an abandoned punch at the WORKED half's end, which would
+     * credit nothing anyway.
+     *
+     * @param  array<string, mixed>  $eff
+     * @param  ?string  $offHalf  a HalfDayWindowService::AM|PM|BOTH value
+     */
+    private function excusedHalfWorkedMinutes(?Attendance $row, array $eff, ?string $offHalf): int
+    {
+        if (! $row || ! $row->time_in || ! $row->time_out) {
+            return 0;
+        }
+
+        [$startHm, $endHm] = $this->halfDays->offWindowFor($eff, $offHalf);
+        $winStart = $this->hmToMinutes($startHm);
+        $winEnd = $this->hmToMinutes($endHm);
+        $in = $this->clockToMinutes($row->time_in);
+        $out = $this->clockToMinutes($row->time_out);
+
+        if ($winStart === null || $winEnd === null || $in === null || $out === null) {
+            return 0; // an unconfigured half has no window to have worked inside
+        }
+
+        // Item 15's overnight rule, as everywhere else: roll the end and the post-midnight
+        // punches past 24h before raw minute-of-day values can be compared.
+        if ($winEnd < $winStart) {
+            $boundary = intdiv($winEnd + $winStart, 2);
+            $roll = static fn (int $t): int => $t <= $boundary ? $t + 1440 : $t;
+            $in = $roll($in);
+            $out = $roll($out);
+            $winEnd += 1440;
+        }
+        if ($out < $in) {
+            $out += 1440; // clocked out after midnight
+        }
+
+        $worked = min($out, $winEnd) - max($in, $winStart);
+        if ($worked <= 0) {
+            return 0;
+        }
+
+        // Only a whole day off (BOTH) has an excused window wide enough to contain the unpaid
+        // meal; on a single half the gap sits outside the window and this subtracts nothing.
+        $mealStart = $this->hmToMinutes($eff['am_end_time'] ?? null);
+        $mealEnd = $this->hmToMinutes($eff['pm_start_time'] ?? null);
+        if ($mealStart !== null && $mealEnd !== null && $mealEnd > $mealStart) {
+            $overlap = min($out, $mealEnd, $winEnd) - max($in, $mealStart, $winStart);
+            $worked -= min(max(0, (int) ($eff['unpaid_break_minutes'] ?? 0)), max(0, $overlap));
+        }
+
+        return max(0, $worked);
+    }
+
+    /** Minutes → "2h 15m", for the pay ledger's detail line. */
+    private function hoursAndMinutes(int $minutes): string
+    {
+        return intdiv($minutes, 60) . 'h ' . ($minutes % 60) . 'm';
     }
 
     /**

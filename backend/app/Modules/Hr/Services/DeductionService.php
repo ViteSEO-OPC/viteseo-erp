@@ -19,6 +19,9 @@ class DeductionService
      *   - time_out_min: int|null                  clock-out (null ⇒ missing punch; see missing_clockout_mode)
      *   - half_day_off: 'AM'|'PM'|null            which half is off (worked window is the OTHER half)
      *   - am_start_min, am_end_min, pm_start_min, pm_end_min: int|null   half windows
+     *   - unpaid_break_minutes: int               the schedule's unpaid meal; caps what the gap
+     *                                             between the halves may excuse (0 ⇒ no meal known,
+     *                                             so nothing is excused)
      *   - governed_by_early_out: bool             an approved early-out already prices this day's undertime
      *   - amnesty: bool                           force-majeure waiver for this date (§9) ⇒ zero
      *   - full_day_credited: bool                 the day cleared HR's minimum-hours bar ⇒ zero undertime
@@ -49,7 +52,8 @@ class DeductionService
         // any post-midnight punches rolled past 24h before these raw minute-of-day values can be
         // compared. Without it a 00:30 arrival computed max(0, 30 − 1320) = 0 late, and a 23:00
         // departure looked like no undertime at all — a graveyard worker could never be charged.
-        if ($workStart !== null && $workEnd !== null && $workEnd < $workStart) {
+        $overnight = $workStart !== null && $workEnd !== null && $workEnd < $workStart;
+        if ($overnight) {
             $boundary = intdiv($workEnd + $workStart, 2);
             $roll = static fn (?int $t): ?int => $t !== null && $t <= $boundary ? $t + 1440 : $t;
 
@@ -61,6 +65,7 @@ class DeductionService
         // --- late ---
         $lateMode = $policy->late_deduction_mode;
         $lateMinutes = 0;
+        $effectiveStart = null;
         if ($workStart !== null && ($lateMode === 'per_hour' || $lateMode === 'tiered')) {
             $effectiveStart = $policy->late_minutes_from === 'after_grace'
                 ? $workStart + (int) ($ctx['grace_min'] ?? 0)
@@ -83,16 +88,43 @@ class DeductionService
             $flags[] = 'missing_clockout';
         }
 
+        // --- the unpaid meal is never charged as missed time ---
+        // A shortfall SPAN can straddle the meal. Leaving at 12:30 on an 08:00–18:00 shift is 330
+        // clock minutes short of the end but only 270 minutes of work the company actually lost,
+        // and arriving at 14:00 is 360 minutes late over the same 300 minutes of missed work.
+        // Charging the span whole billed the meal hour as though it had been due to be worked —
+        // an hour the employee is not paid for either way, taken off them twice.
+        //
+        // The REPORTED minutes stay raw: they answer "how much of my shift did I miss", which is
+        // what the employee's badge and the violation engine measure. Only the money is netted.
+        $mealStart = $ctx['am_end_min'] ?? null;
+        $mealEnd = $ctx['pm_start_min'] ?? null;
+        $mealCap = max(0, (int) ($ctx['unpaid_break_minutes'] ?? 0));
+        // Skipped outright on an overnight shift: the meal window's own minute-of-day values would
+        // have to be rolled too, and which side of midnight they belong to is not something the
+        // roll above can decide for a gap it never saw a punch inside. Under-charging by an hour
+        // is the safe direction to be wrong in.
+        $mealWithin = function (?int $from, ?int $to) use ($mealStart, $mealEnd, $mealCap, $overnight): int {
+            if ($overnight || $from === null || $to === null || $mealStart === null || $mealEnd === null || $mealEnd <= $mealStart) {
+                return 0;
+            }
+
+            return min($mealCap, max(0, min($to, $mealEnd) - max($from, $mealStart)));
+        };
+
         // --- convert charged minutes → billable minutes → fraction of a day ---
         $chargedLate = ($lateMode === 'tiered')
+            // A ladder, not a span: the rung is chosen by how late they were, so there is no
+            // stretch of clock inside it for the meal to be double-counted in.
             ? $this->tierMinutes($lateMinutes, $policy)
-            : $lateMinutes;
+            : max(0, $lateMinutes - $mealWithin($effectiveStart, $timeIn));
+        $chargedUndertime = max(0, $undertimeMinutes - $mealWithin($timeOut, $workEnd));
 
         // Item 9 — the audit spec rounds the shortfall ONCE. Rounding each component separately
         // over-charged under the round_* modes: 30 min late + 30 min undertime became two 60-min
         // blocks instead of one. Round the total, then split it back proportionally so the two
         // display figures still sum to what is actually charged.
-        $rawShortfall = $chargedLate + $undertimeMinutes;
+        $rawShortfall = $chargedLate + $chargedUndertime;
         $totalFraction = $this->toFraction($rawShortfall, $policy);
         $lateFraction = $rawShortfall > 0 ? $totalFraction * ($chargedLate / $rawShortfall) : 0.0;
         $undertimeFraction = $totalFraction - $lateFraction;
