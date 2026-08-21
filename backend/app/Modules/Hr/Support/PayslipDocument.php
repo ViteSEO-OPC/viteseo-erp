@@ -45,9 +45,9 @@ final class PayslipDocument
     ): array {
         $lines = [];
 
-        $add = function (string $key, string $name, float $amount, ?string $note = null, string $kind = 'earning') use (&$lines) {
+        $add = function (string $key, string $name, float $amount, ?string $note = null, string $kind = 'earning', ?array $dates = null) use (&$lines) {
             if (round($amount, 2) != 0.0) {
-                $lines[] = ['key' => $key, 'name' => $name, 'amount' => round($amount, 2), 'note' => $note, 'kind' => $kind];
+                $lines[] = ['key' => $key, 'name' => $name, 'amount' => round($amount, 2), 'note' => $note, 'kind' => $kind, 'dates' => $dates];
             }
         };
 
@@ -77,7 +77,8 @@ final class PayslipDocument
 
             $add('overtime', 'Overtime', $f('overtime_pay'), self::minutesNote($slip['overtime_minutes'] ?? 0));
             $add('night_diff', 'Night Differential', $f('night_diff_pay'), self::minutesNote($slip['night_diff_minutes'] ?? 0));
-            $add('holiday', 'Holiday', $f('holiday_premium'));
+            $holidayDates = self::holidayDates($slip);
+            $add('holiday', 'Holiday', $f('holiday_premium'), self::daysNote(count($holidayDates)), 'earning', $holidayDates ?: null);
             $add('rest_day', 'Rest Day', $f('rest_day_premium'), self::minutesNote($slip['rest_day_minutes'] ?? 0));
         }
 
@@ -127,6 +128,95 @@ final class PayslipDocument
         $add('reimbursement', 'Reimbursement', $f('reimbursements'));
 
         return self::withOverrideMarks($lines, $overrides);
+    }
+
+    /**
+     * THE HOLIDAYS BEHIND THE HOLIDAY FIGURE — one entry per day worked, in the same
+     * {date, detail} shape the deduction rows use, so the document renders both with one
+     * component instead of two that drift.
+     *
+     * Empty for payslips written before `holiday_lines` existed, which keeps their Holiday row
+     * exactly as it has always printed: a total with nothing under it. Deriving those days now
+     * would read TODAY'S holiday calendar and schedule, which is the one answer a document of
+     * record must not give.
+     *
+     * @param  array<string, mixed>  $slip
+     * @return list<array{date: string|null, detail: string|null, amount: float}>
+     */
+    public static function holidayDates(array $slip): array
+    {
+        $lines = $slip['holiday_lines'] ?? [];
+        $lines = is_array($lines) ? $lines : [];
+
+        return array_values(array_map(fn (array $line) => [
+            'date' => ($line['date'] ?? null) === null ? null : (string) $line['date'],
+            'detail' => self::holidayDetail($line),
+            // The same facts at a third of the width, for the PDF. The printed row is a 6.5px
+            // half-column: the full wording trims mid-phrase there, and what it loses is the
+            // rate — the one thing on the line the employee can actually check.
+            'short' => self::holidayShort($line),
+            'amount' => round((float) ($line['amount'] ?? 0), 2),
+        ], $lines));
+    }
+
+    /**
+     * One holiday line as words: what the day was, what rate it paid, and — when it landed on a
+     * rest day — why that rate is the WHOLE daily rate rather than the premium on top of it.
+     * The employee otherwise sees a figure twice the size of the one beside it with no reason given.
+     *
+     * @param  array<string, mixed>  $line
+     */
+    private static function holidayDetail(array $line): ?string
+    {
+        $type = (string) ($line['type'] ?? '');
+        $kind = match ($type) {
+            'regular' => 'Regular holiday',
+            'special_non_working' => 'Special non-working',
+            default => 'Holiday',
+        };
+
+        $parts = [];
+        if (($line['name'] ?? null) !== null && trim((string) $line['name']) !== '') {
+            $parts[] = trim((string) $line['name']);
+        }
+
+        $rate = (int) ($line['rate_pct'] ?? 0);
+        $parts[] = $rate > 0 ? "{$kind} {$rate}%" : $kind;
+
+        if (! empty($line['rest_day'])) {
+            // Not an extra premium — the full rate, because a rest day was never inside the
+            // salary in the first place. Worth saying, or the bigger number reads as a mistake.
+            $parts[] = 'on a rest day (full rate)';
+        }
+
+        return $parts === [] ? null : implode(' · ', $parts);
+    }
+
+    /**
+     * The print form: the holiday, its rate, and the rest-day flag — everything material, with
+     * only the NAME allowed to trim, because it is the one part whose length is unbounded.
+     *
+     * @param  array<string, mixed>  $line
+     */
+    private static function holidayShort(array $line): string
+    {
+        $rate = (int) ($line['rate_pct'] ?? 0);
+        $parts = [];
+
+        $name = trim((string) ($line['name'] ?? ''));
+        if ($name !== '') {
+            $parts[] = Str::limit($name, 24, '…');
+        }
+
+        $parts[] = ($rate > 0 ? $rate . '%' : 'holiday') . (empty($line['rest_day']) ? '' : ' rest day');
+
+        return implode(' · ', $parts);
+    }
+
+    /** "2 days" beside the Holiday label, or null when there is nothing to count. */
+    private static function daysNote(int $days): ?string
+    {
+        return $days > 0 ? $days . ' ' . ($days === 1 ? 'day' : 'days') : null;
     }
 
     /**

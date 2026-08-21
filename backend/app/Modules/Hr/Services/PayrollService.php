@@ -381,6 +381,8 @@ class PayrollService
      */
     /**
      * @param  array{index:int, count:int, deduction_timing:string, tax_timing:string}  $dist
+     * @param  list<array<string, mixed>>  $holidayLines  the days behind `$holidayPremium`, from
+     *                                                    holidayPremiumFor(), snapshot onto the slip
      */
     public function payslipFor(
         Employee $employee,
@@ -398,6 +400,7 @@ class PayrollService
         int $nightDiffMinutes = 0,
         float $restDayPremium = 0.0,
         int $restDayMinutes = 0,
+        array $holidayLines = [],
     ): array {
         $policy ??= $this->attendancePolicy->get();
         $monthlyBase = (float) $employee->base_salary;
@@ -565,6 +568,10 @@ class PayrollService
         // an attendance correction after the run must not silently rewrite the explanation
         // printed under a figure that has not moved.
         $slip['attendance_lines'] = $unpaidDetail?->lines ?: null;
+        // WHICH holidays the premium above was earned on. Snapshot for the same reason
+        // `attendance_lines` is: a holiday reclassified after the run must not rewrite the
+        // explanation printed under a figure that has already been paid.
+        $slip['holiday_lines'] = $holidayLines ?: null;
 
         return $slip;
     }
@@ -1347,12 +1354,19 @@ class PayrollService
      * no premium). Only days with a present/late attendance record earn it. Simplified:
      * flat daily-rate basis, no OT/night-diff stacking.
      *
+     * Returns the money AND the days behind it. The lines are what the payslip prints under
+     * the Holiday figure: before this the method returned a bare float, so a slip that paid
+     * two holidays showed one number the employee had no way to check.
+     *
      * @param  array<string, string>  $holidayMap  date 'Y-m-d' => type
+     * @return array{pay: float, lines: list<array{date: string, name: string|null, type: string, rate_pct: int, rest_day: bool, daily_rate: float, amount: float}>}
      */
-    private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null): float
+    private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null): array
     {
+        $none = ['pay' => 0.0, 'lines' => []];
+
         if ($workingDays <= 0 || $holidayMap === []) {
-            return 0.0;
+            return $none;
         }
 
         // Same daily-rate basis as absence/late — priced through the shared helper.
@@ -1364,7 +1378,7 @@ class PayrollService
         // everyone else. Read off the CYCLE'S policy version, so a rule changed today cannot
         // reprice a period that has already been paid.
         if ($employee->isManagement() && ! $policy->management_holiday_premium) {
-            return 0.0;
+            return $none;
         }
 
         $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
@@ -1378,26 +1392,57 @@ class PayrollService
         $salaryCoversEveryDay = $policy->daily_rate_basis === 'fixed_divisor'
             && (int) $policy->annual_divisor >= 365;
 
+        // The holiday's NAME, for the line the payslip prints. One memoized query for the whole
+        // run, not one per employee.
+        $names = $this->holidays->namesBetween(Carbon::parse($start, $tz), Carbon::parse($end, $tz));
+
         $premium = 0.0;
+        $lines = [];
+        // Ordered so the printed lines read down the period rather than in whatever order the
+        // holiday table came back in.
+        ksort($holidayMap);
+
         foreach ($holidayMap as $date => $type) {
             if (! isset($worked[$date])) {
                 continue;
             }
 
             $multiplier = self::holidayPremiumMultiplier($type, $policy);
+            $onRestDay = false;
 
             if (! $salaryCoversEveryDay) {
                 $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
                 if (! $isWorkday && $multiplier > 0) {
                     // Add-on → full rate: +100% becomes 200%, +30% becomes 130%.
                     $multiplier += 1.0;
+                    $onRestDay = true;
                 }
             }
 
+            $amount = round($dailyRate * $multiplier, 2);
             $premium += $dailyRate * $multiplier;
+
+            // A day that earned nothing earns no line either — a `special_working` day inside the
+            // cycle is an ordinary working day, and printing it at ₱0 under "Holiday" would read
+            // as a holiday the employee was short-changed on.
+            if ($amount == 0.0) {
+                continue;
+            }
+
+            $lines[] = [
+                'date' => $date,
+                'name' => $names[$date] ?? null,
+                'type' => (string) $type,
+                // The POLICY percentage as HR set it, not the add-on this method works in: "200%"
+                // is the figure in Company → Rules and the one the employee can look up.
+                'rate_pct' => self::dayRateMultiplierPct($type, ! $onRestDay, $policy),
+                'rest_day' => $onRestDay,
+                'daily_rate' => round($dailyRate, 2),
+                'amount' => $amount,
+            ];
         }
 
-        return round($premium, 2);
+        return ['pay' => round($premium, 2), 'lines' => $lines];
     }
 
     /**
@@ -1849,7 +1894,7 @@ class PayrollService
                     [
                         'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
                         'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
-                        'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                        'holiday_premium' => 0, 'holiday_lines' => null, 'overtime_pay' => 0, 'night_diff_pay' => 0,
                         'rest_day_premium' => 0,
                         'thirteenth_month' => $row['thirteenth_month'],
                         // The bucket this slip was measured against, kept so the payslip can
@@ -1984,7 +2029,7 @@ class PayrollService
                     [
                         'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
                         'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
-                        'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                        'holiday_premium' => 0, 'holiday_lines' => null, 'overtime_pay' => 0, 'night_diff_pay' => 0,
                         'rest_day_premium' => 0, 'thirteenth_month' => 0, 'other_benefits' => 0,
                         'adjustment_pay' => $amount,
                         'adjustment_note' => $line['note'] ?? null,
@@ -3185,7 +3230,7 @@ class PayrollService
                 [
                     'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
                     'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
-                    'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                    'holiday_premium' => 0, 'holiday_lines' => null, 'overtime_pay' => 0, 'night_diff_pay' => 0,
                     'rest_day_premium' => 0, 'thirteenth_month' => 0, 'adjustment_pay' => 0,
                     'separation_pay' => $separationPay,
                     'separation_pay_taxable' => $separationTaxable,
@@ -3824,8 +3869,10 @@ class PayrollService
                 // silently defeat asOf() for the one part of the payslip it matters most to.
                 $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd, $policy);
 
-                // Premium for working on a (non-working) holiday in this cycle.
-                $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
+                // Premium for working on a (non-working) holiday in this cycle, plus the days
+                // behind it for the payslip to print.
+                $holiday = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
+                $holidayPremium = $holiday['pay'];
                 // Rest days worked feed BOTH the rest-day premium and the overtime cap below.
                 $restByDate = $this->attendance->restDayWorkedMinutesFor($employee, $cycleStart, $cycleEnd, $holidayMap);
                 $restDay = $this->restDayPremiumFor($employee, $periodsPerYear, $workingDays, $restByDate, $policy);
@@ -3852,7 +3899,7 @@ class PayrollService
                 $employeeDist['month_to_date'] = $monthToDate[$employee->id]
                     ?? ['earnings' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0];
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes'], $holiday['lines']);
 
                 // A correction added to this period belongs to the period, not to the run that
                 // happened to compute it. `payslipFor()` prices the cutoff from attendance and knows

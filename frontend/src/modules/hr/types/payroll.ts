@@ -238,6 +238,21 @@ export interface PayslipLine extends PayslipLineCorrection {
    * `other_deductions_breakdown`, which are already single-purpose lists.
    */
   kind?: "earning" | "allowance";
+  /**
+   * THE DAYS BEHIND THE FIGURE, printed under the line the way a deduction's dates are.
+   * Present on Holiday, where one lump sum answered nothing: which holiday, at what rate, and
+   * whether it landed on a rest day. Null on every other line, and on Holiday for payslips
+   * issued before the derivation was recorded.
+   */
+  dates?: PayslipLineDate[] | null;
+}
+
+/** One dated occurrence behind a line, with what it was worth when the line is an earning. */
+export interface PayslipLineDate {
+  date: string | null;
+  detail: string | null;
+  /** Earnings only — a deduction's row carries its money on the row itself. */
+  amount?: number | null;
 }
 
 /**

@@ -137,6 +137,48 @@
         return $rest > 0 ? $text . ' +' . $rest . ' more' : $text;
     };
 
+    /**
+     * The days behind an EARNINGS line — Holiday is the only one that has any. Unlike a
+     * deduction's dates these are not joined into one string: each day carries its own money, and
+     * running them together would leave the reader dividing a total by an unknown number of
+     * unequal parts. Trimmed to the printed column's width, and capped like every other list here.
+     *
+     * @return list<array{text: string, amount: string}>
+     */
+    $earningDates = function (array $line) use ($amt, $fitWide) {
+        $dates = $line['dates'] ?? [];
+
+        if (! is_array($dates) || $dates === []) {
+            return [];
+        }
+
+        $max = 4;
+        $shown = array_slice($dates, 0, $max);
+        $out = [];
+
+        foreach ($shown as $d) {
+            $day = empty($d['date'])
+                ? '—'
+                : \Illuminate\Support\Carbon::parse($d['date'])->format('M j');
+            // The print form, which is short by construction. `detail` is the screen's fuller
+            // wording and is only the fallback for a payslip serialised before `short` existed.
+            $detail = trim((string) ($d['short'] ?? $d['detail'] ?? ''));
+
+            $out[] = [
+                'text' => $detail === '' ? $day : $day . ' · ' . $fitWide($detail, 40),
+                'amount' => ($d['amount'] ?? null) === null ? '' : $amt((float) $d['amount']),
+            ];
+        }
+
+        $rest = count($dates) - count($shown);
+
+        if ($rest > 0) {
+            $out[] = ['text' => '+' . $rest . ' more', 'amount' => ''];
+        }
+
+        return $out;
+    };
+
     // Attendance reasons are bounded by the number of charge kinds; benefit shares and loans are
     // not, so only those are capped.
     $rows = $p['deductions_breakdown'] ?? [];
@@ -358,7 +400,12 @@
             <table>
                 <tr class="thead"><td>Compensation</td><td class="amt">Amount</td></tr>
                 @foreach ($earningLines as $line)
-                    <tr class="line">
+                    @php
+                        // Assembled here rather than inline, for the reason the deductions loop
+                        // below gives: Blade's directive scanner fails the whole VIEW, not the line.
+                        $days = $earningDates($line);
+                    @endphp
+                    <tr class="line{{ $days ? ' pair' : '' }}">
                         <td>
                             @if (! empty($line['original_name']))
                                 <span class="was">{{ $fit($line['original_name']) }}</span>
@@ -370,6 +417,19 @@
                         </td>
                         <td class="amt">{!! $was($line['original_amount'] ?? null) !!}{{ $amt($line['amount']) }}</td>
                     </tr>
+                    {{--
+                        WHICH holidays the figure above was earned on. "Holiday 2,100.00" has to be
+                        taken on trust; "Aug 21 · Independence Day · Regular holiday 200%" can be
+                        checked against the reader's own memory of the month.
+                    --}}
+                    @foreach ($days as $day)
+                        {{-- Only the LAST day of a line closes it off; a rule between two days of
+                             the same figure would read as two separate lines. --}}
+                        <tr class="why{{ $loop->last ? '' : ' open' }}">
+                            <td>{{ $day['text'] }}</td>
+                            <td class="amt">{{ $day['amount'] }}</td>
+                        </tr>
+                    @endforeach
                 @endforeach
                 <tr class="sum"><td>Total Compensation</td><td class="amt">{{ $amt($t['earnings']) }}</td></tr>
             </table>

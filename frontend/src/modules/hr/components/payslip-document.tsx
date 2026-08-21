@@ -12,6 +12,7 @@ import type {
   PayslipDeductionKey,
   PayslipDeductionRow,
   PayslipLine,
+  PayslipLineDate,
   PayslipMonthSummary,
   TaxAnnualisationBasis,
 } from "@/modules/hr/types/payroll";
@@ -238,7 +239,14 @@ export function PayslipDocument({
                 originalValue={line.original_amount == null ? null : amount(line.original_amount)}
                 originalLabel={line.original_name}
                 {...pick(line.key)}
+                pair={(line.dates?.length ?? 0) > 0}
               />
+              {/*
+               * The days behind the figure, when the line has any. Holiday is the one that does:
+               * a lump sum under "Holiday" told the employee nothing about WHICH holiday, at what
+               * rate, or why a rest-day one paid twice what the last one did.
+               */}
+              {(line.dates?.length ?? 0) > 0 && <EarningDates dates={line.dates ?? []} />}
               {editorFor(line.key)}
             </Fragment>
           ))}
@@ -853,6 +861,33 @@ function TaxBasisNote({ basis }: { basis: Payslip["tax_basis"] }) {
 }
 
 /** A note ON the row above, not a row of its own — the employer's counterpart contribution. */
+/**
+ * The dated occurrences behind one earnings line: what the day was, the rate it paid, and what
+ * it was worth. One row per day rather than a single joined string — unlike a deduction's dates,
+ * each of these carries its own money, and running them together would leave the reader dividing
+ * a total by an unknown number of unequal parts.
+ */
+function EarningDates({ dates }: { dates: PayslipLineDate[] }) {
+  return (
+    <div className="border-b border-border px-4 pb-2.5 pt-1">
+      {dates.map((d, i) => (
+        <div
+          key={`${d.date ?? "?"}-${i}`}
+          className="flex items-baseline justify-between gap-4 text-caption text-muted-foreground"
+        >
+          <span>
+            {d.date ? shortDay(d.date) : "—"}
+            {d.detail && <span className="ml-1.5">{d.detail}</span>}
+          </span>
+          {d.amount != null && (
+            <span className="shrink-0 font-mono tabular-nums">{amount(d.amount)}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SubRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border px-4 pb-2.5 pl-9 text-caption italic text-muted-foreground">
