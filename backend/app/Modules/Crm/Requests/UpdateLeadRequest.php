@@ -23,7 +23,7 @@ class UpdateLeadRequest extends FormRequest
             'email' => ['nullable', 'email', 'max:255'],
             'phone' => ['nullable', 'string', 'max:50'],
             'industry' => ['nullable', 'string', 'max:255'],
-            'website_status' => ['sometimes', 'required', Rule::in(['has-website', 'no-website', 'needs-redesign'])],
+            'website_status' => ['sometimes', 'required', Rule::in(['has-website', 'no-website', 'needs-redesign', 'website-unknown', 'website-unreachable'])],
             'priority' => ['sometimes', 'required', Rule::in(['high', 'medium', 'low'])],
             // Validated against the enums that own these two columns — same source as the read filter.
             'email_outreach' => ['sometimes', 'required', Rule::enum(LeadEmailOutreach::class)],

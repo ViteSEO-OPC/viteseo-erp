@@ -114,6 +114,22 @@ def extract_title(sel: Selector) -> str | None:
     return title.strip() if title and title.strip() else None
 
 
+def extract_canonical(sel: Selector, base_url: str) -> str | None:
+    """The URL the page claims for itself: `<link rel="canonical">`, else `og:url`.
+
+    A site can be reached at many addresses (a redirect chain, a directory's tracking link, an
+    alternate domain kept alive after a rebrand). The canonical URL is the page's own statement of
+    where it really lives, which is the address worth judging identity against — so a redirect into a
+    parked or unrelated host is assessed on where it landed, not where the crawl was aimed. Relative
+    values are resolved against the fetched URL; a self-referential canonical is normal and useful.
+    """
+    for css in ('link[rel="canonical"]::attr(href)', 'meta[property="og:url"]::attr(content)'):
+        val = sel.css(css).get()
+        if val and val.strip():
+            return urljoin(base_url, val.strip())
+    return None
+
+
 def extract_description(sel: Selector) -> str | None:
     for css in ('meta[name="description"]::attr(content)', 'meta[property="og:description"]::attr(content)'):
         val = sel.css(css).get()

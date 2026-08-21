@@ -75,6 +75,54 @@ def test_unreachable_audit():
     assert payload["website_reachable"] is False
     assert payload["https_enabled"] is False
     assert payload["audit"]["unreachable"] is True
+    assert payload["final_url"] is None
+    assert payload["canonical_url"] is None
+
+
+# ── URL provenance — the CRM verifies business identity against these ───────────────────────────
+#
+# The audit reports WHERE it landed and what the page calls itself; it never decides whether the page
+# belongs to the business (that is CRM business logic, and this is a strict data provider). Both are
+# typed payload fields rather than `audit` blob keys because the CRM derives from them.
+
+
+def test_build_audit_reports_the_final_url_it_landed_on():
+    """`final_url` is the post-redirect URL Scrapy ended up at, not the one that was queued — so a
+    redirect into a parked or unrelated host is assessed on where it actually went."""
+    payload = build_audit(SAMPLE_HTML, "https://www.acmecoffee.com.ph/home", 200)
+
+    assert payload["final_url"] == "https://www.acmecoffee.com.ph/home"
+
+
+def test_build_audit_extracts_the_canonical_url():
+    html = '<html><head><link rel="canonical" href="https://acme.com/"></head><body></body></html>'
+
+    assert build_audit(html, "https://acme.com/landing?utm=x", 200)["canonical_url"] == "https://acme.com/"
+
+
+def test_canonical_falls_back_to_og_url():
+    html = '<html><head><meta property="og:url" content="https://acme.com/"></head><body></body></html>'
+
+    assert build_audit(html, "https://acme.com/x", 200)["canonical_url"] == "https://acme.com/"
+
+
+def test_a_relative_canonical_is_resolved_against_the_fetched_url():
+    html = '<html><head><link rel="canonical" href="/ph/"></head><body></body></html>'
+
+    assert build_audit(html, "https://acme.com/landing", 200)["canonical_url"] == "https://acme.com/ph/"
+
+
+def test_canonical_is_none_when_the_page_declares_nothing():
+    assert build_audit(SAMPLE_HTML, "https://acme.com/", 200)["canonical_url"] is None
+
+
+def test_a_broken_homepage_still_reports_where_it_landed():
+    """A 4xx/5xx page yields no structure, but knowing the host that served the error is still the
+    evidence the CRM needs to decide the URL was not the business's site."""
+    payload = build_audit("<html></html>", "https://parking.example/acme", 404)
+
+    assert payload["final_url"] == "https://parking.example/acme"
+    assert payload["canonical_url"] is None
 
 
 # ── normalize_website_url — the queue's `website` field is unvalidated free text ────────────────

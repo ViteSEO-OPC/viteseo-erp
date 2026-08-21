@@ -47,6 +47,12 @@ class StoreWebsiteEnrichmentRequest extends FormRequest
             'instagram_url' => ['nullable', 'string', 'max:2048'],
             'youtube_url' => ['nullable', 'string', 'max:2048'],
 
+            // URL provenance — where the request actually LANDED, and what the page calls itself.
+            // Identity verification runs against these rather than the URL we aimed at, so a redirect
+            // to a parked page or an unrelated host is judged on where it ended up.
+            'final_url' => ['nullable', 'string', 'max:2048'],
+            'canonical_url' => ['nullable', 'string', 'max:2048'],
+
             // Site metadata
             'website_title' => ['nullable', 'string', 'max:255'],
             'website_description' => ['nullable', 'string', 'max:2000'],

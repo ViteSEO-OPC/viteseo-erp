@@ -40,7 +40,7 @@ class IngestDiscoveredLeadsRequest extends FormRequest
             'businesses.*.industry' => ['nullable', 'string', 'max:255'],
             // Real website detection is a legitimate enrichment output (unlike the human CSV import,
             // which repurposes its "Website" column as Priority and never sets website_status).
-            'businesses.*.website_status' => ['nullable', Rule::in(['has-website', 'no-website', 'needs-redesign'])],
+            'businesses.*.website_status' => ['nullable', Rule::in(['has-website', 'no-website', 'needs-redesign', 'website-unknown'])],
 
             'businesses.*.region' => ['nullable', 'string', 'max:255'],
             'businesses.*.province' => ['nullable', 'string', 'max:255'],

@@ -40,6 +40,8 @@ const STATUS_STYLE: Record<string, { label: string; cls: string }> = {
   "has-website": { label: "Strong website", cls: "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300" },
   "needs-redesign": { label: "Needs redesign", cls: "bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300" },
   "no-website": { label: "No website", cls: "bg-muted text-muted-foreground" },
+  "website-unknown": { label: "Website not verified", cls: "bg-slate-100 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300" },
+  "website-unreachable": { label: "Website unreachable", cls: "bg-orange-100 text-orange-700 dark:bg-orange-950/50 dark:text-orange-300" },
 };
 
 const PRIORITY_STYLE: Record<NearbyPriority, { label: string; dot: string; text: string }> = {
@@ -80,7 +82,7 @@ export function WebsiteIntelPanel({ website, priority }: { website?: WebsiteSumm
             <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
           </a>
         ) : (
-          <span className="text-xs font-medium text-muted-foreground">Not found</span>
+          <span className="text-xs font-medium text-muted-foreground">Not discovered yet</span>
         )}
       </div>
 
@@ -184,7 +186,13 @@ function priorityExplanation(website: WebsiteSummary): string {
   const s = website.signals;
   switch (website.status) {
     case "no-website":
-      return "No website was found for this business — the highest-opportunity prospect for a new web presence.";
+      return "No website exists for this business — the highest-opportunity prospect for a new web presence.";
+    case "website-unknown":
+      return website.url
+        ? "A URL was found but could not be confirmed as this business's own website — priority stays neutral until it is verified."
+        : "No website has been discovered for this business yet. That is not the same as having none, so priority stays neutral until one is checked.";
+    case "website-unreachable":
+      return "The known URL did not respond, so nothing could be confirmed about this business's web presence — priority stays neutral.";
     case "needs-redesign": {
       const gaps: string[] = [];
       if (s) {

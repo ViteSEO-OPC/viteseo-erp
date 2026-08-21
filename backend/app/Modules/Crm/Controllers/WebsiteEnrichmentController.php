@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Crm\Requests\StoreWebsiteEnrichmentRequest;
 use App\Modules\Crm\Resources\WebsiteEnrichmentResource;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use App\Modules\Crm\Services\WebsiteStatusDeriver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -49,23 +50,42 @@ class WebsiteEnrichmentController extends Controller
     }
 
     /** Record one lead's website audit findings and derive its website_status (fit-data only). */
-    public function update(StoreWebsiteEnrichmentRequest $request, Lead $lead, WebsiteStatusDeriver $deriver): JsonResponse
-    {
+    public function update(
+        StoreWebsiteEnrichmentRequest $request,
+        Lead $lead,
+        WebsiteStatusDeriver $deriver,
+        WebsiteIdentityVerifier $verifier,
+    ): JsonResponse {
         $data = $request->validated();
         $now = now();
 
+        // Does this page actually belong to THIS business? A reachable page proves only that some
+        // server answered — the URL may be a mis-tagged node, a parked domain, or a redirect to an
+        // unrelated host. The verdict is persisted alongside the findings so the decision is auditable
+        // rather than an invisible enum flip.
+        $verdict = $verifier->verify($lead, $data);
+
         $enrichment = $lead->websiteEnrichment()->updateOrCreate(
             ['lead_id' => $lead->id],
-            [...$data, 'last_checked_at' => $now, 'enriched_at' => $now],
+            [
+                ...$data,
+                'identity_verified' => $verdict->verified,
+                'identity_confidence' => $verdict->confidence,
+                'identity_signals' => $verdict->signals,
+                'last_checked_at' => $now,
+                'enriched_at' => $now,
+            ],
         );
 
         // Derive the coarse website_status (the ONLY lead field this provider writes).
         $status = $deriver->derive(
-            (bool) $data['website_reachable'],
-            (bool) $data['https_enabled'],
-            (bool) $data['about_page'],
-            (bool) $data['contact_page'],
-            (bool) $data['services_page'],
+            hasUrl: filled($lead->website),
+            reachable: (bool) $data['website_reachable'],
+            identityVerified: $verdict->verified,
+            https: (bool) $data['https_enabled'],
+            aboutPage: (bool) $data['about_page'],
+            contactPage: (bool) $data['contact_page'],
+            servicesPage: (bool) $data['services_page'],
         );
         $lead->update(['website_status' => $status]);
 

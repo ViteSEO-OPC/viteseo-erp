@@ -465,6 +465,13 @@ class LeadImportService
      * values (so DB defaults apply, e.g. website_status), and defaults contact_name to the business
      * name when the provider exposed no contact person (documented normalization — not fabrication).
      *
+     * `website_status` is the one field the provider cannot decide. Discovery observes whether a
+     * directory record happened to carry a URL — never whether a website exists, works, or belongs to
+     * the business — so any status it reports is overwritten with `website-unknown` and left for the
+     * audit (WebsiteIdentityVerifier) to resolve. The field stays
+     * ACCEPTED rather than rejected so an older deployed scraper keeps ingesting normally: the CRM and
+     * the scraper release independently, and a validation error here would silently stop discovery.
+     *
      * @param  array<string, mixed>  $business
      * @return array<string, mixed>
      */
@@ -488,6 +495,9 @@ class LeadImportService
         if (! isset($row['contact_name']) && isset($row['business_name'])) {
             $row['contact_name'] = $row['business_name'];
         }
+
+        // Not a passthrough — a refusal. See the docblock.
+        $row['website_status'] = 'website-unknown';
 
         return $row;
     }

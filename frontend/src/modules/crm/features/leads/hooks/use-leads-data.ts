@@ -123,7 +123,7 @@ export function useLeads() {
   // Website-status filter — URL-driven & reactive (the overview cards link to
   // /leads?website_status=<status>). Independent of the priority filter above.
   const rawWebsiteStatus = searchParams.get("website_status") ?? "";
-  const websiteStatus = ["has-website", "no-website", "needs-redesign"].includes(rawWebsiteStatus)
+  const websiteStatus = ["has-website", "no-website", "needs-redesign", "website-unknown", "website-unreachable"].includes(rawWebsiteStatus)
     ? rawWebsiteStatus
     : "";
 

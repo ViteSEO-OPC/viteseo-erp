@@ -91,7 +91,7 @@
       "keywords": ["needs website", "no website", "without a website", "needs a website", "leads with no website", "leads without a website"],
       "response": {
         "type": "navigate",
-        "text": "Leads with *No Website* are the highest-conversion segment — opening **Leads** filtered to that website status…",
+        "text": "Opening **Leads** filtered to *No Website* — businesses confirmed to have none. Businesses whose website simply has not been verified yet sit under *Not Verified*, not here…",
         "action": { "type": "navigate", "target": "/zerem/leads?website_status=no-website" }
       }
     },

@@ -25,7 +25,7 @@ class StoreLeadRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:50'],
             'industry' => ['nullable', 'string', 'max:255'],
             // These five have DB column defaults — omit to use the backend default; validated if provided.
-            'website_status' => ['sometimes', Rule::in(['has-website', 'no-website', 'needs-redesign'])],
+            'website_status' => ['sometimes', Rule::in(['has-website', 'no-website', 'needs-redesign', 'website-unknown', 'website-unreachable'])],
             'priority' => ['sometimes', Rule::in(['high', 'medium', 'low'])],
             // Validated against the enums that own these two columns — same source as the read filter.
             'email_outreach' => ['sometimes', Rule::enum(LeadEmailOutreach::class)],
