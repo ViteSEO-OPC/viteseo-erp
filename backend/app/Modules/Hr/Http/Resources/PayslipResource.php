@@ -257,6 +257,9 @@ class PayslipResource extends JsonResource
             // Only meaningful under the tiered mode, and the thing that explains why 194 minutes
             // and 72 minutes can cost exactly the same.
             'late_tiers' => $policy['late_tiers'] ?? [],
+            // Without this the tier line under-explains a repeating charge: "over 30 min → 1h"
+            // cannot account for the 3h docked off a 95-minute arrival.
+            'late_tier_recurring' => (bool) ($policy['late_tier_recurring'] ?? false),
             'undertime_mode' => $policy['undertime_deduction_mode'] ?? 'none',
             // The DOLE day the fraction is taken against — dailyRate ÷ this.
             'hours_per_day' => (int) ($policy['hours_per_day_divisor'] ?? 8),

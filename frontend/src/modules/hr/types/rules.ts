@@ -94,6 +94,7 @@ export interface AttendancePolicy {
   lates_per_deduction: number; // N for the penalty above
   late_minutes_from: LateMinutesFrom; // count late minutes from start, or from end of grace
   late_tiers: LateTier[] | null; // `tiered` mode only
+  late_tier_recurring: boolean; // the rung repeats per block of `over` minutes, not once
 
   undertime_deduction_mode: UndertimeDeductionMode;
   missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct

@@ -215,10 +215,36 @@ class DeductionService
     /**
      * `tiered` late mode: the highest ladder rung whose `over` threshold the lateness
      * exceeds decides the charged HOURS (converted to minutes). No rung matched ⇒ 0.
+     *
+     * With `late_tier_recurring` on, the single rung stops being a one-off charge and becomes
+     * a repeating BLOCK: the charge is billed once per whole `over` minutes of lateness, so a
+     * "30 min ⇒ 1h" rule costs 1h at 30–59 late, 2h at 60–89, 3h at 90–119. The flag is
+     * validated to a single rung with `over >= 1` (UpdateAttendancePolicyRequest), so a ladder
+     * can never reach the recurring branch and there is no "which rung repeats?" ambiguity.
+     *
+     * Note the boundary difference the recurring mode deliberately accepts: the flat rule is
+     * strictly MORE than `over` (exactly 30 late ⇒ 0), while a block count is floor(late ÷ over)
+     * (exactly 30 late ⇒ one block). Charging nothing at 30 and two hours at 60 would make the
+     * rule HR wrote — "every 30 minutes" — untrue for every block after the first.
+     *
+     * Nothing here bounds the result: 4h late under a 30 ⇒ 1h rule computes 8h. forDay() caps
+     * the day at `daily_deduction_cap` (one day's pay by default), which is the existing rail.
      */
     private function tierMinutes(int $lateMinutes, AttendancePolicy $policy): int
     {
         $tiers = $policy->late_tiers ?? [];
+
+        if ($policy->late_tier_recurring && count($tiers) === 1) {
+            $over = (int) ($tiers[0]['over'] ?? 0);
+            $charge = (int) round((float) ($tiers[0]['hours'] ?? 0) * 60);
+
+            // A zero/negative block is rejected at save time; falling through to the flat rule
+            // rather than dividing by it keeps a hand-edited or legacy row from fataling a run.
+            if ($over > 0) {
+                return intdiv(max(0, $lateMinutes), $over) * $charge;
+            }
+        }
+
         $hours = 0.0;
         foreach ($tiers as $tier) {
             if ($lateMinutes > (int) ($tier['over'] ?? PHP_INT_MAX)) {

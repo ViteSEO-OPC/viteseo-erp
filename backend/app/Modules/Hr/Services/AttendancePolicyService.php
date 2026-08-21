@@ -27,6 +27,10 @@ class AttendancePolicyService
         'late_penalty_enabled' => false,
         'late_minutes_from' => 'start_time',
         'late_tiers' => null,
+        // Whether the tiered rung REPEATS. Off = today's behaviour: the rung's charge is
+        // applied once, however late the arrival. On, it is charged per whole block of
+        // `over` minutes (30-min rung, 90 min late ⇒ three blocks).
+        'late_tier_recurring' => false,
         'undertime_deduction_mode' => 'none',
         'missing_clockout_mode' => 'no_deduction_flag_for_review',
         // Item 5 — how long past the scheduled end an open punch is still "in progress". Past

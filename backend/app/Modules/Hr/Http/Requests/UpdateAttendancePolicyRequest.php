@@ -38,6 +38,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'late_tiers' => ['sometimes', 'nullable', 'array'],
             'late_tiers.*.over' => ['required_with:late_tiers', 'integer', 'min:0', 'max:1440'],
             'late_tiers.*.hours' => ['required_with:late_tiers', 'numeric', 'min:0', 'max:24'],
+            // Repeat the rung per whole block of `over` minutes instead of charging it once.
+            // Cross-validated below: it only has a meaning for a SINGLE rung with a non-zero
+            // `over`, which is exactly the one-rung rule Company → Rules edits.
+            'late_tier_recurring' => ['sometimes', 'boolean'],
 
             'undertime_deduction_mode' => ['sometimes', 'in:none,per_hour'],
             // Restricted to what the engine actually honours. This accepted
@@ -166,6 +170,31 @@ class UpdateAttendancePolicyRequest extends FormRequest
                 $message = 'Night differential start and end times must be different.';
                 $v->errors()->add('night_diff_start_time', $message);
                 $v->errors()->add('night_diff_end_time', $message);
+            }
+
+            // A repeating late rung needs a block width to repeat over, and needs to be the
+            // ONLY rung — with a ladder there is no single answer to "which rung repeats?",
+            // and silently picking one would over- or under-charge without anyone being told.
+            // (The API accepts multi-rung ladders; only the recurring flag is restricted.)
+            $recurring = $this->boolean('late_tier_recurring', (bool) $policy->late_tier_recurring);
+            if ($this->has('late_tier_recurring') || $this->has('late_tiers')) {
+                $tiers = $this->has('late_tiers') ? $this->input('late_tiers') : $policy->late_tiers;
+                $tiers = is_array($tiers) ? $tiers : [];
+
+                if ($recurring && count($tiers) > 1) {
+                    $v->errors()->add(
+                        'late_tier_recurring',
+                        'A repeating late rule can only use one threshold, not a ladder.',
+                    );
+                }
+                // `over` of 0 would make every minute of lateness its own block — an unbounded
+                // charge that only the daily cap stops. Rejected rather than clamped.
+                if ($recurring && count($tiers) === 1 && (int) ($tiers[0]['over'] ?? 0) < 1) {
+                    $v->errors()->add(
+                        'late_tiers',
+                        'A repeating late rule needs a threshold of at least 1 minute.',
+                    );
+                }
             }
 
             foreach (['late', 'absence', 'missed_time_out'] as $category) {

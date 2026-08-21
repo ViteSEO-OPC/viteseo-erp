@@ -326,7 +326,8 @@ function rungValue(
 
 // How lateness is charged. "exact" bills the precise minutes late; "custom" is a single
 // threshold rule — if late by MORE than `over` minutes, charge a flat `charge` minutes —
-// stored as a one-row late_tiers ladder (late_deduction_mode = 'tiered').
+// stored as a one-row late_tiers ladder (late_deduction_mode = 'tiered'). With
+// `late_tier_recurring` on, that rung repeats per whole block of `over` minutes instead.
 type ChargeMode = "exact" | "custom";
 
 // The single threshold rung the UI edits, read out of the stored late_tiers (minutes).
@@ -334,6 +335,25 @@ function thresholdFrom(tiers: LateTier[] | null | undefined): { over: number; ch
   const row = tiers?.[0];
   if (!row) return { over: 15, charge: 60 }; // sensible starting point
   return { over: Number(row.over ?? 15), charge: Math.round(Number(row.hours ?? 1) * 60) };
+}
+
+/**
+ * What the threshold rule actually costs at a given lateness — mirrors
+ * DeductionService::tierMinutes() exactly, including the recurring branch's floor(). Shown
+ * live under the inputs because "30 min ⇒ 60 min" reads harmless until you see the 4h.
+ */
+function thresholdCost(lateMinutes: number, over: number, charge: number, recurring: boolean): number {
+  if (!Number.isFinite(over) || !Number.isFinite(charge) || charge < 0) return 0;
+  if (recurring) return over >= 1 ? Math.floor(lateMinutes / over) * charge : 0;
+  return lateMinutes > over ? charge : 0;
+}
+
+/** 90 → "1h 30m", 120 → "2h", 45 → "45m". Deduction figures read as time, not decimals. */
+function asDuration(minutes: number): string {
+  if (minutes <= 0) return "no deduction";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return [h > 0 ? `${h}h` : null, m > 0 ? `${m}m` : null].filter(Boolean).join(" ");
 }
 
 // The four alert levels must strictly ascend. Returns an error message, or null if OK.
@@ -432,6 +452,9 @@ function AttendancePolicyEditor() {
   const [chargeMode, setChargeMode] = useState<ChargeMode>(policy?.late_deduction_mode === "tiered" ? "custom" : "exact");
   const [thresholdOver, setThresholdOver] = useState(String(th.over));
   const [thresholdCharge, setThresholdCharge] = useState(String(th.charge));
+  // Whether that one rung REPEATS. Off (the default, and every existing policy) charges it
+  // once however late the arrival — the behaviour this page has always had.
+  const [thresholdRecurring, setThresholdRecurring] = useState(policy?.late_tier_recurring ?? false);
   const [lateFrom, setLateFrom] = useState(policy?.late_minutes_from ?? "start_time");
   // Item 5 — how long past someone's own shift end an open punch is still "in progress".
   const [timeoutAllowance, setTimeoutAllowance] = useState(
@@ -508,6 +531,20 @@ function AttendancePolicyEditor() {
   }
 
   /**
+   * Everything the time-deduction card has to be true before it saves. The recurring rule is
+   * the addition: a 0-minute block would repeat once per minute late, which the server rejects
+   * — caught here so HR gets a sentence instead of a 422.
+   */
+  function guardTimeDeductions(): boolean {
+    if (!guardTimeoutAllowance()) return false;
+    if (lateChargeOn && chargeMode === "custom" && thresholdRecurring && Number(thresholdOver) < 1) {
+      toast.error("A repeating late rule needs a threshold of at least 1 minute.");
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * Auto mode with both caps at 0 means overtime pays from the clock with NO ceiling — and 0 is
    * the shipped default, so this is reached by leaving fields alone rather than by typing a number.
    * Confirmed once, on the save that ENTERS that state; editing anything else in the card later
@@ -571,6 +608,9 @@ function AttendancePolicyEditor() {
   const chargeFields = () => ({
     late_deduction_mode: lateMode,
     late_tiers: lateMode === "tiered" ? [{ over: Number(thresholdOver), hours: Number(thresholdCharge) / 60 }] : null,
+    // Meaningless without a threshold rule, and the server rejects it on a multi-rung ladder —
+    // so it is forced off whenever the rule that carries it isn't the one being saved.
+    late_tier_recurring: lateMode === "tiered" ? thresholdRecurring : false,
     deduction_rounding: "exact" as const,
     deduction_block_minutes: 60,
     late_minutes_from: lateFrom,
@@ -604,28 +644,59 @@ function AttendancePolicyEditor() {
       </div>
 
       {chargeMode === "custom" && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-foreground">If late by more than</span>
-          <Input
-            id="pol-th-over"
-            type="number"
-            min={0}
-            max={480}
-            value={thresholdOver}
-            onChange={(e) => setThresholdOver(e.target.value)}
-            className="w-20"
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-foreground">
+              {thresholdRecurring ? "For every" : "If late by more than"}
+            </span>
+            <Input
+              id="pol-th-over"
+              type="number"
+              min={thresholdRecurring ? 1 : 0}
+              max={480}
+              value={thresholdOver}
+              onChange={(e) => setThresholdOver(e.target.value)}
+              className="w-20"
+            />
+            <span className="text-sm text-foreground">
+              {thresholdRecurring ? "minutes late, charge" : "minutes, charge"}
+            </span>
+            <Input
+              id="pol-th-charge"
+              type="number"
+              min={0}
+              max={480}
+              value={thresholdCharge}
+              onChange={(e) => setThresholdCharge(e.target.value)}
+              className="w-20"
+            />
+            <span className="text-sm text-foreground">minutes&apos; pay.</span>
+          </div>
+
+          {/* The toggle. Off = charge the rung once (how this rule has always worked);
+              on = charge it again for every further whole block of `over` minutes. */}
+          <CheckBox
+            checked={thresholdRecurring}
+            onChange={setThresholdRecurring}
+            label="Repeat the charge for every block of late minutes"
           />
-          <span className="text-sm text-foreground">minutes, charge</span>
-          <Input
-            id="pol-th-charge"
-            type="number"
-            min={0}
-            max={480}
-            value={thresholdCharge}
-            onChange={(e) => setThresholdCharge(e.target.value)}
-            className="w-20"
-          />
-          <span className="text-sm text-foreground">minutes&apos; pay.</span>
+
+          {/* What it actually costs, computed the same way the payroll engine does. Reading
+              the rule back as pesos-worth-of-time is the only way the difference between the
+              two modes is obvious before somebody's payslip makes it obvious. */}
+          <div className="ml-7 space-y-1 border-l-2 border-border pl-4">
+            {[30, 60, 120].map((late) => (
+              <p key={late} className="text-xs text-muted-foreground">
+                {asDuration(late)} late →{" "}
+                <strong className="text-foreground">
+                  {asDuration(
+                    thresholdCost(late, Number(thresholdOver), Number(thresholdCharge), thresholdRecurring),
+                  )}
+                </strong>{" "}
+                deducted
+              </p>
+            ))}
+          </div>
         </div>
       )}
 
@@ -637,6 +708,16 @@ function AttendancePolicyEditor() {
             A threshold rule charges a flat amount that can exceed the actual minutes late (e.g. 16 min late
             → a full hour docked). This may be an unlawful penalty under Labor Code Art. 113 — enable only
             with legal review.
+            {thresholdRecurring && (
+              <>
+                {" "}
+                <strong>
+                  Repeating multiplies that gap: the charge keeps compounding with the lateness, so a
+                  long delay can reach a whole day&apos;s pay.
+                </strong>{" "}
+                A single day is still capped at one day&apos;s pay, but nothing below that cap is.
+              </>
+            )}
           </p>
         </div>
       )}
@@ -863,7 +944,7 @@ function AttendancePolicyEditor() {
             undertime_deduction_mode: undertimeMode,
             missing_timeout_allowance_minutes: Number(timeoutAllowance),
             daily_deduction_cap: 1,
-          }, guardTimeoutAllowance)
+          }, guardTimeDeductions)
         }
       >
         {/* Lateness — two switches that can BOTH be on. */}

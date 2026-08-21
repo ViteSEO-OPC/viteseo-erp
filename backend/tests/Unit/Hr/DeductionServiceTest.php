@@ -209,6 +209,134 @@ class DeductionServiceTest extends TestCase
     }
 
     /**
+     * The recurring flag turns the single rung into a repeating BLOCK. The rule HR writes as
+     * "30 min late = 1h docked" then means what it says at every multiple, instead of charging
+     * one hour whether somebody was 31 minutes or four hours late.
+     */
+    public function test_recurring_tier_charges_once_per_block_of_lateness(): void
+    {
+        $policy = $this->policy([
+            'late_deduction_mode' => 'tiered',
+            'late_tiers' => [['over' => 30, 'hours' => 1]],
+            'late_tier_recurring' => true,
+        ]);
+
+        // 60 late (09:00 in) → two 30-min blocks → 2h = 120/480.
+        $r60 = $this->svc->forDay($this->ctx(['time_in_min' => 540]), $policy);
+        $this->assertEqualsWithDelta(120 / 480, $r60->unpaidFraction, 1e-9);
+        $this->assertSame(60, $r60->lateMinutes); // the CLOCK figure is untouched by the charge
+
+        // 90 late → three blocks → 3h.
+        $r90 = $this->svc->forDay($this->ctx(['time_in_min' => 570]), $policy);
+        $this->assertEqualsWithDelta(180 / 480, $r90->unpaidFraction, 1e-9);
+
+        // 45 late → one whole block only; the leftover 15 min does NOT buy a second.
+        $r45 = $this->svc->forDay($this->ctx(['time_in_min' => 525]), $policy);
+        $this->assertEqualsWithDelta(60 / 480, $r45->unpaidFraction, 1e-9);
+    }
+
+    /**
+     * The boundary the recurring mode deliberately moves. Flat is strictly "more than 30", so
+     * exactly 30 costs nothing; a block count is floor(late ÷ 30), so exactly 30 is one block.
+     * Pinned because it is the one case where switching the toggle on changes an existing
+     * policy's answer at a value it already handled.
+     */
+    public function test_recurring_charges_the_block_at_exactly_the_threshold(): void
+    {
+        $tiers = [['over' => 30, 'hours' => 1]];
+
+        $flat = $this->svc->forDay(
+            $this->ctx(['time_in_min' => 510]), // exactly 30 late
+            $this->policy(['late_deduction_mode' => 'tiered', 'late_tiers' => $tiers]),
+        );
+        $this->assertSame(0.0, $flat->unpaidFraction);
+
+        $recurring = $this->svc->forDay(
+            $this->ctx(['time_in_min' => 510]),
+            $this->policy(['late_deduction_mode' => 'tiered', 'late_tiers' => $tiers, 'late_tier_recurring' => true]),
+        );
+        $this->assertEqualsWithDelta(60 / 480, $recurring->unpaidFraction, 1e-9);
+
+        // One minute short of the block is still nothing under either mode.
+        $under = $this->svc->forDay(
+            $this->ctx(['time_in_min' => 509]),
+            $this->policy(['late_deduction_mode' => 'tiered', 'late_tiers' => $tiers, 'late_tier_recurring' => true]),
+        );
+        $this->assertSame(0.0, $under->unpaidFraction);
+    }
+
+    /**
+     * Every policy that exists today has the flag off, and must price exactly as it did before
+     * the column was added — the whole no-op guarantee of this feature.
+     */
+    public function test_the_flag_off_is_the_old_flat_behaviour(): void
+    {
+        $policy = $this->policy([
+            'late_deduction_mode' => 'tiered',
+            'late_tiers' => [['over' => 30, 'hours' => 1]],
+            'late_tier_recurring' => false,
+        ]);
+
+        // 31 and 240 minutes late cost the SAME flat hour — the complaint that motivated the flag.
+        $r31 = $this->svc->forDay($this->ctx(['time_in_min' => 511]), $policy);
+        $r240 = $this->svc->forDay($this->ctx(['time_in_min' => 720]), $policy);
+        $this->assertEqualsWithDelta(60 / 480, $r31->unpaidFraction, 1e-9);
+        $this->assertEqualsWithDelta(60 / 480, $r240->unpaidFraction, 1e-9);
+    }
+
+    /**
+     * A ladder has no single rung to repeat. The save endpoint rejects the combination, so this
+     * only guards a hand-edited or imported row: it must fall back to the flat ladder rather
+     * than silently pick a rung and charge a multiple of it.
+     */
+    public function test_recurring_is_ignored_on_a_multi_rung_ladder(): void
+    {
+        $policy = $this->policy([
+            'late_deduction_mode' => 'tiered',
+            'late_tiers' => [['over' => 15, 'hours' => 1], ['over' => 60, 'hours' => 2]],
+            'late_tier_recurring' => true,
+        ]);
+
+        // 90 late → the flat ladder's matching rung (over 60 → 2h), NOT six 15-min blocks.
+        $r = $this->svc->forDay($this->ctx(['time_in_min' => 570]), $policy);
+        $this->assertEqualsWithDelta(120 / 480, $r->unpaidFraction, 1e-9);
+    }
+
+    /** A 0-minute block can't be divided by. Falls back to flat instead of fataling a payroll run. */
+    public function test_a_zero_width_recurring_block_falls_back_instead_of_dividing_by_zero(): void
+    {
+        $r = $this->svc->forDay(
+            $this->ctx(['time_in_min' => 570]),
+            $this->policy([
+                'late_deduction_mode' => 'tiered',
+                'late_tiers' => [['over' => 0, 'hours' => 1]],
+                'late_tier_recurring' => true,
+            ]),
+        );
+
+        // Flat rule, over 0: 90 > 0 → one hour. Not 90 blocks.
+        $this->assertEqualsWithDelta(60 / 480, $r->unpaidFraction, 1e-9);
+    }
+
+    /** The existing safety rail still holds: multiplying blocks can never exceed one day's pay. */
+    public function test_the_daily_cap_still_bounds_a_recurring_charge(): void
+    {
+        $r = $this->svc->forDay(
+            // 04:00 late (12:00 in) under a 30 ⇒ 1h rule = eight blocks = 8h, which IS the
+            // whole 8-hour day; the undertime on top would push it past one day's pay.
+            $this->ctx(['time_in_min' => 720, 'time_out_min' => 1020]),
+            $this->policy([
+                'late_deduction_mode' => 'tiered',
+                'late_tiers' => [['over' => 30, 'hours' => 1]],
+                'late_tier_recurring' => true,
+                'undertime_deduction_mode' => 'per_hour',
+            ]),
+        );
+
+        $this->assertEqualsWithDelta(1.0, $r->unpaidFraction, 1e-9);
+    }
+
+    /**
      * Breaks are not a pay input — however long they run, this service charges nothing for
      * them. Detecting an OVERLONG break moved to ViolationService in (it is measured
      * against the employee's own schedule entitlement, and must work with every deduction mode

@@ -20,6 +20,7 @@ class AttendancePolicyResource extends JsonResource
             'late_penalty_enabled' => (bool) $this->late_penalty_enabled,
             'late_minutes_from' => $this->late_minutes_from,
             'late_tiers' => $this->late_tiers,
+            'late_tier_recurring' => (bool) $this->late_tier_recurring,
 
             'undertime_deduction_mode' => $this->undertime_deduction_mode,
             'missing_clockout_mode' => $this->missing_clockout_mode,

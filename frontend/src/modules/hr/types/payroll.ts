@@ -316,6 +316,7 @@ export interface AttendanceChargeLine {
 export interface DeductionRule {
   late_mode: string;
   late_tiers: { over: number; hours: number }[];
+  late_tier_recurring: boolean;
   undertime_mode: string;
   hours_per_day: number;
   rounding: string;
