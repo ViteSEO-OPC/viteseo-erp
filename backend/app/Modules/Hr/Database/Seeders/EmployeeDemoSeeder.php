@@ -47,11 +47,14 @@ class EmployeeDemoSeeder extends Seeder
         ]);
         $dana->user->assignRole('hr_officer'); // HR officer AND an employee.
 
+        // Marco is the demo's MANAGEMENT employee: fixed salary, exempt from the time clock.
+        // Without one, the exemption (auto-present rows, no violations, no premiums) is
+        // unexercisable in a walkthrough.
         $marco = $service->create([
             'name' => 'Marco Cruz', 'email' => 'marco@viteseo.ph',
             'department_id' => $dept('ENG'), 'job_title' => 'Engineering Manager',
             'employment_status' => 'regular', 'hire_date' => '2020-06-01',
-            'base_salary' => 110000,
+            'base_salary' => 110000, 'is_management' => true,
         ]);
 
         $maya = $service->create([

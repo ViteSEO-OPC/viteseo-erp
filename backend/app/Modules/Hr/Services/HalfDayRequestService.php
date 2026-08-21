@@ -23,6 +23,7 @@ class HalfDayRequestService
         private readonly PayrollFreezeService $freeze,
         private readonly RetroFlagService $retro,
         private readonly HalfDayWindowService $windows,
+        private readonly AttendancePolicyService $policy,
     ) {}
 
     /** HR sees all; an employee sees only their own. */
@@ -44,6 +45,12 @@ class HalfDayRequestService
     /** @param array<string, mixed> $data */
     public function create(Employee $employee, array $data): HalfDayRequest
     {
+        if ($employee->managementExemptOn($data['work_date'], (bool) $this->policy->get()->management_auto_attendance)) {
+            throw ValidationException::withMessages([
+                'work_date' => ['Management employees are exempt from attendance.'],
+            ]);
+        }
+
         $req = HalfDayRequest::create([
             'employee_id' => $employee->id,
             'work_date' => $data['work_date'],

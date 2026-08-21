@@ -42,6 +42,10 @@ class PayrollRunResource extends JsonResource
             // disbursed. Present only on the response to a run that just executed; null when the
             // run is merely being read back, where it would describe an event, not a state.
             'skipped_disbursed' => $this->resource->skippedDisbursedCount,
+            // Corrections this recompute found the engine has since disagreed with. Same rule as
+            // the line above: present on the response to a run that just executed, null when the
+            // run is merely being read back.
+            'override_notes' => $this->resource->overrideNotes,
             // A locked run can no longer be recomputed.
             'locked_at' => $this->locked_at,
             'locked_by' => $this->locker?->name,

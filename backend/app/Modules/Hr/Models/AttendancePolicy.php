@@ -15,6 +15,7 @@ class AttendancePolicy extends Model
         'late_penalty_enabled',
         'late_minutes_from',
         'late_tiers',
+        'late_tier_recurring',
         'undertime_deduction_mode',
         'missing_clockout_mode',
         // Item 5 — minutes past the scheduled end before an open punch counts as abandoned.
@@ -23,6 +24,10 @@ class AttendancePolicy extends Model
         'early_clock_in_mode',
         // Whether working a rest day needs HR's permission first.
         'rest_day_work_requires_request',
+        // The management attendance exemption: whether the platform writes their days at all,
+        // and whether they earn the holiday premium when they work one.
+        'management_auto_attendance',
+        'management_holiday_premium',
         'geofence_enabled',
         'office_lat',
         'office_lng',
@@ -62,7 +67,10 @@ class AttendancePolicy extends Model
         'missing_timeout_allowance_minutes' => 'integer',
         'late_penalty_enabled' => 'boolean',
         'rest_day_work_requires_request' => 'boolean',
+        'management_auto_attendance' => 'boolean',
+        'management_holiday_premium' => 'boolean',
         'late_tiers' => 'array',
+        'late_tier_recurring' => 'boolean',
         'geofence_enabled' => 'boolean',
         // float, not decimal:7 — these are fed straight into haversine trigonometry and
         // serialised as JSON numbers; `decimal:` would hand both a string. A double holds

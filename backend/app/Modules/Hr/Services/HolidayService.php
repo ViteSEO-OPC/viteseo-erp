@@ -51,10 +51,18 @@ class HolidayService
      */
     private array $typedMemo = [];
 
+    /**
+     * Per-request memo of namesBetween(), keyed the same way and cleared alongside it.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private array $nameMemo = [];
+
     /** Drop the memo — called from every path that changes holiday data. */
     private function forgetMemo(): void
     {
         $this->typedMemo = [];
+        $this->nameMemo = [];
     }
 
     public function listSets(): Collection
@@ -229,6 +237,30 @@ class HolidayService
             ->whereHas('set', fn ($q) => $q->where('country_code', self::HOME_COUNTRY))
             ->get(['date', 'type'])
             ->mapWithKeys(fn ($h) => [Carbon::parse($h->date)->toDateString() => $h->type])
+            ->all();
+    }
+
+    /**
+     * Home-country holidays in the range as [date 'Y-m-d' => name] — the WORDING payroll needs
+     * to say WHICH holiday a premium was earned on. Kept apart from typedHolidaysBetween()
+     * rather than folded into it: that map's values are the type string itself, matched with
+     * `match` and `in_array` in a dozen places, and widening it to a pair would touch all of them
+     * to serve one caller. Memoized on the same per-request basis, so a payroll run asking once
+     * per employee still costs one query.
+     *
+     * @return array<string, string>
+     */
+    public function namesBetween(Carbon $start, Carbon $end): array
+    {
+        $key = $start->toDateString() . '|' . $end->toDateString();
+        if (isset($this->nameMemo[$key])) {
+            return $this->nameMemo[$key];
+        }
+
+        return $this->nameMemo[$key] = Holiday::whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->whereHas('set', fn ($q) => $q->where('country_code', self::HOME_COUNTRY))
+            ->get(['date', 'name'])
+            ->mapWithKeys(fn ($h) => [Carbon::parse($h->date)->toDateString() => (string) $h->name])
             ->all();
     }
 

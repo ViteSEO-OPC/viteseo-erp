@@ -9,6 +9,8 @@ import type {
   DailyOverride,
   LocationFix,
   OpenShiftRow,
+  ManagementGenerationStatus,
+  ManagementGenerationResult,
 } from "@/modules/hr/types/attendance";
 
 export async function getMyAttendance(): Promise<MyAttendance> {
@@ -133,5 +135,20 @@ export async function upsertDailyOverride(
     grace_minutes: graceMinutes,
     min_full_day_minutes: minFullDayMinutes,
   });
+  return res.data.data;
+}
+
+/** Did the nightly management-attendance job actually run? */
+export async function getManagementGeneration(): Promise<ManagementGenerationStatus> {
+  const res = await apiClient.get("/hr/attendance/management-generation");
+  return res.data.data;
+}
+
+/** Run it now. Omitting the range covers the last seven days, as the nightly does. */
+export async function regenerateManagementAttendance(range?: {
+  from?: string;
+  to?: string;
+}): Promise<ManagementGenerationResult> {
+  const res = await apiClient.post("/hr/attendance/management-generation", range ?? {});
   return res.data.data;
 }

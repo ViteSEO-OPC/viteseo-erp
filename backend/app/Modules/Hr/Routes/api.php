@@ -194,6 +194,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // Stale-attendance review queue (item 6). Same "keep it above any attendance/{param}"
         // caveat as the field time-ins above.
         Route::get('attendance/open-shifts', [AttendanceController::class, 'openShifts']);
+        // Management attendance is GENERATED, not punched — these two say whether the nightly
+        // job actually ran, and let HR run it now when it did not.
+        Route::get('attendance/management-generation', [AttendanceController::class, 'managementGeneration']);
+        Route::post('attendance/management-generation', [AttendanceController::class, 'regenerateManagement']);
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).
@@ -260,6 +264,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payslips/{payslip}/line-corrections', [PayrollController::class, 'overridePayslipLine'])
             ->middleware('throttle:30,1,payslip-correction:');
         Route::delete('payslips/{payslip}/line-corrections/{amendment}', [PayrollController::class, 'removePayslipLineCorrection'])
+            ->middleware('throttle:30,1,payslip-correction:');
+        // "Seen it, my figure still stands" — clears the drift warning a recompute raises when the
+        // engine's own figure moved out from under a correction. Moves no money, so it shares the
+        // correction limit rather than the heavier run limits.
+        Route::post('payslips/{payslip}/line-corrections/{amendment}/acknowledge', [PayrollController::class, 'acknowledgePayslipLineCorrection'])
             ->middleware('throttle:30,1,payslip-correction:');
         Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf'])->middleware('throttle:20,1,hr-pdf:');

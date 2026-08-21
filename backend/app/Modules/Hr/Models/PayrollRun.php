@@ -52,6 +52,18 @@ class PayrollRun extends Model
      */
     public ?int $skippedDisbursedCount = null;
 
+    /**
+     * WHAT THE RECOMPUTE FOUND UNDERNEATH THE CORRECTIONS — one sentence per correction the engine
+     * has since disagreed with, or whose line no longer exists.
+     *
+     * An override is absolute and still wins, so none of these changed a figure. That is exactly
+     * why they have to be said: nothing looks wrong, and only the person who made the correction
+     * can decide whether it still belongs. Set by `PayrollService::run()`, never stored.
+     *
+     * @var list<string>|null
+     */
+    public ?array $overrideNotes = null;
+
     public function payslips(): HasMany
     {
         return $this->hasMany(Payslip::class);

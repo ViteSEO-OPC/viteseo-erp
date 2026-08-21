@@ -57,6 +57,8 @@ class EmployeeResource extends JsonResource
             'base_salary' => $this->base_salary,
             // Fixed-salary + attendance-exempt management flag.
             'is_management' => (bool) $this->is_management,
+            // WHEN that exemption started — read-only, stamped when the flag is switched on.
+            'management_since' => $this->management_since?->format('Y-m-d'),
             'phone' => $this->phone,
             'address' => $this->address,
             'emergency_contact_name' => $this->emergency_contact_name,

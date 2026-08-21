@@ -51,6 +51,51 @@ class InertPolicyModesTest extends HrTestCase
         $this->savePolicy(['early_arrival_mode' => 'none'])->assertOk();
     }
 
+    /**
+     * The recurring late rule repeats ONE rung. A ladder has no single rung to repeat, so the
+     * combination is refused rather than resolved by picking one — the wrong pick would over-
+     * or under-charge every late arrival with nobody being told which rung was chosen.
+     */
+    public function test_a_recurring_late_rule_is_rejected_on_a_ladder(): void
+    {
+        $this->savePolicy([
+            'late_deduction_mode' => 'tiered',
+            'late_tiers' => [['over' => 15, 'hours' => 1], ['over' => 60, 'hours' => 2]],
+            'late_tier_recurring' => true,
+        ])->assertStatus(422)->assertJsonValidationErrors('late_tier_recurring');
+    }
+
+    /** A 0-minute block would repeat once per minute late — an unbounded charge. Refused. */
+    public function test_a_recurring_late_rule_needs_a_non_zero_threshold(): void
+    {
+        $this->savePolicy([
+            'late_deduction_mode' => 'tiered',
+            'late_tiers' => [['over' => 0, 'hours' => 1]],
+            'late_tier_recurring' => true,
+        ])->assertStatus(422)->assertJsonValidationErrors('late_tiers');
+    }
+
+    public function test_a_recurring_late_rule_on_a_single_rung_saves(): void
+    {
+        $this->savePolicy([
+            'late_deduction_mode' => 'tiered',
+            'late_tiers' => [['over' => 30, 'hours' => 1]],
+            'late_tier_recurring' => true,
+        ])->assertOk()->assertJsonPath('data.late_tier_recurring', true);
+
+        $this->assertTrue((bool) AttendancePolicy::first()->late_tier_recurring);
+    }
+
+    /** The ladder itself stays allowed — only the recurring FLAG is restricted to one rung. */
+    public function test_a_ladder_still_saves_without_the_recurring_flag(): void
+    {
+        $this->savePolicy([
+            'late_deduction_mode' => 'tiered',
+            'late_tiers' => [['over' => 15, 'hours' => 1], ['over' => 60, 'hours' => 2]],
+            'late_tier_recurring' => false,
+        ])->assertOk();
+    }
+
     /** A rejected field must not block the rest of the card from saving. */
     public function test_a_rejected_mode_does_not_change_anything_else(): void
     {

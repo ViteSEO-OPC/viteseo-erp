@@ -20,6 +20,7 @@ class AttendancePolicyResource extends JsonResource
             'late_penalty_enabled' => (bool) $this->late_penalty_enabled,
             'late_minutes_from' => $this->late_minutes_from,
             'late_tiers' => $this->late_tiers,
+            'late_tier_recurring' => (bool) $this->late_tier_recurring,
 
             'undertime_deduction_mode' => $this->undertime_deduction_mode,
             'missing_clockout_mode' => $this->missing_clockout_mode,
@@ -28,6 +29,8 @@ class AttendancePolicyResource extends JsonResource
             'early_arrival_mode' => $this->early_arrival_mode,
             'early_clock_in_mode' => $this->early_clock_in_mode,
             'rest_day_work_requires_request' => (bool) $this->rest_day_work_requires_request,
+            'management_auto_attendance' => (bool) $this->management_auto_attendance,
+            'management_holiday_premium' => (bool) $this->management_holiday_premium,
 
             // Geofenced clock-in. lat/lng stay nullable — "no pin set yet" is a real state
             // the Rules form has to distinguish from 0,0 (a valid point in the Atlantic).

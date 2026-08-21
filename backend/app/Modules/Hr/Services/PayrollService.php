@@ -381,6 +381,8 @@ class PayrollService
      */
     /**
      * @param  array{index:int, count:int, deduction_timing:string, tax_timing:string}  $dist
+     * @param  list<array<string, mixed>>  $holidayLines  the days behind `$holidayPremium`, from
+     *                                                    holidayPremiumFor(), snapshot onto the slip
      */
     public function payslipFor(
         Employee $employee,
@@ -398,6 +400,7 @@ class PayrollService
         int $nightDiffMinutes = 0,
         float $restDayPremium = 0.0,
         int $restDayMinutes = 0,
+        array $holidayLines = [],
     ): array {
         $policy ??= $this->attendancePolicy->get();
         $monthlyBase = (float) $employee->base_salary;
@@ -565,6 +568,10 @@ class PayrollService
         // an attendance correction after the run must not silently rewrite the explanation
         // printed under a figure that has not moved.
         $slip['attendance_lines'] = $unpaidDetail?->lines ?: null;
+        // WHICH holidays the premium above was earned on. Snapshot for the same reason
+        // `attendance_lines` is: a holiday reclassified after the run must not rewrite the
+        // explanation printed under a figure that has already been paid.
+        $slip['holiday_lines'] = $holidayLines ?: null;
 
         return $slip;
     }
@@ -1347,21 +1354,33 @@ class PayrollService
      * no premium). Only days with a present/late attendance record earn it. Simplified:
      * flat daily-rate basis, no OT/night-diff stacking.
      *
+     * Returns the money AND the days behind it. The lines are what the payslip prints under
+     * the Holiday figure: before this the method returned a bare float, so a slip that paid
+     * two holidays showed one number the employee had no way to check.
+     *
      * @param  array<string, string>  $holidayMap  date 'Y-m-d' => type
+     * @return array{pay: float, lines: list<array{date: string, name: string|null, type: string, rate_pct: int, rest_day: bool, daily_rate: float, amount: float}>}
      */
-    private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null): float
+    private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null): array
     {
-        // Management staff are on a FIXED salary — no holiday premium, regardless of caller.
-        if ($employee->isManagement()) {
-            return 0.0;
-        }
+        $none = ['pay' => 0.0, 'lines' => []];
 
         if ($workingDays <= 0 || $holidayMap === []) {
-            return 0.0;
+            return $none;
         }
 
         // Same daily-rate basis as absence/late — priced through the shared helper.
         $policy ??= $this->attendancePolicy->get();
+
+        // Management staff are on a FIXED salary, so by default a holiday they worked pays no
+        // premium — the day was already inside the salary. `management_holiday_premium`
+        // (Company → Rules) buys that back: on, they earn the same statutory premium as
+        // everyone else. Read off the CYCLE'S policy version, so a rule changed today cannot
+        // reprice a period that has already been paid.
+        if ($employee->isManagement() && ! $policy->management_holiday_premium) {
+            return $none;
+        }
+
         $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
 
         $worked = array_flip($this->attendance->workedDatesBetween($employee, $start, $end));
@@ -1373,26 +1392,57 @@ class PayrollService
         $salaryCoversEveryDay = $policy->daily_rate_basis === 'fixed_divisor'
             && (int) $policy->annual_divisor >= 365;
 
+        // The holiday's NAME, for the line the payslip prints. One memoized query for the whole
+        // run, not one per employee.
+        $names = $this->holidays->namesBetween(Carbon::parse($start, $tz), Carbon::parse($end, $tz));
+
         $premium = 0.0;
+        $lines = [];
+        // Ordered so the printed lines read down the period rather than in whatever order the
+        // holiday table came back in.
+        ksort($holidayMap);
+
         foreach ($holidayMap as $date => $type) {
             if (! isset($worked[$date])) {
                 continue;
             }
 
             $multiplier = self::holidayPremiumMultiplier($type, $policy);
+            $onRestDay = false;
 
             if (! $salaryCoversEveryDay) {
                 $isWorkday = (bool) ($this->workSchedule->effectiveFor($employee, Carbon::parse($date, $tz))['is_workday'] ?? true);
                 if (! $isWorkday && $multiplier > 0) {
                     // Add-on → full rate: +100% becomes 200%, +30% becomes 130%.
                     $multiplier += 1.0;
+                    $onRestDay = true;
                 }
             }
 
+            $amount = round($dailyRate * $multiplier, 2);
             $premium += $dailyRate * $multiplier;
+
+            // A day that earned nothing earns no line either — a `special_working` day inside the
+            // cycle is an ordinary working day, and printing it at ₱0 under "Holiday" would read
+            // as a holiday the employee was short-changed on.
+            if ($amount == 0.0) {
+                continue;
+            }
+
+            $lines[] = [
+                'date' => $date,
+                'name' => $names[$date] ?? null,
+                'type' => (string) $type,
+                // The POLICY percentage as HR set it, not the add-on this method works in: "200%"
+                // is the figure in Company → Rules and the one the employee can look up.
+                'rate_pct' => self::dayRateMultiplierPct($type, ! $onRestDay, $policy),
+                'rest_day' => $onRestDay,
+                'daily_rate' => round($dailyRate, 2),
+                'amount' => $amount,
+            ];
         }
 
-        return round($premium, 2);
+        return ['pay' => round($premium, 2), 'lines' => $lines];
     }
 
     /**
@@ -1844,7 +1894,7 @@ class PayrollService
                     [
                         'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
                         'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
-                        'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                        'holiday_premium' => 0, 'holiday_lines' => null, 'overtime_pay' => 0, 'night_diff_pay' => 0,
                         'rest_day_premium' => 0,
                         'thirteenth_month' => $row['thirteenth_month'],
                         // The bucket this slip was measured against, kept so the payslip can
@@ -1979,7 +2029,7 @@ class PayrollService
                     [
                         'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
                         'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
-                        'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                        'holiday_premium' => 0, 'holiday_lines' => null, 'overtime_pay' => 0, 'night_diff_pay' => 0,
                         'rest_day_premium' => 0, 'thirteenth_month' => 0, 'other_benefits' => 0,
                         'adjustment_pay' => $amount,
                         'adjustment_note' => $line['note'] ?? null,
@@ -2139,7 +2189,7 @@ class PayrollService
                     }
                 }
 
-                PayslipAmendment::create([
+                $amendment = PayslipAmendment::create([
                     'payslip_id' => $slip->id,
                     'kind' => $kind,
                     'amount' => $signed,
@@ -2150,7 +2200,7 @@ class PayrollService
                     'created_by' => $actor->id,
                 ]);
 
-                $this->applyAmendmentTo($slip, $kind, $signed, $tax, $line['note'] ?? null, $reason);
+                $this->applyAmendmentTo($slip, $kind, $signed, $tax, $line['note'] ?? null, $reason, (int) $amendment->id);
 
                 $employeeIds[] = $employeeId;
                 $total = round($total + $magnitude, 2);
@@ -2204,10 +2254,10 @@ class PayrollService
     }
 
     /** Fold one correction into a payslip's stored figures. */
-    private function applyAmendmentTo(Payslip $slip, string $kind, float $amount, float $tax, ?string $note, string $reason): void
+    private function applyAmendmentTo(Payslip $slip, string $kind, float $amount, float $tax, ?string $note, string $reason, ?int $amendmentId = null): void
     {
         if ($kind === 'deduction') {
-            $this->applyAmendmentDeductionTo($slip, abs($amount), $note ?: $reason);
+            $this->applyAmendmentDeductionTo($slip, abs($amount), $note ?: $reason, $amendmentId);
 
             return;
         }
@@ -2229,7 +2279,7 @@ class PayrollService
     }
 
     /** Fold a MISSED DEDUCTION into a payslip — a benefit share, a uniform, an unrecorded obligation. */
-    private function applyAmendmentDeductionTo(Payslip $slip, float $amount, string $label): void
+    private function applyAmendmentDeductionTo(Payslip $slip, float $amount, string $label, ?int $amendmentId = null): void
     {
         $available = max(0.0, round((float) $slip->net_pay, 2));
         $taken = round(min($amount, $available), 2);
@@ -2246,7 +2296,11 @@ class PayrollService
             // read what was taken off them rather than one larger unexplained figure.
             'other_deductions_breakdown' => [
                 ...($slip->other_deductions_breakdown ?? []),
-                ['name' => 'Correction — ' . Str::limit($label, 60), 'amount' => $taken],
+                // THE AMENDMENT'S OWN ID, carried onto the line it created. Every other row in this
+                // breakdown is keyed by a slug of its name, and two corrections entered under the
+                // same label would slug to one key: correcting either would edit the first and mark
+                // both as corrected. A row that knows which amendment made it cannot collide.
+                ['name' => 'Correction — ' . Str::limit($label, 60), 'amount' => $taken, 'amendment_id' => $amendmentId],
             ],
             'total_deductions' => round((float) $slip->total_deductions + $taken, 2),
             'net_pay' => round(max(0, (float) $slip->net_pay - $taken), 2),
@@ -2626,6 +2680,47 @@ class PayrollService
         });
     }
 
+    /**
+     * "I have seen the new figure, and my correction still stands."
+     *
+     * A recompute can move the engine's own figure out from under a correction that was entered
+     * against an older one — `withLineOverrides()` reports that as drift, and keeps reporting it
+     * on every subsequent run because it cannot tell "reviewed and still right" from "nobody
+     * looked". This is how HR says the former. It moves NO money: the correction was already
+     * winning and still is, and only the baseline the drift note is measured against is restamped.
+     *
+     * A route of its own rather than a side effect of re-saving the correction. Re-saving does
+     * have the same effect (overrideLine writes `edited_against` afresh), but it is not something
+     * anyone would guess, and it makes HR retype an amount and a reason to change nothing.
+     */
+    public function acknowledgeLineOverride(Payslip $payslip, PayslipAmendment $override, User $actor): Payslip
+    {
+        $run = $payslip->payrollRun;
+
+        $this->assertCorrectable($run);
+
+        if ((int) $override->payslip_id !== (int) $payslip->id || $override->target_key === null) {
+            throw ValidationException::withMessages([
+                'override' => ['That correction does not belong to this payslip.'],
+            ]);
+        }
+
+        // `original_amount` is refreshed to the engine's current figure on every run, so it is
+        // already the number HR is being shown and asked to accept — recomputing the snapshot to
+        // rediscover it would only introduce a way for the two to disagree.
+        $override->update(['edited_against' => $override->original_amount]);
+
+        $this->audit->log(
+            'updated', 'Payroll',
+            'Confirmed the correction on ' . ($override->targetLabel() ?? $override->target_key)
+                . ' still stands — ' . $this->employeeName((int) $payslip->employee_id)
+                . ', ' . $run->cycle_end->format('M Y') . ' payslip',
+            $run,
+        );
+
+        return $payslip->fresh()->load(['amendments.creator', 'employee.user', 'payrollRun']);
+    }
+
     /** A period can be corrected only while it is finished and still open. */
     private function assertCorrectable(?PayrollRun $run): void
     {
@@ -2741,7 +2836,25 @@ class PayrollService
                 }
 
                 if (str_starts_with($key, PayslipLines::ALLOWANCE_PREFIX)) {
-                    $slip = $this->setNamedLine($slip, 'allowances_breakdown', $key, PayslipLines::ALLOWANCE_PREFIX, $to);
+                    /*
+                     * A PAYSLIP FROM BEFORE THE ALLOWANCE SPLIT has no breakdown to edit. The
+                     * document prints its `allowances` column as ONE aggregate line — see
+                     * PayslipDocument::allowanceLines() — and that column IS the line, so the
+                     * `allowances` move below carries the whole correction on its own.
+                     *
+                     * Routing it through setNamedLine() instead searched an empty breakdown and
+                     * refused with "this payslip no longer has that line", about a line that is
+                     * plainly on the payslip. The two cases cannot be confused: the aggregate is
+                     * only ever printed WHEN the breakdown is empty, so a genuine component that
+                     * happens to be named "Allowances" still resolves by name.
+                     */
+                    $aggregate = (array) ($slip['allowances_breakdown'] ?? []) === []
+                        && $key === PayslipLines::keyForName(PayslipLines::ALLOWANCE_PREFIX, 'Allowances');
+
+                    if (! $aggregate) {
+                        $slip = $this->setNamedLine($slip, 'allowances_breakdown', $key, PayslipLines::ALLOWANCE_PREFIX, $to);
+                    }
+
                     $add('allowances', $delta);
                 }
 
@@ -2797,10 +2910,20 @@ class PayrollService
     {
         $lines = (array) ($slip[$field] ?? []);
         $slug = substr($key, strlen($prefix));
+        // The two key spaces are kept DISJOINT: an amendment-keyed line is matched only by its id,
+        // and a slug-keyed line only by its name. Without that a deduction genuinely called
+        // "Amend 7" would answer to the key of amendment #7.
+        $amendmentId = PayslipLines::amendmentIdIn($key, $prefix);
         $found = false;
 
         foreach ($lines as $i => $line) {
-            if (PayslipDocument::slug((string) $line['name']) === $slug) {
+            $lineAmendment = $line['amendment_id'] ?? null;
+
+            $matches = $amendmentId === null
+                ? $lineAmendment === null && PayslipDocument::slug((string) $line['name']) === $slug
+                : (int) $lineAmendment === $amendmentId;
+
+            if ($matches) {
                 $lines[$i]['amount'] = round($to, 2);
                 $found = true;
                 break;
@@ -3180,7 +3303,7 @@ class PayrollService
                 [
                     'base_salary' => 0, 'period_base' => 0, 'absence_deduction' => 0,
                     'reimbursements' => 0, 'allowances' => 0, 'allowances_breakdown' => [],
-                    'holiday_premium' => 0, 'overtime_pay' => 0, 'night_diff_pay' => 0,
+                    'holiday_premium' => 0, 'holiday_lines' => null, 'overtime_pay' => 0, 'night_diff_pay' => 0,
                     'rest_day_premium' => 0, 'thirteenth_month' => 0, 'adjustment_pay' => 0,
                     'separation_pay' => $separationPay,
                     'separation_pay_taxable' => $separationTaxable,
@@ -3808,8 +3931,9 @@ class PayrollService
                 // scheduled workdays drive the daily rate; unpaid days (absences +
                 // missing records on past workdays, minus approved leave) prorate pay.
                 $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $cycleStart, $cycleEnd);
-                // Management staff are on a FIXED salary — the unpaidDaysDetailFor()/holidayPremiumFor()
-                // helpers themselves return 0 for management, so pay is never prorated by attendance.
+                // Management staff are on a FIXED salary — unpaidDaysDetailFor() returns 0 for
+                // them, so pay is never prorated by attendance. holidayPremiumFor() likewise
+                // pays them nothing UNLESS `management_holiday_premium` is on in Company → Rules.
                 // $policy is passed EXPLICITLY. It always accepted one (the preview/dry-run
                 // override, step 6b) and this call never supplied it, so the late and undertime
                 // deductions re-read the live singleton instead of the policy resolved above.
@@ -3818,8 +3942,10 @@ class PayrollService
                 // silently defeat asOf() for the one part of the payslip it matters most to.
                 $unpaidDetail = $this->attendance->unpaidDaysDetailFor($employee, $cycleStart, $cycleEnd, $policy);
 
-                // Premium for working on a (non-working) holiday in this cycle.
-                $holidayPremium = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
+                // Premium for working on a (non-working) holiday in this cycle, plus the days
+                // behind it for the payslip to print.
+                $holiday = $this->holidayPremiumFor($employee, $cycleStart, $cycleEnd, $periodsPerYear, $workingDays, $holidayMap, $policy);
+                $holidayPremium = $holiday['pay'];
                 // Rest days worked feed BOTH the rest-day premium and the overtime cap below.
                 $restByDate = $this->attendance->restDayWorkedMinutesFor($employee, $cycleStart, $cycleEnd, $holidayMap);
                 $restDay = $this->restDayPremiumFor($employee, $periodsPerYear, $workingDays, $restByDate, $policy);
@@ -3846,7 +3972,7 @@ class PayrollService
                 $employeeDist['month_to_date'] = $monthToDate[$employee->id]
                     ?? ['earnings' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0];
 
-                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes']);
+                $slip = $this->payslipFor($employee, $reimbTotal, $unpaidDetail->unpaidDays, $periodsPerYear, $workingDays, $employeeDist, $holidayPremium, $unpaidDetail, $policy, $overtime['pay'], $overtime['minutes'], $nightDiff['pay'], $nightDiff['minutes'], $restDay['pay'], $restDay['minutes'], $holiday['lines']);
 
                 // A correction added to this period belongs to the period, not to the run that
                 // happened to compute it. `payslipFor()` prices the cutoff from attendance and knows
@@ -4013,8 +4139,11 @@ class PayrollService
                 );
             }
 
-            // And TELL THE CALLER, not just the audit log.
+            // And TELL THE CALLER, not just the audit log. A note nobody reads is the same as no
+            // note: the audit trail answers "what happened to this run" after the fact, and these
+            // are for the person standing in front of the recompute right now.
             $run->skippedDisbursedCount = count($skippedDisbursed);
+            $run->overrideNotes = $overrideNotes;
 
             // One summary line for the reimbursements this run auto-paid.
             if ($reimbPaidCount > 0) {

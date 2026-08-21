@@ -131,6 +131,10 @@ class ViolationService
         // comes down when HR resolves a violation). ON (default) ⇒ each month starts at zero.
         $carryOver = ! $policy->monthly_late_reset;
 
+        // The company rule behind the management exemption, read ONCE for the whole scan: with
+        // it off nobody is exempt and management is flagged like everyone else.
+        $managementAuto = (bool) $policy->management_auto_attendance;
+
         // Step D: a resolved LATE violation has been actioned by HR, so it never counts toward
         // escalation — not in this month, not in the carry-over seed. Keyed "employeeId|Y-m-d"
         // across all history up to the scan end.
@@ -176,18 +180,6 @@ class ViolationService
         $computed = [];
 
         foreach (Employee::with('workSchedule')->get() as $emp) {
-            // Management is exempt from the time clock, so no violation category applies to
-            // them: their rows are written by `hr:generate-management-attendance`, not scanned.
-            // Guarding HERE rather than relying on those rows existing is the point — a night
-            // the job did not run (or any day before an employee was made management) left a
-            // missing row, and the absence branch below reads a missing row as an unauthorised
-            // absence, escalating to red AWOL. The roster, the reports and payroll all already
-            // exempt them (AttendanceService::allForDate, unpaidDaysDetailFor); this was the one
-            // layer that did not, so the board showed 'Present' beside an AWOL flag.
-            if ($emp->isManagement()) {
-                continue;
-            }
-
             $rows = Attendance::where('employee_id', $emp->id)
                 ->whereBetween('work_date', [$monthStart->toDateString(), $scanEnd->toDateString()])
                 ->get()
@@ -210,7 +202,14 @@ class ViolationService
                     ->whereBetween('work_date', [$carryFloor, $monthStart->copy()->subDay()->toDateString()])
                     ->pluck('work_date');
                 foreach ($priorLates as $wd) {
-                    if (! isset($resolvedLate["{$emp->id}|" . $wd->toDateString()])) {
+                    $wdStr = $wd->toDateString();
+                    // A stray 'late' row inside an exempt period is not a tardiness — the same
+                    // rule the day loop applies, so the seed and the scan agree.
+                    if ($emp->managementExemptOn($wdStr, $managementAuto)) {
+                        continue;
+                    }
+
+                    if (! isset($resolvedLate["{$emp->id}|{$wdStr}"])) {
                         $monthlyLate++;
                     }
                 }
@@ -232,6 +231,23 @@ class ViolationService
                 }
 
                 $dateStr = $d->toDateString();
+
+                // Management is exempt from the time clock, so no violation category applies to
+                // the days they were exempt for: those rows are written by
+                // `hr:generate-management-attendance`, not scanned. Guarding HERE rather than
+                // relying on those rows existing is the point — a night the job did not run left
+                // a missing row, and the absence branch below reads a missing row as an
+                // unauthorised absence, escalating to red AWOL beside a roster that says
+                // 'Present'. Scoped BY DATE, because the exemption starts when the promotion
+                // does: skipping the employee outright erased every real late and absence they
+                // accrued as rank-and-file the moment HR ticked the box.
+                if ($emp->managementExemptOn($dateStr, $managementAuto)) {
+                    $lateStreak = 0;
+                    $absentStreak = 0;
+
+                    continue;
+                }
+
                 $row = $rows->get($dateStr);
 
                 // Non-working holiday with no clock-in: not a violation, and it leaves the

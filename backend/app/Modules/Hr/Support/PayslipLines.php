@@ -166,4 +166,28 @@ final class PayslipLines
     {
         return $prefix . Str::slug($name);
     }
+
+    /**
+     * The key for a deduction line an AMENDMENT created.
+     *
+     * Keyed by the amendment rather than by a slug of its name: two corrections entered under the
+     * same label slug to the same key, and one of them would then be uncorrectable while the other
+     * carried both their marks.
+     */
+    public static function keyForAmendment(string $prefix, int $amendmentId): string
+    {
+        return $prefix . 'amend-' . $amendmentId;
+    }
+
+    /** The amendment an `other:amend-<id>` key names, or null for a key that names a slug. */
+    public static function amendmentIdIn(string $key, string $prefix): ?int
+    {
+        if (! str_starts_with($key, $prefix . 'amend-')) {
+            return null;
+        }
+
+        $id = substr($key, strlen($prefix) + 6);
+
+        return ctype_digit($id) ? (int) $id : null;
+    }
 }

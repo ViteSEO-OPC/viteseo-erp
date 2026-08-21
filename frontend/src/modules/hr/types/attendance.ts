@@ -152,6 +152,12 @@ export interface MyAttendance {
   week: Attendance[];
   clock_in: ClockInWindow;
   day_rules: DayRules | null;
+  /**
+   * Exempt from the time clock right now — the person's management flag AND the company rule
+   * together. Gate the clock on this, never on `is_management` alone, or the panel keeps
+   * hiding itself after HR switches auto time in/out off.
+   */
+  attendance_exempt: boolean;
 }
 
 export type Severity = "green" | "yellow" | "orange" | "red";
@@ -314,4 +320,29 @@ export interface OpenShiftRow {
   employee_can_fix: boolean;
   /** ISO instant the allowance expired and pay stopped waiting. */
   auto_closes_at: string | null;
+}
+
+/** The nightly management-attendance job, as HR reads it (item: job visibility). */
+export interface ManagementGenerationStatus {
+  employees: number;
+  enabled: boolean; // the company rule — off, there is no nightly to be stale about
+
+  is_stale: boolean;
+  last_run: {
+    ran_at: string;
+    range_start: string | null;
+    range_end: string | null;
+    created: number;
+    updated: number;
+    skipped: number;
+    notes: string[];
+    triggered_by: string | null; // null = the scheduler, a name = someone pressed the button
+  } | null;
+}
+
+export interface ManagementGenerationResult {
+  from: string;
+  to: string;
+  stats: { created: number; updated: number; skipped: number; employees: number; notes: string[] };
+  status: ManagementGenerationStatus;
 }

@@ -27,6 +27,7 @@ class AttendanceReportService
     public function __construct(
         private readonly ScheduleService $schedule,
         private readonly HolidayService $holidays,
+        private readonly AttendancePolicyService $policy,
     ) {}
 
     /** Shared tab metadata, so the three reports describe each other identically. */
@@ -598,7 +599,8 @@ class AttendanceReportService
 
         $hire = $employee->hire_date?->toDateString();
         $separation = $employee->separation_date?->toDateString();
-        $isManagement = $employee->isManagement();
+        // The company rule behind the exemption, read once for the whole month grid.
+        $managementAuto = (bool) $this->policy->get()->management_auto_attendance;
 
         $days = [];
         $counts = ['present' => 0, 'late' => 0, 'absent' => 0, 'on_leave' => 0, 'half_day' => 0];
@@ -620,8 +622,10 @@ class AttendanceReportService
                 $row && $row->status_override => $row->status,
                 $row && $row->time_in => $row->status,
                 $onLeave => 'on_leave',
+                // Above the holiday branch, as the roster ranks it: management is in on a
+                // holiday like any other day; the premium they do not get is payroll's call.
+                $employee->managementExemptOn($date, $managementAuto) => $isWorkday ? 'present' : 'rest_day',
                 $isHoliday && $isWorkday => 'holiday',
-                $isManagement => $isWorkday ? 'present' : 'rest_day',
                 $row && $row->status => $row->status,
                 $isWorkday && $judged => 'absent',
                 $isWorkday => 'upcoming',

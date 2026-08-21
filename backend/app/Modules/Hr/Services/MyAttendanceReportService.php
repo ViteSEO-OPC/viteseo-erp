@@ -23,6 +23,7 @@ class MyAttendanceReportService
     ];
 
     public function __construct(
+        private readonly AttendancePolicyService $policy,
         private readonly AttendanceService $attendance,
         private readonly ScheduleService $schedule,
         private readonly HolidayService $holidays,
@@ -83,6 +84,14 @@ class MyAttendanceReportService
                 // Management is exempt from the clock, and every zero on this page follows from
                 // that fact rather than from the employee never being late. Say so.
                 'is_management' => $employee->isManagement(),
+                // Whether the exemption is actually IN FORCE — `is_management` alone is the
+                // person's flag, this is the flag AND the company rule. The page's "you don't
+                // clock in" notice follows this one, or it would keep promising an exemption
+                // that Company → Rules has switched off.
+                'attendance_exempt' => $employee->managementExemptOn(
+                    $today->toDateString(),
+                    (bool) $this->policy->get()->management_auto_attendance,
+                ),
             ],
             'schedule' => $this->scheduleSummary($employee),
             'years' => $this->yearOptions($employee, $year, $today),
@@ -187,7 +196,8 @@ class MyAttendanceReportService
 
         $hire = $employee->hire_date?->toDateString();
         $separation = $employee->separation_date?->toDateString();
-        $isManagement = $employee->isManagement();
+        // The company rule behind the exemption, read once for the whole year grid.
+        $managementAuto = (bool) $this->policy->get()->management_auto_attendance;
 
         $days = [];
         $todayStr = $today->toDateString();
@@ -211,11 +221,15 @@ class MyAttendanceReportService
                 $row && $row->status_override => $row->status,
                 $row && $row->time_in => $row->status,
                 $leave !== null => 'on_leave',
+                // Ranked ABOVE holiday and suspension, exactly as allForDate ranks it:
+                // management is in on those days too — the premium is what they do not get,
+                // and payroll decides that. Asked per DATE, so days before the promotion keep
+                // whatever record the employee actually built on the clock.
+                $employee->managementExemptOn($date, $managementAuto) => $isWorkday ? 'present' : 'rest_day',
                 $isNonWorkingHoliday && $isWorkday => 'holiday',
                 // Ranked BELOW the holiday branch, exactly as allForDate ranks it: a holiday
                 // already pays, so a suspension declared over one changes nothing.
                 $suspension !== null && $isWorkday => $suspension['is_paid'] ? 'suspended_paid' : 'suspended_unpaid',
-                $isManagement => $isWorkday ? 'present' : 'rest_day',
                 $row && $row->status => $row->status,
                 $isWorkday && $judged => 'absent',
                 $isWorkday => 'upcoming',

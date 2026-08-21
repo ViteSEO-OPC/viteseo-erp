@@ -274,6 +274,20 @@ export async function removePayslipLineCorrection(
   return res.data.data;
 }
 
+/**
+ * "Seen it, my figure still stands." Clears the drift warning without touching the payslip —
+ * re-stamps the engine figure the correction is measured against.
+ */
+export async function acknowledgePayslipLineCorrection(
+  payslipId: number,
+  correctionId: number,
+): Promise<Payslip> {
+  const res = await apiClient.post(
+    `/hr/payslips/${payslipId}/line-corrections/${correctionId}/acknowledge`,
+  );
+  return res.data.data;
+}
+
 /** Correct a period on its OWN payslips. */
 export async function amendPayrollRun(
   runId: number,

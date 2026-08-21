@@ -12,35 +12,17 @@
     /** Two peso figures that differ by more than rounding. */
     $differs = fn ($a, $b) => abs((float) $a - (float) $b) > 0.005;
 
-    /**
-     * The rows the Compensation table shows even at zero, in the order it shows them — matching
-     * the screen. A reader checking a payslip is checking a list they already expect, and a
-     * missing "Overtime" row is indistinguishable from overtime that was silently dropped.
+    /*
+     * The rows an ordinary period shows even at zero arrive as REAL LINES from
+     * PayslipDocument::earningLines(), in the order it shows them — the screen reads the same
+     * list. This used to rebuild that skeleton here by NAME, which both duplicated the rule and
+     * printed a renamed line twice: once as an empty placeholder under its old name and again
+     * under the one HR gave it.
      */
-    $skeleton = ['Basic Pay', 'Overtime', 'Night Differential', 'Rest Day', 'Holiday'];
-
     $earningLines = array_values(array_filter(
         $p['earnings_breakdown'],
         fn ($l) => ($l['kind'] ?? 'earning') !== 'allowance',
     ));
-
-    if ($p['run_type'] === 'regular') {
-        $bySkeleton = [];
-        foreach ($skeleton as $name) {
-            $found = null;
-            foreach ($earningLines as $l) {
-                if ($l['name'] === $name) { $found = $l; break; }
-            }
-            $bySkeleton[] = $found ?? ['name' => $name, 'amount' => 0.0, 'note' => null];
-        }
-
-        $extra = array_values(array_filter(
-            $earningLines,
-            fn ($l) => ! in_array($l['name'], $skeleton, true),
-        ));
-
-        $earningLines = array_merge($bySkeleton, $extra);
-    }
 
     $allowanceLines = array_values(array_filter(
         $p['earnings_breakdown'],
@@ -56,15 +38,27 @@
         }
     }
 
-    // How many lines were corrected, and when the most recent of them was issued.
-    $amendedCount = count($corrections);
+    /*
+     * WHAT WAS AMENDED, AND WHEN. Counted over EVERY amendment, not only the ones that changed a
+     * line already here: a payslip that had a line added to it has been amended just as much, and
+     * used to carry no stamp at all.
+     */
+    $correctedCount = count($corrections);
+    $addedCount = count($p['amendments'] ?? []) - $correctedCount;
+    $amendedCount = $correctedCount + $addedCount;
     $amendedOn = null;
 
-    foreach ($corrections as $amendment) {
+    foreach ($p['amendments'] ?? [] as $amendment) {
         if (($amendment['issued_on'] ?? null) !== null && $amendment['issued_on'] > (string) $amendedOn) {
             $amendedOn = $amendment['issued_on'];
         }
     }
+
+    /** Said as what actually happened — three corrected and one added is not "4 corrected". */
+    $amendedWhat = implode(' · ', array_filter([
+        $correctedCount > 0 ? $correctedCount . ' line' . ($correctedCount === 1 ? '' : 's') . ' corrected' : null,
+        $addedCount > 0 ? $addedCount . ' line' . ($addedCount === 1 ? '' : 's') . ' added' : null,
+    ]));
 
     /** The struck-through original, or nothing at all on a line nobody has corrected. */
     $was = fn ($original) => $original === null ? '' : '<span class="was">' . $amt($original) . '</span>';
@@ -135,6 +129,48 @@
         $rest = count($dates) - count($shown);
 
         return $rest > 0 ? $text . ' +' . $rest . ' more' : $text;
+    };
+
+    /**
+     * The days behind an EARNINGS line — Holiday is the only one that has any. Unlike a
+     * deduction's dates these are not joined into one string: each day carries its own money, and
+     * running them together would leave the reader dividing a total by an unknown number of
+     * unequal parts. Trimmed to the printed column's width, and capped like every other list here.
+     *
+     * @return list<array{text: string, amount: string}>
+     */
+    $earningDates = function (array $line) use ($amt, $fitWide) {
+        $dates = $line['dates'] ?? [];
+
+        if (! is_array($dates) || $dates === []) {
+            return [];
+        }
+
+        $max = 4;
+        $shown = array_slice($dates, 0, $max);
+        $out = [];
+
+        foreach ($shown as $d) {
+            $day = empty($d['date'])
+                ? '—'
+                : \Illuminate\Support\Carbon::parse($d['date'])->format('M j');
+            // The print form, which is short by construction. `detail` is the screen's fuller
+            // wording and is only the fallback for a payslip serialised before `short` existed.
+            $detail = trim((string) ($d['short'] ?? $d['detail'] ?? ''));
+
+            $out[] = [
+                'text' => $detail === '' ? $day : $day . ' · ' . $fitWide($detail, 40),
+                'amount' => ($d['amount'] ?? null) === null ? '' : $amt((float) $d['amount']),
+            ];
+        }
+
+        $rest = count($dates) - count($shown);
+
+        if ($rest > 0) {
+            $out[] = ['text' => '+' . $rest . ' more', 'amount' => ''];
+        }
+
+        return $out;
     };
 
     // Attendance reasons are bounded by the number of charge kinds; benefit shares and loans are
@@ -358,7 +394,12 @@
             <table>
                 <tr class="thead"><td>Compensation</td><td class="amt">Amount</td></tr>
                 @foreach ($earningLines as $line)
-                    <tr class="line">
+                    @php
+                        // Assembled here rather than inline, for the reason the deductions loop
+                        // below gives: Blade's directive scanner fails the whole VIEW, not the line.
+                        $days = $earningDates($line);
+                    @endphp
+                    <tr class="line{{ $days ? ' pair' : '' }}">
                         <td>
                             @if (! empty($line['original_name']))
                                 <span class="was">{{ $fit($line['original_name']) }}</span>
@@ -370,6 +411,19 @@
                         </td>
                         <td class="amt">{!! $was($line['original_amount'] ?? null) !!}{{ $amt($line['amount']) }}</td>
                     </tr>
+                    {{--
+                        WHICH holidays the figure above was earned on. "Holiday 2,100.00" has to be
+                        taken on trust; "Aug 21 · Independence Day · Regular holiday 200%" can be
+                        checked against the reader's own memory of the month.
+                    --}}
+                    @foreach ($days as $day)
+                        {{-- Only the LAST day of a line closes it off; a rule between two days of
+                             the same figure would read as two separate lines. --}}
+                        <tr class="why{{ $loop->last ? '' : ' open' }}">
+                            <td>{{ $day['text'] }}</td>
+                            <td class="amt">{{ $day['amount'] }}</td>
+                        </tr>
+                    @endforeach
                 @endforeach
                 <tr class="sum"><td>Total Compensation</td><td class="amt">{{ $amt($t['earnings']) }}</td></tr>
             </table>
@@ -681,7 +735,7 @@
             @if ($amendedCount > 0)
                 <div class="cap" style="padding-top: 4px;">Amended</div>
                 <div style="font-size: 8px; padding-top: 1px;">
-                    {{ $amendedCount }} line{{ $amendedCount === 1 ? '' : 's' }} corrected{{ $amendedOn ? ' · ' . $fmt($amendedOn) : '' }}
+                    {{ $amendedWhat }}{{ $amendedOn ? ' · ' . $fmt($amendedOn) : '' }}
                 </div>
             @endif
         </td>

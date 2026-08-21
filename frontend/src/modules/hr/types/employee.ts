@@ -51,6 +51,7 @@ export interface Employee {
   previous_hire_date: string | null;
   base_salary: string; // raw decimal from the API; format for display
   is_management: boolean; // fixed salary + exempt from attendance
+  management_since: string | null; // when that exemption started (read-only)
   phone: string | null;
   address: string | null; // home address
   emergency_contact_name: string | null;

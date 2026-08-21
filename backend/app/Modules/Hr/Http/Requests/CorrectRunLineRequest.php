@@ -23,7 +23,8 @@ class CorrectRunLineRequest extends FormRequest
             'target_key' => ['required', 'string', 'max:100'],
             'amount' => ['nullable', 'numeric', 'min:0', 'max:99999999'],
             'label' => ['nullable', 'string', 'max:100'],
-            'reason' => ['required', 'string', 'min:5', 'max:500'],
+            // Required, with no minimum length — see CorrectPayslipLineRequest.
+            'reason' => ['required', 'string', 'max:500'],
             'issued_on' => ['nullable', 'date'],
             // Absent means everyone. An EMPTY array does not: it names nobody, and silently
             // treating that as "everyone" is the difference between correcting one payslip and

@@ -101,6 +101,11 @@ export interface PayrollRun {
    * the response to a run that just executed; null when a run is merely read back.
    */
   skipped_disbursed?: number | null;
+  /**
+   * Corrections this recompute found the engine has since disagreed with — one sentence each.
+   * Present on the response to a run that just executed; null when a run is merely read back.
+   */
+  override_notes?: string[] | null;
   breakdown?: PayrollBreakdownRow[];
 }
 
@@ -238,6 +243,21 @@ export interface PayslipLine extends PayslipLineCorrection {
    * `other_deductions_breakdown`, which are already single-purpose lists.
    */
   kind?: "earning" | "allowance";
+  /**
+   * THE DAYS BEHIND THE FIGURE, printed under the line the way a deduction's dates are.
+   * Present on Holiday, where one lump sum answered nothing: which holiday, at what rate, and
+   * whether it landed on a rest day. Null on every other line, and on Holiday for payslips
+   * issued before the derivation was recorded.
+   */
+  dates?: PayslipLineDate[] | null;
+}
+
+/** One dated occurrence behind a line, with what it was worth when the line is an earning. */
+export interface PayslipLineDate {
+  date: string | null;
+  detail: string | null;
+  /** Earnings only — a deduction's row carries its money on the row itself. */
+  amount?: number | null;
 }
 
 /**
@@ -316,6 +336,7 @@ export interface AttendanceChargeLine {
 export interface DeductionRule {
   late_mode: string;
   late_tiers: { over: number; hours: number }[];
+  late_tier_recurring: boolean;
   undertime_mode: string;
   hours_per_day: number;
   rounding: string;
@@ -633,6 +654,10 @@ export interface PayslipAmendment {
   override_amount: number | null;
   /** What the engine computed — the struck-through figure, refreshed on every run. */
   original_amount: number | null;
+  /** The engine figure this was corrected AGAINST, frozen when HR entered it. */
+  edited_against: number | null;
+  /** The two above disagree: the engine has changed its mind since, and HR has not confirmed. */
+  has_drifted: boolean;
   /** The wording HR gave the line. Display only: the line keeps its key. */
   label_override: string | null;
   /** Signed: negative for a reversal or a deduction, positive for extra pay. */
