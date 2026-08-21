@@ -33,6 +33,10 @@ const DAY_STATUS: Record<AttendanceDayStatus, { label: string; chip: string; dot
     dot: "bg-severity-orange",
   },
   holiday: { label: "Holiday", chip: "bg-violet-subtle text-violet", dot: "bg-violet" },
+  // Worded and coloured as the employee's own screen words them (my-attendance-display.tsx).
+  // Paid vs unpaid is a pay question the payslip answers; the day itself reads the same either way.
+  suspended_paid: { label: "Work suspended", chip: "bg-brand-subtle text-brand", dot: "bg-brand" },
+  suspended_unpaid: { label: "Work suspended", chip: "bg-brand-subtle text-brand", dot: "bg-brand" },
   rest_day: { label: "Rest day", chip: "bg-muted text-muted-foreground", dot: "bg-muted-foreground" },
   not_employed: {
     label: "Not employed",
@@ -42,6 +46,23 @@ const DAY_STATUS: Record<AttendanceDayStatus, { label: string; chip: string; dot
   upcoming: { label: "Upcoming", chip: "bg-muted text-muted-foreground/60", dot: "bg-muted-foreground" },
 };
 
+/**
+ * The map, but total. `hr_attendance.status` is a free-text column with no DB constraint, and the
+ * report forwards whatever is in it — so a status this screen has never heard of is a data
+ * question, not a reason to throw. It used to throw: an unmapped status made every lookup below
+ * read `.chip` off `undefined`, and with no error boundary in the tree that unmounted the whole
+ * app the moment a reader expanded the row. An unknown day now reads as itself, in grey.
+ */
+function dayStatus(status: AttendanceDayStatus): { label: string; chip: string; dot: string } {
+  return (
+    DAY_STATUS[status] ?? {
+      label: String(status).replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()),
+      chip: "bg-muted text-muted-foreground",
+      dot: "bg-muted-foreground",
+    }
+  );
+}
+
 /** The four statuses worth a legend — the rest are days nobody was expected in. */
 const LEGEND: AttendanceDayStatus[] = ["present", "late", "absent", "on_leave"];
 
@@ -50,8 +71,8 @@ export function AttendanceLegend() {
     <div className="flex flex-wrap items-center gap-4">
       {LEGEND.map((status) => (
         <span key={status} className="flex items-center gap-1.5 text-caption text-muted-foreground">
-          <span className={cn("size-2 rounded-full", DAY_STATUS[status].dot)} />
-          {DAY_STATUS[status].label}
+          <span className={cn("size-2 rounded-full", dayStatus(status).dot)} />
+          {dayStatus(status).label}
         </span>
       ))}
     </div>
@@ -60,7 +81,7 @@ export function AttendanceLegend() {
 
 /** The one-line description a day's tooltip carries: what it was, and when they clocked in/out. */
 function dayTitle(day: AttendanceReportDay): string {
-  const parts = [`${day.date} (${day.weekday}) — ${DAY_STATUS[day.status].label}`];
+  const parts = [`${day.date} (${day.weekday}) — ${dayStatus(day.status).label}`];
   if (day.leave_type && day.status === "on_leave") parts.push(day.leave_type);
   if (day.time_in) parts.push(`In ${day.time_in}${day.time_out ? ` · Out ${day.time_out}` : ""}`);
   if (day.hours > 0) parts.push(`${day.hours.toFixed(2)} h`);
@@ -78,7 +99,7 @@ export function DayGrid({ days }: { days: AttendanceReportDay[] }) {
           title={dayTitle(day)}
           className={cn(
             "flex size-8 items-center justify-center rounded-md text-xs font-bold",
-            DAY_STATUS[day.status].chip,
+            dayStatus(day.status).chip,
           )}
         >
           {day.day}
@@ -348,10 +369,10 @@ export function AttendanceDtrTable({
                           <span
                             className={cn(
                               "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold",
-                              DAY_STATUS[day.status].chip,
+                              dayStatus(day.status).chip,
                             )}
                           >
-                            {DAY_STATUS[day.status].label}
+                            {dayStatus(day.status).label}
                           </span>
                         </td>
                       </tr>

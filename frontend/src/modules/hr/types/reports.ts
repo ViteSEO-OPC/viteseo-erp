@@ -115,6 +115,9 @@ export interface ReportMonthOption {
  * How one day of an employee's month reads. `upcoming` is a workday that hasn't happened yet and
  * `not_employed` a day outside their employment window — neither is an absence, and neither
  * counts toward the attendance rate.
+ *
+ * This must stay a superset of what `AttendanceReportService::gridFor()` can emit, which includes
+ * anything HR stored in `hr_attendance.status` — the suspension statuses reach the report that way.
  */
 export type AttendanceDayStatus =
   | "present"
@@ -124,6 +127,8 @@ export type AttendanceDayStatus =
   | "half_day"
   | "rest_day"
   | "holiday"
+  | "suspended_paid"
+  | "suspended_unpaid"
   | "not_employed"
   | "upcoming";
 
