@@ -5,6 +5,7 @@ namespace App\Modules\Hr\Database\Seeders;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\HalfDayRequest;
+use App\Modules\Hr\Services\ManagementAttendanceService;
 use Illuminate\Database\Seeder;
 
 /**
@@ -34,7 +35,9 @@ class AttendanceDemoSeeder extends Seeder
         $today = now($tz)->startOfDay();
         $absentDays = [$weekStart->toDateString(), $weekStart->copy()->addDay()->toDateString()];
 
-        $employees = Employee::with('user')->get();
+        // Management is exempt from the clock, so they get no punches — the generator writes
+        // their days instead, below.
+        $employees = Employee::with('user')->where('is_management', false)->get();
 
         for ($day = $weekStart->copy(); $day->lte($today); $day->addDay()) {
             if ($day->isWeekend()) {
@@ -95,6 +98,16 @@ class AttendanceDemoSeeder extends Seeder
         }
 
         $this->seedEdgeCases($employees, $weekStart, $today);
+
+        // The management side of the week: generated rows up to YESTERDAY. Today is left
+        // alone on purpose — the nightly job never invents presence for a day still in
+        // progress, and the roster derives 'present' for them without a row anyway.
+        if ($today->gt($weekStart)) {
+            app(ManagementAttendanceService::class)->generate(
+                $weekStart->toDateString(),
+                $today->copy()->subDay()->toDateString(),
+            );
+        }
     }
 
     /**

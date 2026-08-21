@@ -3,9 +3,7 @@
 namespace App\Modules\Hr\Console\Commands;
 
 use App\Modules\Hr\Services\ManagementAttendanceService;
-use App\Modules\Hr\Services\ViolationService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Carbon;
 
 /** Writes the attendance rows for management staff (see ManagementAttendanceService). */
 class GenerateManagementAttendance extends Command
@@ -19,34 +17,28 @@ class GenerateManagementAttendance extends Command
 
     protected $description = 'Generate attendance rows for attendance-exempt management staff';
 
-    public function handle(ManagementAttendanceService $service, ViolationService $violations): int
+    public function handle(ManagementAttendanceService $service): int
     {
-        $tz = config('app.timezone_local');
-        $today = now($tz)->startOfDay();
-
-        $to = $this->option('to')
-            ? Carbon::parse($this->option('to'), $tz)->startOfDay()
-            : $today->copy();
-
-        $from = $this->option('from')
-            ? Carbon::parse($this->option('from'), $tz)->startOfDay()
-            : $to->copy()->subDays(max(1, (int) $this->option('days')) - 1);
-
-        // Never invent presence for a day that has not happened yet.
-        if ($to->gt($today)) {
-            $to = $today->copy();
-        }
-
         $dryRun = (bool) $this->option('dry-run');
+
+        // The range, the generation and the violation recompute all live in the service, so
+        // HR's regenerate button and this command cannot drift apart.
+        $result = $service->run(
+            from: $this->option('from'),
+            to: $this->option('to'),
+            days: (int) $this->option('days'),
+            dryRun: $dryRun,
+            recompute: ! $this->option('no-recompute'),
+        );
+
+        $stats = $result['stats'];
 
         $this->info(sprintf(
             '%sManagement attendance %s → %s',
             $dryRun ? '[dry run] ' : '',
-            $from->toDateString(),
-            $to->toDateString(),
+            $result['from'],
+            $result['to'],
         ));
-
-        $stats = $service->generate($from->toDateString(), $to->toDateString(), $dryRun);
 
         foreach ($stats['notes'] as $note) {
             $this->warn("  {$note}");
@@ -60,14 +52,7 @@ class GenerateManagementAttendance extends Command
             $stats['skipped'],
         ));
 
-        $written = $stats['created'] + $stats['updated'];
-
-        // New rows clear the bogus absences those days used to produce, but the stored
-        // violations only change when they are recomputed.
-        if (! $dryRun && $written > 0 && ! $this->option('no-recompute')) {
-            for ($m = $from->copy()->startOfMonth(); $m->lte($to); $m->addMonth()) {
-                $violations->recompute($m->format('Y-m'));
-            }
+        if ($result['recomputed']) {
             $this->line('  Violations recomputed.');
         }
 

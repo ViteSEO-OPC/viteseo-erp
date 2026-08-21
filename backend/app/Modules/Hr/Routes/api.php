@@ -194,6 +194,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // Stale-attendance review queue (item 6). Same "keep it above any attendance/{param}"
         // caveat as the field time-ins above.
         Route::get('attendance/open-shifts', [AttendanceController::class, 'openShifts']);
+        // Management attendance is GENERATED, not punched — these two say whether the nightly
+        // job actually ran, and let HR run it now when it did not.
+        Route::get('attendance/management-generation', [AttendanceController::class, 'managementGeneration']);
+        Route::post('attendance/management-generation', [AttendanceController::class, 'regenerateManagement']);
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).

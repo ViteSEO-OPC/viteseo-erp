@@ -68,6 +68,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
             // attendance row, not off an approval), so this only moves who has to agree first.
             'rest_day_work_requires_request' => ['sometimes', 'boolean'],
 
+            // The management exemption's two switches — see AttendancePolicyService::DEFAULTS.
+            'management_auto_attendance' => ['sometimes', 'boolean'],
+            'management_holiday_premium' => ['sometimes', 'boolean'],
+
             // Geofenced clock-in. Deliberately NOT cross-validated against
             // `geofence_enabled` — a half-configured policy must be SAVEABLE (HR pins the
             // office, saves, fetches the IP, saves again), and the server fails open on it

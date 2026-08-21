@@ -1351,17 +1351,22 @@ class PayrollService
      */
     private function holidayPremiumFor(Employee $employee, string $start, string $end, int $periodsPerYear, int $workingDays, array $holidayMap, ?AttendancePolicy $policy = null): float
     {
-        // Management staff are on a FIXED salary — no holiday premium, regardless of caller.
-        if ($employee->isManagement()) {
-            return 0.0;
-        }
-
         if ($workingDays <= 0 || $holidayMap === []) {
             return 0.0;
         }
 
         // Same daily-rate basis as absence/late — priced through the shared helper.
         $policy ??= $this->attendancePolicy->get();
+
+        // Management staff are on a FIXED salary, so by default a holiday they worked pays no
+        // premium — the day was already inside the salary. `management_holiday_premium`
+        // (Company → Rules) buys that back: on, they earn the same statutory premium as
+        // everyone else. Read off the CYCLE'S policy version, so a rule changed today cannot
+        // reprice a period that has already been paid.
+        if ($employee->isManagement() && ! $policy->management_holiday_premium) {
+            return 0.0;
+        }
+
         $dailyRate = $this->dailyRateFor($employee, $policy, $periodsPerYear, $workingDays);
 
         $worked = array_flip($this->attendance->workedDatesBetween($employee, $start, $end));
@@ -3808,8 +3813,9 @@ class PayrollService
                 // scheduled workdays drive the daily rate; unpaid days (absences +
                 // missing records on past workdays, minus approved leave) prorate pay.
                 $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $cycleStart, $cycleEnd);
-                // Management staff are on a FIXED salary — the unpaidDaysDetailFor()/holidayPremiumFor()
-                // helpers themselves return 0 for management, so pay is never prorated by attendance.
+                // Management staff are on a FIXED salary — unpaidDaysDetailFor() returns 0 for
+                // them, so pay is never prorated by attendance. holidayPremiumFor() likewise
+                // pays them nothing UNLESS `management_holiday_premium` is on in Company → Rules.
                 // $policy is passed EXPLICITLY. It always accepted one (the preview/dry-run
                 // override, step 6b) and this call never supplied it, so the late and undertime
                 // deductions re-read the live singleton instead of the policy resolved above.

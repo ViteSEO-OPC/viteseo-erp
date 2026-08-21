@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/core/auth-context";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -120,7 +119,6 @@ function hoursLabel(minutes: number): string {
 }
 
 export function TimeClockPanel() {
-  const { employee } = useAuth();
   const { data, isLoading } = useMyAttendance();
   const clockInMut = useClockIn();
   const clockOutMut = useClockOut();
@@ -331,8 +329,10 @@ export function TimeClockPanel() {
     if (ok) setTimeOutOpen(false);
   }
 
-  // Management staff are exempt from attendance — no clock panel, just a note.
-  if (employee?.is_management) {
+  // Management staff are exempt from attendance — no clock panel, just a note. Read off the
+  // server's live answer (flag AND company rule), not the auth payload's raw flag: HR can
+  // switch auto time in/out off, and then they punch like everyone else.
+  if (data?.attendance_exempt) {
     return (
       <div className="flex items-center gap-3 rounded-card bg-dark-teal p-6 text-white">
         <span className="size-2.5 rounded-full bg-success" />

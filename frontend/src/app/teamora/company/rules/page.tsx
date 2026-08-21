@@ -245,6 +245,7 @@ type PolicyCardKey =
   | "time_deductions"
   | "early_ot"
   | "rest_day_work"
+  | "management"
   | "geofence"
   | "premium_rates"
   | "basis"
@@ -280,6 +281,12 @@ const POLICY_CARDS: PolicyCard[] = [
     title: "Working a rest day",
     description:
       "Whether someone can time in on a day their schedule doesn't cover, or has to ask you first. The day is paid the same either way.",
+  },
+  {
+    key: "management",
+    title: "Management attendance",
+    description:
+      "Whether management staff are timed in and out automatically instead of using the time clock, and whether they earn the premium on a holiday they work.",
   },
   {
     key: "geofence",
@@ -412,6 +419,16 @@ function AttendancePolicyEditor() {
   // Working a rest day. On (the default) = the work-request queue; off = an ordinary punch.
   const [restDayNeedsRequest, setRestDayNeedsRequest] = useState(
     policy?.rest_day_work_requires_request ?? true,
+  );
+
+  // Management attendance. On (the default) = they never punch and the platform writes their
+  // days; off = they use the time clock like everyone else. The premium switch is separate
+  // because it is a PAY question, not an attendance one.
+  const [managementAuto, setManagementAuto] = useState(
+    policy?.management_auto_attendance ?? true,
+  );
+  const [managementHolidayPremium, setManagementHolidayPremium] = useState(
+    policy?.management_holiday_premium ?? false,
   );
 
   // Geofenced clock-in. lat/lng are kept as STRINGS so an empty box stays empty ("no pin
@@ -1285,6 +1302,80 @@ function AttendancePolicyEditor() {
           This does not cover <strong>work suspensions</strong> — a typhoon or a shutdown. Whether
           people may time in on one of those is set per declaration, on{" "}
           <strong>Company → Holidays &amp; Suspensions</strong>.
+        </Hint>
+      </SettingsDialog>
+
+      {/*
+       * Management attendance. Two switches that look alike and are not: the first decides
+       * whether the exemption exists at all, the second is a pay rule that applies only while
+       * someone is flagged management.
+       */}
+      <SettingsDialog
+        card={CARD.management}
+        open={openCard === "management"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "management"}
+        onSave={() =>
+          saveCard("management", {
+            management_auto_attendance: managementAuto,
+            management_holiday_premium: managementHolidayPremium,
+          })
+        }
+      >
+        <SubHeading>Automatic time in and time out</SubHeading>
+        <CheckBox
+          checked={managementAuto}
+          onChange={setManagementAuto}
+          label="Time management staff in and out automatically"
+        />
+        <Hint>
+          {managementAuto ? (
+            <>
+              Anyone marked <strong>Management</strong> on their record never uses the time
+              clock. Each night the platform writes their day from their own schedule, so they
+              show as <strong>present</strong> on the roster, raise no late or absent flags, and
+              cannot file half-day, early-out or overtime requests. Leave still works normally.
+            </>
+          ) : (
+            <>
+              Management uses the time clock like everyone else — they time in and out, arrive
+              late, and are flagged for it. Nothing is generated for them from tonight on;{" "}
+              <strong>days already generated stay</strong>, because they are the record of the
+              period they were exempt.
+            </>
+          )}
+        </Hint>
+        <Hint>
+          <strong>Their pay does not change either way.</strong> Management is salaried on a
+          fixed basis, so attendance never prorates it: no absence deduction, no lateness
+          charge, no overtime or night differential. This switch decides only who has to punch.
+        </Hint>
+
+        <SubHeading>Holidays they work</SubHeading>
+        <CheckBox
+          checked={managementHolidayPremium}
+          onChange={setManagementHolidayPremium}
+          label="Pay management the premium for a holiday they worked"
+        />
+        <Hint>
+          {managementHolidayPremium ? (
+            <>
+              A regular holiday or special non-working day they worked earns the same statutory
+              premium everyone else gets, at the rates in{" "}
+              <strong>Premium &amp; overtime rates</strong>.
+            </>
+          ) : (
+            <>
+              A holiday they worked pays nothing extra — the day is already inside their fixed
+              salary. This is the usual treatment for salaried management, and today&apos;s
+              behaviour.
+            </>
+          )}
+        </Hint>
+        <Hint>
+          Payroll reads this rule <strong>as it stood during the cycle</strong>, so turning it on
+          today never reprices a period that has already been paid. To pay a past holiday, save
+          this with an earlier <strong>effective from</strong> date and re-run that cycle.
         </Hint>
       </SettingsDialog>
 

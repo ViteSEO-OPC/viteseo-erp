@@ -264,10 +264,25 @@ class AttendanceService
         ]);
     }
 
+    /**
+     * The company rule behind the management exemption (Company → Rules). Off, nobody is
+     * exempt and management uses the time clock like everyone else.
+     */
+    private function managementAutoAttendance(): bool
+    {
+        return (bool) $this->policy->get()->management_auto_attendance;
+    }
+
+    /** Is this employee exempt from the clock today — their flag AND the company rule? */
+    public function attendanceExemptToday(Employee $employee): bool
+    {
+        return $employee->managementExemptOn($this->today(), $this->managementAutoAttendance());
+    }
+
     /** Management staff are exempt from attendance — they never clock in/out. */
     private function assertNotManagement(Employee $employee): void
     {
-        if ($employee->isManagement()) {
+        if ($employee->managementExemptOn($this->today(), $this->managementAutoAttendance())) {
             throw ValidationException::withMessages([
                 'attendance' => ['Management employees are exempt from attendance.'],
             ]);
@@ -355,7 +370,8 @@ class AttendanceService
         // Fetched whenever the day COULD have produced one, not only when it currently requires
         // one: a decided request still needs explaining, and HR flipping a switch mid-day must
         // not make yesterday's rejection vanish off the panel.
-        $workRequest = $employee->isManagement() || ($isWorkday && $suspension === null)
+        $workRequest = $employee->managementExemptOn($today, $this->managementAutoAttendance())
+            || ($isWorkday && $suspension === null)
             ? null
             : $this->workRequests->forDate($employee, $today);
 
@@ -725,6 +741,17 @@ class AttendanceService
      */
     public function adjust(Employee $employee, string $workDate, array $data): Attendance
     {
+        // A day the employee was exempt for has no clock record to correct — the platform
+        // generates it. Asked per DATE, so a day BEFORE the promotion is still HR's to fix.
+        // Blocking here also protects the series: an edit stamps the row `manual`, and the
+        // generator deliberately never touches a manual row again, so one correction would
+        // silently freeze that date out of every future run.
+        if ($employee->managementExemptOn($workDate, $this->managementAutoAttendance())) {
+            throw ValidationException::withMessages([
+                'attendance' => ['Management employees are exempt from attendance — this day is generated, not entered.'],
+            ]);
+        }
+
         // Attendance is the INPUT payroll priced this day from, so it is frozen once
         // that day has been paid.
         $this->freeze->assertOpen($employee->id, $workDate, null, 'adjust this attendance record');
@@ -1025,6 +1052,9 @@ class AttendanceService
         // counted them as lateness, so the number HR reads off the dashboard was inflated by them.
         $offHalves = $this->halfDays->offHalvesBetween($date, $date);
 
+        // Read once for the whole roster, not once per employee.
+        $managementAuto = $this->managementAutoAttendance();
+
         $s = [
             'checked_in' => 0, 'not_checked_in' => 0, 'on_leave' => 0,
             'early_arrivals' => 0, 'late_arrivals' => 0, 'on_time' => 0,
@@ -1041,8 +1071,10 @@ class AttendanceService
             }
 
             // Management: exempt from attendance — auto-present (on time) on scheduled
-            // workdays, never absent/not-checked-in. On leave/rest days, fall through.
-            if ($emp->isManagement()) {
+            // workdays, never absent/not-checked-in. On leave/rest days, fall through. A
+            // holiday or a suspended day is still a day they are counted in for: the thing
+            // they do not get is the PREMIUM, and that is priced in payroll, not here.
+            if ($emp->managementExemptOn($date, $managementAuto)) {
                 if (! $isOnLeave && $eff['is_workday']) {
                     $s['checked_in']++;
                     $s['on_time']++;
@@ -1104,10 +1136,12 @@ class AttendanceService
         // Approved half days for the whole roster, fetched once rather than per employee: this
         // map is read for every row on the board.
         $offHalves = $this->halfDays->offHalvesBetween($date, $date);
+        // Read once for the whole roster, not once per employee.
+        $managementAuto = $this->managementAutoAttendance();
 
         return Employee::with(['user', 'department', 'workSchedule'])
             ->get()
-            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday, $suspendedPaid, $offHalves) {
+            ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday, $suspendedPaid, $offHalves, $managementAuto) {
                 $att = $rows->get($emp->id);
                 $eff = $this->schedule->effectiveFor($emp, $dateCarbon);
                 $leaveName = $leaveMap->get($emp->id);
@@ -1127,6 +1161,15 @@ class AttendanceService
                     $status = $att->status; // present | late
                 } elseif ($leaveName) {
                     $status = 'on_leave';
+                } elseif ($emp->managementExemptOn($date, $managementAuto)) {
+                    // Management is exempt from attendance — auto-present on a scheduled
+                    // workday, rest day otherwise. Never absent/not-checked-in. Ranked ABOVE
+                    // the holiday and suspension branches: they are in on those days like any
+                    // other, and the generated row says so once the nightly has run — reading
+                    // 'holiday' before it and 'present' after was the same day changing its
+                    // mind overnight. What they do not get is the premium, and payroll (not
+                    // this board) is where that is decided.
+                    $status = $eff['is_workday'] ? 'present' : 'rest_day';
                 } elseif ($isHoliday && ($eff['is_workday'] ?? false)) {
                     // Non-working holiday on what would have been a workday — not an absence.
                     $status = 'holiday';
@@ -1136,10 +1179,6 @@ class AttendanceService
                     // statutory premium, so a suspension declared over one changes nothing and
                     // must not overwrite the classification payroll prices from.
                     $status = $suspendedPaid ? 'suspended_paid' : 'suspended_unpaid';
-                } elseif ($emp->isManagement()) {
-                    // Management is exempt from attendance — auto-present on a scheduled
-                    // workday, rest day otherwise. Never absent/not-checked-in.
-                    $status = $eff['is_workday'] ? 'present' : 'rest_day';
                 } elseif ($att && $att->status) {
                     $status = $att->status; // HR-set (e.g. absent)
                 } elseif ($eff['is_workday'] && $isPast) {
@@ -1419,13 +1458,14 @@ class AttendanceService
             // `employee()` is withTrashed, so a separated employee's unresolved day still shows —
             // that is precisely when it matters, since their final pay is about to be computed.
             $employee = $row->employee;
+            $date = $row->work_date->toDateString();
             // Management attendance is synthetic (`hr:generate-management-attendance`) and exempt
             // from the clock entirely, so an open row of theirs is not something HR can act on.
-            if (! $employee || $employee->isManagement()) {
+            // Only while the exemption is ON: with the company rule off they punch like anyone
+            // else, and a forgotten clock-out of theirs belongs in this queue.
+            if (! $employee || $employee->managementExemptOn($date, (bool) $policy->management_auto_attendance)) {
                 continue;
             }
-
-            $date = $row->work_date->toDateString();
             $eff = $this->schedule->effectiveFor($employee, Carbon::parse($date, $tz));
             $offHalf = $offHalves["{$employee->id}|{$date}"] ?? null;
             $resolved = $this->resolveWorkedWindow($row, $eff, $policy, $offHalf);
@@ -2324,9 +2364,13 @@ class AttendanceService
             ->orderBy('work_date')
             ->get();
 
+        $managementAuto = $this->managementAutoAttendance();
+
         foreach ($rows as $row) {
             $employee = $row->employee;
-            if (! $employee || $employee->isManagement()) {
+            // Generated days are not a long shift anyone worked. Only while the exemption is on:
+            // with the rule off these are real punches and belong in the queue.
+            if (! $employee || $employee->managementExemptOn($row->work_date->toDateString(), $managementAuto)) {
                 continue;
             }
 
@@ -2372,9 +2416,11 @@ class AttendanceService
         $out = [];
         $clockedByEmployee = [];
 
+        $managementAuto = $this->managementAutoAttendance();
+
         foreach ($requests as $request) {
             $employee = $request->employee;
-            if (! $employee || $employee->isManagement()) {
+            if (! $employee || $employee->managementExemptOn($request->work_date->toDateString(), $managementAuto)) {
                 continue;
             }
 

@@ -16,6 +16,7 @@ import { AttendanceMeetingDialog } from "@/modules/hr/components/attendance-meet
 import { AttendanceSummaryTiles } from "@/modules/hr/components/attendance-summary-tiles";
 import { FieldTimeInQueue } from "@/modules/hr/components/field-timein-queue";
 import { OpenShiftQueue } from "@/modules/hr/components/open-shift-queue";
+import { ManagementGenerationCard } from "@/modules/hr/components/management-generation-card";
 import {
   SoftBadge,
   deriveAttendanceStatus,
@@ -167,6 +168,15 @@ export default function AttendancePage() {
             setDate(r.work_date);
           }}
         />
+      </div>
+
+      {/*
+       * Management attendance is generated, not punched. Renders nothing when nobody is
+       * exempt; below the two queues because a missed nightly is a data-freshness problem,
+       * not a person waiting on HR.
+       */}
+      <div className="mt-4 empty:mt-0">
+        <ManagementGenerationCard />
       </div>
 
       <div className="mt-4">

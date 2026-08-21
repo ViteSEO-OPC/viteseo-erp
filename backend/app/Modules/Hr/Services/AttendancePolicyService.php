@@ -47,6 +47,13 @@ class AttendancePolicyService
         // weekend coverage is routine, where a queue that is always approved is a queue nobody
         // reads; the punch is then simply recorded, and pays exactly the same either way.
         'rest_day_work_requires_request' => true,
+        // Management is exempt from the time clock and the platform writes their attendance
+        // instead — on is today's behaviour. Off puts them back on the clock like everyone
+        // else; it never changes their pay, which is fixed either way.
+        'management_auto_attendance' => true,
+        // Off is today's behaviour: fixed-salary management earns no holiday premium. On pays
+        // them the same statutory premium as everyone else for a holiday they worked.
+        'management_holiday_premium' => false,
         // Geofenced clock-in — off is today's behaviour. Also the kill switch: turning it
         // off puts everyone back on the normal clock instantly, with no deploy.
         'geofence_enabled' => false,

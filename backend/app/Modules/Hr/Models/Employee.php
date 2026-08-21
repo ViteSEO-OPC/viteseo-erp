@@ -43,6 +43,9 @@ class Employee extends Model
         'bank_account',
         'base_salary',
         'is_management',
+        // WHEN the attendance exemption began — see the migration. Never accepted from a
+        // request; EmployeeService stamps it when the flag is switched on.
+        'management_since',
         // Excluded from the minimum-wage check, with the reason on the record.
         'minimum_wage_exempt',
         'minimum_wage_exempt_reason',
@@ -98,6 +101,7 @@ class Employee extends Model
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
         'is_management' => 'boolean',
+        'management_since' => 'date',
         'minimum_wage_exempt' => 'boolean',
         // One entry per named sibling: [{ name, gender }].
         'siblings' => 'array',
@@ -165,6 +169,32 @@ class Employee extends Model
     public function isManagement(): bool
     {
         return (bool) $this->is_management;
+    }
+
+    /**
+     * Was the attendance exemption in force on this Manila date? Two things decide it:
+     *
+     *  - the COMPANY rule (`management_auto_attendance`, Company → Rules). Off, nobody is
+     *    exempt: management uses the time clock like everyone else. Passed in rather than read
+     *    here so each caller resolves the policy once instead of once per employee per day.
+     *  - WHEN this person became management. `is_management` answers only "today", which is the
+     *    wrong question for anything that scans history: a blanket skip let a promotion erase
+     *    the lates and absences someone accrued before it.
+     *
+     * Their PAY is not part of this: management is salaried on a fixed basis whatever the rule
+     * says, so payroll keeps asking isManagement() instead.
+     */
+    public function managementExemptOn(string $date, bool $autoAttendanceEnabled): bool
+    {
+        if (! $autoAttendanceEnabled || ! $this->isManagement()) {
+            return false;
+        }
+
+        // A flagged employee with no start date predates the column — exempt throughout, exactly
+        // as they behaved before it existed.
+        $since = $this->management_since?->toDateString() ?? $this->hire_date?->toDateString();
+
+        return $since === null || $date >= $since;
     }
 
     /** Browser-facing URL for the profile picture, or null to fall back to initials. */

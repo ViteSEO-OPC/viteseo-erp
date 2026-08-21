@@ -41,6 +41,7 @@ import {
   useWorkRequests,
   useCancelWorkRequest,
 } from "@/modules/hr/hooks/use-work-request";
+import { useMyAttendance } from "@/modules/hr/hooks/use-attendance";
 
 type RequestTab = "leave" | "half" | "early" | "overtime";
 
@@ -109,16 +110,21 @@ interface HistItem {
 function RequestTabs({
   value,
   onChange,
+  available,
 }: {
   value: RequestTab;
   onChange: (tab: RequestTab) => void;
+  /** Which kinds this employee may file — management is exempt from all but leave. */
+  available: RequestTab[];
 }) {
-  const tabs: { value: RequestTab; label: string }[] = [
-    { value: "leave", label: "Leave" },
-    { value: "half", label: "Half-Day" },
-    { value: "early", label: "Early Out" },
-    { value: "overtime", label: "Overtime" },
-  ];
+  const tabs = (
+    [
+      { value: "leave", label: "Leave" },
+      { value: "half", label: "Half-Day" },
+      { value: "early", label: "Early Out" },
+      { value: "overtime", label: "Overtime" },
+    ] as { value: RequestTab; label: string }[]
+  ).filter((t) => available.includes(t.value));
 
   return (
     <div
@@ -175,7 +181,23 @@ export default function TimeOffPage() {
   const cancelWorkRequestMut = useCancelWorkRequest();
   const cancelEarlyOutMut = useCancelEarlyOutRequest();
   const cancelOvertimeMut = useCancelOvertimeRequest();
-  const [tab, setTab] = useState<RequestTab>("leave");
+  const { data: myAttendance } = useMyAttendance();
+  /*
+   * Exempt from the time clock, so half-day, early-out and overtime requests mean nothing —
+   * the server refuses all three. Leave still applies: they take it and it still costs
+   * credits. Hiding the tabs rather than letting the form 422 keeps the page honest about
+   * what they can actually do. Read off the server's live answer (the management flag AND the
+   * company rule), so switching auto time in/out off hands the tabs straight back.
+   */
+  const isManagement = myAttendance?.attendance_exempt ?? false;
+  const availableTabs: RequestTab[] = isManagement
+    ? ["leave"]
+    : ["leave", "half", "early", "overtime"];
+
+  const [rawTab, setTab] = useState<RequestTab>("leave");
+  // Derived, not stored: the flag can change under a mounted page, and a tab that is no
+  // longer available must not keep rendering its form.
+  const tab = availableTabs.includes(rawTab) ? rawTab : "leave";
   const [detail, setDetail] = useState<HistItem | null>(null);
   const [cancelTarget, setCancelTarget] = useState<HistItem | null>(null);
 
@@ -500,8 +522,15 @@ export default function TimeOffPage() {
            */}
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <h2 className="text-h3 font-bold text-foreground">{REQUEST_TITLES[tab]}</h2>
-            <RequestTabs value={tab} onChange={setTab} />
+            <RequestTabs value={tab} onChange={setTab} available={availableTabs} />
           </div>
+
+          {isManagement && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              You&apos;re exempt from the time clock, so half-day, early-out and overtime
+              requests don&apos;t apply to you. Leave still does.
+            </p>
+          )}
 
           <div className="mt-6">
             {tab === "leave" ? (

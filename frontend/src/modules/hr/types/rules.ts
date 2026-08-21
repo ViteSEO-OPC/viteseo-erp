@@ -109,6 +109,14 @@ export interface AttendancePolicy {
   // either way — the rest-day premium is priced off the attendance row, not off an approval.
   rest_day_work_requires_request: boolean;
 
+  // The management attendance exemption. On (the default): management never punches — the
+  // platform writes their days. Off: they use the time clock like everyone else, flags and
+  // all. Their pay is fixed either way.
+  management_auto_attendance: boolean;
+  // Whether management earns the statutory premium for a holiday they worked. Off (the
+  // default) is why the management flag exists — fixed-salary staff are not paid by the day.
+  management_holiday_premium: boolean;
+
   // Geofenced clock-in. Off = today's clock-in, untouched; it doubles as the kill switch.
   // On but half-configured (no pin, or no IPs) deliberately behaves as OFF — the server
   // fails open rather than locking the company out of its own time clock.

@@ -17,6 +17,8 @@ import {
   reopenViolation,
   getDailyOverride,
   upsertDailyOverride,
+  getManagementGeneration,
+  regenerateManagementAttendance,
 } from "@/modules/hr/api/attendance";
 import type { DayTask, LocationFix } from "@/modules/hr/types/attendance";
 
@@ -154,6 +156,27 @@ export function useUpsertDailyOverride() {
       // The rule the employee panel prints comes from `me/attendance`, so changing it here
       // has to refresh that too — an HR officer is an employee with a clock panel as well.
       qc.invalidateQueries({ queryKey: MY_KEY });
+    },
+  });
+}
+
+/** The nightly management-attendance job's last run — the only way a dead cron is visible. */
+export function useManagementGeneration() {
+  return useQuery({
+    queryKey: ["hr", "attendance", "management-generation"],
+    queryFn: getManagementGeneration,
+  });
+}
+
+export function useRegenerateManagementAttendance() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: regenerateManagementAttendance,
+    // The run writes attendance and recomputes violations, so both boards are now stale.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["hr", "attendance"] });
+      qc.invalidateQueries({ queryKey: ["hr", "attendance-summary"] });
+      qc.invalidateQueries({ queryKey: ["hr", "violations"] });
     },
   });
 }

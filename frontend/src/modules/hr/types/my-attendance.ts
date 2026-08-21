@@ -88,6 +88,8 @@ export interface MyAttendanceReport {
     hire_date: string | null;
     /** Management is exempt from the clock — every zero below follows from that, not from luck. */
     is_management: boolean;
+    /** The exemption as it stands TODAY — the flag and the company rule together. */
+    attendance_exempt: boolean;
   };
   schedule: {
     name: string | null;
