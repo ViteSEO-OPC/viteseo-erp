@@ -185,9 +185,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
-        // The withholding-tax bands, readable. Read-only: tax rates come from statute, and
-        // an editable table would silently mis-withhold for everyone at once.
+        // The withholding-tax bands. Editable, because the schedule is statute that CHANGES
+        // (the BIR table has moved once already, and a bill to move it again is in the House
+        // as of Aug 2026) and a rate change should not need a migration and a deploy. The
+        // danger an editable table carries — one mistyped figure mis-withholding for everyone
+        // in a band at once — is answered by SaveTaxTableRequest, which refuses a table whose
+        // bands do not add up, not by keeping the numbers in code.
         Route::get('tax-table', [TaxTableController::class, 'show']);
+        Route::match(['put', 'patch'], 'tax-table', [TaxTableController::class, 'update']);
+        Route::delete('tax-versions/{taxVersion}', [TaxTableController::class, 'destroyVersion']);
         Route::get('reports/{key}', [ReportController::class, 'show']);
         Route::post('reports/{key}/export', [ReportController::class, 'export'])->middleware('throttle:10,1,report-export:');
         Route::get('attendance', [AttendanceController::class, 'index']);

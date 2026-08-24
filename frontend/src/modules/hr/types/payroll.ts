@@ -801,7 +801,7 @@ export interface DeductionArrear {
 /**
  * The withholding-tax table, exposed so it can be checked against the BIR schedule.
  *
- * `max_annual` is derived server-side (the next band's floor − 0.01) because the table stores only
+ * `max_annual` is derived server-side (the next band's floor) because the table stores only
  * floors, while the BIR prints ranges — and a range is what makes it checkable. Null on the top band.
  */
 export interface TaxBand {
@@ -819,7 +819,18 @@ export interface TaxTable {
   /** True when `as_of` precedes every version and the earliest table was used instead. */
   is_fallback: boolean;
   bands: TaxBand[];
-  versions: { effective_from: string | null; note: string | null }[];
+  versions: { id: number; effective_from: string | null; note: string | null }[];
+  /** Today in Manila — the date the editor publishes for. There is no date to choose. */
+  today: string;
+  /** True when a table was already published today, so saving replaces it rather than adding one. */
+  has_version_today: boolean;
+}
+
+/** One band as the editor sends it. Floors and money in pesos; the rate as a decimal (0.15 = 15%). */
+export interface TaxBandInput {
+  min_annual: number;
+  base_tax: number;
+  rate_on_excess: number;
 }
 
 /** One employee this run would pay below the regional minimum daily wage. */
