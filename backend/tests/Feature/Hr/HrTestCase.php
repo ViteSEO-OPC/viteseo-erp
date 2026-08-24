@@ -3,6 +3,8 @@
 namespace Tests\Feature\Hr;
 
 use App\Models\User;
+use App\Modules\Hr\Models\AttendancePolicy;
+use App\Modules\Hr\Services\AttendancePolicyService;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Testing\TestResponse;
@@ -89,5 +91,25 @@ abstract class HrTestCase extends TestCase
         $user->assignRole('hr_officer');
 
         return $user;
+    }
+
+    /**
+     * Set attendance rules as the ones that have ALWAYS been in force.
+     *
+     * A payroll run prices at the rule version in force on the cycle's LAST DAY, so a rule set
+     * today never reaches a fixture cycle in the past. That is the point rather than a wrinkle to
+     * work around — it is what stops an edit now from silently repricing an old payslip. A test
+     * that writes the policy row directly is not describing HR changing its mind mid-history, it
+     * is describing a company that has always had this rule, so the rule belongs in the OPENING
+     * version. Writing the row raw (`AttendancePolicy::query()->update()`) records no version at
+     * all and only ever worked because `asOf()` used to fall back to the live row.
+     *
+     * @param  array<string, mixed>  $rules  any subset of AttendancePolicyService::DEFAULTS
+     */
+    protected function policyAlways(array $rules): AttendancePolicy
+    {
+        return app(AttendancePolicyService::class)->update(
+            $rules + ['effective_from' => AttendancePolicyService::OPENING_DATE],
+        );
     }
 }

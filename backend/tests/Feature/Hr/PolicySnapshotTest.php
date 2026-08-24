@@ -3,7 +3,6 @@
 namespace Tests\Feature\Hr;
 
 use App\Models\User;
-use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Database\Seeders\ContributionSettingSeeder;
@@ -74,7 +73,7 @@ class PolicySnapshotTest extends HrTestCase
     {
         $this->assertSame(125, $this->snapshot()['attendance_policy']['overtime_ordinary_pct']);
 
-        AttendancePolicy::query()->update(['overtime_ordinary_pct' => 150]);
+        $this->policyAlways(['overtime_ordinary_pct' => 150]);
 
         $this->assertSame(150, $this->snapshot()['attendance_policy']['overtime_ordinary_pct']);
     }

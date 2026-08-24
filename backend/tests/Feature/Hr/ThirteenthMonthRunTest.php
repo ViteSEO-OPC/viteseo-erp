@@ -7,11 +7,13 @@ use App\Modules\Hr\Database\Seeders\ContributionSettingSeeder;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollRun;
+use App\Modules\Hr\Models\PayrollSetting;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\WorkSchedule;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 
 /** 13th month pay is paid by payroll and withheld on. */
 class ThirteenthMonthRunTest extends HrTestCase
@@ -194,5 +196,56 @@ class ThirteenthMonthRunTest extends HrTestCase
         $this->actingAs($employee->user)
             ->postJson('/api/v1/hr/payroll/thirteenth-month/run', ['year' => 2026])
             ->assertForbidden();
+    }
+
+    /**
+     * A PREVIEW HAS TO RESOLVE ITS RULES THE WAY THE RUN DOES.
+     *
+     * The preview read the LIVE settings row while the run reads the cap dated at that year's
+     * end. For the current year with nothing scheduled the two agree, which is why the case
+     * above never caught it — but a ceiling already scheduled for December, followed by any
+     * later edit, made the preview quote a tax figure the run would not charge.
+     */
+    public function test_the_preview_uses_the_same_dated_cap_as_the_run(): void
+    {
+        $this->travelTo(Carbon::parse('2026-08-24 09:00', config('app.timezone_local')));
+
+        // A lower ceiling already scheduled for December...
+        PayrollSetting::effectiveFrom('2026-12-01');
+        PayrollSetting::current()->update(['other_benefits_annual_cap' => 30000]);
+
+        // ...and an ordinary edit made today, which is what the live row ends up holding.
+        PayrollSetting::effectiveFrom(null);
+        PayrollSetting::current()->update(['other_benefits_annual_cap' => 90000]);
+
+        $this->assertSame(
+            30000.0,
+            (float) PayrollSetting::asOf('2026-12-31')->other_benefits_annual_cap,
+            'fixture: the dated cap and the live one must genuinely differ',
+        );
+        $this->assertSame(90000.0, (float) PayrollSetting::current()->other_benefits_annual_cap);
+
+        // ₱1.2M taxable for the year, so the excess is taxed at a real marginal rate rather
+        // than disappearing into the ₱250,000 zero band.
+        $employee = $this->employee('E-001', 60000);
+        $this->payYear($employee, 60000, 0, 100000);
+
+        $preview = $this->actingAsHr()
+            ->getJson('/api/v1/hr/payroll/thirteenth-month/preview?year=2026')
+            ->assertOk()
+            ->json();
+
+        $slip = $this->execute()->payslips()->firstOrFail();
+
+        $this->assertGreaterThan(
+            0.0,
+            (float) $slip->withholding_tax,
+            'fixture: December\'s lower ceiling has to actually bite, or this proves nothing',
+        );
+        $this->assertSame(
+            (float) $slip->withholding_tax,
+            (float) $preview['data']['tax'],
+            'the preview quoted a tax the run would not charge',
+        );
     }
 }

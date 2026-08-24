@@ -35,7 +35,7 @@ export interface Attendance {
 }
 
 /**
- * Today's clock-in window, decided by the server (Company → Rules → strict clock-in).
+ * Today's clock-in window, decided by the server (Company → Settings → strict clock-in).
  * The panel only reads it — it never re-derives the rule.
  */
 export interface ClockInWindow {
@@ -53,7 +53,7 @@ export interface ClockInWindow {
   defers_to: string | null;
   /**
    * Ask where the employee is before clocking in. This is "the server is actually
-   * enforcing a geofence", NOT the raw Company → Rules toggle: a policy switched on but
+   * enforcing a geofence", NOT the raw Company → Settings toggle: a policy switched on but
    * left unconfigured fails open server-side and reports `false` here, so the panel never
    * demands a location that is about to be ignored.
    */

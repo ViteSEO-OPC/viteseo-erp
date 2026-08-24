@@ -18,6 +18,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { CompanyDetailsForm } from "@/modules/hr/components/company-details-form";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { WorkScheduleFormDialog } from "@/modules/hr/components/work-schedule-form-dialog";
 import {
@@ -46,9 +47,24 @@ import {
   type WorkSchedule,
 } from "@/modules/hr/types/rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
-import { DatePicker } from "@/modules/hr/ui/date-picker";
-import { formatDate } from "@/core/lib/format";
-import { manilaToday } from "@/modules/hr/lib/manila-date";
+import { AxiosError } from "axios";
+
+/**
+ * The server's own words, when it has any.
+ *
+ * A 422 carries the reason in `errors.<field>[0]`, and a flat "Could not save." in its place
+ * leaves HR staring at a form that refuses to save without ever saying why. That is not
+ * hypothetical: the rules here are refused outright when a change would mis-price a period that
+ * has already been run, and the refusal is only useful if its reason arrives with it.
+ */
+function saveError(err: unknown, fallback = "Could not save."): string {
+  if (!(err instanceof AxiosError)) return fallback;
+
+  const errors = err.response?.data?.errors as Record<string, string[]> | undefined;
+  const firstField = errors ? Object.values(errors)[0]?.[0] : undefined;
+
+  return firstField ?? err.response?.data?.message ?? fallback;
+}
 
 export default function RulesPage() {
   const { data: schedules, isLoading, isError } = useWorkSchedules();
@@ -78,19 +94,39 @@ export default function RulesPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Company Rules"
-        subtitle="Work schedules per role, attendance policy, and per-employee overrides."
-        actions={
-          <Button onClick={openCreate}>
-            <Plus />
-            Add Schedule
-          </Button>
-        }
+        title="Company Settings"
+        subtitle="Company details, work schedules per role, attendance settings, and per-employee overrides."
       />
 
       <div className="mt-8 space-y-8">
-        {/* Section A — schedules */}
-        <section>
+        {/*
+         * Section A — who the employer is. First on the page because it is the one thing here
+         * that appears on documents people outside HR read: every payslip, export and report
+         * prints this letterhead.
+         */}
+        <CompanyDetailsForm />
+
+        {/* Section B — schedules */}
+        <section className="space-y-6">
+          {/*
+           * The heading carries "Add Schedule" rather than the page header: the page now edits
+           * four unrelated things, so a button parked at the top reads as applying to all of
+           * them. Beside the table it fills, it can only mean one thing.
+           */}
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-1">
+              <h2 className="text-h3 font-bold text-foreground">Work schedules</h2>
+              <p className="text-sm text-muted-foreground">
+                Working days and hours per role. Lateness is measured against these, plus each
+                schedule&rsquo;s own grace period.
+              </p>
+            </div>
+            <Button onClick={openCreate}>
+              <Plus />
+              Add Schedule
+            </Button>
+          </div>
+
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading schedules…</p>
           ) : isError ? (
@@ -104,11 +140,11 @@ export default function RulesPage() {
           )}
         </section>
 
-        {/* Section B — attendance policy */}
+        {/* Section C — attendance settings */}
         <AttendancePolicyForm />
 
         {/*
-         * Section C — payroll settings. Kept visually separate from the attendance policy
+         * Section D — payroll settings. Kept visually separate from the attendance settings
          * rather than folded into its card grid: both sections carry an "Effective from"
          * date, but they mean DIFFERENT things (see the two banners), and the payroll rules
          * have nothing to do with the violation engine the attendance heading describes.
@@ -134,7 +170,7 @@ export default function RulesPage() {
   );
 }
 
-// ---- Section A: schedules table ----
+// ---- Section B: schedules table ----
 
 // Column widths shared by the header and every row so they line up. Matches the
 // Figma frame (Schedule / Workdays / Hours / Grace / Actions).
@@ -214,7 +250,7 @@ function SchedulesTable({
   );
 }
 
-// ---- Section B: attendance policy + task format ----
+// ---- Section C: attendance settings + task format ----
 
 function AttendancePolicyForm() {
   const { data: policy } = useAttendancePolicy();
@@ -222,7 +258,7 @@ function AttendancePolicyForm() {
   return (
     <section className="space-y-6">
       <div className="space-y-1">
-        <h2 className="text-h3 font-bold text-foreground">Attendance policy</h2>
+        <h2 className="text-h3 font-bold text-foreground">Attendance settings</h2>
         <p className="text-sm text-muted-foreground">
           Handbook thresholds the violation system reads.
         </p>
@@ -588,7 +624,6 @@ function AttendancePolicyEditor() {
   // today (the default) reaches the open cycle and every future one, but never a cycle that has
   // already closed. Back-dating is how HR corrects a cycle that has already been run — without
   // it, a fix typed after the cycle ended could never reach the payslips it was meant to fix.
-  const [effectiveFrom, setEffectiveFrom] = useState(manilaToday);
 
   // Save just ONE card's fields (partial update — the API only touches keys it's sent).
   async function saveCard(
@@ -601,13 +636,14 @@ function AttendancePolicyEditor() {
     if (guard && !guard()) return;
     setSaving(key);
     try {
-      // Every card's save carries the date. The server versions the WHOLE policy row, so the
-      // date applies to all the rules as they stand after this save, not only this card's.
-      await update.mutateAsync({ ...fields, effective_from: effectiveFrom });
+      // No date is sent: a rule applies from today, and the server refuses a past one. The
+      // server versions the WHOLE policy row, so today's save dates every rule on this page as
+      // it stands, not only this card's.
+      await update.mutateAsync(fields);
       toast.success("Saved");
       setOpenCard(null);
-    } catch {
-      toast.error("Could not save.");
+    } catch (err) {
+      toast.error(saveError(err));
     } finally {
       setSaving(null);
     }
@@ -952,33 +988,16 @@ function AttendancePolicyEditor() {
        */}
       <div className="rounded-lg border border-success bg-success-subtle p-4">
         <p className="text-xs text-foreground">
-          <strong>A change here reaches the whole of any cycle it applies to — it is not split
-          at the date you save it.</strong>{" "}
+          <strong>A change here reaches the whole of the cycle that is still open — it is not
+          split at the date you save it.</strong>{" "}
           Payroll prices each cycle using the rules in force on its <strong>last day</strong>,
-          so saving today reaches the cycle that is still open and every cycle after it. Cycles
-          that have already ended keep the rules they were run under. A <strong>locked</strong>{" "}
-          run and an already-<strong>disbursed</strong> payslip can never be repriced at all.
+          so saving today covers the open cycle and every cycle after it, and seals when that
+          cycle ends. Cycles that have already ended keep the rules they were run under, and
+          cannot be changed by editing this page — fix one by correcting its payslips. A{" "}
+          <strong>locked</strong> run and an already-<strong>disbursed</strong> payslip can
+          never be repriced at all.
         </p>
       </div>
-
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Label htmlFor="pol-effective-from">Effective from</Label>
-          <DatePicker
-            id="pol-effective-from"
-            value={effectiveFrom}
-            onChange={setEffectiveFrom}
-            className="w-44"
-          />
-        </div>
-        <Hint>
-          Leave as today unless you are correcting a cycle that has already been run — then set
-          it to a date inside that cycle and re-run payroll. This dates <strong>every</strong>{" "}
-          rule on this page as it stands when you save, not only the card you save.
-        </Hint>
-      </div>
-
-      <Divider />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {POLICY_CARDS.map((card) => (
@@ -1793,7 +1812,7 @@ function AttendancePolicyEditor() {
   );
 }
 
-// ---- Section C: payroll settings ----
+// ---- Section D: payroll settings ----
 
 /**
  * Company-wide payroll configuration. Structurally the same animal as the attendance
@@ -1874,7 +1893,6 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
   // would be a wage order of nothing rather than no wage order at all.
   const [minimumWage, setMinimumWage] = useState(settings.minimum_daily_wage?.toString() ?? "");
   // Blank = today, which is what every change used to be recorded as whether or not it was true.
-  const [effectiveFrom, setEffectiveFrom] = useState("");
 
   const [openCard, setOpenCard] = useState<PayrollCardKey | null>(null);
   const [saving, setSaving] = useState<PayrollCardKey | null>(null);
@@ -1900,14 +1918,11 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
         tax_timing: taxTiming,
         allowance_timing: allowanceTiming,
         minimum_daily_wage: minimumWage.trim() === "" ? null : Number(minimumWage),
-        effective_from: effectiveFrom || undefined,
       });
-      toast.success(
-        effectiveFrom ? `Saved, effective ${formatDate(effectiveFrom)}` : "Saved",
-      );
+      toast.success("Saved");
       setOpenCard(null);
-    } catch {
-      toast.error("Could not save.");
+    } catch (err) {
+      toast.error(saveError(err));
     } finally {
       setSaving(null);
     }
@@ -1924,29 +1939,10 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
         <p className="text-xs text-foreground">
           <strong>Each cycle is priced with the settings in force for that cycle.</strong>{" "}
           A change saved today does not reprice a period that has already been run, and
-          re-running an old cycle keeps what it was priced with — unlike the attendance rules
-          above, which every cycle still open reads live.
+          re-running an old cycle keeps what it was priced with. To change a period that has
+          already been run, correct its payslips instead.
         </p>
       </div>
-
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Label htmlFor="pay-effective-from">Effective from</Label>
-          <DatePicker
-            id="pay-effective-from"
-            value={effectiveFrom}
-            onChange={setEffectiveFrom}
-            placeholder="Today"
-            className="w-44"
-          />
-        </div>
-        <Hint>
-          Leave blank for today. Set an earlier date only if the change genuinely applied then —
-          periods already run keep the settings they were priced with.
-        </Hint>
-      </div>
-
-      <Divider />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {PAYROLL_CARDS.map((card) => (
@@ -2125,10 +2121,6 @@ function SettingsDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function Divider() {
-  return <div className="h-px w-full bg-border" />;
 }
 
 // A cheap client-side sanity check so a typo gets a plain sentence instead of a 422 keyed

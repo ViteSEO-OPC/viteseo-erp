@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// The two company rules behind the management attendance exemption (Company → Rules).
+// The two company rules behind the management attendance exemption (Company → Settings).
 // Both default to TODAY'S behaviour, so this migration changes nothing on its own.
 return new class extends Migration
 {

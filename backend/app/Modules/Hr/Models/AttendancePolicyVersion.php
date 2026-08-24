@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * What Company → Rules said from a given date — the fourth and last dated pricing input,
+ * What Company → Settings said from a given date — the fourth and last dated pricing input,
  * alongside salary (`hr_salary_histories`), the statutory rates (`hr_contribution_versions`)
  * and allowances (`hr_benefit_program_versions`).
  */

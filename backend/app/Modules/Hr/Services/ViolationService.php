@@ -116,7 +116,7 @@ class ViolationService
         // Never scan past today — the current month is only complete up to today.
         $scanEnd = $monthEnd->gt($today) ? $today->copy() : $monthEnd;
 
-        // The colour ladder HR configures (Company → Rules). Constant across this month's
+        // The colour ladder HR configures (Company → Settings). Constant across this month's
         // scan; a null column falls back to today's literals, so this is a no-op by default.
         $policy = $this->policy->get();
         // Per-CATEGORY merge, so a category added after HR last saved this page ('s

@@ -18,7 +18,6 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import { DatePicker } from "@/modules/hr/ui/date-picker";
 import { Explainer } from "@/modules/hr/ui/explainer";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import {
@@ -30,7 +29,6 @@ import { useEmployees } from "@/modules/hr/hooks/use-employees";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { EligibilityPicker } from "@/modules/hr/components/eligibility-picker";
 import {
-  ALLOWANCE_FREQUENCIES,
   CONTRIBUTION_TREATMENTS,
   TAX_TREATMENTS,
   type BenefitProgram,
@@ -80,7 +78,6 @@ function AllowanceForm({
   const [confirming, setConfirming] = useState(false);
   const [name, setName] = useState(program?.name ?? "");
   const [amount, setAmount] = useState(program?.amount ?? "");
-  const [frequency, setFrequency] = useState(program?.frequency ?? "monthly");
   const [tax, setTax] = useState(program?.tax_treatment ?? "de_minimis");
   // This allowance's OWN de-minimis ceiling. Blank means none recorded, which keeps
   // the whole amount tax-free; ceilings are per item and are never pooled with another benefit's.
@@ -92,9 +89,6 @@ function AllowanceForm({
   const [contributable, setContributable] = useState(
     (program?.contributable ?? true) ? "yes" : "no",
   );
-  // The date this amount applies FROM. An old cycle re-run before it keeps the
-  // figure that applied then, so this is the field that decides whose payslip moves.
-  const [effectiveFrom, setEffectiveFrom] = useState(new Date().toISOString().slice(0, 10));
   const [mode, setMode] = useState<EligibilityMode>(
     (program?.eligibility as EligibilityMode) ?? "all",
   );
@@ -114,7 +108,8 @@ function AllowanceForm({
       kind: "allowance",
       category: "allowance",
       amount: Number(amount),
-      frequency,
+      // No `frequency`: the amount IS monthly. The column keeps its 'monthly' default for a new
+      // programme and its existing value for an old one, so nothing is silently re-denominated.
       tax_treatment: tax,
       deminimis_ceiling: tax === "taxable" || ceiling === "" ? null : Number(ceiling),
       ceiling_period: tax === "taxable" || ceiling === "" ? null : ceilingPeriod,
@@ -125,7 +120,7 @@ function AllowanceForm({
       eligibility: mode,
       // Sent only for the mode that uses them, so switching mode cannot leave a stale rule behind.
       eligibility_statuses: mode === "status" ? statuses : [],
-      effective_from: effectiveFrom,
+      // No date is sent: an amount applies from today, and the server refuses a past one.
       employee_ids: mode === "custom" ? employeeIds : [],
     };
 
@@ -177,10 +172,17 @@ function AllowanceForm({
           />
         </div>
 
+        {/*
+         * ONE amount, always monthly. There used to be a "Frequency" picker beside it, which
+         * read as though it competed with the allowance timing in Company -> Settings; it never
+         * did. This field only ever DENOMINATED the figure, while the timing setting decides
+         * which cutoff it lands on — two different questions, and the pairing invited HR to
+         * answer the second one here.
+         */}
         <div className="group/explain">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label htmlFor="a-amount">Amount per period</Label>
+              <Label htmlFor="a-amount">Monthly amount</Label>
               <Input
                 id="a-amount"
                 type="number"
@@ -190,29 +192,13 @@ function AllowanceForm({
                 onChange={(e) => setAmount(e.target.value)}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="a-freq">Frequency</Label>
-              <SimpleSelect
-                id="a-freq"
-                value={frequency}
-                onValueChange={setFrequency}
-                options={ALLOWANCE_FREQUENCIES.map((f) => ({ value: f.value, label: f.label }))}
-              />
-            </div>
-            {/*
-             * Payroll prices an allowance as of the cycle END, so a period that closed
-             * before this date keeps whatever applied then. Without it, raising an amount rewrote
-             * every payslip that had not yet been paid out.
-             */}
-            <div className="space-y-1.5">
-              <Label htmlFor="a-eff">Applies from</Label>
-              <DatePicker id="a-eff" value={effectiveFrom} onChange={setEffectiveFrom} />
-            </div>
           </div>
           <Explainer>
             <p className="text-caption text-muted-foreground">
-              Payslips for periods that ended before <strong>{effectiveFrom}</strong> keep the
-              amount that applied then, even if they are re-run.
+              The amount for a whole month. Which cutoff it is paid on is set once for the
+              company, under <strong>Company -&gt; Settings -&gt; Payroll</strong>. A new amount
+              applies from today; periods that have already been run keep what they were priced
+              with, even if they are re-run.
             </p>
           </Explainer>
         </div>

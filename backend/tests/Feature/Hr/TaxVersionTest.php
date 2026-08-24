@@ -104,7 +104,7 @@ class TaxVersionTest extends HrTestCase
     }
 
     /**
-     * The table stores only floors; the viewer derives each band's ceiling as the next floor − 0.01,
+     * The table stores only floors; the viewer derives each band's ceiling as the next floor,
      * because the BIR prints ranges and a range is what makes it checkable.
      */
     public function test_the_viewer_derives_band_ceilings_and_leaves_the_top_open(): void
@@ -113,15 +113,20 @@ class TaxVersionTest extends HrTestCase
             ->getJson('/api/v1/hr/tax-table?as_of=2026-08-07')
             ->json('data.bands');
 
-        // The next floor MINUS one centavo: ₱250,000 itself belongs to the 15% band, so the exempt
-        // range has to stop just short of it rather than overlap.
-        $this->assertSame(249999.99, (float) $bands[0]['max_annual']);
+        // The next floor EXACTLY. ₱250,000 is the exempt band's ceiling AND the 15% band's floor,
+        // and it is exempt — annualTax() needs income to EXCEED a floor to enter that band. The
+        // viewer says "Not over ₱250,000" / "Over ₱250,000 – ₱400,000", so nothing overlaps.
+        $this->assertSame(250000.0, (float) $bands[0]['max_annual']);
         $this->assertSame(250000.0, (float) $bands[1]['min_annual']);
         $this->assertSame(
-            round((float) $bands[2]['min_annual'] - 0.01, 2),
+            (float) $bands[2]['min_annual'],
             (float) $bands[1]['max_annual'],
         );
         $this->assertNull($bands[count($bands) - 1]['max_annual'], 'the top band is open-ended');
+
+        // The claim the label rests on: the boundary itself is exempt, matching the BIR's
+        // "Not over ₱250,000" rather than the "up to ₱249,999.99" this used to print.
+        $this->assertSame(0.0, app(\App\Modules\Hr\Services\TaxService::class)->annualTax(250000, '2026-08-07'));
     }
 
     /** `as_of` selects the version in force then — the point is checking what a past period used. */
