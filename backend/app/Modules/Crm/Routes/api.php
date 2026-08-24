@@ -29,6 +29,7 @@ use App\Modules\Crm\Controllers\PlannerEventController;
 use App\Modules\Crm\Controllers\ServiceAreaController;
 use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
+use App\Modules\Crm\Controllers\WebsiteEvidenceController;
 use App\Modules\Crm\Http\Middleware\EnsurePerformanceManagement;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -113,6 +114,26 @@ Route::prefix('v1/crm')->group(function (): void {
         // Triggering paid AI work is closer to managing the integration than to importing a file, so
         // it is gated like the Settings surface. The scraper's service account is an Admin/Super
         // Admin token already, so this changes nothing operationally.
+        // Website candidate evidence — the chain that lets `website-unknown` legitimately become
+        // `no-website`. Two audiences on one trail.
+        //
+        // The DISCOVERY SERVICE (same `import` permission as the ingest and audit queue it sits
+        // beside) reads the search queue, submits the candidates a search pass produced — possibly
+        // none, which is itself evidence — and submits the crawler's findings per candidate. It can
+        // never set a status: adjudication reuses the unmodified WebsiteIdentityVerifier, at a
+        // stricter bar than the audit because these URLs were guessed rather than asserted.
+        //
+        // A BD reads the evidence and, only once the search is exhausted, confirms that no credible
+        // website exists. That confirmation is the ONLY path to `no-website` — WebsiteStatusDeriver
+        // still cannot produce it and is untouched. Guarded by the lead policy rather than a role, so
+        // a BD acts on leads they can already see; `confirmAbsence` additionally requires `update`,
+        // since it changes a field on the lead.
+        Route::get('/website-evidence/queue', [WebsiteEvidenceController::class, 'queue'])->can('import', Lead::class);
+        Route::post('/leads/{lead}/website-candidates', [WebsiteEvidenceController::class, 'storeCandidates'])->can('import', Lead::class);
+        Route::put('/leads/{lead}/website-candidates/{candidate}', [WebsiteEvidenceController::class, 'verifyCandidate'])->can('import', Lead::class);
+        Route::get('/leads/{lead}/website-evidence', [WebsiteEvidenceController::class, 'show'])->can('viewWebsiteEvidence', 'lead');
+        Route::post('/leads/{lead}/website-absence', [WebsiteEvidenceController::class, 'confirmAbsence'])->can('confirmWebsiteAbsence', 'lead');
+
         Route::get('/discovery/config', [DiscoveryConfigController::class, 'config'])->can('import', Lead::class);
         Route::post('/discovery/proposals', [DiscoveryConfigController::class, 'proposals'])
             ->can('import', Lead::class)

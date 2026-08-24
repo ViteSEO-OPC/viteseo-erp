@@ -1,0 +1,536 @@
+<?php
+
+namespace Tests\Feature\Crm;
+
+use App\Models\User;
+use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Models\LeadWebsiteCandidate;
+use App\Modules\Crm\Models\LeadWebsiteSearch;
+use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
+use App\Modules\Crm\Services\WebsiteIdentityVerifier;
+use Database\Seeders\RolesAndPermissionsSeeder;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
+use Tests\TestCase;
+
+/**
+ * The evidence chain that lets `website-unknown` legitimately become `no-website`.
+ *
+ *   OSM candidate -> website-unknown -> candidate discovery -> deterministic verification
+ *   -> exhausted evidence -> BD confirms -> no-website -> existing High Priority
+ *
+ * The property these defend is narrow and important: **the system may not conclude absence on its
+ * own.** A search that finds nothing is weaker evidence than a human check — a business may hold a
+ * site no tier surfaced — so exhaustion is recorded as evidence and stops there. Every attempt to
+ * reach `no-website` without a person, or without evidence, must be refused.
+ *
+ * The opposite failure matters too and is tested: a confirmation that cannot be made because the
+ * search was never run is not a safety feature if it also blocks legitimate use, so the happy path
+ * is pinned end to end.
+ */
+class WebsiteEvidenceChainTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->seed(RolesAndPermissionsSeeder::class);
+        User::factory()->create(['status' => 'active']);
+    }
+
+    private function user(string $role): User
+    {
+        $user = User::factory()->create(['status' => 'active']);
+        $user->assignRole($role);
+
+        return $user;
+    }
+
+    /** A discovered prospect with no URL — the population this feature exists for. */
+    private function discoveredLead(?User $owner = null): Lead
+    {
+        return Lead::factory()->create([
+            'business_name' => 'Vigan Dental Care',
+            'contact_name' => 'Vigan Dental Care',
+            'city' => 'Vigan',
+            'phone' => '+63 77 722 1234',
+            'email' => null,
+            'website' => null,
+            'website_status' => 'website-unknown',
+            'source' => 'openstreetmap',
+            'place_id' => 'node/'.fake()->unique()->numberBetween(1000, 99999),
+            'qualified_at' => null,
+            'assigned_to' => $owner?->id,
+        ]);
+    }
+
+    private function service(): WebsiteEvidenceService
+    {
+        return app(WebsiteEvidenceService::class);
+    }
+
+    /** Crawl findings that will clear the stricter bar: domain + title + phone all match. */
+    private function strongFindings(string $url = 'https://vigandentalcare.ph'): array
+    {
+        return [
+            'website_reachable' => true,
+            'website_title' => 'Vigan Dental Care — Dentist in Vigan',
+            'website_description' => 'Family dentistry in Vigan.',
+            'final_url' => $url,
+            'canonical_url' => $url,
+            'phones_found' => ['+63 77 722 1234'],
+            'emails_found' => [],
+        ];
+    }
+
+    /** Findings for a page that plainly belongs to somebody else. */
+    private function weakFindings(string $url = 'https://unrelated-shop.example'): array
+    {
+        return [
+            'website_reachable' => true,
+            'website_title' => 'Welcome to our store',
+            'website_description' => 'General merchandise.',
+            'final_url' => $url,
+            'canonical_url' => $url,
+            'phones_found' => [],
+            'emails_found' => [],
+        ];
+    }
+
+    // --- the queue -----------------------------------------------------------
+
+    public function test_the_queue_offers_discovered_leads_that_have_no_url(): void
+    {
+        Sanctum::actingAs($this->user('crm_admin'));
+        $lead = $this->discoveredLead();
+
+        $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()
+            ->assertJsonPath('data.0.id', (string) $lead->id)
+            ->assertJsonPath('data.0.business', 'Vigan Dental Care');
+    }
+
+    public function test_a_lead_that_already_has_a_url_is_not_queued(): void
+    {
+        // It has a URL, so the ORDINARY audit owns it. Searching for a website it already has would
+        // be wasted spend.
+        Sanctum::actingAs($this->user('crm_admin'));
+        $this->discoveredLead()->update(['website' => 'https://example.ph']);
+
+        $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    public function test_an_exhausted_lead_leaves_the_queue(): void
+    {
+        Sanctum::actingAs($this->user('crm_admin'));
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->markExhausted($lead);
+
+        $this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()->assertJsonCount(0, 'data');
+    }
+
+    // --- recording candidates ------------------------------------------------
+
+    public function test_candidates_are_recorded_with_their_provenance(): void
+    {
+        Sanctum::actingAs($this->user('crm_admin'));
+        $lead = $this->discoveredLead();
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-candidates", [
+            'candidates' => [
+                ['url' => 'https://mercurydrug.com', 'source' => 'wikidata', 'source_detail' => 'Q6818610'],
+            ],
+            'tiers_run' => ['osm_tag', 'wikidata'],
+        ])->assertOk()
+            ->assertJsonPath('data.candidates.0.source', 'wikidata')
+            ->assertJsonPath('data.candidates.0.sourceDetail', 'Q6818610')
+            // Proposed but not yet checked — deliberately NOT false, which would read as refuted.
+            ->assertJsonPath('data.candidates.0.verified', null)
+            ->assertJsonPath('data.search.tiersRun', ['osm_tag', 'wikidata']);
+    }
+
+    public function test_a_search_that_found_nothing_is_still_recorded_as_evidence(): void
+    {
+        // "We ran Wikidata and it had nothing" is a fact worth keeping. An empty submission that
+        // recorded nothing would be indistinguishable from never having looked.
+        Sanctum::actingAs($this->user('crm_admin'));
+        $lead = $this->discoveredLead();
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-candidates", [
+            'candidates' => [], 'tiers_run' => ['osm_tag', 'wikidata'],
+        ])->assertOk()
+            ->assertJsonPath('data.search.searched', true)
+            ->assertJsonPath('data.search.candidatesFound', 0)
+            ->assertJsonPath('data.search.tiersRun', ['osm_tag', 'wikidata']);
+    }
+
+    public function test_re_running_a_tier_updates_rather_than_duplicates(): void
+    {
+        $lead = $this->discoveredLead();
+        $payload = [['url' => 'https://a.example', 'source' => 'wikidata']];
+
+        $this->service()->recordCandidates($lead, $payload, ['wikidata']);
+        $this->service()->recordCandidates($lead, $payload, ['wikidata']);
+
+        // Otherwise a repeated search would inflate the count and make thin evidence look thorough.
+        $this->assertSame(1, LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->count());
+    }
+
+    public function test_the_same_url_from_two_tiers_is_two_rows(): void
+    {
+        // Independent corroboration is stronger than one source, and collapsing them would erase it.
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://a.example', 'source' => 'wikidata'],
+            ['url' => 'https://a.example', 'source' => 'osm_tag'],
+        ], ['wikidata', 'osm_tag']);
+
+        $this->assertSame(2, LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->count());
+    }
+
+    public function test_tiers_run_accumulates_across_passes(): void
+    {
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $search = $this->service()->recordCandidates($lead, [], ['wikidata']);
+
+        // A later pass must not erase the record that an earlier tier ran, or an exhaustion claim
+        // would understate what was actually tried.
+        $this->assertEqualsCanonicalizing(['osm_tag', 'wikidata'], $search->tiers_run);
+    }
+
+    // --- deterministic verification -----------------------------------------
+
+    public function test_a_strong_candidate_is_verified(): void
+    {
+        Sanctum::actingAs($this->user('crm_admin'));
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+
+        $this->putJson(
+            "/api/v1/crm/leads/{$lead->id}/website-candidates/{$candidate->id}",
+            $this->strongFindings(),
+        )->assertOk()
+            ->assertJsonPath('data.candidates.0.verified', true)
+            ->assertJsonPath('data.candidates.0.rejectionReason', null);
+    }
+
+    public function test_a_candidate_that_belongs_to_someone_else_is_refused(): void
+    {
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://unrelated-shop.example', 'source' => 'search'],
+        ], ['search']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+
+        $this->service()->recordVerification($candidate, $this->weakFindings());
+
+        $this->assertFalse($candidate->refresh()->verified);
+        $this->assertSame(LeadWebsiteCandidate::REJECTED_IDENTITY, $candidate->rejection_reason);
+    }
+
+    public function test_an_unreachable_candidate_is_refused_as_unreachable(): void
+    {
+        // A stale URL — the measured Max's Restaurant case, whose domain lapsed and now serves
+        // somebody else. It must be refused, not recorded as a website.
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://lapsed-domain.example', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+
+        $this->service()->recordVerification($candidate, ['website_reachable' => false]);
+
+        $this->assertFalse($candidate->refresh()->verified);
+        $this->assertSame(LeadWebsiteCandidate::REJECTED_UNREACHABLE, $candidate->rejection_reason);
+    }
+
+    public function test_the_discovered_bar_is_stricter_than_the_audit_threshold(): void
+    {
+        // A guessed URL must prove more than one somebody asserted. This is the whole reason the
+        // constant exists rather than reusing the verifier's own threshold.
+        $this->assertGreaterThan(
+            WebsiteIdentityVerifier::THRESHOLD,
+            WebsiteEvidenceService::ACCEPT_CONFIDENCE,
+        );
+    }
+
+    public function test_two_close_candidates_on_different_domains_are_both_refused(): void
+    {
+        // 66 vs 65 is a coin toss between two plausible pages, not an answer. Ambiguity must resolve
+        // to "keep looking" rather than to whichever sorted first.
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+            ['url' => 'https://vigandentalcare.com', 'source' => 'search'],
+        ], ['wikidata', 'search']);
+
+        foreach (LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->get() as $candidate) {
+            $this->service()->recordVerification($candidate, $this->strongFindings($candidate->url));
+        }
+
+        $verified = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->where('verified', true)->count();
+        $this->assertSame(0, $verified, 'an ambiguous winner must not be accepted');
+        $this->assertSame(
+            LeadWebsiteCandidate::REJECTED_MARGIN,
+            LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->first()->rejection_reason,
+        );
+    }
+
+    // --- exhaustion is evidence, not a verdict -------------------------------
+
+    public function test_exhaustion_never_changes_website_status_by_itself(): void
+    {
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+
+        $this->service()->markExhausted($lead);
+
+        // THE CENTRAL GUARANTEE. Searching and finding nothing is not a conclusion.
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+        $this->assertTrue($this->service()->searchFor($lead)->isExhausted());
+    }
+
+    public function test_exhaustion_is_refused_while_a_candidate_is_unchecked(): void
+    {
+        // An exhaustion claim resting on candidates nobody tested would be worthless.
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://a.example', 'source' => 'wikidata'],
+        ], ['wikidata']);
+
+        $this->service()->markExhausted($lead);
+
+        $this->assertFalse($this->service()->searchFor($lead)->isExhausted());
+    }
+
+    public function test_a_new_candidate_reopens_an_exhausted_search(): void
+    {
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->markExhausted($lead);
+        $this->assertTrue($this->service()->searchFor($lead)->isExhausted());
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://new.example', 'source' => 'search'],
+        ], ['search']);
+
+        $this->assertFalse($this->service()->searchFor($lead)->isExhausted());
+    }
+
+    // --- the human confirmation, and its guards ------------------------------
+
+    public function test_confirmation_is_refused_before_the_search_is_exhausted(): void
+    {
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead($bd);
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")
+            ->assertStatus(409);
+
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+    }
+
+    public function test_confirmation_is_refused_when_a_verified_website_exists(): void
+    {
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead($bd);
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+        // Force the flag so the guard, not the exhaustion rule, is what refuses.
+        LeadWebsiteSearch::query()->where('lead_id', $lead->id)->update(['exhausted_at' => now()]);
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertStatus(409);
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+    }
+
+    public function test_a_bd_confirming_exhausted_evidence_produces_no_website(): void
+    {
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead($bd);
+
+        // A candidate was found, checked, and refused. Then the tiers ran out.
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://unrelated-shop.example', 'source' => 'search'],
+        ], ['osm_tag', 'wikidata', 'search']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->weakFindings());
+        $this->service()->markExhausted($lead);
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence", [
+            'note' => 'Called the clinic — they confirmed they have no website.',
+        ])->assertOk()
+            ->assertJsonPath('data.websiteStatus', 'no-website')
+            ->assertJsonPath('data.search.confirmedAbsent', true)
+            ->assertJsonPath('data.search.confirmedBy', $bd->name);
+
+        // THE OUTCOME THIS FEATURE EXISTS FOR.
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+    }
+
+    public function test_the_confirmed_lead_renders_high_on_the_nearby_board(): void
+    {
+        // The existing NearbyClientResource mapping, untouched: no-website -> high. This is the end
+        // of the chain, and it needed no change to the priority rules to arrive.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead($bd);
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->markExhausted($lead);
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
+
+        $row = collect($this->getJson('/api/v1/crm/nearby-clients')->assertOk()->json('data'))
+            ->firstWhere('id', (string) $lead->id);
+
+        $this->assertSame('high', $row['priority']);
+        $this->assertSame('no-website', $row['website']['status']);
+    }
+
+    public function test_the_evidence_trail_is_readable_by_the_owning_bd(): void
+    {
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead($bd);
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://unrelated-shop.example', 'source' => 'search'],
+        ], ['search']);
+
+        $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertOk()
+            ->assertJsonPath('data.candidates.0.url', 'https://unrelated-shop.example')
+            ->assertJsonPath('data.search.canConfirmAbsence', false);
+    }
+
+    public function test_only_an_exhausted_search_advertises_that_absence_can_be_confirmed(): void
+    {
+        Sanctum::actingAs($this->user('crm_admin'));
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->markExhausted($lead);
+
+        $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertOk()
+            ->assertJsonPath('data.search.canConfirmAbsence', true);
+    }
+
+    // --- boundaries ----------------------------------------------------------
+
+    public function test_a_candidate_cannot_be_verified_against_a_different_lead(): void
+    {
+        Sanctum::actingAs($this->user('crm_admin'));
+        $lead = $this->discoveredLead();
+        $other = $this->discoveredLead();
+        $this->service()->recordCandidates($other, [
+            ['url' => 'https://a.example', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $other->id)->firstOrFail();
+
+        // Otherwise a candidate would be adjudicated against the wrong business's name and phone.
+        $this->putJson(
+            "/api/v1/crm/leads/{$lead->id}/website-candidates/{$candidate->id}",
+            $this->strongFindings(),
+        )->assertNotFound();
+    }
+
+    public function test_an_unauthenticated_caller_is_refused_everywhere(): void
+    {
+        $lead = $this->discoveredLead();
+
+        $this->getJson('/api/v1/crm/website-evidence/queue')->assertUnauthorized();
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-candidates", [])->assertUnauthorized();
+        $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertUnauthorized();
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertUnauthorized();
+    }
+
+    public function test_confirmation_does_not_touch_score_or_priority_directly(): void
+    {
+        // The lead's `priority` column and score are not this feature's business. `website_status`
+        // is the only field it writes; anything downstream is the existing frozen behaviour.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead($bd);
+        $before = ['priority' => $lead->priority, 'status' => $lead->status, 'score' => $lead->score];
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->markExhausted($lead);
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
+
+        $after = $lead->refresh();
+        $this->assertSame($before['priority'], $after->priority);
+        $this->assertSame($before['status'], $after->status);
+        // A prospect is outside Lead::scopeActive, so the observer does not score it either.
+        $this->assertSame($before['score'], $after->score);
+    }
+
+    // --- who may act, on a pool that has no owners --------------------------
+
+    public function test_a_bd_may_read_and_confirm_an_unassigned_prospect(): void
+    {
+        // THE REAL SHAPE OF THE POOL. A discovered prospect is unassigned until someone qualifies it,
+        // so the ordinary `isVisibleTo` boundary would deny every BD on exactly the businesses this
+        // workflow exists for. The prospect carve-out on the policy is what makes the feature usable
+        // at all — not a loosening of the lead-ownership rule, which still applies once qualified.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+        $this->assertNull($lead->assigned_to);
+
+        $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertOk();
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->markExhausted($lead);
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+    }
+
+    public function test_a_bd_may_not_touch_a_qualified_lead_owned_by_someone_else(): void
+    {
+        // Once qualified the lead has an owner, and this endpoint is no more permissive than the
+        // lead-edit endpoint whose authority it borrows.
+        $owner = $this->user('crm_bd');
+        $other = $this->user('crm_bd');
+        $lead = $this->discoveredLead($owner);
+        $lead->update(['qualified_at' => now()]);
+
+        Sanctum::actingAs($other);
+        $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertForbidden();
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertForbidden();
+    }
+
+    public function test_a_lead_with_a_verified_candidate_leaves_the_search_queue(): void
+    {
+        // The chain deliberately never writes `crm_leads.website`, so the queue's "has no URL" filter
+        // cannot notice that this lead was answered. Nothing else would take it out either: exhaustion
+        // is refused while a candidate is verified. Without an explicit exclusion it would be searched
+        // again on every run, forever, ahead of leads nobody has looked at yet.
+        Sanctum::actingAs($this->user('crm_admin'));
+        $solved = $this->discoveredLead();
+        $unsolved = $this->discoveredLead();
+
+        $this->service()->recordCandidates($solved, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $solved->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+        $this->assertTrue($candidate->refresh()->verified);
+
+        $queued = $this->getJson('/api/v1/crm/website-evidence/queue?limit=50')
+            ->assertOk()->json('data.*.id');
+
+        $this->assertNotContains((string) $solved->id, $queued);
+        $this->assertContains((string) $unsolved->id, $queued);
+    }
+}

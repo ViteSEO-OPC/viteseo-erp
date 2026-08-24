@@ -35,6 +35,7 @@ from scraper.targets import (
     select,
     targets_per_run,
 )
+from scraper.website_discovery.runner import run_website_discovery
 from scraper.website_intelligence.runner import run_audit
 
 
@@ -400,6 +401,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     c.set_defaults(func=_compare)
 
+    fw = sub.add_parser(
+        "find-websites",
+        help="Find candidate websites for leads that have none (Tier 0: OSM tags + Wikidata).",
+    )
+    fw.add_argument("--limit", type=int, default=50, help="Max leads to search (default 50).")
+    fw.add_argument(
+        "--commit",
+        action="store_true",
+        help="Record the evidence in the CRM (default is a dry run that submits nothing).",
+    )
+    fw.set_defaults(func=_find_websites)
+
     a = sub.add_parser("audit", help="Audit the websites of leads that have a URL (Website Intelligence).")
     a.add_argument("--limit", type=int, default=50, help="Max websites to audit (default 50).")
     a.add_argument(
@@ -410,6 +423,7 @@ def main(argv: list[str] | None = None) -> int:
     a.set_defaults(func=_audit)
 
     args = parser.parse_args(argv)
+
     try:
         return args.func(args)
     except ValueError as exc:
@@ -421,3 +435,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _audit(args: argparse.Namespace) -> int:
     return run_audit(Config.load(), args.limit, commit=args.commit)
+
+
+def _find_websites(args: argparse.Namespace) -> int:
+    """Tier 0 candidate discovery. Proposes and verifies; never concludes absence."""
+    return run_website_discovery(Config.load(), args.limit, commit=args.commit)

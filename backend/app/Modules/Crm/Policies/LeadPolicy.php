@@ -73,4 +73,31 @@ class LeadPolicy
     {
         return $user->can('crm.leads.qualify');
     }
+
+    /**
+     * Read the website-evidence trail behind a lead's website conclusion.
+     *
+     * Ownership is deliberately NOT required for a PROSPECT, for the same reason as {@see qualify()}:
+     * the prospect pool is shared and unassigned, so `isVisibleTo` would deny every BD on precisely
+     * the businesses this evidence exists to explain. A qualified lead has an owner, and the ordinary
+     * visibility boundary applies to it again.
+     */
+    public function viewWebsiteEvidence(User $user, Lead $lead): bool
+    {
+        return $user->can('crm.leads.view') && ($lead->isProspect() || $lead->isVisibleTo($user));
+    }
+
+    /**
+     * Confirm, from that evidence, that a business genuinely has no website.
+     *
+     * Gated on the ordinary EDIT permission, because it writes `website_status` — the same field and
+     * the same authority as a manual lead edit. The prospect carve-out matches
+     * {@see viewWebsiteEvidence()}; the evidence guards in
+     * {@see \App\Modules\Crm\Services\Website\WebsiteEvidenceService::confirmAbsent()} apply on
+     * top of this and are what stop an unfounded claim.
+     */
+    public function confirmWebsiteAbsence(User $user, Lead $lead): bool
+    {
+        return $user->can('crm.leads.edit') && ($lead->isProspect() || $lead->isVisibleTo($user));
+    }
 }

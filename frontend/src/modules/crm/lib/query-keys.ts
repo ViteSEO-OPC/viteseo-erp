@@ -97,6 +97,12 @@ export const queryKeys = {
     // Discovered-business prospect pool (GET /nearby-clients).
     list: () => [...queryKeys.nearbyClients.all, "list"] as const,
   },
+  websiteEvidence: {
+    all: ["website-evidence"] as const,
+    // The candidate/rejection trail behind one lead's website conclusion. Fetched lazily, per lead,
+    // only when a BD opens the evidence — the Nearby list must never fan out one request per card.
+    detail: (leadId: string) => [...queryKeys.websiteEvidence.all, leadId] as const,
+  },
   performance: {
     all: ["performance"] as const,
     // Personal / reporting KPI summary (GET /dashboard/performance-summary). `scope` separates My
