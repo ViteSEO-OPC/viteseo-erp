@@ -54,6 +54,7 @@ def build_record(
     imported: int = 0,
     provider_stats: Optional[dict[str, Any]] = None,
     started_at: Optional[str] = None,
+    choice: Any = None,
 ) -> dict[str, Any]:
     """One run's funnel, flat and provider-agnostic.
 
@@ -67,9 +68,27 @@ def build_record(
     proposed = int(stats.get("proposed", discovered))
     resolved = int(stats.get("resolved", discovered))
 
+    # FIVE SEPARATE FACTS, deliberately not collapsed into one. "OpenAI was selected", "OpenStreetMap
+    # actually ran", "the selection came from the CRM rather than a flag", "it fell back because no
+    # credential was stored" and "the model rejected our key" are different things, and a reader who
+    # can only see the last provider name cannot tell a healthy OSM run from a broken AI one.
+    execution_status = str(stats.get("execution_status") or "ok")
+
     record: dict[str, Any] = {
         "started_at": started_at,
+        # What actually ran.
         "provider": provider,
+        # What the configuration asked for — equal to `provider` unless a fallback occurred.
+        "provider_selected": getattr(choice, "provider", provider),
+        # Where the decision came from: cli | crm | env | default.
+        "provider_source": getattr(choice, "source", None),
+        # Why the effective provider differs from the selected one (CRM's reason code), if it does.
+        "fallback_reason": getattr(choice, "reason", None),
+        # Whether the provider actually completed. `ok` is the ONLY value that makes the counts below
+        # a real result; anything else means the run failed and discovered nothing for that reason.
+        "provider_execution_status": execution_status,
+        "error_reason": stats.get("error_reason"),
+        "succeeded": execution_status == "ok",
         "area": area,
         "category": category,
         "limit": limit,

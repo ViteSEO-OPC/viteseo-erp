@@ -18,7 +18,9 @@ import {
 const cardClass = "border border-border bg-card p-6 shadow-card";
 
 /**
- * Settings → Integrations. The whole surface for connecting the company mailbox to Google.
+ * The Gmail card on Settings → Integrations: the whole surface for connecting the company mailbox
+ * to Google. The page heading belongs to {@see IntegrationsPage}, which composes this card with the
+ * others — it lived here only while Gmail was the sole integration.
  *
  * Reached only by Admin / Super Admin: `/zerem/settings` is `minRole: crm_admin` in PAGE_ACCESS and
  * the RoleGuard matches by prefix, so this route inherits the gate — and the three API endpoints
@@ -42,13 +44,6 @@ export function GmailIntegrationPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <h2 className="text-2xl font-bold text-foreground">Integrations</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Connect the services the CRM reads from. Only Admins can change these.
-        </p>
-      </header>
-
       {/* The banner the OAuth callback lands on. `?gmail=…` is the only thing the redirect
           carries — a status and, on failure, a short reason code. Never a token or a code. */}
       {callbackStatus === "connected" ? (

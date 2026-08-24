@@ -1,10 +1,17 @@
-"""The OpenAI discovery provider — proposal only, never authoritative.
+"""The AI discovery provider: proposal only, never authoritative — and never silently failing.
 
-Two things are being pinned. First, that a language model's output cannot become a lead without OSM
-confirming it. Second, that every way the model can fail — down, slow, rate-limited, or answering
-with nonsense — produces NO candidates rather than bad ones.
+Three things are pinned here, each from the direction it would actually break:
 
-No network: the OpenAI client and the OSM lookup are both stubbed.
+  - **A language model's output cannot become a lead without OSM confirming it.** Identity always
+    comes from a real OSM element; a name OSM cannot confirm is dropped.
+  - **The credential is not in this process.** The provider authenticates to the CRM, which holds the
+    OpenAI key and makes the model call. There is no OpenAI key here to leak.
+  - **A FAILED CALL IS NOT AN EMPTY RESULT.** A rejected credential and a genuinely empty answer are
+    both zero names. Reporting them identically would let a broken integration masquerade as an
+    honest quiet run indefinitely, so every failure carries a status and only `ok` means the list is
+    real.
+
+No test touches the network: the CRM client and the OSM lookup are both stubbed.
 """
 
 import json
@@ -13,7 +20,13 @@ import httpx
 import pytest
 
 from scraper.models import RawBusiness
-from scraper.providers.openai_discovery import OpenAiDiscoveryProvider
+from scraper.providers.openai_discovery import (
+    EXECUTION_CRM_UNREACHABLE,
+    EXECUTION_INVALID_RESPONSE,
+    EXECUTION_NOT_EFFECTIVE,
+    EXECUTION_OK,
+    OpenAiDiscoveryProvider,
+)
 
 
 class FakeOsm:
@@ -40,12 +53,11 @@ def osm_business(name: str, provider_id: str, website: str | None = None) -> Raw
 
 
 def build(monkeypatch, *, respond, known=None) -> tuple[OpenAiDiscoveryProvider, FakeOsm]:
-    """A provider whose HTTP POST is replaced by `respond(url, json)`."""
+    """A provider whose CRM POST is replaced by `respond(url, kwargs)`."""
     fake_osm = FakeOsm(known)
     provider = OpenAiDiscoveryProvider(
-        api_key="test-key",
-        model="gpt-4o-mini",
-        base_url="https://api.openai.com/v1",
+        crm_base_url="http://crm.test/api/v1/crm",
+        crm_token="test-crm-token",
         timeout=5,
         osm=fake_osm,
     )
@@ -53,21 +65,40 @@ def build(monkeypatch, *, respond, known=None) -> tuple[OpenAiDiscoveryProvider,
     return provider, fake_osm
 
 
-def ok(names: list, usage: dict | None = None) -> httpx.Response:
+def crm_ok(names: list, usage: dict | None = None, status: int = 200) -> httpx.Response:
     body = {
-        "choices": [{"message": {"content": json.dumps({"businesses": names})}}],
-        "usage": usage or {"prompt_tokens": 120, "completion_tokens": 40},
+        "data": {
+            "effectiveProvider": "openai",
+            "executionStatus": EXECUTION_OK,
+            "errorReason": None,
+            "proposals": names,
+            "usage": usage or {"model": "gpt-4o-mini", "prompt_tokens": 120, "completion_tokens": 40},
+        }
     }
-    return httpx.Response(200, json=body, request=httpx.Request("POST", "https://api.openai.com"))
+    return httpx.Response(status, json=body, request=httpx.Request("POST", "http://crm.test"))
+
+
+def crm_failure(execution_status: str, error: str = "boom", http: int = 502) -> httpx.Response:
+    body = {
+        "message": "The discovery provider could not be reached or refused the request.",
+        "data": {
+            "effectiveProvider": "openai",
+            "executionStatus": execution_status,
+            "errorReason": error,
+            "proposals": [],
+            "usage": {},
+        },
+    }
+    return httpx.Response(http, json=body, request=httpx.Request("POST", "http://crm.test"))
 
 
 # --- the capability -------------------------------------------------------------
 
 
 def test_only_osm_confirmed_proposals_become_candidates(monkeypatch):
-    provider, fake_osm = build(
+    provider, _ = build(
         monkeypatch,
-        respond=lambda url, kw: ok(["Kopi Roasters", "Invented Bistro"]),
+        respond=lambda url, kw: crm_ok(["Kopi Roasters", "Invented Bistro"]),
         known=[osm_business("Kopi Roasters", "node/1")],
     )
 
@@ -77,20 +108,22 @@ def test_only_osm_confirmed_proposals_become_candidates(monkeypatch):
     assert provider.stats()["proposed"] == 2
     assert provider.stats()["resolved"] == 1
     assert provider.stats()["resolution_rate"] == 0.5
+    assert provider.stats()["execution_status"] == EXECUTION_OK
 
 
 def test_every_returned_field_comes_from_osm_not_the_model(monkeypatch):
-    # The model is asked for names only; if it volunteers anything else it must not survive.
+    # If the CRM (or the model behind it) volunteers anything beyond names, it must not survive.
     def respond(url, kw):
         body = {
-            "choices": [{"message": {"content": json.dumps({
-                "businesses": ["Kopi Roasters"],
+            "data": {
+                "executionStatus": EXECUTION_OK,
+                "proposals": ["Kopi Roasters"],
                 "coordinates": [{"lat": 0.0, "lon": 0.0}],
                 "provider_id": "node/999",
-            })}}],
-            "usage": {},
+                "usage": {},
+            }
         }
-        return httpx.Response(200, json=body, request=httpx.Request("POST", "https://x"))
+        return httpx.Response(200, json=body, request=httpx.Request("POST", "http://crm.test"))
 
     provider, _ = build(monkeypatch, respond=respond, known=[osm_business("Kopi Roasters", "node/1")])
     found = provider.discover(area="Makati", category="cafe", limit=10)
@@ -100,18 +133,14 @@ def test_every_returned_field_comes_from_osm_not_the_model(monkeypatch):
 
 
 def test_the_callers_limit_still_binds_after_oversampling(monkeypatch):
-    # Distinct identity-bearing names: "Cafe 0".."Cafe 9" all reduce to the single token "cafe",
-    # which the resolver would correctly refuse as ambiguous rather than resolve.
     words = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliet"]
     known = [osm_business(f"{w} Cafe", f"node/{i}") for i, w in enumerate(words)]
     provider, _ = build(
-        monkeypatch, respond=lambda url, kw: ok([b.name for b in known]), known=known
+        monkeypatch, respond=lambda url, kw: crm_ok([b.name for b in known]), known=known
     )
 
-    found = provider.discover(area="Makati", category="cafe", limit=3)
-
-    # Oversampling widens the search, never what reaches the CRM.
-    assert len(found) == 3
+    # Oversampling widens the SEARCH, never the import.
+    assert len(provider.discover(area="Makati", category="cafe", limit=3)) == 3
 
 
 def test_proposals_are_asked_for_beyond_the_limit(monkeypatch):
@@ -119,32 +148,20 @@ def test_proposals_are_asked_for_beyond_the_limit(monkeypatch):
 
     def respond(url, kw):
         seen["payload"] = kw["json"]
-        return ok([])
+        return crm_ok([])
 
     provider, _ = build(monkeypatch, respond=respond)
     provider.discover(area="Makati", category="cafe", limit=5)
 
-    asked = json.loads(seen["payload"]["messages"][1]["content"])["max_results"]
-    assert asked > 5
-
-
-def test_sampling_is_deterministic(monkeypatch):
-    seen = {}
-
-    def respond(url, kw):
-        seen["payload"] = kw["json"]
-        return ok([])
-
-    provider, _ = build(monkeypatch, respond=respond)
-    provider.discover(area="Makati", category="cafe", limit=5)
-
-    assert seen["payload"]["temperature"] == 0
+    assert seen["payload"]["count"] > 5
 
 
 def test_token_usage_is_reported_for_cost_comparison(monkeypatch):
     provider, _ = build(
         monkeypatch,
-        respond=lambda url, kw: ok(["Kopi Roasters"], {"prompt_tokens": 210, "completion_tokens": 25}),
+        respond=lambda url, kw: crm_ok(
+            ["Kopi Roasters"], {"model": "gpt-4o-mini", "prompt_tokens": 210, "completion_tokens": 25}
+        ),
         known=[osm_business("Kopi Roasters", "node/1")],
     )
     provider.discover(area="Makati", category="cafe", limit=5)
@@ -154,56 +171,101 @@ def test_token_usage_is_reported_for_cost_comparison(monkeypatch):
     assert provider.stats()["model"] == "gpt-4o-mini"
 
 
-# --- malformed and hostile model output -----------------------------------------
+# --- the credential is not in this process --------------------------------------
+
+
+def test_the_provider_authenticates_to_the_crm_and_holds_no_openai_key(monkeypatch):
+    seen = {}
+
+    def respond(url, kw):
+        seen["url"] = url
+        seen["headers"] = kw.get("headers", {})
+        return crm_ok([])
+
+    provider, _ = build(monkeypatch, respond=respond)
+    provider.discover(area="Makati", category="cafe", limit=5)
+
+    assert seen["url"].endswith("/discovery/proposals")
+    assert seen["headers"]["Authorization"] == "Bearer test-crm-token"
+    # There is no OpenAI credential in this process to leak, by construction.
+    assert not hasattr(provider, "api_key")
+    assert not hasattr(provider, "model")
+
+
+def test_a_missing_crm_token_fails_loudly_rather_than_falling_back():
+    # A silent fall back to OSM would label a plain OSM run as `openai` in the metrics.
+    with pytest.raises(ValueError, match="CRM_TOKEN"):
+        OpenAiDiscoveryProvider(
+            crm_base_url="http://crm.test", crm_token="", timeout=5, osm=FakeOsm()
+        )
+
+
+# --- a genuine empty answer -----------------------------------------------------
+
+
+def test_an_empty_but_successful_answer_is_a_successful_run(monkeypatch):
+    # The model legitimately found nothing. That is an ordinary discovery outcome and must NOT be
+    # reported as a provider failure — the mirror image of the tests below.
+    provider, _ = build(monkeypatch, respond=lambda url, kw: crm_ok([]))
+
+    assert provider.discover(area="Nowhere", category="cafe", limit=5) == []
+    assert provider.stats()["execution_status"] == EXECUTION_OK
+    assert provider.stats()["error_reason"] is None
+    assert provider.stats()["proposed"] == 0
+
+
+# --- a failure is NOT an empty result -------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "content",
-    [
-        "not json at all",
-        '{"businesses": "not a list"}',
-        '{"wrong_key": ["Kopi Roasters"]}',
-        "[]",                                  # a list, not the expected object
-        '{"businesses": [null, 42, {"a": 1}]}',  # right shape, unusable entries
-        '{"businesses": []}',
-    ],
-    ids=["plain text", "not a list", "missing key", "not an object", "junk entries", "empty"],
+    "status",
+    ["auth_failed", "rate_limited", "unreachable", "invalid_response", "not_configured"],
 )
-def test_malformed_model_output_yields_no_candidates(monkeypatch, content):
-    def respond(url, kw):
-        body = {"choices": [{"message": {"content": content}}], "usage": {}}
-        return httpx.Response(200, json=body, request=httpx.Request("POST", "https://x"))
+def test_an_upstream_failure_is_reported_as_a_failure_not_as_zero_candidates(monkeypatch, status):
+    provider, fake_osm = build(
+        monkeypatch,
+        respond=lambda url, kw: crm_failure(status, error="http_401"),
+        known=[osm_business("Kopi Roasters", "node/1")],
+    )
 
-    provider, fake_osm = build(monkeypatch, respond=respond, known=[osm_business("Kopi", "node/1")])
+    found = provider.discover(area="Makati", category="cafe", limit=5)
 
-    assert provider.discover(area="Makati", category="cafe", limit=5) == []
-    assert fake_osm.asked == []  # nothing worth looking up, so no Overpass spend either
-
-
-def test_usable_names_survive_junk_entries_beside_them(monkeypatch):
-    def respond(url, kw):
-        body = {"choices": [{"message": {"content": json.dumps(
-            {"businesses": ["Kopi Roasters", None, 42, "  "]}
-        )}}], "usage": {}}
-        return httpx.Response(200, json=body, request=httpx.Request("POST", "https://x"))
-
-    provider, _ = build(monkeypatch, respond=respond, known=[osm_business("Kopi Roasters", "node/1")])
-
-    assert len(provider.discover(area="Makati", category="cafe", limit=5)) == 1
-
-
-# --- API failure modes ----------------------------------------------------------
-
-
-@pytest.mark.parametrize("status", [400, 401, 429, 500, 503])
-def test_non_2xx_responses_yield_no_candidates(monkeypatch, status):
-    def respond(url, kw):
-        return httpx.Response(status, json={"error": "nope"}, request=httpx.Request("POST", "https://x"))
-
-    provider, fake_osm = build(monkeypatch, respond=respond)
-
-    assert provider.discover(area="Makati", category="cafe", limit=5) == []
+    assert found == []
+    # THE DISTINCTION. Zero candidates, but explicitly NOT a successful run.
+    assert provider.stats()["execution_status"] == status
+    assert provider.stats()["execution_status"] != EXECUTION_OK
+    assert provider.stats()["error_reason"] == "http_401"
+    # And no Overpass spend on a batch that was never obtained.
     assert fake_osm.asked == []
+
+
+def test_a_rejected_credential_is_distinguishable_from_an_empty_answer(monkeypatch):
+    # Both produce zero candidates. The stats must tell them apart — this is the whole correction.
+    rejected, _ = build(monkeypatch, respond=lambda url, kw: crm_failure("auth_failed", "http_401"))
+    empty, _ = build(monkeypatch, respond=lambda url, kw: crm_ok([]))
+
+    rejected.discover(area="Makati", category="cafe", limit=5)
+    empty.discover(area="Makati", category="cafe", limit=5)
+
+    assert rejected.stats()["execution_status"] == "auth_failed"
+    assert empty.stats()["execution_status"] == EXECUTION_OK
+    assert rejected.stats()["execution_status"] != empty.stats()["execution_status"]
+
+
+def test_a_crm_refusal_because_ai_is_not_effective_is_reported(monkeypatch):
+    # 409: the CRM enforcing the same guard the settings page shows. A configuration state, surfaced
+    # rather than swallowed.
+    def respond(url, kw):
+        return httpx.Response(
+            409,
+            json={"data": {"effectiveProvider": "openstreetmap", "reason": "provider_disabled", "proposals": []}},
+            request=httpx.Request("POST", "http://crm.test"),
+        )
+
+    provider, _ = build(monkeypatch, respond=respond)
+
+    assert provider.discover(area="Makati", category="cafe", limit=5) == []
+    assert provider.stats()["execution_status"] == EXECUTION_NOT_EFFECTIVE
 
 
 @pytest.mark.parametrize(
@@ -211,47 +273,68 @@ def test_non_2xx_responses_yield_no_candidates(monkeypatch, status):
     [httpx.ConnectTimeout("timed out"), httpx.ReadTimeout("slow"), httpx.ConnectError("refused")],
     ids=["connect timeout", "read timeout", "connection refused"],
 )
-def test_transport_failures_yield_no_candidates(monkeypatch, exc):
+def test_an_unreachable_crm_is_a_failure_not_an_empty_run(monkeypatch, exc):
     def respond(url, kw):
         raise exc
 
     provider, _ = build(monkeypatch, respond=respond)
 
-    # No exception escapes: an unreachable model is an empty discovery, which run_discovery already
-    # handles as "nothing discovered". It must never abort a scheduled run.
+    # No exception escapes — a scheduled sweep must not abort — but the run is marked failed.
     assert provider.discover(area="Makati", category="cafe", limit=5) == []
+    assert provider.stats()["execution_status"] == EXECUTION_CRM_UNREACHABLE
 
 
-def test_a_response_missing_the_expected_shape_yields_no_candidates(monkeypatch):
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"unexpected": True},
+        {"data": {"executionStatus": EXECUTION_OK}},          # no proposals key at all
+        {"data": {"executionStatus": EXECUTION_OK, "proposals": "not a list"}},
+    ],
+    ids=["no data envelope", "missing proposals", "proposals not a list"],
+)
+def test_an_unreadable_crm_response_is_a_failure_not_an_empty_run(monkeypatch, body):
+    provider, _ = build(
+        monkeypatch,
+        respond=lambda url, kw: httpx.Response(
+            200, json=body, request=httpx.Request("POST", "http://crm.test")
+        ),
+    )
+
+    assert provider.discover(area="Makati", category="cafe", limit=5) == []
+    assert provider.stats()["execution_status"] == EXECUTION_INVALID_RESPONSE
+
+
+def test_junk_entries_beside_usable_names_do_not_fail_the_run(monkeypatch):
+    # A well-formed response with some unusable entries is still a SUCCESS — the usable names survive
+    # and the run is not marked failed. Only an unreadable response is a failure.
     def respond(url, kw):
-        return httpx.Response(200, json={"unexpected": True}, request=httpx.Request("POST", "https://x"))
+        body = {
+            "data": {
+                "executionStatus": EXECUTION_OK,
+                "proposals": ["Kopi Roasters", None, 42, "  "],
+                "usage": {},
+            }
+        }
+        return httpx.Response(200, json=body, request=httpx.Request("POST", "http://crm.test"))
 
-    provider, _ = build(monkeypatch, respond=respond)
+    provider, _ = build(monkeypatch, respond=respond, known=[osm_business("Kopi Roasters", "node/1")])
 
-    assert provider.discover(area="Makati", category="cafe", limit=5) == []
-
-
-# --- configuration --------------------------------------------------------------
+    assert len(provider.discover(area="Makati", category="cafe", limit=5)) == 1
+    assert provider.stats()["execution_status"] == EXECUTION_OK
 
 
-def test_a_missing_api_key_fails_loudly_rather_than_falling_back():
-    # A silent fallback to OSM would label a plain OSM run as `openai` in the metrics and quietly
-    # corrupt the comparison this provider exists to enable.
-    with pytest.raises(ValueError, match="OPENAI_API_KEY"):
-        OpenAiDiscoveryProvider(
-            api_key="", model="gpt-4o-mini", base_url="https://api.openai.com/v1",
-            timeout=5, osm=FakeOsm(),
-        )
+# --- provenance and cleanup -----------------------------------------------------
 
 
 def test_provenance_is_the_provider_name():
     provider = OpenAiDiscoveryProvider(
-        api_key="k", model="m", base_url="https://x", timeout=5, osm=FakeOsm()
+        crm_base_url="http://crm.test", crm_token="t", timeout=5, osm=FakeOsm()
     )
     assert provider.name == "openai"
 
 
 def test_closing_releases_the_osm_client_too(monkeypatch):
-    provider, fake_osm = build(monkeypatch, respond=lambda url, kw: ok([]))
+    provider, fake_osm = build(monkeypatch, respond=lambda url, kw: crm_ok([]))
     provider.close()
     assert fake_osm.closed

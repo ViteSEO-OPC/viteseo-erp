@@ -11,7 +11,9 @@ use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
+use App\Modules\Crm\Controllers\DiscoveryConfigController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
+use App\Modules\Crm\Controllers\NerbyProviderSettingController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
 use App\Modules\Crm\Controllers\LeadFollowUpController;
@@ -90,6 +92,31 @@ Route::prefix('v1/crm')->group(function (): void {
         // data provider (same `import` permission); never touches Lead Status / score / ownership.
         Route::get('/website-enrichment/queue', [WebsiteEnrichmentController::class, 'queue'])->can('import', Lead::class);
         Route::put('/leads/{lead}/website-enrichment', [WebsiteEnrichmentController::class, 'update'])->can('import', Lead::class);
+
+        // Nearby discovery provider — the scraper's window onto the configuration an admin chose in
+        // Settings → Integrations. Same `import` permission as the two providers above, because it is
+        // the same service doing the same job; deliberately NOT gated on an admin role, since the
+        // scraper authenticates as a service account and should not need to be an administrator.
+        //
+        // `config` answers with the EFFECTIVE provider, never the merely-selected one. That keeps the
+        // fallback rule in exactly one place: "OpenAI selected but no key" resolves to OpenStreetMap
+        // here, so the scraper needs no fallback logic of its own and cannot disagree with the CRM.
+        //
+        // `proposals` makes the OpenAI call SERVER-SIDE and returns names only. The scraper never
+        // receives the API key — that is the whole point of the endpoint existing. Refused with 409
+        // unless AI is genuinely the effective provider, so a caller that skipped `config` cannot
+        // spend on a provider nobody enabled.
+        //
+        // IT CARRIES A ROLE GATE ON TOP OF THE PERMISSION, unlike its siblings, because it SPENDS
+        // MONEY. `crm.leads.import` is deliberately held by Business Development Managers too (their
+        // own spreadsheet imports), so permission alone would let any BD run up an OpenAI bill.
+        // Triggering paid AI work is closer to managing the integration than to importing a file, so
+        // it is gated like the Settings surface. The scraper's service account is an Admin/Super
+        // Admin token already, so this changes nothing operationally.
+        Route::get('/discovery/config', [DiscoveryConfigController::class, 'config'])->can('import', Lead::class);
+        Route::post('/discovery/proposals', [DiscoveryConfigController::class, 'proposals'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
         Route::get('/leads/{lead}/activities', [LeadController::class, 'activities'])->can('view', 'lead');
         // One lead as a PDF profile. Authorized by `view` on the lead — the same ownership boundary as
         // reading it — so a BD can export their own leads and nobody can export a lead they cannot see.
@@ -440,6 +467,48 @@ Route::prefix('v1/crm')->group(function (): void {
             Route::get('/settings/integrations/gmail', [GmailOAuthController::class, 'show']);
             Route::delete('/settings/integrations/gmail', [GmailOAuthController::class, 'destroy']);
             Route::post('/settings/integrations/gmail/authorization', [GmailOAuthController::class, 'store']);
+
+            // Settings → Integrations → Nearby Lead Generation: which engine fills the discovered-
+            // business pool. Gated identically to Gmail above, and for the same reason — this
+            // configures how the ORGANISATION generates leads, not a personal preference. A Business
+            // Development Manager is refused here at the route, so the UI hiding these controls is
+            // presentation rather than protection.
+            //
+            // GET returns configuration plus the EFFECTIVE provider and a reason code — never the
+            // API key, never its ciphertext, never its length. Selecting OpenAI without a usable
+            // credential falls back to OpenStreetMap, and the response says so rather than letting a
+            // client display "OpenAI" for a run that queried Overpass.
+            //
+            // PUT treats the API key as write-only: omitting it keeps the stored one, so changing a
+            // model or flipping the switch never sends a credential through a browser again. Clearing
+            // it is the separate DELETE, because a blank field usually means "I didn't retype it".
+            //
+            // POST .../test verifies the stored credential and records a status code. Throttled: the
+            // button spends money, so it must not be a load generator.
+            // Provider-KEYED, so a third engine (a structured Places provider is under evaluation)
+            // needs an enum case and nothing else — no new route, no new column, no migration.
+            //
+            // GET returns every provider's configuration plus the EFFECTIVE provider and a reason
+            // code — never a credential, never its ciphertext, never its length. Selecting a provider
+            // without a usable credential falls back to OpenStreetMap, and the response says so
+            // rather than letting a client display a provider that is not actually running.
+            //
+            // PUT /provider is SELECTION only: it never enables anything and never touches a
+            // credential, because choosing an engine and authorising it to spend money are different
+            // decisions and one mis-click must not do both.
+            //
+            // PUT /providers/{provider} configures one engine. The credential is write-only —
+            // omitting it keeps the stored one, so changing a model never sends a key through a
+            // browser again. Clearing it is the separate DELETE.
+            //
+            // POST .../test verifies one stored credential and records a status code. Throttled: the
+            // button spends money, so it must not be a load generator.
+            Route::get('/settings/integrations/nerby', [NerbyProviderSettingController::class, 'show']);
+            Route::put('/settings/integrations/nerby/provider', [NerbyProviderSettingController::class, 'select']);
+            Route::put('/settings/integrations/nerby/providers/{provider}', [NerbyProviderSettingController::class, 'update']);
+            Route::delete('/settings/integrations/nerby/providers/{provider}/credential', [NerbyProviderSettingController::class, 'destroyCredential']);
+            Route::post('/settings/integrations/nerby/providers/{provider}/test', [NerbyProviderSettingController::class, 'test'])
+                ->middleware('throttle:10,1');
         });
     });
 });

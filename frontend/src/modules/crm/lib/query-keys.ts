@@ -179,6 +179,11 @@ export const queryKeys = {
     // another provider's status; `all` is the prefix for "refresh every integration card".
     all: ["integrations"] as const,
     gmail: () => [...queryKeys.integrations.all, "gmail"] as const,
+    // Nearby Lead Generation — the discovery-provider configuration. One key for the whole
+    // control centre rather than one per provider: the API answers with every provider plus the
+    // effective one in a single payload, and splitting it would let the switch and a provider's
+    // credential state be cached at different ages and disagree on screen.
+    nerby: () => [...queryKeys.integrations.all, "nerby"] as const,
   },
   businessRules: {
     // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved

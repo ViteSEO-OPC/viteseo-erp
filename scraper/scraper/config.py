@@ -7,8 +7,12 @@ discovery provider, or pointing at a different CRM, is configuration only.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
+
+import httpx
 
 
 def _load_dotenv() -> None:
@@ -34,15 +38,12 @@ class Config:
     nominatim_url: str
     user_agent: str
     request_timeout: float
-    # OpenAI-assisted discovery. Only read when DISCOVERY_PROVIDER selects it — the default OSM path
-    # never touches these, and an environment that never sets them behaves exactly as before.
+    # AI-assisted discovery timeout. There is deliberately NO OpenAI API key here: the CRM holds the
+    # credential and makes the outbound model call, so this process never receives, stores or logs one.
+    # See `fetch_crm_provider` below for how the provider itself is decided.
     #
-    # DEFAULTED, deliberately: making them required would break every existing construction site
-    # (tests included) and turn an additive capability into a breaking change to the config contract.
-    # An empty key is the honest default — it means "AI discovery is not configured here".
-    openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
-    openai_base_url: str = "https://api.openai.com/v1"
+    # DEFAULTED so existing construction sites (tests included) keep working — an additive capability
+    # must not become a breaking change to the config contract.
     openai_timeout: float = 30.0
 
     @classmethod
@@ -60,10 +61,72 @@ class Config:
             nominatim_url=os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org"),
             user_agent=os.environ.get("USER_AGENT", "CRM-Enterprise-Scraper/1.0"),
             request_timeout=float(os.environ.get("REQUEST_TIMEOUT", "60")),
-            openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
-            openai_model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
-            openai_base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             # Shorter than REQUEST_TIMEOUT: a slow proposal should cost one target a few seconds and
             # then yield nothing, rather than stall a scheduled run behind it.
             openai_timeout=float(os.environ.get("OPENAI_TIMEOUT", "30")),
         )
+
+
+@dataclass(frozen=True)
+class CrmProviderConfig:
+    """What the CRM says the discovery provider should be, and why.
+
+    Note ``effective_provider``, not "selected": the CRM resolves the fallback itself, so a provider
+    an admin chose but has not credentialed arrives here already resolved to ``openstreetmap`` with a
+    reason. That keeps the fallback rule in ONE place — a second copy in Python would be a copy that
+    eventually disagrees with the CRM's own settings page.
+    """
+
+    effective_provider: str
+    configured_provider: str
+    reason: str
+    mode: str
+    is_fallback: bool
+
+
+def fetch_crm_provider(config: "Config") -> Optional[CrmProviderConfig]:
+    """Ask the CRM which provider to use. ``None`` when it cannot be asked.
+
+    Returns None — never raises, and never guesses — for a missing token, an unreachable CRM, a
+    non-2xx response, or a payload that is not the expected shape. The caller treats None as "fall
+    back to the local configuration", which ends at OpenStreetMap: a CRM outage must degrade discovery
+    to the safe baseline, not stop it and not silently keep using a provider nobody can confirm.
+
+    No credential is involved in either direction. The response carries provider identifiers and a
+    reason code; the API key stays in the CRM, which is what makes the AI path safe to operate from a
+    worker at all.
+    """
+    if not config.crm_token:
+        return None
+
+    url = f"{config.crm_base_url.rstrip('/')}/discovery/config"
+    try:
+        with httpx.Client(timeout=config.request_timeout) as client:
+            response = client.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {config.crm_token}",
+                    "Accept": "application/json",
+                    "User-Agent": config.user_agent,
+                },
+            )
+        if response.status_code >= 400:
+            print(
+                f"CRM discovery config unavailable (HTTP {response.status_code}).",
+                file=sys.stderr,
+            )
+            return None
+        payload = response.json()["data"]
+        return CrmProviderConfig(
+            effective_provider=str(payload["effectiveProvider"]),
+            configured_provider=str(payload.get("configuredProvider", payload["effectiveProvider"])),
+            reason=str(payload.get("reason", "")),
+            mode=str(payload.get("mode", "live")),
+            is_fallback=bool(payload.get("isFallback", False)),
+        )
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        print(
+            f"CRM discovery config unreachable ({type(exc).__name__}) — using local configuration.",
+            file=sys.stderr,
+        )
+        return None

@@ -54,7 +54,18 @@ business logic. The ingest payload physically cannot carry those fields.
 | Provider | Selector | Needs a key | What it does |
 |---|---|---|---|
 | **OpenStreetMap** (default) | `--provider osm` | no | Overpass tag search over 19 `CATEGORY_SELECTORS`. The safe baseline and the fallback. |
-| **OpenAI-assisted** | `--provider openai` | `OPENAI_API_KEY` | The model PROPOSES candidate business names; OSM deterministically RESOLVES them. |
+| **OpenAI-assisted** | `--provider openai` | `CRM_TOKEN` only | The CRM holds the OpenAI key and makes the call; this tool asks it for candidate names, then OSM deterministically RESOLVES them. |
+
+**The provider is chosen in the CRM.** Settings -> Integrations -> Nearby Lead Generation (Admin /
+Super Admin only) selects it; the scraper obeys the CRM's EFFECTIVE provider, so "OpenAI selected but
+no key" already arrives resolved to OpenStreetMap with a reason. Precedence is
+`--provider` -> CRM setting -> `DISCOVERY_PROVIDER` -> `openstreetmap`, and an unreachable CRM falls
+back to the local configuration rather than stopping discovery.
+
+**A failed provider call is never reported as an empty result.** A rejected credential and a town
+with no matching businesses both yield zero candidates; the run metrics carry
+`provider_execution_status` and `error_reason` so the two can be told apart, and a failed execution
+exits non-zero instead of logging a quiet "nothing discovered".
 
 **The AI never becomes authoritative.** It proposes names and nothing else. `provider_id`,
 coordinates, phone, email and website all come from the resolved OSM element, so dedup and

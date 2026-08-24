@@ -23,7 +23,7 @@ from scraper import run_metrics
 from scraper.config import Config
 from scraper.ingest import CrmIngestClient
 from scraper.normalizer import normalize
-from scraper.providers import get_provider
+from scraper.providers import config_for, get_provider, resolve_provider_choice
 from scraper.targets import (
     MAX_LIMIT,
     TargetsError,
@@ -47,6 +47,7 @@ def run_discovery(
     commit: bool,
     print_only: bool = False,
     out: str | None = None,
+    provider_override: str | None = None,
 ) -> int:
     """Discover one (area, category) pair and ingest it. The single discovery path.
 
@@ -54,9 +55,14 @@ def run_discovery(
     proven flow — same provider, same normalizer, same ingest client, same ``dry_run = not commit``
     gate — rather than growing a second one that could drift from it.
     """
-    provider = get_provider(config)
+    # THE PROVIDER BOUNDARY. This is the single point where the Settings switch enters the runtime;
+    # everything downstream (normalize -> ingest -> prospect -> qualification -> scoring) is identical
+    # whichever provider produced the RawBusiness records.
+    choice = resolve_provider_choice(config, provider_override)
+    provider = get_provider(config_for(config, choice))
     print(
-        f"Discovering '{category}' in '{area}' via {provider.name} (limit {limit})...",
+        f"Discovering '{category}' in '{area}' via {provider.name} "
+        f"(limit {limit}, provider from {choice.source})...",
         file=sys.stderr,
     )
     started_at = datetime.now(timezone.utc)
@@ -93,6 +99,7 @@ def run_discovery(
                 imported=imported,
                 provider_stats=provider_stats,
                 started_at=started_at.isoformat(),
+                choice=choice,
             )
         )
 
@@ -100,6 +107,21 @@ def run_discovery(
         with open(out, "w", encoding="utf-8") as fh:
             json.dump([b.to_payload() for b in businesses], fh, indent=2, ensure_ascii=False)
         print(f"Wrote {out}", file=sys.stderr)
+
+    # A PROVIDER THAT FAILED TO EXECUTE IS NOT A RUN THAT FOUND NOTHING. Checked before the
+    # "nothing discovered" branch below, so a rejected credential or an unreachable model exits
+    # non-zero and a scheduler alarms, instead of being logged as a quiet, successful zero.
+    execution_status = str(provider_stats.get("execution_status") or "ok")
+    if execution_status != "ok":
+        record_run()
+        error = provider_stats.get("error_reason")
+        print(
+            f"ERROR: {provider.name} did not complete discovery (status: {execution_status}"
+            + (f", {error}" if error else "")
+            + "). No candidates were retrieved; this is a FAILED run, not an empty one.",
+            file=sys.stderr,
+        )
+        return 3
 
     if print_only:
         record_run()
@@ -228,18 +250,18 @@ def _compare(args: argparse.Namespace) -> int:
 
 
 def _discover(args: argparse.Namespace) -> int:
-    config = Config.load()
-    if args.provider:
-        config = Config(**{**config.__dict__, "discovery_provider": args.provider})
-
+    # `--provider` is passed through as an OVERRIDE rather than folded into the config, so the
+    # precedence (flag > CRM > env > default) is decided in one place and an explicit flag can be
+    # told apart from a configured default in the run metrics.
     return run_discovery(
-        config,
+        Config.load(),
         area=args.area,
         category=args.category,
         limit=args.limit,
         commit=args.commit,
         print_only=args.print_only,
         out=args.out,
+        provider_override=args.provider,
     )
 
 
