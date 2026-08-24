@@ -1741,7 +1741,10 @@ class PayrollService
      */
     public function thirteenthMonthPreview(int $year): array
     {
-        $cap = (float) (PayrollSetting::current()->other_benefits_annual_cap ?? 0);
+        // The SAME dated cap runThirteenthMonth() will use, not the live row. A preview that
+        // resolves its rules differently from the run it is previewing is not a preview: for a
+        // past year, or a cap change already scheduled ahead, the two quietly disagreed.
+        $cap = (float) (PayrollSetting::asOf("{$year}-12-31")->other_benefits_annual_cap ?? 0);
         $rows = $this->computeThirteenthMonth($year, $cap);
 
         return [
@@ -3433,7 +3436,7 @@ class PayrollService
      * recomputed. Reversible via unlock(), which is audited: the lock is a safety catch
      * against an accidental re-run, not a legal seal.
      */
-    public function lock(PayrollRun $run, User $user): PayrollRun
+    public function lock(PayrollRun $run, User $user, bool $acknowledgeOverpayment = false): PayrollRun
     {
         if ($run->isLocked()) {
             throw ValidationException::withMessages([
@@ -3472,6 +3475,36 @@ class PayrollService
                     "{$owing} payslip(s) were amended after being paid and still have a balance outstanding. Pay it before locking the run.",
                 ],
             ]);
+        }
+
+        // AND NOT A PENNY OVERPAID EITHER. The mirror of the check above, and the one it was
+        // missing: a correction that LOWERS a paid payslip leaves the company out of pocket, and
+        // `net_pay > disbursed_amount` cannot see it because the inequality points the other way.
+        // Closing the books on a cycle while money is still unrecovered went through silently.
+        //
+        // A refusal rather than a block: wages already paid cannot be clawed back unilaterally
+        // (Labor Code art. 113 — recovery needs the employee's written consent), so there is no
+        // action that would clear this the way paying a balance clears the case above. A run with
+        // an overpayment on it would otherwise be unlockable for ever. So it asks, once, the same
+        // way a back-dated salary does (EmployeeService::assertSalaryDateIsSafe).
+        if (! $acknowledgeOverpayment) {
+            $overpaid = $run->payslips()
+                ->whereNotNull('disbursed_amount')
+                ->whereColumn('net_pay', '<', 'disbursed_amount')
+                ->get();
+
+            if ($overpaid->isNotEmpty()) {
+                $total = $overpaid->sum(fn (Payslip $p) => -$p->amountOutstanding());
+
+                throw ValidationException::withMessages([
+                    'acknowledge_overpayment' => [
+                        $overpaid->count() . ' payslip(s) in this run were corrected downward after '
+                            . 'being paid, so ' . '₱' . number_format((float) $total, 2) . ' was '
+                            . 'overpaid and has not been recovered. Nothing collects it back '
+                            . 'automatically. Confirm to lock the run anyway.',
+                    ],
+                ]);
+            }
         }
 
         $run->update(['locked_at' => now(), 'locked_by' => $user->id]);

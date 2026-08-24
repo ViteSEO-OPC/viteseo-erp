@@ -52,12 +52,6 @@ export interface BenefitTier {
   employee_share: number;
 }
 
-export const ALLOWANCE_FREQUENCIES = [
-  { value: "monthly", label: "Monthly" },
-  { value: "semi_monthly", label: "Semi-monthly" },
-  { value: "annual", label: "Annual" },
-] as const;
-
 export const TAX_TREATMENTS = [
   { value: "de_minimis", label: "De minimis · non-taxable" },
   { value: "taxable", label: "Taxable" },
@@ -92,10 +86,6 @@ export const HMO_CADENCES = [
   { value: "per_cutoff", label: "Per cutoff" },
   { value: "monthly", label: "Monthly" },
 ] as const;
-
-export function frequencyLabel(v: string): string {
-  return ALLOWANCE_FREQUENCIES.find((f) => f.value === v)?.label ?? v;
-}
 
 export interface BenefitProgress {
   percent: number;

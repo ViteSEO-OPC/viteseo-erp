@@ -345,7 +345,13 @@ class PayrollController extends Controller
     public function lockRun(Request $request, PayrollRun $payrollRun): JsonResponse
     {
         return PayrollRunResource::make(
-            $this->service->lock($payrollRun, $request->user()),
+            // A run carrying an unrecovered overpayment is refused until HR confirms — see
+            // PayrollService::lock(). The flag arrives only from that confirmation.
+            $this->service->lock(
+                $payrollRun,
+                $request->user(),
+                $request->boolean('acknowledge_overpayment'),
+            ),
         )->response();
     }
 

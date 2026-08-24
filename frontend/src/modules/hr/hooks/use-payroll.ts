@@ -163,8 +163,16 @@ export function useReopenPayslip() {
 export function useSetPayrollRunLock() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, lock }: { id: number; lock: boolean }) =>
-      lock ? lockPayrollRun(id) : unlockPayrollRun(id),
+    mutationFn: ({
+      id,
+      lock,
+      acknowledgeOverpayment,
+    }: {
+      id: number;
+      lock: boolean;
+      /** Confirms locking over an unrecovered overpayment. See lockPayrollRun. */
+      acknowledgeOverpayment?: boolean;
+    }) => (lock ? lockPayrollRun(id, acknowledgeOverpayment) : unlockPayrollRun(id)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
       qc.invalidateQueries({ queryKey: RUNS_KEY });

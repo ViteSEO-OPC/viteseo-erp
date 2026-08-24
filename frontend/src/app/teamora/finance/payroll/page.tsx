@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { PayslipCorrections } from "@/modules/hr/components/payslip-corrections";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { RunLineWaiverDialog } from "@/modules/hr/components/run-line-waiver-dialog";
 import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import {
@@ -210,6 +211,37 @@ export default function PayrollPage() {
   const disbursedCount =
     detail?.breakdown?.filter((r) => r.status === "disbursed").length ?? 0;
   const lockMut = useSetPayrollRunLock();
+  /*
+   * Locking is refused while a correction has left a paid payslip overpaid — money the company
+   * is out and cannot take back without the employee's written consent. That refusal is a
+   * QUESTION (nothing HR does would ever clear it), so it becomes a confirmation rather than a
+   * dead menu item that does nothing when clicked.
+   */
+  const [overpaidLock, setOverpaidLock] = useState<{ id: number; message: string } | null>(null);
+
+  async function setLock(id: number, lock: boolean, acknowledgeOverpayment = false) {
+    try {
+      await lockMut.mutateAsync({ id, lock, acknowledgeOverpayment });
+      setOverpaidLock(null);
+      toast.success(lock ? "Run locked" : "Run unlocked");
+    } catch (err) {
+      const overpaid =
+        err instanceof AxiosError
+          ? err.response?.data?.errors?.acknowledge_overpayment?.[0]
+          : undefined;
+
+      if (overpaid) {
+        setOverpaidLock({ id, message: overpaid });
+        return;
+      }
+
+      toast.error(
+        err instanceof AxiosError
+          ? (err.response?.data?.message ?? "Could not change the lock.")
+          : "Could not change the lock.",
+      );
+    }
+  }
   const history = (runs ?? []).filter((r) => r.id !== currentRun?.id);
   // A past run selected from the history modal → its per-employee breakdown.
   const { data: viewRun } = usePayrollRun(viewRunId ?? undefined);
@@ -516,7 +548,7 @@ export default function PayrollPage() {
                 {detail?.can_lock && (
                   <DropdownMenuItem
                     disabled={lockMut.isPending}
-                    onSelect={() => lockMut.mutate({ id: detail.id, lock: true })}
+                    onSelect={() => void setLock(detail.id, true)}
                   >
                     <Lock />
                     {lockMut.isPending ? "Locking…" : "Lock this run"}
@@ -525,7 +557,7 @@ export default function PayrollPage() {
                 {detail?.is_locked && (
                   <DropdownMenuItem
                     disabled={lockMut.isPending}
-                    onSelect={() => lockMut.mutate({ id: detail.id, lock: false })}
+                    onSelect={() => void setLock(detail.id, false)}
                   >
                     <LockOpen />
                     {lockMut.isPending ? "Unlocking…" : "Unlock this run"}
@@ -848,6 +880,13 @@ export default function PayrollPage() {
                   onRowClick={(r) => setPayslipId(r.id)}
                 />
               </div>
+              {/*
+               * What THIS period was priced with — the whole point of freezing a period's rules
+               * is being able to answer "why does June say that?" months later, and the current
+               * period was the only place that answer appeared. Deliberately outside the scroll
+               * box above, so opening it does not fight the table for the same few pixels.
+               */}
+              <RunRulesSnapshot snapshot={viewRun.policy_snapshot} drift={viewRun.rules_drift} />
             </>
           ) : (
             <p className="py-10 text-center text-sm text-muted-foreground">Loading breakdown…</p>
@@ -1193,6 +1232,23 @@ export default function PayrollPage() {
 
       {/* The queue of pay differences awaiting settlement. */}
       <TaxTableDialog open={taxTableOpen} onOpenChange={setTaxTableOpen} />
+
+      {/*
+       * The server names the money; repeating it here in our own words would be a second place
+       * for the figure to be wrong.
+       */}
+      <DeleteConfirmDialog
+        open={overpaidLock !== null}
+        onOpenChange={(next) => !next && setOverpaidLock(null)}
+        title="Lock this run anyway?"
+        question={overpaidLock?.message}
+        description="Locking closes the cycle to any further recompute. The overpayment stays on the payslip and on the record, so it can still be arranged with the employee afterwards. Unlocking is possible later, and is audited."
+        confirmLabel="Lock anyway"
+        isPending={lockMut.isPending}
+        onConfirm={() => {
+          if (overpaidLock) return setLock(overpaidLock.id, true, true);
+        }}
+      />
 
       {/* off-cycle correction. */}
       <PaymentBatchDialog

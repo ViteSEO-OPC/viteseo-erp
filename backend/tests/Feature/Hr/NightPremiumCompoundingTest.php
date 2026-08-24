@@ -38,7 +38,7 @@ class NightPremiumCompoundingTest extends HrTestCase
 
         // A divisor-based daily rate so declaring a holiday cannot move the hourly figure itself —
         // the ratios below would otherwise be measuring the rate basis rather than the multiplier.
-        app(AttendancePolicyService::class)->get()->update([
+        $this->policyAlways([
             'overtime_mode' => 'approved_only',
             'daily_rate_basis' => 'fixed_divisor',
             'annual_divisor' => 261,
@@ -238,7 +238,7 @@ class NightPremiumCompoundingTest extends HrTestCase
 
         $atMinimum = $this->payrollResult();
 
-        app(AttendancePolicyService::class)->get()->update(['premium_regular_holiday_pct' => 300]);
+        $this->policyAlways(['premium_regular_holiday_pct' => 300]);
         $raised = $this->payrollResult();
 
         $this->assertEqualsWithDelta(

@@ -4,7 +4,6 @@ namespace Tests\Feature\Hr;
 
 use App\Models\User;
 use App\Modules\Hr\Models\Attendance;
-use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\Department;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Holiday;
@@ -62,13 +61,14 @@ class ManagementCompanyRulesTest extends HrTestCase
     }
 
     /**
-     * Write the rule straight to the row. Each `app(...)` below resolves a fresh service (and
-     * so a fresh policy memo), which is exactly how a later HTTP request would read it.
+     * The rule this company has always had. Filed as the OPENING version, not as an edit made
+     * today: the fixture cycles below are in the past, and a run prices at the rules in force on
+     * the cycle's last day. Each call resolves a fresh service (and so a fresh policy memo),
+     * which is exactly how a later HTTP request would read it.
      */
     private function setRule(string $field, bool $value): void
     {
-        app(AttendancePolicyService::class)->get(); // the singleton row exists from here on
-        AttendancePolicy::query()->update([$field => $value]);
+        $this->policyAlways([$field => $value]);
     }
 
     private function holiday(string $date, string $type = 'regular'): void

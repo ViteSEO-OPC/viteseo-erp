@@ -71,7 +71,7 @@ class PayslipComputationBasisTest extends HrTestCase
     /** Turn on per-minute late/undertime charging. */
     private function chargeLateness(): void
     {
-        app(AttendancePolicyService::class)->update([
+        $this->policyAlways([
             'late_deduction_mode' => 'per_hour',
             'undertime_deduction_mode' => 'per_hour',
         ]);
@@ -191,7 +191,7 @@ class PayslipComputationBasisTest extends HrTestCase
     {
         // The step nobody can derive from the payslip: a tier ladder makes 20 minutes late and
         // 200 minutes late cost exactly the same, and nothing on the document used to say so.
-        app(AttendancePolicyService::class)->update([
+        $this->policyAlways([
             'late_deduction_mode' => 'tiered',
             'late_tiers' => [['over' => 15, 'hours' => 1]],
         ]);

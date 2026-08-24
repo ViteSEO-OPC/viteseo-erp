@@ -116,9 +116,21 @@ export async function reopenPayslip(id: number, reason?: string): Promise<Payrol
   return res.data.data;
 }
 
-/** Seal a fully-disbursed run so it can never be recomputed. */
-export async function lockPayrollRun(id: number): Promise<PayrollRun> {
-  const res = await apiClient.post(`/hr/payroll/runs/${id}/lock`);
+/**
+ * Seal a fully-disbursed run so it can never be recomputed.
+ *
+ * Refused with a 422 on `acknowledge_overpayment` when a correction dropped a paid payslip below
+ * what was transferred — money the company is out and cannot claw back without the employee's
+ * written consent. Pass the flag to lock it anyway; that is a confirmation, not a default.
+ */
+export async function lockPayrollRun(
+  id: number,
+  acknowledgeOverpayment = false,
+): Promise<PayrollRun> {
+  const res = await apiClient.post(
+    `/hr/payroll/runs/${id}/lock`,
+    acknowledgeOverpayment ? { acknowledge_overpayment: true } : {},
+  );
   return res.data.data;
 }
 
