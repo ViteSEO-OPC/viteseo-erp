@@ -35,6 +35,7 @@ from scraper.targets import (
     select,
     targets_per_run,
 )
+from scraper.safety import describe_target, refuse_remote_commit
 from scraper.website_discovery.runner import run_website_discovery
 from scraper.website_intelligence.runner import run_audit
 
@@ -153,6 +154,7 @@ def run_discovery(
     summary = result.get("summary", {})
     record_run(summary, int(result.get("importedCount") or 0))
     print(
+        f"[{mode}] CRM target: {describe_target(config.crm_base_url).label}\n"
         f"[{mode}] total={summary.get('total')} valid={summary.get('valid')} "
         f"duplicates={summary.get('duplicates')} updated={summary.get('updated', 0)} "
         f"imported={result.get('importedCount')}"
@@ -423,6 +425,15 @@ def main(argv: list[str] | None = None) -> int:
     a.set_defaults(func=_audit)
 
     args = parser.parse_args(argv)
+
+    # ONE choke point for every write, present and future. Enforcing this per-command would mean each
+    # new `--commit` flag has to remember the rule; enforcing it on the parsed args means a command
+    # that forgets is still covered, because the flag itself is what triggers the check.
+    if getattr(args, "commit", False):
+        refusal = refuse_remote_commit(describe_target(Config.load().crm_base_url), commit=True)
+        if refusal:
+            print(f"ERROR: {refusal}", file=sys.stderr)
+            return 2
 
     try:
         return args.func(args)

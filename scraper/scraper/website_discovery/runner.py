@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from scraper.config import Config
+from scraper.safety import describe_target
 from scraper.website_discovery.fetcher import fetch_candidate
 from scraper.website_discovery.tier0 import (
     candidates_for,
@@ -75,11 +76,24 @@ def run_website_discovery(config: Config, limit: int, *, commit: bool = False) -
         base_url=config.crm_base_url, token=config.crm_token, user_agent=config.user_agent
     )
 
+    target = describe_target(config.crm_base_url)
+
     try:
         try:
             leads = client.queue(limit)
+        except httpx.HTTPStatusError as exc:
+            # Name the status: a 401 here almost always means the token belongs to another
+            # deployment (they are per-database), which is otherwise a slow thing to work out.
+            print(
+                f"Could not read the website-search queue from {target.host}: "
+                f"HTTP {exc.response.status_code}.",
+                file=sys.stderr,
+            )
+            return 2
         except httpx.HTTPError as exc:
-            print(f"Could not read the website-search queue ({type(exc).__name__}).", file=sys.stderr)
+            print(
+                f"Could not reach the CRM at {target.host} ({type(exc).__name__}).", file=sys.stderr
+            )
             return 2
 
         if not leads:
@@ -87,7 +101,12 @@ def run_website_discovery(config: Config, limit: int, *, commit: bool = False) -
             return 0
 
         mode = "COMMIT" if commit else "DRY RUN"
-        print(f"[{mode}] Searching websites for {len(leads)} lead(s)...", file=sys.stderr)
+        # State the target on every run, not just refused ones: a read pointed at the wrong
+        # environment is how an operator discovers the setting is wrong, before a write does.
+        print(
+            f"[{mode}] CRM target: {target.label} — searching websites for {len(leads)} lead(s)...",
+            file=sys.stderr,
+        )
 
         # ONE Overpass query for the whole batch, and one Wikidata call per 40 brands. Both are
         # shared community infrastructure; per-lead requests would be an unreasonable ask.

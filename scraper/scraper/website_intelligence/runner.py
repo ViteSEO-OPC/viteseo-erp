@@ -12,6 +12,7 @@ import sys
 from scrapy.crawler import CrawlerProcess
 
 from scraper.config import Config
+from scraper.safety import describe_target
 from scraper.ingest import CrmIngestClient
 from scraper.website_intelligence.spider import WebsiteAuditSpider
 from scraper.website_intelligence.urls import normalize_website_url
@@ -65,7 +66,8 @@ def run_audit(config: Config, limit: int, *, commit: bool = False) -> int:
 
     queue = valid_queue
     mode = "COMMIT" if commit else "DRY RUN"
-    print(f"[{mode}] Auditing {len(queue)} website(s)...", file=sys.stderr)
+    target = describe_target(config.crm_base_url)
+    print(f"[{mode}] CRM target: {target.label} — auditing {len(queue)} website(s)...", file=sys.stderr)
 
     process = CrawlerProcess(
         settings={
