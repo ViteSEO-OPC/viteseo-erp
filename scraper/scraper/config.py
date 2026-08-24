@@ -34,6 +34,16 @@ class Config:
     nominatim_url: str
     user_agent: str
     request_timeout: float
+    # OpenAI-assisted discovery. Only read when DISCOVERY_PROVIDER selects it — the default OSM path
+    # never touches these, and an environment that never sets them behaves exactly as before.
+    #
+    # DEFAULTED, deliberately: making them required would break every existing construction site
+    # (tests included) and turn an additive capability into a breaking change to the config contract.
+    # An empty key is the honest default — it means "AI discovery is not configured here".
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_timeout: float = 30.0
 
     @classmethod
     def load(cls) -> "Config":
@@ -50,4 +60,10 @@ class Config:
             nominatim_url=os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org"),
             user_agent=os.environ.get("USER_AGENT", "CRM-Enterprise-Scraper/1.0"),
             request_timeout=float(os.environ.get("REQUEST_TIMEOUT", "60")),
+            openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
+            openai_model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+            openai_base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            # Shorter than REQUEST_TIMEOUT: a slow proposal should cost one target a few seconds and
+            # then yield nothing, rather than stall a scheduled run behind it.
+            openai_timeout=float(os.environ.get("OPENAI_TIMEOUT", "30")),
         )

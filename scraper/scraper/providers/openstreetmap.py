@@ -10,6 +10,7 @@ request/second per the usage policy.
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Optional
 
@@ -164,7 +165,67 @@ class OpenStreetMapProvider(DiscoveryProvider):
                 break
         return businesses
 
+    def find_by_name(self, names: list[str], *, area: str, limit: int = 200) -> list[RawBusiness]:
+        """Look up businesses BY NAME within ``area``, deliberately without a category filter.
+
+        This is the deterministic half of AI-assisted discovery: something proposes names, this
+        proves whether OSM actually holds a business by that name in that area, and only proven ones
+        become RawBusiness records with a real ``provider_id`` and real coordinates.
+
+        DELIBERATELY UNCONSTRAINED BY CATEGORY, and that is the entire point. Filtering by the same
+        CATEGORY_SELECTORS ``discover()`` uses could only ever return a subset of what ``discover()``
+        already returns, so the proposer would add exactly nothing. Dropping the constraint is what
+        finds the business OSM holds under a tag our 19 selectors do not cover — a pharmacy tagged
+        ``shop=chemist`` rather than ``amenity=pharmacy``.
+
+        ONE query for the whole batch, via regex alternation. A query per name would multiply load on
+        Overpass by the proposal count; Overpass is shared community infrastructure and this tool is
+        a guest on it, so batch cost stays the same order as a normal discover() run.
+
+        Additive: ``discover()`` and every function it calls are untouched by this method's existence.
+        """
+        wanted = [n.strip() for n in names if isinstance(n, str) and n.strip()]
+        if not wanted:
+            return []
+
+        bbox = self._geocode_area(area)
+        elements = self._overpass_by_name(wanted, bbox, limit)
+
+        businesses: list[RawBusiness] = []
+        for element in elements:
+            business = parse_element(element)
+            if business is None:
+                continue
+            # Identity came from a real OSM element, not from whoever proposed the name.
+            business.verification_source = "osm"
+            if self.reverse_geocode and business.latitude is not None and business.longitude is not None:
+                if not (business.region and business.province and business.city):
+                    self._fill_admin_area(business)
+            businesses.append(business)
+        return businesses
+
     # -- OSM calls -----------------------------------------------------------------------------
+
+    def _overpass_by_name(
+        self, names: list[str], bbox: tuple[float, float, float, float], limit: int
+    ) -> list[dict]:
+        """One name-filtered Overpass query for a whole batch of names."""
+        south, west, north, east = bbox
+        bbox_str = f"{south},{west},{north},{east}"
+
+        # Escape regex metacharacters in the names (a business called "A+B Trading" must not compile
+        # into a quantifier), then escape the Overpass string literal itself.
+        alternation = "|".join(re.escape(n) for n in names)
+        pattern = f"^({alternation})$".replace("\\", "\\\\").replace('"', '\\"')
+
+        parts = []
+        for kind in ("node", "way"):
+            # `,i` = case-insensitive: OSM casing is inconsistent and a proposer's casing is a guess.
+            parts.append(f'{kind}["name"~"{pattern}",i]({bbox_str});')
+        query = f"[out:json][timeout:60];({''.join(parts)});out center {limit};"
+
+        resp = self._post_with_retry(query)
+        return resp.json().get("elements", [])
 
     def _geocode_area(self, area: str) -> tuple[float, float, float, float]:
         """Forward-geocode a place name to a bounding box (south, west, north, east)."""

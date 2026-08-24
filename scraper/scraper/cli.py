@@ -16,7 +16,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
+from datetime import datetime, timezone
 
+from scraper import run_metrics
 from scraper.config import Config
 from scraper.ingest import CrmIngestClient
 from scraper.normalizer import normalize
@@ -56,7 +59,15 @@ def run_discovery(
         f"Discovering '{category}' in '{area}' via {provider.name} (limit {limit})...",
         file=sys.stderr,
     )
+    started_at = datetime.now(timezone.utc)
+    started = time.monotonic()
     raw = provider.discover(area=area, category=category, limit=limit)
+
+    # Optional per-provider numbers (proposals, resolution rate, token usage). Read the same way
+    # `close` is — a provider that has nothing to add simply does not implement it.
+    stats_fn = getattr(provider, "stats", None)
+    provider_stats = stats_fn() if callable(stats_fn) else {}
+
     close = getattr(provider, "close", None)
     if callable(close):
         close()
@@ -64,16 +75,39 @@ def run_discovery(
     businesses = [normalize(r, provider.name) for r in raw]
     print(f"Discovered {len(businesses)} business(es).", file=sys.stderr)
 
+    def record_run(ingest_summary: dict | None = None, imported: int = 0) -> None:
+        """Log this run's funnel. Called on EVERY path that finished discovery, including the ones
+        that stop before the CRM — a provider that proposed 40 names and resolved 0 is exactly the
+        result the comparison needs to see, and recording only successful imports would hide it."""
+        run_metrics.append(
+            run_metrics.build_record(
+                provider=provider.name,
+                area=area,
+                category=category,
+                limit=limit,
+                commit=commit,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                discovered=len(businesses),
+                with_website=sum(1 for b in businesses if b.website),
+                ingest_summary=ingest_summary,
+                imported=imported,
+                provider_stats=provider_stats,
+                started_at=started_at.isoformat(),
+            )
+        )
+
     if out:
         with open(out, "w", encoding="utf-8") as fh:
             json.dump([b.to_payload() for b in businesses], fh, indent=2, ensure_ascii=False)
         print(f"Wrote {out}", file=sys.stderr)
 
     if print_only:
+        record_run()
         print(json.dumps([b.to_payload() for b in businesses], indent=2, ensure_ascii=False))
         return 0
 
     if not businesses:
+        record_run()
         print("Nothing discovered — skipping ingest.", file=sys.stderr)
         return 0
 
@@ -94,11 +128,102 @@ def run_discovery(
 
     mode = "COMMIT" if commit else "DRY RUN"
     summary = result.get("summary", {})
+    record_run(summary, int(result.get("importedCount") or 0))
     print(
         f"[{mode}] total={summary.get('total')} valid={summary.get('valid')} "
         f"duplicates={summary.get('duplicates')} updated={summary.get('updated', 0)} "
         f"imported={result.get('importedCount')}"
     )
+    return 0
+
+
+def run_comparison(config: Config, *, area: str, category: str, limit: int, providers: list[str]) -> dict:
+    """Run several providers over ONE target WITHOUT touching the CRM, and compare their candidate sets.
+
+    WHY THIS EXISTS, AND WHY IT MUST BE NON-MUTATING. Comparing providers on IMPORTED leads is
+    invalid: the CRM dedups on `place_id`, so whichever provider commits first claims the businesses
+    and the second is credited with nothing but duplicates. The result would measure run order, not
+    provider quality. Comparing the sets BEFORE either one writes is the only way to get the honest
+    answer to "what did this provider find that the other did not".
+
+    Never contacts the CRM, never advances the rotation cursor, never writes a lead. The only
+    side effect is a metrics line per provider, which is the point.
+    """
+    sets: dict[str, dict[str, dict]] = {}
+    report_failures: dict[str, str] = {}
+
+    for name in providers:
+        run_config = Config(**{**config.__dict__, "discovery_provider": name})
+        print(f"\n=== {name}: '{category}' in '{area}' (limit {limit}) ===", file=sys.stderr)
+
+        started_at = datetime.now(timezone.utc)
+        started = time.monotonic()
+        try:
+            # Construction is inside the guard too: an unconfigured provider (no API key) must cost
+            # only its own column, exactly as a flaky area costs only its own target in discover-all.
+            provider = get_provider(run_config)
+            raw = provider.discover(area=area, category=category, limit=limit)
+        except Exception as exc:  # noqa: BLE001 - one provider failing must not lose the other's result
+            print(f"  {name} failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            report_failures[name] = f"{type(exc).__name__}: {exc}"
+            continue
+
+        stats_fn = getattr(provider, "stats", None)
+        provider_stats = stats_fn() if callable(stats_fn) else {}
+        close = getattr(provider, "close", None)
+        if callable(close):
+            close()
+
+        businesses = [normalize(r, provider.name) for r in raw]
+        # Keyed by place_id — the CRM's own dedup key, so "the same business" means here exactly what
+        # it will mean at ingest. Comparing on names instead would flatter whichever provider phrases
+        # them differently.
+        sets[provider.name] = {b.place_id: b for b in businesses if b.place_id}
+
+        run_metrics.append(
+            run_metrics.build_record(
+                provider=provider.name, area=area, category=category, limit=limit, commit=False,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                discovered=len(businesses),
+                with_website=sum(1 for b in businesses if b.website),
+                provider_stats=provider_stats, started_at=started_at.isoformat(),
+            )
+        )
+        print(f"  {len(businesses)} candidate(s).", file=sys.stderr)
+
+    report: dict = {"area": area, "category": category, "limit": limit, "providers": {}}
+    for name, found in sets.items():
+        others: set[str] = set()
+        for other_name, other_found in sets.items():
+            if other_name != name:
+                others |= set(other_found)
+        unique = set(found) - others
+        report["providers"][name] = {
+            "candidates": len(found),
+            "unique_to_this_provider": len(unique),
+            "unique_names": sorted(found[k].business_name for k in unique),
+        }
+
+    if report_failures:
+        report["failed"] = report_failures
+
+    if len(sets) > 1:
+        names = list(sets)
+        shared = set(sets[names[0]])
+        for other in names[1:]:
+            shared &= set(sets[other])
+        report["shared_by_all"] = len(shared)
+
+    return report
+
+
+def _compare(args: argparse.Namespace) -> int:
+    config = Config.load()
+    providers = [p.strip() for p in args.providers.split(",") if p.strip()]
+    report = run_comparison(
+        config, area=args.area, category=args.category, limit=args.limit, providers=providers
+    )
+    print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -239,6 +364,20 @@ def main(argv: list[str] | None = None) -> int:
     da.add_argument("--state-file", default=None, help="Override the rotation state file path.")
     da.set_defaults(func=_discover_all)
 
+    c = sub.add_parser(
+        "compare",
+        help="Run providers over the SAME target without touching the CRM and diff their candidates.",
+    )
+    c.add_argument("--area", required=True, help='Place name, e.g. "Makati City, Philippines".')
+    c.add_argument("--category", required=True, help='Category word (e.g. "cafe") or "key=value".')
+    c.add_argument("--limit", type=int, default=20, help="Max businesses per provider (default 20).")
+    c.add_argument(
+        "--providers",
+        default="osm,openai",
+        help="Comma-separated providers to compare (default: osm,openai).",
+    )
+    c.set_defaults(func=_compare)
+
     a = sub.add_parser("audit", help="Audit the websites of leads that have a URL (Website Intelligence).")
     a.add_argument("--limit", type=int, default=50, help="Max websites to audit (default 50).")
     a.add_argument(
@@ -249,7 +388,13 @@ def main(argv: list[str] | None = None) -> int:
     a.set_defaults(func=_audit)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ValueError as exc:
+        # Provider selection/configuration errors (unknown provider, missing API key). Same
+        # presentation as the targets-file errors above — a clear line, not a stack trace.
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
 
 def _audit(args: argparse.Namespace) -> int:
