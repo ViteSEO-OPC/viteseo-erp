@@ -24,16 +24,23 @@ export type AcquisitionSummary = {
   currentMonthCount: number;
 };
 
-// Live per-BD operational row (GET /dashboard/bd-performance). Only one metric has an
-// unambiguous backend source today: `assigned` (a raw leads.assigned_to count). Follow-ups,
-// converted leads, conversion rate, and any performance status are intentionally absent —
-// there is no follow-ups backend and the lead-status enum has no converted/won state, so the
-// card renders those columns as display-only placeholders until the KPI Engine milestone.
+// Live per-BD operational row (GET /dashboard/bd-performance). `assigned` is a raw
+// leads.assigned_to count. `converted` and `rate` reuse the approved Business Computation
+// definitions (§3.3 / §3.5): conversion is the existence of a Deal, and the rate's denominator is
+// engaged leads — so this card always agrees with Reports & Performance. `rate` is null when the
+// BD has no engaged leads; that is "undefined", rendered as an em dash, and must never be shown
+// as 0%.
+//
+// Follow-ups and performance status remain absent: the Planner now models follow-up work, so they
+// are no longer blocked by missing data, but by a Product Owner decision on which figure each
+// column means. The card renders those two as display-only placeholders until then.
 export type BdPerformanceRow = {
   id: string;
   name: string;
   initials: string;
   assigned: number;
+  converted: number;
+  rate: number | null;
 };
 
 export type ManagementData = {
