@@ -15,13 +15,23 @@ import type { BdPerformanceRow } from "@/modules/crm/features/management/types/m
 const th = "h-9 px-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
 const td = "px-3 py-3.5 text-sm text-secondary-foreground";
 
-// Display-only placeholder for columns with no legitimate backend source yet. There is no
-// follow-ups backend (an outbound email is not a follow-up), and the lead-status enum has no
-// converted/won state, so Follow-ups, Converted, Rate, and Status are intentionally NOT derived
-// (no proxy business rule) — they land with the future KPI Engine milestone.
+// Display-only placeholder for Status — the one column with no approved definition. It is not
+// blocked by missing data: BD Ranking exists, but it yields an interim peer-relative INDEX, and
+// banding that into labels would invent the proxy business rule this card refuses to create. Which
+// value Status carries is a Product Owner decision, so it stays undrawn until one is made.
 function Placeholder() {
   return (
-    <span className="text-muted-foreground/60" title="Available with the KPI Engine">
+    <span className="text-muted-foreground/60" title="Pending a Product Owner definition">
+      —
+    </span>
+  );
+}
+
+// An undefined conversion rate — the BD has engaged nobody, so there is no ratio to report. This is
+// deliberately NOT 0%, which would claim they worked leads and converted none (approved edge rule).
+function NoRate() {
+  return (
+    <span className="text-muted-foreground/60" title="No engaged leads yet">
       —
     </span>
   );
@@ -38,7 +48,7 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
   return (
     <ChartCard
       title="BD Performance Overview"
-      subtitle="Live: Assigned. Follow-ups, Converted, Rate & Status arrive with the KPI Engine."
+      subtitle="Live: Assigned, Follow-ups, Converted & Rate. Status awaits a Product Owner definition."
       filter={
         <Link href="/zerem/reports" className="text-xs font-semibold text-teal-700 hover:underline">
           Open Reports &amp; Performance →
@@ -75,9 +85,12 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
                   </div>
                 </TableCell>
                 <TableCell className={td}>{r.assigned}</TableCell>
-                <TableCell className={cn(td, "tabular-nums")}><Placeholder /></TableCell>
-                <TableCell className={cn(td, "tabular-nums")}><Placeholder /></TableCell>
-                <TableCell className={cn(td, "tabular-nums")}><Placeholder /></TableCell>
+                {/* Completed this month. 0 is a real count, never the em dash `rate` uses. */}
+                <TableCell className={cn(td, "tabular-nums")}>{r.followUps}</TableCell>
+                <TableCell className={cn(td, "tabular-nums")}>{r.converted}</TableCell>
+                <TableCell className={cn(td, "tabular-nums")}>
+                  {r.rate === null ? <NoRate /> : `${r.rate.toFixed(1)}%`}
+                </TableCell>
                 <TableCell className="px-3 py-3.5"><Placeholder /></TableCell>
               </TableRow>
             ))}
