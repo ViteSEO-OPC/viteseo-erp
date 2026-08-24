@@ -16,7 +16,10 @@ use Illuminate\Support\Carbon;
  * the interpretation/scoring.
  *
  * @property array<string, mixed>|null $audit
- * @property array<string, bool>|null $identity_signals
+ * @property array<string, bool|array<string, mixed>>|null $identity_signals Deterministic checks are
+ *      booleans; the optional reserved `ai_adjudication` key holds the AI second-pass record (verdict,
+ *      reason, model, prompt version, token usage) written by
+ *      {@see \App\Modules\Crm\Services\Website\LlmIdentityAdjudicator}.
  * @property Carbon|null $last_checked_at Cast to datetime; declared so static analysis applies the cast.
  * @property Carbon|null $enriched_at Cast to datetime; declared so static analysis applies the cast.
  */
