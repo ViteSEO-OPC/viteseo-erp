@@ -25,20 +25,26 @@ export type AcquisitionSummary = {
 };
 
 // Live per-BD operational row (GET /dashboard/bd-performance). `assigned` is a raw
-// leads.assigned_to count. `converted` and `rate` reuse the approved Business Computation
-// definitions (§3.3 / §3.5): conversion is the existence of a Deal, and the rate's denominator is
-// engaged leads — so this card always agrees with Reports & Performance. `rate` is null when the
-// BD has no engaged leads; that is "undefined", rendered as an em dash, and must never be shown
-// as 0%.
+// leads.assigned_to count. The other three reuse the approved Business Computation definitions
+// rather than restating them, so this card always agrees with Reports & Performance:
+//   - followUps — the Planner follow-up work the BD COMPLETED this calendar month, i.e.
+//     PerformanceSummaryService's `completedFollowUps`, the same figure My Performance shows.
+//   - converted / rate — §3.3 and §3.5: conversion is the existence of a Deal, and the rate's
+//     denominator is engaged leads.
 //
-// Follow-ups and performance status remain absent: the Planner now models follow-up work, so they
-// are no longer blocked by missing data, but by a Product Owner decision on which figure each
-// column means. The card renders those two as display-only placeholders until then.
+// The two zeroes mean different things and must render differently. `followUps` is a count, so 0
+// is a real measurement and shows as "0". `rate` is null when the BD has no engaged leads; that is
+// "undefined", rendered as an em dash, and must never be shown as 0%.
+//
+// Only performance status remains absent, and NOT for want of data: no approved per-BD status
+// definition exists, so which value that column carries is a Product Owner decision. The card
+// renders it as a display-only placeholder until one is made.
 export type BdPerformanceRow = {
   id: string;
   name: string;
   initials: string;
   assigned: number;
+  followUps: number;
   converted: number;
   rate: number | null;
 };

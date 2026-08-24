@@ -179,23 +179,25 @@ class DashboardController extends Controller
      * with no code change. Only metrics with a legitimate, unambiguous backend source today are
      * returned:
      *   - assigned  = leads assigned to the BD (leads.assigned_to) — a raw count, no business rule
+     *   - followUps = follow-up work the BD COMPLETED this month (PerformanceSummaryService)
      *   - converted = the BD's active leads with ≥1 Deal (Business-Computation-Mapping §3.3)
      *   - rate      = converted ÷ ENGAGED × 100, 1 dp; null when engaged = 0 (§3.5)
      *
-     * NO NEW BUSINESS RULE IS DEFINED HERE. `converted` and `rate` reuse the approved definitions
+     * NO NEW BUSINESS RULE IS DEFINED HERE. All three derived figures reuse the approved definitions
      * already implemented in {@see PerformanceSummaryService::for()} — conversion is the existence
-     * of a Deal (never a lead status), and the rate's denominator is {@see Lead::scopeEngaged()},
-     * the single canonical "has been contacted at all" predicate shared with M-04. Both are
-     * computed here as GROUP BY aggregates rather than by calling that service per BD, which would
-     * reintroduce the N+1 this endpoint deliberately avoids. Because `visibleTo()` degrades to
-     * `assigned_to = :id` for a non-admin, the per-BD filter below is definitionally the same set
-     * the service would compute for that BD — so this card can never disagree with Reports.
+     * of a Deal (never a lead status), the rate's denominator is {@see Lead::scopeEngaged()}, the
+     * single canonical "has been contacted at all" predicate shared with M-04, and `followUps` is
+     * that service's `completedFollowUps` figure verbatim. Each is computed here as a GROUP BY
+     * aggregate rather than by calling that service per BD, which would reintroduce the N+1 this
+     * endpoint deliberately avoids. Because `visibleTo()` degrades to `assigned_to = :id` for a
+     * non-admin, the per-BD filter below is definitionally the same set the service would compute
+     * for that BD — so this card can never disagree with Reports or My Performance.
      *
-     * Still NOT returned: follow-ups and any performance score / status. The Planner now models
-     * follow-up work ({@see PlannerEvent::FOLLOW_UP_WORK_TYPES}), so these are no longer blocked by
-     * missing data — they are blocked on a Product Owner decision about WHICH figure each column
-     * means (scheduled? completed? missed? on-time %?). Inventing one here would be exactly the
-     * proxy business rule this endpoint refuses to create, so both stay display-only placeholders.
+     * Still NOT returned: any performance score / status. That column is not blocked by missing
+     * data but by a Product Owner decision — no approved per-BD status definition exists anywhere
+     * in the spec, and BD Ranking (§3.12) yields an interim peer-relative INDEX, not a status.
+     * Banding it into labels would be exactly the proxy business rule this endpoint refuses to
+     * create, so Status stays a display-only placeholder.
      */
     public function bdPerformance(): JsonResponse
     {
@@ -239,7 +241,27 @@ class DashboardController extends Controller
             ->groupBy('assigned_to')
             ->pluck('count', 'assigned_to');
 
-        $rows = $bds->map(function (User $bd) use ($assigned, $converted, $engaged): array {
+        // Completed Follow-ups — `PerformanceSummaryService::for()`'s `completedFollowUps`, per BD.
+        // The predicate is that service's, not a restatement of it: the CATEGORY comes from
+        // {@see PlannerEvent::scopeFollowUpWork()} (never a hand-written event_type list, which is
+        // how three copies of a definition drift apart), and completion is timestamped by the real
+        // `completed_at`, never `updated_at`. Rows completed before that column existed carry null
+        // and are excluded — the same honest omission the service makes.
+        //
+        // Planner rows are keyed by who OWES the work, not who owns the lead, which is what makes a
+        // GROUP BY on `assigned_to` the right attribution here: PlannerOwnershipTransfer moves a
+        // lead's OPEN events on reassignment while completed work is never transferred, so this
+        // credits the BD who actually did it.
+        $followUps = PlannerEvent::query()
+            ->whereIn('assigned_to', $ids)
+            ->followUpWork()
+            ->where('status', 'completed')
+            ->where('completed_at', '>=', now()->startOfMonth())
+            ->selectRaw('assigned_to, COUNT(*) as count')
+            ->groupBy('assigned_to')
+            ->pluck('count', 'assigned_to');
+
+        $rows = $bds->map(function (User $bd) use ($assigned, $followUps, $converted, $engaged): array {
             $convertedCount = (int) ($converted->get($bd->id) ?? 0);
             $engagedCount = (int) ($engaged->get($bd->id) ?? 0);
 
@@ -248,6 +270,10 @@ class DashboardController extends Controller
                 'name' => $bd->name,
                 'initials' => $this->initialsFor($bd->name),
                 'assigned' => (int) ($assigned->get($bd->id) ?? 0),
+                // A COUNT has no zero-denominator, so 0 is a real measurement ("completed nothing
+                // this month") rather than an undefined one. It stays 0 and must not borrow the
+                // em dash that `rate` uses below — the two express different things.
+                'followUps' => (int) ($followUps->get($bd->id) ?? 0),
                 'converted' => $convertedCount,
                 // Undefined, never 0% — a BD who has engaged nobody has no rate to report, and a
                 // fabricated zero would read as "worked leads, converted none" (frozen edge rule).

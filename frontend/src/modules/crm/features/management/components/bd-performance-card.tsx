@@ -15,13 +15,13 @@ import type { BdPerformanceRow } from "@/modules/crm/features/management/types/m
 const th = "h-9 px-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
 const td = "px-3 py-3.5 text-sm text-secondary-foreground";
 
-// Display-only placeholder for Follow-ups and Status. The Planner now models follow-up work, so
-// these are no longer blocked by missing data — they are blocked on a Product Owner decision about
-// which figure each column means (scheduled? completed? missed? on-time %?). Deriving one here
-// would invent a proxy business rule, so they stay undrawn until that decision is made.
+// Display-only placeholder for Status — the one column with no approved definition. It is not
+// blocked by missing data: BD Ranking exists, but it yields an interim peer-relative INDEX, and
+// banding that into labels would invent the proxy business rule this card refuses to create. Which
+// value Status carries is a Product Owner decision, so it stays undrawn until one is made.
 function Placeholder() {
   return (
-    <span className="text-muted-foreground/60" title="Pending a metric definition">
+    <span className="text-muted-foreground/60" title="Pending a Product Owner definition">
       —
     </span>
   );
@@ -48,7 +48,7 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
   return (
     <ChartCard
       title="BD Performance Overview"
-      subtitle="Live: Assigned, Converted & Rate. Follow-ups and Status await a metric definition."
+      subtitle="Live: Assigned, Follow-ups, Converted & Rate. Status awaits a Product Owner definition."
       filter={
         <Link href="/zerem/reports" className="text-xs font-semibold text-teal-700 hover:underline">
           Open Reports &amp; Performance →
@@ -85,7 +85,8 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
                   </div>
                 </TableCell>
                 <TableCell className={td}>{r.assigned}</TableCell>
-                <TableCell className={cn(td, "tabular-nums")}><Placeholder /></TableCell>
+                {/* Completed this month. 0 is a real count, never the em dash `rate` uses. */}
+                <TableCell className={cn(td, "tabular-nums")}>{r.followUps}</TableCell>
                 <TableCell className={cn(td, "tabular-nums")}>{r.converted}</TableCell>
                 <TableCell className={cn(td, "tabular-nums")}>
                   {r.rate === null ? <NoRate /> : `${r.rate.toFixed(1)}%`}
