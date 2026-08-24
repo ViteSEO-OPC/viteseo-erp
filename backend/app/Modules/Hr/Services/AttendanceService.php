@@ -265,7 +265,7 @@ class AttendanceService
     }
 
     /**
-     * The company rule behind the management exemption (Company → Rules). Off, nobody is
+     * The company rule behind the management exemption (Company → Settings). Off, nobody is
      * exempt and management uses the time clock like everyone else.
      */
     private function managementAutoAttendance(): bool
@@ -505,7 +505,7 @@ class AttendanceService
         // expected for, and therefore the one their arrival is judged against, is the other one.
         $offHalf = $this->halfDays->offHalfFor($employee->id, $this->today());
 
-        // Strict clock-in (Company → Rules): the shift can't be started before it begins.
+        // Strict clock-in (Company → Settings): the shift can't be started before it begins.
         $opensAt = $this->clockInOpensAt($eff, $local, $offHalf);
         if ($opensAt && $local->lt($opensAt)) {
             throw ValidationException::withMessages([
@@ -516,7 +516,7 @@ class AttendanceService
             ]);
         }
 
-        // Geofence (Company → Rules). Returns null — and changes nothing below — whenever the
+        // Geofence (Company → Settings). Returns null — and changes nothing below — whenever the
         // feature is off or unconfigured, so an untouched install behaves exactly as before.
         // Deliberately the LAST gate: no point telling someone they aren't at the office when
         // the real problem is that they already clocked in an hour ago.
@@ -3277,7 +3277,7 @@ class AttendanceService
     }
 
     /**
-     * Minutes → a fraction of the DECLARED day (Company → Rules `hours_per_day_divisor`, the DOLE
+     * Minutes → a fraction of the DECLARED day (Company → Settings `hours_per_day_divisor`, the DOLE
      * 8-hour day), clamped to [0, 1].
      *
      * The declared day is the ONLY denominator pay uses. It is deliberately not the schedule's

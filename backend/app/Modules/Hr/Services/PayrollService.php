@@ -51,6 +51,7 @@ class PayrollService
         private readonly LoanService $loans,
         private readonly TaxService $tax,
         private readonly AllowanceService $allowances,
+        private readonly CompanyProfileService $company,
     ) {}
 
     /**
@@ -1374,7 +1375,7 @@ class PayrollService
 
         // Management staff are on a FIXED salary, so by default a holiday they worked pays no
         // premium — the day was already inside the salary. `management_holiday_premium`
-        // (Company → Rules) buys that back: on, they earn the same statutory premium as
+        // (Company → Settings) buys that back: on, they earn the same statutory premium as
         // everyone else. Read off the CYCLE'S policy version, so a rule changed today cannot
         // reprice a period that has already been paid.
         if ($employee->isManagement() && ! $policy->management_holiday_premium) {
@@ -1434,7 +1435,7 @@ class PayrollService
                 'name' => $names[$date] ?? null,
                 'type' => (string) $type,
                 // The POLICY percentage as HR set it, not the add-on this method works in: "200%"
-                // is the figure in Company → Rules and the one the employee can look up.
+                // is the figure in Company → Settings and the one the employee can look up.
                 'rate_pct' => self::dayRateMultiplierPct($type, ! $onRestDay, $policy),
                 'rest_day' => $onRestDay,
                 'daily_rate' => round($dailyRate, 2),
@@ -3933,7 +3934,7 @@ class PayrollService
                 $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $cycleStart, $cycleEnd);
                 // Management staff are on a FIXED salary — unpaidDaysDetailFor() returns 0 for
                 // them, so pay is never prorated by attendance. holidayPremiumFor() likewise
-                // pays them nothing UNLESS `management_holiday_premium` is on in Company → Rules.
+                // pays them nothing UNLESS `management_holiday_premium` is on in Company → Settings.
                 // $policy is passed EXPLICITLY. It always accepted one (the preview/dry-run
                 // override, step 6b) and this call never supplied it, so the late and undertime
                 // deductions re-read the live singleton instead of the policy resolved above.
@@ -4443,6 +4444,10 @@ class PayrollService
             'stamp' => fn ($d) => $d
                 ? Carbon::parse($d)->timezone(config('app.timezone_local'))->format('F d, Y · g:i A')
                 : '—',
+            // The letterhead, from Company → Settings. Renders the profile as it stands now:
+            // re-issuing an old payslip after a rename prints the new name, the same way a
+            // reprinted letter goes out on today's stationery.
+            'company' => $this->company->letterhead(),
         ];
     }
 
@@ -4641,6 +4646,7 @@ class PayrollService
                 'totals' => $totals,
             ],
             $this->registerRows($run),
+            $this->company->letterhead(),
         );
 
         $this->audit->log(
@@ -4652,11 +4658,29 @@ class PayrollService
 
         return [
             'path' => $path,
-            'name' => 'VITE_SEO_Payroll_Breakdown_' . Str::of($this->periodLabel($run))
+            // Named for whoever the employer currently is, like the letterhead inside it.
+            'name' => $this->companyFilePrefix() . 'Payroll_Breakdown_' . Str::of($this->periodLabel($run))
                 ->replace(['–', ' '], ['-', '_'])
                 ->replace(',', '')
                 ->toString() . '.xlsx',
         ];
+    }
+
+    /**
+     * The company name as a filename prefix — "VITE SEO DIGITAL ADVERTISING OPC" becomes
+     * "VITE_SEO_". Trimmed to the first two words so the name stays readable next to the
+     * period it is really identified by, and empty when there is nothing usable to prefix with.
+     */
+    private function companyFilePrefix(): string
+    {
+        // ascii() first, so "Açme" prefixes as "Acme" rather than losing the letter entirely.
+        $words = preg_split('/\s+/', trim(Str::ascii((string) $this->company->get()->legal_name))) ?: [];
+        $prefix = Str::of(implode('_', array_slice(array_filter($words), 0, 2)))
+            ->replaceMatches('/[^A-Za-z0-9_]/', '')
+            ->trim('_')
+            ->toString();
+
+        return $prefix === '' ? '' : $prefix . '_';
     }
 
     /**

@@ -5,7 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 // Geofenced clock-in (MVP). The office lives on the policy row rather than a new settings
-// table because there is exactly ONE office in the MVP and Company → Rules already owns
+// table because there is exactly ONE office in the MVP and Company → Settings already owns
 // every clock-in rule — multi-office is an explicit non-goal.
 return new class extends Migration
 {

@@ -40,7 +40,7 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'late_tiers.*.hours' => ['required_with:late_tiers', 'numeric', 'min:0', 'max:24'],
             // Repeat the rung per whole block of `over` minutes instead of charging it once.
             // Cross-validated below: it only has a meaning for a SINGLE rung with a non-zero
-            // `over`, which is exactly the one-rung rule Company → Rules edits.
+            // `over`, which is exactly the one-rung rule Company → Settings edits.
             'late_tier_recurring' => ['sometimes', 'boolean'],
 
             'undertime_deduction_mode' => ['sometimes', 'in:none,per_hour'],

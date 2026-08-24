@@ -58,6 +58,8 @@ class ReportService
         // The reconciliation recomputes each employee's annual tax from the same dated
         // table payroll used, rather than trusting the figure payroll happened to withhold.
         private readonly TaxService $tax,
+        // Who the employer is, for the PDF letterhead.
+        private readonly CompanyProfileService $companyProfile,
     ) {}
 
     /** @param array<string, mixed> $filters */
@@ -142,6 +144,8 @@ class ReportService
         return Pdf::loadView('hr::report', [
             'r' => $report,
             'generatedAt' => now(config('app.timezone_local'))->format('M j, Y g:i A'),
+            // The letterhead, from Company → Settings — the same one the payslip prints.
+            'company' => $this->companyProfile->letterhead(),
         ])->download("{$slug}-{$date}.pdf");
     }
 

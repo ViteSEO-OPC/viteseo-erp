@@ -6,6 +6,7 @@ use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
 use App\Modules\Hr\Http\Controllers\BenefitController;
 use App\Modules\Hr\Http\Controllers\BenefitProgramController;
 use App\Modules\Hr\Http\Controllers\ChangeRequestController;
+use App\Modules\Hr\Http\Controllers\CompanyProfileController;
 use App\Modules\Hr\Http\Controllers\ConcernController;
 use App\Modules\Hr\Http\Controllers\DailyOverrideController;
 use App\Modules\Hr\Http\Controllers\DeductionArrearsController;
@@ -46,6 +47,11 @@ use Illuminate\Support\Facades\Route;
 // All HR routes are auto-prefixed with /api/v1/hr (see HrServiceProvider).
 
 Route::middleware('auth:sanctum')->group(function () {
+    // The employer's own details (Company → Settings). Read is open to any authenticated
+    // user: the payslip on screen prints this letterhead for employees too. Writes are
+    // hr_officer-only, further down.
+    Route::get('company-profile', [CompanyProfileController::class, 'show']);
+
     // Departments — read is open to any authenticated user (employees need the
     // list for dropdowns); writes are hr_officer-only.
     Route::get('departments', [DepartmentController::class, 'index']);
@@ -459,7 +465,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);
         // What the rates would charge, beside any per-employee override.
 
-        // Company → Rules: work schedules + per-employee assignment + attendance policy.
+        // Company → Settings: work schedules + per-employee assignment + attendance policy.
         Route::get('work-schedules', [WorkScheduleController::class, 'index']);
         Route::post('work-schedules', [WorkScheduleController::class, 'store']);
         Route::match(['put', 'patch'], 'work-schedules/{workSchedule}', [WorkScheduleController::class, 'update']);
@@ -468,6 +474,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'employees/{employee}/schedule', [WorkScheduleController::class, 'updateEmployeeSchedule']);
         Route::get('attendance-policy', [AttendancePolicyController::class, 'show']);
         Route::match(['put', 'patch'], 'attendance-policy', [AttendancePolicyController::class, 'update']);
+
+        // Company → Settings: who the employer is, as printed on every letterhead.
+        Route::match(['put', 'patch'], 'company-profile', [CompanyProfileController::class, 'update']);
+        Route::post('company-profile/logo', [CompanyProfileController::class, 'updateLogo'])->middleware('throttle:20,1,hr-upload:');
+        Route::delete('company-profile/logo', [CompanyProfileController::class, 'destroyLogo']);
 
         // Requests → Document + Profile-change queues (HR only).
         Route::get('document-requests', [DocumentRequestController::class, 'index']);

@@ -1,4 +1,4 @@
-// Company → Rules (Phase-2).
+// Company → Settings (Phase-2).
 
 export interface WorkSchedule {
   id: number;
@@ -171,7 +171,7 @@ export interface AttendancePolicy {
 }
 
 /**
- * What a save to Company → Rules sends. WRITE-ONLY: `effective_from` is not part of the policy
+ * What a save to Company → Settings sends. WRITE-ONLY: `effective_from` is not part of the policy
  * resource, it dates the version payroll resolves against, so it is deliberately absent from
  * `AttendancePolicy` above — reading the policy back never returns it.
  */

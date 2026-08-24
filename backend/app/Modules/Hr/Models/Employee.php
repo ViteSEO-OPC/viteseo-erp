@@ -236,7 +236,7 @@ class Employee extends Model
     /**
      * Was the attendance exemption in force on this Manila date? Two things decide it:
      *
-     *  - the COMPANY rule (`management_auto_attendance`, Company → Rules). Off, nobody is
+     *  - the COMPANY rule (`management_auto_attendance`, Company → Settings). Off, nobody is
      *    exempt: management uses the time clock like everyone else. Passed in rather than read
      *    here so each caller resolves the policy once instead of once per employee per day.
      *  - WHEN this person became management. `is_management` answers only "today", which is the

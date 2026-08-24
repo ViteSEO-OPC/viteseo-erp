@@ -3,6 +3,7 @@
 import { Fragment, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
+import { useCompanyProfile } from "@/modules/hr/hooks/use-company";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
 import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
 import type {
@@ -29,8 +30,12 @@ const DEDUCTION_LABELS: Record<PayslipDeductionKey, string> = {
  * HR's modal, and (mirrored in `hr::payslip`) the PDF.
  */
 
-const COMPANY_NAME = "VITE SEO DIGITAL ADVERTISING OPC";
-const COMPANY_ADDRESS =
+/**
+ * The letterhead when the profile hasn't arrived yet — the same values the row is seeded
+ * with. A payslip that flashed a blank company name on every open would read as broken.
+ */
+const FALLBACK_COMPANY_NAME = "VITE SEO DIGITAL ADVERTISING OPC";
+const FALLBACK_COMPANY_ADDRESS =
   "26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines";
 
 /** Bare grouped amount — no ₱. The document states its currency once, on the net pay bar. */
@@ -130,6 +135,12 @@ export function PayslipDocument({
   edit?: PayslipEditMode;
 }) {
   const p = payslip;
+  // The letterhead, from Company → Settings — the same row `hr::payslip` prints from, so the
+  // document on screen and the PDF of it can never disagree about who the employer is.
+  const { data: company } = useCompanyProfile();
+  const companyName = company?.legal_name || FALLBACK_COMPANY_NAME;
+  const companyAddress = company ? (company.address ?? "") : FALLBACK_COMPANY_ADDRESS;
+  const companyLogo = company?.logo_url ?? null;
   // Derived by the API, not here — the PDF renders the same figures and the arithmetic is
   // subtle enough (see PayslipResource::documentTotals) that two implementations would drift.
   const t = p.totals;
@@ -175,12 +186,18 @@ export function PayslipDocument({
     >
       {/* Header */}
       <div className="flex flex-col items-center gap-2">
+        {companyLogo && (
+          // eslint-disable-next-line @next/next/no-img-element -- signed, short-lived URL off the private disk; not an optimizable static asset
+          <img src={companyLogo} alt="" className="mb-1 h-10 object-contain" />
+        )}
         <p className="text-center text-lg font-extrabold uppercase tracking-tight sm:text-xl">
-          {COMPANY_NAME}
+          {companyName}
         </p>
-        <p className="max-w-[36rem] text-center text-caption text-muted-foreground">
-          {COMPANY_ADDRESS}
-        </p>
+        {companyAddress && (
+          <p className="max-w-[36rem] text-center text-caption text-muted-foreground">
+            {companyAddress}
+          </p>
+        )}
       </div>
 
       {/* Title + period */}

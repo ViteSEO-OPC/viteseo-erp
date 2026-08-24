@@ -6,7 +6,7 @@ use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\AttendancePolicyVersion;
 
 /**
- * The single attendance-policy row (Company → Rules). 's violation engine
+ * The single attendance-policy row (Company → Settings). 's violation engine
  * reads these thresholds; the task-format rule governs the time-in task checklist.
  */
 class AttendancePolicyService

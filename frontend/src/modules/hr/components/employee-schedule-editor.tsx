@@ -25,7 +25,7 @@ import { TimePicker } from "@/modules/hr/ui/time-picker";
 /**
  * An employee's effective work schedule, with HR editing (assign a schedule + set
  * per-person overrides). `readOnly` renders just the resolved summary — used on
- * the employee's own profile. Shared by Company → Rules and the Work Details tab.
+ * the employee's own profile. Shared by Company → Settings and the Work Details tab.
  */
 export function EmployeeScheduleEditor({
   employeeId,

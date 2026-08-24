@@ -119,12 +119,12 @@ class ManagementAttendanceService
             return $stats;
         }
 
-        // The company rule (Company → Rules). Off, management is on the time clock like
+        // The company rule (Company → Settings). Off, management is on the time clock like
         // everyone else and there is nothing for this job to write.
         $managementAuto = (bool) $this->policy->get()->management_auto_attendance;
 
         if (! $managementAuto) {
-            $stats['notes'][] = 'Auto time in/out for management is switched off in Company → Rules — nothing generated.';
+            $stats['notes'][] = 'Auto time in/out for management is switched off in Company → Settings — nothing generated.';
 
             return $this->record($from, $to, $stats, $dryRun);
         }

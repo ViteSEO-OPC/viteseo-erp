@@ -24,13 +24,18 @@
         .track { background: #e2e8f0; height: 8px; border-radius: 4px; width: 140px; }
         .fill { background: #0d9488; height: 8px; border-radius: 4px; }
         .note { margin-top: 14px; color: #64748b; font-size: 10px; font-style: italic; }
-        .foot { margin-top: 28px; color: #94a3b8; font-size: 10px; text-align: center; }
+        /* Height-capped so a large upload can't shove the report onto an extra page. */
+        .logo { padding-bottom: 6px; }
+        .logo img { height: 38px; }
     </style>
 </head>
 <body>
 <div class="wrap">
     <div class="head">
-        <div class="company">Viteseo Inc.</div>
+        @if (!empty($company['logo']))
+            <div class="logo"><img src="{{ $company['logo'] }}" alt=""></div>
+        @endif
+        <div class="company">{{ $company['name'] }}</div>
         <div class="doc">{{ $r['title'] }}</div>
         <div class="desc">{{ $r['description'] }}</div>
         <div class="meta">Generated {{ $generatedAt }}</div>
@@ -118,7 +123,6 @@
         <div class="note">{{ $r['note'] }}</div>
     @endif
 
-    <div class="foot">Viteseo HRIS · Confidential</div>
 </div>
 </body>
 </html>

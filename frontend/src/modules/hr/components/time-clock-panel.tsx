@@ -137,13 +137,13 @@ export function TimeClockPanel() {
   const busy = clockInMut.isPending || clockOutMut.isPending || breakMut.isPending;
   const activeState = state === "clocked_in" || state === "on_lunch" || state === "on_break";
 
-  // Strict clock-in (Company → Rules). The server decides whether anything holds this
+  // Strict clock-in (Company → Settings). The server decides whether anything holds this
   // employee back and until when; we only compare that against the ticking clock, so the
   // button unlocks on the minute the shift opens without waiting for a refetch.
   const opensAt = data?.clock_in?.opens_at ?? null;
   const tooEarly = opensAt !== null && manilaHm(now) < opensAt;
 
-  // Geofenced clock-in (Company → Rules). The server reports whether it is ACTUALLY
+  // Geofenced clock-in (Company → Settings). The server reports whether it is ACTUALLY
   // enforcing — an enabled-but-unconfigured policy fails open and reports false — so the
   // panel never asks a question whose answer would be ignored.
   const geofenced = data?.clock_in?.geofence ?? false;

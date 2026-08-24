@@ -18,6 +18,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { CompanyDetailsForm } from "@/modules/hr/components/company-details-form";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { WorkScheduleFormDialog } from "@/modules/hr/components/work-schedule-form-dialog";
 import {
@@ -78,19 +79,39 @@ export default function RulesPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Company Rules"
-        subtitle="Work schedules per role, attendance policy, and per-employee overrides."
-        actions={
-          <Button onClick={openCreate}>
-            <Plus />
-            Add Schedule
-          </Button>
-        }
+        title="Company Settings"
+        subtitle="Company details, work schedules per role, attendance settings, and per-employee overrides."
       />
 
       <div className="mt-8 space-y-8">
-        {/* Section A — schedules */}
-        <section>
+        {/*
+         * Section A — who the employer is. First on the page because it is the one thing here
+         * that appears on documents people outside HR read: every payslip, export and report
+         * prints this letterhead.
+         */}
+        <CompanyDetailsForm />
+
+        {/* Section B — schedules */}
+        <section className="space-y-6">
+          {/*
+           * The heading carries "Add Schedule" rather than the page header: the page now edits
+           * four unrelated things, so a button parked at the top reads as applying to all of
+           * them. Beside the table it fills, it can only mean one thing.
+           */}
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-1">
+              <h2 className="text-h3 font-bold text-foreground">Work schedules</h2>
+              <p className="text-sm text-muted-foreground">
+                Working days and hours per role. Lateness is measured against these, plus each
+                schedule&rsquo;s own grace period.
+              </p>
+            </div>
+            <Button onClick={openCreate}>
+              <Plus />
+              Add Schedule
+            </Button>
+          </div>
+
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading schedules…</p>
           ) : isError ? (
@@ -104,11 +125,11 @@ export default function RulesPage() {
           )}
         </section>
 
-        {/* Section B — attendance policy */}
+        {/* Section C — attendance settings */}
         <AttendancePolicyForm />
 
         {/*
-         * Section C — payroll settings. Kept visually separate from the attendance policy
+         * Section D — payroll settings. Kept visually separate from the attendance settings
          * rather than folded into its card grid: both sections carry an "Effective from"
          * date, but they mean DIFFERENT things (see the two banners), and the payroll rules
          * have nothing to do with the violation engine the attendance heading describes.
@@ -134,7 +155,7 @@ export default function RulesPage() {
   );
 }
 
-// ---- Section A: schedules table ----
+// ---- Section B: schedules table ----
 
 // Column widths shared by the header and every row so they line up. Matches the
 // Figma frame (Schedule / Workdays / Hours / Grace / Actions).
@@ -214,7 +235,7 @@ function SchedulesTable({
   );
 }
 
-// ---- Section B: attendance policy + task format ----
+// ---- Section C: attendance settings + task format ----
 
 function AttendancePolicyForm() {
   const { data: policy } = useAttendancePolicy();
@@ -222,7 +243,7 @@ function AttendancePolicyForm() {
   return (
     <section className="space-y-6">
       <div className="space-y-1">
-        <h2 className="text-h3 font-bold text-foreground">Attendance policy</h2>
+        <h2 className="text-h3 font-bold text-foreground">Attendance settings</h2>
         <p className="text-sm text-muted-foreground">
           Handbook thresholds the violation system reads.
         </p>
@@ -1793,7 +1814,7 @@ function AttendancePolicyEditor() {
   );
 }
 
-// ---- Section C: payroll settings ----
+// ---- Section D: payroll settings ----
 
 /**
  * Company-wide payroll configuration. Structurally the same animal as the attendance

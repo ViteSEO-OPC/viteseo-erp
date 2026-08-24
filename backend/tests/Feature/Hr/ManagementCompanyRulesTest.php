@@ -21,7 +21,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 
 /**
- * The two Company → Rules switches behind the management exemption:
+ * The two Company → Settings switches behind the management exemption:
  *
  *  - `management_auto_attendance` — off, the exemption stops existing and management uses the
  *    time clock like everyone else. Their PAY is fixed either way.

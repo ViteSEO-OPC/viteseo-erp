@@ -150,6 +150,10 @@
                text-transform: uppercase; color: #6b7280; letter-spacing: 0.2px; }
 
         /* Header */
+        /* The mark, when one is set. Height-capped so a large upload can't push the
+           document onto a second page — dompdf scales the width to match. */
+        .logo { text-align: center; padding-bottom: 3px; }
+        .logo img { height: 34px; }
         .company { text-align: center; font-size: 13px; font-weight: bold; }
         .address { text-align: center; font-size: 7px; color: #6b7280; padding-top: 1px; }
 
@@ -224,8 +228,13 @@
 </head>
 <body>
 
-<div class="company">VITE SEO DIGITAL ADVERTISING OPC</div>
-<div class="address">26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines</div>
+@if (!empty($company['logo']))
+    <div class="logo"><img src="{{ $company['logo'] }}" alt=""></div>
+@endif
+<div class="company">{{ $company['name'] }}</div>
+@if (!empty($company['address']))
+    <div class="address">{{ $company['address'] }}</div>
+@endif
 
 <table style="margin-top: 10px;">
     <tr>
