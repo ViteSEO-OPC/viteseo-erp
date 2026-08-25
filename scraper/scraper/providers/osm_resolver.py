@@ -14,10 +14,30 @@ That is what preserves the two properties the pipeline depends on:
   idempotent and an AI-found business dedups correctly against the same business found by the plain
   OSM provider.
 
-AMBIGUITY DROPS RATHER THAN GUESSES. A wrong resolution is worse than a miss: it attaches a real
-``place_id`` to the wrong business, and because the CRM dedups on that key the error becomes
-permanent and invisible. So when a proposal matches more than one distinct OSM business, this
-records the ambiguity and keeps neither.
+MATCHING IS BY CONTAINMENT, NOT EQUALITY, AND THAT IS A DELIBERATE WIDENING. A proposal matches an
+OSM element when the proposal's identity-bearing words are all present in the element's. "Mercury
+Drug" therefore matches "Mercury Drug Vigan". Requiring exact equality — as this once did — meant
+that any branch qualifier a proposer could not guess (a town, a highway, a mall) refused the match,
+which rejected precisely the businesses a proposer is most likely to name. Containment is one-way:
+the proposal must be contained BY the element, never the reverse, so "Mercury Drug Vigan" proposed
+against a bare "Mercury Drug" element still does not match.
+
+TWO DIFFERENT SITUATIONS THAT MUST NOT BE CONFLATED, and separating them is the rest of the change:
+
+* **Genuine ambiguity — one NAME, several businesses.** Two OSM elements both called "Mercury Drug"
+  with different keys. Which one a proposer meant is unknowable, and a wrong resolution is worse than
+  a miss: it attaches a real ``place_id`` to the wrong business, and because the CRM dedups on that
+  key the error becomes permanent and invisible. Still refused, exactly as before.
+
+* **Several BRANCHES — different names, one chain.** "Mercury Drug Vigan" and "Mercury Drug Bantay"
+  are two real, separately mapped businesses with their own keys and their own coordinates. There is
+  nothing to guess between them, so both are kept and both go on to the same deterministic dedup and
+  verification every other discovered business passes through. Refusing them would have thrown away
+  most of what the widening is for.
+
+A proposal that matches an implausible number of distinct businesses is matching on a word too common
+to identify anything, so it is refused wholesale rather than trusted branch by branch — see
+``MAX_BRANCH_MATCHES``.
 
 No network access lives here. The lookup is injected, which keeps the matching rules — the part
 worth being sure about — testable without Overpass.
@@ -42,6 +62,16 @@ STOPWORDS = frozenset({
 })
 
 
+#: How many DISTINCT businesses one proposal may match before it is refused wholesale.
+#:
+#: Containment matching is one-way and start-anchored, so it cannot match arbitrarily — but a very
+#: short proposal ("Rose") can still be contained by several unrelated businesses ("Rose Pharmacy",
+#: "Rose Bakery"). Past this count the proposal is plainly matching on a word too common to identify
+#: anything, and the right response is to trust none of its matches rather than to pick among them.
+#: Set high enough that a real chain with many branches in one city still resolves.
+MAX_BRANCH_MATCHES = 10
+
+
 def normalize_name(name: str) -> str:
     """A name reduced to its identity-bearing words, lower-cased and order-independent.
 
@@ -61,13 +91,33 @@ class ResolutionOutcome:
     proposed_count: int = 0
     unmatched: list[str] = field(default_factory=list)
     ambiguous: list[str] = field(default_factory=list)
+    #: Proposals refused for matching more distinct businesses than {@see MAX_BRANCH_MATCHES}.
+    #: Counted apart from `ambiguous` because the two say different things to an operator: one
+    #: proposal was unresolvable, the other was not specific enough to be a proposal at all.
+    too_generic: list[str] = field(default_factory=list)
+
+    @property
+    def confirmed_count(self) -> int:
+        """PROPOSALS that matched at least one real business.
+
+        Distinct from ``len(resolved)``, which counts BUSINESSES — one proposal naming a chain can
+        now resolve to several branches, so the two numbers legitimately differ and conflating them
+        would let a resolution rate exceed 1.0.
+        """
+        return (
+            self.proposed_count
+            - len(self.unmatched)
+            - len(self.ambiguous)
+            - len(self.too_generic)
+        )
 
     @property
     def resolution_rate(self) -> float:
-        """Proven ÷ proposed. The honest measure of how much of a proposer's output was real."""
+        """Proven ÷ proposed, measured in PROPOSALS. The honest measure of how much of a proposer's
+        output corresponded to something real."""
         if self.proposed_count == 0:
             return 0.0
-        return round(len(self.resolved) / self.proposed_count, 4)
+        return round(self.confirmed_count / self.proposed_count, 4)
 
 
 class OsmNameResolver:
@@ -103,15 +153,43 @@ class OsmNameResolver:
         for candidate in candidates:
             by_key.setdefault(normalize_name(candidate.name), {})[candidate.provider_id] = candidate
 
+        # Each group's identity words, split once here rather than once per proposal.
+        group_words = {key: set(key.split()) for key in by_key}
+
+        # Businesses already taken by an earlier proposal. Two proposals can legitimately reach the
+        # same branch ("Mercury Drug" and "Mercury Drug Vigan"), and it must appear once.
+        taken: set[str] = set()
+
         for proposal in wanted:
-            matches = by_key.get(normalize_name(proposal), {})
-            if not matches:
+            words = set(normalize_name(proposal).split())
+            # CONTAINMENT, ONE-WAY: the proposal's identity words must all appear in the element's.
+            matched_keys = [key for key, other in group_words.items() if words <= other]
+
+            if not matched_keys:
                 outcome.unmatched.append(proposal)
-            elif len(matches) > 1:
-                # Several different real businesses share this name in this area. Which one the
-                # proposer meant is unknowable, so take none.
+                continue
+
+            if len(matched_keys) > MAX_BRANCH_MATCHES:
+                # Matching this widely means the proposal is not identifying a business. Refuse all
+                # of it rather than keep an arbitrary subset.
+                outcome.too_generic.append(proposal)
+                continue
+
+            # GENUINE AMBIGUITY, unchanged: a single NAME held by more than one distinct business.
+            # Refused for the whole proposal rather than per group — if part of what this proposal
+            # matched is unresolvable, the safe reading is that the proposal itself is unresolvable.
+            # Conservative on purpose: keeping the clean groups would mean deciding that the
+            # proposer meant those and not the contested ones, which is exactly the guess this
+            # module exists to refuse.
+            if any(len(by_key[key]) > 1 for key in matched_keys):
                 outcome.ambiguous.append(proposal)
-            else:
-                outcome.resolved.append(next(iter(matches.values())))
+                continue
+
+            for key in matched_keys:
+                business = next(iter(by_key[key].values()))
+                if business.provider_id in taken:
+                    continue
+                taken.add(business.provider_id)
+                outcome.resolved.append(business)
 
         return outcome

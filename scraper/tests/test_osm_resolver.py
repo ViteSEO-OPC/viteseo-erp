@@ -151,3 +151,112 @@ def test_the_whole_batch_is_looked_up_in_one_call():
     assert len(calls) == 1
     assert calls[0] == names
     assert len(outcome.resolved) == 3
+
+
+# --- the widening: real Philippine branch names ----------------------------------
+
+
+def test_a_bare_chain_name_resolves_to_its_branch_row():
+    # THE CASE THE WIDENING EXISTS FOR. OSM records "Mercury Drug Vigan"; a proposer has no way to
+    # know the branch qualifier. Exact matching refused this, which rejected precisely the businesses
+    # a proposer is most likely to name.
+    outcome = resolver_for(osm("Mercury Drug Vigan", "node/1")).resolve(
+        ["Mercury Drug"], area="Vigan"
+    )
+
+    assert [b.provider_id for b in outcome.resolved] == ["node/1"]
+    assert outcome.unmatched == []
+
+
+def test_every_differently_named_branch_is_kept():
+    # Three real, separately mapped businesses with their own keys and coordinates. There is nothing
+    # to guess between them, so all three go on to the ordinary dedup and verification pipeline.
+    outcome = resolver_for(
+        osm("Mercury Drug Vigan", "node/1"),
+        osm("Mercury Drug Bantay", "node/2"),
+        osm("Mercury Drug Candon", "node/3"),
+    ).resolve(["Mercury Drug"], area="Ilocos Sur")
+
+    assert sorted(b.provider_id for b in outcome.resolved) == ["node/1", "node/2", "node/3"]
+    assert outcome.ambiguous == []
+
+
+def test_same_name_different_key_is_still_refused_even_beside_clean_branches():
+    # THE SAFETY RULE, UNCHANGED. Two elements sharing one NAME are unresolvable, and a proposal that
+    # touches that collision takes nothing at all — keeping the clean branch would mean deciding the
+    # proposer meant that one and not the contested pair, which is the guess this module refuses.
+    outcome = resolver_for(
+        osm("Mercury Drug", "node/1"),
+        osm("Mercury Drug", "node/2"),
+        osm("Mercury Drug Vigan", "node/3"),
+    ).resolve(["Mercury Drug"], area="Vigan")
+
+    assert outcome.resolved == []
+    assert outcome.ambiguous == ["Mercury Drug"]
+
+
+def test_containment_is_one_way():
+    # A proposal may be contained BY an element, never the reverse. "Mercury Drug Vigan" proposed
+    # against a bare "Mercury Drug" element is a proposer claiming more than OSM knows.
+    outcome = resolver_for(osm("Mercury Drug", "node/1")).resolve(
+        ["Mercury Drug Vigan"], area="Vigan"
+    )
+
+    assert outcome.resolved == []
+    assert outcome.unmatched == ["Mercury Drug Vigan"]
+
+
+def test_a_different_business_sharing_one_word_still_does_not_match():
+    outcome = resolver_for(osm("Rose Bakery", "node/1")).resolve(["Rose Pharmacy"], area="Vigan")
+
+    assert outcome.resolved == []
+    assert outcome.unmatched == ["Rose Pharmacy"]
+
+
+def test_a_proposal_matching_implausibly_many_businesses_is_refused_wholesale():
+    # "Rose" is contained by everything here. Matching this widely means the proposal is not
+    # identifying a business, so none of its matches are trusted.
+    many = [osm(f"Rose {n}", f"node/{i}") for i, n in enumerate(
+        ["Pharmacy", "Bakery", "Cafe", "Salon", "Hotel", "Clinic", "Dental", "Optical",
+         "Hardware", "Grocery", "Bookshop"], start=1
+    )]
+    outcome = resolver_for(*many).resolve(["Rose"], area="Vigan")
+
+    assert outcome.resolved == []
+    assert outcome.too_generic == ["Rose"]
+    assert outcome.ambiguous == []
+
+
+def test_a_business_reached_by_two_proposals_appears_once():
+    outcome = resolver_for(osm("Mercury Drug Vigan", "node/1")).resolve(
+        ["Mercury Drug", "Mercury Drug Vigan"], area="Vigan"
+    )
+
+    assert [b.provider_id for b in outcome.resolved] == ["node/1"]
+    assert outcome.proposed_count == 2
+
+
+# --- the rate stays a rate --------------------------------------------------------
+
+
+def test_the_rate_measures_proposals_and_cannot_exceed_one():
+    # One proposal, three branches. Counting BUSINESSES over PROPOSALS would report 3.0.
+    outcome = resolver_for(
+        osm("Mercury Drug Vigan", "node/1"),
+        osm("Mercury Drug Bantay", "node/2"),
+        osm("Mercury Drug Candon", "node/3"),
+    ).resolve(["Mercury Drug"], area="Ilocos Sur")
+
+    assert len(outcome.resolved) == 3
+    assert outcome.confirmed_count == 1
+    assert outcome.resolution_rate == 1.0
+
+
+def test_every_refusal_reason_is_counted_against_the_rate():
+    outcome = resolver_for(osm("Kopi Roasters", "node/1")).resolve(
+        ["Kopi Roasters", "Nowhere Cafe"], area="Makati"
+    )
+
+    assert outcome.confirmed_count == 1
+    assert outcome.resolution_rate == 0.5
+

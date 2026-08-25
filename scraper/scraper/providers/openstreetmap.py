@@ -46,6 +46,42 @@ CATEGORY_SELECTORS: dict[str, list[tuple[str, str]]] = {
 # OSM tag keys that describe what a business *is*, most specific first — used to derive `industry`.
 _CATEGORY_KEYS = ["shop", "amenity", "tourism", "office", "leisure", "craft", "healthcare"]
 
+#: OSM values that name INFRASTRUCTURE, not a business — refused by ``find_by_name`` only.
+#:
+#: WHY THIS EXISTS AND WHY ONLY THERE. ``discover()`` names the tags it wants, so it can never return
+#: one of these. ``find_by_name`` deliberately drops the category filter — that is the whole point of
+#: it — and matches on name prefix, which means a real business's name can be carried by a nearby map
+#: feature: a live measurement returned "Grandpa's Inn and Restaurant Customer Parking" as a
+#: candidate lead. A car park is not a prospect, and letting one become a lead with a real
+#: ``place_id`` would be a permanent wrong row.
+#:
+#: A FLOOR, NOT A TAXONOMY. This refuses the obvious non-businesses that share a business's name; it
+#: does not try to decide what counts as a good lead. A gift shop found while looking for restaurants
+#: is still a real business and still passes — judging that is the CRM's job, not this module's.
+_NON_BUSINESS_VALUES: dict[str, set[str]] = {
+    "amenity": {
+        "parking", "parking_space", "parking_entrance", "motorcycle_parking", "bicycle_parking",
+        "bench", "shelter", "toilets", "waste_basket", "waste_disposal", "drinking_water",
+        "fountain", "recycling", "post_box", "telephone", "clock", "grit_bin", "bbq",
+    },
+    "leisure": {"park", "playground", "pitch", "garden", "picnic_table", "slipway"},
+    "tourism": {"artwork", "picnic_site", "viewpoint", "information"},
+}
+
+
+def is_business_element(element: dict) -> bool:
+    """Whether a named OSM element plausibly represents a BUSINESS rather than a map feature.
+
+    Used by name-based lookup, where the category filter is deliberately absent. Returns True for
+    anything not positively identified as infrastructure — refusing only what is clearly not a
+    business, rather than trying to prove that something is one.
+    """
+    tags = element.get("tags") or {}
+    for key, excluded in _NON_BUSINESS_VALUES.items():
+        if str(tags.get(key) or "").strip().lower() in excluded:
+            return False
+    return True
+
 
 def category_selectors(category: str) -> list[tuple[str, str]]:
     """Resolve a friendly category word to OSM tag selectors, or parse a raw ``key=value``."""
@@ -172,6 +208,11 @@ class OpenStreetMapProvider(DiscoveryProvider):
         proves whether OSM actually holds a business by that name in that area, and only proven ones
         become RawBusiness records with a real ``provider_id`` and real coordinates.
 
+        MATCHING IS PREFIX-ANCHORED, NOT EXACT. See ``_overpass_by_name`` — a proposal retrieves any
+        OSM element whose name STARTS with it, which is what lets "Mercury Drug" reach the branch
+        rows. Deciding which of those retrieved elements actually correspond to the proposal is the
+        resolver's job, not this method's.
+
         DELIBERATELY UNCONSTRAINED BY CATEGORY, and that is the entire point. Filtering by the same
         CATEGORY_SELECTORS ``discover()`` uses could only ever return a subset of what ``discover()``
         already returns, so the proposer would add exactly nothing. Dropping the constraint is what
@@ -193,6 +234,11 @@ class OpenStreetMapProvider(DiscoveryProvider):
 
         businesses: list[RawBusiness] = []
         for element in elements:
+            # Prefix matching lets a business's name reach nearby map features that merely quote it —
+            # a car park named after the restaurant beside it. Refused here, never in `discover()`,
+            # which names the tags it wants and cannot return one.
+            if not is_business_element(element):
+                continue
             business = parse_element(element)
             if business is None:
                 continue
@@ -215,8 +261,18 @@ class OpenStreetMapProvider(DiscoveryProvider):
 
         # Escape regex metacharacters in the names (a business called "A+B Trading" must not compile
         # into a quantifier), then escape the Overpass string literal itself.
+        #
+        # ANCHORED AT THE START ONLY, AND THAT ASYMMETRY IS THE POINT. Philippine OSM names routinely
+        # carry a branch qualifier the proposer has no way to guess — "Mercury Drug Vigan", "Rose
+        # Pharmacy - Quirino Blvd". A trailing `$` made those unretrievable: the element was never
+        # fetched, so the resolver never got to judge it, and the businesses a proposer is most likely
+        # to name were the ones structurally guaranteed to be missed.
+        #
+        # The LEADING `^` stays, and does the safety work: "Drug" still cannot match "Mercury Drug",
+        # so a short or generic word cannot sweep in unrelated businesses. Widening happens only in
+        # the direction real names actually vary — extra words on the END.
         alternation = "|".join(re.escape(n) for n in names)
-        pattern = f"^({alternation})$".replace("\\", "\\\\").replace('"', '\\"')
+        pattern = f"^({alternation})".replace("\\", "\\\\").replace('"', '\\"')
 
         parts = []
         for kind in ("node", "way"):

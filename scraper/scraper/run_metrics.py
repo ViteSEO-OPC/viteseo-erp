@@ -97,9 +97,17 @@ def build_record(
         # -- discovery funnel --
         "proposed": proposed,
         "resolved": resolved,
-        "resolution_rate": round(resolved / proposed, 4) if proposed else 0.0,
+        # The provider's own rate wins when it reports one. A proposal naming a chain can resolve to
+        # several branches, so businesses ÷ proposals can exceed 1.0 and is not the rate anyone means;
+        # the provider divides by PROPOSALS CONFIRMED, which is.
+        "resolution_rate": (
+            round(float(stats["resolution_rate"]), 4)
+            if stats.get("resolution_rate") is not None
+            else (round(resolved / proposed, 4) if proposed else 0.0)
+        ),
         "unmatched": int(stats.get("unmatched", 0)),
         "ambiguous": int(stats.get("ambiguous", 0)),
+        "too_generic": int(stats.get("too_generic", 0)),
         "discovered": discovered,
         # Website DISCOVERY rate — how often a provider supplied a URL at all. Distinct from the
         # CRM's website STATUS, which only the audit may decide; this counts inputs, not verdicts.
@@ -112,6 +120,21 @@ def build_record(
         "updated": summary.get("updated"),
         "imported": imported,
     }
+
+    # COMPOSITE LANES, when the provider ran more than one. Absent for a single-lane run for the same
+    # reason the cost block is: a plain OSM run has no baseline-versus-expansion split to report, and
+    # emitting zeros would claim the AI leg contributed nothing when it was never asked to.
+    if "baseline_discovered" in stats:
+        record["baseline_discovered"] = int(stats["baseline_discovered"])
+        record["ai_duplicates"] = int(stats.get("ai_duplicates", 0))
+        # The number the AI capability is judged on: businesses the baseline did not already hold.
+        record["net_new"] = int(stats.get("net_new", 0))
+        record["confirmed"] = int(stats.get("confirmed", 0))
+        # The AI leg's OWN outcome, separate from the run's. A failed expansion beside a healthy
+        # baseline is a successful run with a broken integration, and both halves need to be visible.
+        record["ai_execution_status"] = stats.get("ai_execution_status")
+        record["ai_error_reason"] = stats.get("ai_error_reason")
+        record["ai_skipped"] = stats.get("ai_skipped")
 
     # Cost, when the provider spends money. Absent for OSM rather than zero — "free" and "not
     # measured" are different claims, and a null says which one this is.

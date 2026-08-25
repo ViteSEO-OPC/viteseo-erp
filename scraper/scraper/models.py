@@ -41,6 +41,10 @@ class RawBusiness(BaseModel):
     A consequence worth stating: two providers that resolve the SAME OSM business produce the SAME
     key, and the CRM correctly treats them as one lead. That is why AI-assisted OSM discovery
     (Capability A) dedups cleanly against the plain OSM provider instead of doubling the pool.
+
+    The composite provider relies on exactly that property: it merges its two lanes on this key
+    alone, so a business the tag sweep already found cannot be counted twice just because the AI leg
+    named it too.
     """
 
     provider_id: str = Field(description="Provider's stable natural key, e.g. OSM 'node/123'.")
@@ -70,6 +74,19 @@ class RawBusiness(BaseModel):
     # them would take a deliberate, separate decision on both sides.
     verification_source: Optional[str] = None       # "osm" | "wikidata" | "website" | ...
     verification_confidence: Optional[int] = None   # 0-100, when a verifier actually scored it
+
+    # WHICH LANE OF A COMPOSITE RUN PRODUCED THIS RECORD, and unlike the two fields above this one
+    # DOES reach the CRM — the normalizer uses it as `source` when it is set.
+    #
+    # It exists because a composite run has two lanes with different trust stories: the OpenStreetMap
+    # tag sweep, and AI-assisted expansion. Stamping one provider name across the whole run would
+    # make it impossible to answer the only question that justifies the AI leg — "did it add coverage
+    # the baseline did not already have?" — because every lead would be labelled identically.
+    #
+    # Optional and defaulting to None so a plain OpenStreetMap run is byte-identical to before: the
+    # normalizer falls back to the run's provider name whenever this is unset, so nothing that does
+    # not set it can observe that it exists.
+    discovered_by: Optional[str] = None
 
 
 class NormalizedBusiness(BaseModel):

@@ -27,7 +27,7 @@ from scraper.providers.openstreetmap import OpenStreetMapProvider
 #: identity by website/Wikidata rather than by an OSM node.
 _PROVIDERS = {
     "openstreetmap": "OpenStreetMap Overpass/Nominatim (default, no API key)",
-    "openai": "OpenAI proposes candidates; OSM resolves them deterministically",
+    "openai": "OpenStreetMap baseline PLUS AI-proposed candidates resolved against OSM",
 }
 
 #: The permanent baseline, and the end of every fallback chain. Named so the fallback path reads as
@@ -126,17 +126,29 @@ def get_provider(config: Config) -> DiscoveryProvider:
 
     if name == "openai":
         # Imported HERE, not at module scope, so selecting OSM never loads this path.
+        from scraper.providers.ai_assisted import AiAssistedDiscoveryProvider
         from scraper.providers.openai_discovery import OpenAiDiscoveryProvider
 
-        return OpenAiDiscoveryProvider(
-            # No API key. The CRM holds the credential and makes the model call, so this process
-            # never receives, stores or logs one — it asks the CRM for names over the same
-            # authenticated channel it already uses to ingest leads.
-            crm_base_url=config.crm_base_url,
-            crm_token=config.crm_token,
-            timeout=config.openai_timeout,
-            # Identity always comes from OSM, even on the AI path — the model proposes names only.
-            osm=build_openstreetmap(config),
+        # ONE OSM CLIENT, SHARED BY BOTH LANES. The composite sweeps with it and the AI leg resolves
+        # names through it, so a run opens one Overpass/Nominatim client rather than two — and there
+        # is a single owner to close.
+        osm = build_openstreetmap(config)
+
+        # AI ADDS; IT DOES NOT REPLACE. The composite runs the untouched OSM sweep first and
+        # unconditionally, so no AI outcome — including total failure — can return less than the
+        # default provider would have.
+        return AiAssistedDiscoveryProvider(
+            osm=osm,
+            ai=OpenAiDiscoveryProvider(
+                # No API key. The CRM holds the credential and makes the model call, so this process
+                # never receives, stores or logs one — it asks the CRM for names over the same
+                # authenticated channel it already uses to ingest leads.
+                crm_base_url=config.crm_base_url,
+                crm_token=config.crm_token,
+                timeout=config.openai_timeout,
+                # Identity always comes from OSM, even on the AI path — the model proposes names only.
+                osm=osm,
+            ),
         )
 
     raise ValueError(

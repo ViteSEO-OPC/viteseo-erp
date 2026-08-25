@@ -110,9 +110,11 @@ class OpenAiDiscoveryProvider(DiscoveryProvider):
                 "error_reason": error,
                 "proposed": 0,
                 "resolved": 0,
+                "confirmed": 0,
                 "resolution_rate": 0.0,
                 "unmatched": 0,
                 "ambiguous": 0,
+                "too_generic": 0,
             }
             print(
                 f"  {self.name}: provider execution FAILED ({status}"
@@ -128,17 +130,23 @@ class OpenAiDiscoveryProvider(DiscoveryProvider):
             "execution_status": EXECUTION_OK,
             "error_reason": None,
             "proposed": outcome.proposed_count,
+            # BUSINESSES resolved, which one proposal naming a chain can legitimately make larger
+            # than `proposed`. `confirmed` counts PROPOSALS and is what the rate divides.
             "resolved": len(outcome.resolved),
+            "confirmed": outcome.confirmed_count,
             "resolution_rate": outcome.resolution_rate,
             "unmatched": len(outcome.unmatched),
             "ambiguous": len(outcome.ambiguous),
+            "too_generic": len(outcome.too_generic),
             **usage,
         }
 
-        if outcome.unmatched or outcome.ambiguous:
+        if outcome.unmatched or outcome.ambiguous or outcome.too_generic:
             print(
-                f"  resolver: {len(outcome.resolved)}/{outcome.proposed_count} proposals confirmed "
-                f"({len(outcome.unmatched)} not in OSM, {len(outcome.ambiguous)} ambiguous — all dropped).",
+                f"  resolver: {outcome.confirmed_count}/{outcome.proposed_count} proposals confirmed "
+                f"-> {len(outcome.resolved)} business(es) "
+                f"({len(outcome.unmatched)} not in OSM, {len(outcome.ambiguous)} ambiguous, "
+                f"{len(outcome.too_generic)} too generic — all dropped).",
                 file=sys.stderr,
             )
 

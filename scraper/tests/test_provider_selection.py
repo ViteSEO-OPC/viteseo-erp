@@ -201,6 +201,7 @@ def test_every_crm_fallback_reason_lands_on_openstreetmap(monkeypatch, reason):
 
 
 def test_a_crm_selected_openai_is_buildable_and_needs_no_openai_key(monkeypatch):
+    from scraper.providers.ai_assisted import AiAssistedDiscoveryProvider
     from scraper.providers.openai_discovery import OpenAiDiscoveryProvider
 
     crm_says(monkeypatch, "openai")
@@ -208,10 +209,23 @@ def test_a_crm_selected_openai_is_buildable_and_needs_no_openai_key(monkeypatch)
 
     provider = get_provider(config_for(config(), choice))
 
-    assert isinstance(provider, OpenAiDiscoveryProvider)
+    # Selecting AI builds the COMPOSITE, not the AI provider alone — the OSM baseline is part of what
+    # "the AI provider" now means, which is the whole point of it being unable to return less.
+    assert isinstance(provider, AiAssistedDiscoveryProvider)
+    assert isinstance(provider._ai, OpenAiDiscoveryProvider)
     # The credential lives in the CRM. This process authenticates to the CRM and nothing else.
     assert not hasattr(provider, "api_key")
+    assert not hasattr(provider._ai, "api_key")
     assert isinstance(provider._osm, OpenStreetMapProvider)
+
+
+def test_the_ai_composite_sweeps_and_resolves_through_one_osm_client(monkeypatch):
+    # One client per run, and one owner to close it. Two would double the load this tool puts on
+    # Overpass and Nominatim, which are shared community infrastructure.
+    crm_says(monkeypatch, "openai")
+    provider = get_provider(config_for(config(), resolve_provider_choice(config())))
+
+    assert provider._osm is provider._ai._osm
 
 
 def test_openai_without_a_crm_token_fails_loudly(monkeypatch):

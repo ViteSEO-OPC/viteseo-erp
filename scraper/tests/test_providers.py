@@ -60,3 +60,112 @@ def test_category_selectors_friendly_and_raw():
 def test_category_selectors_unknown_raises():
     with pytest.raises(ValueError):
         category_selectors("definitely-not-a-category")
+
+
+# --- the name query: prefix-anchored, not exact -----------------------------------
+
+
+def _name_query(*names: str) -> str:
+    """The Overpass query the provider builds for a batch of proposed names, without a network."""
+    from scraper.providers.openstreetmap import OpenStreetMapProvider
+
+    provider = OpenStreetMapProvider.__new__(OpenStreetMapProvider)
+    captured = {}
+
+    def capture(query):
+        captured["query"] = query
+        raise AssertionError("network must not be reached")
+
+    provider._post_with_retry = capture  # type: ignore[method-assign]
+    try:
+        provider._overpass_by_name(list(names), (1.0, 2.0, 3.0, 4.0), 200)
+    except AssertionError:
+        pass
+    return captured["query"]
+
+
+def test_the_name_query_is_anchored_at_the_start_only():
+    # THE GATE THAT MADE BRANCH NAMES UNREACHABLE. With a trailing `$`, "Mercury Drug" could not
+    # retrieve "Mercury Drug Vigan" — the element was never fetched, so the resolver never got to
+    # judge it. Dropping the trailing anchor is what lets real Philippine branch rows be considered.
+    query = _name_query("Mercury Drug")
+
+    assert "^(Mercury" in query
+    assert ")$" not in query
+
+
+def test_the_leading_anchor_survives_so_a_generic_word_cannot_sweep():
+    # The safety half of the asymmetry: widening happens only in the direction real names vary —
+    # extra words at the END. "Drug" must still not match "Mercury Drug".
+    import re
+
+    query = _name_query("Drug")
+    pattern = re.search(r'\["name"~"(.+?)",i\]', query).group(1).replace("\\\\", "\\")
+
+    assert pattern.startswith("^(")
+    assert re.match(pattern, "Drug Store", re.I)
+    assert not re.match(pattern, "Mercury Drug", re.I)
+
+
+def test_a_whole_batch_of_names_is_still_one_query():
+    # Overpass is shared community infrastructure; a query per name would multiply the load by the
+    # proposal count.
+    query = _name_query("Mercury Drug", "Rose Pharmacy", "Vigan Dental")
+
+    assert query.count("node[") == 1
+    assert query.count("way[") == 1
+
+
+def test_regex_metacharacters_in_a_name_are_still_escaped():
+    # "A+B Trading" must not compile into a quantifier.
+    query = _name_query("A+B Trading")
+
+    assert "A\\+B" in query or "A\\\\+B" in query
+
+
+# --- name lookup must not return map features ------------------------------------
+
+
+def test_a_car_park_named_after_a_business_is_not_a_business():
+    # FOUND BY MEASUREMENT, not by reasoning: a live run returned "Grandpa's Inn and Restaurant
+    # Customer Parking" as a candidate lead. Prefix matching lets a real business's name reach nearby
+    # features that merely quote it, and a car park with a real place_id would be a permanent wrong row.
+    from scraper.providers.openstreetmap import is_business_element
+
+    assert not is_business_element({
+        "type": "way", "id": 470500871,
+        "tags": {"name": "Grandpa's Inn and Restaurant Customer Parking", "amenity": "parking"},
+    })
+
+
+def test_a_real_business_sharing_a_chain_name_still_passes():
+    # The filter refuses infrastructure, not businesses in an unexpected category. A gift shop found
+    # while looking for restaurants is a real prospect; judging it is the CRM's job.
+    from scraper.providers.openstreetmap import is_business_element
+
+    assert is_business_element({
+        "type": "node", "id": 1,
+        "tags": {"name": "Grandpa's Inn Souvenir and Gift Shop", "shop": "gift"},
+    })
+    assert is_business_element({
+        "type": "node", "id": 2, "tags": {"name": "Mercury Drug Vigan", "amenity": "pharmacy"},
+    })
+
+
+def test_an_untagged_named_element_is_not_refused():
+    # The filter refuses only what is positively identified as infrastructure. A business whose only
+    # distinguishing tag is its name is exactly what name lookup exists to find.
+    from scraper.providers.openstreetmap import is_business_element
+
+    assert is_business_element({"type": "node", "id": 3, "tags": {"name": "Kusina Felicitas"}})
+
+
+def test_the_default_sweep_is_not_subject_to_the_filter():
+    # `discover()` names the tags it wants, so it cannot return infrastructure and must not gain a
+    # filter — the CEO-accepted default behaviour stays byte-identical.
+    import inspect
+
+    from scraper.providers.openstreetmap import OpenStreetMapProvider
+
+    assert "is_business_element" not in inspect.getsource(OpenStreetMapProvider.discover)
+
