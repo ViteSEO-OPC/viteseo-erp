@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { AxiosError } from "axios";
 import { AlertTriangle, Banknote, CheckCircle2, ChevronRight, Download, FileWarning, Upload, X } from "lucide-react";
 
@@ -26,6 +27,7 @@ import {
   useCreatePaymentBatch,
   usePaymentBatch,
   usePaymentBatches,
+  usePaymentBatchTotals,
   useReconcilePaymentBatch,
   useSettlePayment,
 } from "@/modules/hr/hooks/use-payroll";
@@ -72,10 +74,23 @@ export function PaymentBatchDialog({
   const [downloading, setDownloading] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
 
-  const { data: batches = [], isLoading } = usePaymentBatches(payrollRunId ?? undefined);
+  // Server-paged. The dialog shows the batches for one run, which is normally a handful — but
+  // "normally" is not a bound, and the endpoint has always cut the list at twenty.
+  const batchTable = useServerTable();
+  const { data: batchPage, isLoading, isFetching } = usePaymentBatches(
+    payrollRunId ?? undefined,
+    batchTable.params,
+  );
+  const batches = batchPage?.items ?? [];
+  const batchTotal = batchPage?.total ?? 0;
+  const batchPageNo = batchTable.params.page;
   const create = useCreatePaymentBatch();
 
-  const paidSoFar = batches.reduce((sum, b) => sum + b.total_amount, 0);
+  // Counted by the DATABASE across every batch. This used to be a sum of the rows in hand, and
+  // the rows in hand were page one — so with more than twenty batches the balance below said a
+  // run still owed money it had already paid.
+  const { data: totals } = usePaymentBatchTotals(payrollRunId ?? undefined);
+  const paidSoFar = totals?.paid_total ?? 0;
   const outstanding = Math.round((runTotalNet - paidSoFar) * 100) / 100;
 
   async function submit() {
@@ -148,7 +163,7 @@ export function PaymentBatchDialog({
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <p className="text-caption">
                 {formatPeso(outstanding)} of this run is still unpaid across{" "}
-                {batches.length} batch(es).
+                {batchTotal} batch(es).
               </p>
             </div>
           )}
@@ -259,6 +274,39 @@ export function PaymentBatchDialog({
                 )}
               </div>
             ))}
+
+            {/*
+              * A pager, because this list is one page now. Without it the dialog would show the
+              * first ten batches and look complete — which is the bug it started with, at twenty.
+              * The count comes from the server's own tally, not from the rows on screen.
+              */}
+            {batchTotal > batchTable.pageSize && (
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <span className="text-caption text-muted-foreground">
+                  Showing {batches.length} of {batchTotal}
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={batchPageNo <= 1 || isFetching}
+                    onClick={() => batchTable.setPage(batchPageNo - 1)}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={batchPageNo * batchTable.pageSize >= batchTotal || isFetching}
+                    onClick={() => batchTable.setPage(batchPageNo + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/*
              * Downloading stamps the batch as sent and it can no longer be rebuilt — once the file

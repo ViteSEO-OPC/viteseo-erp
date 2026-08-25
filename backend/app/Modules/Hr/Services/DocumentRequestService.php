@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Modules\Hr\Models\DocumentRequest;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeDocument;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -13,20 +15,33 @@ use Illuminate\Validation\ValidationException;
 
 class DocumentRequestService
 {
+    use PagesQueues;
+
     public const TYPES = ['payroll', 'leave', 'attendance', 'coe', 'other'];
 
     public function __construct(private readonly AuditService $audit) {}
 
     /** HR sees all; an employee sees only their own. */
-    public function list(User $user): Collection
+    /**
+     * One page of the document-request queue. HR sees everyone's; anybody else sees only their
+     * own, and that scope is applied BEFORE the filters so no search can widen it.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function list(User $user, array $filters = []): LengthAwarePaginator
     {
-        $query = DocumentRequest::with(['employee.user', 'reviewer'])->latest();
+        $query = DocumentRequest::with(['employee.user', 'reviewer']);
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $query->where('employee_id', $user->employee?->id);
         }
 
-        return $query->get();
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            ['type', 'other_detail', 'reason'],
+            priorityStatuses: ['pending'],
+        );
     }
 
     /** @param array<string, mixed> $data */

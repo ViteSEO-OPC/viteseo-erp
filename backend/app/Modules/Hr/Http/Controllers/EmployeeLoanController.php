@@ -33,7 +33,12 @@ class EmployeeLoanController extends Controller
         $status = $request->query('status');
 
         return EmployeeLoanResource::collection(
-            $this->service->all(is_string($status) && $status !== '' ? $status : null),
+            // Applied by the DATABASE. `status` is a positional argument here rather than a
+            // filter key, because this endpoint has always taken it that way.
+            $this->service->all(
+                is_string($status) && $status !== '' ? $status : null,
+                $request->only(['search', 'per_page']),
+            ),
         )->response();
     }
 

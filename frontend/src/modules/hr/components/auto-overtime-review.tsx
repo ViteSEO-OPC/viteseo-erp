@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import {useState} from "react";
 import { AlertTriangle, Eye } from "lucide-react";
 
-import { useAutoOvertimeReview } from "@/modules/hr/hooks/use-overtime";
+import { useAutoOvertimeReview, useAutoOvertimeTotals } from "@/modules/hr/hooks/use-overtime";
 import { useAttendancePolicy } from "@/modules/hr/hooks/use-rules";
 import { Label } from "@/components/ui/label";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatDate } from "@/core/lib/format";
 import { DatePicker } from "@/modules/hr/ui/date-picker";
@@ -70,13 +71,31 @@ export function AutoOvertimeReview() {
 
   const auto = policy?.overtime_mode === "auto_after_threshold";
 
-  const { data: rows, isLoading } = useAutoOvertimeReview(
-    auto ? period.start : "",
-    auto ? period.end : "",
-  );
+  // Two server-paged tables rather than one fetch split in the browser: each asks the query for
+  // its own kind, so "held" means every held day in the range and not the held ones that happened
+  // to land on a shared page.
+  const heldTable = useServerTable();
+  const flaggedTable = useServerTable();
+  const start = auto ? period.start : "";
+  const end = auto ? period.end : "";
 
-  const held = useMemo(() => (rows ?? []).filter((r) => r.kind === "held"), [rows]);
-  const flagged = useMemo(() => (rows ?? []).filter((r) => r.kind === "flagged"), [rows]);
+  const { data: heldPage, isLoading, isFetching: heldFetching } = useAutoOvertimeReview(start, end, {
+    ...heldTable.params,
+    status: "held",
+  });
+  const { data: flaggedPage, isFetching: flaggedFetching } = useAutoOvertimeReview(start, end, {
+    ...flaggedTable.params,
+    status: "flagged",
+  });
+
+  // Counted by the SERVER across the whole range. Both are minutes of pay, and both used to be
+  // reduced from the rows in hand.
+  const { data: totals } = useAutoOvertimeTotals(start, end);
+
+  const held = heldPage?.items ?? [];
+  const flagged = flaggedPage?.items ?? [];
+  const heldCount = totals?.held.count ?? 0;
+  const flaggedCount = totals?.flagged.count ?? 0;
 
   // Nothing is paid from the clock alone in the other modes, so every overtime minute was already
   // authorised by a person and this panel would only be noise.
@@ -142,14 +161,9 @@ export function AutoOvertimeReview() {
     why,
   ];
 
-  const search = {
-    getSearchText: (r: AutoOvertimeReviewItem) =>
-      `${r.name ?? ""} ${r.employee_no ?? ""} ${r.work_date}`,
-    searchPlaceholder: "Search employee, date…",
-  };
 
-  const totalHeld = held.reduce((sum, r) => sum + r.excess_minutes, 0);
-  const totalFlagged = flagged.reduce((sum, r) => sum + r.paid_minutes, 0);
+  const totalHeld = totals?.held.minutes ?? 0;
+  const totalFlagged = totals?.flagged.minutes ?? 0;
 
   return (
     <div className="mt-10">
@@ -193,7 +207,7 @@ export function AutoOvertimeReview() {
       ) : (
         <>
           {/* Held — inaction costs someone their wages, so it leads and it is a warning. */}
-          {held.length > 0 && (
+          {heldCount > 0 && (
             <div className="mt-6">
               <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
                 <AlertTriangle className="size-5 text-warning" aria-hidden />
@@ -210,19 +224,22 @@ export function AutoOvertimeReview() {
                   columns={heldColumns}
                   rows={held}
                   rowKey={(r) => `${r.employee_id}-${r.work_date}`}
-                  {...search}
+                  pageSize={heldTable.pageSize}
+                  searchPlaceholder="Search employee, department…"
+                  filterable={false}
                   empty="Nothing held back in this period."
+                  server={heldTable.serverProps(heldPage?.total ?? 0, heldFetching)}
                 />
                 <p className="mt-2 text-caption text-muted-foreground">
                   <strong>{hm(totalHeld)}</strong> of overtime is currently unpaid across{" "}
-                  {held.length} {held.length === 1 ? "day" : "days"}.
+                  {heldCount} {heldCount === 1 ? "day" : "days"}.
                 </p>
               </div>
             </div>
           )}
 
           {/* Flagged — already paid. Neutral on purpose: reading it and moving on is a valid outcome. */}
-          {flagged.length > 0 && (
+          {flaggedCount > 0 && (
             <div className="mt-8">
               <h3 className="flex items-center gap-2 text-base font-bold text-foreground">
                 <Eye className="size-5 text-muted-foreground" aria-hidden />
@@ -239,18 +256,21 @@ export function AutoOvertimeReview() {
                   columns={flaggedColumns}
                   rows={flagged}
                   rowKey={(r) => `${r.employee_id}-${r.work_date}`}
-                  {...search}
+                  pageSize={flaggedTable.pageSize}
+                  searchPlaceholder="Search employee, department…"
+                  filterable={false}
                   empty="Nothing flagged in this period."
+                  server={flaggedTable.serverProps(flaggedPage?.total ?? 0, flaggedFetching)}
                 />
                 <p className="mt-2 text-caption text-muted-foreground">
-                  <strong>{hm(totalFlagged)}</strong> of overtime is paying across {flagged.length}{" "}
-                  flagged {flagged.length === 1 ? "day" : "days"}.
+                  <strong>{hm(totalFlagged)}</strong> of overtime is paying across {flaggedCount}{" "}
+                  flagged {flaggedCount === 1 ? "day" : "days"}.
                 </p>
               </div>
             </div>
           )}
 
-          {held.length === 0 && flagged.length === 0 && (
+          {heldCount === 0 && flaggedCount === 0 && (
             <p className="mt-4 text-sm text-muted-foreground">
               No automatic overtime needs reviewing in this period.
             </p>

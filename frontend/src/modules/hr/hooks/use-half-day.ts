@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getHalfDayRequests,
@@ -13,8 +14,14 @@ import {
 
 const KEY = ["hr", "half-day-requests"] as const;
 
-export function useHalfDayRequests() {
-  return useQuery({ queryKey: KEY, queryFn: getHalfDayRequests });
+/** One page of the half-day queue, with the total. Filtered and ordered by the database. */
+export function useHalfDayRequests(params: QueueParams) {
+  return useQuery({
+    queryKey: [...KEY, params] as const,
+    queryFn: () => getHalfDayRequests(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useCreateHalfDayRequest() {

@@ -2,9 +2,11 @@ import Link from "next/link";
 
 import { StatusBadge } from "@/core/components/status-badge";
 import { EmployeeAvatar } from "@/modules/hr/ui/employee-avatar";
-import type { Employee } from "@/modules/hr/types/employee";
+import type { EmployeeListItem } from "@/modules/hr/types/employee";
 
-export function EmployeeCard({ employee }: { employee: Employee }) {
+// Takes the directory projection, not the full record — a full `Employee` still
+// satisfies it, so the single-employee screens can pass theirs unchanged.
+export function EmployeeCard({ employee }: { employee: EmployeeListItem }) {
   return (
     <Link
       href={`/teamora/people/employees/${employee.id}`}

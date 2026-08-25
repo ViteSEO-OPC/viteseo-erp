@@ -19,7 +19,10 @@ class ChangeRequestController extends Controller
     // GET /hr/change-requests — HR queue. GET /hr/me/change-requests — own.
     public function index(Request $request): JsonResponse
     {
-        return ChangeRequestResource::collection($this->service->list($request->user()))->response();
+        // Applied by the DATABASE. In the browser they would only narrow the page on screen.
+        return ChangeRequestResource::collection(
+            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // POST /hr/me/change-requests — the caller proposes a profile change.

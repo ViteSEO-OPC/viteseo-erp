@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Search } from "lucide-react";
 
 import { EmployeeCell } from "@/modules/hr/components/employee-cell";
+import type { StatusFilterOption } from "@/core/components/status-filter";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatTimeManila } from "@/core/lib/format";
 import { useAttendanceSummary, useHrAttendance } from "@/modules/hr/hooks/use-attendance";
@@ -47,43 +47,39 @@ const columns: Column<HrAttendanceRow>[] = [
   },
 ];
 
+/** Curated: server mode cannot read the vocabulary off one page of rows. */
+const ATTENDANCE_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "present", label: "Present" },
+  { value: "late", label: "Late" },
+  { value: "absent", label: "Absent" },
+  { value: "on_leave", label: "On leave" },
+  { value: "not_checked_in", label: "Not checked in" },
+];
+
 export function CheckinBoard() {
   const { data: summary } = useAttendanceSummary();
-  const { data: roster, isLoading: rosterLoading } = useHrAttendance();
+  // Server-paged and server-filtered, like the attendance board it mirrors.
+  //
+  // Its three filter states below were declared, fed into a client-side filter, and never
+  // rendered — no control existed for any of them, so all three sat at their defaults and the
+  // filter was a no-op. The table supplies a real search box and status pills now, and both
+  // reach the query.
+  const table = useServerTable(25);
+  const { data: rosterPage, isLoading: rosterLoading, isFetching } = useHrAttendance(
+    undefined,
+    table.params,
+  );
+  const roster = rosterPage?.items;
   const { data: leaveTypes } = useLeaveTypes();
 
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [timingFilter, setTimingFilter] = useState("all");
 
-  const filteredRoster = useMemo(() => {
-    if (!roster) return [];
-    return roster.filter((r) => {
-      // Either form matches: the board shows "Dela Cruz, Juan", but "juan dela" is how most
-      // people look someone up.
-      const q = query.trim().toLowerCase();
-      const matches = (value: string | null) => (value ?? "").toLowerCase().includes(q);
-      if (q && !matches(r.name) && !matches(r.list_name)) return false;
-      if (statusFilter !== "all") {
-        if (statusFilter === "checked_in" && !r.time_in) return false;
-        if (statusFilter === "on_leave" && !r.leave_type) return false;
-        if (statusFilter === "absent" && r.status !== "absent") return false;
-      }
-      if (timingFilter !== "all") {
-        const tm = deriveAttendanceTiming(r);
-        const cat = tm?.label.toLowerCase() ?? "";
-        if (timingFilter === "on_time" && !cat.includes("on time") && !cat.includes("early")) return false;
-        if (timingFilter === "late" && !cat.includes("late")) return false;
-      }
-      return true;
-    });
-  }, [roster, query, statusFilter, timingFilter]);
+  const filteredRoster = roster ?? [];
+
 
   const emptyMessage = rosterLoading
     ? "Loading…"
-    : roster && roster.length === 0
-      ? "No attendance records for today."
-      : `No employees match "${query}".`;
+    : "No attendance records for today.";
 
   return (
     <section>
@@ -110,7 +106,9 @@ export function CheckinBoard() {
           rows={filteredRoster}
           rowKey={(r) => r.employee_id}
           empty={emptyMessage}
-          pageSize={10}
+          pageSize={table.pageSize}
+          searchPlaceholder="Search employee…"
+          server={table.serverProps(rosterPage?.total ?? 0, isFetching, ATTENDANCE_STATUS_OPTIONS)}
         />
       </div>
     </section>

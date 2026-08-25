@@ -39,6 +39,8 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
+import type { StatusFilterOption } from "@/core/components/status-filter";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
@@ -63,12 +65,25 @@ import {
 import {
   pipelineLabel,
   REJECTION_REASONS,
+  REQ_STAGES,
   type Candidate,
   type Requisition,
 } from "@/modules/hr/types/recruitment";
 
+/**
+ * The requisition stages, curated. Server mode cannot read them off the rows — those are one
+ * page, so a stage absent from it would have no pill at all.
+ */
+const REQUISITION_STAGE_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  ...REQ_STAGES.map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })),
+];
+
 export default function RecruitmentPage() {
-  const { data: requisitions } = useRequisitions();
+  // Server-paged: requisitions accumulate for as long as the company hires.
+  const table = useServerTable();
+  const { data: reqPage, isFetching: reqFetching } = useRequisitions(table.params);
+  const requisitions = reqPage?.items;
   // undefined = initial (fall back to the busiest req) · null = explicitly
   // deselected (show ALL candidates) · number = a chosen requisition.
   const [selectedId, setSelectedId] = useState<number | null | undefined>();
@@ -98,6 +113,8 @@ export default function RecruitmentPage() {
 
   // Default to the requisition with the most candidates until the user picks one
   // (derived, not an effect — avoids a setState-on-render cascade).
+  // Picked from the page on screen rather than the whole board — this is a first-glance
+  // default, not an answer, and the reader overrides it by clicking a row.
   const defaultReqId = useMemo(() => {
     if (!requisitions || requisitions.length === 0) return undefined;
     return [...requisitions].sort((a, b) => b.candidates_count - a.candidates_count)[0].id;
@@ -242,7 +259,11 @@ export default function RecruitmentPage() {
           rowKey={(r) => r.id}
           onRowClick={(r) => setSelectedId(r.id === activeReqId ? null : r.id)}
           rowClassName={(r) => r.id === activeReqId ? "bg-brand-subtle" : undefined}
-          pageSize={10}
+          pageSize={table.pageSize}
+          searchPlaceholder="Search title, location…"
+          // A requisition tracks progress in `stage`, so the pills filter that column rather
+          // than a `status` it does not have.
+          server={table.serverProps(reqPage?.total ?? 0, reqFetching, REQUISITION_STAGE_OPTIONS)}
         />
       </div>
 

@@ -258,10 +258,10 @@ class PayrollReportingTest extends HrTestCase
     {
         $this->workedEveryDay();
         $run = $this->runPayroll();
-        $this->assertNotEmpty(app(PayrollService::class)->thirteenthMonth(2026));
+        $this->assertNotEmpty(app(PayrollService::class)->thirteenthMonth(2026)['rows']);
 
         $run->update(['status' => 'processing']);
 
-        $this->assertSame([], app(PayrollService::class)->thirteenthMonth(2026));
+        $this->assertSame([], app(PayrollService::class)->thirteenthMonth(2026)['rows']);
     }
 }

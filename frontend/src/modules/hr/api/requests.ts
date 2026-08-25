@@ -1,4 +1,5 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type {
   DocumentRequest,
   ChangeRequest,
@@ -8,9 +9,9 @@ import type {
 
 // --- Document requests ---
 
-export async function getDocumentRequests(): Promise<DocumentRequest[]> {
-  const res = await apiClient.get("/hr/document-requests");
-  return res.data.data;
+export async function getDocumentRequests(params: QueueParams): Promise<QueuePage<DocumentRequest>> {
+  const res = await apiClient.get("/hr/document-requests", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function getMyDocumentRequests(): Promise<DocumentRequest[]> {
@@ -55,9 +56,9 @@ export async function reopenDocumentRequest(
 
 // --- Change requests ---
 
-export async function getChangeRequests(): Promise<ChangeRequest[]> {
-  const res = await apiClient.get("/hr/change-requests");
-  return res.data.data;
+export async function getChangeRequests(params: QueueParams): Promise<QueuePage<ChangeRequest>> {
+  const res = await apiClient.get("/hr/change-requests", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function getMyChangeRequests(): Promise<ChangeRequest[]> {
@@ -101,9 +102,9 @@ export async function reopenChangeRequest(
 
 // --- Payslip requests ---
 
-export async function getPayslipRequests(): Promise<PayslipRequest[]> {
-  const res = await apiClient.get("/hr/payslip-requests");
-  return res.data.data;
+export async function getPayslipRequests(params: QueueParams): Promise<QueuePage<PayslipRequest>> {
+  const res = await apiClient.get("/hr/payslip-requests", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function getMyPayslipRequests(): Promise<PayslipRequest[]> {
@@ -136,9 +137,9 @@ export async function reopenPayslipRequest(id: number, reason?: string): Promise
 
 // --- Payroll inquiries ---
 
-export async function getPayrollInquiries(): Promise<PayrollInquiry[]> {
-  const res = await apiClient.get("/hr/payroll-inquiries");
-  return res.data.data;
+export async function getPayrollInquiries(params: QueueParams): Promise<QueuePage<PayrollInquiry>> {
+  const res = await apiClient.get("/hr/payroll-inquiries", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function getMyPayrollInquiries(): Promise<PayrollInquiry[]> {

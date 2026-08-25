@@ -1,4 +1,5 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type {
   Requisition,
   Candidate,
@@ -6,9 +7,9 @@ import type {
   CandidateEmailDraft,
 } from "@/modules/hr/types/recruitment";
 
-export async function getRequisitions(): Promise<Requisition[]> {
-  const res = await apiClient.get("/hr/requisitions");
-  return res.data.data;
+export async function getRequisitions(params: QueueParams): Promise<QueuePage<Requisition>> {
+  const res = await apiClient.get("/hr/requisitions", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export interface RequisitionInput {

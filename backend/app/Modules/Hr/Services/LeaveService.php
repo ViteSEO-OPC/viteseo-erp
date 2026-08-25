@@ -10,7 +10,9 @@ use App\Modules\Hr\Models\LeaveSetting;
 use App\Modules\Hr\Models\LeaveType;
 use App\Modules\Hr\Models\LeaveTypeAllotment;
 use App\Modules\Hr\Models\SharedLeaveBalance;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +20,8 @@ use Illuminate\Validation\ValidationException;
 
 class LeaveService
 {
+    use PagesQueues;
+
     public function __construct(
         private readonly HolidayService $holidays,
         private readonly AuditService $audit,
@@ -204,18 +208,31 @@ class LeaveService
      * Requests visible to this user: HR officers see all; everyone else sees
      * only their own. (The frontend never sends an employee id.)
      */
-    public function listRequests(User $user): Collection
+    /**
+     * One page of the leave queue. HR sees everyone's; anybody else sees only their own, and
+     * that scope is applied BEFORE the filters so no search can widen it.
+     *
+     * Ordered by when it was FILED, not by a work date — a leave request covers a range, so
+     * there is no single day for it to be about. Pending rows lead it either way.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function listRequests(User $user, array $filters = []): LengthAwarePaginator
     {
         $query = LeaveRequest::query()
-            ->with(['employee.user', 'leaveType', 'reviewer', 'canceller'])
-            ->latest();
+            ->with(['employee.user', 'leaveType', 'reviewer', 'canceller']);
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $employeeId = $user->employee?->id;
             $query->where('employee_id', $employeeId);
         }
 
-        return $query->get();
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            ['reason'],
+            priorityStatuses: ['pending'],
+        );
     }
 
     /**
@@ -394,7 +411,15 @@ class LeaveService
                 'Leave approved after the period was paid',
             );
 
-            $this->violations->recompute();
+            // Item 11 — the months the LEAVE covers, not "this month". Approving last week's
+            // leave after the month turned has to move last month's flags, and the read path
+            // that used to rebuild every month on the way out is gone. Scoped to the one
+            // employee whose excused days changed.
+            $this->violations->recomputeRange(
+                $request->start_date->toDateString(),
+                $request->end_date->toDateString(),
+                $request->employee_id,
+            );
         }
 
         return $result;
@@ -469,7 +494,12 @@ class LeaveService
 
         // Removing an approved leave can re-open an absence/AWOL flag on its days.
         if ($wasApproved) {
-            $this->violations->recompute();
+            // The months the leave covers, scoped to its employee — see approve().
+            $this->violations->recomputeRange(
+                $request->start_date->toDateString(),
+                $request->end_date->toDateString(),
+                $request->employee_id,
+            );
         }
 
         return $request->load(['employee.user', 'leaveType', 'reviewer', 'canceller']);
@@ -569,7 +599,12 @@ class LeaveService
 
         // The days stop being excused leave, so an absence/AWOL flag may come back.
         if ($wasApproved) {
-            $this->violations->recompute();
+            // The months the leave covers, scoped to its employee — see approve().
+            $this->violations->recomputeRange(
+                $request->start_date->toDateString(),
+                $request->end_date->toDateString(),
+                $request->employee_id,
+            );
         }
 
         return $request->load(['employee.user', 'leaveType', 'reviewer']);

@@ -14,6 +14,8 @@ import { ReviewDialog } from "@/core/components/review-dialog";
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
 import { DataTable, type Column } from "@/core/components/data-table";
+import type { StatusFilterOption } from "@/core/components/status-filter";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import {
   useReimbursements,
@@ -21,32 +23,53 @@ import {
   useRejectReimbursement,
   useMarkReimbursementPaid,
   useReopenReimbursement,
+  useReimbursementSummary,
 } from "@/modules/hr/hooks/use-reimbursements";
 import {
   categoryLabel,
   type Reimbursement,
 } from "@/modules/hr/types/reimbursement";
 
+/** Curated: server mode cannot read the vocabulary off one page of rows. */
+const CLAIM_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "scheduled", label: "Scheduled" },
+  { value: "paid", label: "Paid" },
+  { value: "rejected", label: "Rejected" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
 export default function ReimbursementPage() {
-  const { data: claims, isLoading, isError } = useReimbursements();
+  // Server-paged. This is the whole company's claims queue — every claim anyone has ever filed
+  // used to arrive here so the browser could show ten of them and add up the cards.
+  const table = useServerTable(10);
+  const { data, isLoading, isError, isFetching } = useReimbursements(table.params);
+  const { data: summary } = useReimbursementSummary();
   const approveMut = useApproveReimbursement();
   const rejectMut = useRejectReimbursement();
   const paidMut = useMarkReimbursementPaid();
   const reopenMut = useReopenReimbursement();
 
+  // Item 5 — counted by the DATABASE, over every claim, not by filtering the rows on screen.
+  // The old version added up whatever had been downloaded; once the queue serves one page that
+  // is ten rows, and "₱12,400 pending" would have meant "pending among these ten" while looking
+  // exactly as authoritative. A status nobody has filed is absent from the payload, so each
+  // read supplies its own zero.
   const stats = useMemo(() => {
-    const list = claims ?? [];
-    const sum = (s: string) =>
-      list.filter((c) => c.status === s).reduce((a, c) => a + parseFloat(c.amount), 0);
+    const count = (s: string) => summary?.[s]?.count ?? 0;
+    const amount = (s: string) => summary?.[s]?.amount ?? 0;
+
     return {
-      pending: list.filter((c) => c.status === "pending").length,
-      pendingSum: sum("pending"),
-      approved: list.filter((c) => c.status === "approved").length,
-      scheduled: list.filter((c) => c.status === "scheduled").length,
-      paidSum: sum("paid"),
-      paidCount: list.filter((c) => c.status === "paid").length,
+      pending: count("pending"),
+      pendingSum: amount("pending"),
+      approved: count("approved"),
+      scheduled: count("scheduled"),
+      paidSum: amount("paid"),
+      paidCount: count("paid"),
     };
-  }, [claims]);
+  }, [summary]);
 
   // Which summary-card amounts are masked (privacy show/hide toggle).
   const [hiddenAmounts, setHiddenAmounts] = useState<Record<string, boolean>>({});
@@ -57,7 +80,8 @@ export default function ReimbursementPage() {
   // Kept as an id and read back from the live list so deciding inside the modal
   // moves the status shown there too.
   const [detailId, setDetailId] = useState<number | null>(null);
-  const detail = (claims ?? []).find((c) => c.id === detailId) ?? null;
+  const rows = data?.items ?? [];
+  const detail = rows.find((c) => c.id === detailId) ?? null;
 
   const busyId =
     (approveMut.isPending && approveMut.variables) ||
@@ -233,10 +257,19 @@ export default function ReimbursementPage() {
         ) : isError ? (
           <p className="text-sm text-destructive">Could not load claims.</p>
         ) : (
-          <DataTable columns={columns} rows={claims ?? []} rowKey={(c) => c.id}
+          // `needsAction` is gone deliberately: it floated undecided claims to the top of the
+          // ROWS IN HAND, which once that is one page would only reorder those ten. The query
+          // sorts pending first across the whole queue instead, so they are on page 1.
+          <DataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(c) => c.id}
+            pageSize={table.pageSize}
             onRowClick={(c) => setDetailId(c.id)}
-            needsAction={(c) => c.status === "pending" || c.status === "approved"}
-            empty="No claims filed yet." />
+            empty="No claims filed yet."
+            searchPlaceholder="Search employee, category…"
+            server={table.serverProps(data?.total ?? 0, isFetching, CLAIM_STATUS_OPTIONS)}
+          />
         )}
       </div>
 

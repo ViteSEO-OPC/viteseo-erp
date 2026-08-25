@@ -125,7 +125,7 @@ class ManagementCompanyRulesTest extends HrTestCase
     {
         $this->setRule('management_auto_attendance', false);
 
-        $roster = collect(app(AttendanceService::class)->allForDate('2026-03-11'))
+        $roster = collect(app(AttendanceService::class)->allForDate('2026-03-11')->items())
             ->firstWhere('employee_id', $this->manager->id);
 
         $this->assertSame('absent', $roster['status']);

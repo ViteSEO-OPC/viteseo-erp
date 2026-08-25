@@ -1,9 +1,10 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type { HalfDayRequest } from "@/modules/hr/types/leave";
 
-export async function getHalfDayRequests(): Promise<HalfDayRequest[]> {
-  const res = await apiClient.get("/hr/half-day-requests");
-  return res.data.data;
+export async function getHalfDayRequests(params: QueueParams): Promise<QueuePage<HalfDayRequest>> {
+  const res = await apiClient.get("/hr/half-day-requests", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function createHalfDayRequest(input: {

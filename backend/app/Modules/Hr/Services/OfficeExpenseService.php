@@ -4,6 +4,9 @@ namespace App\Modules\Hr\Services;
 
 use App\Models\User;
 use App\Modules\Hr\Models\OfficeExpense;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
@@ -11,16 +14,94 @@ use Illuminate\Validation\ValidationException;
 
 class OfficeExpenseService
 {
+    use PagesQueues;
+
     public const CATEGORIES = ['utilities', 'supplies', 'equipment', 'maintenance', 'events', 'rent', 'other'];
 
     /** The review states an expense can be in. `recorded` is where every expense starts. */
     public const STATUSES = ['recorded', 'approved', 'rejected'];
 
+    /**
+     * The orderings the ledger's sort control offers, as a closed list.
+     *
+     * A closed list rather than a column name off the query string: `?sort=` reaching orderBy()
+     * unchecked is how a filter control becomes a way to probe columns the screen never shows.
+     * Anything unrecognised falls through to the default ordering.
+     */
+    private const SORTS = [
+        'amount_desc' => [['amount', 'desc']],
+        'amount_asc' => [['amount', 'asc']],
+        'date_desc' => [['expense_date', 'desc']],
+    ];
+
     public function __construct(private readonly AuditService $audit) {}
 
-    public function list(): Collection
+    /**
+     * One page of the office-expense ledger, newest spend first with anything still awaiting a
+     * decision on top. Searchable by what was bought and who from — there is no employee on an
+     * expense, only the person who recorded it, so the filer branch is off.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function list(array $filters = []): LengthAwarePaginator
     {
-        return OfficeExpense::with(['recorder', 'reviewer'])->latest('expense_date')->get();
+        return $this->paginateQueue(
+            $this->window(OfficeExpense::with(['recorder', 'reviewer']), $filters),
+            $filters,
+            ['category', 'description', 'vendor'],
+            searchEmployee: false,
+            priorityStatuses: ['recorded'],
+            recencyColumn: 'expense_date',
+            sort: self::SORTS[$filters['sort'] ?? ''] ?? null,
+        );
+    }
+
+    /**
+     * The spend totals above the ledger: the whole window, and the two categories it went to
+     * most. Counted by the DATABASE over every matching row.
+     *
+     * Item 5. These were added up in the browser from whatever had been downloaded — which,
+     * once the ledger serves one page, is ten rows. "Total spend ₱4,300" meaning "across these
+     * ten" is a wrong number that looks exactly like a right one.
+     *
+     * Takes the same $filters as list() so the cards describe the ledger BELOW them. A summary
+     * that ignored the period picker would contradict the table on the same screen.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{total: float, by_category: array<string, float>}
+     */
+    public function summary(array $filters = []): array
+    {
+        $rows = $this->window(OfficeExpense::query(), $filters)
+            ->selectRaw('category, coalesce(sum(amount), 0) as spend')
+            ->groupBy('category')
+            ->toBase()
+            ->get();
+
+        $byCategory = [];
+        $total = 0.0;
+        foreach ($rows as $row) {
+            $spend = (float) $row->spend;
+            $byCategory[(string) $row->category] = $spend;
+            $total += $spend;
+        }
+
+        arsort($byCategory);
+
+        return ['total' => $total, 'by_category' => $byCategory];
+    }
+
+    /**
+     * The date window the period picker sets, applied to the QUERY. Filtering by date in the
+     * browser could only ever narrow the page it was handed.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function window(Builder $query, array $filters): Builder
+    {
+        return $query
+            ->when($filters['from'] ?? null, fn (Builder $q, $from) => $q->whereDate('expense_date', '>=', $from))
+            ->when($filters['to'] ?? null, fn (Builder $q, $to) => $q->whereDate('expense_date', '<=', $to));
     }
 
     /** @param array<string, mixed> $data */

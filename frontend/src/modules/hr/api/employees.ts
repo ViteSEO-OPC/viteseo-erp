@@ -1,6 +1,9 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type {
   Employee,
+  EmployeeListItem,
+  EmployeeOption,
   EmployeeInput,
   EmployeeUpdateInput,
   EmployeeDocument,
@@ -9,22 +12,57 @@ import type {
   SalaryHistoryEntry,
 } from "@/modules/hr/types/employee";
 
+/** What the directory asks for. Everything here is applied by the database, not the browser. */
+export interface EmployeeDirectoryParams {
+  search?: string;
+  /** Which roster. "former" is what makes a rehire reachable — see below. */
+  status?: "active" | "former" | "all";
+  /** Department id, as a string from the select. */
+  department?: string;
+  employment_status?: string;
+  page?: number;
+  per_page?: number;
+}
+
+/** One page of the directory, plus how many people match across every page. */
+export interface EmployeeDirectoryPage {
+  items: EmployeeListItem[];
+  total: number;
+}
+
 /**
- * The employee directory. `status` defaults to "active" server-side.
+ * One page of the employee directory. `status` defaults to "active" server-side.
  *
  * "former" is what makes a rehire reachable: a separated employee is soft-deleted, so the
  * default directory cannot show them and there was no way to find someone to take back.
+ *
+ * Returns the TOTAL alongside the rows because the screen cannot work it out: it holds twelve
+ * cards and needs to say how many people matched.
  */
 export async function getEmployees(
-  search?: string,
-  status?: "active" | "former" | "all",
-): Promise<Employee[]> {
+  params: EmployeeDirectoryParams = {},
+): Promise<EmployeeDirectoryPage> {
+  const { search, status, department, employment_status, page, per_page } = params;
   const res = await apiClient.get("/hr/employees", {
     params: {
       ...(search ? { search } : {}),
       ...(status && status !== "active" ? { status } : {}),
+      ...(department && department !== "all" ? { department } : {}),
+      ...(employment_status && employment_status !== "all" ? { employment_status } : {}),
+      ...(page && page > 1 ? { page } : {}),
+      ...(per_page ? { per_page } : {}),
     },
   });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
+}
+
+/**
+ * Every employee, as picker options. Its own endpoint because a dropdown cannot page — reading
+ * the directory gave the selects its first hundred people, so employee 101 could not be chosen
+ * as anyone's manager. Four fields per row instead of thirteen.
+ */
+export async function getEmployeeOptions(): Promise<EmployeeOption[]> {
+  const res = await apiClient.get("/hr/employees/options");
   return res.data.data;
 }
 
@@ -308,11 +346,14 @@ export async function getEmployeeLoans(id: number): Promise<EmployeeLoan[]> {
  * Without this a loan sitting at `requested` was reachable only from the record it belongs to,
  * so no dashboard or queue could show that it was waiting on HR.
  */
-export async function getAllLoans(status?: string): Promise<EmployeeLoan[]> {
+export async function getAllLoans(
+  status: string | undefined,
+  params: QueueParams,
+): Promise<QueuePage<EmployeeLoan>> {
   const res = await apiClient.get("/hr/loans", {
-    params: status ? { status } : undefined,
+    params: { ...queueQuery(params), ...(status ? { status } : {}) },
   });
-  return res.data.data;
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function createEmployeeLoan(

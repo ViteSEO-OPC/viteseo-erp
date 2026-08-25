@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { Clock, CalendarPlus, RotateCcw } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
@@ -219,13 +220,22 @@ function Details({
       : Math.max(0, minutesOf(timeOut) - minutesOf(timeIn) - row.lunch_minutes) / 60;
 
   // Violation history: fetch ALL months, filter client-side by an optional period.
-  const { data: violations } = useViolations(row.employee_id);
+  const violationTable = useServerTable();
   const { data: policy } = useAttendancePolicy();
-  const allViolations = useMemo(() => violations ?? [], [violations]);
 
   const currentYear = manilaYear();
   const [periodMonth, setPeriodMonth] = useState("all"); // "all" | "01".."12"
   const [periodYear, setPeriodYear] = useState(currentYear);
+
+  // The month picker reaches the QUERY. Filtering the rows in hand would have searched whichever
+  // page the reader happened to be on and reported "no violations for the selected period" for a
+  // month sitting two pages down.
+  const { data: violations, isFetching: violationsFetching } = useViolations(
+    row.employee_id,
+    periodMonth === "all" ? undefined : `${periodYear}-${periodMonth}`,
+    violationTable.params,
+  );
+  const filteredViolations = violations?.items ?? [];
 
   // Year options: the employee's hire year → this year (newest first).
   const years = useMemo(() => {
@@ -234,11 +244,6 @@ function Details({
     return Array.from({ length: currentYear - start + 1 }, (_, i) => currentYear - i);
   }, [row.hire_date, currentYear]);
 
-  const filteredViolations = useMemo(() => {
-    if (periodMonth === "all") return allViolations;
-    const prefix = `${periodYear}-${periodMonth}`; // 'YYYY-MM'
-    return allViolations.filter((v) => v.work_date.startsWith(prefix));
-  }, [allViolations, periodMonth, periodYear]);
 
   async function onSave() {
     try {
@@ -486,10 +491,14 @@ function Details({
             columns={violationColumns}
             rows={filteredViolations}
             rowKey={(v) => v.id}
-            needsAction={(v) => !v.resolved}
-            pageSize={10}
-            searchPlaceholder="Search violations…"
+            pageSize={violationTable.pageSize}
             toolbar={periodToolbar}
+            // `needsAction` is gone deliberately: unresolved flags lead the QUERY now, so they
+            // are on page 1 across the whole history rather than floated within ten rows. Search
+            // is off — a box over one page would answer for the page; the month picker above is
+            // the filter that reaches the database.
+            searchable={false}
+            server={violationTable.serverProps(violations?.total ?? 0, violationsFetching)}
             empty={
               periodMonth === "all"
                 ? "No violations on record."

@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import {useState} from "react";
 
 import { PageHeader } from "@/modules/hr/components/page-header";
+import type { StatusFilterOption } from "@/core/components/status-filter";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { cn } from "@/lib/utils";
 import { formatTimeManila, formatDate } from "@/core/lib/format";
@@ -51,10 +52,36 @@ function AlertDot({ row }: { row: HrAttendanceRow }) {
   );
 }
 
+/**
+ * The roster statuses, curated. Server mode cannot read them off the rows — those are one page.
+ *
+ * The API also accepts a `timing` filter (early / on_time / late), derived the same way, which
+ * no control on this screen offers yet.
+ */
+const ATTENDANCE_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "present", label: "Present" },
+  { value: "late", label: "Late" },
+  { value: "absent", label: "Absent" },
+  { value: "on_leave", label: "On leave" },
+  { value: "not_checked_in", label: "Not checked in" },
+];
+
 export default function AttendancePage() {
   const [date, setDate] = useState(manilaToday());
   const { data: summary } = useAttendanceSummary(date);
-  const { data: rows, isLoading, isError } = useHrAttendance(date);
+  // Server-paged, and server-FILTERED. The status and timing controls below are not columns —
+  // each row's status is derived from the employee's schedule and the day — so the server
+  // filters after deriving and before cutting the page. Applying either here would have narrowed
+  // the twenty-five rows on screen and called it the roster.
+  //
+  // The board also GAINS filtering it never had: the previous version declared search, status
+  // and timing state, fed them into a client-side filter, and rendered no control for any of
+  // them — so all three sat at their defaults and the filter was a no-op. The table supplies a
+  // real search box and status pills now, and both reach the query.
+  const table = useServerTable(25);
+  const { data, isLoading, isError, isFetching } = useHrAttendance(date, table.params);
+  const filtered = data?.items ?? [];
 
   const [editing, setEditing] = useState<HrAttendanceRow | null>(null);
   const [scheduling, setScheduling] = useState<HrAttendanceRow | null>(null);
@@ -66,9 +93,6 @@ export default function AttendancePage() {
    */
   const [pendingFix, setPendingFix] = useState<OpenShiftRow | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [timingFilter, setTimingFilter] = useState("all");
 
   /**
    * The row the correction dialog is on. DERIVED rather than stashed by an effect: the queue's
@@ -78,7 +102,7 @@ export default function AttendancePage() {
   const editingRow =
     editing ??
     (pendingFix && pendingFix.work_date === date
-      ? ((rows ?? []).find((r) => r.employee_id === pendingFix.employee_id) ?? null)
+      ? (filtered.find((r) => r.employee_id === pendingFix.employee_id) ?? null)
       : null);
 
   const closeEditor = () => {
@@ -86,16 +110,6 @@ export default function AttendancePage() {
     setPendingFix(null);
   };
 
-  const filtered = useMemo(() => {
-    return (rows ?? []).filter((r) => {
-      const q = search.trim().toLowerCase();
-      const matches = (value: string | null) => (value ?? "").toLowerCase().includes(q);
-      if (q && !matches(r.name) && !matches(r.list_name)) return false;
-      if (statusFilter !== "all" && r.status !== statusFilter) return false;
-      if (timingFilter !== "all" && r.timing?.category !== timingFilter) return false;
-      return true;
-    });
-  }, [rows, search, statusFilter, timingFilter]);
 
   const columns: Column<HrAttendanceRow>[] = [
     {
@@ -194,7 +208,10 @@ export default function AttendancePage() {
             rows={filtered}
             rowKey={(r) => r.employee_id}
             onRowClick={(r) => setEditing(r)}
+            pageSize={table.pageSize}
+            searchPlaceholder="Search employee…"
             empty="No attendance matches these filters."
+            server={table.serverProps(data?.total ?? 0, isFetching, ATTENDANCE_STATUS_OPTIONS)}
           />
         )}
       </div>

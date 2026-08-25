@@ -379,7 +379,7 @@ class AttendanceOverrideTest extends HrTestCase
     {
         $this->svc()->adjust($this->employee, $this->today, ['time_in' => null, 'status' => 'on_leave']);
 
-        $row = collect($this->svc()->allForDate($this->today))->firstWhere('employee_id', $this->employee->id);
+        $row = collect($this->svc()->allForDate($this->today)->items())->firstWhere('employee_id', $this->employee->id);
 
         $this->assertSame('on_leave', $row['status']);
     }

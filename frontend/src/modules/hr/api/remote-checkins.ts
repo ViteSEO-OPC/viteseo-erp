@@ -1,4 +1,5 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type { LocationFix, RemoteCheckin } from "@/modules/hr/types/attendance";
 
 /**
@@ -27,9 +28,14 @@ export async function getMyRemoteCheckin(): Promise<RemoteCheckin | null> {
 }
 
 /** HR's queue. `status` of "all" returns the whole history. */
-export async function getRemoteCheckins(status = "pending"): Promise<RemoteCheckin[]> {
-  const res = await apiClient.get("/hr/attendance/remote-checkins", { params: { status } });
-  return res.data.data;
+export async function getRemoteCheckins(
+  status: string,
+  params: QueueParams,
+): Promise<QueuePage<RemoteCheckin>> {
+  const res = await apiClient.get("/hr/attendance/remote-checkins", {
+    params: { ...queueQuery(params), status },
+  });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function approveRemoteCheckin(id: number): Promise<RemoteCheckin> {

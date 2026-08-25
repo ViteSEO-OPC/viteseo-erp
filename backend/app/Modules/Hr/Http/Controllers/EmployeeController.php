@@ -35,9 +35,32 @@ class EmployeeController extends Controller
         $status = $request->query('status');
         $status = in_array($status, ['active', 'former', 'all'], true) ? $status : 'active';
 
-        $employees = $this->service->list($request->query('search'), $status);
+        $employees = $this->service->list([
+            'search' => $request->query('search'),
+            'status' => $status,
+            'department' => $request->query('department'),
+            'employment_status' => $request->query('employment_status'),
+            'per_page' => $request->query('per_page'),
+        ]);
 
-        return EmployeeResource::collection($employees)->response();
+        // The directory projection, not the whole record — see EmployeeResource::lean().
+        // Flagged on the collection's own resources rather than via `map()`, which forwards to
+        // the underlying collection and would hand back a plain Collection, losing the paginator
+        // (and with it the meta/links half of the envelope).
+        $collection = EmployeeResource::collection($employees);
+        $collection->collection->each->lean();
+
+        return $collection->response();
+    }
+
+    /**
+     * GET /hr/employees/options — every employee as a picker option (id + name + the two
+     * fields eligibility filters on). See EmployeeService::options() for why this is not just
+     * index() with a big page size.
+     */
+    public function options(): JsonResponse
+    {
+        return response()->json(['data' => $this->service->options()]);
     }
 
     // POST /api/v1/hr/employees — creates user + employee + leave balances.

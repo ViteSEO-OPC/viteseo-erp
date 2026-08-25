@@ -165,7 +165,7 @@ class HolidayPayTest extends HrTestCase
     {
         $this->holiday('regular');
 
-        $row = collect(app(AttendanceService::class)->allForDate($this->tue->toDateString()))
+        $row = collect(app(AttendanceService::class)->allForDate($this->tue->toDateString())->items())
             ->firstWhere('employee_id', $this->employee->id);
 
         $this->assertSame('holiday', $row['status']);

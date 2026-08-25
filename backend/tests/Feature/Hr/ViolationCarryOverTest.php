@@ -86,7 +86,8 @@ class ViolationCarryOverTest extends HrTestCase
     private function thisMonthLateSeverities(): array
     {
         return app(ViolationService::class)
-            ->list($this->employee->id, $this->thisStart->format('Y-m'))
+            ->list($this->employee->id, $this->thisStart->format('Y-m'), ['per_page' => 100])
+            ->getCollection()
             ->where('type', 'late')
             ->sortBy(fn ($v) => $v->work_date->toDateString())
             ->pluck('severity')->values()->all();
@@ -114,6 +115,71 @@ class ViolationCarryOverTest extends HrTestCase
         $this->assertSame(['orange', 'orange'], $this->thisMonthLateSeverities());
     }
 
+    /**
+     * The carry-over seed is fetched for a whole CHUNK of employees in one query, bounded by the
+     * EARLIEST hire date in that chunk — so a long-tenured colleague's window drags in rows that
+     * fall before another employee's own floor. Each employee must still be seeded only from lates
+     * on or after THEIR floor.
+     *
+     * The case that makes this real is a rehire: `hire_date` is reset to the new stint's start
+     * while the previous stint's attendance stays on file. Without the per-employee trim they come
+     * back already several steps up the escalation ladder, carrying tardiness from an employment
+     * that has already been settled.
+     */
+    public function test_lates_before_an_employees_own_hire_date_do_not_seed_their_tally(): void
+    {
+        AttendancePolicy::query()->update(['monthly_late_reset' => false]);
+
+        $tz = config('app.timezone_local');
+        $prevWeekdays = $this->weekdays($this->prevStart, 4);
+
+        // Hired PART-WAY THROUGH the previous month, so the seed block runs for them (their floor
+        // is before this month) — but the three lates below sit before that floor.
+        $rehired = Employee::create([
+            'user_id' => User::factory()->create()->id,
+            'department_id' => $this->employee->department_id,
+            'employee_no' => 'E-002', 'job_title' => 'Staff',
+            'hire_date' => $prevWeekdays[3]->toDateString(),
+            'base_salary' => 20000, 'pay_frequency' => 'semi_monthly',
+            'is_management' => false, 'work_schedule_id' => WorkSchedule::first()->id,
+        ]);
+
+        $late = function (Employee $emp, Carbon $day) use ($tz) {
+            Attendance::create([
+                'employee_id' => $emp->id, 'work_date' => $day->toDateString(),
+                'time_in' => Carbon::parse($day->toDateString().' 09:00', $tz)->utc(),
+                'time_out' => Carbon::parse($day->toDateString().' 17:00', $tz)->utc(),
+                'status' => 'late', 'lunch_minutes' => 60, 'break_minutes' => 0,
+                'source' => Attendance::SOURCE_MANUAL,
+            ]);
+        };
+
+        // Three lates from the PREVIOUS stint — all before this employee's current hire date.
+        foreach (array_slice($prevWeekdays, 0, 3) as $day) {
+            $late($rehired, $day);
+        }
+        foreach ($this->weekdays($this->thisStart, 2) as $day) {
+            $late($rehired, $day);
+        }
+
+        $vs = app(ViolationService::class);
+        $vs->recompute($this->prevStart->format('Y-m'));
+        $vs->recompute($this->thisStart->format('Y-m'));
+
+        $severities = $vs->list($rehired->id, $this->thisStart->format('Y-m'), ['per_page' => 100])
+            ->getCollection()
+            ->where('type', 'late')
+            ->sortBy(fn ($v) => $v->work_date->toDateString())
+            ->pluck('severity')->values()->all();
+
+        // Seeded from 0, not 3: this stint's lates are #1 and #2 → both green.
+        // Without the per-employee trim they would be #4 and #5 → both orange.
+        $this->assertSame(['green', 'green'], $severities);
+
+        // The tenured employee is untouched — still seeded from their own three.
+        $this->assertSame(['orange', 'orange'], $this->thisMonthLateSeverities());
+    }
+
     public function test_resolving_prior_violations_reduces_the_carried_tally(): void
     {
         AttendancePolicy::query()->update(['monthly_late_reset' => false]);
@@ -121,7 +187,8 @@ class ViolationCarryOverTest extends HrTestCase
         $vs->recompute($this->prevStart->format('Y-m'));
         $vs->recompute($this->thisStart->format('Y-m'));
 
-        foreach ($vs->list($this->employee->id, $this->prevStart->format('Y-m'))->where('type', 'late') as $v) {
+        foreach ($vs->list($this->employee->id, $this->prevStart->format('Y-m'), ['per_page' => 100])
+            ->getCollection()->where('type', 'late') as $v) {
             $vs->resolve($v);
         }
         $vs->recompute($this->thisStart->format('Y-m'));

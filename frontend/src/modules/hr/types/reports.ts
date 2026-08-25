@@ -16,7 +16,22 @@ export interface ReportBars {
 
 export interface ReportTable {
   columns: string[];
+  /** ONE PAGE of rows when `meta` is present — read `meta.total` for how many there are. */
   rows: string[][];
+  /**
+   * Present only on the tables the server pages: the ones carrying a row per employee (leave
+   * liability, tax reconciliation, the payroll register). Absent means the table is small by
+   * nature and arrived whole.
+   *
+   * On the register `per_page` is a target rather than an exact count — its rows come in
+   * department blocks that must not be split from their subtotal.
+   */
+  meta?: {
+    total: number;
+    current_page: number;
+    per_page: number;
+    last_page: number;
+  } | null;
 }
 
 export interface TitledReportTable extends ReportTable {
@@ -84,6 +99,11 @@ export interface Report {
   representation?: StackedSeries;
   // Audit Trail specifics.
   entries?: AuditEntry[];
+  /**
+   * Present when the SERVER paged this report — `entries` is then one page, not the whole
+   * result, and the screen must render `total` rather than counting what it holds.
+   */
+  pagination?: ReportPagination;
   // Attendance specifics — the three month-scoped views share one envelope, so a single
   // component renders all of them and only the row payload below differs per tab.
   tabs?: ReportTab[];
@@ -200,6 +220,17 @@ export interface AttendanceLeaveRow {
   remaining: number;
   balances: AttendanceLeaveBalance[];
   requests: AttendanceLeaveRequestRow[];
+}
+
+/** What the server says about a paged report: the whole set, and which slice of it this is. */
+export interface ReportPagination {
+  /** Rows matching the current filters across every page. */
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+  /** Rows in THIS response — less than `per_page` on the last page. */
+  returned: number;
 }
 
 export interface AuditEntry {

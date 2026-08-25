@@ -19,7 +19,10 @@ class PayslipRequestController extends Controller
     // GET /hr/payslip-requests — HR queue. GET /hr/me/payslip-requests — own.
     public function index(Request $request): JsonResponse
     {
-        return PayslipRequestResource::collection($this->service->list($request->user()))->response();
+        // Applied by the DATABASE. In the browser they would only narrow the page on screen.
+        return PayslipRequestResource::collection(
+            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // POST /hr/me/payslip-requests — the caller requests a payslip copy.

@@ -60,7 +60,7 @@ class OpenShiftReviewTest extends HrTestCase
     /** @return array<string, mixed>|null the queue row for a date, if it is listed at all */
     private function rowFor(string $date, ?string $from = null, ?string $to = null): ?array
     {
-        $rows = app(AttendanceService::class)->openShiftReview($from ?? '2026-08-01', $to ?? '2026-08-31');
+        $rows = app(AttendanceService::class)->openShiftRows($from ?? '2026-08-01', $to ?? '2026-08-31');
 
         foreach ($rows as $row) {
             if ($row['work_date'] === $date) {
@@ -256,7 +256,7 @@ class OpenShiftReviewTest extends HrTestCase
         $this->openPunch('2026-08-03', '08:00'); // auto-closed, and the OLDER of the two
         $this->openPunch('2026-08-09', '09:00'); // Sunday — needs fixing
 
-        $rows = app(AttendanceService::class)->openShiftReview('2026-08-01', '2026-08-31');
+        $rows = app(AttendanceService::class)->openShiftRows('2026-08-01', '2026-08-31');
 
         $this->assertCount(2, $rows);
         // Oldest-first would put the tidy row on top and bury the one costing money.

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getWorkRequests,
@@ -15,8 +16,14 @@ const KEY = ["hr", "work-requests"] as const;
 /** The employee's own clock panel — every decision here changes what it may offer. */
 const MY_ATTENDANCE_KEY = ["hr", "me", "attendance"] as const;
 
-export function useWorkRequests() {
-  return useQuery({ queryKey: KEY, queryFn: getWorkRequests });
+/** One page of the work-request queue, with the total. Filtered and ordered by the database. */
+export function useWorkRequests(params: QueueParams) {
+  return useQuery({
+    queryKey: [...KEY, params] as const,
+    queryFn: () => getWorkRequests(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useCreateWorkRequest() {

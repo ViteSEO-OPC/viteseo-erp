@@ -5,22 +5,37 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayslipRequest;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Validation\ValidationException;
 
 class PayslipRequestService
 {
+    use PagesQueues;
+
     public function __construct(private readonly AuditService $audit) {}
 
-    public function list(User $user): Collection
+    /**
+     * One page of the queue. HR sees everyone's; anybody else sees only their own, and that
+     * scope is applied BEFORE the filters so no search can widen it.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function list(User $user, array $filters = []): LengthAwarePaginator
     {
-        $query = PayslipRequest::with(['employee.user', 'reviewer', 'payslip.payrollRun'])->latest();
+        $query = PayslipRequest::with(['employee.user', 'reviewer', 'payslip.payrollRun']);
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $query->where('employee_id', $user->employee?->id);
         }
 
-        return $query->get();
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            ['reason'],
+            priorityStatuses: ['pending'],
+        );
     }
 
     /** @param array<string, mixed> $data */

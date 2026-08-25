@@ -1,4 +1,5 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type {
   Attendance,
   DayTask,
@@ -38,11 +39,25 @@ export async function toggleBreak(type: "lunch" | "break"): Promise<Attendance> 
   return res.data.data;
 }
 
-export async function getHrAttendance(date?: string): Promise<HrAttendanceRow[]> {
+/**
+ * ONE PAGE of the roster for a date.
+ *
+ * `status` and `timing` reach the SERVER even though neither is a column — they are derived per
+ * row from the employee's schedule and the day, and the server filters after deriving them.
+ * Applying either here would have narrowed the twenty-five rows already on screen.
+ */
+export async function getHrAttendance(
+  date: string | undefined,
+  params: QueueParams & { timing?: string },
+): Promise<QueuePage<HrAttendanceRow>> {
   const res = await apiClient.get("/hr/attendance", {
-    params: date ? { date } : undefined,
+    params: {
+      ...queueQuery(params),
+      ...(date ? { date } : {}),
+      ...(params.timing && params.timing !== "all" ? { timing: params.timing } : {}),
+    },
   });
-  return res.data.data;
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function getAttendanceSummary(date?: string): Promise<AttendanceSummary> {
@@ -53,32 +68,47 @@ export async function getAttendanceSummary(date?: string): Promise<AttendanceSum
 }
 
 export async function getOpenShifts(
-  from?: string,
-  to?: string,
-): Promise<OpenShiftRow[]> {
+  from: string | undefined,
+  to: string | undefined,
+  params: QueueParams,
+): Promise<QueuePage<OpenShiftRow>> {
   const res = await apiClient.get("/hr/attendance/open-shifts", {
-    params: { from: from || undefined, to: to || undefined },
+    params: {
+      ...queueQuery(params),
+      from: from || undefined,
+      to: to || undefined,
+    },
   });
-  return res.data.data;
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function getViolations(
   employeeId?: number,
   month?: string,
-): Promise<Violation[]> {
+  params?: QueueParams,
+): Promise<QueuePage<Violation>> {
   const res = await apiClient.get("/hr/violations", {
     params: {
       ...(employeeId ? { employee: employeeId } : {}),
       ...(month ? { month } : {}),
+      ...(params ? queueQuery(params) : {}),
     },
   });
-  return res.data.data;
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 /** The caller's own flags. Read-only server-side — never triggers a recompute. */
+/**
+ * The caller's own flags for a month.
+ *
+ * `per_page` is passed explicitly and generously: the dashboard banner picks the WORST
+ * unresolved flag, and severity is not the sort key — so the one it needs could sit on any page.
+ * One employee, one month, is at most a few dozen rows, which is what makes asking for all of
+ * them the right answer here rather than a cap in disguise.
+ */
 export async function getMyViolations(month?: string): Promise<Violation[]> {
   const res = await apiClient.get("/hr/me/violations", {
-    params: month ? { month } : undefined,
+    params: { ...(month ? { month } : {}), per_page: 100 },
   });
   return res.data.data;
 }

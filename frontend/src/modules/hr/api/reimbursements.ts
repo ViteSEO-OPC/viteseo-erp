@@ -1,8 +1,15 @@
 import { apiClient } from "@/core/api-client";
-import type { Reimbursement } from "@/modules/hr/types/reimbursement";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
+import type { Reimbursement, ReimbursementSummary } from "@/modules/hr/types/reimbursement";
 
-export async function getReimbursements(): Promise<Reimbursement[]> {
-  const res = await apiClient.get("/hr/reimbursements");
+export async function getReimbursements(params: QueueParams): Promise<QueuePage<Reimbursement>> {
+  const res = await apiClient.get("/hr/reimbursements", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
+}
+
+/** Counts and peso totals per status, for the cards above the finance queue. HR only. */
+export async function getReimbursementSummary(): Promise<ReimbursementSummary> {
+  const res = await apiClient.get("/hr/reimbursements/summary");
   return res.data.data;
 }
 

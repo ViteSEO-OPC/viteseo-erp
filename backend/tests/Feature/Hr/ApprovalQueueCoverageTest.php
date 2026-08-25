@@ -168,6 +168,37 @@ class ApprovalQueueCoverageTest extends HrTestCase
         $this->assertSame(3, $nav['/teamora/requests/work-schedule'] ?? 0);
     }
 
+    /**
+     * The feed is PAGED but the counts are not. `total` and the sidebar badges must report every
+     * outstanding item, not just the page that fits — a bell reading "3" beside a queue of nine is
+     * how work goes unreviewed. Guards the bounded per-source fetch: each source reads only enough
+     * rows to fill the page, so its count has to come from a COUNT rather than from `$rows->count()`.
+     */
+    public function test_the_counts_survive_a_page_smaller_than_the_queue(): void
+    {
+        foreach (range(1, 4) as $ignored) {
+            $this->overtime();
+        }
+        $this->earlyOut();
+        $this->halfDay();
+
+        // Six outstanding schedule requests, asked for two at a time.
+        $feed = app(NotificationService::class)->forUser($this->hrUser(), 2, 0);
+
+        $this->assertCount(2, $feed['items'], 'the page itself is capped');
+        $this->assertSame(6, $feed['total'], 'total counts the whole queue, not the page');
+        $this->assertSame(6, $feed['nav']['/teamora/requests/work-schedule'] ?? 0, 'so does the badge');
+        $this->assertTrue($feed['has_more']);
+
+        // And the second page continues rather than repeating the first.
+        $second = app(NotificationService::class)->forUser($this->hrUser(), 2, 2);
+        $this->assertSame(6, $second['total']);
+        $this->assertEmpty(
+            array_intersect(array_column($feed['items'], 'id'), array_column($second['items'], 'id')),
+            'page 2 must not repeat page 1',
+        );
+    }
+
     /** A count written against a path the sidebar cannot match is silently thrown away. */
     public function test_every_badge_key_is_a_real_nav_href(): void
     {

@@ -303,6 +303,19 @@ class AttendancePolicyService
             $after ?: null,
         );
 
+        // Item 11 — the ladder, the graces and the carry-over switch are all inputs to the
+        // violation scan, so saving them re-judges history. Rebuilt from the date the version
+        // takes effect up to today; a save that changed nothing rebuilds nothing.
+        //
+        // Resolved lazily rather than injected: ViolationService takes this service as a
+        // constructor argument, so injecting it back would close a container cycle.
+        if ($before !== []) {
+            app(ViolationService::class)->recomputeRange(
+                $effectiveFrom,
+                now(config('app.timezone_local'))->toDateString(),
+            );
+        }
+
         return $policy;
     }
 

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { useReport, useExportReport } from "@/modules/hr/hooks/use-report";
+import { useDebouncedValue } from "@/core/use-debounced-value";
 import { SimpleSelect } from "@/modules/hr/ui/select";
 import type { AuditEntry } from "@/modules/hr/types/reports";
 
@@ -49,10 +50,34 @@ function ModuleBadge({ module }: { module: string }) {
   );
 }
 
+// One page of the log. Ten rows, matching every other table on the platform.
+const PAGE_SIZE = 10;
+
 export function AuditReport() {
   const [range, setRange] = useState(9);
-  const { data: report, isLoading, isError } = useReport("audit", { months: range });
-  const exportMut = useExportReport("audit");
+
+  // Item 17 — the audit trail is SERVER-PAGED. It is the one table with no ceiling: it gains a
+  // row every time anybody does anything, so it is the first to outgrow "fetch it and slice it
+  // in the browser". The screen used to take the server's first 100 entries and page through
+  // them ten at a time, which meant the pager stopped at 100 with no indication there was more,
+  // and the search box searched those 100 — reporting "No matches" for a record on page 40.
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  // The table fires on every keystroke; the request must not.
+  const debouncedSearch = useDebouncedValue(search, 250);
+
+  const { data: report, isLoading, isError, isFetching } = useReport("audit", {
+    months: range,
+    page,
+    per_page: PAGE_SIZE,
+    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+  }, { keepPreviousData: true });
+  const exportMut = useExportReport("audit", {
+    months: range,
+    // The export follows the search on screen. Downloading a file that quietly disagrees with
+    // the table it came from is worse than not offering the button.
+    ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+  });
 
   async function onExport() {
     try {
@@ -64,6 +89,7 @@ export function AuditReport() {
   }
 
   const entries = report?.entries ?? [];
+  const total = report?.pagination?.total ?? entries.length;
 
   const columns: Column<AuditEntry>[] = [
     { header: "Timestamp", cell: (e) => <span className="whitespace-nowrap text-muted-foreground">{e.timestamp}</span> },
@@ -100,7 +126,12 @@ export function AuditReport() {
           aria-label="Date range"
           className="w-48"
           value={String(range)}
-          onValueChange={(v) => setRange(Number(v))}
+          onValueChange={(v) => {
+            setRange(Number(v));
+            // A narrower range has fewer pages. Without this the reader stays on page 12 of a
+            // result that now has three, and the table comes back empty.
+            setPage(1);
+          }}
           options={RANGES.map((r) => ({ value: String(r.value), label: r.label }))}
         />
       </div>
@@ -111,7 +142,25 @@ export function AuditReport() {
         ) : isError || !report ? (
           <p className="text-sm text-destructive">Could not load this report.</p>
         ) : (
-          <DataTable columns={columns} rows={entries} rowKey={(_e, i) => i} pageSize={10} empty="No activity in this period." />
+          <DataTable
+            columns={columns}
+            rows={entries}
+            rowKey={(_e, i) => i}
+            pageSize={PAGE_SIZE}
+            empty="No activity in this period."
+            searchPlaceholder="Search user, action or details…"
+            // Every entry is an action already taken — there is nothing to filter by status.
+            filterable={false}
+            server={{
+              total,
+              page,
+              loading: isFetching,
+              onParamsChange: ({ page: next, query }) => {
+                setPage(next);
+                setSearch(query);
+              },
+            }}
+          />
         )}
       </div>
     </div>

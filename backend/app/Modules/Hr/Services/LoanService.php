@@ -9,12 +9,16 @@ use App\Modules\Hr\Models\EmployeeLoan;
 use App\Modules\Hr\Models\LoanPayment;
 use App\Modules\Hr\Models\PayrollRun;
 use App\Modules\Hr\Models\Payslip;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Validation\ValidationException;
 
 /** Loans and cash advances repaid through payroll. */
 class LoanService
 {
+    use PagesQueues;
+
     public function __construct(private readonly AuditService $audit) {}
 
     /**
@@ -22,14 +26,27 @@ class LoanService
      *
      * @return Collection<int, EmployeeLoan>
      */
-    public function all(?string $status = null): Collection
+    /**
+     * One page of every employee's loans, newest request first.
+     *
+     * The last of the thirteen sources the approvals card reads. It was the only one still
+     * fetching its whole table to contribute a handful of outstanding rows to a to-do list.
+     *
+     * `requested_at` is null on a loan HR issued directly, so the id carries the ordering for
+     * those — and doubles as the unique tiebreaker paging needs.
+     *
+     * @param  array<string, mixed>  $filters  search, page, per_page
+     */
+    public function all(?string $status = null, array $filters = []): LengthAwarePaginator
     {
-        return EmployeeLoan::query()
-            ->when($status !== null, fn ($q) => $q->where('status', $status))
-            ->with(['employee.user', 'policy'])
-            ->orderByDesc('requested_at')
-            ->orderByDesc('id')
-            ->get();
+        return $this->paginateQueue(
+            EmployeeLoan::query()
+                ->when($status !== null, fn ($q) => $q->where('status', $status))
+                ->with(['employee.user', 'policy']),
+            $filters,
+            ['reference', 'type'],
+            sort: [['requested_at', 'desc']],
+        );
     }
 
     public function forEmployee(Employee $employee): Collection

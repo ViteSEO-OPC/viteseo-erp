@@ -139,7 +139,11 @@ class AttendanceController extends Controller
     {
         $date = $request->query('date');
 
-        return response()->json(['data' => $this->service->allForDate($date)]);
+        $page = $this->service->allForDate($date, $request->only([
+            'search', 'status', 'timing', 'page', 'per_page',
+        ]));
+
+        return response()->json($this->paged($page));
     }
 
     // GET /api/v1/hr/attendance/summary?date=YYYY-MM-DD — the 8 day tiles.
@@ -197,9 +201,34 @@ class AttendanceController extends Controller
             'to' => ['nullable', 'date_format:Y-m-d'],
         ]);
 
-        return response()->json([
-            'data' => $this->service->openShiftReview($data['from'] ?? null, $data['to'] ?? null),
-        ]);
+        return response()->json($this->paged($this->service->openShiftReview(
+            $data['from'] ?? null,
+            $data['to'] ?? null,
+            $request->only(['search', 'status', 'page', 'per_page']),
+        )));
+    }
+
+    /**
+     * The same {data, meta} envelope an API Resource collection produces.
+     *
+     * These two endpoints serve computed arrays rather than models, so there is no Resource to
+     * shape the response — and a paged endpoint that answered in a different shape from every
+     * other paged endpoint would need its own handling on the client for no reason.
+     *
+     * @param  \Illuminate\Pagination\LengthAwarePaginator<int, array<string, mixed>>  $page
+     * @return array<string, mixed>
+     */
+    private function paged(\Illuminate\Pagination\LengthAwarePaginator $page): array
+    {
+        return [
+            'data' => $page->items(),
+            'meta' => [
+                'total' => $page->total(),
+                'current_page' => $page->currentPage(),
+                'per_page' => $page->perPage(),
+                'last_page' => $page->lastPage(),
+            ],
+        ];
     }
 
     // POST /api/v1/hr/attendance/adjust — HR sets/corrects a row (HR only).
