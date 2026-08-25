@@ -61,7 +61,7 @@ function Label({ children }: { children: React.ReactNode }) {
 type Props = {
   filters: Filters;
   patch: (next: Partial<Filters>) => void;
-  options: { locations: string[]; niches: string[]; statuses: string[]; priorities: string[] };
+  options: { locations: string[]; niches: string[]; statuses: string[]; priorities: string[]; foundBy: string[] };
   origin: NearbyOrigin | null;
   selectLocation: (area: string) => void;
   useMyLocation: () => void;
@@ -195,6 +195,19 @@ export function NearbyFilters({
           <Label>Lead status</Label>
           <FilterSelect value={filters.status} onChange={(v) => patch({ status: v })} allLabel="All statuses" options={options.statuses} />
         </div>
+      </div>
+
+      {/* Which discovery lane found the business — the deterministic OpenStreetMap sweep, or the
+          AI-assisted expansion beside it. "All sources" is the default and leaves the board exactly
+          as it was before this control existed. */}
+      <div className="flex flex-col gap-1.5">
+        <Label>Found by</Label>
+        <FilterSelect
+          value={filters.foundBy}
+          onChange={(v) => patch({ foundBy: v })}
+          allLabel="All sources"
+          options={options.foundBy}
+        />
       </div>
     </div>
   );

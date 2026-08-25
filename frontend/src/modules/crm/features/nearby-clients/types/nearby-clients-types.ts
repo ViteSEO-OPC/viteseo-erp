@@ -94,6 +94,12 @@ export type NearbyClient = {
   active: boolean;
   /** Lead status enum, e.g. "new". */
   status: string;
+  /**
+   * Which discovery LANE found this business — the deterministic OpenStreetMap sweep, or the
+   * AI-assisted expansion that runs beside it. A closed set decided server-side from per-record
+   * provenance; never a vendor name, and nothing in the UI branches on it beyond the filter.
+   */
+  foundBy: "openstreetmap" | "ai-assisted";
   /** Coordinate-derived distance in km — computed by the Interactive Map milestone (absent now). */
   distanceKm?: number;
   /** Coordinate-derived map layout position (%) — computed by the Interactive Map milestone (absent now). */
