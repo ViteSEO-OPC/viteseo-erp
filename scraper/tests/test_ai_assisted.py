@@ -12,11 +12,13 @@ import pytest
 from scraper.models import RawBusiness
 from scraper.normalizer import normalize
 from scraper.providers.ai_assisted import (
+    EXPANSION_UNSUPPORTED,
     LANE_AI,
     LANE_BASELINE,
     SKIPPED_BASELINE_FULL,
     AiAssistedDiscoveryProvider,
 )
+from scraper.providers.openstreetmap import SelectorSweep
 
 
 def business(name: str, provider_id: str) -> RawBusiness:
@@ -24,15 +26,35 @@ def business(name: str, provider_id: str) -> RawBusiness:
 
 
 class FakeOsm:
-    """Stands in for OpenStreetMapProvider.discover()."""
+    """Stands in for OpenStreetMapProvider — both the default sweep and the selector sweep."""
 
-    def __init__(self, *found: RawBusiness) -> None:
+    def __init__(
+        self,
+        *found: RawBusiness,
+        sweep: SelectorSweep | None = None,
+        sweep_raises: Exception | None = None,
+    ) -> None:
         self._found = list(found)
+        self._sweep = sweep
+        self._sweep_raises = sweep_raises
         self.calls: list[dict] = []
+        self.selector_calls: list[list[tuple[str, str]]] = []
 
     def discover(self, *, area: str, category: str, limit: int) -> list[RawBusiness]:
         self.calls.append({"area": area, "category": category, "limit": limit})
         return [b.model_copy(deep=True) for b in self._found][:limit]
+
+    def find_by_selectors(self, selectors, *, area: str, limit: int = 200) -> SelectorSweep:
+        self.selector_calls.append(list(selectors))
+        if self._sweep_raises is not None:
+            raise self._sweep_raises
+        if self._sweep is None:
+            return SelectorSweep()
+        return SelectorSweep(
+            businesses=[b.model_copy(deep=True) for b in self._sweep.businesses],
+            by_selector={k: list(v) for k, v in self._sweep.by_selector.items()},
+        )
+
 
 
 class FakeAi:
@@ -56,6 +78,24 @@ class FakeAi:
 
     def close(self) -> None:
         self.closed = True
+class FakeAiWithTags(FakeAi):
+    """An AI leg that also offers tag expansion."""
+
+    def __init__(self, *found: RawBusiness, selectors=None, status="ok", error=None,
+                 raises_expand: Exception | None = None, **kw) -> None:
+        super().__init__(*found, **kw)
+        self._selectors = list(selectors or [])
+        self._expand_status = status
+        self._expand_error = error
+        self._raises_expand = raises_expand
+        self.expand_calls: list[tuple] = []
+
+    def expand_tags(self, category: str, known):
+        self.expand_calls.append((category, list(known)))
+        if self._raises_expand is not None:
+            raise self._raises_expand
+        return (self._selectors, self._expand_status, self._expand_error,
+                {"model": "mock", "prompt_tokens": 0, "completion_tokens": 0})
 
 
 def composite(osm: FakeOsm, ai: FakeAi) -> AiAssistedDiscoveryProvider:
@@ -321,4 +361,193 @@ def test_a_keyless_record_never_becomes_a_lead_without_a_place_id():
     ).resolve(["Watsons"], area="Vigan")
 
     assert outcome.resolved == []
+
+
+# --- lane 2: AI-expanded tag sweep ------------------------------------------------
+
+
+def tag_sweep(*pairs) -> SelectorSweep:
+    """(selector_label, RawBusiness) pairs -> a SelectorSweep with attribution."""
+    sweep = SelectorSweep()
+    for label, biz in pairs:
+        sweep.businesses.append(biz)
+        sweep.by_selector.setdefault(label, []).append(biz.provider_id)
+    return sweep
+
+
+def test_tag_expansion_adds_businesses_the_default_sweep_cannot_reach():
+    # THE MEASURED CASE. `amenity=restaurant` structurally cannot return an `amenity=fast_food`
+    # outlet, no matter how good the matching is — the tag is never queried.
+    osm = FakeOsm(
+        business("Cafe Leona", "node/1"),
+        sweep=tag_sweep(("amenity=fast_food", business("Mang Inasal", "node/2"))),
+    )
+    ai = FakeAiWithTags(selectors=["amenity=fast_food"])
+    provider = composite(osm, ai)
+
+    result = provider.discover(area="Vigan", category="restaurant", limit=30)
+
+    assert [b.provider_id for b in result] == ["node/1", "node/2"]
+    assert provider.stats()["expansion_net_new"] == 1
+    assert provider.stats()["expansion_selectors"] == ["amenity=fast_food"]
+
+
+def test_the_expander_is_told_what_the_baseline_already_sweeps():
+    osm = FakeOsm(business("Cafe Leona", "node/1"))
+    ai = FakeAiWithTags(selectors=[])
+    composite(osm, ai).discover(area="Vigan", category="restaurant", limit=30)
+
+    category, known = ai.expand_calls[0]
+    assert category == "restaurant"
+    assert ("amenity", "restaurant") in known
+
+
+def test_a_rejected_selector_is_never_swept():
+    # Validation stands between the model and Overpass. A car-park selector must not reach the query.
+    osm = FakeOsm(business("Cafe Leona", "node/1"))
+    ai = FakeAiWithTags(selectors=["amenity=parking", "building=yes"])
+    provider = composite(osm, ai)
+
+    provider.discover(area="Vigan", category="restaurant", limit=30)
+
+    assert osm.selector_calls == []          # no sweep was attempted at all
+    assert provider.stats()["expansion_rejected"] == 2
+    assert provider.stats()["expansion_net_new"] == 0
+
+
+def test_expansion_records_per_selector_attribution():
+    # A selector that only returns businesses the baseline already held earns nothing and should be
+    # pruned. Measured on live data, `healthcare=pharmacy` is exactly that.
+    already = business("Rose Pharmacy", "node/1")
+    osm = FakeOsm(
+        already,
+        sweep=tag_sweep(
+            ("shop=chemist", business("Watsons", "node/2")),
+            ("healthcare=pharmacy", already.model_copy(deep=True)),
+        ),
+    )
+    ai = FakeAiWithTags(selectors=["shop=chemist", "healthcare=pharmacy"])
+    provider = composite(osm, ai)
+
+    provider.discover(area="Vigan", category="pharmacy", limit=30)
+    per = provider.stats()["expansion_by_selector"]
+
+    assert per["shop=chemist"] == {"found": 1, "net_new": 1}
+    assert per["healthcare=pharmacy"] == {"found": 1, "net_new": 0}
+    assert provider.stats()["expansion_duplicates"] == 1
+
+
+def test_expansion_findings_carry_the_ai_lane():
+    osm = FakeOsm(
+        business("Cafe Leona", "node/1"),
+        sweep=tag_sweep(("amenity=fast_food", business("Mang Inasal", "node/2"))),
+    )
+    provider = composite(osm, FakeAiWithTags(selectors=["amenity=fast_food"]))
+
+    rows = [normalize(b, provider.name) for b in provider.discover(area="Vigan", category="restaurant", limit=30)]
+
+    assert {r.place_id: r.source for r in rows} == {"node/1": "openstreetmap", "node/2": "openai"}
+
+
+def test_the_lane_totals_split_by_lane_and_sum_to_net_new():
+    osm = FakeOsm(
+        business("Cafe Leona", "node/1"),
+        sweep=tag_sweep(("amenity=fast_food", business("Mang Inasal", "node/2"))),
+    )
+    ai = FakeAiWithTags(business("Grandpa's Inn", "node/3"), selectors=["amenity=fast_food"])
+    provider = composite(osm, ai)
+
+    provider.discover(area="Vigan", category="restaurant", limit=30)
+    stats = provider.stats()
+
+    assert stats["expansion_net_new"] == 1
+    assert stats["name_net_new"] == 1
+    assert stats["net_new"] == 2
+
+
+# --- lane 2 can never reduce the baseline -----------------------------------------
+
+
+def test_an_expansion_failure_status_leaves_the_baseline_intact():
+    osm = FakeOsm(business("Cafe Leona", "node/1"), business("Hidden Garden", "node/2"))
+    ai = FakeAiWithTags(status="auth_failed", error="http_401")
+    provider = composite(osm, ai)
+
+    result = provider.discover(area="Vigan", category="restaurant", limit=30)
+
+    assert [b.provider_id for b in result] == ["node/1", "node/2"]
+    assert provider.stats()["expansion_status"] == "auth_failed"
+    assert provider.stats()["execution_status"] == "ok"
+
+
+def test_an_expansion_exception_leaves_the_baseline_intact():
+    osm = FakeOsm(business("Cafe Leona", "node/1"))
+    provider = composite(osm, FakeAiWithTags(raises_expand=RuntimeError("boom")))
+
+    result = provider.discover(area="Vigan", category="restaurant", limit=30)
+
+    assert [b.provider_id for b in result] == ["node/1"]
+    assert provider.stats()["expansion_status"] == "provider_errored"
+
+
+def test_an_overpass_failure_during_the_expansion_sweep_leaves_the_baseline_intact():
+    # The sweep reaches Overpass and Nominatim, which fail in ways the lane does not model.
+    osm = FakeOsm(business("Cafe Leona", "node/1"), sweep_raises=RuntimeError("rate limited"))
+    provider = composite(osm, FakeAiWithTags(selectors=["amenity=fast_food"]))
+
+    result = provider.discover(area="Vigan", category="restaurant", limit=30)
+
+    assert [b.provider_id for b in result] == ["node/1"]
+    assert provider.stats()["expansion_status"] == "provider_errored"
+    assert provider.stats()["execution_status"] == "ok"
+
+
+def test_an_ai_leg_without_the_capability_is_not_a_failure():
+    # An older provider simply does not offer expansion. That is a fact, not an error.
+    provider = composite(FakeOsm(business("Cafe Leona", "node/1")), FakeAi())
+
+    provider.discover(area="Vigan", category="restaurant", limit=30)
+
+    assert provider.stats()["expansion_status"] == EXPANSION_UNSUPPORTED
+    assert provider.stats()["execution_status"] == "ok"
+
+
+def test_neither_lane_is_attempted_when_the_baseline_fills_the_limit():
+    osm = FakeOsm(business("A", "node/1"), business("B", "node/2"),
+                  sweep=tag_sweep(("amenity=fast_food", business("C", "node/3"))))
+    ai = FakeAiWithTags(selectors=["amenity=fast_food"])
+    provider = composite(osm, ai)
+
+    provider.discover(area="Vigan", category="restaurant", limit=2)
+
+    assert ai.expand_calls == []
+    assert osm.selector_calls == []
+    assert provider.stats()["expansion_status"] == SKIPPED_BASELINE_FULL
+
+
+def test_a_raw_selector_category_is_passed_through_as_already_covered():
+    # `category_selectors` parses a raw "key=value" category, so the caller's own selector IS what
+    # the baseline swept and the model must be told not to repeat it.
+    osm = FakeOsm(business("A", "node/1"))
+    ai = FakeAiWithTags(selectors=["shop=chemist"])
+    provider = composite(osm, ai)
+
+    provider.discover(area="Vigan", category="amenity=veterinary", limit=30)
+
+    assert ai.expand_calls[0][1] == [("amenity", "veterinary")]
+    assert provider.stats()["expansion_status"] == "ok"
+
+
+def test_a_category_the_provider_cannot_parse_still_lets_expansion_run():
+    # An unrecognised word makes `category_selectors` raise. The lane has nothing to declare as
+    # already-covered, which is not a reason to skip it — and certainly not a reason to fail the run.
+    osm = FakeOsm(business("A", "node/1"))
+    ai = FakeAiWithTags(selectors=["shop=chemist"])
+    provider = composite(osm, ai)
+
+    provider.discover(area="Vigan", category="not_a_known_category", limit=30)
+
+    assert ai.expand_calls[0][1] == []
+    assert provider.stats()["expansion_status"] == "ok"
+    assert provider.stats()["execution_status"] == "ok"
 

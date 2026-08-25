@@ -169,3 +169,92 @@ def test_the_default_sweep_is_not_subject_to_the_filter():
 
     assert "is_business_element" not in inspect.getsource(OpenStreetMapProvider.discover)
 
+
+# --- selector sweep: the expansion lane's only OSM call ---------------------------
+
+
+class _SweepProvider:
+    """A provider whose Overpass call is replaced by fixed elements — no network, no geocode."""
+
+    def __init__(self, elements):
+        from scraper.providers.openstreetmap import OpenStreetMapProvider
+
+        self.p = OpenStreetMapProvider.__new__(OpenStreetMapProvider)
+        self.p.reverse_geocode = False
+        self.p._geocode_area = lambda area: (1.0, 2.0, 3.0, 4.0)  # type: ignore[method-assign]
+        self.p._overpass = lambda selectors, bbox, limit: elements  # type: ignore[method-assign]
+
+
+def test_a_selector_sweep_attributes_each_business_to_the_tag_it_carries():
+    # Attribution comes from the ELEMENT'S OWN TAGS, not from the query — one Overpass call unions
+    # every selector, so the response cannot say which one matched what.
+    elements = [
+        {"type": "node", "id": 1, "lat": 1.0, "lon": 2.0,
+         "tags": {"name": "Mang Inasal", "amenity": "fast_food"}},
+        {"type": "node", "id": 2, "lat": 1.0, "lon": 2.0,
+         "tags": {"name": "Vigan Food Hall", "amenity": "food_court"}},
+    ]
+    sweep = _SweepProvider(elements).p.find_by_selectors(
+        [("amenity", "fast_food"), ("amenity", "food_court")], area="Vigan"
+    )
+
+    assert [b.provider_id for b in sweep.businesses] == ["node/1", "node/2"]
+    assert sweep.by_selector == {
+        "amenity=fast_food": ["node/1"],
+        "amenity=food_court": ["node/2"],
+    }
+
+
+def test_a_business_carrying_two_matched_tags_is_attributed_to_both():
+    # Which is why per-selector net-new may sum to more than the lane total: the lane deduplicates,
+    # and each selector's figure answers "what would we lose by dropping this one?".
+    elements = [{"type": "node", "id": 1, "lat": 1.0, "lon": 2.0,
+                 "tags": {"name": "Rose Pharmacy", "amenity": "pharmacy", "healthcare": "pharmacy"}}]
+    sweep = _SweepProvider(elements).p.find_by_selectors(
+        [("amenity", "pharmacy"), ("healthcare", "pharmacy")], area="Vigan"
+    )
+
+    assert len(sweep.businesses) == 1
+    assert sweep.by_selector == {
+        "amenity=pharmacy": ["node/1"],
+        "healthcare=pharmacy": ["node/1"],
+    }
+
+
+def test_an_empty_selector_list_makes_no_query_at_all():
+    # No selectors survived validation. That must cost nothing — not a geocode, not an Overpass call.
+    from scraper.providers.openstreetmap import OpenStreetMapProvider
+
+    provider = OpenStreetMapProvider.__new__(OpenStreetMapProvider)
+
+    def explode(*a, **k):
+        raise AssertionError("no network may be reached")
+
+    provider._geocode_area = explode  # type: ignore[method-assign]
+    provider._overpass = explode  # type: ignore[method-assign]
+
+    sweep = provider.find_by_selectors([], area="Vigan")
+
+    assert sweep.businesses == []
+    assert sweep.by_selector == {}
+
+
+def test_a_selector_sweep_stamps_osm_as_the_verification_source():
+    elements = [{"type": "node", "id": 1, "lat": 1.0, "lon": 2.0,
+                 "tags": {"name": "Mang Inasal", "amenity": "fast_food"}}]
+    sweep = _SweepProvider(elements).p.find_by_selectors([("amenity", "fast_food")], area="Vigan")
+
+    assert sweep.businesses[0].verification_source == "osm"
+
+
+def test_the_default_sweep_does_not_know_about_selector_sweeps():
+    # `discover()` is the CEO-accepted default and must stay byte-identical. Expansion is a SEPARATE
+    # call the composite makes, never a widening of this one.
+    import inspect
+
+    from scraper.providers.openstreetmap import OpenStreetMapProvider
+
+    source = inspect.getsource(OpenStreetMapProvider.discover)
+    assert "find_by_selectors" not in source
+    assert "SelectorSweep" not in source
+

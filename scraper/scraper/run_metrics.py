@@ -136,6 +136,23 @@ def build_record(
         record["ai_error_reason"] = stats.get("ai_error_reason")
         record["ai_skipped"] = stats.get("ai_skipped")
 
+        # THE TAG-EXPANSION LANE, reported separately from the name lane because the two are judged
+        # separately: one is cheap, cacheable and deterministic, the other is neither.
+        # `expansion_rejected` is the trust metric — a model that starts proposing invalid selectors
+        # becomes visible here before it becomes expensive. `expansion_by_selector` is what lets a
+        # tag that duplicates the baseline entirely be pruned rather than swept forever.
+        record["name_net_new"] = int(stats.get("name_net_new", 0))
+        record["expansion_status"] = stats.get("expansion_status")
+        record["expansion_error"] = stats.get("expansion_error")
+        record["expansion_proposed"] = int(stats.get("expansion_proposed", 0))
+        record["expansion_selectors"] = stats.get("expansion_selectors") or []
+        record["expansion_rejected"] = int(stats.get("expansion_rejected", 0))
+        record["expansion_rejections"] = stats.get("expansion_rejections") or {}
+        record["expansion_discovered"] = int(stats.get("expansion_discovered", 0))
+        record["expansion_duplicates"] = int(stats.get("expansion_duplicates", 0))
+        record["expansion_net_new"] = int(stats.get("expansion_net_new", 0))
+        record["expansion_by_selector"] = stats.get("expansion_by_selector") or {}
+
     # Cost, when the provider spends money. Absent for OSM rather than zero — "free" and "not
     # measured" are different claims, and a null says which one this is.
     if "prompt_tokens" in stats or "completion_tokens" in stats:

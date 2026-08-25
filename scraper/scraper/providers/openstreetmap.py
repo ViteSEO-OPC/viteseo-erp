@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import time
+from dataclasses import dataclass, field
 from typing import Optional
 
 import httpx
@@ -146,6 +147,25 @@ def parse_element(element: dict) -> Optional[RawBusiness]:
     )
 
 
+@dataclass
+class SelectorSweep:
+    """Businesses found by a selector sweep, plus WHICH selector found each one.
+
+    The attribution is the whole reason this is not a plain list. A sweep unions several selectors
+    into ONE Overpass query, so the response cannot say which selector matched what — but per-selector
+    net-new is exactly the number that decides whether a selector earns its place. Without it a tag
+    that duplicates the baseline entirely (measured: `healthcare=pharmacy` returns twelve businesses
+    and zero net-new) would justify itself forever on gross counts.
+
+    Derived from each element's own tags rather than from the query, so it is a fact about the
+    element and not a guess about the response.
+    """
+
+    businesses: list[RawBusiness] = field(default_factory=list)
+    #: "amenity=fast_food" -> the provider_ids that carried that tag.
+    by_selector: dict[str, list[str]] = field(default_factory=dict)
+
+
 def extract_admin_area(address: dict) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Map a Nominatim ``address`` object to (region, province, city) with sensible fallbacks."""
     region = address.get("region") or address.get("state")
@@ -249,6 +269,50 @@ class OpenStreetMapProvider(DiscoveryProvider):
                     self._fill_admin_area(business)
             businesses.append(business)
         return businesses
+
+    def find_by_selectors(
+        self, selectors: list[tuple[str, str]], *, area: str, limit: int = 200
+    ) -> SelectorSweep:
+        """Sweep ``area`` for businesses matching ADDITIONAL tag selectors, with attribution.
+
+        THE EXPANSION LANE'S ONLY OSM CALL. ``discover()`` sweeps the category's hand-written
+        selectors and is not touched by this method's existence; this sweeps a separate set and the
+        composite merges the two on ``provider_id``. Keeping them as two calls rather than one widened
+        call is what leaves the accepted default behaviour byte-identical.
+
+        ONE QUERY FOR EVERY SELECTOR. ``_overpass`` already unions them, so eight expanded tags cost a
+        single Overpass request rather than eight — the reason this lane adds about a second rather
+        than a minute.
+
+        NO BUSINESS FILTER, deliberately, and unlike ``find_by_name``. A selector sweep is defined by
+        its tags exactly as ``discover()`` is, so what it returns is what was asked for. The
+        equivalent protection lives one step earlier, where a non-business selector is refused before
+        it can be executed at all.
+        """
+        if not selectors:
+            return SelectorSweep()
+
+        bbox = self._geocode_area(area)
+        elements = self._overpass(selectors, bbox, limit)
+
+        sweep = SelectorSweep()
+        for element in elements:
+            business = parse_element(element)
+            if business is None:
+                continue
+            # Identity came from a real OSM element, exactly as on every other path.
+            business.verification_source = "osm"
+            if self.reverse_geocode and business.latitude is not None and business.longitude is not None:
+                if not (business.region and business.province and business.city):
+                    self._fill_admin_area(business)
+            sweep.businesses.append(business)
+
+            # Attribute from the element's OWN tags: which of the selectors this element satisfies.
+            tags = element.get("tags") or {}
+            for key, value in selectors:
+                if str(tags.get(key) or "").strip().lower() == value:
+                    sweep.by_selector.setdefault(f"{key}={value}", []).append(business.provider_id)
+        return sweep
 
     # -- OSM calls -----------------------------------------------------------------------------
 

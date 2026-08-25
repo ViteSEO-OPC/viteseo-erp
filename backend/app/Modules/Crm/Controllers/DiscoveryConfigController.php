@@ -5,7 +5,9 @@ namespace App\Modules\Crm\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Requests\DiscoveryProposalRequest;
+use App\Modules\Crm\Requests\DiscoveryTagExpansionRequest;
 use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
+use App\Modules\Crm\Services\Discovery\Contracts\TagExpander;
 use App\Modules\Crm\Services\Discovery\NerbyProviderSettingService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,6 +23,12 @@ use Symfony\Component\HttpFoundation\Response;
  * OpenStreetMap here, inside the CRM, so the scraper needs no fallback logic of its own — it does
  * what it is told and records what it did. A second copy of that rule in Python would be a copy that
  * eventually disagrees.
+ *
+ * `tagExpansions` ASKS FOR A SEARCH STRATEGY RATHER THAN A RESULT. The model returns OSM tag
+ * selectors — `shop=chemist` beside `amenity=pharmacy` — and Overpass then supplies every business
+ * those tags match. A wrong selector describes a query that finds nothing; it cannot invent a
+ * business, because the answer never describes one. That makes it a smaller trust surface than
+ * `proposals`, not merely a different one.
  *
  * `proposals` MAKES THE OPENAI CALL SERVER-SIDE. The scraper sends an area and a category and gets
  * back names. It never receives, stores or logs the API key, because the key never leaves this
@@ -108,6 +116,62 @@ class DiscoveryConfigController extends Controller
             // 502: the CRM is fine, its upstream provider is not. Deliberately NOT 200 — a scraper
             // that only checked the HTTP status would otherwise treat a failed model call as a
             // successful discovery of nothing, which is the exact confusion this endpoint must avoid.
+            return response()->json([
+                'message' => 'The discovery provider could not be reached or refused the request.',
+                'data' => $payload,
+            ], Response::HTTP_BAD_GATEWAY);
+        }
+
+        return response()->json(['data' => $payload]);
+    }
+
+    /**
+     * Additional OSM tag selectors worth sweeping for one category.
+     *
+     * REFUSES unless the effective provider is OpenAI, exactly as `proposals` does and for the same
+     * reason: a caller that skipped `config` must not be able to spend money on a provider the admin
+     * has not enabled.
+     *
+     * Selectors leave here UNVALIDATED against the OSM key vocabulary. That check belongs with the
+     * scraper, which owns the tag vocabulary it is about to execute; duplicating it here would create
+     * a second copy that eventually disagrees with the one that matters.
+     */
+    public function tagExpansions(
+        DiscoveryTagExpansionRequest $request,
+        TagExpander $expander,
+    ): JsonResponse {
+        $effective = $this->settings->resolveQuietly();
+
+        if ($effective->provider !== NerbyProvider::OPENAI) {
+            return response()->json([
+                'message' => 'AI-assisted discovery is not the effective provider.',
+                'data' => [
+                    'effectiveProvider' => $effective->provider->value,
+                    'reason' => $effective->reason,
+                    'selectors' => [],
+                ],
+            ], Response::HTTP_CONFLICT);
+        }
+
+        /** @var list<string> $known */
+        $known = array_values((array) ($request->validated('knownSelectors') ?? []));
+
+        $result = $expander->expand((string) $request->validated('category'), $known);
+
+        $payload = [
+            'effectiveProvider' => $effective->provider->value,
+            // Whether the call worked, always — never inferred from the list being empty. A narrow
+            // category legitimately has no additional tags, and that must not read as a failure.
+            'executionStatus' => $result['status'],
+            'errorReason' => $result['error'],
+            // Search strategy only. Nothing here is a business, and nothing here is a credential.
+            'selectors' => $result['selectors'],
+            'usage' => $result['usage'],
+        ];
+
+        if ($result['status'] !== TagExpander::STATUS_OK) {
+            // 502 for the same reason as `proposals`: a scraper that only read the HTTP status must
+            // not mistake a failed model call for a category that genuinely has no other tags.
             return response()->json([
                 'message' => 'The discovery provider could not be reached or refused the request.',
                 'data' => $payload,

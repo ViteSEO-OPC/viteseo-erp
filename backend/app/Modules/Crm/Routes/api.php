@@ -138,6 +138,13 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::post('/discovery/proposals', [DiscoveryConfigController::class, 'proposals'])
             ->can('import', Lead::class)
             ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+        // Search STRATEGY, not business records: which OSM tags a category can hide under. Same
+        // guard and throttle as `proposals` because it reaches the same paid provider — though the
+        // answer is cached per category forever, so a healthy deployment calls it a handful of times
+        // in total.
+        Route::post('/discovery/tag-expansions', [DiscoveryConfigController::class, 'tagExpansions'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
         Route::get('/leads/{lead}/activities', [LeadController::class, 'activities'])->can('view', 'lead');
         // One lead as a PDF profile. Authorized by `view` on the lead — the same ownership boundary as
         // reading it — so a BD can export their own leads and nobody can export a lead they cannot see.

@@ -18,6 +18,12 @@ WHAT THE MODEL IS NEVER ASKED FOR, AND NEVER TRUSTED WITH: ``provider_id``, coor
 email, website, or category. Every field on every returned record comes from a real OSM element. The
 model's entire influence is over WHICH names get looked up.
 
+TWO CAPABILITIES, ONE CREDENTIAL PATH. Besides proposing names, this asks the CRM which OSM TAGS a
+category can hide under ({@see expand_tags}). That second answer is search strategy rather than data:
+it is validated against the OSM key vocabulary and executed by Overpass, so a wrong tag describes a
+query that finds nothing. Both go through the same authenticated CRM channel and neither ever sees a
+model credential.
+
 THE CEILING, STATED PLAINLY. A business absent from OSM cannot be resolved and is dropped. This
 provider therefore widens coverage WITHIN OSM; it does not reach beyond it. Reaching genuinely
 unmapped businesses is Capability B — a candidate verified by its own website or Wikidata rather than
@@ -216,6 +222,75 @@ class OpenAiDiscoveryProvider(DiscoveryProvider):
         usage = payload.get("usage")
 
         return names, dict(usage) if isinstance(usage, dict) else {}, EXECUTION_OK, None
+
+    # -- tag expansion: search STRATEGY, never business data -----------------------------------
+
+    def expand_tags(self, category: str, known: list[tuple[str, str]]) -> tuple[list[str], str, Optional[str], dict[str, Any]]:
+        """Additional OSM selectors worth sweeping for ``category``, straight from the CRM.
+
+        Returns raw, UNVALIDATED strings. {@see scraper.providers.tag_expansion.validate_selectors}
+        decides which are usable, because the code that will execute a selector is the code that owns
+        the tag vocabulary — splitting that across the network would let the two copies drift.
+
+        No area is sent. Whether ``amenity=fast_food`` belongs with restaurants is a fact about OSM's
+        taxonomy rather than about a town, which is what lets the CRM cache one answer per category
+        forever and keeps this capability's steady-state cost at zero calls.
+
+        Never raises, and never hides a failure — the same contract as ``_propose``.
+
+        :returns: ``(selectors, status, error, usage)``
+        """
+        payload: dict[str, Any] = {}
+        try:
+            response = self._client.post(
+                f"{self.crm_base_url}/discovery/tag-expansions",
+                headers={
+                    "Authorization": f"Bearer {self.crm_token}",
+                    "Accept": "application/json",
+                },
+                json={
+                    "category": category,
+                    # Advisory: lets the model ADD rather than repeat. Validation deduplicates
+                    # regardless, so a model that ignores this costs a wasted selector, never a
+                    # duplicated sweep.
+                    "knownSelectors": [f"{k}={v}" for k, v in known],
+                },
+            )
+        except httpx.HTTPError as exc:
+            return [], EXECUTION_CRM_UNREACHABLE, type(exc).__name__, {}
+
+        try:
+            body = response.json()
+            if isinstance(body, dict) and isinstance(body.get("data"), dict):
+                payload = body["data"]
+        except ValueError:
+            payload = {}
+
+        if response.status_code >= 400:
+            status = str(payload.get("executionStatus") or "")
+            if not status:
+                status = (
+                    EXECUTION_NOT_EFFECTIVE
+                    if response.status_code == 409
+                    else EXECUTION_CRM_UNREACHABLE
+                )
+            return [], status, str(payload.get("errorReason") or f"http_{response.status_code}"), {}
+
+        status = str(payload.get("executionStatus") or EXECUTION_OK)
+        if status != EXECUTION_OK:
+            return [], status, str(payload.get("errorReason") or ""), {}
+
+        raw = payload.get("selectors")
+        if not isinstance(raw, list):
+            return [], EXECUTION_INVALID_RESPONSE, "missing_selectors", {}
+
+        usage = payload.get("usage")
+        return (
+            [s.strip() for s in raw if isinstance(s, str) and s.strip()],
+            EXECUTION_OK,
+            None,
+            dict(usage) if isinstance(usage, dict) else {},
+        )
 
     def close(self) -> None:
         self._client.close()

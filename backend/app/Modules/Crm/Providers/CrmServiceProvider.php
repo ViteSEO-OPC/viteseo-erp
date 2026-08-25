@@ -47,7 +47,9 @@ use App\Modules\Crm\Policies\PlannerEventPolicy;
 use App\Modules\Crm\Policies\UserPolicy;
 use App\Modules\Crm\Services\BusinessRules\ScoringConfigProvider;
 use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
+use App\Modules\Crm\Services\Discovery\Contracts\TagExpander;
 use App\Modules\Crm\Services\Discovery\OpenAiProposalGenerator;
+use App\Modules\Crm\Services\Discovery\OpenAiTagExpander;
 use App\Modules\Crm\Services\Kpi\KpiConfig;
 use App\Modules\Crm\Services\NicheCanonicalizer;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
@@ -104,6 +106,7 @@ class CrmServiceProvider extends ServiceProvider
         // anything. Not a singleton — it reads the stored configuration per call, so an admin's key
         // or model change takes effect on the next request rather than after a restart.
         $this->app->bind(ProposalGenerator::class, OpenAiProposalGenerator::class);
+        $this->app->bind(TagExpander::class, OpenAiTagExpander::class);
 
         // Business Niche registry lookup for the Nearby Clients surface. SCOPED (one instance per
         // request) on purpose: the canonicalizer memoizes the registry, so serializing a whole
