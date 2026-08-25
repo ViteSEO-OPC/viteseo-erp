@@ -161,13 +161,117 @@ class WebsiteEvidenceService
 
         $candidate->save();
 
-        // Order matters: the margin rule can DEMOTE a candidate that just verified, so the
-        // contradiction check has to run after it and ask the table what survived — not assume the
-        // candidate in hand is still verified.
+        // Order matters: the margin rule can DEMOTE a candidate that just verified, so everything
+        // after it has to ask the table what survived — not assume the candidate in hand is still
+        // verified. Adjudicate, then unwind any claim the result contradicts, then publish it.
         $this->applyMargin($lead);
         $this->reconcileConfirmedAbsence($lead);
+        $this->promoteVerifiedWebsite($lead);
 
         return $candidate->refresh();
+    }
+
+    /**
+     * A verified candidate becomes the lead's website, so the ordinary audit can take it from here.
+     *
+     * THE STATE THIS FIXES. `crm_leads.website` is what ROUTES a lead: the audit queue selects rows
+     * where it is set, the evidence queue selects rows where it is null. A lead holding a verified
+     * candidate satisfied neither — it left the evidence queue (its search is answered) and could not
+     * enter the audit queue (the column was still null). It sat permanently at `website-unknown` and
+     * therefore Medium, while the evidence beneath it held a URL proven to belong to the business.
+     * In Vigan that is not an edge case: no business there carries a website tag at all, so this is
+     * the path every chain we discover takes.
+     *
+     * THIS WRITES A URL, NOT A VERDICT. `website_status` is untouched and stays whatever it was;
+     * only the audit may change it, and only from real page findings (HTTPS, About, Contact,
+     * Services) that this chain never collects. Promotion moves the lead to where those findings get
+     * made — it does not anticipate them. `website` is deliberately absent from `LeadObserver`'s
+     * scoring inputs, so this cannot move a Lead Score even on a qualified lead.
+     *
+     * WHY THIS IS NOT A NEW KIND OF WRITE. `LeadImportService::ingestDiscovered()` already backfills
+     * this column from a raw provider tag with no identity check at all. The URL here cleared
+     * {@see ACCEPT_CONFIDENCE} against the business's own name, phone and domain, and beat its
+     * runner-up by {@see ACCEPT_MARGIN}. Refusing the stricter source while accepting the looser one
+     * was the inconsistency, not this.
+     *
+     * NEVER OVERWRITES. Only a null column is filled, so a URL a person entered — or one an earlier
+     * ingest supplied — always wins. There is no path here that replaces an existing answer.
+     *
+     * AND IT UNWINDS ITSELF. Candidates are verified ONE AT A TIME, so a lead can pass through a
+     * moment where a single candidate is verified — and promoted — before a second arrives and
+     * {@see applyMargin()} refuses both. Left alone the lead would keep a URL its own evidence had
+     * just rejected, and would be audited on it. So when no verified candidate remains, a promotion
+     * this method can PROVE it made is withdrawn: the stored URL must match a candidate on this lead
+     * that the margin rule refused. That proof is what keeps the withdrawal away from a human's URL
+     * or an ingest's. Unlike the absence-confirmation path, retreating here IS the neutral direction
+     * — the lead returns to `website` null and to the evidence queue that was already searching it.
+     */
+    private function promoteVerifiedWebsite(Lead $lead): void
+    {
+        // Re-read rather than trust the candidate in hand: applyMargin may have just demoted it.
+        $verified = LeadWebsiteCandidate::query()
+            ->where('lead_id', $lead->id)->where('verified', true)->first();
+
+        if (! $verified) {
+            $this->withdrawPromotedWebsite($lead);
+
+            return;
+        }
+
+        // A column that already holds an answer is somebody else's decision — a human's, or an
+        // earlier ingest's. Promotion fills a gap; it never settles a disagreement.
+        if ($lead->website !== null && trim((string) $lead->website) !== '') {
+            return;
+        }
+
+        $url = $verified->normalized_url ?: $verified->url;
+        if ($url === null || trim($url) === '') {
+            return;
+        }
+
+        // The evidence row is left exactly as it is — url, normalized_url, confidence, signals and
+        // verified all stay put. This copies the URL onward; it never becomes the record of why.
+        $lead->update(['website' => $url]);
+
+        Log::info('Verified website candidate promoted to the lead', [
+            'lead_id' => $lead->id,
+            'candidate_id' => $verified->id,
+            'url' => $url,
+            'confidence' => $verified->confidence,
+        ]);
+    }
+
+    /**
+     * Take back a promotion this class made, once the candidate behind it stopped being verified.
+     *
+     * ONLY WHAT IT CAN PROVE IT WROTE. The stored URL must match a candidate on this lead that the
+     * margin rule refused — the single situation in which a promotion is known to have been
+     * invalidated after the fact. A URL a person typed, or one an ingest supplied, matches no such
+     * candidate and is left exactly where it is.
+     */
+    private function withdrawPromotedWebsite(Lead $lead): void
+    {
+        $website = trim((string) $lead->website);
+        if ($website === '') {
+            return;
+        }
+
+        $ours = LeadWebsiteCandidate::query()
+            ->where('lead_id', $lead->id)
+            ->where('rejection_reason', LeadWebsiteCandidate::REJECTED_MARGIN)
+            ->where(fn ($q) => $q->where('url', $website)->orWhere('normalized_url', $website))
+            ->exists();
+
+        if (! $ours) {
+            return;
+        }
+
+        $lead->update(['website' => null]);
+
+        Log::info('Promoted website withdrawn — no candidate remains verified', [
+            'lead_id' => $lead->id,
+            'url' => $website,
+        ]);
     }
 
     /**

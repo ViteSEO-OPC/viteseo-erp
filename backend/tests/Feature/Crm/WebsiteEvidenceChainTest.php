@@ -731,4 +731,268 @@ class WebsiteEvidenceChainTest extends TestCase
             'canonical_url' => 'https://someone-else.ph',
         ];
     }
+
+    // --- a verified candidate becomes the lead's website ---------------------
+
+    public function test_a_verified_candidate_is_promoted_to_the_leads_website(): void
+    {
+        // THE SEAM THIS CLOSES. `crm_leads.website` is what ROUTES a lead between the two queues. A
+        // lead holding a verified candidate satisfied neither: answered for the evidence queue, and
+        // invisible to the audit queue because the column was still null.
+        $lead = $this->discoveredLead();
+        $this->assertNull($lead->website);
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+
+        $this->assertTrue($candidate->refresh()->verified);
+        $this->assertSame('https://vigandentalcare.ph', $lead->refresh()->website);
+    }
+
+    public function test_promotion_leaves_the_evidence_record_completely_intact(): void
+    {
+        // The candidate row remains the audit trail. Promotion copies the URL onward; it never
+        // becomes the record of WHY the URL is trusted.
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+
+        $candidate->refresh();
+        $this->assertTrue($candidate->verified);
+        $this->assertSame('https://vigandentalcare.ph', $candidate->url);
+        $this->assertNotNull($candidate->normalized_url);
+        $this->assertGreaterThanOrEqual(WebsiteEvidenceService::ACCEPT_CONFIDENCE, $candidate->confidence);
+        $this->assertNotEmpty($candidate->signals);
+        $this->assertNotNull($candidate->checked_at);
+        $this->assertNull($candidate->rejection_reason);
+    }
+
+    public function test_an_unverified_candidate_is_never_promoted(): void
+    {
+        // A page that belongs to somebody else is refused, and the lead keeps no URL at all.
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://someone-else.ph', 'source' => 'search'],
+        ], ['search']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->foreignFindings());
+
+        $this->assertFalse($candidate->refresh()->verified);
+        $this->assertNull($lead->refresh()->website);
+    }
+
+    public function test_a_candidate_the_margin_rule_demotes_is_never_promoted(): void
+    {
+        // The margin rule can demote a candidate that just verified, which is why promotion re-reads
+        // the table instead of trusting the candidate in hand.
+        $lead = $this->discoveredLead();
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'search'],
+            ['url' => 'https://vigandentalcare.com', 'source' => 'wikidata'],
+        ], ['search', 'wikidata']);
+
+        foreach (LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->get() as $candidate) {
+            $this->service()->recordVerification($candidate, $this->strongFindings($candidate->url));
+        }
+
+        $this->assertSame(
+            0,
+            LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->where('verified', true)->count(),
+        );
+        $this->assertNull($lead->refresh()->website);
+    }
+
+    public function test_promotion_never_overwrites_a_website_somebody_else_supplied(): void
+    {
+        // A column that already holds an answer is a human's or an earlier ingest's decision.
+        // Promotion fills a gap; it never settles a disagreement.
+        $lead = $this->discoveredLead();
+        $lead->update(['website' => 'https://entered-by-a-person.ph']);
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+
+        $this->assertTrue($candidate->refresh()->verified);
+        $this->assertSame('https://entered-by-a-person.ph', $lead->refresh()->website);
+    }
+
+    // --- routing: the whole point of the column ------------------------------
+
+    public function test_a_promoted_lead_leaves_the_evidence_queue_and_joins_the_audit_queue(): void
+    {
+        // BEFORE: in the evidence queue, absent from the audit queue.
+        // AFTER:  the reverse. That routing is what the seam broke and this restores.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        $this->assertContains((string) $lead->id, $this->evidenceQueueIds());
+        $this->assertNotContains((string) $lead->id, $this->auditQueueIds());
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+
+        $this->assertNotContains((string) $lead->id, $this->evidenceQueueIds());
+        $this->assertContains((string) $lead->id, $this->auditQueueIds());
+    }
+
+    public function test_a_lead_with_no_verified_candidate_stays_in_the_evidence_path(): void
+    {
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://someone-else.ph', 'source' => 'search'],
+        ], ['search']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->foreignFindings());
+
+        $this->assertNull($lead->refresh()->website);
+        $this->assertContains((string) $lead->id, $this->evidenceQueueIds());
+        $this->assertNotContains((string) $lead->id, $this->auditQueueIds());
+    }
+
+    // --- the frozen boundaries, re-asserted against promotion ----------------
+
+    public function test_promotion_does_not_write_website_status_or_move_priority(): void
+    {
+        // Promotion moves the lead to where a verdict gets MADE; it does not anticipate one. Only the
+        // audit may change website_status, and only from real page findings.
+        $lead = $this->discoveredLead();
+        $this->assertSame('website-unknown', $lead->website_status);
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+
+        $lead->refresh();
+        $this->assertSame('website-unknown', $lead->website_status);
+        $this->assertSame('medium', $this->nearbyPriorityFor($lead));
+    }
+
+    public function test_promotion_leaves_the_lead_score_untouched(): void
+    {
+        // `website` is deliberately absent from LeadObserver::SCORING_INPUTS, so this write cannot
+        // move a score even on a QUALIFIED lead — which is the only kind that has one.
+        $bd = $this->user('crm_bd');
+        $lead = $this->discoveredLead($bd);
+        $lead->update(['qualified_at' => now()]);
+        $scoreBefore = $lead->refresh()->score;
+        $this->assertNotNull($scoreBefore, 'a qualified lead should carry a score');
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+
+        $lead->refresh();
+        $this->assertSame('https://vigandentalcare.ph', $lead->website);
+        $this->assertSame($scoreBefore, $lead->score);
+    }
+
+    public function test_no_website_still_requires_the_human_confirmation_path(): void
+    {
+        // Promotion changes nothing about how absence is concluded. confirmAbsent() remains the only
+        // writer of `no-website`, and it still refuses until the search is exhausted.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->markExhausted($lead);
+
+        $this->assertNull($lead->refresh()->website);
+        $this->assertSame('website-unknown', $lead->website_status);
+
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
+
+        $lead->refresh();
+        $this->assertSame('no-website', $lead->website_status);
+        $this->assertSame('high', $this->nearbyPriorityFor($lead));
+        // Absence is a conclusion about the business, not a URL. Nothing was promoted.
+        $this->assertNull($lead->website);
+    }
+
+    /** @return list<string> lead ids the website-evidence queue currently offers */
+    private function evidenceQueueIds(): array
+    {
+        return collect($this->getJson('/api/v1/crm/website-evidence/queue')->assertOk()->json('data'))
+            ->pluck('id')->all();
+    }
+
+    /** @return list<string> lead ids the website-audit queue currently offers */
+    private function auditQueueIds(): array
+    {
+        return collect($this->getJson('/api/v1/crm/website-enrichment/queue')->assertOk()->json('data'))
+            ->pluck('id')->all();
+    }
+
+    public function test_a_promotion_is_withdrawn_when_the_margin_rule_later_refuses_it(): void
+    {
+        // FOUND BY TEST, NOT BY REASONING. Candidates verify ONE AT A TIME, so the first can be
+        // promoted before a second arrives and applyMargin() refuses both. Without the withdrawal the
+        // lead would keep — and be audited on — a URL its own evidence had just rejected.
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'search'],
+        ], ['search']);
+        $first = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($first, $this->strongFindings());
+
+        // Promoted while it stood alone.
+        $this->assertSame('https://vigandentalcare.ph', $lead->refresh()->website);
+
+        // A second, equally strong candidate on another domain arrives.
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.com', 'source' => 'wikidata'],
+        ], ['wikidata']);
+        $second = LeadWebsiteCandidate::query()
+            ->where('lead_id', $lead->id)->where('url', 'https://vigandentalcare.com')->firstOrFail();
+        $this->service()->recordVerification($second, $this->strongFindings($second->url));
+
+        // Both refused for insufficient margin — so the promotion goes with them.
+        $this->assertSame(
+            0,
+            LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->where('verified', true)->count(),
+        );
+        $this->assertNull($lead->refresh()->website);
+        // And the lead is back where the evidence chain can keep working on it.
+        $this->assertSame('website-unknown', $lead->website_status);
+    }
+
+    public function test_the_withdrawal_only_touches_a_url_this_class_promoted(): void
+    {
+        // A human's URL matches no margin-refused candidate, so it survives an adjudication that
+        // refuses every candidate on the lead.
+        $lead = $this->discoveredLead();
+        $lead->update(['website' => 'https://entered-by-a-person.ph']);
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'search'],
+            ['url' => 'https://vigandentalcare.com', 'source' => 'wikidata'],
+        ], ['search', 'wikidata']);
+        foreach (LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->get() as $candidate) {
+            $this->service()->recordVerification($candidate, $this->strongFindings($candidate->url));
+        }
+
+        $this->assertSame('https://entered-by-a-person.ph', $lead->refresh()->website);
+    }
+
 }
