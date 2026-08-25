@@ -22,10 +22,12 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $last_searched_at Cast to datetime; declared so static analysis applies the cast.
  * @property Carbon|null $exhausted_at Cast to datetime; declared so static analysis applies the cast.
  * @property Carbon|null $confirmed_absent_at Cast to datetime; declared so static analysis applies the cast.
+ * @property Carbon|null $confirmation_invalidated_at Cast to datetime; declared so static analysis applies the cast.
  */
 #[Fillable([
     'lead_id', 'tiers_run', 'candidates_found', 'candidates_rejected',
     'last_searched_at', 'exhausted_at', 'confirmed_absent_at', 'confirmed_by', 'confirmation_note',
+    'confirmation_invalidated_at', 'confirmation_invalidated_reason',
 ])]
 class LeadWebsiteSearch extends Model
 {
@@ -43,6 +45,7 @@ class LeadWebsiteSearch extends Model
             'last_searched_at' => 'datetime',
             'exhausted_at' => 'datetime',
             'confirmed_absent_at' => 'datetime',
+            'confirmation_invalidated_at' => 'datetime',
         ];
     }
 
@@ -64,8 +67,22 @@ class LeadWebsiteSearch extends Model
         return $this->exhausted_at !== null;
     }
 
+    /**
+     * A human concluded no website exists, and that conclusion still stands.
+     *
+     * A WITHDRAWN CONFIRMATION IS NOT A CONFIRMATION. When a later search deterministically verifies
+     * a website, the confirmation is invalidated rather than deleted — the BD's judgement was
+     * reasonable on the evidence they had, and the trail should say it was superseded, not that it
+     * never happened. Reading both columns here means no caller has to remember that rule.
+     */
     public function isConfirmedAbsent(): bool
     {
-        return $this->confirmed_absent_at !== null;
+        return $this->confirmed_absent_at !== null && $this->confirmation_invalidated_at === null;
+    }
+
+    /** A confirmation was made and later contradicted by a verified website. */
+    public function isConfirmationInvalidated(): bool
+    {
+        return $this->confirmed_absent_at !== null && $this->confirmation_invalidated_at !== null;
     }
 }

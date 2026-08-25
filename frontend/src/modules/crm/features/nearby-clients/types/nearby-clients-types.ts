@@ -148,6 +148,10 @@ export type WebsiteSearch = {
   confirmedAt: string | null;
   confirmedBy: string | null;
   note: string | null;
+  /** A confirmation that a later deterministically-verified website contradicted. */
+  confirmationWithdrawn: boolean;
+  withdrawnAt: string | null;
+  withdrawnReason: string | null;
   /** The server's own answer to "may this be confirmed now?" — never re-derived in the UI. */
   canConfirmAbsence: boolean;
 };

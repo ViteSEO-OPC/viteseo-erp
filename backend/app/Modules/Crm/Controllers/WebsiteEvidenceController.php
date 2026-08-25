@@ -157,6 +157,12 @@ class WebsiteEvidenceController extends Controller
                     'confirmedAt' => $search->confirmed_absent_at?->toIso8601String(),
                     'confirmedBy' => $search->confirmedBy?->name,
                     'note' => $search->confirmation_note,
+                    // A confirmation that a later verified website contradicted. Surfaced rather
+                    // than hidden: the panel should say the conclusion was superseded, not quietly
+                    // drop it as though nobody had ever decided.
+                    'confirmationWithdrawn' => $search->isConfirmationInvalidated(),
+                    'withdrawnAt' => $search->confirmation_invalidated_at?->toIso8601String(),
+                    'withdrawnReason' => $search->confirmation_invalidated_reason,
                     // Whether a BD may act. Surfaced so the UI need not re-derive the rule.
                     'canConfirmAbsence' => $search->isExhausted()
                         && ! $search->isConfirmedAbsent()

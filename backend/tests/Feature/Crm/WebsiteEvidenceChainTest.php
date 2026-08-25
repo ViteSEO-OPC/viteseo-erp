@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\LeadWebsiteCandidate;
 use App\Modules\Crm\Models\LeadWebsiteSearch;
+use App\Modules\Crm\Resources\NearbyClientResource;
 use App\Modules\Crm\Services\Website\WebsiteEvidenceService;
 use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use Database\Seeders\RolesAndPermissionsSeeder;
@@ -532,5 +533,202 @@ class WebsiteEvidenceChainTest extends TestCase
 
         $this->assertNotContains((string) $solved->id, $queued);
         $this->assertContains((string) $unsolved->id, $queued);
+    }
+
+    // --- a confirmed absence that later turns out to be wrong ----------------
+
+    public function test_a_verified_website_withdraws_an_earlier_confirmed_absence(): void
+    {
+        // THE EXACT SEQUENCE: confirm absence -> no-website/High -> a website is later verified ->
+        // no longer no-website/High. Before this, the lead kept the strongest signal on the Nearby
+        // board while the evidence underneath it proved a website existed.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        // 1. Searched, nothing found, human confirms.
+        $this->service()->recordCandidates($lead, [], ['osm_tag', 'wikidata']);
+        $this->service()->markExhausted($lead);
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
+
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+        $this->assertSame('high', $this->nearbyPriorityFor($lead));
+
+        // 2. A later tier proposes a URL, and it verifies deterministically.
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'search'],
+        ], ['search']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+        $this->assertTrue($candidate->refresh()->verified);
+
+        // 3. The lead must no longer claim absence, and must no longer rank High on the board.
+        $lead->refresh();
+        $this->assertSame('website-unknown', $lead->website_status);
+        $this->assertNotSame('high', $this->nearbyPriorityFor($lead));
+
+        $search = $this->service()->searchFor($lead);
+        $this->assertFalse($search->isConfirmedAbsent());
+        $this->assertTrue($search->isConfirmationInvalidated());
+        // The exhaustion claim goes too — a search holding a verified website plainly did not come
+        // up empty.
+        $this->assertFalse($search->isExhausted());
+    }
+
+    public function test_the_withdrawn_confirmation_is_kept_rather_than_erased(): void
+    {
+        // The BD's judgement was reasonable on the evidence they had. The trail must read
+        // "confirmed, then superseded" — not as though nobody ever decided.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->markExhausted($lead);
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence", ['note' => 'Called them.'])
+            ->assertOk();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'search'],
+        ], ['search']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+
+        $search = $this->service()->searchFor($lead->refresh());
+        $this->assertNotNull($search->confirmed_absent_at);
+        $this->assertSame($bd->id, $search->confirmed_by);
+        $this->assertSame('Called them.', $search->confirmation_note);
+        $this->assertNotNull($search->confirmation_invalidated_at);
+
+        $response = $this->getJson("/api/v1/crm/leads/{$lead->id}/website-evidence")->assertOk();
+        $response->assertJsonPath('data.search.confirmedAbsent', false);
+        $response->assertJsonPath('data.search.confirmationWithdrawn', true);
+        $this->assertNotNull($response->json('data.search.withdrawnReason'));
+    }
+
+    public function test_a_refused_candidate_leaves_a_confirmed_absence_standing(): void
+    {
+        // Only a VERIFIED website may overturn a human conclusion. A candidate that was checked and
+        // rejected is the evidence that supported the conclusion in the first place.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->markExhausted($lead);
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://someone-else.ph', 'source' => 'search'],
+        ], ['search']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->foreignFindings());
+
+        $this->assertFalse($candidate->refresh()->verified);
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+        $this->assertTrue($this->service()->searchFor($lead)->isConfirmedAbsent());
+    }
+
+    public function test_ambiguous_candidates_leave_the_lead_neutral_and_never_restore_no_website(): void
+    {
+        // A ONE-WAY DOOR, DELIBERATELY. Candidates verify one at a time, so a lead can pass through a
+        // moment where one candidate is verified — withdrawing the confirmation — before a second
+        // arrives and the margin rule refuses both. The confirmation is NOT restored afterwards, and
+        // that is the point: restoring it would mean writing `no-website` automatically, which is
+        // exactly the thing nothing in this system is allowed to do. The lead settles at neutral and
+        // a human may confirm again, having seen the two candidates that caused the doubt.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->markExhausted($lead);
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
+        $this->assertSame('no-website', $lead->refresh()->website_status);
+
+        // Two strong candidates on different domains — neither can be told apart, so both are refused.
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'search'],
+            ['url' => 'https://vigandentalcare.com', 'source' => 'wikidata'],
+        ], ['search', 'wikidata']);
+
+        foreach (LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->get() as $candidate) {
+            $this->service()->recordVerification($candidate, $this->strongFindings($candidate->url));
+        }
+
+        // Nothing survived verification...
+        $this->assertSame(
+            0,
+            LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->where('verified', true)->count(),
+        );
+        // ...and the lead is neutral, NOT back at no-website. Nothing automated may write that value.
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+        $this->assertNotSame('high', $this->nearbyPriorityFor($lead));
+        $this->assertFalse($this->service()->searchFor($lead)->isConfirmedAbsent());
+    }
+
+    public function test_the_withdrawal_never_writes_no_website_and_leaves_a_human_status_alone(): void
+    {
+        // Two guarantees in one: the reconciliation only ever reverts AWAY from `no-website`, and it
+        // will not stomp a status a person set more recently than the confirmation it is unwinding.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [], ['osm_tag']);
+        $this->service()->markExhausted($lead);
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertOk();
+
+        // A human moves it on before the verification lands.
+        $lead->update(['website_status' => 'needs-redesign']);
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://vigandentalcare.ph', 'source' => 'search'],
+        ], ['search']);
+        $candidate = LeadWebsiteCandidate::query()->where('lead_id', $lead->id)->firstOrFail();
+        $this->service()->recordVerification($candidate, $this->strongFindings());
+
+        $this->assertSame('needs-redesign', $lead->refresh()->website_status);
+        $this->assertTrue($this->service()->searchFor($lead)->isConfirmationInvalidated());
+    }
+
+    public function test_the_safety_rule_still_holds_after_a_withdrawal(): void
+    {
+        // Regression guard on the original invariant: an unchecked candidate must block confirmation.
+        // Re-asserted here because the withdrawal path now clears `exhausted_at`, and clearing it
+        // must NOT open a shortcut back to `no-website`.
+        $bd = $this->user('crm_bd');
+        Sanctum::actingAs($bd);
+        $lead = $this->discoveredLead();
+
+        $this->service()->recordCandidates($lead, [
+            ['url' => 'https://maybe.ph', 'source' => 'search'],
+        ], ['search']);
+
+        // Claiming exhaustion while a candidate is unchecked is refused...
+        $this->assertFalse($this->service()->markExhausted($lead)->isExhausted());
+
+        // ...and so, therefore, is the confirmation.
+        $this->postJson("/api/v1/crm/leads/{$lead->id}/website-absence")->assertStatus(409);
+        $this->assertSame('website-unknown', $lead->refresh()->website_status);
+    }
+
+    /** The prospecting priority the Nearby board would render for this lead. */
+    private function nearbyPriorityFor(Lead $lead): string
+    {
+        return (new NearbyClientResource($lead->refresh()))
+            ->toArray(request())['priority'];
+    }
+
+    /** Crawl findings for a page that is plainly a different business. */
+    private function foreignFindings(): array
+    {
+        return [
+            'website_reachable' => true,
+            'website_title' => 'Manila Hardware Supply',
+            'website_description' => 'Tools and paint.',
+            'final_url' => 'https://someone-else.ph',
+            'canonical_url' => 'https://someone-else.ph',
+        ];
     }
 }

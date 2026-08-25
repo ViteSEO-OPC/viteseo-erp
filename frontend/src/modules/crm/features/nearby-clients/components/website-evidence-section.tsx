@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Search, ShieldCheck, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, History, Search, ShieldCheck, Loader2 } from "lucide-react";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Textarea } from "@/modules/crm/components/ui/textarea";
 import {
@@ -129,6 +129,21 @@ function EvidenceBody({
             <CandidateRow key={c.id} candidate={c} />
           ))}
         </ul>
+      )}
+
+      {search.confirmationWithdrawn && (
+        // Say what happened. The BD's conclusion was reasonable on the evidence they had, and
+        // silently dropping it would read as the system changing its mind on its own.
+        <div className="rounded-md border border-amber-200 bg-amber-50/60 p-2 dark:border-amber-900 dark:bg-amber-950/30">
+          <p className="flex items-center gap-1 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+            <History className="h-3 w-3" aria-hidden />
+            Earlier &ldquo;no website&rdquo; confirmation withdrawn
+          </p>
+          <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+            {search.withdrawnReason ?? "A website was verified for this business."}
+            {search.confirmedBy && ` Originally confirmed by ${search.confirmedBy}.`}
+          </p>
+        </div>
       )}
 
       {search.confirmedAbsent ? (

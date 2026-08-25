@@ -161,9 +161,76 @@ class WebsiteEvidenceService
 
         $candidate->save();
 
+        // Order matters: the margin rule can DEMOTE a candidate that just verified, so the
+        // contradiction check has to run after it and ask the table what survived — not assume the
+        // candidate in hand is still verified.
         $this->applyMargin($lead);
+        $this->reconcileConfirmedAbsence($lead);
 
         return $candidate->refresh();
+    }
+
+    /**
+     * A verified website contradicts an earlier confirmation of absence — withdraw the confirmation.
+     *
+     * THE STATE THIS EXISTS TO PREVENT. A human confirms a business has no website; a later search
+     * deterministically verifies one. Without this, the lead keeps `no-website` and therefore keeps
+     * High Priority — the strongest signal on the Nearby board — while the evidence beneath it says a
+     * website exists at high confidence. The board would be pointing BDs at a greenfield opportunity
+     * that provably is not one.
+     *
+     * DIRECTION IS THE WHOLE SAFETY ARGUMENT. This reverts `no-website` to `website-unknown` and
+     * stops there. It never writes `no-website`, never guesses `has-website`, and never touches a
+     * status a human has since set to something else. Retreating to neutral when the evidence stops
+     * supporting a strong claim is safe; asserting a strong claim automatically is exactly what the
+     * rest of this class refuses to do. `website-unknown` then leaves the existing verification and
+     * Website Intelligence flow to determine the real state, which is its job, not this method's.
+     *
+     * The confirmation itself is invalidated rather than erased — see the migration for why.
+     */
+    private function reconcileConfirmedAbsence(Lead $lead): void
+    {
+        $verified = LeadWebsiteCandidate::query()
+            ->where('lead_id', $lead->id)->where('verified', true)->first();
+
+        if (! $verified) {
+            return;
+        }
+
+        $search = $this->searchFor($lead);
+
+        // An exhausted search that holds a verified candidate is self-contradictory: markExhausted()
+        // refuses that combination outright, so it can only arise from a verification recorded after
+        // the fact. Clear it for the same reason the confirmation goes — the search plainly did not
+        // come up empty.
+        if ($search->exists && $search->isExhausted()) {
+            $search->exhausted_at = null;
+            $search->save();
+        }
+
+        if (! $search->exists || ! $search->isConfirmedAbsent()) {
+            return;
+        }
+
+        DB::transaction(function () use ($lead, $search, $verified): void {
+            $search->confirmation_invalidated_at = now();
+            $search->confirmation_invalidated_reason = 'A website was verified for this business after the confirmation.';
+            $search->save();
+
+            // Only ever unwind OUR OWN claim. If a person has since moved the lead to some other
+            // status, that is a more recent human decision than the one being withdrawn.
+            if ($lead->website_status === 'no-website') {
+                $lead->update(['website_status' => 'website-unknown']);
+            }
+
+            Log::warning('Confirmed website absence withdrawn — a website was verified', [
+                'lead_id' => $lead->id,
+                'candidate_id' => $verified->id,
+                'url' => $verified->normalized_url ?? $verified->url,
+                'confidence' => $verified->confidence,
+                'originally_confirmed_by' => $search->confirmed_by,
+            ]);
+        });
     }
 
     /**
