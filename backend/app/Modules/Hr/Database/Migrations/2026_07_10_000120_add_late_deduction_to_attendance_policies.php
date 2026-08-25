@@ -4,7 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-// Payroll tardiness policy (Company → Rules): how accumulated lates translate into a
+// Payroll tardiness policy (Company → Settings): how accumulated lates translate into a
 // pay deduction. Kept SEPARATE from the violation-flag thresholds so HR can tune the
 // colour ladder and the payroll penalty independently. Default 'none' — no behaviour
 // change until HR opts in.

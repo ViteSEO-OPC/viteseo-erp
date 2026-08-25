@@ -102,7 +102,7 @@ class PayslipMonthSummaryTest extends HrTestCase
             ->json('data');
     }
 
-    /** Move the three timing switches together, the way HR sets them in Company → Rules. */
+    /** Move the three timing switches together, the way HR sets them in Company → Settings. */
     private function timing(string $value): void
     {
         PayrollSetting::effectiveFrom('2000-01-01');

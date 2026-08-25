@@ -20,11 +20,6 @@ use OpenSpout\Writer\XLSX\Writer;
 /** THE PAYROLL BREAKDOWN AS A WORKBOOK — the styling half of the run export. */
 final class PayrollXlsxWriter
 {
-    /** Matches the payslip PDF, which hardcodes the same name (payslip.blade.php). */
-    public const COMPANY = 'VITE SEO DIGITAL ADVERTISING OPC';
-
-    public const ADDRESS = 'Makati City, Metro Manila, Philippines';
-
     private const INK = '171717';
 
     private const MUTED = '777777';
@@ -53,13 +48,14 @@ final class PayrollXlsxWriter
      *               rows: list<list<float|int|string|null>>,
      *               totals: list<float|int|string|null>}  $breakdown
      * @param  array{columns: list<string>, rows: list<list<float|int|string|null>>, text: list<int>}  $source
+     * @param  array{name: string, address: string, logo: ?string}  $letterhead  from CompanyProfileService
      */
-    public static function write(string $path, array $breakdown, array $source): void
+    public static function write(string $path, array $breakdown, array $source, array $letterhead): void
     {
         $writer = new Writer(new Options());
         $writer->openToFile($path);
 
-        self::writeBreakdown($writer, $breakdown);
+        self::writeBreakdown($writer, $breakdown, $letterhead);
         self::writeSource($writer, $source);
 
         $writer->close();
@@ -69,8 +65,9 @@ final class PayrollXlsxWriter
      * Sheet 1 — the styled table, the one this whole class exists for.
      *
      * @param  array<string, mixed>  $breakdown
+     * @param  array{name: string, address: string, logo: ?string}  $letterhead
      */
-    private static function writeBreakdown(Writer $writer, array $breakdown): void
+    private static function writeBreakdown(Writer $writer, array $breakdown, array $letterhead): void
     {
         $sheet = $writer->getCurrentSheet();
         $sheet->setName('Payroll Export');
@@ -83,9 +80,11 @@ final class PayrollXlsxWriter
         }
 
         // --- letterhead -----------------------------------------------------------------------
-        $writer->addRow(new Row([new StringCell(self::COMPANY, self::text(16, self::INK, bold: true))], 22.0));
+        // Same name and address the payslip prints — both read Company → Settings, so the
+        // workbook and the PDF can no longer drift apart.
+        $writer->addRow(new Row([new StringCell($letterhead['name'], self::text(16, self::INK, bold: true))], 22.0));
         $writer->addRow(new Row([new StringCell($breakdown['title'], self::text(10, self::MUTED))]));
-        $writer->addRow(new Row([new StringCell(self::ADDRESS, self::text(8, self::MUTED))]));
+        $writer->addRow(new Row([new StringCell($letterhead['address'], self::text(8, self::MUTED))]));
         $writer->addRow(new Row([]));
 
         // --- the four cards -------------------------------------------------------------------

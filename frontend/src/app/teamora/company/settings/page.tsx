@@ -18,6 +18,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { CompanyDetailsForm } from "@/modules/hr/components/company-details-form";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { WorkScheduleFormDialog } from "@/modules/hr/components/work-schedule-form-dialog";
 import {
@@ -37,6 +38,7 @@ import {
   type DailyRateBasis,
   type EarlyClockInMode,
   type LateDeductionMode,
+  type LateMinutesFrom,
   type LateTier,
   type OvertimeMode,
   type UndertimeDeductionMode,
@@ -45,9 +47,24 @@ import {
   type WorkSchedule,
 } from "@/modules/hr/types/rules";
 import { SimpleSelect } from "@/modules/hr/ui/select";
-import { DatePicker } from "@/modules/hr/ui/date-picker";
-import { formatDate } from "@/core/lib/format";
-import { manilaToday } from "@/modules/hr/lib/manila-date";
+import { AxiosError } from "axios";
+
+/**
+ * The server's own words, when it has any.
+ *
+ * A 422 carries the reason in `errors.<field>[0]`, and a flat "Could not save." in its place
+ * leaves HR staring at a form that refuses to save without ever saying why. That is not
+ * hypothetical: the rules here are refused outright when a change would mis-price a period that
+ * has already been run, and the refusal is only useful if its reason arrives with it.
+ */
+function saveError(err: unknown, fallback = "Could not save."): string {
+  if (!(err instanceof AxiosError)) return fallback;
+
+  const errors = err.response?.data?.errors as Record<string, string[]> | undefined;
+  const firstField = errors ? Object.values(errors)[0]?.[0] : undefined;
+
+  return firstField ?? err.response?.data?.message ?? fallback;
+}
 
 export default function RulesPage() {
   const { data: schedules, isLoading, isError } = useWorkSchedules();
@@ -77,19 +94,39 @@ export default function RulesPage() {
   return (
     <div className="p-4 sm:p-8">
       <PageHeader
-        title="Company Rules"
-        subtitle="Work schedules per role, attendance policy, and per-employee overrides."
-        actions={
-          <Button onClick={openCreate}>
-            <Plus />
-            Add Schedule
-          </Button>
-        }
+        title="Company Settings"
+        subtitle="Company details, work schedules per role, attendance settings, and per-employee overrides."
       />
 
       <div className="mt-8 space-y-8">
-        {/* Section A — schedules */}
-        <section>
+        {/*
+         * Section A — who the employer is. First on the page because it is the one thing here
+         * that appears on documents people outside HR read: every payslip, export and report
+         * prints this letterhead.
+         */}
+        <CompanyDetailsForm />
+
+        {/* Section B — schedules */}
+        <section className="space-y-6">
+          {/*
+           * The heading carries "Add Schedule" rather than the page header: the page now edits
+           * four unrelated things, so a button parked at the top reads as applying to all of
+           * them. Beside the table it fills, it can only mean one thing.
+           */}
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="space-y-1">
+              <h2 className="text-h3 font-bold text-foreground">Work schedules</h2>
+              <p className="text-sm text-muted-foreground">
+                Working days and hours per role. Lateness is measured against these, plus each
+                schedule&rsquo;s own grace period.
+              </p>
+            </div>
+            <Button onClick={openCreate}>
+              <Plus />
+              Add Schedule
+            </Button>
+          </div>
+
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading schedules…</p>
           ) : isError ? (
@@ -103,11 +140,11 @@ export default function RulesPage() {
           )}
         </section>
 
-        {/* Section B — attendance policy */}
+        {/* Section C — attendance settings */}
         <AttendancePolicyForm />
 
         {/*
-         * Section C — payroll settings. Kept visually separate from the attendance policy
+         * Section D — payroll settings. Kept visually separate from the attendance settings
          * rather than folded into its card grid: both sections carry an "Effective from"
          * date, but they mean DIFFERENT things (see the two banners), and the payroll rules
          * have nothing to do with the violation engine the attendance heading describes.
@@ -133,7 +170,7 @@ export default function RulesPage() {
   );
 }
 
-// ---- Section A: schedules table ----
+// ---- Section B: schedules table ----
 
 // Column widths shared by the header and every row so they line up. Matches the
 // Figma frame (Schedule / Workdays / Hours / Grace / Actions).
@@ -213,7 +250,7 @@ function SchedulesTable({
   );
 }
 
-// ---- Section B: attendance policy + task format ----
+// ---- Section C: attendance settings + task format ----
 
 function AttendancePolicyForm() {
   const { data: policy } = useAttendancePolicy();
@@ -221,7 +258,7 @@ function AttendancePolicyForm() {
   return (
     <section className="space-y-6">
       <div className="space-y-1">
-        <h2 className="text-h3 font-bold text-foreground">Attendance policy</h2>
+        <h2 className="text-h3 font-bold text-foreground">Attendance settings</h2>
         <p className="text-sm text-muted-foreground">
           Handbook thresholds the violation system reads.
         </p>
@@ -245,6 +282,7 @@ type PolicyCardKey =
   | "time_deductions"
   | "early_ot"
   | "rest_day_work"
+  | "management"
   | "geofence"
   | "premium_rates"
   | "basis"
@@ -280,6 +318,12 @@ const POLICY_CARDS: PolicyCard[] = [
     title: "Working a rest day",
     description:
       "Whether someone can time in on a day their schedule doesn't cover, or has to ask you first. The day is paid the same either way.",
+  },
+  {
+    key: "management",
+    title: "Management attendance",
+    description:
+      "Whether management staff are timed in and out automatically instead of using the time clock, and whether they earn the premium on a holiday they work.",
   },
   {
     key: "geofence",
@@ -326,7 +370,8 @@ function rungValue(
 
 // How lateness is charged. "exact" bills the precise minutes late; "custom" is a single
 // threshold rule — if late by MORE than `over` minutes, charge a flat `charge` minutes —
-// stored as a one-row late_tiers ladder (late_deduction_mode = 'tiered').
+// stored as a one-row late_tiers ladder (late_deduction_mode = 'tiered'). With
+// `late_tier_recurring` on, that rung repeats per whole block of `over` minutes instead.
 type ChargeMode = "exact" | "custom";
 
 // The single threshold rung the UI edits, read out of the stored late_tiers (minutes).
@@ -334,6 +379,95 @@ function thresholdFrom(tiers: LateTier[] | null | undefined): { over: number; ch
   const row = tiers?.[0];
   if (!row) return { over: 15, charge: 60 }; // sensible starting point
   return { over: Number(row.over ?? 15), charge: Math.round(Number(row.hours ?? 1) * 60) };
+}
+
+/**
+ * What the threshold rule costs at a given number of CHARGEABLE late minutes — mirrors
+ * DeductionService::tierMinutes() exactly, including the recurring branch's `- 1`. Both modes
+ * share one boundary: strictly MORE than `over`, so repeating changes how often the rung is
+ * charged and never when it starts.
+ */
+function thresholdCost(lateMinutes: number, over: number, charge: number, recurring: boolean): number {
+  if (!Number.isFinite(over) || !Number.isFinite(charge) || charge < 0) return 0;
+  if (recurring) return over >= 1 ? Math.floor(Math.max(0, lateMinutes - 1) / over) * charge : 0;
+  return lateMinutes > over ? charge : 0;
+}
+
+/** The bits of a work schedule the late preview needs, all as Manila minutes-of-day. */
+type SampleDay = {
+  startMin: number;
+  graceMin: number;
+  mealStartMin: number | null; // the unpaid meal, which is never charged as missed time
+  mealEndMin: number | null;
+  mealCap: number;
+};
+
+/** The lateness rule as this card has it configured. */
+type LateRule = {
+  basis: LateMinutesFrom;
+  mode: ChargeMode;
+  over: number;
+  charge: number;
+  recurring: boolean;
+};
+
+/**
+ * The whole late calculation as payroll runs it, from a clock-in to minutes of pay — mirrors
+ * DeductionService::forDay(). Grace GATES: an arrival inside it costs nothing on either basis.
+ * Past the gate, the basis decides what the charge is measured from. The unpaid meal is netted
+ * off an `exact` charge (an arrival after lunch did not miss the lunch hour of work) but never
+ * off a threshold charge — that is a ladder rung, not a span of clock, and has no meal inside it.
+ */
+function lateCostAt(timeIn: number, day: SampleDay, rule: LateRule): number {
+  const graceEnd = day.startMin + Math.max(0, day.graceMin);
+  if (timeIn <= graceEnd) return 0;
+
+  const from = rule.basis === "after_grace" ? graceEnd : day.startMin;
+  const chargeable = Math.max(0, timeIn - from);
+  if (rule.mode !== "exact") {
+    return thresholdCost(chargeable, rule.over, rule.charge, rule.recurring);
+  }
+
+  const { mealStartMin, mealEndMin } = day;
+  const meal =
+    mealStartMin === null || mealEndMin === null || mealEndMin <= mealStartMin
+      ? 0
+      : Math.min(
+          Math.max(0, day.mealCap),
+          Math.max(0, Math.min(timeIn, mealEndMin) - Math.max(from, mealStartMin)),
+        );
+
+  return Math.max(0, chargeable - meal);
+}
+
+/** The first clock minute the rule costs anything, searching one shift's worth. */
+function firstChargedMinute(day: SampleDay, rule: LateRule): number | null {
+  for (let t = day.startMin + Math.max(0, day.graceMin) + 1; t <= day.startMin + 480; t++) {
+    if (lateCostAt(t, day, rule) > 0) return t;
+  }
+  return null;
+}
+
+/** "08:00" → 480. Unparseable falls back to 8am so the preview always renders something. */
+function toMinutes(hhmm: string | null | undefined): number {
+  const m = /^(\d{1,2}):(\d{2})/.exec(hhmm ?? "");
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 480;
+}
+
+/** 511 → "8:31 AM" — the preview reads in clock time, the way HR asks the question. */
+function toClock(minutes: number): string {
+  const m = ((minutes % 1440) + 1440) % 1440;
+  const h24 = Math.floor(m / 60);
+  const h = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h}:${String(m % 60).padStart(2, "0")} ${h24 < 12 ? "AM" : "PM"}`;
+}
+
+/** 90 → "1h 30m", 120 → "2h", 45 → "45m". Deduction figures read as time, not decimals. */
+function asDuration(minutes: number): string {
+  if (minutes <= 0) return "no deduction";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return [h > 0 ? `${h}h` : null, m > 0 ? `${m}m` : null].filter(Boolean).join(" ");
 }
 
 // The four alert levels must strictly ascend. Returns an error message, or null if OK.
@@ -349,6 +483,23 @@ function ladderError(late: number[], absent: number[], missed: number[], longBre
 function AttendancePolicyEditor() {
   const { data: policy } = useAttendancePolicy();
   const update = useUpdateAttendancePolicy();
+
+  // The default work schedule, read ONLY so the late preview can be shown in clock times
+  // instead of abstract minutes. Served from the same cached useWorkSchedules() the table
+  // above calls, so this costs no second request. Grace lives on the schedule, not on the
+  // policy, which is why the preview has to name which schedule it is illustrating.
+  const { data: schedules } = useWorkSchedules();
+  const sample = schedules?.find((s) => s.is_default) ?? schedules?.[0];
+  const sampleStart = toMinutes(sample?.start_time);
+  const sampleGrace = Math.max(0, sample?.grace_minutes ?? 15);
+  const sampleDay: SampleDay = {
+    startMin: sampleStart,
+    graceMin: sampleGrace,
+    // The meal sits between the two half-day windows, exactly as DeductionService reads it.
+    mealStartMin: sample?.am_end_time ? toMinutes(sample.am_end_time) : null,
+    mealEndMin: sample?.pm_start_time ? toMinutes(sample.pm_start_time) : null,
+    mealCap: Math.max(0, sample?.unpaid_break_minutes ?? 0),
+  };
 
   // Violation flags — the four alert levels HR configures, read out of the stored ladder.
   // Lateness is by lates-this-month; absence by consecutive days. Reassembled on save.
@@ -374,9 +525,10 @@ function AttendancePolicyEditor() {
   // Whether the late tally resets each calendar month (on) or carries over (off).
   const [monthlyReset, setMonthlyReset] = useState(policy?.monthly_late_reset ?? true);
 
-  // Tardiness pay deduction — two INDEPENDENT switches that can both be on:
+  // Tardiness pay deduction — two MUTUALLY EXCLUSIVE switches; at most one is ever on:
   // • lateChargeOn       = deduct for the actual time late (exact minutes, or a threshold rule)
   // • latePenaltyEnabled = deduct 1 extra full day for every N lates in the pay period
+  // Turning either on turns the other off, so the same late is never charged twice.
   const [lateChargeOn, setLateChargeOn] = useState((policy?.late_deduction_mode ?? "none") !== "none");
   const [latePenaltyEnabled, setLatePenaltyEnabled] = useState(policy?.late_penalty_enabled ?? false);
   const [latesPerDeduction, setLatesPerDeduction] = useState(String(policy?.lates_per_deduction ?? 3));
@@ -392,6 +544,16 @@ function AttendancePolicyEditor() {
   // Working a rest day. On (the default) = the work-request queue; off = an ordinary punch.
   const [restDayNeedsRequest, setRestDayNeedsRequest] = useState(
     policy?.rest_day_work_requires_request ?? true,
+  );
+
+  // Management attendance. On (the default) = they never punch and the platform writes their
+  // days; off = they use the time clock like everyone else. The premium switch is separate
+  // because it is a PAY question, not an attendance one.
+  const [managementAuto, setManagementAuto] = useState(
+    policy?.management_auto_attendance ?? true,
+  );
+  const [managementHolidayPremium, setManagementHolidayPremium] = useState(
+    policy?.management_holiday_premium ?? false,
   );
 
   // Geofenced clock-in. lat/lng are kept as STRINGS so an empty box stays empty ("no pin
@@ -432,6 +594,9 @@ function AttendancePolicyEditor() {
   const [chargeMode, setChargeMode] = useState<ChargeMode>(policy?.late_deduction_mode === "tiered" ? "custom" : "exact");
   const [thresholdOver, setThresholdOver] = useState(String(th.over));
   const [thresholdCharge, setThresholdCharge] = useState(String(th.charge));
+  // Whether that one rung REPEATS. Off (the default, and every existing policy) charges it
+  // once however late the arrival — the behaviour this page has always had.
+  const [thresholdRecurring, setThresholdRecurring] = useState(policy?.late_tier_recurring ?? false);
   const [lateFrom, setLateFrom] = useState(policy?.late_minutes_from ?? "start_time");
   // Item 5 — how long past someone's own shift end an open punch is still "in progress".
   const [timeoutAllowance, setTimeoutAllowance] = useState(
@@ -459,7 +624,6 @@ function AttendancePolicyEditor() {
   // today (the default) reaches the open cycle and every future one, but never a cycle that has
   // already closed. Back-dating is how HR corrects a cycle that has already been run — without
   // it, a fix typed after the cycle ended could never reach the payslips it was meant to fix.
-  const [effectiveFrom, setEffectiveFrom] = useState(manilaToday);
 
   // Save just ONE card's fields (partial update — the API only touches keys it's sent).
   async function saveCard(
@@ -472,13 +636,14 @@ function AttendancePolicyEditor() {
     if (guard && !guard()) return;
     setSaving(key);
     try {
-      // Every card's save carries the date. The server versions the WHOLE policy row, so the
-      // date applies to all the rules as they stand after this save, not only this card's.
-      await update.mutateAsync({ ...fields, effective_from: effectiveFrom });
+      // No date is sent: a rule applies from today, and the server refuses a past one. The
+      // server versions the WHOLE policy row, so today's save dates every rule on this page as
+      // it stands, not only this card's.
+      await update.mutateAsync(fields);
       toast.success("Saved");
       setOpenCard(null);
-    } catch {
-      toast.error("Could not save.");
+    } catch (err) {
+      toast.error(saveError(err));
     } finally {
       setSaving(null);
     }
@@ -502,6 +667,20 @@ function AttendancePolicyEditor() {
     const n = Number(timeoutAllowance);
     if (!Number.isInteger(n) || n < 30 || n > 720) {
       toast.error("The wait after the shift ends must be between 30 minutes and 12 hours.");
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Everything the time-deduction card has to be true before it saves. The recurring rule is
+   * the addition: a 0-minute block would repeat once per minute late, which the server rejects
+   * — caught here so HR gets a sentence instead of a 422.
+   */
+  function guardTimeDeductions(): boolean {
+    if (!guardTimeoutAllowance()) return false;
+    if (lateChargeOn && chargeMode === "custom" && thresholdRecurring && Number(thresholdOver) < 1) {
+      toast.error("A repeating late rule needs a threshold of at least 1 minute.");
       return false;
     }
     return true;
@@ -571,6 +750,9 @@ function AttendancePolicyEditor() {
   const chargeFields = () => ({
     late_deduction_mode: lateMode,
     late_tiers: lateMode === "tiered" ? [{ over: Number(thresholdOver), hours: Number(thresholdCharge) / 60 }] : null,
+    // Meaningless without a threshold rule, and the server rejects it on a multi-rung ladder —
+    // so it is forced off whenever the rule that carries it isn't the one being saved.
+    late_tier_recurring: lateMode === "tiered" ? thresholdRecurring : false,
     deduction_rounding: "exact" as const,
     deduction_block_minutes: 60,
     late_minutes_from: lateFrom,
@@ -578,71 +760,153 @@ function AttendancePolicyEditor() {
 
   // The lateness charge controls, shown when the per-time switch is on. "Start counting late
   // from" comes first, then how the time is charged: Exact, or a single threshold rule.
-  const chargeControls = () => (
-    <div className="ml-7 space-y-3 border-l-2 border-border pl-4">
-      <div className="flex flex-wrap items-end gap-4">
-        <FieldSelect
-          id="pol-late-from"
-          label="Start counting late from"
-          value={lateFrom}
-          onChange={(v) => setLateFrom(v as "start_time" | "after_grace")}
-          options={[
-            { value: "start_time", label: "Scheduled start time" },
-            { value: "after_grace", label: "End of the grace period" },
-          ]}
-        />
-        <FieldSelect
-          id="pol-charge-mode"
-          label="Charge the time as"
-          value={chargeMode}
-          onChange={(v) => setChargeMode(v as ChargeMode)}
-          options={[
-            { value: "exact", label: "Exact time missed" },
-            { value: "custom", label: "Custom — threshold rule" },
-          ]}
-        />
-      </div>
+  const chargeControls = () => {
+    const rule: LateRule = {
+      basis: lateFrom,
+      mode: chargeMode,
+      over: Number(thresholdOver),
+      charge: Number(thresholdCharge),
+      recurring: thresholdRecurring,
+    };
+    // Three clock moments worth showing: the last free minute, the first minute the rule costs
+    // anything, and two hours in — where a repeating rule visibly diverges from a flat one.
+    // Deduped and sorted, because with a small threshold they can land on the same minute.
+    const first = firstChargedMinute(sampleDay, rule);
+    const previewMarks = [
+      ...new Set(
+        [sampleStart + sampleGrace, first, sampleStart + 120].filter(
+          (t): t is number => t !== null,
+        ),
+      ),
+    ].sort((a, b) => a - b);
 
-      {chargeMode === "custom" && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-foreground">If late by more than</span>
-          <Input
-            id="pol-th-over"
-            type="number"
-            min={0}
-            max={480}
-            value={thresholdOver}
-            onChange={(e) => setThresholdOver(e.target.value)}
-            className="w-20"
+    return (
+      <div className="ml-7 space-y-3 border-l-2 border-border pl-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <FieldSelect
+            id="pol-late-from"
+            label="Start counting late from"
+            value={lateFrom}
+            onChange={(v) => setLateFrom(v as "start_time" | "after_grace")}
+            options={[
+              { value: "start_time", label: "Scheduled start time" },
+              { value: "after_grace", label: "End of the grace period" },
+            ]}
           />
-          <span className="text-sm text-foreground">minutes, charge</span>
-          <Input
-            id="pol-th-charge"
-            type="number"
-            min={0}
-            max={480}
-            value={thresholdCharge}
-            onChange={(e) => setThresholdCharge(e.target.value)}
-            className="w-20"
+          <FieldSelect
+            id="pol-charge-mode"
+            label="Charge the time as"
+            value={chargeMode}
+            onChange={(v) => setChargeMode(v as ChargeMode)}
+            options={[
+              { value: "exact", label: "Exact time missed" },
+              { value: "custom", label: "Custom — threshold rule" },
+            ]}
           />
-          <span className="text-sm text-foreground">minutes&apos; pay.</span>
         </div>
-      )}
 
-      {chargeMode === "exact" ? (
-        <Hint>Exact charges only the minutes late — the proportionate, Art. 113-safe default.</Hint>
-      ) : (
-        <div className="rounded-lg border border-destructive bg-destructive/5 p-3">
-          <p className="text-xs text-destructive">
-            A threshold rule charges a flat amount that can exceed the actual minutes late (e.g. 16 min late
-            → a full hour docked). This may be an unlawful penalty under Labor Code Art. 113 — enable only
-            with legal review.
+        {/* What "Start counting late from" does. The control used to be a bare label with two
+            options and no explanation, which is how "scheduled start" got read as "grace is
+            ignored" — it never means that: grace gates lateness on both settings. */}
+        <Hint>
+          Grace always applies first — nobody who clocks in inside it is late, on either setting.
+          Past grace, this picks what the charge is measured from:{" "}
+          <strong className="text-foreground">scheduled start</strong> counts from{" "}
+          {toClock(sampleStart)}, so a threshold bites sooner;{" "}
+          <strong className="text-foreground">end of the grace period</strong> counts from{" "}
+          {toClock(sampleStart + sampleGrace)}, so the same threshold bites {sampleGrace} minutes
+          later.
+        </Hint>
+
+        {chargeMode === "custom" && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-foreground">
+                {thresholdRecurring ? "For every" : "If late by more than"}
+              </span>
+              <Input
+                id="pol-th-over"
+                type="number"
+                min={thresholdRecurring ? 1 : 0}
+                max={480}
+                value={thresholdOver}
+                onChange={(e) => setThresholdOver(e.target.value)}
+                className="w-20"
+              />
+              <span className="text-sm text-foreground">
+                {thresholdRecurring ? "minutes late, charge" : "minutes, charge"}
+              </span>
+              <Input
+                id="pol-th-charge"
+                type="number"
+                min={0}
+                max={480}
+                value={thresholdCharge}
+                onChange={(e) => setThresholdCharge(e.target.value)}
+                className="w-20"
+              />
+              <span className="text-sm text-foreground">minutes&apos; pay.</span>
+            </div>
+
+            {/* The toggle. Off = charge the rung once (how this rule has always worked);
+                on = charge it again for every further whole block of `over` minutes. */}
+            <CheckBox
+              checked={thresholdRecurring}
+              onChange={setThresholdRecurring}
+              label="Repeat the charge for every block of late minutes"
+            />
+
+          </div>
+        )}
+
+        {/* What it actually costs, at real clock times, computed the way the payroll engine does.
+            "31 minutes late" was never the question HR asks — "what time can somebody walk in
+            before this costs them" is, and the answer moves with grace, the basis and the toggle.
+            Shown for BOTH charge modes: under `exact` the grace gate is the whole story. */}
+        <div className="ml-7 space-y-1 border-l-2 border-border pl-4">
+          <p className="text-xs text-muted-foreground">
+            Example — {sample ? `${sample.name}: ` : ""}
+            {toClock(sampleStart)} start, {sampleGrace} min grace.
           </p>
+          {previewMarks.map((t) => (
+            <p key={t} className="text-xs text-muted-foreground">
+              In at <strong className="text-foreground">{toClock(t)}</strong> →{" "}
+              <strong className="text-foreground">
+                {asDuration(lateCostAt(t, sampleDay, rule))}
+              </strong>{" "}
+              deducted{t <= sampleStart + sampleGrace ? " (still within grace)" : ""}
+            </p>
+          ))}
         </div>
-      )}
-      <Hint>Leaving early is always billed to the exact minute. A single day can never cost more than one day&apos;s pay.</Hint>
-    </div>
-  );
+
+        {chargeMode === "exact" ? (
+          <Hint>
+            Exact charges only the minutes late — the proportionate, Art. 113-safe default. Grace is
+            still honoured: an arrival inside it costs nothing.
+          </Hint>
+        ) : (
+          <div className="rounded-lg border border-destructive bg-destructive/5 p-3">
+            <p className="text-xs text-destructive">
+              A threshold rule charges a flat amount that can exceed the actual minutes late (e.g. 16 min late
+              → a full hour docked). This may be an unlawful penalty under Labor Code Art. 113 — enable only
+              with legal review.
+              {thresholdRecurring && (
+                <>
+                  {" "}
+                  <strong>
+                    Repeating multiplies that gap: the charge keeps compounding with the lateness, so a
+                    long delay can reach a whole day&apos;s pay.
+                  </strong>{" "}
+                  A single day is still capped at one day&apos;s pay, but nothing below that cap is.
+                </>
+              )}
+            </p>
+          </div>
+        )}
+        <Hint>Leaving early is always billed to the exact minute. A single day can never cost more than one day&apos;s pay.</Hint>
+      </div>
+    );
+  };
 
   // --- Geofenced clock-in ---
 
@@ -724,33 +988,16 @@ function AttendancePolicyEditor() {
        */}
       <div className="rounded-lg border border-success bg-success-subtle p-4">
         <p className="text-xs text-foreground">
-          <strong>A change here reaches the whole of any cycle it applies to — it is not split
-          at the date you save it.</strong>{" "}
+          <strong>A change here reaches the whole of the cycle that is still open — it is not
+          split at the date you save it.</strong>{" "}
           Payroll prices each cycle using the rules in force on its <strong>last day</strong>,
-          so saving today reaches the cycle that is still open and every cycle after it. Cycles
-          that have already ended keep the rules they were run under. A <strong>locked</strong>{" "}
-          run and an already-<strong>disbursed</strong> payslip can never be repriced at all.
+          so saving today covers the open cycle and every cycle after it, and seals when that
+          cycle ends. Cycles that have already ended keep the rules they were run under, and
+          cannot be changed by editing this page — fix one by correcting its payslips. A{" "}
+          <strong>locked</strong> run and an already-<strong>disbursed</strong> payslip can
+          never be repriced at all.
         </p>
       </div>
-
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Label htmlFor="pol-effective-from">Effective from</Label>
-          <DatePicker
-            id="pol-effective-from"
-            value={effectiveFrom}
-            onChange={setEffectiveFrom}
-            className="w-44"
-          />
-        </div>
-        <Hint>
-          Leave as today unless you are correcting a cycle that has already been run — then set
-          it to a date inside that cycle and re-run payroll. This dates <strong>every</strong>{" "}
-          rule on this page as it stands when you save, not only the card you save.
-        </Hint>
-      </div>
-
-      <Divider />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {POLICY_CARDS.map((card) => (
@@ -849,7 +1096,7 @@ function AttendancePolicyEditor() {
         </Hint>
       </SettingsDialog>
 
-      {/* Time-based pay deductions — lateness (two independent switches) + undertime. */}
+      {/* Time-based pay deductions — lateness (two exclusive switches) + undertime. */}
       <SettingsDialog
         card={CARD.time_deductions}
         open={openCard === "time_deductions"}
@@ -863,25 +1110,35 @@ function AttendancePolicyEditor() {
             undertime_deduction_mode: undertimeMode,
             missing_timeout_allowance_minutes: Number(timeoutAllowance),
             daily_deduction_cap: 1,
-          }, guardTimeoutAllowance)
+          }, guardTimeDeductions)
         }
       >
-        {/* Lateness — two switches that can BOTH be on. */}
+        {/* Lateness — pick at most ONE of the two charges. */}
         <SubHeading>When someone is late</SubHeading>
+        <p className="text-xs text-muted-foreground">
+          Choose at most one way to charge a late — switching one on switches the other off, so the
+          same late arrival is never deducted twice.
+        </p>
 
-        {/* Switch 1 — deduct the actual minutes late. */}
+        {/* Switch 1 — deduct the actual minutes late. Turns the penalty off. */}
         <CheckBox
           checked={lateChargeOn}
-          onChange={setLateChargeOn}
+          onChange={(v) => {
+            setLateChargeOn(v);
+            if (v) setLatePenaltyEnabled(false);
+          }}
           label="Deduct pay for the actual time they were late"
         />
         {lateChargeOn && chargeControls()}
 
-        {/* Switch 2 — extra full-day penalty per N lates (independent of the charge above). */}
+        {/* Switch 2 — extra full-day penalty per N lates. Turns the per-time charge off. */}
         <SubDivider />
         <CheckBox
           checked={latePenaltyEnabled}
-          onChange={setLatePenaltyEnabled}
+          onChange={(v) => {
+            setLatePenaltyEnabled(v);
+            if (v) setLateChargeOn(false);
+          }}
           label="Add an extra full-day penalty for repeated lates"
         />
         {latePenaltyEnabled && (
@@ -897,17 +1154,6 @@ function AttendancePolicyEditor() {
               className="w-20"
             />
             <span className="text-sm text-foreground">lates in a pay period.</span>
-          </div>
-        )}
-
-        {/* Both on = the same lateness is charged twice. Intentional stacking, flagged. */}
-        {lateChargeOn && latePenaltyEnabled && (
-          <div className="rounded-lg border border-warning bg-warning-subtle p-3">
-            <p className="text-xs text-foreground">
-              Both lateness deductions are on, so a single late arrival is charged{" "}
-              <strong>twice</strong> — once as the actual time, and again toward the full-day penalty.
-              This is deliberate stacking; confirm it against your handbook and Labor Code Art. 113.
-            </p>
           </div>
         )}
 
@@ -1208,6 +1454,80 @@ function AttendancePolicyEditor() {
       </SettingsDialog>
 
       {/*
+       * Management attendance. Two switches that look alike and are not: the first decides
+       * whether the exemption exists at all, the second is a pay rule that applies only while
+       * someone is flagged management.
+       */}
+      <SettingsDialog
+        card={CARD.management}
+        open={openCard === "management"}
+        onOpenChange={(o) => !o && setOpenCard(null)}
+        pending={saving === "management"}
+        onSave={() =>
+          saveCard("management", {
+            management_auto_attendance: managementAuto,
+            management_holiday_premium: managementHolidayPremium,
+          })
+        }
+      >
+        <SubHeading>Automatic time in and time out</SubHeading>
+        <CheckBox
+          checked={managementAuto}
+          onChange={setManagementAuto}
+          label="Time management staff in and out automatically"
+        />
+        <Hint>
+          {managementAuto ? (
+            <>
+              Anyone marked <strong>Management</strong> on their record never uses the time
+              clock. Each night the platform writes their day from their own schedule, so they
+              show as <strong>present</strong> on the roster, raise no late or absent flags, and
+              cannot file half-day, early-out or overtime requests. Leave still works normally.
+            </>
+          ) : (
+            <>
+              Management uses the time clock like everyone else — they time in and out, arrive
+              late, and are flagged for it. Nothing is generated for them from tonight on;{" "}
+              <strong>days already generated stay</strong>, because they are the record of the
+              period they were exempt.
+            </>
+          )}
+        </Hint>
+        <Hint>
+          <strong>Their pay does not change either way.</strong> Management is salaried on a
+          fixed basis, so attendance never prorates it: no absence deduction, no lateness
+          charge, no overtime or night differential. This switch decides only who has to punch.
+        </Hint>
+
+        <SubHeading>Holidays they work</SubHeading>
+        <CheckBox
+          checked={managementHolidayPremium}
+          onChange={setManagementHolidayPremium}
+          label="Pay management the premium for a holiday they worked"
+        />
+        <Hint>
+          {managementHolidayPremium ? (
+            <>
+              A regular holiday or special non-working day they worked earns the same statutory
+              premium everyone else gets, at the rates in{" "}
+              <strong>Premium &amp; overtime rates</strong>.
+            </>
+          ) : (
+            <>
+              A holiday they worked pays nothing extra — the day is already inside their fixed
+              salary. This is the usual treatment for salaried management, and today&apos;s
+              behaviour.
+            </>
+          )}
+        </Hint>
+        <Hint>
+          Payroll reads this rule <strong>as it stood during the cycle</strong>, so turning it on
+          today never reprices a period that has already been paid. To pay a past holiday, save
+          this with an earlier <strong>effective from</strong> date and re-run that cycle.
+        </Hint>
+      </SettingsDialog>
+
+      {/*
        * Geofenced clock-in. The switch is the kill switch: off = today's clock-in, with
        * nothing else in the app changing. On but half-configured fails OPEN by design.
        */}
@@ -1492,7 +1812,7 @@ function AttendancePolicyEditor() {
   );
 }
 
-// ---- Section C: payroll settings ----
+// ---- Section D: payroll settings ----
 
 /**
  * Company-wide payroll configuration. Structurally the same animal as the attendance
@@ -1573,7 +1893,6 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
   // would be a wage order of nothing rather than no wage order at all.
   const [minimumWage, setMinimumWage] = useState(settings.minimum_daily_wage?.toString() ?? "");
   // Blank = today, which is what every change used to be recorded as whether or not it was true.
-  const [effectiveFrom, setEffectiveFrom] = useState("");
 
   const [openCard, setOpenCard] = useState<PayrollCardKey | null>(null);
   const [saving, setSaving] = useState<PayrollCardKey | null>(null);
@@ -1599,14 +1918,11 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
         tax_timing: taxTiming,
         allowance_timing: allowanceTiming,
         minimum_daily_wage: minimumWage.trim() === "" ? null : Number(minimumWage),
-        effective_from: effectiveFrom || undefined,
       });
-      toast.success(
-        effectiveFrom ? `Saved, effective ${formatDate(effectiveFrom)}` : "Saved",
-      );
+      toast.success("Saved");
       setOpenCard(null);
-    } catch {
-      toast.error("Could not save.");
+    } catch (err) {
+      toast.error(saveError(err));
     } finally {
       setSaving(null);
     }
@@ -1623,29 +1939,10 @@ function PayrollSettingsEditor({ settings }: { settings: PayrollSettings }) {
         <p className="text-xs text-foreground">
           <strong>Each cycle is priced with the settings in force for that cycle.</strong>{" "}
           A change saved today does not reprice a period that has already been run, and
-          re-running an old cycle keeps what it was priced with — unlike the attendance rules
-          above, which every cycle still open reads live.
+          re-running an old cycle keeps what it was priced with. To change a period that has
+          already been run, correct its payslips instead.
         </p>
       </div>
-
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Label htmlFor="pay-effective-from">Effective from</Label>
-          <DatePicker
-            id="pay-effective-from"
-            value={effectiveFrom}
-            onChange={setEffectiveFrom}
-            placeholder="Today"
-            className="w-44"
-          />
-        </div>
-        <Hint>
-          Leave blank for today. Set an earlier date only if the change genuinely applied then —
-          periods already run keep the settings they were priced with.
-        </Hint>
-      </div>
-
-      <Divider />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {PAYROLL_CARDS.map((card) => (
@@ -1824,10 +2121,6 @@ function SettingsDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function Divider() {
-  return <div className="h-px w-full bg-border" />;
 }
 
 // A cheap client-side sanity check so a typo gets a plain sentence instead of a 422 keyed

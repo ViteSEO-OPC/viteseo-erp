@@ -19,6 +19,7 @@ class RemoteCheckinService
     public function __construct(
         private readonly AttendanceService $attendance,
         private readonly AuditService $audit,
+        private readonly AttendancePolicyService $policy,
     ) {}
 
     /**
@@ -29,7 +30,10 @@ class RemoteCheckinService
      */
     public function submit(Employee $employee, UploadedFile $photo, ?float $lat, ?float $lng): RemoteCheckin
     {
-        if ($employee->isManagement()) {
+        if ($employee->managementExemptOn(
+            now(config('app.timezone_local'))->toDateString(),
+            (bool) $this->policy->get()->management_auto_attendance,
+        )) {
             throw ValidationException::withMessages([
                 'photo' => ['Management employees are exempt from attendance.'],
             ]);

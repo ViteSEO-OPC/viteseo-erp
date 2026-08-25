@@ -44,7 +44,7 @@ class AutoOvertimeCapTest extends HrTestCase
     /** @param array<string, mixed> $attrs */
     private function policy(array $attrs = []): void
     {
-        app(AttendancePolicyService::class)->get()->update(array_merge([
+        $this->policyAlways(array_merge([
             'overtime_mode' => 'auto_after_threshold',
             'overtime_threshold_minutes' => 0,
             // Item 7's review flag OFF for this file. Every case here works a six-hour overrun,

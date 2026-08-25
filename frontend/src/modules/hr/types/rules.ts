@@ -1,4 +1,4 @@
-// Company → Rules (Phase-2).
+// Company → Settings (Phase-2).
 
 export interface WorkSchedule {
   id: number;
@@ -32,8 +32,8 @@ export interface WorkScheduleInput {
   is_default: boolean;
 }
 
-// Per-time charging only. The per-N-lates full-day penalty is a separate, independent
-// switch (`late_penalty_enabled`), so the two can be combined.
+// Per-time charging only. The per-N-lates full-day penalty is a separate switch
+// (`late_penalty_enabled`); the rules UI keeps the two mutually exclusive.
 export type LateDeductionMode = "none" | "per_hour" | "tiered";
 export type LateMinutesFrom = "start_time" | "after_grace";
 export type UndertimeDeductionMode = "none" | "per_hour";
@@ -90,10 +90,11 @@ export interface AttendancePolicy {
 
   // Payroll: how accumulated lates translate into a pay deduction.
   late_deduction_mode: LateDeductionMode; // per-time charge for the minutes late
-  late_penalty_enabled: boolean; // independent: every N lates = 1 extra day deducted
+  late_penalty_enabled: boolean; // every N lates = 1 extra day deducted (excludes the mode above)
   lates_per_deduction: number; // N for the penalty above
   late_minutes_from: LateMinutesFrom; // count late minutes from start, or from end of grace
   late_tiers: LateTier[] | null; // `tiered` mode only
+  late_tier_recurring: boolean; // the rung repeats per block of `over` minutes, not once
 
   undertime_deduction_mode: UndertimeDeductionMode;
   missing_clockout_mode: MissingClockoutMode; // default: flag for review, never auto-deduct
@@ -107,6 +108,14 @@ export interface AttendancePolicy {
   // non-workday into a work request; off records the punch straight away. Pay is identical
   // either way — the rest-day premium is priced off the attendance row, not off an approval.
   rest_day_work_requires_request: boolean;
+
+  // The management attendance exemption. On (the default): management never punches — the
+  // platform writes their days. Off: they use the time clock like everyone else, flags and
+  // all. Their pay is fixed either way.
+  management_auto_attendance: boolean;
+  // Whether management earns the statutory premium for a holiday they worked. Off (the
+  // default) is why the management flag exists — fixed-salary staff are not paid by the day.
+  management_holiday_premium: boolean;
 
   // Geofenced clock-in. Off = today's clock-in, untouched; it doubles as the kill switch.
   // On but half-configured (no pin, or no IPs) deliberately behaves as OFF — the server
@@ -162,7 +171,7 @@ export interface AttendancePolicy {
 }
 
 /**
- * What a save to Company → Rules sends. WRITE-ONLY: `effective_from` is not part of the policy
+ * What a save to Company → Settings sends. WRITE-ONLY: `effective_from` is not part of the policy
  * resource, it dates the version payroll resolves against, so it is deliberately absent from
  * `AttendancePolicy` above — reading the policy back never returns it.
  */

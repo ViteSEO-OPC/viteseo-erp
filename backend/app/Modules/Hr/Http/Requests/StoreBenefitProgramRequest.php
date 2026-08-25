@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Http\Requests;
 
 use App\Modules\Hr\Models\BenefitProgram;
+use App\Modules\Hr\Rules\AppliesFromToday;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -34,7 +35,7 @@ class StoreBenefitProgramRequest extends FormRequest
             // the whole amount exempt. Ceilings are per item and are never pooled.
             // The date this price applies from. Defaults to today; HR sets it
             // deliberately when a rise is agreed in arrears.
-            'effective_from' => ['sometimes', 'nullable', 'date'],
+            'effective_from' => ['sometimes', 'nullable', 'date', new AppliesFromToday],
             'deminimis_ceiling' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:9999999.99'],
             // loan-policy config. Typed per kind rather than shared into one loose
             // shape: a loan policy and an HMO have nothing in common but a name.

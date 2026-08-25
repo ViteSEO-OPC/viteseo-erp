@@ -1,6 +1,16 @@
 "use client";
 
-import { CalendarCheck, UserPlus, FileText, Receipt } from "lucide-react";
+import {
+  CalendarCheck,
+  Clock4,
+  FileText,
+  HandCoins,
+  LogOut,
+  Receipt,
+  Timer,
+  UserMinus,
+  UserPlus,
+} from "lucide-react";
 
 import { StatCard } from "@/core/components/stat-card";
 import { formatDate, formatRelative } from "@/core/lib/format";
@@ -8,14 +18,26 @@ import { AttendanceTrendChart } from "@/modules/hr/components/attendance-trend-c
 import { CheckinBoard } from "@/modules/hr/components/checkin-board";
 import { PendingApprovals } from "@/modules/hr/components/pending-approvals";
 import { useHrDashboard } from "@/modules/hr/hooks/use-dashboard";
-import type { ActivityItem } from "@/modules/hr/types/dashboard";
+import type { ActivityItem, ActivityType } from "@/modules/hr/types/dashboard";
 
-// Each activity type gets an icon and a circle colour drawn from the status tokens.
-const ACTIVITY_STYLE = {
+/**
+ * Each activity type gets an icon and a circle colour drawn from the status tokens. Typed against
+ * `ActivityType` so the day a ninth kind is added to the feed, this map fails to compile rather
+ * than quietly rendering it as an anonymous grey dot — which is what the six missing kinds
+ * (half-days, early-outs, overtime, loans, separations) had been doing.
+ */
+const ACTIVITY_STYLE: Record<ActivityType, { Icon: typeof CalendarCheck; circle: string }> = {
   leave: { Icon: CalendarCheck, circle: "bg-success" },
   reimbursement: { Icon: Receipt, circle: "bg-info" },
   hire: { Icon: UserPlus, circle: "bg-success" },
-} as const;
+  half_day: { Icon: Clock4, circle: "bg-warning" },
+  early_out: { Icon: LogOut, circle: "bg-warning" },
+  overtime: { Icon: Timer, circle: "bg-info" },
+  loan: { Icon: HandCoins, circle: "bg-info" },
+  // The one event in the feed that reduces the headcount — not a success, and not a warning
+  // about something still to be decided.
+  separation: { Icon: UserMinus, circle: "bg-danger" },
+};
 
 export default function HrDashboardPage() {
   const { data: stats, isLoading } = useHrDashboard();
@@ -33,10 +55,15 @@ export default function HrDashboardPage() {
           <StatCard label="Headcount" value={stats?.headcount ?? "—"} subNote="Active employees" />
           <StatCard label="On Leave Today" value={stats?.on_leave_today ?? "—"} subNote="Approved leave covering today" />
           <StatCard label="Open Roles" value={stats?.open_roles ?? "—"} subNote="Recruitment pipeline" />
+          {/*
+            * The next PAY DATE off the configured schedule, so the note has to say so. It read
+            * "Upcoming cycle" while showing a date that was neither — see
+            * DashboardService::nextPayrollDate().
+            */}
           <StatCard
             label="Next Payroll"
             value={stats ? formatDate(stats.next_payroll_date) : "—"}
-            subNote="Upcoming cycle"
+            subNote="Next pay date"
           />
         </div>
 

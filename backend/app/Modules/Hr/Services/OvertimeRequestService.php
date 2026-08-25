@@ -204,6 +204,12 @@ class OvertimeRequestService
     /** @param array<string, mixed> $data */
     public function create(Employee $employee, array $data): OvertimeRequest
     {
+        if ($employee->managementExemptOn($data['work_date'], (bool) $this->policy->get()->management_auto_attendance)) {
+            throw ValidationException::withMessages([
+                'work_date' => ['Management employees are exempt from attendance.'],
+            ]);
+        }
+
         // Filing is only meaningful in `approved_only` — mirrors the note the form shows, so the
         // rule holds even if the UI is bypassed.
         $settings = $this->settings();
@@ -249,6 +255,12 @@ class OvertimeRequestService
      */
     public function createFor(Employee $employee, array $data, User $filedBy): OvertimeRequest
     {
+        if ($employee->managementExemptOn($data['work_date'], (bool) $this->policy->get()->management_auto_attendance)) {
+            throw ValidationException::withMessages([
+                'work_date' => ['Management employees are exempt from attendance.'],
+            ]);
+        }
+
         // Same mode gate as ordinary filing: in `auto_after_threshold` the clock already records
         // overtime and in `none` there is none to record, so a request would authorise nothing.
         $settings = $this->settings();

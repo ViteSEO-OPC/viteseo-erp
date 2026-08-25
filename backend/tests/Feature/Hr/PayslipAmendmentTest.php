@@ -787,9 +787,15 @@ class PayslipAmendmentTest extends HrTestCase
 
         $this->assertStringContainsString('Still to be paid', $html);
         $this->assertStringContainsString('was paid out on', $html);
-        // The correction, on the Compensation table, carrying its reason and its issue date.
-        $this->assertStringContainsString('Adjustment', $html);
+        // The correction, on the Compensation table. NAMED BY THE LABEL HR TYPED — the form calls
+        // that field "what the line is called on the payslip" — with the reason and the issue date
+        // beneath it. It printed as "Adjustment" with the label demoted to the note until the
+        // label was made to mean what the field says it means.
         $this->assertStringContainsString('Back pay for the 1 Aug raise', $html);
+        $this->assertStringContainsString('back-dated raise', $html);
+        $this->assertStringContainsString('issued Aug 20, 2026', $html);
+        // And the document says it was amended, which an ADDED line used to leave unstamped.
+        $this->assertStringContainsString('1 line added', $html);
         $this->assertStringNotContainsString('Corrections to this payslip', $html);
     }
 

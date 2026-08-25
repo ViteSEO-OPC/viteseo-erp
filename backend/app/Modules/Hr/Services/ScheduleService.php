@@ -9,7 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Work schedules (Company → Rules) + the single resolver every attendance/violation
+ * Work schedules (Company → Settings) + the single resolver every attendance/violation
  * check reads: an employee's EFFECTIVE schedule = per-employee override → assigned
  * schedule → the default schedule. Never a company-wide cutoff.
  */

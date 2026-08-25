@@ -3,9 +3,9 @@
 import { Fragment, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
+import { useCompanyProfile } from "@/modules/hr/hooks/use-company";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
 import { CONTRIBUTION_LABELS } from "@/modules/hr/types/benefits";
-import { formatPeso } from "@/core/lib/format";
 import type {
   Payslip,
   PayslipAmendment,
@@ -30,12 +30,13 @@ const DEDUCTION_LABELS: Record<PayslipDeductionKey, string> = {
  * HR's modal, and (mirrored in `hr::payslip`) the PDF.
  */
 
-const COMPANY_NAME = "VITE SEO DIGITAL ADVERTISING OPC";
-const COMPANY_ADDRESS =
+/**
+ * The letterhead when the profile hasn't arrived yet — the same values the row is seeded
+ * with. A payslip that flashed a blank company name on every open would read as broken.
+ */
+const FALLBACK_COMPANY_NAME = "VITE SEO DIGITAL ADVERTISING OPC";
+const FALLBACK_COMPANY_ADDRESS =
   "26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines";
-
-/** The rows the Compensation table shows even at zero, in the order it shows them. */
-const EARNING_SKELETON = ["Basic Pay", "Overtime", "Night Differential", "Rest Day", "Holiday"];
 
 /** Bare grouped amount — no ₱. The document states its currency once, on the net pay bar. */
 function amount(n: number): string {
@@ -134,6 +135,12 @@ export function PayslipDocument({
   edit?: PayslipEditMode;
 }) {
   const p = payslip;
+  // The letterhead, from Company → Settings — the same row `hr::payslip` prints from, so the
+  // document on screen and the PDF of it can never disagree about who the employer is.
+  const { data: company } = useCompanyProfile();
+  const companyName = company?.legal_name || FALLBACK_COMPANY_NAME;
+  const companyAddress = company ? (company.address ?? "") : FALLBACK_COMPANY_ADDRESS;
+  const companyLogo = company?.logo_url ?? null;
   // Derived by the API, not here — the PDF renders the same figures and the arithmetic is
   // subtle enough (see PayslipResource::documentTotals) that two implementations would drift.
   const t = p.totals;
@@ -156,7 +163,7 @@ export function PayslipDocument({
    * document where every row is a control needs a way out that is not hunting for a Cancel button.
    */
   const pick = (key?: string) =>
-    edit && key
+    edit && key && !isAddedLine(key)
       ? {
           onSelect: () => edit.onSelect(edit.selected === key ? null : key),
           active: edit.selected === key,
@@ -179,12 +186,18 @@ export function PayslipDocument({
     >
       {/* Header */}
       <div className="flex flex-col items-center gap-2">
+        {companyLogo && (
+          // eslint-disable-next-line @next/next/no-img-element -- signed, short-lived URL off the private disk; not an optimizable static asset
+          <img src={companyLogo} alt="" className="mb-1 h-10 object-contain" />
+        )}
         <p className="text-center text-lg font-extrabold uppercase tracking-tight sm:text-xl">
-          {COMPANY_NAME}
+          {companyName}
         </p>
-        <p className="max-w-[36rem] text-center text-caption text-muted-foreground">
-          {COMPANY_ADDRESS}
-        </p>
+        {companyAddress && (
+          <p className="max-w-[36rem] text-center text-caption text-muted-foreground">
+            {companyAddress}
+          </p>
+        )}
       </div>
 
       {/* Title + period */}
@@ -309,16 +322,9 @@ export function PayslipDocument({
                 : amount(fixes.withholding_tax.original_amount as number)
             }
             originalLabel={fixes.withholding_tax?.label_override ? "Withholding Tax" : null}
-            pair={!!p.tax_basis}
             {...pick("withholding_tax")}
           />
           {editorFor("withholding_tax")}
-          {/*
-           * The least checkable figure on the document: an annualised projection of
-           * one period, net of contributions, against a dated bracket table. Four steps, none
-           * of them visible, ending in a peso amount the reader was expected to accept.
-           */}
-          <TaxBasisNote basis={p.tax_basis} />
           {/*
            * December folds the year's correction into the line above, and on the
            * common case it goes NEGATIVE and net pay exceeds gross. Naming the adjustment is
@@ -467,19 +473,17 @@ export function PayslipDocument({
   );
 }
 
-/** The Compensation table's rows: the ordinary period's skeleton, then whatever else this run paid. */
+/**
+ * The Compensation table's rows, in the API's own order.
+ *
+ * The rows an ordinary period shows even at zero come from the API as REAL LINES — keys and all —
+ * rather than being painted in here. Synthesising them client-side gave them no key, which is why
+ * only Basic Pay used to be correctable; and matching them to the API's lines BY NAME made a line
+ * HR had renamed fail to match, so it printed twice: once as an empty placeholder and again with
+ * its new name.
+ */
 function earningRows(p: Payslip): PayslipLine[] {
-  const earnings = p.earnings_breakdown.filter((line) => line.kind !== "allowance");
-
-  if (p.run_type !== "regular") {
-    return earnings;
-  }
-
-  const skeleton = EARNING_SKELETON.map(
-    (name) => earnings.find((line) => line.name === name) ?? { name, amount: 0, note: null },
-  );
-
-  return [...skeleton, ...earnings.filter((line) => !EARNING_SKELETON.includes(line.name))];
+  return p.earnings_breakdown.filter((line) => line.kind !== "allowance");
 }
 
 /**
@@ -494,7 +498,7 @@ function deductionRows(p: Payslip): PayslipDeductionRow[] {
   return p.run_type === "regular" ? rows : rows.filter((row) => row.amount !== 0);
 }
 
-/** One reason the period was charged for, with the dates behind it. */
+/** One reason the period was charged for: what it was, how many, what it cost. */
 function DeductionRow({
   row,
   onSelect,
@@ -505,74 +509,35 @@ function DeductionRow({
   onSelect?: () => void;
   active?: boolean;
 }) {
-  const dates = row.dates ?? [];
-  const isTime = row.minutes !== null && row.minutes !== undefined;
-  // The dates line belongs to the row above it, so the whole pair highlights and responds as one
-  // unit — a charge and the days behind it are one thing to correct, not two.
   const Cell = onSelect ? "button" : "div";
 
   return (
-    <>
-      <Cell
-        {...(onSelect ? { type: "button" as const, onClick: onSelect } : {})}
-        className={cn(
-          "flex w-full items-center justify-between gap-4 px-4 py-3 text-left text-sm",
-          dates.length === 0 && "border-b border-border",
-          dates.length > 0 && "pb-1",
-          onSelect &&
-            "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          active && "bg-muted",
-        )}
-      >
-        <span className="flex items-center gap-2">
-          <span>
-            {row.original_name && <Struck>{row.original_name}</Struck>}
-            {row.name}
-          </span>
-          {row.count > 0 && (
-            <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded bg-destructive px-1 font-mono text-[11px] font-semibold text-white tabular-nums">
-              {row.count}
-            </span>
-          )}
-        </span>
-        <span className="shrink-0 font-mono font-medium tabular-nums">
-          {row.original_amount != null && <Struck>{amount(row.original_amount)}</Struck>}
-          {amount(row.amount)}
-        </span>
-      </Cell>
-      {dates.length > 0 && (
-        <div
-          className={cn(
-            "flex items-baseline justify-between gap-4 border-b border-border px-4 pb-2.5 text-caption text-muted-foreground",
-            active && "bg-muted",
-          )}
-        >
-          <span>{describeDates(row)}</span>
-          {/*
-           * The minute total belongs beside the dates, not on the money row — it is what the
-           * dates add up to, and the money row already carries what the minutes cost.
-           */}
-          {isTime && (row.minutes ?? 0) > 0 && (
-            <span className="shrink-0 font-mono tabular-nums">{row.minutes} min</span>
-          )}
-        </div>
+    <Cell
+      {...(onSelect ? { type: "button" as const, onClick: onSelect } : {})}
+      className={cn(
+        "flex w-full items-center justify-between gap-4 border-b border-border px-4 py-3 text-left text-sm",
+        onSelect &&
+          "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active && "bg-muted",
       )}
-    </>
+    >
+      <span className="flex items-center gap-2">
+        <span>
+          {row.original_name && <Struck>{row.original_name}</Struck>}
+          {row.name}
+        </span>
+        {row.count > 0 && (
+          <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded bg-destructive px-1 font-mono text-[11px] font-semibold text-white tabular-nums">
+            {row.count}
+          </span>
+        )}
+      </span>
+      <span className="shrink-0 font-mono font-medium tabular-nums">
+        {row.original_amount != null && <Struck>{amount(row.original_amount)}</Struck>}
+        {amount(row.amount)}
+      </span>
+    </Cell>
   );
-}
-
-/** "Aug 5, Aug 10" for a day charge; "Aug 1 180m · Aug 5 120m" once minutes are what varies. */
-function describeDates(row: PayslipDeductionRow): string {
-  const isTime = row.minutes !== null && row.minutes !== undefined;
-
-  return (row.dates ?? [])
-    .map((d) => {
-      const day = d.date ? shortDay(d.date) : "—";
-      if (!isTime) return day;
-      const minutes = d.detail?.match(/^(\d+)\s*min/)?.[1];
-      return minutes ? `${day} ${minutes}m` : day;
-    })
-    .join(isTime ? " · " : ", ");
 }
 
 /** THE MONTH, RESTATED — the table that makes the last cutoff a picture of the whole month. */
@@ -672,23 +637,52 @@ function SettlementNote({ payslip }: { payslip: Payslip }) {
   );
 }
 
-/** THAT THIS DOCUMENT WAS AMENDED, AND WHEN — one sentence, in with the rest of the provenance. */
+/**
+ * THAT THIS DOCUMENT WAS AMENDED, AND WHEN — one sentence, in with the rest of the provenance.
+ *
+ * Counts every amendment, not only the ones that changed a line that was already here. A payslip
+ * that had a line ADDED to it has been amended just as much, and used to carry no stamp at all.
+ */
 function AmendedNote({ amendments }: { amendments: Payslip["amendments"] }) {
-  const corrections = (amendments ?? []).filter((a) => a.target_key !== null);
+  const all = amendments ?? [];
 
-  if (corrections.length === 0) return null;
+  if (all.length === 0) return null;
 
-  const latest = corrections.reduce((a, b) => ((a.issued_on ?? "") > (b.issued_on ?? "") ? a : b));
+  const corrected = all.filter((a) => a.target_key !== null).length;
+  const added = all.length - corrected;
+  const latest = all.reduce((a, b) => ((a.issued_on ?? "") > (b.issued_on ?? "") ? a : b));
+
+  // Said as what actually happened: three lines corrected and one added is not "4 lines corrected".
+  const what = [
+    corrected > 0 && `${corrected} line${corrected === 1 ? "" : "s"} corrected`,
+    added > 0 && `${added} line${added === 1 ? "" : "s"} added`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <Meta label="Amended">
       <span className="text-xs font-normal">
-        {corrections.length} line{corrections.length === 1 ? "" : "s"} corrected
+        {what}
         {latest.issued_on ? ` · ${longDate(latest.issued_on)}` : null}
         {latest.issued_by ? ` · ${latest.issued_by}` : null}
       </span>
     </Meta>
   );
+}
+
+/**
+ * A line an amendment ADDED, rather than one it corrected — on either side of the document.
+ *
+ * Not correctable, and the API says so both times. A correction replaces a figure the ENGINE
+ * produced, measured against the payslip's engine snapshot; an added line is not in that snapshot
+ * by definition. An added earning is refused as "That is not a line on a payslip" (its
+ * `amendment:` key is not in the line catalogue), an added deduction as "This payslip has no such
+ * line". Offering the control anyway is how HR reached both. Not selectable is the honest state
+ * until an added line has an edit-and-remove control of its own.
+ */
+function isAddedLine(key: string): boolean {
+  return key.startsWith("amendment:") || key.startsWith("other:amend-");
 }
 
 function Row({
@@ -819,40 +813,13 @@ function SettlementLine({
   );
 }
 
-/** "Aug 5" — the payslip's dates are all inside one period, so the year is noise. */
-function shortDay(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString("en-PH", {
-    month: "short",
-    day: "numeric",
-  });
-}
-
-/** How the withholding figure was reached, in two lines the reader can follow with a calculator. */
-function TaxBasisNote({ basis }: { basis: Payslip["tax_basis"] }) {
-  if (!basis) return null;
-
-  const rate = basis.band ? `${Number((basis.band.rate * 100).toFixed(3))}%` : null;
-
-  return (
-    <div className="space-y-0.5 border-b border-border px-4 pb-2.5 pl-9 text-caption text-muted-foreground">
-      <p>
-        ({formatPeso(basis.taxable_monthly)} taxable − {formatPeso(basis.contributions_monthly)}{" "}
-        contributions) × 12 = {formatPeso(basis.annual_taxable)} a year
-      </p>
-      {basis.band && (
-        <p>
-          {rate} over {formatPeso(basis.band.min)}
-          {basis.band.base > 0 ? ` plus ${formatPeso(basis.band.base)}` : ""} ={" "}
-          {formatPeso(basis.annual_tax)} a year ÷ 12
-          {basis.timing_factor !== 1 ? ` × ${basis.timing_factor}` : ""}
-        </p>
-      )}
-    </div>
-  );
-}
-
 /** A note ON the row above, not a row of its own — the employer's counterpart contribution. */
+/**
+ * The dated occurrences behind one earnings line: what the day was, the rate it paid, and what
+ * it was worth. One row per day rather than a single joined string — unlike a deduction's dates,
+ * each of these carries its own money, and running them together would leave the reader dividing
+ * a total by an unknown number of unequal parts.
+ */
 function SubRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-border px-4 pb-2.5 pl-9 text-caption italic text-muted-foreground">

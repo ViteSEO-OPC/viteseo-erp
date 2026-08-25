@@ -46,7 +46,7 @@ function describe(row: OpenShiftRow): { label: string; tone: Tone; detail: strin
         label: "No schedule",
         tone: "danger",
         detail:
-          "This employee has no work schedule assigned, so there is nothing to close the shift against. Assign one under Company → Rules, then correct the day.",
+          "This employee has no work schedule assigned, so there is nothing to close the shift against. Assign one under Company → Settings, then correct the day.",
       };
     case "in_after_end":
       return {

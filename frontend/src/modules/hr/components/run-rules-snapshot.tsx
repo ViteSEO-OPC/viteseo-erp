@@ -18,6 +18,7 @@ import type {
 const LABELS: Record<string, string> = {
   late_deduction_mode: "Late deduction",
   late_tiers: "Late tiers",
+  late_tier_recurring: "Late threshold repeats",
   late_penalty_enabled: "Full-day penalty per N lates",
   lates_per_deduction: "Lates per deduction",
   monthly_late_reset: "Late count resets monthly",
@@ -65,6 +66,9 @@ const GATES: Record<string, (p: Record<string, unknown>) => boolean> = {
   deduction_block_minutes: (p) => p.deduction_rounding !== "exact",
   // DeductionService::tierMinutes() — the ladder is read only in `tiered` mode.
   late_tiers: (p) => p.late_deduction_mode === "tiered",
+  // Same gate, same reason: outside `tiered` the flag repeats a rung nothing reads. Shown even
+  // when off, because "charged once" is the fact that explains a flat deduction on the payslip.
+  late_tier_recurring: (p) => p.late_deduction_mode === "tiered",
   // DeductionService:83 computes lateness — and so reads this — only in a charging mode.
   // With `none`, "Late counted from: start time" describes an unused measurement.
   late_minutes_from: (p) =>
@@ -113,8 +117,23 @@ function tiers(value: unknown): string {
     .join(" · ");
 }
 
-function display(key: string, value: unknown): string {
-  if (key === "late_tiers") return tiers(value);
+/**
+ * The same rung when it REPEATS. It keeps the flat sentence's "over N min" opening on purpose:
+ * both modes start charging at the same minute (strictly MORE than `over`), and only how often
+ * the rung is billed differs. "every 30 min late → 1h" read as though the first hour landed at
+ * exactly 30, which is not what DeductionService::tierMinutes() does.
+ */
+function recurringTier(value: unknown): string {
+  const t = Array.isArray(value) ? value[0] : null;
+  if (!t) return "None set";
+  return `over ${t?.over ?? "?"} min → ${t?.hours ?? 0}h, repeating per ${t?.over ?? "?"} min`;
+}
+
+function display(key: string, value: unknown, policy?: Record<string, unknown>): string {
+  if (key === "late_tiers") {
+    return policy?.late_tier_recurring === true ? recurringTier(value) : tiers(value);
+  }
+  if (key === "late_tier_recurring") return value === true ? "Yes — charged per block" : "No — charged once";
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "On" : "Off";
   if (PERCENT.test(key)) return `${value}%`;
@@ -199,9 +218,17 @@ export function RunRulesSnapshot({
   snapshot?: PolicySnapshot | null;
   drift?: RulesDriftEntry[];
 }) {
-  // Runs from before have no snapshot (or the flat v1 shape) — say so plainly
-  // rather than render a misleading empty panel.
-  if (!snapshot) return null;
+  // A run computed before the platform started recording this has nothing to show. Say so,
+  // rather than return null: on the run-history drill-in that silence is indistinguishable from
+  // "no rules applied", and this panel exists precisely to answer "what priced these payslips?".
+  if (!snapshot) {
+    return (
+      <p className="mt-6 rounded-card border border-dashed border-border bg-card p-4 text-caption text-muted-foreground">
+        This run was computed before the platform began recording the rules it used, so there is
+        nothing to show for it. Every run since carries its own copy.
+      </p>
+    );
+  }
 
   const policy = snapshot.attendance_policy ?? {};
   const setting = snapshot.payroll_setting ?? {};
@@ -267,7 +294,10 @@ export function RunRulesSnapshot({
             <div>
               <h4 className="mb-2 text-caption font-semibold text-foreground">Attendance &amp; rates</h4>
               {shown.map((k) => (
-                <Row key={k} name={label(k)} value={display(k, policy[k])} />
+                // policy is passed so the tier line can be phrased as a repeating rule; the
+                // drift rows above deliberately don't get it — their `was` value predates the
+                // current flag, so describing it with today's setting would misreport history.
+                <Row key={k} name={label(k)} value={display(k, policy[k], policy)} />
               ))}
             </div>
 

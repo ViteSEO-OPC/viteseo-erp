@@ -6,12 +6,18 @@ use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\AttendancePolicyVersion;
 
 /**
- * The single attendance-policy row (Company → Rules). 's violation engine
+ * The single attendance-policy row (Company → Settings). 's violation engine
  * reads these thresholds; the task-format rule governs the time-in task checklist.
  */
 class AttendancePolicyService
 {
     public function __construct(private readonly AuditService $audit) {}
+
+    /**
+     * The date the opening version is filed under — far enough back that no pay cycle
+     * predates it, so `asOf()` can always find a version and never has to fall back.
+     */
+    public const OPENING_DATE = '2000-01-01';
 
     /**
      * Every editable field, with its current-behaviour default. The deduction-policy
@@ -27,6 +33,10 @@ class AttendancePolicyService
         'late_penalty_enabled' => false,
         'late_minutes_from' => 'start_time',
         'late_tiers' => null,
+        // Whether the tiered rung REPEATS. Off = today's behaviour: the rung's charge is
+        // applied once, however late the arrival. On, it is charged per whole block of
+        // `over` minutes (30-min rung, 90 min late ⇒ three blocks).
+        'late_tier_recurring' => false,
         'undertime_deduction_mode' => 'none',
         'missing_clockout_mode' => 'no_deduction_flag_for_review',
         // Item 5 — how long past the scheduled end an open punch is still "in progress". Past
@@ -43,6 +53,13 @@ class AttendancePolicyService
         // weekend coverage is routine, where a queue that is always approved is a queue nobody
         // reads; the punch is then simply recorded, and pays exactly the same either way.
         'rest_day_work_requires_request' => true,
+        // Management is exempt from the time clock and the platform writes their attendance
+        // instead — on is today's behaviour. Off puts them back on the clock like everyone
+        // else; it never changes their pay, which is fixed either way.
+        'management_auto_attendance' => true,
+        // Off is today's behaviour: fixed-salary management earns no holiday premium. On pays
+        // them the same statutory premium as everyone else for a holiday they worked.
+        'management_holiday_premium' => false,
         // Geofenced clock-in — off is today's behaviour. Also the kill switch: turning it
         // off puts everyone back on the normal clock instantly, with no deploy.
         'geofence_enabled' => false,
@@ -133,7 +150,53 @@ class AttendancePolicyService
 
     public function get(): AttendancePolicy
     {
-        return $this->memo ??= AttendancePolicy::firstOrCreate([], self::DEFAULTS);
+        if ($this->memo !== null) {
+            return $this->memo;
+        }
+
+        $policy = AttendancePolicy::firstOrCreate([], self::DEFAULTS);
+
+        // The row coming into existence is itself the first thing worth remembering. Without
+        // this the opening version was never written on a fresh install — the migration below
+        // runs while this table is still empty, so its backfill always took the early return —
+        // and every `asOf()` for a date before the first EDIT fell through to the live row.
+        // Re-running an old cycle then priced it at today's rules, undoing the versioning.
+        if ($policy->wasRecentlyCreated) {
+            $this->writeVersion($policy, self::OPENING_DATE, null);
+        }
+
+        return $this->memo = $policy;
+    }
+
+    /**
+     * File the opening version — what the rules said before anyone ever changed them.
+     *
+     * Idempotent, so both callers can run freely: `get()` covers a fresh install, and the
+     * backfill migration covers a database that predates this. It snapshots DEFAULTS rather than
+     * the live row on purpose — the live row is whatever it has since been edited TO, and
+     * claiming those were the rules in force since 2000 is the exact error being fixed here.
+     *
+     * @return bool whether a row was written (false = one was already there)
+     */
+    public function ensureOpeningVersion(): bool
+    {
+        $exists = AttendancePolicyVersion::query()
+            ->whereDate('effective_from', '<=', self::OPENING_DATE)
+            ->exists();
+
+        if ($exists) {
+            return false;
+        }
+
+        // forceFill() runs the cast MUTATORS, so the attributes come out in database shape —
+        // arrays encoded — which is what asOf()'s newFromBuilder() expects to rehydrate.
+        $this->writeVersion(
+            (new AttendancePolicy)->forceFill(self::DEFAULTS),
+            self::OPENING_DATE,
+            null,
+        );
+
+        return true;
     }
 
     /**
@@ -252,6 +315,18 @@ class AttendancePolicyService
     {
         $date = $effectiveFrom ?: now(config('app.timezone_local'))->toDateString();
 
+        $this->writeVersion($policy, $date, auth()->id());
+
+        return $date;
+    }
+
+    /**
+     * The single writer for this table, so the payload is shaped identically however it got here.
+     *
+     * @param  ?int  $createdBy  null for the opening version — nobody authored the stock state
+     */
+    private function writeVersion(AttendancePolicy $policy, string $date, ?int $createdBy): void
+    {
         // getAttributes() is already in database shape — array columns encoded, booleans as
         // 0/1 — which is exactly what asOf() expects to rehydrate through newFromBuilder().
         $payload = $policy->getAttributes();
@@ -264,11 +339,9 @@ class AttendancePolicyService
 
         AttendancePolicyVersion::updateOrCreate(
             ['effective_from' => $date],
-            ['payload' => $payload, 'created_by' => auth()->id()],
+            ['payload' => $payload, 'created_by' => $createdBy],
         );
 
         $this->asOfMemo = [];
-
-        return $date;
     }
 }

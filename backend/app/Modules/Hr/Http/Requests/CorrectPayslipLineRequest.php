@@ -32,10 +32,14 @@ class CorrectPayslipLineRequest extends FormRequest
             // register, remittance and BIR filing still groups by what the line IS.
             'label' => ['nullable', 'string', 'max:100'],
 
-            // Mandatory, and long enough to say what was wrong. A figure that overrules the payroll
-            // engine with no stated reason is indistinguishable from an error once anyone has
-            // forgotten it — and this one is printed on a legally consequential document.
-            'reason' => ['required', 'string', 'min:5', 'max:500'],
+            // Mandatory. A figure that overrules the payroll engine with no stated reason is
+            // indistinguishable from an error once anyone has forgotten it — and this one is
+            // printed on a legally consequential document.
+            //
+            // No MINIMUM length, deliberately. A floor cannot tell a real reason from a padded
+            // one — "typo" is four characters and honest, "aaaaa" is five and says nothing — so
+            // all it ever did was refuse the shortest true answers.
+            'reason' => ['required', 'string', 'max:500'],
 
             // When the correction was issued. Defaults to today in Manila, which is almost always
             // right; free-form because a March correction is genuinely issued in August.

@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { PayslipCorrections } from "@/modules/hr/components/payslip-corrections";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { RunLineWaiverDialog } from "@/modules/hr/components/run-line-waiver-dialog";
 import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import {
@@ -32,7 +33,6 @@ import {
 import { ReopenAction } from "@/modules/hr/components/reopen-action";
 import { PayslipAmendmentDialog } from "@/modules/hr/components/payslip-amendment-dialog";
 import { RerunRunDialog } from "@/modules/hr/components/rerun-run-dialog";
-import { RetroFlagsDialog } from "@/modules/hr/components/retro-flags-dialog";
 import { TaxTableDialog } from "@/modules/hr/components/tax-table-dialog";
 import { PaymentBatchDialog } from "@/modules/hr/components/payment-batch-dialog";
 import { MinimumWageDialog } from "@/modules/hr/components/minimum-wage-dialog";
@@ -50,8 +50,6 @@ import {
   useMarkPayslipDone,
   useReopenPayslip,
   usePayrollSettings,
-  useRetroFlags,
-  useDeductionArrears,
   useThirteenthMonth,
   useThirteenthMonthPreview,
   useRunThirteenthMonth,
@@ -65,6 +63,7 @@ import type {
   ThirteenthMonthRow,
 } from "@/modules/hr/types/payroll";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
+import { notifyOverrideDrift } from "@/modules/hr/lib/override-drift";
 
 /** The three headline totals, each with its own show/hide. */
 type MoneyTotal = "gross" | "deductions" | "net";
@@ -81,9 +80,8 @@ export default function PayrollPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [thirteenthOpen, setThirteenthOpen] = useState(false);
-  //  / — payslip corrections and the queue of differences awaiting one.
+  //  — the dialog that adds a line to a period's payslips.
   const [amendOpen, setAmendOpen] = useState(false);
-  const [retroOpen, setRetroOpen] = useState(false);
   const [taxTableOpen, setTaxTableOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   // The minimum-wage review, and the one-off override that gets a flagged run through.
@@ -99,11 +97,6 @@ export default function PayrollPage() {
     employeeId: number | null;
     reason: string | null;
   }>({ runId: null, employeeId: null, reason: null });
-  const { data: retroFlags = [] } = useRetroFlags();
-  const { data: deductionArrears = [] } = useDeductionArrears();
-  //  + — one badge for everything payroll could not settle by itself. Two separate
-  // counters would have HR checking two places for the same class of problem.
-  const outstandingCount = retroFlags.length + deductionArrears.length;
   const [payThirteenthOpen, setPayThirteenthOpen] = useState(false);
   // What the RUN would pay, which differs from the projection above whenever the year
   // is partial. Declared after `thirteenthOpen` because it reads it; fetched only while open.
@@ -218,6 +211,37 @@ export default function PayrollPage() {
   const disbursedCount =
     detail?.breakdown?.filter((r) => r.status === "disbursed").length ?? 0;
   const lockMut = useSetPayrollRunLock();
+  /*
+   * Locking is refused while a correction has left a paid payslip overpaid — money the company
+   * is out and cannot take back without the employee's written consent. That refusal is a
+   * QUESTION (nothing HR does would ever clear it), so it becomes a confirmation rather than a
+   * dead menu item that does nothing when clicked.
+   */
+  const [overpaidLock, setOverpaidLock] = useState<{ id: number; message: string } | null>(null);
+
+  async function setLock(id: number, lock: boolean, acknowledgeOverpayment = false) {
+    try {
+      await lockMut.mutateAsync({ id, lock, acknowledgeOverpayment });
+      setOverpaidLock(null);
+      toast.success(lock ? "Run locked" : "Run unlocked");
+    } catch (err) {
+      const overpaid =
+        err instanceof AxiosError
+          ? err.response?.data?.errors?.acknowledge_overpayment?.[0]
+          : undefined;
+
+      if (overpaid) {
+        setOverpaidLock({ id, message: overpaid });
+        return;
+      }
+
+      toast.error(
+        err instanceof AxiosError
+          ? (err.response?.data?.message ?? "Could not change the lock.")
+          : "Could not change the lock.",
+      );
+    }
+  }
   const history = (runs ?? []).filter((r) => r.id !== currentRun?.id);
   // A past run selected from the history modal → its per-employee breakdown.
   const { data: viewRun } = usePayrollRun(viewRunId ?? undefined);
@@ -246,6 +270,7 @@ export default function PayrollPage() {
       } else {
         toast.success("Payroll computed — payslips generated");
       }
+      notifyOverrideDrift(run);
       setConfirmOpen(false);
       setMinWageAck(false);
       setMinWageReason("");
@@ -457,26 +482,8 @@ export default function PayrollPage() {
             : "Loading pay schedule…"
         }
         actions={
-          /* THE TWO VERBS THAT CARRY THE WORKFLOW, then everything else behind `⋯`. */
+          /* Everything else behind `⋯`, then THE TWO VERBS THAT CARRY THE WORKFLOW. */
           <>
-            {/*
-             * The disbursement layer. Only a completed run has anything to pay,
-             * and the dialog is where the bank file comes from.
-             */}
-            <Button
-              variant="outline"
-              onClick={() => setPayOpen(true)}
-              disabled={!currentRun || currentRun.status !== "completed"}
-              title={
-                currentRun?.status === "completed"
-                  ? "Build the payment batch and bank file for this run"
-                  : "Run this period first — only a completed run can be paid"
-              }
-            >
-              <Banknote />
-              Pay run
-            </Button>
-
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" title="More payroll tools">
@@ -486,17 +493,10 @@ export default function PayrollPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 {/*
-                 *  / — the two queues. Kept here as well as in the strip so a
-                 * zero count is still openable; an empty queue and an unchecked one are not
-                 * the same thing, which is the whole reason they are counted.
+                 *  — kept here as well as in the strip so a zero count is still
+                 * openable; an unchecked run and a clean one are not the same thing, which is
+                 * the whole reason it is counted.
                  */}
-                <DropdownMenuItem onSelect={() => setRetroOpen(true)}>
-                  <AlertTriangle
-                    className={outstandingCount > 0 ? "text-warning" : undefined}
-                  />
-                  Outstanding corrections
-                  <DropdownMenuShortcut>{outstandingCount}</DropdownMenuShortcut>
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setMinWageOpen(true)}>
                   <Scale className={minWageFlagged > 0 ? "text-warning" : undefined} />
                   Minimum wage check
@@ -506,10 +506,11 @@ export default function PayrollPage() {
                 <DropdownMenuSeparator />
 
                 {/*
-                 * ADDING a line to payslips — back pay, a missed HMO share, an amount the engine
-                 * never priced. CHANGING a line that is already there happens on the payslip
-                 * itself, where the wrong figure is; this is for the money that has no line yet,
-                 * and it can reach several employees at once.
+                 * THE PERIOD-WIDE CHANGES — the two that reach many payslips at once, behind one
+                 * door. ADDING a line the engine never priced (back pay, a missed HMO share), and
+                 * CORRECTING a line the payslips already have to one figure across the payroll.
+                 * Changing ONE person's payslip still happens on that payslip, where the wrong
+                 * figure is in front of you.
                  */}
                 <DropdownMenuItem
                   onSelect={() => {
@@ -522,7 +523,7 @@ export default function PayrollPage() {
                   }}
                 >
                   <Wrench />
-                  Add a line to payslips
+                  Correct this period&rsquo;s payslips
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setThirteenthOpen(true)}>
                   <Gift />
@@ -547,7 +548,7 @@ export default function PayrollPage() {
                 {detail?.can_lock && (
                   <DropdownMenuItem
                     disabled={lockMut.isPending}
-                    onSelect={() => lockMut.mutate({ id: detail.id, lock: true })}
+                    onSelect={() => void setLock(detail.id, true)}
                   >
                     <Lock />
                     {lockMut.isPending ? "Locking…" : "Lock this run"}
@@ -556,7 +557,7 @@ export default function PayrollPage() {
                 {detail?.is_locked && (
                   <DropdownMenuItem
                     disabled={lockMut.isPending}
-                    onSelect={() => lockMut.mutate({ id: detail.id, lock: false })}
+                    onSelect={() => void setLock(detail.id, false)}
                   >
                     <LockOpen />
                     {lockMut.isPending ? "Unlocking…" : "Unlock this run"}
@@ -564,6 +565,24 @@ export default function PayrollPage() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/*
+             * The disbursement layer. Only a completed run has anything to pay,
+             * and the dialog is where the bank file comes from.
+             */}
+            <Button
+              variant="outline"
+              onClick={() => setPayOpen(true)}
+              disabled={!currentRun || currentRun.status !== "completed"}
+              title={
+                currentRun?.status === "completed"
+                  ? "Build the payment batch and bank file for this run"
+                  : "Run this period first — only a completed run can be paid"
+              }
+            >
+              <Banknote />
+              Pay run
+            </Button>
 
             <Button
               className="bg-warning text-white hover:bg-warning/90 disabled:opacity-50"
@@ -585,33 +604,20 @@ export default function PayrollPage() {
       />
 
       {/*
-       * WHAT IS OWED, said out loud. A badge on a permanently-lit button reads as decoration —
-       * it looks the same whether it says 0 or 3. This renders ONLY when something is actually
-       * outstanding, so its presence IS the signal, and it disappears entirely when clear.
+       * WHAT IS WRONG, said out loud. A badge on a permanently-lit button reads as decoration —
+       * it looks the same whether it says 0 or 3. This renders ONLY when something actually
+       * fired, so its presence IS the signal, and it disappears entirely when clear.
        */}
-      {(outstandingCount > 0 || minWageFlagged > 0) && (
+      {minWageFlagged > 0 && (
         <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-card border border-warning/40 bg-warning-subtle px-4 py-3">
           <AlertTriangle className="size-5 shrink-0 text-warning" />
           <p className="min-w-0 flex-1 text-sm text-foreground">
-            {[
-              outstandingCount > 0 &&
-                `${outstandingCount} correction${outstandingCount === 1 ? "" : "s"} owed`,
-              minWageFlagged > 0 &&
-                `${minWageFlagged} employee${minWageFlagged === 1 ? "" : "s"} below minimum wage`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
+            {minWageFlagged} employee{minWageFlagged === 1 ? " is" : "s are"} paid below minimum
+            wage
           </p>
-          {outstandingCount > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setRetroOpen(true)}>
-              Review corrections
-            </Button>
-          )}
-          {minWageFlagged > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setMinWageOpen(true)}>
-              Review wages
-            </Button>
-          )}
+          <Button variant="outline" size="sm" onClick={() => setMinWageOpen(true)}>
+            Review wages
+          </Button>
         </div>
       )}
 
@@ -874,6 +880,13 @@ export default function PayrollPage() {
                   onRowClick={(r) => setPayslipId(r.id)}
                 />
               </div>
+              {/*
+               * What THIS period was priced with — the whole point of freezing a period's rules
+               * is being able to answer "why does June say that?" months later, and the current
+               * period was the only place that answer appeared. Deliberately outside the scroll
+               * box above, so opening it does not fight the table for the same few pixels.
+               */}
+              <RunRulesSnapshot snapshot={viewRun.policy_snapshot} drift={viewRun.rules_drift} />
             </>
           ) : (
             <p className="py-10 text-center text-sm text-muted-foreground">Loading breakdown…</p>
@@ -1220,19 +1233,20 @@ export default function PayrollPage() {
       {/* The queue of pay differences awaiting settlement. */}
       <TaxTableDialog open={taxTableOpen} onOpenChange={setTaxTableOpen} />
 
-      <RetroFlagsDialog
-        open={retroOpen}
-        onOpenChange={setRetroOpen}
-        onSettleWithAdjustment={(flag) => {
-          // Straight from the difference onto the payslip that owes it, carrying the period, the
-          // employee and the reason across so HR does not retype what the system already knows.
-          setAmendPrefill({
-            runId: flag.payroll_run_id,
-            employeeId: flag.employee.id,
-            reason: flag.reason,
-          });
-          setRetroOpen(false);
-          setAmendOpen(true);
+      {/*
+       * The server names the money; repeating it here in our own words would be a second place
+       * for the figure to be wrong.
+       */}
+      <DeleteConfirmDialog
+        open={overpaidLock !== null}
+        onOpenChange={(next) => !next && setOverpaidLock(null)}
+        title="Lock this run anyway?"
+        question={overpaidLock?.message}
+        description="Locking closes the cycle to any further recompute. The overpayment stays on the payslip and on the record, so it can still be arranged with the employee afterwards. Unlocking is possible later, and is audited."
+        confirmLabel="Lock anyway"
+        isPending={lockMut.isPending}
+        onConfirm={() => {
+          if (overpaidLock) return setLock(overpaidLock.id, true, true);
         }}
       />
 

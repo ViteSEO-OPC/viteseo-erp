@@ -345,7 +345,13 @@ class PayrollController extends Controller
     public function lockRun(Request $request, PayrollRun $payrollRun): JsonResponse
     {
         return PayrollRunResource::make(
-            $this->service->lock($payrollRun, $request->user()),
+            // A run carrying an unrecovered overpayment is refused until HR confirms — see
+            // PayrollService::lock(). The flag arrives only from that confirmation.
+            $this->service->lock(
+                $payrollRun,
+                $request->user(),
+                $request->boolean('acknowledge_overpayment'),
+            ),
         )->response();
     }
 
@@ -440,6 +446,19 @@ class PayrollController extends Controller
         $payslip->loadMissing('payrollRun');
 
         $slip = $this->service->removeLineOverride($payslip, $amendment, request()->user());
+
+        $slip->load(['payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator']);
+
+        return PayslipResource::make($slip)->response();
+    }
+
+    // POST /api/v1/hr/payslips/{payslip}/line-corrections/{amendment}/acknowledge — HR confirming
+    // a drifted correction still stands. Changes no figure; only stops the run reporting it.
+    public function acknowledgePayslipLineCorrection(Payslip $payslip, PayslipAmendment $amendment): JsonResponse
+    {
+        $payslip->loadMissing('payrollRun');
+
+        $slip = $this->service->acknowledgeLineOverride($payslip, $amendment, request()->user());
 
         $slip->load(['payrollRun.runner', 'employee.user', 'employee.department', 'amendments.creator']);
 

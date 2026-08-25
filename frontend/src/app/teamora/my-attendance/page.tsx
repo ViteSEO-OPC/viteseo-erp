@@ -212,7 +212,7 @@ export default function MyAttendancePage() {
             </p>
           )}
 
-          {report.employee.is_management && (
+          {report.employee.attendance_exempt && (
             <p className="mt-3 text-caption text-muted-foreground">
               You are on a management schedule, which is exempt from the time clock: scheduled
               workdays read as present and no lateness or undertime is measured against you.

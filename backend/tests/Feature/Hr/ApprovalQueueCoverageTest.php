@@ -37,7 +37,7 @@ class ApprovalQueueCoverageTest extends HrTestCase
         '/teamora/company/faq',
         '/teamora/company/holidays',
         '/teamora/company/leave-types',
-        '/teamora/company/rules',
+        '/teamora/company/settings',
         '/teamora/concerns',
         '/teamora/faq',
         '/teamora/finance/office-expenses',

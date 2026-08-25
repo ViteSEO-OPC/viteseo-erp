@@ -6,6 +6,7 @@ use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
 use App\Modules\Hr\Http\Controllers\BenefitController;
 use App\Modules\Hr\Http\Controllers\BenefitProgramController;
 use App\Modules\Hr\Http\Controllers\ChangeRequestController;
+use App\Modules\Hr\Http\Controllers\CompanyProfileController;
 use App\Modules\Hr\Http\Controllers\ConcernController;
 use App\Modules\Hr\Http\Controllers\DailyOverrideController;
 use App\Modules\Hr\Http\Controllers\DeductionArrearsController;
@@ -46,6 +47,11 @@ use Illuminate\Support\Facades\Route;
 // All HR routes are auto-prefixed with /api/v1/hr (see HrServiceProvider).
 
 Route::middleware('auth:sanctum')->group(function () {
+    // The employer's own details (Company → Settings). Read is open to any authenticated
+    // user: the payslip on screen prints this letterhead for employees too. Writes are
+    // hr_officer-only, further down.
+    Route::get('company-profile', [CompanyProfileController::class, 'show']);
+
     // Departments — read is open to any authenticated user (employees need the
     // list for dropdowns); writes are hr_officer-only.
     Route::get('departments', [DepartmentController::class, 'index']);
@@ -179,9 +185,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
-        // The withholding-tax bands, readable. Read-only: tax rates come from statute, and
-        // an editable table would silently mis-withhold for everyone at once.
+        // The withholding-tax bands. Editable, because the schedule is statute that CHANGES
+        // (the BIR table has moved once already, and a bill to move it again is in the House
+        // as of Aug 2026) and a rate change should not need a migration and a deploy. The
+        // danger an editable table carries — one mistyped figure mis-withholding for everyone
+        // in a band at once — is answered by SaveTaxTableRequest, which refuses a table whose
+        // bands do not add up, not by keeping the numbers in code.
         Route::get('tax-table', [TaxTableController::class, 'show']);
+        Route::match(['put', 'patch'], 'tax-table', [TaxTableController::class, 'update']);
+        Route::delete('tax-versions/{taxVersion}', [TaxTableController::class, 'destroyVersion']);
         Route::get('reports/{key}', [ReportController::class, 'show']);
         Route::post('reports/{key}/export', [ReportController::class, 'export'])->middleware('throttle:10,1,report-export:');
         Route::get('attendance', [AttendanceController::class, 'index']);
@@ -194,6 +206,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // Stale-attendance review queue (item 6). Same "keep it above any attendance/{param}"
         // caveat as the field time-ins above.
         Route::get('attendance/open-shifts', [AttendanceController::class, 'openShifts']);
+        // Management attendance is GENERATED, not punched — these two say whether the nightly
+        // job actually ran, and let HR run it now when it did not.
+        Route::get('attendance/management-generation', [AttendanceController::class, 'managementGeneration']);
+        Route::post('attendance/management-generation', [AttendanceController::class, 'regenerateManagement']);
         Route::post('attendance/adjust', [AttendanceController::class, 'adjust']);
 
         // Daily grace-period override (HR only, per-date).
@@ -260,6 +276,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('payslips/{payslip}/line-corrections', [PayrollController::class, 'overridePayslipLine'])
             ->middleware('throttle:30,1,payslip-correction:');
         Route::delete('payslips/{payslip}/line-corrections/{amendment}', [PayrollController::class, 'removePayslipLineCorrection'])
+            ->middleware('throttle:30,1,payslip-correction:');
+        // "Seen it, my figure still stands" — clears the drift warning a recompute raises when the
+        // engine's own figure moved out from under a correction. Moves no money, so it shares the
+        // correction limit rather than the heavier run limits.
+        Route::post('payslips/{payslip}/line-corrections/{amendment}/acknowledge', [PayrollController::class, 'acknowledgePayslipLineCorrection'])
             ->middleware('throttle:30,1,payslip-correction:');
         Route::get('payslips/{payslip}', [PayrollController::class, 'showHrPayslip']);
         Route::get('payslips/{payslip}/pdf', [PayrollController::class, 'payslipPdf'])->middleware('throttle:20,1,hr-pdf:');
@@ -394,6 +415,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Documents tab: list / upload / delete.
         Route::get('employees/{employee}/documents', [EmployeeController::class, 'documentsIndex']);
         Route::post('employees/{employee}/documents', [EmployeeController::class, 'storeDocument'])->middleware('throttle:20,1,hr-upload:');
+        Route::patch('employees/{employee}/documents/{document}', [EmployeeController::class, 'renameDocument']);
         Route::delete('employees/{employee}/documents/{document}', [EmployeeController::class, 'destroyDocument']);
 
         // Company → Departments: archive/restore (HR only). CRUD is above.
@@ -449,7 +471,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);
         // What the rates would charge, beside any per-employee override.
 
-        // Company → Rules: work schedules + per-employee assignment + attendance policy.
+        // Company → Settings: work schedules + per-employee assignment + attendance policy.
         Route::get('work-schedules', [WorkScheduleController::class, 'index']);
         Route::post('work-schedules', [WorkScheduleController::class, 'store']);
         Route::match(['put', 'patch'], 'work-schedules/{workSchedule}', [WorkScheduleController::class, 'update']);
@@ -458,6 +480,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'employees/{employee}/schedule', [WorkScheduleController::class, 'updateEmployeeSchedule']);
         Route::get('attendance-policy', [AttendancePolicyController::class, 'show']);
         Route::match(['put', 'patch'], 'attendance-policy', [AttendancePolicyController::class, 'update']);
+
+        // Company → Settings: who the employer is, as printed on every letterhead.
+        Route::match(['put', 'patch'], 'company-profile', [CompanyProfileController::class, 'update']);
+        Route::post('company-profile/logo', [CompanyProfileController::class, 'updateLogo'])->middleware('throttle:20,1,hr-upload:');
+        Route::delete('company-profile/logo', [CompanyProfileController::class, 'destroyLogo']);
 
         // Requests → Document + Profile-change queues (HR only).
         Route::get('document-requests', [DocumentRequestController::class, 'index']);

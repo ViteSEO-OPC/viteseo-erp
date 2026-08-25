@@ -28,6 +28,34 @@ class PayrollSetting extends Model
     ];
 
     /**
+     * The date the opening version is filed under — far enough back that no pay cycle
+     * predates it, so `asOf()` can always find a version and never has to fall back.
+     */
+    public const OPENING_DATE = '2000-01-01';
+
+    /**
+     * A stock install's settings, and the payload of the opening version.
+     *
+     * These repeat the columns' own database defaults DELIBERATELY. `firstOrCreate` returns a
+     * model built from the attributes it inserted, so a DB-side default reaches the ROW while the
+     * in-memory instance the caller is holding still reads null. That was already true of the
+     * de-minimis cap (a fresh install withheld tax on the whole 13th month, caught by B17's
+     * tests); the three timings had exactly the same hole.
+     */
+    public const DEFAULTS = [
+        'frequency' => 'semi_monthly',
+        'deduction_timing' => 'every',
+        'tax_timing' => 'every',
+        'allowance_timing' => 'every',
+        'anchor_date' => null,
+        'pay_delay_days' => 0,
+        // ₱90,000, statutory (TRAIN): 13th month pay and other benefits.
+        'other_benefits_annual_cap' => 90000,
+        // Null = no wage order configured, warns about nothing.
+        'minimum_daily_wage' => null,
+    ];
+
+    /**
      * The date the NEXT write should take effect from, consumed by the `updated` hook below.
      *
      * Set it immediately before saving when HR has given an explicit date; it is cleared as soon
@@ -44,6 +72,12 @@ class PayrollSetting extends Model
     /** Every write to this row records a version — automatically. */
     protected static function booted(): void
     {
+        // The row coming into existence is itself the first thing worth remembering. Without
+        // this the opening version was never written on a fresh install, every `asOf()` for a
+        // date before the first EDIT fell through to the live row, and re-running an old cycle
+        // silently priced it at today's rules — the whole point of versioning, undone.
+        static::created(fn () => static::ensureOpeningVersion());
+
         static::updated(function (): void {
             $date = static::$pendingEffectiveFrom;
             static::$pendingEffectiveFrom = null;
@@ -60,17 +94,8 @@ class PayrollSetting extends Model
     /** The singleton company payroll settings row (created with defaults if absent). */
     public static function current(): self
     {
-        // The exemption is stated HERE as well as in the column default, deliberately.
-        // `firstOrCreate` returns a model built from the attributes it inserted — a DB-side
-        // default is applied to the ROW but the in-memory instance still reads null, and the
-        // caller is holding that instance. On a fresh install the first payroll run therefore saw
-        // "no exemption" and withheld tax on the whole 13th month. Caught by B17's tests.
-        return static::firstOrCreate([], [
-            'frequency' => 'semi_monthly',
-            'pay_delay_days' => 0,
-            // ₱90,000, statutory (TRAIN): 13th month pay and other benefits.
-            'other_benefits_annual_cap' => 90000,
-        ]);
+        // Why DEFAULTS repeats the database defaults: see the constant.
+        return static::firstOrCreate([], self::DEFAULTS);
     }
 
     /** The settings that were in force on a date. */
@@ -142,5 +167,40 @@ class PayrollSetting extends Model
         static::$asOfMemo = [];
 
         return $date;
+    }
+
+    /**
+     * File the opening version — what the settings said before anyone ever changed them.
+     *
+     * Idempotent, so both callers can run freely: the `created` hook covers a fresh install, and
+     * the backfill migration covers a database that predates this. It snapshots DEFAULTS rather
+     * than the live row on purpose — the live row is whatever it has since been edited TO, and
+     * claiming those were the rules in force since 2000 is the exact error being fixed here.
+     *
+     * @return bool whether a row was written (false = one was already there)
+     */
+    public static function ensureOpeningVersion(): bool
+    {
+        $exists = PayrollSettingVersion::query()
+            ->whereDate('effective_from', '<=', self::OPENING_DATE)
+            ->exists();
+
+        if ($exists) {
+            return false;
+        }
+
+        // forceFill() runs the cast MUTATORS, so this comes out in database shape — which is
+        // what asOf()'s newFromBuilder() expects, applying the casts once on the way out.
+        $payload = (new static)->forceFill(self::DEFAULTS)->getAttributes();
+
+        PayrollSettingVersion::create([
+            'effective_from' => self::OPENING_DATE,
+            'payload' => $payload,
+            'created_by' => null, // nobody authored this; it is the stock state
+        ]);
+
+        static::flushAsOfMemo();
+
+        return true;
     }
 }

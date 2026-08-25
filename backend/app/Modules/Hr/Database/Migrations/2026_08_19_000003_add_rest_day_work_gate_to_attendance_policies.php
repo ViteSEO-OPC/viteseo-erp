@@ -5,7 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
-/** Whether working a rest day needs HR's permission first (Company → Rules). */
+/** Whether working a rest day needs HR's permission first (Company → Settings). */
 return new class extends Migration
 {
     private const DEFAULT = true;

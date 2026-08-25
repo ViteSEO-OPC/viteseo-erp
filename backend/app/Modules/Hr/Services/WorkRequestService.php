@@ -56,10 +56,16 @@ class WorkRequestService
             ->first();
     }
 
+    /** Exempt from the clock on this date — the person's flag AND the company rule. */
+    private function attendanceExempt(Employee $employee, string $date): bool
+    {
+        return $employee->managementExemptOn($date, (bool) $this->policy->get()->management_auto_attendance);
+    }
+
     /** Which kind of request a date calls for, or null when the employee may simply time in. */
     public function requiredTypeFor(Employee $employee, string $date): ?string
     {
-        if ($employee->isManagement()) {
+        if ($this->attendanceExempt($employee, $date)) {
             return null;
         }
 
@@ -84,7 +90,7 @@ class WorkRequestService
      */
     public function create(Employee $employee, string $date, ?string $reason = null): WorkRequest
     {
-        if ($employee->isManagement()) {
+        if ($this->attendanceExempt($employee, $date)) {
             throw ValidationException::withMessages([
                 'work_date' => ['Management employees are exempt from attendance.'],
             ]);

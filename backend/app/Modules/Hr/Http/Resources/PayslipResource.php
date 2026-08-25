@@ -37,7 +37,8 @@ class PayslipResource extends JsonResource
                 'employee_no' => $this->employee?->employee_no,
                 'job_title' => $this->employee?->job_title,
                 'department' => $this->employee?->department?->name,
-                'address' => $this->employee?->address,
+                // Composed from the split parts, falling back to the pre-split text.
+                'address' => $this->employee?->addressLine(),
                 // FULL for the employee reading their OWN payslip, masked for anyone
                 // else. A payslip has to be usable as evidence of employment and income, which
                 // means the person it belongs to must see their own government numbers on it.
@@ -144,6 +145,14 @@ class PayslipResource extends JsonResource
                     'target_label' => $a->targetLabel(),
                     'override_amount' => $a->override_amount === null ? null : (float) $a->override_amount,
                     'original_amount' => $a->original_amount === null ? null : (float) $a->original_amount,
+                    // The engine figure this correction was entered AGAINST, frozen at the time.
+                    // Where it and `original_amount` disagree, the engine has since changed its
+                    // mind and the correction is waiting on HR to confirm it still stands.
+                    'edited_against' => $a->edited_against === null ? null : (float) $a->edited_against,
+                    // The comparison itself, from the model rather than redone in the UI — the
+                    // rounding it does is what decides whether a run reports this as drift, and
+                    // two implementations of that would eventually disagree.
+                    'has_drifted' => $a->hasDrifted(),
                     'label_override' => $a->label_override,
                     'amount' => (float) $a->amount,
                     'tax' => (float) $a->tax,
@@ -257,6 +266,9 @@ class PayslipResource extends JsonResource
             // Only meaningful under the tiered mode, and the thing that explains why 194 minutes
             // and 72 minutes can cost exactly the same.
             'late_tiers' => $policy['late_tiers'] ?? [],
+            // Without this the tier line under-explains a repeating charge: "over 30 min → 1h"
+            // cannot account for the 3h docked off a 95-minute arrival.
+            'late_tier_recurring' => (bool) ($policy['late_tier_recurring'] ?? false),
             'undertime_mode' => $policy['undertime_deduction_mode'] ?? 'none',
             // The DOLE day the fraction is taken against — dailyRate ÷ this.
             'hours_per_day' => (int) ($policy['hours_per_day_divisor'] ?? 8),

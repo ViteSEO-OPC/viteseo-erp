@@ -241,9 +241,11 @@ class HalfDayLatenessTest extends HrTestCase
             $this->employee, self::DATE, self::DATE, app(AttendancePolicyService::class)->get(),
         );
 
-        // 0.5 for the half + 120 min ÷ the 540-min scheduled span. It used to charge a FULL day:
-        // 0.5 for the half plus another 0.5 for an early-out measured against 5 PM.
-        $this->assertEqualsWithDelta(0.5 + 120 / 540, $detail->unpaidDays, 0.0001);
+        // 0.5 for the half + 120 min ÷ the DECLARED 480-min day — the same denominator the clock
+        // -derived undertime uses, so the identical two hours cost the identical amount whichever
+        // path catches them. It used to charge a FULL day: 0.5 for the half plus another 0.5 for
+        // an early-out measured against 5 PM.
+        $this->assertEqualsWithDelta(0.5 + 120 / 480, $detail->unpaidDays, 0.0001);
         $this->assertLessThan(1.0, $detail->unpaidDays);
     }
 

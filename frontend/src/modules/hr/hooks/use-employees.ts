@@ -15,6 +15,7 @@ import {
   getMyDocuments,
   uploadEmployeeDocument,
   deleteEmployeeDocument,
+  renameEmployeeDocument,
   uploadEmployeePhoto,
   deleteEmployeePhoto,
   getEmployeeLoans,
@@ -226,6 +227,15 @@ export function useUploadEmployeeDocument(id: number) {
   return useMutation({
     mutationFn: ({ file, label }: { file: File; label?: "Uploaded" | "Signed" }) =>
       uploadEmployeeDocument(id, file, label),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id, "documents"] }),
+  });
+}
+
+export function useRenameEmployeeDocument(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ documentId, name }: { documentId: number; name: string }) =>
+      renameEmployeeDocument(id, documentId, name),
     onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id, "documents"] }),
   });
 }

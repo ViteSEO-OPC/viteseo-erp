@@ -35,7 +35,7 @@ export interface Attendance {
 }
 
 /**
- * Today's clock-in window, decided by the server (Company → Rules → strict clock-in).
+ * Today's clock-in window, decided by the server (Company → Settings → strict clock-in).
  * The panel only reads it — it never re-derives the rule.
  */
 export interface ClockInWindow {
@@ -53,7 +53,7 @@ export interface ClockInWindow {
   defers_to: string | null;
   /**
    * Ask where the employee is before clocking in. This is "the server is actually
-   * enforcing a geofence", NOT the raw Company → Rules toggle: a policy switched on but
+   * enforcing a geofence", NOT the raw Company → Settings toggle: a policy switched on but
    * left unconfigured fails open server-side and reports `false` here, so the panel never
    * demands a location that is about to be ignored.
    */
@@ -152,6 +152,12 @@ export interface MyAttendance {
   week: Attendance[];
   clock_in: ClockInWindow;
   day_rules: DayRules | null;
+  /**
+   * Exempt from the time clock right now — the person's management flag AND the company rule
+   * together. Gate the clock on this, never on `is_management` alone, or the panel keeps
+   * hiding itself after HR switches auto time in/out off.
+   */
+  attendance_exempt: boolean;
 }
 
 export type Severity = "green" | "yellow" | "orange" | "red";
@@ -199,7 +205,10 @@ export interface EmployeeSchedule {
 /** HR roster row (one per employee for a given day). */
 export interface HrAttendanceRow {
   employee_id: number;
+  /** The natural name — "Juan Dela Cruz". Used where the UI addresses the person. */
   name: string | null;
+  /** The roster form — "Dela Cruz, Juan Santos". Also the order the list arrives in. */
+  list_name: string | null;
   /** Profile picture; null falls back to initials. */
   photo_url: string | null;
   department: string | null;
@@ -314,4 +323,29 @@ export interface OpenShiftRow {
   employee_can_fix: boolean;
   /** ISO instant the allowance expired and pay stopped waiting. */
   auto_closes_at: string | null;
+}
+
+/** The nightly management-attendance job, as HR reads it (item: job visibility). */
+export interface ManagementGenerationStatus {
+  employees: number;
+  enabled: boolean; // the company rule — off, there is no nightly to be stale about
+
+  is_stale: boolean;
+  last_run: {
+    ran_at: string;
+    range_start: string | null;
+    range_end: string | null;
+    created: number;
+    updated: number;
+    skipped: number;
+    notes: string[];
+    triggered_by: string | null; // null = the scheduler, a name = someone pressed the button
+  } | null;
+}
+
+export interface ManagementGenerationResult {
+  from: string;
+  to: string;
+  stats: { created: number; updated: number; skipped: number; employees: number; notes: string[] };
+  status: ManagementGenerationStatus;
 }

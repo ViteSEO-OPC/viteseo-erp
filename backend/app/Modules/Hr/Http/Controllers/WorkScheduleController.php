@@ -12,7 +12,7 @@ use App\Modules\Hr\Services\ScheduleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 
-// Company → Rules (schedules). All routes are hr_officer-only.
+// Company → Settings (schedules). All routes are hr_officer-only.
 class WorkScheduleController extends Controller
 {
     public function __construct(private readonly ScheduleService $service) {}

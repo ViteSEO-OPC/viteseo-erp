@@ -36,13 +36,30 @@ class Employee extends Model
         'previous_hire_date',
         'hire_date',
         'phone',
+        // The two addresses, as parts. `address` / `current_address` are the
+        // pre-split free-text values, kept read-only for what was recorded before.
         'address',
+        'address_house_no',
+        'address_street',
+        'address_barangay',
+        'address_city',
+        'address_province',
+        'address_zip',
+        'current_address_house_no',
+        'current_address_street',
+        'current_address_barangay',
+        'current_address_city',
+        'current_address_province',
+        'current_address_zip',
         'emergency_contact_name',
         'emergency_contact_phone',
         'bank_name',
         'bank_account',
         'base_salary',
         'is_management',
+        // WHEN the attendance exemption began — see the migration. Never accepted from a
+        // request; EmployeeService stamps it when the flag is switched on.
+        'management_since',
         // Excluded from the minimum-wage check, with the reason on the record.
         'minimum_wage_exempt',
         'minimum_wage_exempt_reason',
@@ -98,6 +115,7 @@ class Employee extends Model
         'date_of_birth' => 'date',
         'base_salary' => 'decimal:2',
         'is_management' => 'boolean',
+        'management_since' => 'date',
         'minimum_wage_exempt' => 'boolean',
         // One entry per named sibling: [{ name, gender }].
         'siblings' => 'array',
@@ -150,6 +168,54 @@ class Employee extends Model
      *
      * @return array<string, string|null>
      */
+    /**
+     * The name as a roster lists it: "Dela Cruz Jr., Juan Santos".
+     *
+     * A suffix belongs to the surname, not to the given names — "Dela Cruz, Juan Jr." files the
+     * Jr. under Juan and reads as a second given name. Records from before the name was split have
+     * no `last_name` to file under, so they keep the composed name rather than being guessed at.
+     */
+    public function listingName(): ?string
+    {
+        $last = trim((string) $this->last_name);
+
+        if ($last === '') {
+            return $this->user?->name;
+        }
+
+        $suffix = trim((string) $this->name_extension);
+        $surname = $suffix === '' ? $last : "{$last} {$suffix}";
+
+        $given = implode(' ', array_filter(
+            [trim((string) $this->first_name), trim((string) $this->middle_name)],
+            fn (string $part) => $part !== '',
+        ));
+
+        return $given === '' ? $surname : "{$surname}, {$given}";
+    }
+
+    /**
+     * One of the two addresses as a single line, composed from its parts.
+     *
+     * Falls back to the pre-split free-text column when no part has been filled in yet, so a record
+     * nobody has re-entered since the split still reads as an address rather than as nothing.
+     *
+     * @param  string  $prefix  'address' (home) or 'current_address'
+     */
+    public function addressLine(string $prefix = 'address'): ?string
+    {
+        $part = fn (string $name) => trim((string) $this->{"{$prefix}_{$name}"});
+
+        $street = trim($part('house_no').' '.$part('street'));
+
+        $pieces = array_values(array_filter(
+            [$street, $part('barangay'), $part('city'), $part('province'), $part('zip')],
+            fn (string $piece) => $piece !== '',
+        ));
+
+        return $pieces === [] ? $this->{$prefix} : implode(', ', $pieces);
+    }
+
     public function maskedSensitive(): array
     {
         $out = [];
@@ -165,6 +231,32 @@ class Employee extends Model
     public function isManagement(): bool
     {
         return (bool) $this->is_management;
+    }
+
+    /**
+     * Was the attendance exemption in force on this Manila date? Two things decide it:
+     *
+     *  - the COMPANY rule (`management_auto_attendance`, Company → Settings). Off, nobody is
+     *    exempt: management uses the time clock like everyone else. Passed in rather than read
+     *    here so each caller resolves the policy once instead of once per employee per day.
+     *  - WHEN this person became management. `is_management` answers only "today", which is the
+     *    wrong question for anything that scans history: a blanket skip let a promotion erase
+     *    the lates and absences someone accrued before it.
+     *
+     * Their PAY is not part of this: management is salaried on a fixed basis whatever the rule
+     * says, so payroll keeps asking isManagement() instead.
+     */
+    public function managementExemptOn(string $date, bool $autoAttendanceEnabled): bool
+    {
+        if (! $autoAttendanceEnabled || ! $this->isManagement()) {
+            return false;
+        }
+
+        // A flagged employee with no start date predates the column — exempt throughout, exactly
+        // as they behaved before it existed.
+        $since = $this->management_since?->toDateString() ?? $this->hire_date?->toDateString();
+
+        return $since === null || $date >= $since;
     }
 
     /** Browser-facing URL for the profile picture, or null to fall back to initials. */

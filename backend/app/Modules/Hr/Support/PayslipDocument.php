@@ -24,6 +24,16 @@ final class PayslipDocument
     /** The five deduction rows the document always shows, in the order it shows them. */
     private const ALWAYS_SHOWN = ['absent', 'undertime', 'half_day', 'late', 'suspended_unpaid'];
 
+    /**
+     * The earning rows an ordinary period shows even at zero, in the order it shows them.
+     *
+     * A missing "Overtime" row is indistinguishable from overtime that was silently dropped, so
+     * the skeleton is part of the document rather than something each renderer paints on top —
+     * and being real rows they carry their KEYS, which is what makes them correctable. `basic` is
+     * in the list for its place in the order; it is emitted unconditionally in any case.
+     */
+    private const ALWAYS_SHOWN_EARNINGS = ['basic', 'overtime', 'night_diff', 'rest_day', 'holiday'];
+
     /** The two charges measured in minutes rather than in days. */
     private const TIME_KINDS = ['late', 'undertime'];
 
@@ -45,9 +55,24 @@ final class PayslipDocument
     ): array {
         $lines = [];
 
-        $add = function (string $key, string $name, float $amount, ?string $note = null, string $kind = 'earning') use (&$lines) {
-            if (round($amount, 2) != 0.0) {
-                $lines[] = ['key' => $key, 'name' => $name, 'amount' => round($amount, 2), 'note' => $note, 'kind' => $kind];
+        $add = function (string $key, string $name, float $amount, ?string $note = null, string $kind = 'earning', ?array $dates = null) use (&$lines, $runType, $overrides) {
+            /*
+             * A ZERO LINE IS DROPPED, with two exceptions.
+             *
+             * The rows an ordinary period always shows, because their absence would read as the
+             * figure having been lost rather than as there being none — and because a row HR
+             * cannot see is a row HR cannot correct.
+             *
+             * And any line a correction stands against, whatever it is: HR correcting a figure
+             * down to zero must not delete the line, or the struck-through original and the way
+             * back to it go with it.
+             */
+            $keep = round($amount, 2) != 0.0
+                || isset($overrides[$key])
+                || ($runType === 'regular' && in_array($key, self::ALWAYS_SHOWN_EARNINGS, true));
+
+            if ($keep) {
+                $lines[] = ['key' => $key, 'name' => $name, 'amount' => round($amount, 2), 'note' => $note, 'kind' => $kind, 'dates' => $dates];
             }
         };
 
@@ -77,8 +102,9 @@ final class PayslipDocument
 
             $add('overtime', 'Overtime', $f('overtime_pay'), self::minutesNote($slip['overtime_minutes'] ?? 0));
             $add('night_diff', 'Night Differential', $f('night_diff_pay'), self::minutesNote($slip['night_diff_minutes'] ?? 0));
-            $add('holiday', 'Holiday', $f('holiday_premium'));
             $add('rest_day', 'Rest Day', $f('rest_day_premium'), self::minutesNote($slip['rest_day_minutes'] ?? 0));
+            $holidayDates = self::holidayDates($slip);
+            $add('holiday', 'Holiday', $f('holiday_premium'), self::daysNote(count($holidayDates)), 'earning', $holidayDates ?: null);
         }
 
         // --- 13th month ------------------------------------------------------------------------
@@ -99,13 +125,22 @@ final class PayslipDocument
                     continue;
                 }
 
+                // THE LABEL HR TYPED IS THE LINE'S NAME. The form calls that field "what the line
+                // is called on the payslip", and it used to print as the small note underneath
+                // while the line itself was always "Adjustment" — the deduction side has always
+                // named its line from the same field. Falling back to the catalogue wording when
+                // nothing was typed: a reversal is a line of its own, since "Adjustment −₱1,000"
+                // reads as an adjustment that was mis-entered.
+                $default = (float) $amendment['amount'] < 0 ? 'Pay Reversed' : 'Adjustment';
+                $label = trim((string) ($amendment['note'] ?? ''));
+
                 $add(
                     'amendment:' . ($amendment['id'] ?? 0),
-                    // A reversal is a line of its own: "Adjustment −₱1,000" reads as an adjustment
-                    // that was mis-entered, which is what it must not be mistaken for.
-                    (float) $amendment['amount'] < 0 ? 'Pay Reversed' : 'Adjustment',
+                    $label !== '' ? $label : $default,
                     (float) $amendment['amount'],
-                    trim(((string) ($amendment['note'] ?: $amendment['reason'])) . ' · issued '
+                    // The REASON underneath, which is the half that explains the line rather than
+                    // naming it, and which was previously only visible when no label was typed.
+                    trim(((string) ($amendment['reason'] ?? '')) . ' · issued '
                         . ((string) ($amendment['issued_on'] ?? ''))),
                 );
             }
@@ -127,6 +162,95 @@ final class PayslipDocument
         $add('reimbursement', 'Reimbursement', $f('reimbursements'));
 
         return self::withOverrideMarks($lines, $overrides);
+    }
+
+    /**
+     * THE HOLIDAYS BEHIND THE HOLIDAY FIGURE — one entry per day worked, in the same
+     * {date, detail} shape the deduction rows use, so the document renders both with one
+     * component instead of two that drift.
+     *
+     * Empty for payslips written before `holiday_lines` existed, which keeps their Holiday row
+     * exactly as it has always printed: a total with nothing under it. Deriving those days now
+     * would read TODAY'S holiday calendar and schedule, which is the one answer a document of
+     * record must not give.
+     *
+     * @param  array<string, mixed>  $slip
+     * @return list<array{date: string|null, detail: string|null, amount: float}>
+     */
+    public static function holidayDates(array $slip): array
+    {
+        $lines = $slip['holiday_lines'] ?? [];
+        $lines = is_array($lines) ? $lines : [];
+
+        return array_values(array_map(fn (array $line) => [
+            'date' => ($line['date'] ?? null) === null ? null : (string) $line['date'],
+            'detail' => self::holidayDetail($line),
+            // The same facts at a third of the width, for the PDF. The printed row is a 6.5px
+            // half-column: the full wording trims mid-phrase there, and what it loses is the
+            // rate — the one thing on the line the employee can actually check.
+            'short' => self::holidayShort($line),
+            'amount' => round((float) ($line['amount'] ?? 0), 2),
+        ], $lines));
+    }
+
+    /**
+     * One holiday line as words: what the day was, what rate it paid, and — when it landed on a
+     * rest day — why that rate is the WHOLE daily rate rather than the premium on top of it.
+     * The employee otherwise sees a figure twice the size of the one beside it with no reason given.
+     *
+     * @param  array<string, mixed>  $line
+     */
+    private static function holidayDetail(array $line): ?string
+    {
+        $type = (string) ($line['type'] ?? '');
+        $kind = match ($type) {
+            'regular' => 'Regular holiday',
+            'special_non_working' => 'Special non-working',
+            default => 'Holiday',
+        };
+
+        $parts = [];
+        if (($line['name'] ?? null) !== null && trim((string) $line['name']) !== '') {
+            $parts[] = trim((string) $line['name']);
+        }
+
+        $rate = (int) ($line['rate_pct'] ?? 0);
+        $parts[] = $rate > 0 ? "{$kind} {$rate}%" : $kind;
+
+        if (! empty($line['rest_day'])) {
+            // Not an extra premium — the full rate, because a rest day was never inside the
+            // salary in the first place. Worth saying, or the bigger number reads as a mistake.
+            $parts[] = 'on a rest day (full rate)';
+        }
+
+        return $parts === [] ? null : implode(' · ', $parts);
+    }
+
+    /**
+     * The print form: the holiday, its rate, and the rest-day flag — everything material, with
+     * only the NAME allowed to trim, because it is the one part whose length is unbounded.
+     *
+     * @param  array<string, mixed>  $line
+     */
+    private static function holidayShort(array $line): string
+    {
+        $rate = (int) ($line['rate_pct'] ?? 0);
+        $parts = [];
+
+        $name = trim((string) ($line['name'] ?? ''));
+        if ($name !== '') {
+            $parts[] = Str::limit($name, 24, '…');
+        }
+
+        $parts[] = ($rate > 0 ? $rate . '%' : 'holiday') . (empty($line['rest_day']) ? '' : ' rest day');
+
+        return implode(' · ', $parts);
+    }
+
+    /** "2 days" beside the Holiday label, or null when there is nothing to count. */
+    private static function daysNote(int $days): ?string
+    {
+        return $days > 0 ? $days . ' ' . ($days === 1 ? 'day' : 'days') : null;
     }
 
     /**
@@ -202,6 +326,30 @@ final class PayslipDocument
             $groups['absent'] ??= ['days' => 0.0, 'minutes' => 0, 'dates' => []];
         }
 
+        /*
+         * A CORRECTION CAN NAME A ROW THE LEDGER NEVER PRODUCED. The five rows above are drawn
+         * whether or not anything was charged, and every charge kind is correctable, so HR can pin
+         * a figure to a row with no attendance lines behind it. Its key would not be in `$weights`
+         * — that is built from the ledger — and pinnedApportion can only pin what it is handed: the
+         * row would print zero while the money HR entered, which went into the one shared
+         * `absence_deduction` column, was apportioned out among the kinds that DO have days. That
+         * is the Absences row silently absorbing somebody else's charge.
+         *
+         * Seeded at ZERO weight, so a pinned row takes its own figure and nothing more; and seeded
+         * AFTER the legacy fallback above, which replaces `$weights` wholesale and would otherwise
+         * throw these away.
+         */
+        $pinnedKinds = array_values(array_filter(
+            array_keys($overrides),
+            fn (string $key) => ! array_key_exists($key, $weights)
+                && ! in_array($key, self::TIME_KINDS, true)
+                && PayslipLines::classFor($key) === PayslipLines::ATTENDANCE_CHARGE,
+        ));
+
+        foreach ($pinnedKinds as $kind) {
+            $weights[$kind] = 0.0;
+        }
+
         $amounts = self::pinnedApportion((float) $totals['absences'], $weights, $overrides);
 
         // --- and the two time reasons share the clamped late/undertime charge --------------------
@@ -212,7 +360,11 @@ final class PayslipDocument
 
         $rows = [];
 
-        foreach ([...self::ALWAYS_SHOWN, ...array_diff(array_keys($groups), self::ALWAYS_SHOWN)] as $kind) {
+        // The always-drawn five, then whatever else the ledger charged, then any further row a
+        // correction has brought into existence.
+        $order = array_unique([...self::ALWAYS_SHOWN, ...array_keys($groups), ...$pinnedKinds]);
+
+        foreach ($order as $kind) {
             $group = $groups[$kind] ?? null;
 
             $rows[] = [
@@ -229,7 +381,12 @@ final class PayslipDocument
         // --- everything that is not attendance: benefit shares, loans, cash advances -------------
         foreach ($slip['other_deductions_breakdown'] ?? [] as $line) {
             $rows[] = [
-                'key' => PayslipLines::keyForName(PayslipLines::OTHER_PREFIX, (string) $line['name']),
+                // A line an amendment created is keyed by that amendment, so two entered under the
+                // same label cannot collapse onto one key. Everything else — benefit shares, loans,
+                // cash advances — is keyed by a slug of its name, as it always was.
+                'key' => ($line['amendment_id'] ?? null) === null
+                    ? PayslipLines::keyForName(PayslipLines::OTHER_PREFIX, (string) $line['name'])
+                    : PayslipLines::keyForAmendment(PayslipLines::OTHER_PREFIX, (int) $line['amendment_id']),
                 'name' => (string) $line['name'],
                 'count' => 0,
                 'days' => 0.0,

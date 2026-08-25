@@ -124,6 +124,38 @@ class HalfDayWindowService
         return [$eff['start_time'] ?? null, $eff['end_time'] ?? null];
     }
 
+    /**
+     * The window an employee was excused FROM — the mirror of windowFor(). Time worked inside it
+     * is time the company never asked for, which is why pay discounts the half-day charge by it
+     * (AttendanceService::excusedHalfWorkedMinutes).
+     *
+     * @param  array<string, mixed>  $eff  the employee's effective schedule for the date
+     * @return array{0: ?string, 1: ?string}  ['HH:MM' start, 'HH:MM' end]; [null, null] when there
+     *                                        is no excused window: an ordinary day, or a half
+     *                                        whose times are unconfigured
+     */
+    public function offWindowFor(array $eff, ?string $offHalf): array
+    {
+        if ($offHalf === self::BOTH) {
+            // Both halves filed off, so the whole schedule is the excused window.
+            return [$eff['start_time'] ?? null, $eff['end_time'] ?? null];
+        }
+
+        if ($offHalf === self::AM) {
+            return isset($eff['am_start_time'], $eff['am_end_time'])
+                ? [$eff['am_start_time'], $eff['am_end_time']]
+                : [null, null];
+        }
+
+        if ($offHalf === self::PM) {
+            return isset($eff['pm_start_time'], $eff['pm_end_time'])
+                ? [$eff['pm_start_time'], $eff['pm_end_time']]
+                : [null, null];
+        }
+
+        return [null, null];
+    }
+
     /** Does this day have a usable window for the half the employee is expected to work? */
     public function hasConfiguredWindow(array $eff, ?string $offHalf): bool
     {

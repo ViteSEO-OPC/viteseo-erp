@@ -46,8 +46,18 @@ const schema = z
     nationality: optionalText(100),
     date_of_birth: optionalPastDate("Date of birth"),
     place_of_birth: optionalText(),
-    address: optionalText(500),
-    current_address: optionalText(500),
+    address_house_no: optionalText(50),
+    address_street: optionalText(150),
+    address_barangay: optionalText(150),
+    address_city: optionalText(150),
+    address_province: optionalText(150),
+    address_zip: optionalText(20),
+    current_address_house_no: optionalText(50),
+    current_address_street: optionalText(150),
+    current_address_barangay: optionalText(150),
+    current_address_city: optionalText(150),
+    current_address_province: optionalText(150),
+    current_address_zip: optionalText(20),
     mothers_maiden_name: optionalText(),
     fathers_name: optionalText(),
     siblings: z
@@ -95,8 +105,18 @@ function toValues(employee: Employee): Values {
     nationality: employee.nationality ?? "",
     date_of_birth: employee.date_of_birth ?? "",
     place_of_birth: employee.place_of_birth ?? "",
-    address: employee.address ?? "",
-    current_address: employee.current_address ?? "",
+    address_house_no: employee.address_house_no ?? "",
+    address_street: employee.address_street ?? "",
+    address_barangay: employee.address_barangay ?? "",
+    address_city: employee.address_city ?? "",
+    address_province: employee.address_province ?? "",
+    address_zip: employee.address_zip ?? "",
+    current_address_house_no: employee.current_address_house_no ?? "",
+    current_address_street: employee.current_address_street ?? "",
+    current_address_barangay: employee.current_address_barangay ?? "",
+    current_address_city: employee.current_address_city ?? "",
+    current_address_province: employee.current_address_province ?? "",
+    current_address_zip: employee.current_address_zip ?? "",
     mothers_maiden_name: employee.mothers_maiden_name ?? "",
     fathers_name: employee.fathers_name ?? "",
     siblings: (employee.siblings ?? []).map((s) => ({ name: s.name, gender: s.gender ?? "" })),
@@ -127,8 +147,18 @@ function toPayload(v: Values): EmployeeUpdateInput {
     nationality: orNull(v.nationality),
     date_of_birth: orNull(v.date_of_birth),
     place_of_birth: orNull(v.place_of_birth),
-    address: orNull(v.address),
-    current_address: orNull(v.current_address),
+    address_house_no: orNull(v.address_house_no),
+    address_street: orNull(v.address_street),
+    address_barangay: orNull(v.address_barangay),
+    address_city: orNull(v.address_city),
+    address_province: orNull(v.address_province),
+    address_zip: orNull(v.address_zip),
+    current_address_house_no: orNull(v.current_address_house_no),
+    current_address_street: orNull(v.current_address_street),
+    current_address_barangay: orNull(v.current_address_barangay),
+    current_address_city: orNull(v.current_address_city),
+    current_address_province: orNull(v.current_address_province),
+    current_address_zip: orNull(v.current_address_zip),
     mothers_maiden_name: orNull(v.mothers_maiden_name),
     fathers_name: orNull(v.fathers_name),
     siblings: v.siblings
@@ -189,8 +219,6 @@ export function EmployeePersonalSection({
       display: employee.date_of_birth ? formatDate(employee.date_of_birth) : null,
     },
     { name: "place_of_birth", label: "Place of birth" },
-    { name: "address", label: "Home address", placeholder: "City, Province" },
-    { name: "current_address", label: "Current address" },
     { name: "mothers_maiden_name", label: "Mother's maiden name" },
     { name: "fathers_name", label: "Father's name" },
   ];
@@ -208,6 +236,44 @@ export function EmployeePersonalSection({
     >
       <div className="space-y-8">
         <FieldGrid specs={identity} editing={editing} form={form} />
+
+        <div className="border-t border-border pt-6">
+          <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
+            Home Address
+          </p>
+          <FieldGrid
+            specs={[
+              { name: "address_house_no", label: "House / unit no.", placeholder: "42" },
+              { name: "address_street", label: "Street", placeholder: "Jasmine St" },
+              { name: "address_barangay", label: "Barangay", placeholder: "Brgy. Holy Spirit" },
+              { name: "address_city", label: "City / municipality", placeholder: "Quezon City" },
+              { name: "address_province", label: "Province", placeholder: "Metro Manila" },
+              { name: "address_zip", label: "ZIP code", placeholder: "1127" },
+            ]}
+            editing={editing}
+            form={form}
+          />
+          <LegacyAddress value={employee.address} />
+        </div>
+
+        <div className="border-t border-border pt-6">
+          <p className="mb-4 text-label font-semibold uppercase tracking-wide text-brand">
+            Current Address
+          </p>
+          <FieldGrid
+            specs={[
+              { name: "current_address_house_no", label: "House / unit no.", placeholder: "42" },
+              { name: "current_address_street", label: "Street", placeholder: "Jasmine St" },
+              { name: "current_address_barangay", label: "Barangay", placeholder: "Brgy. Holy Spirit" },
+              { name: "current_address_city", label: "City / municipality", placeholder: "Quezon City" },
+              { name: "current_address_province", label: "Province", placeholder: "Metro Manila" },
+              { name: "current_address_zip", label: "ZIP code", placeholder: "1127" },
+            ]}
+            editing={editing}
+            form={form}
+          />
+          <LegacyAddress value={employee.current_address} />
+        </div>
 
         <SiblingsBlock employee={employee} editing={editing} form={form} />
 
@@ -263,6 +329,24 @@ export function EmployeePersonalSection({
         </div>
       </div>
     </RecordSectionShell>
+  );
+}
+
+/**
+ * The address as it was recorded before the fields were split apart.
+ *
+ * It is not backfilled into the boxes above: splitting "42 Jasmine St, Quezon City" into the right
+ * parts is a judgement no migration can make, and a wrong guess files a barangay under Street and
+ * calls it data. So the old line is shown here, read-only, until someone re-enters the parts —
+ * after which there is nothing left to show and this disappears on its own.
+ */
+function LegacyAddress({ value }: { value: string | null }) {
+  if (!value?.trim()) return null;
+
+  return (
+    <p className="mt-4 text-caption text-muted-foreground">
+      <span className="font-medium">Previously recorded:</span> {value}
+    </p>
   );
 }
 

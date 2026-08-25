@@ -15,7 +15,7 @@ class Payslip extends Model
 
     protected $fillable = [
         'payroll_run_id', 'employee_id',
-        'base_salary', 'reimbursements', 'allowances', 'holiday_premium', 'gross',
+        'base_salary', 'reimbursements', 'allowances', 'holiday_premium', 'holiday_lines', 'gross',
         // Payslip redesign — the full period basic, the absence charge taken off it, and the
         // per-component allowance split, so the document can show the derivation.
         'period_base', 'absence_deduction', 'allowances_breakdown',
@@ -76,6 +76,7 @@ class Payslip extends Model
         'period_base' => 'decimal:2',
         'absence_deduction' => 'decimal:2',
         'allowances_breakdown' => 'array',
+        'holiday_lines' => 'array',
         'working_days' => 'integer',
         'daily_rate' => 'decimal:2',
         'unpaid_days' => 'decimal:2',

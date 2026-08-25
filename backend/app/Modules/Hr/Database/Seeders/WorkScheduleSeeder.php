@@ -7,7 +7,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use Illuminate\Database\Seeder;
 
 /**
- * Seeds a default office schedule + a field schedule (Company → Rules), and the
+ * Seeds a default office schedule + a field schedule (Company → Settings), and the
  * single attendance-policy row. Employees resolve to the default until HR assigns
  * them another or sets per-person overrides.
  */

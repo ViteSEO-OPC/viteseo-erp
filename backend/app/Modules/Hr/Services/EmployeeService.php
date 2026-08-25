@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Services;
 
 use App\Models\User;
+use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\EmployeeBenefit;
@@ -61,7 +62,12 @@ class EmployeeService
         'employment_type', 'work_location', 'employee_role', 'is_management',
         'first_name', 'middle_name', 'last_name', 'name_extension',
         'gender', 'civil_status', 'nationality', 'date_of_birth', 'place_of_birth',
-        'phone', 'address', 'current_address',
+        'phone',
+        // The two addresses. The bare `address` / `current_address` are the pre-split
+        // free text, still writable so an old change request can still be approved.
+        'address', 'current_address',
+        'address_house_no', 'address_street', 'address_barangay', 'address_city', 'address_province', 'address_zip',
+        'current_address_house_no', 'current_address_street', 'current_address_barangay', 'current_address_city', 'current_address_province', 'current_address_zip',
         'mothers_maiden_name', 'fathers_name', 'siblings', 'number_of_siblings',
         'high_school', 'college_course', 'university',
         'emergency_contact_name', 'emergency_contact_relationship', 'emergency_contact_phone',
@@ -342,6 +348,9 @@ class EmployeeService
                 'hire_date' => $data['hire_date'],
                 'base_salary' => $data['base_salary'] ?? 0,
                 ...$this->profileData($data),
+                // A new hire flagged management is exempt from their first day, not from the
+                // day someone typed the record.
+                ...(empty($data['is_management']) ? [] : ['management_since' => $data['hire_date']]),
             ]);
 
             // 3) Seed this year's leave credits from the allotment defaults for this employment
@@ -404,11 +413,51 @@ class EmployeeService
      *
      * @param  array<string, mixed>  $data
      */
+    /**
+     * Keep the attendance exemption's paper trail in step with the flag. Called on every save;
+     * a no-op unless the flag actually moved.
+     */
+    private function syncManagementExemption(Employee $employee, bool $wasManagement): void
+    {
+        $isManagement = (bool) $employee->is_management;
+
+        if ($isManagement === $wasManagement) {
+            return;
+        }
+
+        $today = now(config('app.timezone_local'))->toDateString();
+        $employee->loadMissing('user');
+        $name = $employee->user?->name ?? 'This employee';
+
+        if ($isManagement) {
+            // Exempt from TODAY, never retroactively: the days before the promotion are a
+            // record the employee actually built by clocking in, and back-dating the exemption
+            // would erase the lates and absences HR may already have acted on.
+            $employee->update(['management_since' => $today]);
+            $this->audit->log('updated', 'People', "{$name} is now management — exempt from the time clock from {$today}", $employee);
+
+            return;
+        }
+
+        // Back on the clock. Their generated history STAYS — it is the record of the days they
+        // were exempt, and deleting it would turn every one of those days into an absence. Only
+        // today and anything later goes: nobody punched those rows, and one sitting on today
+        // reads to the time clock as already-clocked-in.
+        Attendance::where('employee_id', $employee->id)
+            ->where('source', Attendance::SOURCE_SYSTEM)
+            ->where('work_date', '>=', $today)
+            ->delete();
+
+        $employee->update(['management_since' => null]);
+        $this->audit->log('updated', 'People', "{$name} is no longer management — back on the time clock from {$today}", $employee);
+    }
+
     public function update(Employee $employee, array $data): Employee
     {
         return DB::transaction(function () use ($employee, $data) {
             $oldSalary = (float) $employee->base_salary;
             $oldTitle = $employee->job_title;
+            $wasManagement = (bool) $employee->is_management;
 
             $this->updateIdentity($employee, $data);
 
@@ -416,6 +465,8 @@ class EmployeeService
                 ...$this->coreData($data),
                 ...$this->profileData($data),
             ]);
+
+            $this->syncManagementExemption($employee, $wasManagement);
 
             $newSalary = (float) $employee->base_salary;
 
@@ -772,6 +823,45 @@ class EmployeeService
 
         $employee->load('user');
         $this->audit->log('updated', 'People', "Uploaded document '{$document->name}' to {$employee->user?->name}", $document);
+
+        return $document;
+    }
+
+    /**
+     * Rename a document — the LABEL on the record, not the file on disk.
+     *
+     * The stored path never changes, so nothing that already points at the file breaks. The
+     * extension is carried over when the new name drops it: `name` is what the browser saves the
+     * download as, and "Contract" with no `.pdf` downloads as a file the OS cannot open.
+     */
+    public function renameDocument(EmployeeDocument $document, string $name): EmployeeDocument
+    {
+        $before = $document->name;
+        $name = trim($name);
+
+        $extension = pathinfo((string) $before, PATHINFO_EXTENSION);
+
+        if ($extension !== '' && strcasecmp(pathinfo($name, PATHINFO_EXTENSION), $extension) !== 0) {
+            $name .= '.'.$extension;
+        }
+
+        if ($name === $before) {
+            return $document;
+        }
+
+        $document->update(['name' => $name]);
+
+        $document->loadMissing('employee.user');
+        $employee = $document->employee?->user?->name ?? $document->employee?->name;
+
+        $this->audit->log(
+            'updated',
+            'People',
+            "Renamed document '{$before}' to '{$name}' on {$employee}",
+            $document,
+            ['name' => $before],
+            ['name' => $name],
+        );
 
         return $document;
     }

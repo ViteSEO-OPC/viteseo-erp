@@ -7,7 +7,10 @@ final class DeductionResult
 {
     /**
      * @param  float  $unpaidFraction  the capped, rounded fraction of a day to deduct (0..cap)
-     * @param  int  $lateMinutes  raw late minutes charged (0 when the late mode is off)
+     * @param  int  $lateMinutes  minutes past the SCHEDULED START — the reported figure the
+     *                            attendance page, ledger line and payslip share. Not the charge
+     *                            basis: `late_minutes_from` may price from the end of grace
+     *                            instead. 0 inside grace, or when the late mode is off.
      * @param  int  $undertimeMinutes  raw undertime minutes charged (0 when the mode is off)
      * @param  float  $lateFraction  late portion of the fraction, for display
      * @param  float  $undertimeFraction  undertime portion of the fraction, for display

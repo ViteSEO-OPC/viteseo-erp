@@ -74,7 +74,7 @@ function threshold(rules: ViolationRules | null | undefined, category: keyof Vio
 }
 
 /**
- * Build the legend descriptions from the CONFIGURED ladder (Company → Rules), so the
+ * Build the legend descriptions from the CONFIGURED ladder (Company → Settings), so the
  * numbers HR set there are exactly what shows here. Each level shows its late-count band
  * and its absence-days band. Falls back to today's defaults when the policy isn't loaded.
  */
@@ -260,7 +260,7 @@ function Details({
 
   const currentSev: Severity = row.flag?.severity ?? "green";
   const level = { sev: currentSev, label: SEVERITY_LABEL[currentSev] };
-  // Legend descriptions reflect the thresholds HR configured (Company → Rules).
+  // Legend descriptions reflect the thresholds HR configured (Company → Settings).
   const legendDesc = useMemo(() => legendDescriptions(policy?.violation_rules), [policy]);
   const pill = hrStatusBadge(effectiveStatus);
 
@@ -467,7 +467,7 @@ function Details({
           )}
         </Section>
 
-        {/* Alert color legend — thresholds come from Company → Rules (Violation flags). */}
+        {/* Alert color legend — thresholds come from Company → Settings (Violation flags). */}
         <Section title="Alert Color Legend">
           <div className="space-y-2">
             {SEVERITY_ORDER.map((sev) => (

@@ -101,10 +101,12 @@ class ConfigurableNightDifferentialTest extends HrTestCase
             ->assertJsonPath('data.night_diff_end_time', '06:00');
 
         $this->actingAsHr()
+            // No date: this case is about the endpoint exposing and round-tripping the window,
+            // and the endpoint no longer accepts a past one. The cases that need the window
+            // dated INTO March go through the service, which is where backdating still lives.
             ->putJson('/api/v1/hr/attendance-policy', [
                 'night_diff_start_time' => '21:30',
                 'night_diff_end_time' => '05:30',
-                'effective_from' => '2026-03-01',
             ])
             ->assertOk()
             ->assertJsonPath('data.night_diff_start_time', '21:30')

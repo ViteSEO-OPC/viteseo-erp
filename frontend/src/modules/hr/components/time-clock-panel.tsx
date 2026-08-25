@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { notify as toast } from "@/core/lib/notify";
 
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/core/auth-context";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -120,7 +119,6 @@ function hoursLabel(minutes: number): string {
 }
 
 export function TimeClockPanel() {
-  const { employee } = useAuth();
   const { data, isLoading } = useMyAttendance();
   const clockInMut = useClockIn();
   const clockOutMut = useClockOut();
@@ -139,13 +137,13 @@ export function TimeClockPanel() {
   const busy = clockInMut.isPending || clockOutMut.isPending || breakMut.isPending;
   const activeState = state === "clocked_in" || state === "on_lunch" || state === "on_break";
 
-  // Strict clock-in (Company → Rules). The server decides whether anything holds this
+  // Strict clock-in (Company → Settings). The server decides whether anything holds this
   // employee back and until when; we only compare that against the ticking clock, so the
   // button unlocks on the minute the shift opens without waiting for a refetch.
   const opensAt = data?.clock_in?.opens_at ?? null;
   const tooEarly = opensAt !== null && manilaHm(now) < opensAt;
 
-  // Geofenced clock-in (Company → Rules). The server reports whether it is ACTUALLY
+  // Geofenced clock-in (Company → Settings). The server reports whether it is ACTUALLY
   // enforcing — an enabled-but-unconfigured policy fails open and reports false — so the
   // panel never asks a question whose answer would be ignored.
   const geofenced = data?.clock_in?.geofence ?? false;
@@ -331,8 +329,10 @@ export function TimeClockPanel() {
     if (ok) setTimeOutOpen(false);
   }
 
-  // Management staff are exempt from attendance — no clock panel, just a note.
-  if (employee?.is_management) {
+  // Management staff are exempt from attendance — no clock panel, just a note. Read off the
+  // server's live answer (flag AND company rule), not the auth payload's raw flag: HR can
+  // switch auto time in/out off, and then they punch like everyone else.
+  if (data?.attendance_exempt) {
     return (
       <div className="flex items-center gap-3 rounded-card bg-dark-teal p-6 text-white">
         <span className="size-2.5 rounded-full bg-success" />

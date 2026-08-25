@@ -7,6 +7,7 @@ use App\Modules\Hr\Http\Requests\RehireEmployeeRequest;
 use App\Modules\Hr\Http\Requests\ReopenRequest;
 use App\Modules\Hr\Http\Requests\SeparateEmployeeRequest;
 use App\Modules\Hr\Http\Requests\SetHrRoleRequest;
+use App\Modules\Hr\Http\Requests\RenameEmployeeDocumentRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeeDocumentRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeePhotoRequest;
 use App\Modules\Hr\Http\Requests\StoreEmployeeRequest;
@@ -115,6 +116,19 @@ class EmployeeController extends Controller
         return EmployeeDocumentResource::make($document)
             ->response()
             ->setStatusCode(Response::HTTP_CREATED);
+    }
+
+    // PATCH /api/v1/hr/employees/{employee}/documents/{document} — rename it.
+    public function renameDocument(
+        RenameEmployeeDocumentRequest $request,
+        Employee $employee,
+        EmployeeDocument $document,
+    ): JsonResponse {
+        abort_unless($document->employee_id === $employee->id, 404);
+
+        return EmployeeDocumentResource::make(
+            $this->service->renameDocument($document, $request->validated('name')),
+        )->response();
     }
 
     // DELETE /api/v1/hr/employees/{employee}/documents/{document}

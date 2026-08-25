@@ -12,35 +12,17 @@
     /** Two peso figures that differ by more than rounding. */
     $differs = fn ($a, $b) => abs((float) $a - (float) $b) > 0.005;
 
-    /**
-     * The rows the Compensation table shows even at zero, in the order it shows them — matching
-     * the screen. A reader checking a payslip is checking a list they already expect, and a
-     * missing "Overtime" row is indistinguishable from overtime that was silently dropped.
+    /*
+     * The rows an ordinary period shows even at zero arrive as REAL LINES from
+     * PayslipDocument::earningLines(), in the order it shows them — the screen reads the same
+     * list. This used to rebuild that skeleton here by NAME, which both duplicated the rule and
+     * printed a renamed line twice: once as an empty placeholder under its old name and again
+     * under the one HR gave it.
      */
-    $skeleton = ['Basic Pay', 'Overtime', 'Night Differential', 'Rest Day', 'Holiday'];
-
     $earningLines = array_values(array_filter(
         $p['earnings_breakdown'],
         fn ($l) => ($l['kind'] ?? 'earning') !== 'allowance',
     ));
-
-    if ($p['run_type'] === 'regular') {
-        $bySkeleton = [];
-        foreach ($skeleton as $name) {
-            $found = null;
-            foreach ($earningLines as $l) {
-                if ($l['name'] === $name) { $found = $l; break; }
-            }
-            $bySkeleton[] = $found ?? ['name' => $name, 'amount' => 0.0, 'note' => null];
-        }
-
-        $extra = array_values(array_filter(
-            $earningLines,
-            fn ($l) => ! in_array($l['name'], $skeleton, true),
-        ));
-
-        $earningLines = array_merge($bySkeleton, $extra);
-    }
 
     $allowanceLines = array_values(array_filter(
         $p['earnings_breakdown'],
@@ -56,15 +38,27 @@
         }
     }
 
-    // How many lines were corrected, and when the most recent of them was issued.
-    $amendedCount = count($corrections);
+    /*
+     * WHAT WAS AMENDED, AND WHEN. Counted over EVERY amendment, not only the ones that changed a
+     * line already here: a payslip that had a line added to it has been amended just as much, and
+     * used to carry no stamp at all.
+     */
+    $correctedCount = count($corrections);
+    $addedCount = count($p['amendments'] ?? []) - $correctedCount;
+    $amendedCount = $correctedCount + $addedCount;
     $amendedOn = null;
 
-    foreach ($corrections as $amendment) {
+    foreach ($p['amendments'] ?? [] as $amendment) {
         if (($amendment['issued_on'] ?? null) !== null && $amendment['issued_on'] > (string) $amendedOn) {
             $amendedOn = $amendment['issued_on'];
         }
     }
+
+    /** Said as what actually happened — three corrected and one added is not "4 corrected". */
+    $amendedWhat = implode(' · ', array_filter([
+        $correctedCount > 0 ? $correctedCount . ' line' . ($correctedCount === 1 ? '' : 's') . ' corrected' : null,
+        $addedCount > 0 ? $addedCount . ' line' . ($addedCount === 1 ? '' : 's') . ' added' : null,
+    ]));
 
     /** The struck-through original, or nothing at all on a line nobody has corrected. */
     $was = fn ($original) => $original === null ? '' : '<span class="was">' . $amt($original) . '</span>';
@@ -102,40 +96,6 @@
     $fitWide = fn ($v, int $max) => ($v === null || $v === '')
         ? '—'
         : (mb_strlen((string) $v) > $max ? mb_substr((string) $v, 0, $max - 1) . '…' : (string) $v);
-
-    /**
-     * The dates behind a deduction row, as one grey line — "Aug 5, Aug 10", or "Aug 1 180m ·
-     * Aug 5 120m" once minutes are what varies.
-     */
-    $fitDates = function (array $row) {
-        $dates = $row['dates'] ?? [];
-
-        if ($dates === []) {
-            return null;
-        }
-
-        $isTime = ($row['minutes'] ?? null) !== null;
-        $max = 6;
-        $shown = array_slice($dates, 0, $max);
-        $parts = [];
-
-        foreach ($shown as $d) {
-            $day = empty($d['date'])
-                ? '—'
-                : \Illuminate\Support\Carbon::parse($d['date'])->format('M j');
-
-            if ($isTime && preg_match('/^(\d+)\s*min/', (string) ($d['detail'] ?? ''), $m)) {
-                $day .= ' ' . $m[1] . 'm';
-            }
-
-            $parts[] = $day;
-        }
-
-        $text = implode($isTime ? ' · ' : ', ', $parts);
-        $rest = count($dates) - count($shown);
-
-        return $rest > 0 ? $text . ' +' . $rest . ' more' : $text;
-    };
 
     // Attendance reasons are bounded by the number of charge kinds; benefit shares and loans are
     // not, so only those are capped.
@@ -190,6 +150,10 @@
                text-transform: uppercase; color: #6b7280; letter-spacing: 0.2px; }
 
         /* Header */
+        /* The mark, when one is set. Height-capped so a large upload can't push the
+           document onto a second page — dompdf scales the width to match. */
+        .logo { text-align: center; padding-bottom: 3px; }
+        .logo img { height: 34px; }
         .company { text-align: center; font-size: 13px; font-weight: bold; }
         .address { text-align: center; font-size: 7px; color: #6b7280; padding-top: 1px; }
 
@@ -254,12 +218,6 @@
         /* Said once, under the total it is deliberately absent from. */
         .ernote td { padding: 2px 6px 0; font-size: 6.5px; font-style: italic; color: #6b7280; }
 
-        /* The dates behind a count, and the tax derivation. Spans both columns because it is a
-           sentence, not an amount. */
-        .why td { border-bottom: 1px solid #e5e7eb; padding: 0 6px 2px 6px;
-                  font-size: 6.5px; color: #6b7280; }
-        .why.open td { border-bottom: none; padding-bottom: 1px; }
-
         /* Footer */
         .foot { margin-top: 9px; page-break-inside: avoid; }
         .foot td { vertical-align: bottom; }
@@ -270,8 +228,13 @@
 </head>
 <body>
 
-<div class="company">VITE SEO DIGITAL ADVERTISING OPC</div>
-<div class="address">26L Burgundy Corporate Tower, 252 Sen. Gil Puyat Avenue, Pio Del Pilar 1230 City of Makati NCR, Fourth District Philippines</div>
+@if (!empty($company['logo']))
+    <div class="logo"><img src="{{ $company['logo'] }}" alt=""></div>
+@endif
+<div class="company">{{ $company['name'] }}</div>
+@if (!empty($company['address']))
+    <div class="address">{{ $company['address'] }}</div>
+@endif
 
 <table style="margin-top: 10px;">
     <tr>
@@ -377,20 +340,9 @@
             <table class="stack">
                 <tr class="thead"><td>Deductions</td><td class="amt">Amount</td></tr>
                 @foreach (array_merge($attendanceRows, $otherRows) as $row)
-                    @php
-                        // Assembled here rather than with inline directives. Blade's directive
-                        // scanner is unreliable when a conditional opens or closes flush against
-                        // adjacent text, and it fails the whole VIEW rather than the line — which
-                        // is how the first draft of this loop 500'd every payslip download.
-                        $dates = $fitDates($row);
-                        $minutes = empty($row['minutes']) ? '' : $row['minutes'] . ' min';
-                    @endphp
-                    {{--
-                        The count badge and the date line are the point of the row: "Absences
-                        1,316.00" has to be taken on trust; "Absences (2) Aug 5, Aug 10" can be
-                        checked against the reader's own memory of the month.
-                    --}}
-                    <tr class="line{{ $dates ? ' pair' : '' }}">
+                    {{-- The count badge carries the quantity: "Absences (2)". The days behind it
+                         are no longer printed. --}}
+                    <tr class="line">
                         <td>
                             @if (! empty($row['original_name']))
                                 <span class="was">{{ $fit($row['original_name']) }}</span>
@@ -402,12 +354,6 @@
                         </td>
                         <td class="amt">{!! $was($row['original_amount'] ?? null) !!}{{ $amt($row['amount']) }}</td>
                     </tr>
-                    @if ($dates)
-                        <tr class="why">
-                            <td>{{ $dates }}</td>
-                            <td class="amt">{{ $minutes }}</td>
-                        </tr>
-                    @endif
                 @endforeach
                 <tr class="sum"><td>Total Deduction</td><td class="amt">{{ $amt($t['deductions']) }}</td></tr>
             </table>
@@ -476,35 +422,8 @@
                         </tr>
                     @endif
                 @endforeach
-                @php
-                    // Built here rather than with inline directives: Blade will not parse a
-                    // conditional that directly follows a digit ("÷ 12" then a directive compiles
-                    // the closing tag and leaves the opener literal), and the sentence reads
-                    // better assembled than stitched out of six template fragments.
-                    $taxWhy = $p['tax_basis'] ?? null;
-                    $taxWhyLines = [];
-
-                    if ($taxWhy) {
-                        $taxWhyLines[] = '(' . $amt($taxWhy['taxable_monthly']) . ' taxable − '
-                            . $amt($taxWhy['contributions_monthly']) . ' contributions) × 12 = '
-                            . $amt($taxWhy['annual_taxable']) . ' a year';
-
-                        if (! empty($taxWhy['band'])) {
-                            $bandRate = rtrim(rtrim(number_format($taxWhy['band']['rate'] * 100, 3), '0'), '.');
-                            $over = $taxWhy['band']['base'] > 0
-                                ? ' plus ' . $amt($taxWhy['band']['base'])
-                                : '';
-                            $split = $taxWhy['timing_factor'] != 1
-                                ? ' × ' . $taxWhy['timing_factor']
-                                : '';
-
-                            $taxWhyLines[] = $bandRate . '% over ' . $amt($taxWhy['band']['min']) . $over
-                                . ' = ' . $amt($taxWhy['annual_tax']) . ' a year ÷ 12' . $split;
-                        }
-                    }
-                @endphp
                 @php $taxFix = $corrections['withholding_tax'] ?? null; @endphp
-                <tr class="line {{ $taxWhyLines ? 'pair' : '' }}">
+                <tr class="line">
                     <td>
                         @if (! empty($taxFix['label_override']))
                             <span class="was">Withholding Tax</span> {{ $fit($taxFix['label_override']) }}
@@ -514,16 +433,6 @@
                     </td>
                     <td class="amt">{!! $was($taxFix['original_amount'] ?? null) !!}{{ $amt($p['withholding_tax']) }}</td>
                 </tr>
-                {{--
-                    The least checkable figure on the document: an annualised projection of one
-                    period, net of contributions, against a dated bracket table. Four steps, none
-                    of them visible, ending in a peso amount the reader was expected to trust.
-                    Kept when the other derivations were dropped, because December's tax line can
-                    go NEGATIVE and nothing else on the page would account for that.
-                --}}
-                @foreach ($taxWhyLines as $line)
-                    <tr class="why {{ $loop->last ? '' : 'open' }}"><td colspan="2">{{ $line }}</td></tr>
-                @endforeach
                 {{--
                     The year-end settlement, shown as its derivation. On the common case
                     the line above is NEGATIVE and net pay exceeds gross; the printed payslip is
@@ -681,7 +590,7 @@
             @if ($amendedCount > 0)
                 <div class="cap" style="padding-top: 4px;">Amended</div>
                 <div style="font-size: 8px; padding-top: 1px;">
-                    {{ $amendedCount }} line{{ $amendedCount === 1 ? '' : 's' }} corrected{{ $amendedOn ? ' · ' . $fmt($amendedOn) : '' }}
+                    {{ $amendedWhat }}{{ $amendedOn ? ' · ' . $fmt($amendedOn) : '' }}
                 </div>
             @endif
         </td>

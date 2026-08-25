@@ -8,10 +8,12 @@ use App\Modules\Hr\Http\Requests\ClockInRequest;
 use App\Modules\Hr\Http\Resources\AttendanceResource;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Services\AttendanceService;
+use App\Modules\Hr\Services\ManagementAttendanceService;
 use App\Modules\Hr\Services\MyAttendanceReportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Carbon;
 
 class AttendanceController extends Controller
 {
@@ -46,6 +48,7 @@ class AttendanceController extends Controller
                     // Same reason as clock_in above: the shape must match the real branch's, or
                     // the panel's optional chaining ends up deciding the day's rules.
                     'day_rules' => null,
+                    'attendance_exempt' => false,
                 ],
             ]);
         }
@@ -62,6 +65,10 @@ class AttendanceController extends Controller
                 // Today's declared rules, so the panel can say "full day at 6h — you reach it
                 // at 3:12 PM" instead of leaving the employee to discover it on their payslip.
                 'day_rules' => $this->service->dayRulesFor($employee),
+                // Is this person exempt from the clock RIGHT NOW — their management flag AND
+                // the company rule together. The panel hides the clock on this rather than on
+                // `is_management`, or it would keep hiding it after HR switches the rule off.
+                'attendance_exempt' => $this->service->attendanceExemptToday($employee),
             ],
         ]);
     }
@@ -142,6 +149,45 @@ class AttendanceController extends Controller
     }
 
     /** GET /api/v1/hr/attendance/open-shifts?from=&to= — the stale-attendance review queue (item 6). */
+    // GET /api/v1/hr/attendance/management-generation — did the nightly actually run?
+    public function managementGeneration(ManagementAttendanceService $service): JsonResponse
+    {
+        return response()->json(['data' => $service->status()]);
+    }
+
+    // POST /api/v1/hr/attendance/management-generation — run it now, for a range.
+    public function regenerateManagement(Request $request, ManagementAttendanceService $service): JsonResponse
+    {
+        $data = $request->validate([
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
+        ]);
+
+        $tz = config('app.timezone_local');
+        $from = $data['from'] ?? null;
+        $to = $data['to'] ?? null;
+
+        // Capped rather than open-ended: this walks every management employee day by day, so a
+        // mistyped year should not turn one press into a decade of writes.
+        if ($from !== null) {
+            $end = Carbon::parse($to ?? now($tz)->toDateString(), $tz);
+            if (Carbon::parse($from, $tz)->diffInDays($end) > 92) {
+                abort(422, 'Regenerate at most three months at a time.');
+            }
+        }
+
+        $result = $service->run(from: $from, to: $to);
+
+        return response()->json([
+            'data' => [
+                'from' => $result['from'],
+                'to' => $result['to'],
+                'stats' => $result['stats'],
+                'status' => $service->status(),
+            ],
+        ]);
+    }
+
     public function openShifts(Request $request): JsonResponse
     {
         $data = $request->validate([

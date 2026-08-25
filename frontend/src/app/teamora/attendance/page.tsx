@@ -16,6 +16,7 @@ import { AttendanceMeetingDialog } from "@/modules/hr/components/attendance-meet
 import { AttendanceSummaryTiles } from "@/modules/hr/components/attendance-summary-tiles";
 import { FieldTimeInQueue } from "@/modules/hr/components/field-timein-queue";
 import { OpenShiftQueue } from "@/modules/hr/components/open-shift-queue";
+import { ManagementGenerationCard } from "@/modules/hr/components/management-generation-card";
 import {
   SoftBadge,
   deriveAttendanceStatus,
@@ -87,7 +88,9 @@ export default function AttendancePage() {
 
   const filtered = useMemo(() => {
     return (rows ?? []).filter((r) => {
-      if (search && !(r.name ?? "").toLowerCase().includes(search.toLowerCase())) return false;
+      const q = search.trim().toLowerCase();
+      const matches = (value: string | null) => (value ?? "").toLowerCase().includes(q);
+      if (q && !matches(r.name) && !matches(r.list_name)) return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (timingFilter !== "all" && r.timing?.category !== timingFilter) return false;
       return true;
@@ -97,7 +100,9 @@ export default function AttendancePage() {
   const columns: Column<HrAttendanceRow>[] = [
     {
       header: "Employee",
-      cell: (r) => <span className="font-semibold text-foreground">{r.name ?? "—"}</span>,
+      cell: (r) => (
+        <span className="font-semibold text-foreground">{r.list_name ?? r.name ?? "—"}</span>
+      ),
     },
     { header: "Dept", cell: (r) => r.department ?? "—" },
     {
@@ -167,6 +172,15 @@ export default function AttendancePage() {
             setDate(r.work_date);
           }}
         />
+      </div>
+
+      {/*
+       * Management attendance is generated, not punched. Renders nothing when nobody is
+       * exempt; below the two queues because a missed nightly is a data-freshness problem,
+       * not a person waiting on HR.
+       */}
+      <div className="mt-4 empty:mt-0">
+        <ManagementGenerationCard />
       </div>
 
       <div className="mt-4">
