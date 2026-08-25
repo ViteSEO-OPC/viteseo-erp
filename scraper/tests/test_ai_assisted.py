@@ -245,3 +245,80 @@ def test_stats_are_a_copy_and_cannot_be_mutated_from_outside():
     provider.stats()["net_new"] = 999
 
     assert provider.stats()["net_new"] == 0
+
+
+# --- same-name businesses keep distinct identities all the way to the CRM ---------
+
+
+def test_two_same_named_branches_reach_the_crm_as_two_distinct_leads():
+    # THE WATSONS CASE, END TO END. Two OSM nodes both called "Watsons" are two real branches. They
+    # must arrive as two leads with two different place_ids — the value the CRM dedups on — not as
+    # one lead, and not as two leads sharing a key.
+    osm = FakeOsm(business("Vigan Pharmacy", "node/1"))
+    ai = FakeAi(business("Watsons", "node/2"), business("Watsons", "node/3"))
+    provider = composite(osm, ai)
+
+    rows = [normalize(b, provider.name) for b in provider.discover(area="Vigan", category="pharmacy", limit=30)]
+    place_ids = [r.place_id for r in rows]
+
+    assert place_ids == ["node/1", "node/2", "node/3"]
+    assert len(set(place_ids)) == len(place_ids)
+    assert provider.stats()["net_new"] == 2
+
+
+def test_a_same_named_branch_the_baseline_already_had_is_still_deduped():
+    # Relaxing the ambiguity rule must not weaken dedup. Identity is the KEY, never the name — one of
+    # these two "Watsons" is already in the baseline and must not arrive twice.
+    osm = FakeOsm(business("Watsons", "node/2"))
+    ai = FakeAi(business("Watsons", "node/2"), business("Watsons", "node/3"))
+    provider = composite(osm, ai)
+
+    result = provider.discover(area="Vigan", category="pharmacy", limit=30)
+
+    assert [b.provider_id for b in result] == ["node/2", "node/3"]
+    assert provider.stats()["ai_duplicates"] == 1
+    assert provider.stats()["net_new"] == 1
+
+
+def test_same_named_branches_keep_their_own_lane_and_coordinates():
+    # Each record carries its OWN OSM identity. Nothing is merged, copied between branches, or
+    # inferred from the shared name.
+    baseline = business("Watsons", "node/2")
+    baseline.latitude, baseline.longitude = 17.57, 120.38
+    extra = business("Watsons", "node/3")
+    extra.latitude, extra.longitude = 17.58, 120.39
+    provider = composite(FakeOsm(baseline), FakeAi(extra))
+
+    result = provider.discover(area="Vigan", category="pharmacy", limit=30)
+    by_id = {b.provider_id: b for b in result}
+
+    assert by_id["node/2"].discovered_by == LANE_BASELINE
+    assert by_id["node/3"].discovered_by == LANE_AI
+    assert by_id["node/2"].latitude != by_id["node/3"].latitude
+
+
+def test_rediscovering_the_same_pool_is_idempotent():
+    # Re-running must produce the SAME keys, or the CRM would treat every re-run as new businesses.
+    def run():
+        provider = composite(
+            FakeOsm(business("Watsons", "node/2")),
+            FakeAi(business("Watsons", "node/3"), business("Mercury Drug", "node/4")),
+        )
+        return [r.place_id for r in
+                (normalize(b, provider.name) for b in
+                 provider.discover(area="Vigan", category="pharmacy", limit=30))]
+
+    assert run() == run() == ["node/2", "node/3", "node/4"]
+
+
+def test_a_keyless_record_never_becomes_a_lead_without_a_place_id():
+    # The CRM dedups on place_id; a lead without one can never be matched against itself. The
+    # resolver refuses these upstream, and this pins the consequence if one ever got through.
+    from scraper.providers.osm_resolver import OsmNameResolver
+
+    outcome = OsmNameResolver(
+        lambda names, area: [business("Watsons", "")]
+    ).resolve(["Watsons"], area="Vigan")
+
+    assert outcome.resolved == []
+

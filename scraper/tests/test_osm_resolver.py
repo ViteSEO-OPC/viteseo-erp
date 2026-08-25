@@ -52,16 +52,33 @@ def test_a_hallucinated_name_cannot_reach_the_pipeline_alongside_a_real_one():
     assert outcome.proposed_count == 3
 
 
-def test_an_ambiguous_proposal_resolves_to_nothing_rather_than_guessing():
-    # Two DIFFERENT real businesses share the name. Picking one would attach a real place_id to
-    # possibly the wrong business — and because the CRM dedups on that key, the error would be
-    # permanent and silent. Taking neither is the only safe answer.
-    outcome = resolver_for(osm("Mercury Drug", "node/1"), osm("Mercury Drug", "node/2")).resolve(
-        ["Mercury Drug"], area="Vigan"
+def test_two_businesses_sharing_one_name_are_both_kept():
+    # THE WATSONS CASE, from live Vigan data: two OSM nodes both called simply "Watsons", no branch
+    # qualifier. These were once refused as ambiguous, on the reasoning that picking one would attach
+    # a real place_id to possibly the wrong business. That reasoning applied to PICKING. Retaining
+    # both picks nothing — each keeps its own real key — so no record can be attached to the wrong
+    # business, and two real prospects stop being thrown away.
+    outcome = resolver_for(osm("Watsons", "node/1"), osm("Watsons", "node/2")).resolve(
+        ["Watsons"], area="Vigan"
     )
 
-    assert outcome.resolved == []
-    assert outcome.ambiguous == ["Mercury Drug"]
+    assert sorted(b.provider_id for b in outcome.resolved) == ["node/1", "node/2"]
+    assert outcome.ambiguous == []
+
+
+def test_keeping_them_is_never_stricter_than_the_baseline_sweep():
+    # `discover()` returns both same-named nodes without hesitation when their tags match. Holding
+    # name lookup to a stricter standard than the tag sweep beside it cost real businesses and
+    # guarded against a risk that was never present.
+    outcome = resolver_for(
+        osm("Mercury Drug", "node/1"),
+        osm("Mercury Drug", "node/2"),
+        osm("Mercury Drug", "node/3"),
+        osm("Mercury Drug", "way/4"),
+    ).resolve(["Mercury Drug"], area="Vigan")
+
+    assert len(outcome.resolved) == 4
+    assert outcome.confirmed_count == 1
 
 
 def test_the_same_business_returned_twice_is_not_ambiguous():
@@ -181,18 +198,52 @@ def test_every_differently_named_branch_is_kept():
     assert outcome.ambiguous == []
 
 
-def test_same_name_different_key_is_still_refused_even_beside_clean_branches():
-    # THE SAFETY RULE, UNCHANGED. Two elements sharing one NAME are unresolvable, and a proposal that
-    # touches that collision takes nothing at all — keeping the clean branch would mean deciding the
-    # proposer meant that one and not the contested pair, which is the guess this module refuses.
+def test_bare_names_and_branch_names_all_survive_together():
+    # The mixed shape real OSM data actually has: some branches labelled, some not. Every one is a
+    # distinct mapped business, so every one is kept.
     outcome = resolver_for(
         osm("Mercury Drug", "node/1"),
         osm("Mercury Drug", "node/2"),
         osm("Mercury Drug Vigan", "node/3"),
     ).resolve(["Mercury Drug"], area="Vigan")
 
+    assert sorted(b.provider_id for b in outcome.resolved) == ["node/1", "node/2", "node/3"]
+    assert outcome.ambiguous == []
+
+
+# --- what identity failure still looks like ---------------------------------------
+
+
+def test_an_element_with_no_usable_key_is_never_resolved():
+    # provider_id IS the dedup contract. An element that cannot supply one has no identity to record,
+    # and landing it would create a lead the CRM can never match against itself.
+    outcome = resolver_for(osm("Watsons", "")).resolve(["Watsons"], area="Vigan")
+
     assert outcome.resolved == []
-    assert outcome.ambiguous == ["Mercury Drug"]
+    assert outcome.ambiguous == ["Watsons"]
+    # NOT "unmatched": OSM did hold something by that name. The two facts are different.
+    assert outcome.unmatched == []
+
+
+def test_a_keyless_element_does_not_drag_down_its_identifiable_neighbours():
+    outcome = resolver_for(osm("Watsons", ""), osm("Watsons", "node/2")).resolve(
+        ["Watsons"], area="Vigan"
+    )
+
+    assert [b.provider_id for b in outcome.resolved] == ["node/2"]
+    assert outcome.ambiguous == []
+
+
+def test_nothing_is_ever_chosen_from_among_candidates():
+    # THE PROTECTION, STATED AS A PROPERTY. Every refusal takes the WHOLE proposal, and every success
+    # keeps EVERY business matched. There is no path that returns a strict, non-empty subset — which
+    # is the only shape a guess could take.
+    matched = [osm(f"Rose {n}", f"node/{i}") for i, n in enumerate(
+        ["Pharmacy", "Bakery", "Cafe"], start=1
+    )]
+    outcome = resolver_for(*matched).resolve(["Rose"], area="Vigan")
+
+    assert len(outcome.resolved) in (0, len(matched))
 
 
 def test_containment_is_one_way():

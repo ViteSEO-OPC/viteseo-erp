@@ -22,22 +22,35 @@ which rejected precisely the businesses a proposer is most likely to name. Conta
 the proposal must be contained BY the element, never the reverse, so "Mercury Drug Vigan" proposed
 against a bare "Mercury Drug" element still does not match.
 
-TWO DIFFERENT SITUATIONS THAT MUST NOT BE CONFLATED, and separating them is the rest of the change:
-
-* **Genuine ambiguity — one NAME, several businesses.** Two OSM elements both called "Mercury Drug"
-  with different keys. Which one a proposer meant is unknowable, and a wrong resolution is worse than
-  a miss: it attaches a real ``place_id`` to the wrong business, and because the CRM dedups on that
-  key the error becomes permanent and invisible. Still refused, exactly as before.
+THE PROTECTION IS THAT NOTHING IS EVER CHOSEN — not that multiple matches are refused. A proposal
+either keeps EVERY distinct business it matched or keeps none of them. That distinction is the whole
+safety argument, and it is what makes the following safe:
 
 * **Several BRANCHES — different names, one chain.** "Mercury Drug Vigan" and "Mercury Drug Bantay"
-  are two real, separately mapped businesses with their own keys and their own coordinates. There is
-  nothing to guess between them, so both are kept and both go on to the same deterministic dedup and
-  verification every other discovered business passes through. Refusing them would have thrown away
-  most of what the widening is for.
+  are two separately mapped businesses with their own keys and coordinates. Both are kept.
 
-A proposal that matches an implausible number of distinct businesses is matching on a word too common
-to identify anything, so it is refused wholesale rather than trusted branch by branch — see
-``MAX_BRANCH_MATCHES``.
+* **Several elements sharing ONE name.** Vigan holds two OSM nodes both called simply "Watsons" and
+  four called "Mercury Drug", with no branch qualifier at all. These were once refused as ambiguous,
+  on the reasoning that picking one would attach a real ``place_id`` to possibly the wrong business.
+  That reasoning applied to PICKING. Retaining every one of them picks nothing: each keeps its own
+  real OSM key and its own coordinates, so no record is ever attached to the wrong business. They are
+  now kept.
+
+  Refusing them was also strictly harsher than the baseline it exists beside: ``discover()`` returns
+  both Watsons nodes without hesitation when their tags match. Holding name lookup to a stricter
+  standard than the tag sweep cost real businesses — measured, two of them in one Vigan sample — and
+  bought nothing, because the risk it guarded against was never present.
+
+WHAT IS STILL REFUSED, and why each is a genuine failure to establish identity:
+
+* **A proposal matching an implausible number of distinct businesses** is matching on a word too
+  common to identify anything. Refused wholesale rather than trusted business by business — see
+  ``MAX_BRANCH_MATCHES``.
+
+* **An element with no usable OSM key.** ``provider_id`` is the dedup contract; an element that
+  cannot supply one has no identity to record, and landing it would create a lead the CRM can never
+  match against itself. Such candidates are never resolved, and a proposal whose every match lacked a
+  key is recorded as ambiguous — something carried that name, but nothing could be identified.
 
 No network access lives here. The lookup is injected, which keeps the matching rules — the part
 worth being sure about — testable without Overpass.
@@ -62,13 +75,16 @@ STOPWORDS = frozenset({
 })
 
 
-#: How many DISTINCT businesses one proposal may match before it is refused wholesale.
+#: How many DISTINCT BUSINESSES one proposal may resolve to before it is refused wholesale.
 #:
 #: Containment matching is one-way and start-anchored, so it cannot match arbitrarily — but a very
 #: short proposal ("Rose") can still be contained by several unrelated businesses ("Rose Pharmacy",
 #: "Rose Bakery"). Past this count the proposal is plainly matching on a word too common to identify
 #: anything, and the right response is to trust none of its matches rather than to pick among them.
-#: Set high enough that a real chain with many branches in one city still resolves.
+#:
+#: Counted in BUSINESSES rather than in distinct names, because that is the quantity the ceiling is
+#: actually about: one name shared by four real branches is one confident answer, while eleven
+#: unrelated businesses sharing one word is not.
 MAX_BRANCH_MATCHES = 10
 
 
@@ -90,10 +106,14 @@ class ResolutionOutcome:
     resolved: list[RawBusiness] = field(default_factory=list)
     proposed_count: int = 0
     unmatched: list[str] = field(default_factory=list)
+    #: Proposals that matched OSM elements of which NONE carried a usable key. Something in the area
+    #: carries that name, but nothing about it could be identified — distinct from `unmatched`, where
+    #: OSM held nothing by that name at all. Note this no longer covers several elements sharing one
+    #: name: those are real businesses with real keys and are all retained.
     ambiguous: list[str] = field(default_factory=list)
-    #: Proposals refused for matching more distinct businesses than {@see MAX_BRANCH_MATCHES}.
+    #: Proposals refused for resolving to more distinct businesses than {@see MAX_BRANCH_MATCHES}.
     #: Counted apart from `ambiguous` because the two say different things to an operator: one
-    #: proposal was unresolvable, the other was not specific enough to be a proposal at all.
+    #: proposal was unidentifiable, the other was not specific enough to be a proposal at all.
     too_generic: list[str] = field(default_factory=list)
 
     @property
@@ -169,24 +189,32 @@ class OsmNameResolver:
                 outcome.unmatched.append(proposal)
                 continue
 
-            if len(matched_keys) > MAX_BRANCH_MATCHES:
-                # Matching this widely means the proposal is not identifying a business. Refuse all
-                # of it rather than keep an arbitrary subset.
-                outcome.too_generic.append(proposal)
-                continue
+            # EVERY distinct business this proposal matched, across every name it matched. Elements
+            # with no usable key are excluded here rather than refused later: they have no identity
+            # to record, and `provider_id` is the dedup contract.
+            businesses = [
+                business
+                for key in matched_keys
+                for provider_id, business in by_key[key].items()
+                if provider_id.strip()
+            ]
 
-            # GENUINE AMBIGUITY, unchanged: a single NAME held by more than one distinct business.
-            # Refused for the whole proposal rather than per group — if part of what this proposal
-            # matched is unresolvable, the safe reading is that the proposal itself is unresolvable.
-            # Conservative on purpose: keeping the clean groups would mean deciding that the
-            # proposer meant those and not the contested ones, which is exactly the guess this
-            # module exists to refuse.
-            if any(len(by_key[key]) > 1 for key in matched_keys):
+            if not businesses:
+                # Something in the area carries this name and nothing about it can be identified.
                 outcome.ambiguous.append(proposal)
                 continue
 
-            for key in matched_keys:
-                business = next(iter(by_key[key].values()))
+            if len(businesses) > MAX_BRANCH_MATCHES:
+                # Resolving this widely means the proposal is not identifying a business. Refuse all
+                # of it rather than keep an arbitrary subset — which would be choosing.
+                outcome.too_generic.append(proposal)
+                continue
+
+            # KEEP ALL OR KEEP NONE, NEVER ONE OF SEVERAL. Two nodes both called "Watsons" are two
+            # real branches; retaining both attaches each to its own real key and guesses nothing.
+            # The refusals above are the only ways a proposal loses, and each of them takes the whole
+            # proposal — so no code path here ever selects between candidates.
+            for business in businesses:
                 if business.provider_id in taken:
                     continue
                 taken.add(business.provider_id)
