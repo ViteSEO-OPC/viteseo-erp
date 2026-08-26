@@ -13,6 +13,7 @@ type UserApi = {
   status: TeamUserStatus;
   last_login_at: string | null;
   created_at: string | null;
+  avatar_url?: string | null;
 };
 
 /** Map the API UserResource shape to the frontend TeamUser. Exported for reuse in mutations. */
@@ -23,6 +24,7 @@ export function mapUser(api: UserApi): TeamUser {
     email: api.email,
     role: api.role,
     status: api.status,
+    avatarUrl: api.avatar_url ?? null,
     lastLoginAt: api.last_login_at,
     createdAt: api.created_at,
   };

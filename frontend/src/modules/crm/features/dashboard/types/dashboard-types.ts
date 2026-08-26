@@ -69,6 +69,12 @@ export type ActivityItem = {
   id: string;
   type: ActivityType;
   actor: string;
+  /**
+   * The actor's photo, from the shared avatar source. Null whenever there is no CRM user behind
+   * the row — a system event, an inbound reply from an external contact, or a user with no photo —
+   * in which case the row keeps its event-type icon tile.
+   */
+  actorAvatarUrl: string | null;
   action: string;
   object: string;
   timestamp: string;

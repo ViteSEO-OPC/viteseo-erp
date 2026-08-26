@@ -77,7 +77,7 @@ export function TeamAccountsTable({
               <TableRow key={u.id} className="border-b border-border-subtle">
                 <TableCell className="px-3 py-3">
                   <div className="flex items-center gap-3">
-                    <AvatarInitials initials={initialsOf(u.name)} size="sm" />
+                    <AvatarInitials src={u.avatarUrl} initials={initialsOf(u.name)} size="sm" />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{u.name}</p>
                       <p className="truncate text-xs text-muted-foreground">{u.email}</p>

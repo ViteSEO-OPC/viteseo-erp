@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/modules/crm/components/ui/dropdown-menu";
 import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
+import { useAvatarUrl } from "@/modules/crm/features/profile/hooks/use-profile";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { cn } from "@/modules/crm/lib/utils";
 import { getAccessibleModules } from "@/core/access";
@@ -19,6 +20,9 @@ type UserMenuProps = {
 
 export function UserMenu({ className }: UserMenuProps) {
   const { user, logout } = useAuth();
+  // The same `me.profile` cache entry Settings and Profile read, so uploading or removing a photo
+  // updates this avatar on the same tick — no reload, and no second copy of the avatar state.
+  const avatarUrl = useAvatarUrl();
   const router = useRouter();
 
   if (!user) return null;
@@ -35,7 +39,7 @@ export function UserMenu({ className }: UserMenuProps) {
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}>
-        <AvatarInitials initials={user.name} size="sm" />
+        <AvatarInitials src={avatarUrl} initials={user.name} size="sm" />
         <span className="hidden text-sm font-medium text-foreground sm:inline">
           {user.name}
         </span>

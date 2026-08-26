@@ -17,6 +17,7 @@ use App\Modules\Crm\Services\Kpi\KpiMetric;
 use App\Modules\Crm\Services\Performance\PerformancePdfExporter;
 use App\Modules\Crm\Services\Performance\PerformanceSummaryService;
 use App\Modules\Crm\Services\Performance\PerformanceTargetService;
+use App\Modules\Crm\Services\ProfilePhotoService;
 use App\Modules\Crm\Services\Ranking\BdRankingRow;
 use App\Modules\Crm\Services\Ranking\BdRankingService;
 use Illuminate\Database\Eloquent\Builder;
@@ -207,7 +208,7 @@ class DashboardController extends Controller
             ->where('status', 'active')
             ->whereHas('roles', fn (Builder $q) => $q->where('name', 'crm_bd'))
             ->orderBy('name')
-            ->get(['id', 'name']);
+            ->get(['id', 'name', 'avatar']);
 
         if ($bds->isEmpty()) {
             return response()->json(['data' => []]);
@@ -269,6 +270,9 @@ class DashboardController extends Controller
                 'id' => (string) $bd->id,
                 'name' => $bd->name,
                 'initials' => $this->initialsFor($bd->name),
+                // Same single source as every other avatar in the CRM: a signed link derived from
+                // `users.avatar`, or null for a BD who has not uploaded one (renders initials).
+                'avatarUrl' => ProfilePhotoService::url($bd->avatar),
                 'assigned' => (int) ($assigned->get($bd->id) ?? 0),
                 // A COUNT has no zero-denominator, so 0 is a real measurement ("completed nothing
                 // this month") rather than an undefined one. It stays 0 and must not borrow the

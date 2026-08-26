@@ -42,7 +42,7 @@ function NoteItem({ note, canManage, onSave, onDelete, isBusy }: NoteItemProps) 
 
   return (
     <div className="group flex gap-3">
-      <AvatarInitials initials={note.initials} size="sm" />
+      <AvatarInitials src={note.avatarUrl} initials={note.initials} size="sm" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm font-semibold text-card-foreground">

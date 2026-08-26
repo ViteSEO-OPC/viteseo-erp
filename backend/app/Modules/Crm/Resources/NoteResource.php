@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\Note;
+use App\Modules\Crm\Services\ProfilePhotoService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -20,6 +21,8 @@ class NoteResource extends JsonResource
             'authorId' => $this->user_id !== null ? (string) $this->user_id : null,
             'author' => $authorName ?? 'Unknown user',
             'initials' => $this->initialsFor($authorName),
+            // The author's photo, from the one shared avatar source. Null → initials.
+            'avatarUrl' => ProfilePhotoService::url($this->author?->avatar),
             'body' => $this->body,
             // Whether the requesting user wrote this note (drives the self/other bubble styling).
             'self' => $this->user_id !== null && $request->user()?->id === $this->user_id,

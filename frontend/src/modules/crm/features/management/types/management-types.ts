@@ -43,6 +43,8 @@ export type BdPerformanceRow = {
   id: string;
   name: string;
   initials: string;
+  /** Shared avatar source (signed link from `users.avatar`); null → render initials. */
+  avatarUrl: string | null;
   assigned: number;
   followUps: number;
   converted: number;

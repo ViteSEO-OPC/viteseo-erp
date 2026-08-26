@@ -4,6 +4,8 @@ export type TeamUserStatus = "active" | "inactive";
 export type TeamUser = {
   id: string;
   name: string;
+  /** Shared avatar source (signed link from `users.avatar`); null → render initials. */
+  avatarUrl: string | null;
   email: string;
   /** Primary role slug (e.g. "crm_bd"), or null. */
   role: string | null;

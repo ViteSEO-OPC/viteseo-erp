@@ -4,7 +4,7 @@ import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Switch } from "@/modules/crm/components/ui/switch";
 import { FormField, FormFieldGrid } from "@/modules/crm/components/forms/form-field/form-field";
-import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
+import { ProfilePhotoField } from "@/modules/crm/features/profile/components/profile-photo-field";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { highestRole, ROLE_LABELS } from "@/modules/crm/lib/rbac";
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
@@ -48,16 +48,11 @@ export function GeneralPage() {
           Your details as they appear across the workspace.
         </p>
 
-        <div className="mb-6 flex items-center gap-4">
-          <AvatarInitials initials={initialsOf(user?.name)} size="md" />
-          <div>
+        <div className="mb-6">
+          <ProfilePhotoField initials={initialsOf(user?.name)}>
             <p className="text-sm font-semibold text-card-foreground">Profile photo</p>
             <p className="mb-2 text-xs text-muted-foreground">PNG or JPG, up to 4 MB.</p>
-            <div className="flex gap-2">
-              <Button variant="default" size="sm">Change photo</Button>
-              <Button variant="outline" size="sm">Remove</Button>
-            </div>
-          </div>
+          </ProfilePhotoField>
         </div>
 
         <div className="flex flex-col gap-5">

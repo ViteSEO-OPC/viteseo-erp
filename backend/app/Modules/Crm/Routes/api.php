@@ -3,6 +3,7 @@
 use App\Models\User;
 use App\Modules\Crm\Controllers\ActivityController;
 use App\Modules\Crm\Controllers\Auth\MeController;
+use App\Modules\Crm\Controllers\Auth\ProfilePhotoController;
 use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
@@ -51,6 +52,17 @@ Route::prefix('v1/crm')->group(function (): void {
         // Not admin user management; the platform's /api/v1/auth/me still owns auth.
         Route::get('/me', MeController::class);
         Route::patch('/me', UpdateProfileController::class);
+
+        // The caller's own profile photo. Self-service like PATCH /me above — no user id is
+        // accepted, the account comes from the token, so neither route can touch another user's
+        // avatar. Bytes go on the PRIVATE disk and are read back through a short-lived signed URL
+        // (`avatar_url` on the resource), because an <img> tag carries no bearer token.
+        //
+        // Throttled: an upload writes a file, and the endpoint is reachable by every signed-in
+        // user. DELETE is idempotent and deliberately un-throttled — removing a photo you no
+        // longer want should never be rate-limited.
+        Route::post('/me/photo', [ProfilePhotoController::class, 'store'])->middleware('throttle:10,1');
+        Route::delete('/me/photo', [ProfilePhotoController::class, 'destroy']);
 
         // Generic, reusable activity feed (append-only Activity log). Powers Dashboard Recent
         // Activity now; reusable for the Activity Logs page, notifications, and future consumers.

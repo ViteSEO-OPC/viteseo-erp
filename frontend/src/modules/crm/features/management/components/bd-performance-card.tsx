@@ -77,7 +77,7 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
               <TableRow key={r.id} className="border-b border-border-subtle">
                 <TableCell className="px-3 py-3">
                   <div className="flex items-center gap-3">
-                    <AvatarInitials initials={r.initials} size="sm" />
+                    <AvatarInitials src={r.avatarUrl} initials={r.initials} size="sm" />
                     <div>
                       <p className="text-sm font-semibold text-foreground">{r.name}</p>
                       <p className="text-xs text-muted-foreground">Business Development Manager</p>
