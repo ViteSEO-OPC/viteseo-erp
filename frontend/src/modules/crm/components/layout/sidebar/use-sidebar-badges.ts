@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { usePlannerEvents } from "@/modules/crm/features/calendar/hooks/use-planner-events";
+import { isActivePlannerEvent } from "@/modules/crm/features/calendar/lib/planner-active";
 import { isPendingOutreachEvent } from "@/modules/crm/features/follow-ups/lib/outreach-pending";
 
 type SidebarBadges = {
@@ -22,9 +23,10 @@ type SidebarBadges = {
  *
  * - `outreach`: pending communication tasks the Outreach inbox surfaces — the exact
  *   `isPendingOutreachEvent` definition the Follow-ups Pending list uses (follow-up + email events
- *   that are todo / scheduled / in_progress).
- * - `planner`: actionable Planner items = DATED events (i.e. overdue or upcoming) that are not yet
- *   completed. Undated Board-only backlog items are neither overdue nor upcoming, so they are excluded.
+ *   that are not yet completed).
+ * - `planner`: actionable Planner items — the exact {@link isActivePlannerEvent} definition, which
+ *   now lives with the Planner feature instead of inline here. Undated Board-only backlog items are
+ *   neither overdue nor upcoming, so they are excluded.
  *
  * Each value is `undefined` while loading OR when the count is zero, so the badge is simply not
  * rendered unless there is a real, non-zero count — never a placeholder zero.
@@ -38,9 +40,7 @@ export function useSidebarBadges(): SidebarBadges {
     }
 
     const outreach = events.filter(isPendingOutreachEvent).length;
-    const planner = events.filter(
-      (event) => event.startsAt !== null && event.status !== "completed",
-    ).length;
+    const planner = events.filter(isActivePlannerEvent).length;
 
     return {
       outreach: outreach > 0 ? outreach : undefined,

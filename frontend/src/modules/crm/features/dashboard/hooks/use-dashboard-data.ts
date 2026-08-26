@@ -23,8 +23,13 @@ import type {
 const KPI_BASE: KpiStat[] = [
   { id: "total-leads", label: "TOTAL LEADS", value: "0", valueVariant: "neutral", caption: "In your pipeline" },
   { id: "high-priority", label: "HIGH PRIORITY", value: "0", valueVariant: "neutral", caption: "Flagged high priority" },
-  // Planner-backed: the whole scoped pending follow-up set. An outbound email is NOT a follow-up
-  // (PO ruling) — only real Planner `follow-up` events count.
+  // Planner-backed: the whole scoped pending follow-up set — every channel of FOLLOW-UP WORK
+  // (`PlannerEvent::FOLLOW_UP_WORK_TYPES`: follow-up, email, call, meeting), not the bare
+  // `follow-up` type. A meeting or call a BD owes a lead is work due just as much as a follow-up.
+  //
+  // The PO ruling this used to cite is about something else and still holds: a SENT outbound email
+  // (a `crm_emails` row) is not a follow-up, and is counted separately by `completed-outreach`
+  // below. A Planner `email` TASK — work owed, not work done — does count here.
   { id: "follow-ups-due", label: "FOLLOW-UPS DUE", value: "0", valueVariant: "neutral", caption: "Overdue, today and upcoming" },
   // Outbound emails the system actually sent — an effort count, not lead coverage (coverage is
   // M-04 Engagement Coverage, a deliberately separate metric). Emailing one lead three times
