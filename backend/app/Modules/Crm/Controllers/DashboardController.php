@@ -135,26 +135,6 @@ class DashboardController extends Controller
         ]);
     }
 
-    /**
-     * Dashboard Copilot AI summary metrics.
-     *
-     * TODO: these are CENTRALIZED PLACEHOLDER values. No AI scoring engine exists yet — the
-     * lead `score` is a plain stored column and there is no re-score / priority-move tracking,
-     * so these numbers have no real source to compute from (deliberately NOT fabricated here).
-     * Once the AI scoring engine lands, replace these with real metrics: leads re-scored and
-     * leads promoted to High priority in the last run, plus the actual run timestamp.
-     */
-    public function copilotSummary(): JsonResponse
-    {
-        return response()->json([
-            'data' => [
-                'rescoredLeads' => 18,
-                'movedToHigh' => 4,
-                'generatedAt' => '2026-07-03T11:20:00+00:00',
-            ],
-        ]);
-    }
-
     /** Latest leads (newest first) — same newest-by-id ordering as the Leads list, so
      * just-created/imported records surface here too (they have no last_activity).
      * Ownership-scoped: a BD only sees their own recent leads. */

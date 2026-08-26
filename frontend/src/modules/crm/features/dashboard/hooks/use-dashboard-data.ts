@@ -305,10 +305,16 @@ export function mapActivity(api: ActivityApi): ActivityItem {
   };
 }
 
-// NOTE: the "Copilot AI summary" row (GET /dashboard/copilot-summary) is intentionally NOT consumed.
-// That endpoint returns fixed placeholder counts for an AI-scoring run that does not exist yet, so
-// surfacing it would display fabricated business information. It stays hidden until a real AI scoring
-// run produces genuine metrics — Recent Activity shows only the real, ownership-scoped activity feed.
+// NOTE: there is no "Copilot AI summary" row. GET /dashboard/copilot-summary used to exist and
+// returned three hardcoded constants — a lead-rescoring count, a moved-to-High count and a fixed
+// timestamp — for an AI scoring run that has never run. This hook deliberately never consumed it, and
+// the endpoint has since been removed rather than left reachable behind that convention: a comment is
+// not a mechanism, and anything reading the route list or the API docs would have found fabricated
+// business figures with nothing marking them as such.
+//
+// Nothing replaces it until an AI scoring engine actually exists to compute from — the lead `score`
+// is a plain stored column today, with no re-score or priority-move tracking behind it. Recent
+// Activity shows only the real, ownership-scoped activity feed.
 
 /**
  * Shared live activity feed over the ownership-scoped `GET /activities` endpoint — the SAME
