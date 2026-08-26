@@ -283,6 +283,41 @@ class ReportsAnalyticsTest extends TestCase
         );
     }
 
+    /**
+     * Each row carries the lead it is owed to, so the card can send the reader there. Null when the
+     * event has no lead — that is not a defect, it is the case the card falls back to the Planner
+     * board for, and it must stay expressible rather than being coerced to 0.
+     */
+    public function test_pending_follow_up_rows_carry_their_lead_id(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+        $lead = Lead::factory()->create(['assigned_to' => $bd->id]);
+        $overdue = now('Asia/Manila')->startOfDay()->subDays(2)->utc();
+
+        PlannerEvent::factory()->assignedTo($bd)->create([
+            'event_type' => 'follow-up',
+            'status' => 'scheduled',
+            'starts_at' => $overdue,
+            'lead_id' => $lead->id,
+        ]);
+        PlannerEvent::factory()->assignedTo($bd)->create([
+            'event_type' => 'follow-up',
+            'status' => 'scheduled',
+            'starts_at' => $overdue,
+            'lead_id' => null,
+        ]);
+
+        Sanctum::actingAs($admin);
+        $rows = $this->getJson('/api/v1/crm/dashboard/reports-analytics')
+            ->assertOk()
+            ->json('data.pendingFollowUps.rows');
+
+        $leadIds = array_column($rows, 'leadId');
+        $this->assertContains($lead->id, $leadIds, 'a lead-linked row exposes its lead');
+        $this->assertContains(null, $leadIds, 'a lead-less row exposes null, not 0');
+    }
+
     /** At or below the cap the two agree exactly, so the card shows no "+N more" row. */
     public function test_counts_and_rows_agree_when_under_the_cap(): void
     {

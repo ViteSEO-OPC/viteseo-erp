@@ -599,6 +599,10 @@ class DashboardController extends Controller
                     'id' => $e->id,
                     'status' => $status,
                     'company' => $e->lead?->business_name ?? '—',
+                    // The lead this work is owed to, so the card can send the reader to it. Null for
+                    // an event that belongs to nobody's lead — the same rows that render "—" above,
+                    // and the case the card falls back to the Planner board for.
+                    'leadId' => $e->lead_id,
                     'description' => $e->title,
                     'dueDate' => $e->starts_at?->toIso8601String(),
                 ];
