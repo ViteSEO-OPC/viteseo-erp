@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Modules\Hr\Models\Candidate;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Requisition;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -13,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 
 class RecruitmentService
 {
+    use PagesQueues;
+
     public const SOURCES = ['referral', 'linkedin', 'jobboard', 'direct', 'agency'];
     // draft = not open yet · active = open (add/hire allowed) · closed = filled/done.
     public const REQ_STAGES = ['draft', 'active', 'closed'];
@@ -70,12 +74,25 @@ class RecruitmentService
         private readonly AuditService $audit,
     ) {}
 
-    public function listRequisitions(): Collection
+    /**
+     * One page of the requisition board, newest opening first.
+     *
+     * A requisition tracks its progress in `stage`, not `status` — so the pills filter on that
+     * column. No priority rung: a requisition's stages are a pipeline, not a decision queue,
+     * and floating one of them would be an opinion about hiring rather than about paging.
+     *
+     * @param  array<string, mixed>  $filters  search, status (stage), page, per_page
+     */
+    public function listRequisitions(array $filters = []): LengthAwarePaginator
     {
-        return Requisition::with(['department', 'hiringManager.user'])
-            ->withCount('candidates')
-            ->latest('opened_at')
-            ->get();
+        return $this->paginateQueue(
+            Requisition::with(['department', 'hiringManager.user'])->withCount('candidates'),
+            $filters,
+            ['title', 'location', 'employment_type', 'job_description'],
+            searchEmployee: false,
+            recencyColumn: 'opened_at',
+            statusColumn: 'stage',
+        );
     }
 
     /**

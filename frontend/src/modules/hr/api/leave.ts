@@ -1,4 +1,5 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type {
   LeaveType,
   LeaveRequest,
@@ -21,9 +22,9 @@ export async function getMyLeaveSummary(): Promise<MyLeaveSummary> {
 }
 
 // HR gets all requests; employees get their own (scoped server-side by role).
-export async function getLeaveRequests(): Promise<LeaveRequest[]> {
-  const res = await apiClient.get("/hr/leave-requests");
-  return res.data.data;
+export async function getLeaveRequests(params: QueueParams): Promise<QueuePage<LeaveRequest>> {
+  const res = await apiClient.get("/hr/leave-requests", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function createLeaveRequest(

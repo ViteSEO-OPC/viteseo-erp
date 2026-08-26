@@ -20,7 +20,11 @@ class PayrollInquiryController extends Controller
     // GET /hr/payroll-inquiries — HR queue. GET /hr/me/payroll-inquiries — own.
     public function index(Request $request): JsonResponse
     {
-        return PayrollInquiryResource::collection($this->service->list($request->user()))->response();
+        // The three the queue tables send. `search` and `status` are applied by the DATABASE —
+        // applied in the browser they would only narrow the page already on screen.
+        return PayrollInquiryResource::collection(
+            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // POST /hr/me/payroll-inquiries — "Request Inquiry" from a payslip.

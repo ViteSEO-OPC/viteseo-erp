@@ -18,9 +18,32 @@ class OfficeExpenseController extends Controller
     public function __construct(private readonly OfficeExpenseService $service) {}
 
     // GET /hr/office-expenses
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        return OfficeExpenseResource::collection($this->service->list())->response();
+        // Applied by the DATABASE. In the browser they would only narrow the page on screen.
+        return OfficeExpenseResource::collection(
+            $this->service->list($this->filters($request)),
+        )->response();
+    }
+
+    /**
+     * GET /hr/office-expenses/summary — the spend cards above the ledger, over the same window
+     * the table is showing. See OfficeExpenseService::summary().
+     */
+    public function summary(Request $request): JsonResponse
+    {
+        return response()->json(['data' => $this->service->summary($this->filters($request))]);
+    }
+
+    /**
+     * One list, because the table and the cards above it must read the same window — a summary
+     * filtered differently from the rows beneath it contradicts them on the same screen.
+     *
+     * @return array<string, mixed>
+     */
+    private function filters(Request $request): array
+    {
+        return $request->only(['search', 'status', 'per_page', 'from', 'to', 'sort']);
     }
 
     // POST /hr/office-expenses

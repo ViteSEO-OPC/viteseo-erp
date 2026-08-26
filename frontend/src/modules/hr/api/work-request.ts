@@ -1,9 +1,10 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type { WorkRequest } from "@/modules/hr/types/leave";
 
-export async function getWorkRequests(): Promise<WorkRequest[]> {
-  const res = await apiClient.get("/hr/work-requests");
-  return res.data.data;
+export async function getWorkRequests(params: QueueParams): Promise<QueuePage<WorkRequest>> {
+  const res = await apiClient.get("/hr/work-requests", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 /**

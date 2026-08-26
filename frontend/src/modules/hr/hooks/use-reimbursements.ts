@@ -1,9 +1,10 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   getReimbursements,
+  getReimbursementSummary,
   createReimbursement,
   approveReimbursement,
   rejectReimbursement,
@@ -12,11 +13,27 @@ import {
   cancelReimbursement,
 } from "@/modules/hr/api/reimbursements";
 
+import type { QueueParams } from "@/modules/hr/api/queue";
+
 const KEY = ["hr", "reimbursements"] as const;
 const NOTIF_KEY = ["hr", "me", "notifications"] as const;
 
-export function useReimbursements() {
-  return useQuery({ queryKey: KEY, queryFn: getReimbursements });
+/**
+ * One page of the claims queue, with the total. Search, status and paging are applied by the
+ * database — see the PagesQueues trait for why.
+ */
+export function useReimbursements(params: QueueParams) {
+  return useQuery({
+    queryKey: [...KEY, params] as const,
+    queryFn: () => getReimbursements(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The figures above the queue. Counted server-side — see ReimbursementSummary. */
+export function useReimbursementSummary() {
+  return useQuery({ queryKey: [...KEY, "summary"] as const, queryFn: getReimbursementSummary });
 }
 
 export function useCreateReimbursement() {

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getEarlyOutRequests,
@@ -13,8 +14,14 @@ import {
 
 const KEY = ["hr", "early-out-requests"] as const;
 
-export function useEarlyOutRequests() {
-  return useQuery({ queryKey: KEY, queryFn: getEarlyOutRequests });
+/** One page of the early-out queue, with the total. Filtered and ordered by the database. */
+export function useEarlyOutRequests(params: QueueParams) {
+  return useQuery({
+    queryKey: [...KEY, params] as const,
+    queryFn: () => getEarlyOutRequests(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useCreateEarlyOutRequest() {

@@ -1,9 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getAutoOvertimeReview,
+  getAutoOvertimeTotals,
   getOvertimeRequests,
   getOvertimeSettings,
   classifyOvertime,
@@ -17,16 +19,38 @@ import {
 
 const KEY = ["hr", "overtime-requests"] as const;
 
-export function useOvertimeRequests() {
-  return useQuery({ queryKey: KEY, queryFn: getOvertimeRequests });
+/** One page of the overtime queue, with the total. Filtered and ordered by the database. */
+export function useOvertimeRequests(params: QueueParams) {
+  return useQuery({
+    queryKey: [...KEY, params] as const,
+    queryFn: () => getOvertimeRequests(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
 /** Auto-mode overtime the caps held back, for the period shown. */
-export function useAutoOvertimeReview(start: string, end: string) {
+/**
+ * The two figures above the review — held and flagged minutes, with their day counts.
+ *
+ * Its own query rather than a sum of the rows on screen: the review is paged, and both figures
+ * are minutes of pay.
+ */
+export function useAutoOvertimeTotals(start: string, end: string) {
   return useQuery({
-    queryKey: ["hr", "overtime-auto-review", start, end] as const,
-    queryFn: () => getAutoOvertimeReview(start, end),
+    queryKey: ["hr", "overtime-auto-review", "totals", start, end] as const,
+    queryFn: () => getAutoOvertimeTotals(start, end),
     enabled: !!start && !!end,
+  });
+}
+
+/** One page of the auto-overtime review. `status` filters the row's derived `kind`. */
+export function useAutoOvertimeReview(start: string, end: string, params: QueueParams) {
+  return useQuery({
+    queryKey: ["hr", "overtime-auto-review", start, end, params] as const,
+    queryFn: () => getAutoOvertimeReview(start, end, params),
+    enabled: !!start && !!end,
+    placeholderData: keepPreviousData,
   });
 }
 

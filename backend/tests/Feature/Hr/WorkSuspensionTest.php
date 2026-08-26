@@ -92,7 +92,7 @@ class WorkSuspensionTest extends HrTestCase
 
     private function rosterStatusOn(string $date): string
     {
-        return collect(app(AttendanceService::class)->allForDate($date))
+        return collect(app(AttendanceService::class)->allForDate($date)->items())
             ->firstWhere('employee_id', $this->employee->id)['status'];
     }
 

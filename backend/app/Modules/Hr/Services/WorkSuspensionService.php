@@ -103,6 +103,8 @@ class WorkSuspensionService
             $suspension,
         );
 
+        $this->recomputeFlagsFor($date);
+
         return ['suspension' => $suspension, 'warning' => $this->settledWarning($date)];
     }
 
@@ -164,6 +166,8 @@ class WorkSuspensionService
 
         $this->audit->log('updated', 'Attendance', $description, $suspension, $before, $after);
 
+        $this->recomputeFlagsFor($date);
+
         return ['suspension' => $suspension, 'warning' => $this->settledWarning($date)];
     }
 
@@ -187,6 +191,21 @@ class WorkSuspensionService
                 . ' non-working day — it is an ordinary workday again',
             $suspension,
         );
+
+        $this->recomputeFlagsFor($date);
+    }
+
+    /**
+     * Item 11 — a suspension excuses everyone from a date, so declaring, changing or
+     * withdrawing one moves the whole roster's absence flags for that month. Rebuilt at the
+     * write; the attendance board that used to do it on the way out no longer recomputes.
+     *
+     * Resolved lazily rather than injected: ViolationService takes this service as a
+     * constructor argument, so injecting it back would close a container cycle.
+     */
+    private function recomputeFlagsFor(string $date): void
+    {
+        app(ViolationService::class)->recompute(substr($date, 0, 7));
     }
 
     /** A LOCKED payroll run is the one hard stop. */

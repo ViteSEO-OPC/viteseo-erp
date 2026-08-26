@@ -63,7 +63,11 @@ class LeaveController extends Controller
     // GET /api/v1/hr/leave-requests — HR sees all; employees see their own.
     public function index(Request $request): JsonResponse
     {
-        $requests = $this->service->listRequests($request->user());
+        // Applied by the DATABASE. In the browser they would only narrow the page on screen.
+        $requests = $this->service->listRequests(
+            $request->user(),
+            $request->only(['search', 'status', 'per_page']),
+        );
 
         return LeaveRequestResource::collection($requests)->response();
     }

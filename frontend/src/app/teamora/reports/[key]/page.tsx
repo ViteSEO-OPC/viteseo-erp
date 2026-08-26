@@ -9,6 +9,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatCard } from "@/core/components/stat-card";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { ReportBars } from "@/modules/hr/components/report-bars";
 import { SimpleSelect } from "@/modules/hr/ui/select";
@@ -69,18 +70,30 @@ function GenericReport({ reportKey }: { reportKey: string }) {
   // it. Empty means "whatever the server picked", which is the current year.
   const [year, setYear] = useState("");
 
+  // The three headcount-scaled report tables — leave liability, the tax reconciliation, the
+  // payroll register — are paged by the server. The rest arrive whole, and `table.meta` is what
+  // says which is which.
+  const tableServer = useServerTable();
+
   const {
     data: report,
     isLoading,
     isError,
-  } = useReport(reportKey, {
-    ...(department !== "all" ? { department } : {}),
-    ...(from ? { from } : {}),
-    ...(to ? { to } : {}),
-    ...(payGroup !== "all" ? { frequency: payGroup } : {}),
-    ...(run ? { run } : {}),
-    ...(year ? { year } : {}),
-  });
+    isFetching,
+  } = useReport(
+    reportKey,
+    {
+      ...(department !== "all" ? { department } : {}),
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
+      ...(payGroup !== "all" ? { frequency: payGroup } : {}),
+      ...(run ? { run } : {}),
+      ...(year ? { year } : {}),
+      page: tableServer.params.page,
+      per_page: tableServer.pageSize,
+    },
+    { keepPreviousData: true },
+  );
   const exportMut = useExportReport(reportKey);
 
   async function onExport() {
@@ -262,7 +275,17 @@ function GenericReport({ reportKey }: { reportKey: string }) {
                 }))}
                 rows={report.table.rows}
                 rowKey={(_row, i) => i}
-                pageSize={10}
+                pageSize={report.table.meta?.per_page ?? 10}
+                // Searching and filtering are off on report tables: the rows are formatted
+                // strings assembled per report, not records, and a box over the page in hand
+                // would answer for the page. The report's own filters above do the narrowing.
+                searchable={false}
+                filterable={false}
+                server={
+                  report.table.meta
+                    ? tableServer.serverProps(report.table.meta.total, isFetching)
+                    : undefined
+                }
               />
             )}
 

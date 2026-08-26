@@ -1,12 +1,27 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type {
   OfficeExpense,
   OfficeExpenseInput,
 } from "@/modules/hr/types/office-expense";
 
-export async function getOfficeExpenses(): Promise<OfficeExpense[]> {
-  const res = await apiClient.get("/hr/office-expenses");
+/** Spend totals for a window, counted by the database. See OfficeExpenseService::summary(). */
+export interface OfficeExpenseSummary {
+  total: number;
+  /** Category → spend, biggest first. */
+  by_category: Record<string, number>;
+}
+
+export async function getOfficeExpenseSummary(
+  params: QueueParams & { from?: string; to?: string },
+): Promise<OfficeExpenseSummary> {
+  const res = await apiClient.get("/hr/office-expenses/summary", { params: queueQuery(params) });
   return res.data.data;
+}
+
+export async function getOfficeExpenses(params: QueueParams): Promise<QueuePage<OfficeExpense>> {
+  const res = await apiClient.get("/hr/office-expenses", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 function toFormData(input: OfficeExpenseInput, receipt?: File | null): FormData {

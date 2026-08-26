@@ -10,12 +10,15 @@ use App\Modules\Hr\Models\HalfDayRequest;
 use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\OvertimeRequest;
 use App\Modules\Hr\Models\WorkRequest;
+use App\Modules\Hr\Services\Concerns\PagesComputedRows;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 
 class AttendanceService
 {
+    use PagesComputedRows;
+
     /** Fallback shift start if an employee has no schedule at all. */
     private const FALLBACK_START = '09:00';
 
@@ -549,6 +552,12 @@ class AttendanceService
         // `leave_credit_refunded_at` makes it idempotent regardless.
         $this->settleLeaveCreditFor($employee, $att);
 
+        // Item 11 — the flags follow the punch. The roster read used to recompute on the way
+        // out, so a late arrival only became a flag once someone opened the board; now the
+        // write that CREATED the fact is what records it, and the board just reads.
+        // Scoped to this employee: a punch changes one person's tally and nobody else's.
+        $this->violations->recompute($local->format('Y-m'), $employee->id);
+
         return $att;
     }
 
@@ -668,6 +677,11 @@ class AttendanceService
 
         $att->save();
 
+        // Ending a break is what fixes its length, and length is what the long_break ladder
+        // reads. Recomputed against the row's OWN work_date, not today: a shift that began
+        // before midnight ends its break on the next calendar day.
+        $this->violations->recompute($att->work_date->format('Y-m'), $employee->id);
+
         return $att;
     }
 
@@ -723,6 +737,10 @@ class AttendanceService
         $netMinutes = $grossMinutes - $att->lunch_minutes;
         $att->hours_worked = round(max(0, $netMinutes) / 60, 2);
         $att->save();
+
+        // Clocking out settles undertime and auto-closes any still-open break, so both
+        // ladders can move here.
+        $this->violations->recompute($att->work_date->format('Y-m'), $employee->id);
 
         return $att;
     }
@@ -1114,15 +1132,36 @@ class AttendanceService
      *
      * @return array<int, array<string, mixed>>
      */
-    public function allForDate(?string $date = null): array
+    /**
+     * ONE PAGE of the roster for a date.
+     *
+     * The search, status and timing filters are applied HERE — after every row's status has been
+     * derived and before the page is cut. That order is the whole design: none of those three is
+     * a column. A row's status comes from its schedule, the day's holidays and suspensions, an
+     * approved leave and whether the day has ended; its timing comes from comparing the punch to
+     * the shift the employee was actually expected for. Neither can become a WHERE clause without
+     * writing schedule resolution a second time in SQL and letting the two answers drift.
+     *
+     * So the roster is still walked in full — that is what "today, for everyone" means, and this
+     * change does not make it cheaper. What it removes is the payload: a board that polls every
+     * sixty seconds used to send a row per employee down the wire on every tick.
+     *
+     * @param  array<string, mixed>  $filters  search, status, timing, page, per_page
+     * @return \Illuminate\Pagination\LengthAwarePaginator<int, array<string, mixed>>
+     */
+    public function allForDate(?string $date = null, array $filters = []): \Illuminate\Pagination\LengthAwarePaginator
     {
         $tz = config('app.timezone_local');
         $date ??= $this->today();
         $dateCarbon = Carbon::parse($date, $tz)->startOfDay();
         $isPast = $dateCarbon->lt($this->localNow()->startOfDay());
 
-        // Keep violation flags current for the roster.
-        $this->violations->recompute();
+        // Item 11 — READ ONLY. This used to recompute the whole roster's flags for the whole
+        // month on every call, and the board polls every 60s, so a full rescan ran on a timer
+        // for as long as anyone had the page open. The flags are now written by the events that
+        // change them (the live clock, HR adjustments, leave and half-day decisions, holiday,
+        // suspension, override and policy edits) plus a nightly sweep for the one input no
+        // write can signal: the day ending, which is what turns a missed shift into an absence.
         $flags = $this->violations->flagsByEmployee();
 
         $rows = Attendance::where('work_date', $date)->get()->keyBy('employee_id');
@@ -1139,7 +1178,7 @@ class AttendanceService
         // Read once for the whole roster, not once per employee.
         $managementAuto = $this->managementAutoAttendance();
 
-        return Employee::with(['user', 'department', 'workSchedule'])
+        $roster = Employee::with(['user', 'department', 'workSchedule'])
             ->get()
             ->map(function (Employee $emp) use ($rows, $leaveMap, $flags, $tz, $dateCarbon, $date, $isPast, $isHoliday, $suspendedPaid, $offHalves, $managementAuto) {
                 $att = $rows->get($emp->id);
@@ -1238,6 +1277,24 @@ class AttendanceService
             ->sortBy(fn (array $row) => mb_strtolower((string) $row['list_name']))
             ->values()
             ->all();
+
+        $status = $filters['status'] ?? null;
+        $timing = $filters['timing'] ?? null;
+
+        $roster = $this->searchComputed($roster, $filters['search'] ?? null, ['name', 'list_name']);
+
+        if ($status && $status !== 'all') {
+            $roster = array_values(array_filter($roster, fn (array $r) => ($r['status'] ?? null) === $status));
+        }
+
+        if ($timing && $timing !== 'all') {
+            $roster = array_values(array_filter(
+                $roster,
+                fn (array $r) => ($r['timing']['category'] ?? null) === $timing,
+            ));
+        }
+
+        return $this->paginateComputed($roster, $filters);
     }
 
     /**
@@ -1425,7 +1482,44 @@ class AttendanceService
      *
      * @return array<int, array<string, mixed>>
      */
-    public function openShiftReview(?string $start = null, ?string $end = null): array
+    /**
+     * ONE PAGE of the stale-attendance review queue.
+     *
+     * Each row's status — needs_fix, auto_closed — is derived here from an approved overtime
+     * request, the employee's schedule and how the day ended. Like the roster, none of that is a
+     * column, so the filter is applied after the derivation and the page is cut after the filter.
+     * See PagesComputedRows.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     * @return \Illuminate\Pagination\LengthAwarePaginator<int, array<string, mixed>>
+     */
+    public function openShiftReview(
+        ?string $start = null,
+        ?string $end = null,
+        array $filters = [],
+    ): \Illuminate\Pagination\LengthAwarePaginator {
+        $rows = $this->openShiftRows($start, $end);
+
+        $status = $filters['status'] ?? null;
+        $rows = $this->searchComputed($rows, $filters['search'] ?? null, ['name', 'department']);
+
+        if ($status && $status !== 'all') {
+            $rows = array_values(array_filter($rows, fn (array $r) => ($r['status'] ?? null) === $status));
+        }
+
+        return $this->paginateComputed($rows, $filters);
+    }
+
+    /**
+     * The review rows themselves, unfiltered and unpaged.
+     *
+     * Kept separate because two callers need the whole set rather than a page: the dashboard
+     * counts how many still need fixing, and the tests assert on the derivation. Paging is a
+     * presentation concern and belongs above this, not inside it.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function openShiftRows(?string $start = null, ?string $end = null): array
     {
         $tz = config('app.timezone_local');
         $end ??= $this->today();
@@ -1814,7 +1908,74 @@ class AttendanceService
      *                    paid_minutes:int, excess_minutes:int, raw_minutes:int, approved_minutes:int,
      *                    late_minutes:int, kind:string, reasons:list<string>}>
      */
-    public function autoOvertimeReview(string $start, string $end): array
+    /**
+     * ONE PAGE of the auto-overtime review.
+     *
+     * `kind` — held or flagged — is derived here from the company's overtime mode, an approved
+     * request and how far past the shift the punch went. Like the roster and the open-shift
+     * queue, that is not a column, so the filter is applied after the derivation and the page is
+     * cut after the filter. See PagesComputedRows.
+     *
+     * @param  array<string, mixed>  $filters  search, status (the row's `kind`), page, per_page
+     * @return \Illuminate\Pagination\LengthAwarePaginator<int, array<string, mixed>>
+     */
+    public function autoOvertimeReview(
+        string $start,
+        string $end,
+        array $filters = [],
+    ): \Illuminate\Pagination\LengthAwarePaginator {
+        $rows = $this->autoOvertimeRows($start, $end);
+
+        $kind = $filters['status'] ?? null;
+        $rows = $this->searchComputed($rows, $filters['search'] ?? null, ['name', 'department']);
+
+        if ($kind && $kind !== 'all') {
+            $rows = array_values(array_filter($rows, fn (array $r) => ($r['kind'] ?? null) === $kind));
+        }
+
+        return $this->paginateComputed($rows, $filters);
+    }
+
+    /**
+     * The two headline figures above the review: how many minutes are being HELD unpaid, and how
+     * many are PAYING on a flagged day, with the day counts for each.
+     *
+     * Counted over the whole range. The screen used to add these up from the rows it had, which
+     * was every row — and would now be a page, so "4h 20m of overtime is currently unpaid" would
+     * have meant "across the ten days on screen". Both figures are money.
+     *
+     * @return array{held: array{count:int, minutes:int}, flagged: array{count:int, minutes:int}}
+     */
+    public function autoOvertimeTotals(string $start, string $end): array
+    {
+        $totals = [
+            'held' => ['count' => 0, 'minutes' => 0],
+            'flagged' => ['count' => 0, 'minutes' => 0],
+        ];
+
+        foreach ($this->autoOvertimeRows($start, $end) as $row) {
+            $kind = $row['kind'] ?? null;
+            if (! isset($totals[$kind])) {
+                continue;
+            }
+
+            $totals[$kind]['count']++;
+            // Held overtime is the excess nobody is paying; flagged is what IS being paid.
+            $totals[$kind]['minutes'] += (int) ($kind === 'held'
+                ? ($row['excess_minutes'] ?? 0)
+                : ($row['paid_minutes'] ?? 0));
+        }
+
+        return $totals;
+    }
+
+    /**
+     * The review rows themselves, unfiltered and unpaged — the dashboard and the totals above
+     * both read the whole set.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function autoOvertimeRows(string $start, string $end): array
     {
         $policy = $this->policy->get();
 
@@ -2288,10 +2449,10 @@ class AttendanceService
      */
     public function exceptionsForCycle(string $start, string $end): array
     {
-        $openShifts = $this->openShiftReview($start, $end);
+        $openShifts = $this->openShiftRows($start, $end);
         $needsFix = array_filter($openShifts, fn (array $r) => $r['status'] === 'needs_fix');
 
-        $overtime = $this->autoOvertimeReview($start, $end);
+        $overtime = $this->autoOvertimeRows($start, $end);
         $held = array_filter($overtime, fn (array $r) => $r['kind'] === 'held');
         $flagged = array_filter($overtime, fn (array $r) => $r['kind'] === 'flagged');
 
@@ -3095,6 +3256,14 @@ class AttendanceService
                     $eoFrac = min(1.0, $eoFrac);
                 }
                 $unpaid += $eoFrac;
+                // Recorded in the ledger as well as in the total, exactly as the two half-day
+                // branches above do. Without the line, the early-out's money sits in
+                // `absence_deduction` with no days behind it, and deductionRows() apportions it
+                // out across the kinds that DO have days — inflating every other charge row on
+                // the payslip (a one-day Holiday Forfeited printing above the daily rate).
+                if ($eoFrac > 0) {
+                    $charge($dateStr, 'early_out', $eoFrac, 'Approved early-out');
+                }
 
                 if ($deductionsActive) {
                     $ded = $this->deduction->forDay(

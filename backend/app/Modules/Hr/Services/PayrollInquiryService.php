@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\PayrollInquiry;
 use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
@@ -13,18 +15,33 @@ use Illuminate\Validation\ValidationException;
 class PayrollInquiryService
 {
     use CancelsOwnRequest;
+    use PagesQueues;
 
     public function __construct(private readonly AuditService $audit) {}
 
-    public function list(User $user): Collection
+    /**
+     * One page of the payroll-inquiry queue. HR sees everyone's; anybody else sees only their
+     * own, and that scope is applied BEFORE the filters so no search can widen it.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function list(User $user, array $filters = []): LengthAwarePaginator
     {
-        $query = PayrollInquiry::with(['employee.user', 'resolver', 'payslip.payrollRun', 'canceller'])->latest();
+        $query = PayrollInquiry::with(['employee.user', 'resolver', 'payslip.payrollRun', 'canceller']);
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $query->where('employee_id', $user->employee?->id);
         }
 
-        return $query->get();
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            ['subject', 'topic', 'message'],
+            // The vocabulary is pending | in_progress | done. The first two still need HR, so
+            // both sort ahead of the settled ones.
+            priorityStatuses: ['pending', 'in_progress'],
+            urgentColumn: 'priority',
+        );
     }
 
     /** @param array<string, mixed> $data */

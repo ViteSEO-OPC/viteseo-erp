@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getRequisitions,
@@ -22,8 +23,14 @@ import type { Candidate } from "@/modules/hr/types/recruitment";
 
 const REQS_KEY = ["hr", "requisitions"] as const;
 
-export function useRequisitions() {
-  return useQuery({ queryKey: REQS_KEY, queryFn: getRequisitions });
+/** One page of the requisition queue, with the total. Filtered and ordered by the database. */
+export function useRequisitions(params: QueueParams) {
+  return useQuery({
+    queryKey: [...REQS_KEY, params] as const,
+    queryFn: () => getRequisitions(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useCandidates(requisitionId: number | undefined) {

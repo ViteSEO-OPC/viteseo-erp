@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Hr\Http\Controllers\ApprovalQueueController;
 use App\Modules\Hr\Http\Controllers\AttendanceController;
 use App\Modules\Hr\Http\Controllers\AttendancePolicyController;
 use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
@@ -237,6 +238,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('payroll/settings', [PayrollController::class, 'settings']);
         Route::put('payroll/settings', [PayrollController::class, 'updateSettings']);
         Route::get('payroll/runs', [PayrollController::class, 'runsIndex']);
+        // BEFORE any payroll/runs/{run} route, so 'for-cycle' is not read as an id.
+        Route::get('payroll/runs/for-cycle', [PayrollController::class, 'runForCycle']);
         Route::get('payroll/thirteenth-month', [PayrollController::class, 'thirteenthMonth']);
         Route::get('payroll/thirteenth-month/preview', [PayrollController::class, 'previewThirteenthMonth']);
         // Pay it, and withhold on what it pushes past the ₱90,000 exemption.
@@ -290,6 +293,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // the run that produced it; the bank file is an export and matches the export limit.
         Route::get('payment-batches', [PaymentBatchController::class, 'index']);
         Route::post('payment-batches', [PaymentBatchController::class, 'store'])->middleware('throttle:5,1,payment-batch:');
+        // BEFORE the {paymentBatch} route, or 'summary' is read as a batch id.
+        Route::get('payment-batches/summary', [PaymentBatchController::class, 'summary']);
         Route::get('payment-batches/{paymentBatch}', [PaymentBatchController::class, 'show']);
         Route::get('payment-batches/{paymentBatch}/bank-file', [PaymentBatchController::class, 'bankFile'])->middleware('throttle:10,1,bank-file:');
         // Reconciliation — what the bank says actually happened. The import moves payslips into
@@ -312,6 +317,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // while keeping the tighter send limit.
         Route::post('candidates/{candidate}/email', [RecruitmentController::class, 'sendEmail'])->middleware('throttle:10,1,hr-email:');
         Route::post('candidates/{candidate}/reject', [RecruitmentController::class, 'reject']);
+        // Counts everybody's claims, so it sits inside the HR-only group.
+        // The dashboard's approvals card — thirteen queues merged server-side.
+        Route::get('approvals/pending', [ApprovalQueueController::class, 'index']);
+        Route::get('reimbursements/summary', [ReimbursementController::class, 'summary']);
         Route::post('reimbursements/{reimbursement}/approve', [ReimbursementController::class, 'approve']);
         Route::post('reimbursements/{reimbursement}/reject', [ReimbursementController::class, 'reject']);
         Route::post('reimbursements/{reimbursement}/mark-paid', [ReimbursementController::class, 'markPaid']);
@@ -342,6 +351,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // auto-mode overtime the caps held back, awaiting someone's yes. Derived on read:
         // it writes nothing, and an approval on the ordinary queue above makes an item disappear.
         Route::get('overtime-requests/auto-review', [OvertimeRequestController::class, 'autoReview']);
+        Route::get('overtime-requests/auto-review/totals', [OvertimeRequestController::class, 'autoReviewTotals']);
         Route::post('departments', [DepartmentController::class, 'store']);
         Route::match(['put', 'patch'], 'departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
@@ -355,6 +365,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // Deliberately not on the update below: an archived record is read-only (the record page
         // drops its edit affordances for a leaver), so a Save that resolved would be a Save the rest
         // of the record's endpoints could not honour anyway.
+        // BEFORE the {employee} route below, or 'options' is read as an employee id.
+        Route::get('employees/options', [EmployeeController::class, 'options']);
         Route::get('employees/{employee}', [EmployeeController::class, 'show'])->withTrashed();
         Route::match(['put', 'patch'], 'employees/{employee}', [EmployeeController::class, 'update']);
         Route::get('employees/{employee}/salary-history', [EmployeeController::class, 'salaryHistory']);
@@ -517,6 +529,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Finance → Office Expenses (HR only).
         Route::get('office-expenses', [OfficeExpenseController::class, 'index']);
+        Route::get('office-expenses/summary', [OfficeExpenseController::class, 'summary']);
         Route::post('office-expenses', [OfficeExpenseController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
         Route::match(['put', 'patch'], 'office-expenses/{officeExpense}', [OfficeExpenseController::class, 'update']);
         Route::post('office-expenses/{officeExpense}/approve', [OfficeExpenseController::class, 'approve']);

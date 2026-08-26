@@ -53,6 +53,16 @@ class PayrollRun extends Model
     public ?int $skippedDisbursedCount = null;
 
     /**
+     * What the attached page of `payslips` is a page OF — total, page, per_page.
+     *
+     * Set by PayrollService::runWithBreakdown(). Null everywhere else, which is the signal the
+     * resource uses to tell "one page of a detail view" from "a row in the runs list".
+     *
+     * @var array{total:int, page:int, per_page:int}|null
+     */
+    public ?array $breakdownMeta = null;
+
+    /**
      * WHAT THE RECOMPUTE FOUND UNDERNEATH THE CORRECTIONS — one sentence per correction the engine
      * has since disagreed with, or whose line no longer exists.
      *

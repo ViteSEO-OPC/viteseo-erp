@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import {useState} from "react";
+import {AlertTriangle} from "lucide-react";
 
 import { Label } from "@/components/ui/label";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatDate, formatTimeManila } from "@/core/lib/format";
 import { useOpenShifts } from "@/modules/hr/hooks/use-attendance";
@@ -73,14 +74,25 @@ export function OpenShiftQueue({ onFix }: { onFix: (row: OpenShiftRow) => void }
   const [to, setTo] = useState(() => manilaToday());
   const [filter, setFilter] = useState<"needs_fix" | "auto_closed" | "all">("needs_fix");
 
-  const { data: rows, isLoading, isError } = useOpenShifts(from, to);
+  // Server-paged, and the status filter reaches the query — a row's status is derived from an
+  // approved overtime request and how the day ended, so the server filters after deriving it.
+  const table = useServerTable();
+  const { data, isLoading, isError, isFetching } = useOpenShifts(from, to, {
+    ...table.params,
+    status: filter,
+  });
+  const shown = data?.items ?? [];
 
-  const all = useMemo(() => rows ?? [], [rows]);
-  const needsFix = useMemo(() => all.filter((r) => r.status === "needs_fix"), [all]);
-  const shown = useMemo(
-    () => (filter === "all" ? all : all.filter((r) => r.status === filter)),
-    [all, filter],
-  );
+  // The "N need fixing" badge, from its OWN count. It used to filter the full list, which is now
+  // a page — so the badge would have said "3 need fixing" for a backlog of forty, on the queue
+  // whose entire purpose is showing how big the backlog is. One extra round trip buys a number
+  // that is true; `per_page: 1` because only the total is wanted.
+  const { data: needsFixPage } = useOpenShifts(from, to, {
+    page: 1,
+    per_page: 1,
+    status: "needs_fix",
+  });
+  const needsFixCount = needsFixPage?.total ?? 0;
 
   const allowanceHours = ((policy?.missing_timeout_allowance_minutes ?? 180) / 60).toFixed(
     (policy?.missing_timeout_allowance_minutes ?? 180) % 60 === 0 ? 0 : 1,
@@ -155,17 +167,17 @@ export function OpenShiftQueue({ onFix }: { onFix: (row: OpenShiftRow) => void }
 
   // Nothing needing a fix and no filter applied = nothing worth taking up space for, the same
   // rule the field time-in queue above it follows.
-  if (filter === "needs_fix" && !isLoading && !isError && needsFix.length === 0) return null;
+  if (filter === "needs_fix" && !isLoading && !isError && needsFixCount === 0) return null;
 
   return (
     <div className="rounded-card border border-border bg-card p-4 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="flex items-center gap-2 text-h3 font-bold text-foreground">
-            {needsFix.length > 0 && <AlertTriangle className="size-4 text-danger" />}
+            {needsFixCount > 0 && <AlertTriangle className="size-4 text-danger" />}
             Open shifts
-            {needsFix.length > 0 && (
-              <SoftBadge tone="danger">{needsFix.length} need fixing</SoftBadge>
+            {needsFixCount > 0 && (
+              <SoftBadge tone="danger">{needsFixCount} need fixing</SoftBadge>
             )}
           </h2>
           <p className="max-w-3xl text-sm text-muted-foreground">
@@ -197,6 +209,9 @@ export function OpenShiftQueue({ onFix }: { onFix: (row: OpenShiftRow) => void }
           <DataTable
             columns={columns}
             rows={shown}
+            pageSize={table.pageSize}
+            searchPlaceholder="Search employee, department…"
+            server={table.serverProps(data?.total ?? 0, isFetching)}
             rowKey={(r) => r.attendance_id}
             onRowClick={onFix}
             // Our own filter rather than the auto one DataTable derives from `status`: that would
@@ -214,10 +229,10 @@ export function OpenShiftQueue({ onFix }: { onFix: (row: OpenShiftRow) => void }
                 ]}
               />
             }
-            // The default indexes every field, which would let "closed" match the internal
-            // `auto_closed` on rows whose badge says something else entirely.
-            getSearchText={(r) => [r.name, r.department, r.work_date].filter(Boolean).join(" ")}
-            searchPlaceholder="Search people…"
+            // `getSearchText` is gone: the search runs in the query now, and it matches the
+            // employee and the department only — the same two fields this listed, and
+            // deliberately not the status, which would let "closed" match the internal
+            // `auto_closed` on rows whose badge says something else.
             empty={
               filter === "auto_closed"
                 ? "No shifts were auto-closed in this range."

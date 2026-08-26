@@ -1,4 +1,5 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type {
   AttendanceException,
   NextPayday,
@@ -52,13 +53,38 @@ export async function updatePayrollSettings(input: {
   return res.data.data;
 }
 
-export async function getPayrollRuns(): Promise<PayrollRun[]> {
-  const res = await apiClient.get("/hr/payroll/runs");
+export async function getPayrollRuns(params: QueueParams): Promise<QueuePage<PayrollRun>> {
+  const res = await apiClient.get("/hr/payroll/runs", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
+}
+
+/**
+ * The run for one exact period, or null when it has not been run.
+ *
+ * Its own request rather than a lookup through the history: the screen offers "Run payroll"
+ * when this is null, so an answer derived from a PAGE of history would put that button back for
+ * a period that has already been paid.
+ */
+export async function getPayrollRunForCycle(cycle: {
+  frequency: string;
+  cycle_start: string;
+  cycle_end: string;
+}): Promise<PayrollRun | null> {
+  const res = await apiClient.get("/hr/payroll/runs/for-cycle", { params: cycle });
   return res.data.data;
 }
 
-export async function getPayrollRun(id: number): Promise<PayrollRun> {
-  const res = await apiClient.get(`/hr/payroll/runs/${id}`);
+export async function getPayrollRun(
+  id: number,
+  breakdown?: { page: number; per_page: number; search?: string },
+): Promise<PayrollRun> {
+  const res = await apiClient.get(`/hr/payroll/runs/${id}`, {
+    params: breakdown && {
+      page: breakdown.page,
+      per_page: breakdown.per_page,
+      ...(breakdown.search ? { search: breakdown.search } : {}),
+    },
+  });
   return res.data.data;
 }
 
@@ -140,13 +166,30 @@ export async function unlockPayrollRun(id: number): Promise<PayrollRun> {
   return res.data.data;
 }
 
+/**
+ * One page of the year's 13th-month accrual, plus the total it is a page of.
+ *
+ * `total_accrued` comes from the server. The screen used to add the column up itself, which is
+ * fine over the whole year and wrong the moment it is a page — of a payroll figure.
+ */
 export async function getThirteenthMonth(
-  year?: number,
-): Promise<{ rows: ThirteenthMonthRow[]; year: number }> {
+  year: number | undefined,
+  params: QueueParams,
+): Promise<{
+  rows: ThirteenthMonthRow[];
+  year: number;
+  totalAccrued: number;
+  total: number;
+}> {
   const res = await apiClient.get("/hr/payroll/thirteenth-month", {
-    params: year ? { year } : undefined,
+    params: { ...queueQuery(params), ...(year ? { year } : {}) },
   });
-  return { rows: res.data.data, year: res.data.meta.year };
+  return {
+    rows: res.data.data.rows,
+    year: res.data.meta.year,
+    totalAccrued: res.data.data.total_accrued,
+    total: res.data.data.meta?.total ?? res.data.data.rows.length,
+  };
 }
 
 /** Exactly what a 13th-month run would pay — computed, saved nowhere. */
@@ -320,10 +363,18 @@ export async function amendPayrollRun(
  * Read-only, and expensive: the server computes the whole run for real and rolls it back, which is
  * the only honest way to describe a recompute. Fetch it when the confirmation opens, not on a hover.
  */
+/**
+ * One page of what a re-run would change.
+ *
+ * The rows arrive ordered changed → added → removed → skipped → unchanged, so page one leads
+ * with everything the reader opened this dialog to see. Every figure in `meta` is summed by the
+ * server over the whole run, never over the page.
+ */
 export async function getRerunPreview(
   runId: number,
+  params: { page: number; per_page: number },
 ): Promise<{ rows: RerunPreviewRow[]; meta: RerunPreviewMeta }> {
-  const res = await apiClient.get(`/hr/payroll/runs/${runId}/rerun-preview`);
+  const res = await apiClient.get(`/hr/payroll/runs/${runId}/rerun-preview`, { params });
   return { rows: res.data.data, meta: res.data.meta };
 }
 
@@ -366,11 +417,30 @@ export async function createPaymentBatch(input: {
 }
 
 /** Every batch, newest first. Optionally narrowed to one run. */
-export async function getPaymentBatches(payrollRunId?: number): Promise<PaymentBatch[]> {
-  const res = await apiClient.get("/hr/payment-batches", {
+/** What a run has been paid across EVERY batch. See PaymentService::paidTotals(). */
+export interface PaymentBatchTotals {
+  paid_total: number;
+  batch_count: number;
+}
+
+export async function getPaymentBatchTotals(payrollRunId?: number): Promise<PaymentBatchTotals> {
+  const res = await apiClient.get("/hr/payment-batches/summary", {
     params: payrollRunId ? { payroll_run_id: payrollRunId } : undefined,
   });
   return res.data.data;
+}
+
+export async function getPaymentBatches(
+  payrollRunId: number | undefined,
+  params: QueueParams,
+): Promise<QueuePage<PaymentBatch>> {
+  const res = await apiClient.get("/hr/payment-batches", {
+    params: {
+      ...queueQuery(params),
+      ...(payrollRunId ? { payroll_run_id: payrollRunId } : {}),
+    },
+  });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 /** One batch with every transfer in it, plus whether it accounts for the whole run. */

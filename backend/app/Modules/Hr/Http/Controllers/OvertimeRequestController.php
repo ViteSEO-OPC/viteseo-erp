@@ -22,7 +22,10 @@ class OvertimeRequestController extends Controller
     // GET /api/v1/hr/overtime-requests — HR sees all; employees see their own.
     public function index(Request $request): JsonResponse
     {
-        return OvertimeRequestResource::collection($this->service->list($request->user()))->response();
+        // Applied by the DATABASE. In the browser they would only narrow the page on screen.
+        return OvertimeRequestResource::collection(
+            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // GET /api/v1/hr/overtime-requests/settings — whether overtime can be REQUESTED at all, so the
@@ -44,8 +47,40 @@ class OvertimeRequestController extends Controller
             'end' => ['required', 'date', 'after_or_equal:start'],
         ]);
 
+        $page = $attendance->autoOvertimeReview(
+            $data['start'],
+            $data['end'],
+            $request->only(['search', 'status', 'page', 'per_page']),
+        );
+
+        // The same {data, meta} envelope every other paged endpoint answers in — this one serves
+        // computed rows, so there is no Resource collection to shape it.
         return response()->json([
-            'data' => $attendance->autoOvertimeReview($data['start'], $data['end']),
+            'data' => $page->items(),
+            'meta' => [
+                'total' => $page->total(),
+                'current_page' => $page->currentPage(),
+                'per_page' => $page->perPage(),
+                'last_page' => $page->lastPage(),
+            ],
+        ]);
+    }
+
+    /**
+     * GET /api/v1/hr/overtime-requests/auto-review/totals — the two figures above the review.
+     *
+     * Its own request rather than a sum of the rows on screen: the review is paged, and both
+     * figures are minutes of pay. See AttendanceService::autoOvertimeTotals().
+     */
+    public function autoReviewTotals(Request $request, AttendanceService $attendance): JsonResponse
+    {
+        $data = $request->validate([
+            'start' => ['required', 'date'],
+            'end' => ['required', 'date', 'after_or_equal:start'],
+        ]);
+
+        return response()->json([
+            'data' => $attendance->autoOvertimeTotals($data['start'], $data['end']),
         ]);
     }
 

@@ -1,4 +1,5 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type {
   AutoOvertimeReviewItem,
   OvertimeClassification,
@@ -12,20 +13,37 @@ export async function getOvertimeSettings(): Promise<OvertimeSettings> {
   return res.data.data;
 }
 
-export async function getOvertimeRequests(): Promise<OvertimeRequest[]> {
-  const res = await apiClient.get("/hr/overtime-requests");
-  return res.data.data;
+export async function getOvertimeRequests(params: QueueParams): Promise<QueuePage<OvertimeRequest>> {
+  const res = await apiClient.get("/hr/overtime-requests", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 /** auto-mode overtime the policy caps held back, awaiting an approval. HR only. */
-export async function getAutoOvertimeReview(
+/** Held vs flagged overtime minutes for a range, counted by the server over every row. */
+export interface AutoOvertimeTotals {
+  held: { count: number; minutes: number };
+  flagged: { count: number; minutes: number };
+}
+
+export async function getAutoOvertimeTotals(
   start: string,
   end: string,
-): Promise<AutoOvertimeReviewItem[]> {
-  const res = await apiClient.get("/hr/overtime-requests/auto-review", {
+): Promise<AutoOvertimeTotals> {
+  const res = await apiClient.get("/hr/overtime-requests/auto-review/totals", {
     params: { start, end },
   });
   return res.data.data;
+}
+
+export async function getAutoOvertimeReview(
+  start: string,
+  end: string,
+  params: QueueParams,
+): Promise<QueuePage<AutoOvertimeReviewItem>> {
+  const res = await apiClient.get("/hr/overtime-requests/auto-review", {
+    params: { ...queueQuery(params), start, end },
+  });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 /** How a date's overtime would be classified + its rate — display only; payroll re-derives it. */

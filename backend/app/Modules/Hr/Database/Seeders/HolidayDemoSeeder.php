@@ -4,6 +4,7 @@ namespace App\Modules\Hr\Database\Seeders;
 
 use App\Modules\Hr\Models\Holiday;
 use App\Modules\Hr\Models\HolidaySet;
+use App\Modules\Hr\Services\ViolationService;
 use Illuminate\Database\Seeder;
 
 /**
@@ -23,10 +24,22 @@ class HolidayDemoSeeder extends Seeder
             return;
         }
 
-        if (HolidaySet::query()->exists()) {
-            return;
+        // Already loaded — skip the set, but still build the flags below: this seeder is the
+        // last one that lands a violation input, so the rebuild belongs here either way.
+        if (! HolidaySet::query()->exists()) {
+            $this->seedSet();
         }
 
+        // Item 11 — violations are no longer computed when someone opens the page. The demo's
+        // attendance spans months, so without this the violations screen would be empty until a
+        // punch or the nightly sweep touched a month, and "All time" would stay empty for good.
+        // Seeded last on purpose: holidays, suspensions and approved leave all change what the
+        // scan produces, so the flags are built once every input is in place.
+        app(ViolationService::class)->recomputeHistory();
+    }
+
+    private function seedSet(): void
+    {
         $set = HolidaySet::create([
             'country_code' => 'PH', 'year' => 2026, 'source' => 'nager', 'refreshed_at' => now(),
         ]);

@@ -360,6 +360,76 @@ class RehireAndReinstatementTest extends HrTestCase
             ->assertJsonCount(0, 'data');
     }
 
+    /**
+     * Searching the former roster must stay INSIDE the former roster. The search clauses are
+     * OR'd together, so without their own group the `deleted_at is not null` filter only guards
+     * the first branch and a job-title match drags active employees into the "former" list —
+     * where the only actions offered are rehire and reinstate.
+     */
+    public function test_searching_the_former_roster_does_not_leak_active_employees(): void
+    {
+        $this->separate('2026-06-30');
+
+        // An ACTIVE employee sharing the separated one's job title — the OR branch that leaks.
+        Employee::create([
+            'user_id' => User::factory()->create()->id,
+            'department_id' => $this->employee->department_id,
+            'employee_no' => 'E-002', 'job_title' => 'Staff', 'hire_date' => '2021-01-01',
+            'employment_status' => 'regular',
+            'base_salary' => 25000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
+        ]);
+
+        $this->actingAs($this->hrUser())
+            ->getJson('/api/v1/hr/employees?status=former&search=Staff')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $this->employee->id);
+    }
+
+    /** The same guard for employee_no, the other unguarded OR branch. */
+    public function test_searching_the_former_roster_by_employee_no_does_not_leak(): void
+    {
+        $this->separate('2026-06-30');
+
+        Employee::create([
+            'user_id' => User::factory()->create()->id,
+            'department_id' => $this->employee->department_id,
+            'employee_no' => 'E-002', 'job_title' => 'Analyst', 'hire_date' => '2021-01-01',
+            'employment_status' => 'regular',
+            'base_salary' => 25000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
+        ]);
+
+        $this->actingAs($this->hrUser())
+            ->getJson('/api/v1/hr/employees?status=former&search=E-00')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $this->employee->id);
+    }
+
+    /** Grouping the OR branches must not break the search itself. */
+    public function test_the_active_directory_is_still_searchable(): void
+    {
+        Employee::create([
+            'user_id' => User::factory()->create(['name' => 'Maria Santos'])->id,
+            'department_id' => $this->employee->department_id,
+            'employee_no' => 'E-002', 'job_title' => 'Analyst', 'hire_date' => '2021-01-01',
+            'employment_status' => 'regular',
+            'base_salary' => 25000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
+        ]);
+
+        $hr = $this->hrUser();
+
+        // by name (through the user relation)
+        $this->actingAs($hr)->getJson('/api/v1/hr/employees?search=Maria')
+            ->assertOk()->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.job_title', 'Analyst');
+
+        // by job title (a top-level column)
+        $this->actingAs($hr)->getJson('/api/v1/hr/employees?search=Staff')
+            ->assertOk()->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $this->employee->id);
+    }
+
     // --- the employment-history timeline --------------------------------------------------------
 
     /**

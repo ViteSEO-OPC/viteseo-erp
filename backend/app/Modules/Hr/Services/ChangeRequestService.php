@@ -5,12 +5,16 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\ChangeRequest;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ChangeRequestService
 {
+    use PagesQueues;
+
     /**
      * Employee fields an employee may request a change to, with labels. All personal +
      * bank columns on hr_employees. (Email/login identity lives on the users row and is
@@ -63,15 +67,27 @@ class ChangeRequestService
 
     public function __construct(private readonly AuditService $audit) {}
 
-    public function list(User $user): Collection
+    /**
+     * One page of the queue. HR sees everyone's; anybody else sees only their own, and that
+     * scope is applied BEFORE the filters so no search can widen it.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function list(User $user, array $filters = []): LengthAwarePaginator
     {
-        $query = ChangeRequest::with(['employee.user', 'reviewer'])->latest();
+        $query = ChangeRequest::with(['employee.user', 'reviewer']);
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $query->where('employee_id', $user->employee?->id);
         }
 
-        return $query->get();
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            // No free-text reason on this queue — it records a field and the two values.
+            ['field', 'old_value', 'new_value'],
+            priorityStatuses: ['pending'],
+        );
     }
 
     /**

@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
@@ -283,7 +284,11 @@ function concernBadge(c: Concern): { status: string; label?: string } {
 }
 
 function MyConcernsCard() {
-  const { data: rows } = useMyConcerns();
+  // Server-paged, like the HR queue. Ordered with anything HR is waiting on at the top, so a
+  // bounded page always shows what needs the reporter's attention first.
+  const table = useServerTable();
+  const { data, isFetching } = useMyConcerns(table.params);
+  const rows = data?.items ?? [];
   const all = rows ?? [];
   // By id, then read back from the live list, so a status change or a newly
   // scheduled meeting shows up without reopening.
@@ -357,20 +362,14 @@ function MyConcernsCard() {
         rows={all}
         rowKey={(c) => c.id}
         onRowClick={(c) => setDetailId(c.id)}
-        // Floats a concern HR is waiting on to the top of the list.
-        needsAction={awaitingAnswer}
-        // Privacy: search on reference/category/visibility/status only — never identity.
-        getSearchText={(c) =>
-          [
-            c.reference_no,
-            concernCategoryLabel(c.category),
-            c.is_anonymous ? "anonymous" : "named",
-            concernBadge(c).label ?? c.status,
-          ].join(" ")
-        }
+        pageSize={table.pageSize}
         searchPlaceholder="Search concerns…"
         filterable={false}
         empty="You haven't raised any concerns."
+        // `needsAction` and `getSearchText` both worked on the rows in hand. The search runs in
+        // the query now — and this queue is scoped to the caller, so the identity rule that
+        // shapes the HR search has nothing to protect here: the reporter is the reader.
+        server={table.serverProps(data?.total ?? 0, isFetching)}
       />
 
       {detail && (

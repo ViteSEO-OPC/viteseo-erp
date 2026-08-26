@@ -164,17 +164,31 @@ function RequestTabs({
   );
 }
 
+/**
+ * What each source is asked for on this page.
+ *
+ * This is ONE EMPLOYEE'S own history — bounded by their own tenure rather than by headcount ×
+ * time, which is why it stays a merged client-side table rather than becoming five paged ones.
+ * A hundred of each kind is far more than a person accumulates, and the queues now sort rows
+ * still awaiting a decision FIRST, so the pending count below is reliable even at the bound:
+ * anything outstanding is at the top of its own list, not stranded past the hundredth row.
+ *
+ * If a genuinely long-tenured record ever outgrows this, the answer is a combined "my requests"
+ * endpoint that merges and pages server-side — the same one PendingApprovals wants.
+ */
+const MY_HISTORY = { page: 1, per_page: 100, status: "all" } as const;
+
 export default function TimeOffPage() {
   const { data: summary } = useMyLeaveSummary();
   const { data: types } = useLeaveTypes();
-  const { data: requests } = useLeaveRequests();
-  const { data: halfDays } = useHalfDayRequests();
+  const { data: requests } = useLeaveRequests(MY_HISTORY);
+  const { data: halfDays } = useHalfDayRequests(MY_HISTORY);
   // Work requests. No tab and no form: these are filed from the time clock, by pressing Time
   // in on a day nobody was expected in on. They appear here only so the employee can follow
   // the decision.
-  const { data: workRequests } = useWorkRequests();
-  const { data: earlyOuts } = useEarlyOutRequests();
-  const { data: overtimes } = useOvertimeRequests();
+  const { data: workRequests } = useWorkRequests(MY_HISTORY);
+  const { data: earlyOuts } = useEarlyOutRequests(MY_HISTORY);
+  const { data: overtimes } = useOvertimeRequests(MY_HISTORY);
   // One dialog, four endpoints — `handleCancel` dispatches on the row's kind.
   const cancelMut = useCancelLeaveRequest();
   const cancelHalfDayMut = useCancelHalfDayRequest();
@@ -256,15 +270,15 @@ export default function TimeOffPage() {
         : null;
 
   const pendingCount =
-    (requests ?? []).filter((r) => r.status === "pending").length +
-    (halfDays ?? []).filter((h) => h.status === "pending").length +
-    (earlyOuts ?? []).filter((e) => e.status === "pending").length +
-    (overtimes ?? []).filter((o) => o.status === "pending").length +
-    (workRequests ?? []).filter((r) => r.status === "pending").length;
+    (requests?.items ?? []).filter((r) => r.status === "pending").length +
+    (halfDays?.items ?? []).filter((h) => h.status === "pending").length +
+    (earlyOuts?.items ?? []).filter((e) => e.status === "pending").length +
+    (overtimes?.items ?? []).filter((o) => o.status === "pending").length +
+    (workRequests?.items ?? []).filter((r) => r.status === "pending").length;
 
   // Combined leave / half-day / early-out / overtime history, newest first.
   const history: HistItem[] = [
-    ...(requests ?? []).map((l) => {
+    ...(requests?.items ?? []).map((l) => {
       const dates = formatDateRange(l.start_date, l.end_date);
       return {
         key: `l${l.id}`,
@@ -302,7 +316,7 @@ export default function TimeOffPage() {
         cancellable: l.status === "pending",
       };
     }),
-    ...(halfDays ?? []).map((h) => ({
+    ...(halfDays?.items ?? []).map((h) => ({
       key: `h${h.id}`,
       id: h.id,
       kind: "half" as const,
@@ -326,7 +340,7 @@ export default function TimeOffPage() {
         : null,
       cancellable: h.status === "pending",
     })),
-    ...(earlyOuts ?? []).map((e) => ({
+    ...(earlyOuts?.items ?? []).map((e) => ({
       key: `e${e.id}`,
       id: e.id,
       kind: "early" as const,
@@ -347,7 +361,7 @@ export default function TimeOffPage() {
         : null,
       cancellable: e.status === "pending",
     })),
-    ...(overtimes ?? []).map((o) => ({
+    ...(overtimes?.items ?? []).map((o) => ({
       key: `o${o.id}`,
       id: o.id,
       kind: "overtime" as const,
@@ -374,7 +388,7 @@ export default function TimeOffPage() {
       // so the service keeps that with HR — offering the button here would only 422.
       cancellable: o.status === "pending",
     })),
-    ...(workRequests ?? []).map((r) => ({
+    ...(workRequests?.items ?? []).map((r) => ({
       key: `r${r.id}`,
       id: r.id,
       kind: "work" as const,
@@ -553,9 +567,9 @@ export default function TimeOffPage() {
 
       <div className="mt-6">
         <TimeOffCalendar
-          leaves={requests ?? []}
-          halfDays={halfDays ?? []}
-          earlyOuts={earlyOuts ?? []}
+          leaves={requests?.items ?? []}
+          halfDays={halfDays?.items ?? []}
+          earlyOuts={earlyOuts?.items ?? []}
         />
       </div>
 

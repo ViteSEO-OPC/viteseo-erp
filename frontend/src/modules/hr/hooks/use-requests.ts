@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getDocumentRequests,
@@ -41,8 +42,13 @@ const MY_INQUIRIES_KEY = ["hr", "me", "payroll-inquiries"] as const;
 
 // --- Document requests ---
 
-export function useDocumentRequests() {
-  return useQuery({ queryKey: DOCS_KEY, queryFn: getDocumentRequests });
+/** One page of the document-request queue, with the total. Filtered by the database. */
+export function useDocumentRequests(params: QueueParams) {
+  return useQuery({
+    queryKey: [...DOCS_KEY, params] as const,
+    queryFn: () => getDocumentRequests(params),
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useMyDocumentRequests() {
@@ -92,8 +98,13 @@ export function useReopenDocumentRequest() {
 
 // --- Change requests ---
 
-export function useChangeRequests() {
-  return useQuery({ queryKey: CHANGES_KEY, queryFn: getChangeRequests });
+/** One page of the change-request queue, with the total. Filtered and ordered by the database. */
+export function useChangeRequests(params: QueueParams) {
+  return useQuery({
+    queryKey: [...CHANGES_KEY, params] as const,
+    queryFn: () => getChangeRequests(params),
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useMyChangeRequests() {
@@ -142,8 +153,13 @@ export function useReopenChangeRequest() {
 
 // --- Payslip requests ---
 
-export function usePayslipRequests() {
-  return useQuery({ queryKey: PAYSLIP_REQS_KEY, queryFn: getPayslipRequests });
+/** One page of the payslip-request queue, with the total. Filtered and ordered by the database. */
+export function usePayslipRequests(params: QueueParams) {
+  return useQuery({
+    queryKey: [...PAYSLIP_REQS_KEY, params] as const,
+    queryFn: () => getPayslipRequests(params),
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useMyPayslipRequests() {
@@ -194,8 +210,13 @@ export function useReopenPayslipRequest() {
 
 // --- Payroll inquiries ---
 
-export function usePayrollInquiries() {
-  return useQuery({ queryKey: INQUIRIES_KEY, queryFn: getPayrollInquiries });
+/** One page of the payroll-inquiry queue, with the total. Filtered by the database. */
+export function usePayrollInquiries(params: QueueParams) {
+  return useQuery({
+    queryKey: [...INQUIRIES_KEY, params] as const,
+    queryFn: () => getPayrollInquiries(params),
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useMyPayrollInquiries() {

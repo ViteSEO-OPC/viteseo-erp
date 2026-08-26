@@ -120,6 +120,16 @@ class ScheduleService
      *
      * @return array{workdays:array<int>, start_time:?string, end_time:?string, grace_minutes:int, unpaid_break_minutes:int, paid_break_minutes:int, expected_minutes:?int, am_start_time:?string, am_end_time:?string, pm_start_time:?string, pm_end_time:?string, source:string, schedule_name:?string, is_workday:?bool}
      */
+    /**
+     * Pre-load the day-rule overrides for a date range, so a caller that walks a month pays one
+     * query instead of one per day. `effectiveFor()` reads them per employee-per-day, which is
+     * where the repeats came from. Purely an optimisation — the result is identical either way.
+     */
+    public function warmDailyOverrides(Carbon|string $from, Carbon|string $to): void
+    {
+        $this->dailyOverrides->warmRange($from, $to);
+    }
+
     public function effectiveFor(Employee $employee, ?Carbon $date = null): array
     {
         $schedule = $employee->workSchedule ?? $this->default();

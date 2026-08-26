@@ -20,7 +20,10 @@ class HalfDayRequestController extends Controller
     // GET /api/v1/hr/half-day-requests — HR sees all; employees see their own.
     public function index(Request $request): JsonResponse
     {
-        return HalfDayRequestResource::collection($this->service->list($request->user()))->response();
+        // Applied by the DATABASE. In the browser they would only narrow the page on screen.
+        return HalfDayRequestResource::collection(
+            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // POST /api/v1/hr/half-day-requests — the caller files their own half-day.

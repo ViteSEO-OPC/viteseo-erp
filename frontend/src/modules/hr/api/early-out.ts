@@ -1,9 +1,10 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type { EarlyOutRequest } from "@/modules/hr/types/leave";
 
-export async function getEarlyOutRequests(): Promise<EarlyOutRequest[]> {
-  const res = await apiClient.get("/hr/early-out-requests");
-  return res.data.data;
+export async function getEarlyOutRequests(params: QueueParams): Promise<QueuePage<EarlyOutRequest>> {
+  const res = await apiClient.get("/hr/early-out-requests", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 export async function createEarlyOutRequest(input: {

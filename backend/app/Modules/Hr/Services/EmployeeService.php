@@ -37,6 +37,12 @@ class EmployeeService
      * allotments are keyed on these — adding one here means every leave type needs
      * an allotment row for it (see AddProjectBasedAndOjtLeaveAllotments migration).
      */
+    /** Directory page size when the caller doesn't say — matches the card grid's 12. */
+    private const DEFAULT_PER_PAGE = 12;
+
+    /** Ceiling on `per_page`, so the directory endpoint can never be asked for the whole table. */
+    private const MAX_PER_PAGE = 100;
+
     public const STATUSES = ['regular', 'probationary', 'contract', 'part_time', 'project_based', 'ojt'];
 
     /**
@@ -299,21 +305,94 @@ class EmployeeService
     }
 
     /** The employee directory. */
-    public function list(?string $search = null, string $status = 'active'): LengthAwarePaginator
+    /**
+     * One page of the directory.
+     *
+     * Every filter is applied HERE rather than in the browser. The screen shows twelve cards; it
+     * used to receive the first hundred employees and do the searching, the department filter and
+     * the paging itself — which meant the hundred-and-first person was unreachable, and a search
+     * for them answered "no employees match your filters" rather than admitting it had never
+     * looked. Filtering in the query is also what makes the count in the header true: the total
+     * below counts everyone who matches, not everyone who was downloaded.
+     *
+     * @param  array<string, mixed>  $filters  search, status (roster), department,
+     *                                         employment_status, per_page
+     */
+    public function list(array $filters = []): LengthAwarePaginator
     {
+        $search = $filters['search'] ?? null;
+        $status = $filters['status'] ?? 'active';
+        $department = $filters['department'] ?? null;
+        $employmentStatus = $filters['employment_status'] ?? null;
+
+        // Bounded both ways: a page is a page. Without the ceiling `?per_page=100000` turns the
+        // directory back into the whole-table read this exists to stop.
+        $perPage = min(self::MAX_PER_PAGE, max(1, (int) ($filters['per_page'] ?? self::DEFAULT_PER_PAGE)));
+
         return Employee::query()
             ->when($status === 'former', fn ($q) => $q->onlyTrashed())
             ->when($status === 'all', fn ($q) => $q->withTrashed())
-            ->with(['user.roles', 'department', 'manager.user'])
+            // Department and employment status are exact matches, so they need no grouping —
+            // unlike the search below, they AND with everything else exactly as intended.
+            ->when($department, fn ($q) => $q->where('department_id', (int) $department))
+            ->when(
+                $employmentStatus && in_array($employmentStatus, self::STATUSES, true),
+                fn ($q) => $q->where('employment_status', $employmentStatus),
+            )
+            // Only what the directory projection reads. `user.roles` and `manager.user` went with
+            // `is_hr_officer` and `manager` when the list stopped shipping the full record —
+            // roles is a many-to-many join, paid for every row, for a field nothing rendered.
+            ->with(['user', 'department'])
+            // The search branches are OR'd, so they need their own group. Ungrouped they sit at the
+            // same level as the roster filter and AND binds tighter than OR, which leaves
+            // `deleted_at is not null` guarding only the FIRST branch — a job-title match then
+            // pulls active employees into the "former" roster. The `active` roster hid this
+            // because its soft-delete global scope is applied last and Laravel groups for it.
             ->when($search, function ($q) use ($search) {
-                $q->whereHas('user', function ($u) use ($search) {
-                    $u->where('name', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%");
-                })->orWhere('job_title', 'like', "%{$search}%")
-                    ->orWhere('employee_no', 'like', "%{$search}%");
+                $q->where(function ($group) use ($search) {
+                    $group->whereHas('user', function ($u) use ($search) {
+                        $u->where('name', 'like', "%{$search}%")
+                            ->orWhere('email', 'like', "%{$search}%");
+                    })->orWhere('job_title', 'like', "%{$search}%")
+                        ->orWhere('employee_no', 'like', "%{$search}%");
+                });
             })
             ->orderByDesc('id')
-            ->paginate(100);
+            ->paginate($perPage);
+    }
+
+    /**
+     * Every employee as a PICKER OPTION — id and name, plus the two fields the eligibility
+     * picker filters on. Nothing else.
+     *
+     * Separate from list() on purpose. The dropdowns ("who is the manager?", "who heads this
+     * department?") need the whole roster and cannot page, so they were reading the directory
+     * endpoint and silently getting its first hundred people — employee 101 could not be chosen
+     * as anyone's manager. They also paid for the full directory projection to render a label:
+     * this returns four columns instead of thirteen, and no relations at all.
+     *
+     * `toBase()` because these are option rows, not models — nothing here is going to be saved.
+     *
+     * @return \Illuminate\Support\Collection<int, array{id:int, name:string, employment_status:string, is_management:bool}>
+     */
+    public function options(): \Illuminate\Support\Collection
+    {
+        return Employee::query()
+            ->join('users', 'users.id', '=', 'hr_employees.user_id')
+            ->orderBy('users.name')
+            ->toBase()
+            ->get([
+                'hr_employees.id',
+                'users.name',
+                'hr_employees.employment_status',
+                'hr_employees.is_management',
+            ])
+            ->map(fn ($row) => [
+                'id' => (int) $row->id,
+                'name' => (string) $row->name,
+                'employment_status' => (string) $row->employment_status,
+                'is_management' => (bool) $row->is_management,
+            ]);
     }
 
     /**

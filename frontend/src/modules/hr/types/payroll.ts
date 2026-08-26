@@ -106,7 +106,28 @@ export interface PayrollRun {
    * Present on the response to a run that just executed; null when a run is merely read back.
    */
   override_notes?: string[] | null;
+  /**
+   * ONE PAGE of the per-employee breakdown. Read `breakdown_meta.total` for how many rows the
+   * run actually has — `breakdown.length` is the page, and every figure the screen states about
+   * the run comes from its own field below rather than from summing these.
+   */
   breakdown?: PayrollBreakdownRow[];
+  /** What the page above is a page of. Detail view only. */
+  breakdown_meta?: { total: number; page: number; per_page: number } | null;
+  /**
+   * Whole-run counts, from the DATABASE. Detail view only.
+   *
+   * These exist because the breakdown is paged: the screen used to derive each of them by
+   * filtering the loaded rows, which would now describe ten employees while looking exactly as
+   * authoritative — and three of them are money.
+   */
+  disbursed_count?: number;
+  /** Payslips a correction left short after payment, and the total still to pay. */
+  owing_count?: number;
+  owing_total?: number;
+  /** The mirror image: corrected downward after the money had already gone out. */
+  overpaid_count?: number;
+  overpaid_total?: number;
 }
 
 /**
@@ -624,6 +645,11 @@ export interface RerunPreviewRow {
 }
 
 export interface RerunPreviewMeta {
+  /** What the page above is a page of — the run, not the rows in hand. */
+  total: number;
+  current_page: number;
+  per_page: number;
+  last_page: number;
   net_before: number;
   net_after: number;
   delta: number;

@@ -121,7 +121,12 @@ class AuditVocabularyAndPagingTest extends HrTestCase
     {
         $this->seedEntries(420);
 
-        $csv = app(ReportService::class)->download('audit')->getContent();
+        // The export streams, so the body is written to the output buffer rather than held on the
+        // response — `getContent()` on a StreamedResponse is `false`, not the file.
+        $response = app(ReportService::class)->download('audit');
+        ob_start();
+        $response->sendContent();
+        $csv = ob_get_clean();
 
         // 420 entries + one header row.
         $this->assertSame(421, count(array_filter(explode("\n", trim($csv)))));
@@ -137,5 +142,182 @@ class AuditVocabularyAndPagingTest extends HrTestCase
         $report = app(ReportService::class)->get('audit', ['per_page' => 99999]);
 
         $this->assertSame(500, $report['pagination']['per_page']);
+    }
+
+    // --- the headcount-scaled report tables page too ---------------------------------
+
+    /**
+     * The payroll register carries a row per PAYSLIP, so it is as long as the run. What must not
+     * move when it is paged are the figures ABOVE it: those are summed from the payslips, never
+     * from the table's rows, and a register whose headline total described ten of them would be
+     * invisible.
+     */
+    public function test_the_payroll_register_pages_without_moving_its_totals(): void
+    {
+        $run = \App\Modules\Hr\Models\PayrollRun::create([
+            'cycle_start' => '2026-08-01', 'cycle_end' => '2026-08-15',
+            'frequency' => 'semi_monthly', 'type' => 'regular', 'status' => 'completed',
+            'total_gross' => 0, 'total_deductions' => 0, 'total_net' => 0, 'employee_count' => 0,
+        ]);
+        $dept = \App\Modules\Hr\Models\Department::create(['name' => 'Ops', 'code' => 'OPS']);
+
+        foreach (range(1, 30) as $i) {
+            $employee = \App\Modules\Hr\Models\Employee::create([
+                'user_id' => \App\Models\User::factory()->create(['name' => "Person {$i}"])->id,
+                'department_id' => $dept->id, 'employee_no' => sprintf('E-%03d', $i),
+                'job_title' => 'Staff', 'hire_date' => '2020-01-01', 'employment_status' => 'regular',
+                'base_salary' => 30000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
+            ]);
+            \App\Modules\Hr\Models\Payslip::create([
+                'payroll_run_id' => $run->id, 'employee_id' => $employee->id,
+                'base_salary' => 30000, 'gross' => 1000, 'net_pay' => 900, 'status' => 'disbursed',
+            ]);
+        }
+
+        $svc = app(ReportService::class);
+
+        $whole = $svc->get('payroll_register', ['per_page' => 200]);
+        $paged = $svc->get('payroll_register', ['per_page' => 10]);
+
+        // 30 payslips plus the department's subtotal row.
+        $this->assertCount(31, $whole['table']['rows']);
+        $this->assertSame(31, $paged['table']['meta']['total'], 'the meta must state the whole run');
+
+        // One department, so one indivisible block — a subtotal must never be separated from the
+        // rows it summarises, even when that overruns the requested page size.
+        $this->assertCount(31, $paged['table']['rows'], 'the department block must not be split');
+        $this->assertSame(1, $paged['table']['meta']['last_page']);
+
+        // THE POINT: the cards above the table are identical whatever the page size.
+        $this->assertEquals(
+            $whole['summary'],
+            $paged['summary'],
+            'the register totals must describe the run, not the page',
+        );
+    }
+
+    /** Page two is a different ten, and every row is reachable. */
+    public function test_walking_the_register_returns_each_row_exactly_once(): void
+    {
+        $run = \App\Modules\Hr\Models\PayrollRun::create([
+            'cycle_start' => '2026-08-01', 'cycle_end' => '2026-08-15',
+            'frequency' => 'semi_monthly', 'type' => 'regular', 'status' => 'completed',
+            'total_gross' => 0, 'total_deductions' => 0, 'total_net' => 0, 'employee_count' => 0,
+        ]);
+        $dept = \App\Modules\Hr\Models\Department::create(['name' => 'Ops', 'code' => 'OPS']);
+
+        foreach (range(1, 25) as $i) {
+            $employee = \App\Modules\Hr\Models\Employee::create([
+                'user_id' => \App\Models\User::factory()->create(['name' => sprintf('Person %02d', $i)])->id,
+                'department_id' => $dept->id, 'employee_no' => sprintf('E-%03d', $i),
+                'job_title' => 'Staff', 'hire_date' => '2020-01-01', 'employment_status' => 'regular',
+                'base_salary' => 30000, 'pay_frequency' => 'semi_monthly', 'is_management' => false,
+            ]);
+            \App\Modules\Hr\Models\Payslip::create([
+                'payroll_run_id' => $run->id, 'employee_id' => $employee->id,
+                'base_salary' => 30000, 'gross' => 1000, 'net_pay' => 900, 'status' => 'disbursed',
+            ]);
+        }
+
+        $svc = app(ReportService::class);
+        $meta = $svc->get('payroll_register', ['per_page' => 10])['table']['meta'];
+
+        $seen = [];
+        foreach (range(1, $meta['last_page']) as $page) {
+            foreach ($svc->get('payroll_register', ['per_page' => 10, 'page' => $page])['table']['rows'] as $row) {
+                $seen[] = $row[0]; // the employee name column
+            }
+        }
+
+        // 25 people plus one subtotal row, each appearing exactly once across the pages.
+        $this->assertCount(26, $seen, 'a row was dropped or duplicated across the pages');
+        $this->assertCount(26, array_unique($seen), 'the same row came back on two pages');
+    }
+
+    // --- item 17: the search runs on the SERVER --------------------------------------
+
+    /**
+     * The screen holds one page of a log that only ever grows, so a search done in the browser
+     * searches that page and nothing else — and answers "no matches" for a record that exists
+     * on page 40. The filter has to reach the query, and the TOTAL has to follow it, or the
+     * pager offers pages the result no longer has.
+     */
+    public function test_the_search_narrows_the_whole_result_not_just_the_page(): void
+    {
+        $this->seedEntries(300);
+
+        // Deliberately the OLDEST row: the report is newest-first, so this one sits on the last
+        // page. A browser-side search over page 1 could never reach it.
+        $needle = AuditLog::create([
+            'action' => 'approved', 'module' => 'Leave',
+            'description' => 'Approved a needle in the haystack', 'ip_address' => '127.0.0.1',
+        ]);
+        AuditLog::whereKey($needle->id)->update(['created_at' => now()->subMonths(2)]);
+
+        // Page one of the unfiltered log cannot contain the needle — 300 newer rows sit on top.
+        $unfiltered = app(ReportService::class)->get('audit', ['per_page' => 10, 'page' => 1]);
+        $this->assertStringNotContainsString(
+            'needle',
+            json_encode($unfiltered['entries']),
+            'precondition: the row being searched for is not on the page already loaded',
+        );
+
+        $found = app(ReportService::class)->get('audit', ['per_page' => 10, 'search' => 'needle']);
+
+        $this->assertSame(1, $found['pagination']['total'], 'the total must follow the search');
+        $this->assertSame(1, $found['pagination']['pages']);
+        $this->assertCount(1, $found['entries']);
+        $this->assertSame('Approved a needle in the haystack', $found['entries'][0]['details']);
+    }
+
+    /** The same box finds an action, a module, or the person who did it — not just the text. */
+    public function test_the_search_also_matches_the_action_module_and_user(): void
+    {
+        $this->seedEntries(3);
+        $actor = $this->hrUser();
+        AuditLog::create([
+            'user_id' => $actor->id, 'action' => 'disbursed', 'module' => 'Recruitment',
+            'description' => 'Nothing distinctive here', 'ip_address' => '127.0.0.1',
+        ]);
+
+        $svc = app(ReportService::class);
+
+        $this->assertSame(1, $svc->get('audit', ['search' => 'disbursed'])['pagination']['total']);
+        $this->assertSame(1, $svc->get('audit', ['search' => 'Recruitment'])['pagination']['total']);
+        $this->assertSame(1, $svc->get('audit', ['search' => $actor->name])['pagination']['total']);
+    }
+
+    /**
+     * A search honoured on screen and dropped on export hands the reader a file that disagrees
+     * with the table they downloaded it from — the same trap the shared FILTERS list guards.
+     */
+    public function test_the_export_carries_the_search_it_was_downloaded_under(): void
+    {
+        $this->seedEntries(50);
+        AuditLog::create([
+            'action' => 'updated', 'module' => 'Payroll',
+            'description' => 'Distinctive marker row', 'ip_address' => '127.0.0.1',
+        ]);
+
+        $response = app(ReportService::class)->download('audit', ['search' => 'Distinctive']);
+        ob_start();
+        $response->sendContent();
+        $csv = ob_get_clean();
+
+        $lines = array_filter(explode("\n", trim($csv)));
+        $this->assertCount(2, $lines, 'header + the one matching row');
+        $this->assertStringContainsString('Distinctive marker row', $csv);
+        $this->assertStringNotContainsString('Entry 1', $csv);
+    }
+
+    /** An empty or whitespace-only box is not a filter — it must not narrow anything. */
+    public function test_an_empty_search_leaves_the_result_untouched(): void
+    {
+        $this->seedEntries(30);
+
+        $svc = app(ReportService::class);
+
+        $this->assertSame(30, $svc->get('audit', ['search' => ''])['pagination']['total']);
+        $this->assertSame(30, $svc->get('audit', ['search' => '   '])['pagination']['total']);
     }
 }
