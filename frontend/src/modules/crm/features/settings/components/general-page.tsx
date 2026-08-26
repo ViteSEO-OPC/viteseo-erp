@@ -26,8 +26,11 @@ const cardClass = "border border-border bg-card p-6 shadow-card";
 
 /**
  * General settings — the signed-in user's own profile / security / preferences.
- * UI-first for this milestone: fields are prefilled from the current session but not
- * yet persisted (profile save, password change, 2FA, and preferences are deferred).
+ *
+ * UI-first for this milestone: the profile fields are prefilled from the session but not yet
+ * persisted. Password and 2FA are NOT deferred work — authentication is owned by the central
+ * account that signs a person in to TeamOra, Zerem and Sprintly, so this page only states where
+ * they are managed. Preferences are live.
  */
 export function GeneralPage() {
   const { user } = useAuth();
@@ -88,32 +91,30 @@ export function GeneralPage() {
       <Card className={cardClass}>
         <h3 className="text-base font-bold text-card-foreground">Login &amp; security</h3>
         <p className="mb-5 text-sm text-muted-foreground">
-          Manage your password and sign-in protection.
+          Sign-in is handled by your Vite SEO Systems account, not by Zerem.
         </p>
 
-        <div className="flex flex-col gap-5">
-          <FormField label="Current Password">
-            <input type="password" className={FIELD} placeholder="••••••••••" />
-          </FormField>
-          <FormFieldGrid>
-            <FormField label="New Password">
-              <input type="password" className={FIELD} placeholder="••••••••" />
-            </FormField>
-            <FormField label="Confirm New Password">
-              <input type="password" className={FIELD} placeholder="••••••••" />
-            </FormField>
-          </FormFieldGrid>
-          <div className="flex justify-end">
-            <Button variant="default" size="sm">Update password</Button>
-          </div>
+        <div className="rounded-lg border border-border bg-muted/40 px-4 py-3">
+          <p className="text-sm font-semibold text-card-foreground">Password</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            One account signs you in to TeamOra, Zerem and Sprintly, so your password is managed
+            centrally and cannot be changed from here. Contact your system administrator to
+            change it.
+          </p>
         </div>
 
         <div className="mt-6 flex items-center justify-between border-t border-border-subtle pt-5">
           <div>
             <p className="text-sm font-semibold text-card-foreground">Two-factor authentication</p>
-            <p className="text-sm text-muted-foreground">Require a code at sign-in for extra security.</p>
+            <p className="text-sm text-muted-foreground">
+              Not in use. Sign-in protection is managed by your Vite SEO Systems account.
+            </p>
           </div>
-          <Switch defaultChecked aria-label="Two-factor authentication" />
+          <Switch
+            checked={false}
+            disabled
+            aria-label="Two-factor authentication — managed by your Vite SEO Systems account"
+          />
         </div>
       </Card>
 
