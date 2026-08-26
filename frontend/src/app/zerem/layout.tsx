@@ -9,6 +9,7 @@ import { LeadRealtimeListener } from "@/modules/crm/features/leads/components/le
 import { NotificationRealtimeListener } from "@/modules/crm/features/notifications/components/notification-realtime-listener";
 import { ProjectNotificationListener } from "@/modules/projects/components/projects/project-notification-listener";
 import { PermissionsProvider } from "@/modules/crm/providers/permissions-provider";
+import { TableDensityProvider } from "@/modules/crm/providers/table-density-provider";
 import { ThemeProvider } from "@/modules/crm/providers/theme-provider";
 import { canAccessPath } from "@/modules/crm/lib/rbac";
 import { AppShell } from "@/modules/crm/components/layout/app-shell/app-shell";
@@ -63,6 +64,9 @@ export default function CrmLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
+      {/* Compact Tables — a Zerem-scoped, localStorage-backed display preference, mounted beside
+          the theme for the same reason: it must not leak into HRIS / Sprintly / Admin. */}
+      <TableDensityProvider>
       <PermissionsProvider>
         <RealtimeProvider>
           {/* "A lead was assigned to me" toasts, live on every CRM screen. */}
@@ -82,6 +86,7 @@ export default function CrmLayout({ children }: { children: React.ReactNode }) {
           </div>
         </RealtimeProvider>
       </PermissionsProvider>
+      </TableDensityProvider>
     </ThemeProvider>
   );
 }

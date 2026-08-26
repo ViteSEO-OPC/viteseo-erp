@@ -3,6 +3,7 @@
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Switch } from "@/modules/crm/components/ui/switch";
+import { useTableDensityPreference } from "@/modules/crm/components/ui/table-density";
 import { FormField, FormFieldGrid } from "@/modules/crm/components/forms/form-field/form-field";
 import { PendingBadge } from "@/modules/crm/components/shared/pending-badge/pending-badge";
 import { ProfilePhotoField } from "@/modules/crm/features/profile/components/profile-photo-field";
@@ -30,6 +31,8 @@ const cardClass = "border border-border bg-card p-6 shadow-card";
  */
 export function GeneralPage() {
   const { user } = useAuth();
+  // Display-only preference, stored per browser — the same shape as the theme. No API call.
+  const { density, setDensity } = useTableDensityPreference();
   const role = highestRole(user?.roles);
   const roleLabel = role ? ROLE_LABELS[role] : "—";
 
@@ -129,6 +132,8 @@ export function GeneralPage() {
           <PreferenceRow
             title="Compact tables"
             description="Reduce row height in data tables."
+            checked={density === "compact"}
+            onCheckedChange={(next) => setDensity(next ? "compact" : "normal")}
           />
           <PreferenceRow
             title="Email notifications"
@@ -161,11 +166,16 @@ function PreferenceRow({
   title,
   description,
   defaultChecked,
+  checked,
+  onCheckedChange,
   pendingReason,
 }: {
   title: string;
   description: string;
   defaultChecked?: boolean;
+  /** Controlled mode — a preference that is actually wired to something. */
+  checked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
   pendingReason?: string;
 }) {
   return (
@@ -179,6 +189,8 @@ function PreferenceRow({
       </div>
       {pendingReason ? (
         <Switch checked={false} disabled aria-label={`${title} — not available yet`} />
+      ) : onCheckedChange ? (
+        <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={title} />
       ) : (
         <Switch defaultChecked={defaultChecked} aria-label={title} />
       )}
