@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Requests;
 
 use App\Models\User;
+use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Enums\PerformanceTargetMetric;
 use App\Modules\Crm\Enums\PerformanceTargetPeriod;
 use Illuminate\Database\Eloquent\Builder;
@@ -46,9 +47,10 @@ class StorePerformanceTargetRequest extends FormRequest
 
     private function isActiveBd(int $userId): bool
     {
-        return User::query()
+        // "Active" means Zerem access is not suspended (`crm_user_access`), not the shared
+        // `users.status` column — a BD who has left keeps their account for TeamOra and Sprintly.
+        return app(CrmAccessService::class)->excludeSuspended(User::query())
             ->whereKey($userId)
-            ->where('status', 'active')
             ->whereHas('roles', fn (Builder $query) => $query->where('name', 'crm_bd'))
             ->exists();
     }

@@ -26,7 +26,8 @@ class N8nTokenCommand extends Command
 
         $user = User::query()->firstOrCreate(
             ['email' => $cfg['email']],
-            ['name' => $cfg['name'], 'password' => bcrypt(Str::random(48)), 'status' => 'active'],
+            // No `status`: the CRM writes nothing to that shared column. The DB default is `active`.
+            ['name' => $cfg['name'], 'password' => bcrypt(Str::random(48))],
         );
 
         foreach ($cfg['permissions'] as $permission) {

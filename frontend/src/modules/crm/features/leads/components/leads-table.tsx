@@ -422,7 +422,7 @@ export function LeadsTable({
                       onClick={onBulkAssign}
                       disabled={bulkBusy}
                     >
-                      {bulkAssigning ? "Assigning…" : "Assign BD"}
+                      {bulkAssigning ? "Reassigning…" : `Reassign Selected (${selectedCount})`}
                     </Button>
                   ) : null}
                   <Button
@@ -497,7 +497,21 @@ export function LeadsTable({
                 assigned: (
                   <TableCell className={td}>
                     {lead.assignedTo ? (
-                      <span className="text-secondary-foreground">{lead.assignedTo.name}</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="text-secondary-foreground">{lead.assignedTo.name}</span>
+                        {/* Suspended owner — the lead is stranded until an Admin reassigns it.
+                            Same `bg-muted`/`text-muted-foreground` pairing the Team Accounts
+                            StatusPill uses for this state, so it is correct in both themes with no
+                            new colour of its own. */}
+                        {lead.assignedTo.suspended ? (
+                          <span
+                            className="inline-flex items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                            title="This BD's Zerem access is suspended"
+                          >
+                            Suspended
+                          </span>
+                        ) : null}
+                      </span>
                     ) : (
                       <span className="text-muted-foreground italic">Unassigned</span>
                     )}

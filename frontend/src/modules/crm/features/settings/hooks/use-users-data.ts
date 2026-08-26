@@ -14,6 +14,8 @@ type UserApi = {
   last_login_at: string | null;
   created_at: string | null;
   avatar_url?: string | null;
+  /** Only present on the list query, which selects it. */
+  lead_count?: number | null;
 };
 
 /** Map the API UserResource shape to the frontend TeamUser. Exported for reuse in mutations. */
@@ -24,6 +26,7 @@ export function mapUser(api: UserApi): TeamUser {
     email: api.email,
     role: api.role,
     status: api.status,
+    leadCount: typeof api.lead_count === "number" ? api.lead_count : null,
     avatarUrl: api.avatar_url ?? null,
     lastLoginAt: api.last_login_at,
     createdAt: api.created_at,

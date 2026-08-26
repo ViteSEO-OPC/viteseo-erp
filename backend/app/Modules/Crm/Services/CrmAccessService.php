@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Modules\Crm\Services;
 
 use App\Models\User;
+use App\Modules\Crm\Models\CrmUserAccess;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The single place CRM (Zerem) access is granted, changed, or read off a centralized user.
@@ -18,9 +20,11 @@ use App\Models\User;
  * Two invariants this class exists to enforce, both of which the old inline
  * `$user->syncRoles([$role])` broke:
  *
- *  1. **Nothing outside `model_has_roles` is written.** No method here calls `save()` on the user, so
- *     a grant cannot touch the password, name, email, status, or any profile column. That is what
- *     makes granting CRM access to a live HRIS account safe.
+ *  1. **Nothing outside `model_has_roles` (and `crm_user_access`) is written.** No method here calls
+ *     `save()` on the user, so a grant cannot touch the password, name, email, status, or any
+ *     profile column. That is what makes granting CRM access to a live HRIS account safe — and it
+ *     is why {@see self::suspend()} lives here rather than in a controller: suspension is bound by
+ *     the same rule, and records to a CRM-owned table instead of the shared `users` row.
  *  2. **Only CRM roles are ever removed.** {@see self::MANAGED_ROLES} is the complete set this class
  *     may detach. `hr_*` and `pm_*` roles are invisible to it, so changing someone's CRM role can
  *     never revoke their HRIS or Projects access.
@@ -116,5 +120,80 @@ class CrmAccessService
     public function hasCrmAccess(User $user): bool
     {
         return $this->primaryCrmRole($user) !== null;
+    }
+
+    // --- CRM access suspension ----------------------------------------------
+    //
+    // Suspension is ACCESS CONTROL ONLY. Nothing below reads or writes a role, a lead, a Planner
+    // event, a score, or any attribution column: a suspended BD keeps `crm_bd` (so an Admin can
+    // still recognise the former owner in Team Accounts and hand their workload on), keeps every
+    // lead and open Planner event, and keeps permanent credit for the work they completed. Moving a
+    // resigned BD's workload is a separate, explicit Admin operation and is never triggered here.
+
+    /**
+     * Suspend the user's Zerem access. Idempotent — re-suspending an already-suspended user leaves
+     * the original `suspended_at` and actor intact rather than restamping them, so the record keeps
+     * saying when access was actually lost.
+     *
+     * The shared `users` row is not written, and neither is the shared Sanctum token: one token
+     * serves TeamOra, Zerem and Sprintly, so revoking it here would sign the user out of products
+     * this decision has nothing to do with. Losing Zerem is enforced per-request instead.
+     */
+    public function suspend(User $user, ?User $actor = null): void
+    {
+        if ($this->isSuspended($user)) {
+            return;
+        }
+
+        $access = new CrmUserAccess([
+            'suspended_at' => now(),
+            'suspended_by' => $actor?->id,
+        ]);
+        // Associated rather than mass-assigned — `user_id` is the row's identity, never request data.
+        $access->user()->associate($user);
+        $access->save();
+    }
+
+    /**
+     * Restore the user's Zerem access.
+     *
+     * Deleting the row is the whole operation. Because suspension never removed a role, never moved
+     * a lead and never revoked a token, there is nothing to put back: the account they still had
+     * simply passes the access check again, on the token they were already holding. Idempotent — a
+     * restore on an active user is a no-op, not an error.
+     */
+    public function restore(User $user): void
+    {
+        CrmUserAccess::query()->where('user_id', $user->id)->delete();
+    }
+
+    /**
+     * Constrain a `users` query to accounts whose Zerem access is NOT suspended.
+     *
+     * The one definition every "active BDs" query shares, so the leaderboard, the ranking cohort and
+     * the performance-target pickers cannot drift apart on what "active" means — they previously each
+     * spelled `where('status', 'active')` against the SHARED users column, which was never a CRM
+     * concept and never gated anything.
+     *
+     * Expressed as an anti-join against `crm_user_access` because absence of a row IS active: there
+     * is no per-user flag to compare, and adding one would create a second source of truth.
+     *
+     * @param  Builder<\App\Models\User>  $query
+     * @return Builder<\App\Models\User>
+     */
+    public function excludeSuspended(Builder $query): Builder
+    {
+        return $query->whereNotIn('users.id', CrmUserAccess::query()->select('user_id'));
+    }
+
+    /**
+     * Whether the user's Zerem access is currently suspended.
+     *
+     * Absence of a row means active, which is why the 24 accounts that were never suspended need no
+     * backfill and a brand-new user is usable immediately.
+     */
+    public function isSuspended(User $user): bool
+    {
+        return CrmUserAccess::query()->where('user_id', $user->id)->exists();
     }
 }

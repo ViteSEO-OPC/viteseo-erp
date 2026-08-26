@@ -10,6 +10,8 @@ export type TeamUser = {
   /** Primary role slug (e.g. "crm_bd"), or null. */
   role: string | null;
   status: TeamUserStatus;
+  /** Leads currently assigned to them — drives "Reassign all leads (N)". Absent outside the list. */
+  leadCount: number | null;
   lastLoginAt: string | null;
   createdAt: string | null;
 };
@@ -41,7 +43,6 @@ export type CreateUserPayload = {
   email: string;
   role: string;
   name?: string;
-  status?: TeamUserStatus;
   /** Optional admin-supplied temp password; server generates one when omitted. New accounts only. */
   password?: string;
 };

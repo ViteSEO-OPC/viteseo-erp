@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Models\Lead;
 use Illuminate\Support\Facades\Broadcast;
 
@@ -39,6 +40,12 @@ use Illuminate\Support\Facades\Broadcast;
 // receiving until their client resubscribes. Events on this channel must
 // therefore carry no data a former owner may not retain — see Slice 3.
 Broadcast::channel('crm.lead.{leadId}', function (User $user, string $leadId): bool {
+    // Mirrors the REST layer: a CRM-suspended user authorizes no CRM channel. Checked first so a
+    // suspension cannot be routed around by holding a socket instead of calling an endpoint.
+    if (app(CrmAccessService::class)->isSuspended($user)) {
+        return false;
+    }
+
     if (! ctype_digit($leadId)) {
         return false;
     }

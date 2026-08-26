@@ -4,13 +4,22 @@ namespace App\Modules\Crm\Controllers;
 
 use App\Http\Controllers\Controller;
 
+use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Notifications\LeadsReassignedNotification;
+use App\Modules\Crm\Requests\ReassignLeadsRequest;
 use App\Modules\Crm\Requests\StoreUserRequest;
 use App\Modules\Crm\Requests\UpdateUserRequest;
+use App\Modules\Crm\Resources\BdPerformanceSnapshotResource;
 use App\Modules\Crm\Resources\UserLookupResource;
 use App\Modules\Crm\Resources\UserResource;
+use App\Modules\Crm\Models\BdPerformanceSnapshot;
 use App\Modules\Crm\Services\CrmAccessService;
+use App\Modules\Crm\Services\LeadAssignmentService;
+use App\Modules\Crm\Services\Planner\PlannerOwnershipTransfer;
+use App\Modules\Crm\Services\Performance\BdPerformanceSnapshotService;
 use App\Models\User;
 use Illuminate\Contracts\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -24,6 +33,12 @@ class UserController extends Controller
 
         $users = User::query()
             ->with('roles')
+            // Portfolio size, for the Team Accounts "Reassign all leads (N)" action. A correlated
+            // subquery rather than withCount(), so the shared User model needs no CRM relation.
+            ->addSelect(['lead_count' => Lead::query()
+                ->selectRaw('count(*)')
+                ->whereColumn('crm_leads.assigned_to', 'users.id')
+                ->getQuery(), ])
             // Role-scoped listing: CRM Admin sees BD accounts only; Super Admin sees everyone.
             // (Extension point: future assigned-user scoping plugs in here.)
             ->when(! $actor->hasRole('super_admin'), function (Builder $query): void {
@@ -85,11 +100,13 @@ class UserController extends Controller
         // one. Returned once (below) so it can be copied and handed off — never stored in plaintext.
         $temporaryPassword = $validated['password'] ?? Str::password(16);
 
+        // `status` is deliberately absent: it belongs to the shared `users` row, and the CRM no
+        // longer writes that column anywhere. The database default (`active`) applies, and CRM
+        // access state — the thing this module actually owns — lives in `crm_user_access`.
         $user = User::create([
             'name' => $validated['name'],
             'email' => $validated['email'],
             'password' => $temporaryPassword, // hashed via the model cast
-            'status' => $validated['status'] ?? 'active',
         ]);
 
         $user->assignRole($validated['role']);
@@ -101,19 +118,36 @@ class UserController extends Controller
         ], 201);
     }
 
-    public function update(UpdateUserRequest $request, User $user, CrmAccessService $access): JsonResponse
+    /**
+     * Edit a CRM team account: rename, change CRM role, or suspend/restore Zerem access.
+     *
+     * `status` NO LONGER writes `users.status`. That column lives on the row shared by TeamOra
+     * (HRIS), Zerem (CRM) and Sprintly (Projects), so suspending a BD through it made a CRM-only
+     * decision with a platform-wide blast radius — and, since nothing ever read it at sign-in, it
+     * blocked precisely nothing. CRM suspension now records to the module-owned `crm_user_access`
+     * table via {@see CrmAccessService} and is enforced per-request by
+     * {@see \App\Modules\Crm\Http\Middleware\EnsureCrmAccessIsActive}.
+     *
+     * `$user->save()` is reached ONLY by a rename. A status-only PATCH must leave the shared row
+     * byte-identical, which is what makes a CRM suspension invisible to the other two products.
+     */
+    public function update(
+        UpdateUserRequest $request,
+        User $user,
+        CrmAccessService $access,
+        BdPerformanceSnapshotService $snapshots,
+    ): JsonResponse
     {
         $validated = $request->validated();
 
         if (array_key_exists('name', $validated)) {
             $user->name = $validated['name'];
+            $user->save();
         }
 
         if (array_key_exists('status', $validated)) {
-            $user->status = $validated['status'];
+            $this->applyCrmAccess($request, $user, $access, $snapshots, $validated['status']);
         }
-
-        $user->save();
 
         if (array_key_exists('role', $validated)) {
             // CRM-SCOPED, never `syncRoles([$role])`. Syncing the user's entire role set silently
@@ -126,6 +160,140 @@ class UserController extends Controller
         return response()->json([
             'data' => new UserResource($user->load('roles')),
         ]);
+    }
+
+    /**
+     * Suspend or restore Zerem access, with the two guard rails {@see self::destroy()} already had
+     * and this path did not.
+     *
+     * Suspension is access control ONLY: it never writes a role, a lead, a Planner event, a score or
+     * any attribution column, and it never revokes the Sanctum token — one token serves all three
+     * products, so revoking it here would sign the user out of TeamOra and Sprintly. Handing a
+     * resigned BD's workload to someone else is a separate, explicit Admin operation.
+     */
+    /**
+     * POST /users/{user}/reassign-leads — hand a departing BD's whole portfolio to a replacement.
+     *
+     * The resignation counterpart to the single-lead assign, and deliberately built ON it: every lead
+     * goes through {@see LeadAssignmentService}, so each one writes its own `lead.assigned` Activity
+     * and runs the Planner transfer. There is no bulk `UPDATE` here — a faster query that produced no
+     * audit trail is the exact failure mode {@see PlannerOwnershipTransfer} exists to prevent.
+     *
+     * WHAT MOVES: current lead ownership, each lead's open Planner work, and — once, at the end — the
+     * departing BD's STANDALONE open work, which is keyed to no lead and would otherwise be stranded
+     * with an account that can no longer sign in.
+     *
+     * WHAT STAYS WITH THE DEPARTING BD, permanently: completed Planner events, calls, notes, emails,
+     * every Activity they caused, `qualified_by`, `created_by`, and their performance history. None of
+     * those are in any write path below.
+     *
+     * A snapshot is captured FIRST when this drains the portfolio, because the moment the leads move,
+     * the custody-based metrics move with them and their record is unrecoverable.
+     */
+    public function reassignLeads(
+        ReassignLeadsRequest $request,
+        User $user,
+        LeadAssignmentService $assignment,
+        PlannerOwnershipTransfer $plannerOwnership,
+        BdPerformanceSnapshotService $snapshots,
+    ): JsonResponse {
+        $this->authorize('update', $user);
+
+        $actor = $request->user();
+        $toUserId = (int) $request->validated('to_user_id');
+
+        if ($toUserId === $user->id) {
+            abort(422, 'Select a different Business Development Manager.');
+        }
+
+        $leads = Lead::query()->where('assigned_to', $user->id)->get();
+
+        // Freeze the record BEFORE ownership moves. Every custody metric (M-01…M-05, C1) reads
+        // `crm_leads.assigned_to`, so once these leads are gone the departing BD's performance is not
+        // merely zero — it is unrecoverable. Skipped when there is nothing to drain.
+        if ($leads->isNotEmpty()) {
+            $snapshots->capture($user, BdPerformanceSnapshot::REASON_REASSIGNMENT);
+        }
+
+        $moved = 0;
+        foreach ($leads as $lead) {
+            if ($assignment->assign($lead, $toUserId, $actor)) {
+                $moved++;
+            }
+        }
+
+        // Once, after the leads: work that belongs to the person rather than to any lead.
+        $standalone = $plannerOwnership->transferStandaloneWork($user->id, $toUserId);
+
+        // ONE bell for the whole handover — the per-lead Activity records remain the granular audit.
+        $recipient = User::find($toUserId);
+        if ($recipient !== null && ($moved > 0 || $standalone > 0)) {
+            $recipient->notify(new LeadsReassignedNotification($user, $actor, $moved, $standalone));
+        }
+
+        return response()->json([
+            'data' => [
+                'leads_reassigned' => $moved,
+                'standalone_events_transferred' => $standalone,
+            ],
+        ]);
+    }
+
+    /**
+     * GET /users/{user}/performance-snapshots — this BD's frozen performance readings, newest first.
+     *
+     * The answer to "what was Jane's record before her leads moved?", which is otherwise unanswerable:
+     * every live metric is derived from current ownership, so once a portfolio is handed on there is
+     * nothing left to query. Gated by the same `view` policy as the account itself.
+     */
+    public function performanceSnapshots(Request $request, User $user): AnonymousResourceCollection
+    {
+        $this->authorize('view', $user);
+
+        return BdPerformanceSnapshotResource::collection(
+            BdPerformanceSnapshot::query()
+                ->where('user_id', $user->id)
+                ->orderByDesc('captured_at')
+                ->orderByDesc('id')
+                ->paginate(15)
+        );
+    }
+
+    private function applyCrmAccess(
+        Request $request,
+        User $user,
+        CrmAccessService $access,
+        BdPerformanceSnapshotService $snapshots,
+        string $status,
+    ): void
+    {
+        if ($status !== 'inactive') {
+            $access->restore($user);
+
+            return;
+        }
+
+        // Locking yourself out of the tool you administer is never the intent, and with enforcement
+        // live it is not self-correcting: the Team Accounts page that would undo it is behind the
+        // very check being tripped.
+        if ($request->user()->id === $user->id) {
+            abort(422, 'You cannot suspend your own account.');
+        }
+
+        // Mirrors destroy(): an owner account is not suspendable through CRM Team Accounts.
+        if ($user->hasRole('super_admin')) {
+            abort(422, 'Super Admin accounts cannot be suspended.');
+        }
+
+        // ORDER IS LOAD-BEARING. BdRankingService builds its cohort from BDs whose access is live, so
+        // the snapshot must be taken while this BD is still IN that cohort. Capturing after the
+        // suspension row lands would silently record an empty ranking for the very person being
+        // captured. One transaction so a failed capture can never leave a suspension without the
+        // record it was supposed to preserve.
+        DB::transaction(function () use ($request, $user, $access, $snapshots): void {
+            $snapshots->capture($user, BdPerformanceSnapshot::REASON_SUSPENSION);
+            $access->suspend($user, $request->user());
+        });
     }
 
     public function destroy(Request $request, User $user): JsonResponse

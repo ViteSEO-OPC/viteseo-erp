@@ -20,7 +20,7 @@ export function StatusPill({ status }: { status: TeamUserStatus }) {
         isActive ? "bg-teal-500/10 text-teal-700" : "bg-muted text-muted-foreground",
       )}
     >
-      {isActive ? "Active" : "Inactive"}
+      {isActive ? "Active" : "Suspended"}
     </span>
   );
 }

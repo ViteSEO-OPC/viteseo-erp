@@ -39,7 +39,13 @@ class UserResource extends JsonResource
             'role' => app(CrmAccessService::class)->primaryCrmRole($this->resource),
             'roles' => $roles,
             'permissions' => $permissions,
-            'status' => $this->status,
+            // CRM access state, NOT the shared `users.status` column. Team Accounts, every owner
+            // picker and the Leads assignee filter all read this, so a suspended BD disappears from
+            // assignment targets without a single frontend change.
+            'status' => app(CrmAccessService::class)->isSuspended($this->resource) ? 'inactive' : 'active',
+            // Portfolio size — drives the Team Accounts "Reassign all leads (N)" action, which is
+            // hidden at zero. Present only on the list query that selects it.
+            'lead_count' => $this->whenNotNull($this->lead_count !== null ? (int) $this->lead_count : null),
             'last_login_at' => $this->last_login_at,
             'created_at' => $this->created_at,
         ];

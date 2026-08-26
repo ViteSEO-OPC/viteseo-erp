@@ -31,6 +31,7 @@ use App\Modules\Crm\Controllers\ServiceAreaController;
 use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
 use App\Modules\Crm\Controllers\WebsiteEvidenceController;
+use App\Modules\Crm\Http\Middleware\EnsureCrmAccessIsActive;
 use App\Modules\Crm\Http\Middleware\EnsurePerformanceManagement;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -47,7 +48,10 @@ Route::prefix('v1/crm')->group(function (): void {
     // scheduled `outreach:sync` poll, so the CRM exposes no unauthenticated endpoint for it and
     // needs no Pub/Sub push subscription, OIDC verification, or public HTTPS callback.
 
-    Route::middleware('auth:sanctum')->group(function () {
+    // EnsureCrmAccessIsActive covers EVERY route below: CRM suspension is enforced per-request
+    // (403 + `crm_access_suspended`), never by revoking the shared Sanctum token, which also signs the
+    // user in to TeamOra and Sprintly. `GET /crm/me` is the single exemption — see the middleware.
+    Route::middleware(['auth:sanctum', EnsureCrmAccessIsActive::class])->group(function () {
         // CRM-shaped profile payload + self-service update (own name + phone only).
         // Not admin user management; the platform's /api/v1/auth/me still owns auth.
         Route::get('/me', MeController::class);
@@ -365,6 +369,12 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::post('/users', [UserController::class, 'store'])->can('create', User::class);
         Route::match(['put', 'patch'], '/users/{user}', [UserController::class, 'update'])->can('update', 'user');
         Route::delete('/users/{user}', [UserController::class, 'destroy'])->can('delete', 'user');
+        // Frozen performance readings for a BD who has left the pipeline — the only way to answer
+        // "what was their record?" once their leads have been handed on. Same policy as viewing them.
+        Route::get('/users/{user}/performance-snapshots', [UserController::class, 'performanceSnapshots']);
+        // Resignation handover: a departing BD's whole portfolio to one active BD. Runs through the
+        // same per-lead assignment logic as PATCH /leads/{lead}/assign — never a bulk UPDATE.
+        Route::post('/users/{user}/reassign-leads', [UserController::class, 'reassignLeads']);
 
         // Nearby Clients — discovered-business prospect pool. A shared prospecting surface of leads
         // landed by a discovery provider. Data only, and provider-agnostic (the supplying provider is

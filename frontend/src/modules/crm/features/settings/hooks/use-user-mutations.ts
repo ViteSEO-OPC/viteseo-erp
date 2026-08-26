@@ -66,6 +66,36 @@ export function useUpdateUser() {
   });
 }
 
+/**
+ * Hand a departing BD's whole portfolio to one active BD.
+ *
+ * Fires ONE request; the backend runs the existing per-lead assignment logic for each lead, so the
+ * `lead.assigned` audit trail and the Planner ownership transfer happen exactly as they do for a
+ * single handover. Leads AND users are invalidated: the source row's count drops to zero and the
+ * destination's rises.
+ */
+export function useReassignAllLeads() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, toUserId }: { userId: string; toUserId: string }) => {
+      const res = await apiClient.post(`/users/${userId}/reassign-leads`, { to_user_id: toUserId });
+      return res.data.data as { leads_reassigned: number; standalone_events_transferred: number };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.lists() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.leads.all });
+      toast.success(
+        data.leads_reassigned === 0 && data.standalone_events_transferred === 0
+          ? "Nothing to reassign"
+          : `Reassigned ${data.leads_reassigned} lead${data.leads_reassigned === 1 ? "" : "s"}`,
+      );
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, "Failed to reassign leads"));
+    },
+  });
+}
+
 /** Delete a Team Account (Super Admin only — enforced by the backend policy). */
 export function useDeleteUser() {
   const queryClient = useQueryClient();
