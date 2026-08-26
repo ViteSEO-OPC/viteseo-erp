@@ -4,6 +4,7 @@ import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Switch } from "@/modules/crm/components/ui/switch";
 import { FormField, FormFieldGrid } from "@/modules/crm/components/forms/form-field/form-field";
+import { PendingBadge } from "@/modules/crm/components/shared/pending-badge/pending-badge";
 import { ProfilePhotoField } from "@/modules/crm/features/profile/components/profile-photo-field";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { highestRole, ROLE_LABELS } from "@/modules/crm/lib/rbac";
@@ -131,8 +132,8 @@ export function GeneralPage() {
           />
           <PreferenceRow
             title="Email notifications"
-            description="Follow-up reminders and the weekly digest."
-            defaultChecked
+            description="Reply alerts to your work email. Configured per workspace, not per user."
+            pendingReason="There is no per-user email preference yet — reply alerts are switched on per environment, and nothing here changes what is sent"
           />
           <div className="flex items-center justify-between py-4">
             <div>
@@ -147,22 +148,40 @@ export function GeneralPage() {
   );
 }
 
+/**
+ * One preference row.
+ *
+ * `pendingReason` marks a preference whose backend does not exist yet: the switch is rendered
+ * OFF and disabled, with the shared PendingBadge carrying the reason. That combination is the
+ * point — a hardcoded `defaultChecked` previously showed Email notifications as ON, which read as
+ * "this preference is saved and enabled" when nothing stores or reads it. An inert control must
+ * never assert a state.
+ */
 function PreferenceRow({
   title,
   description,
   defaultChecked,
+  pendingReason,
 }: {
   title: string;
   description: string;
   defaultChecked?: boolean;
+  pendingReason?: string;
 }) {
   return (
     <div className="flex items-center justify-between py-4">
       <div>
-        <p className="text-sm font-semibold text-card-foreground">{title}</p>
+        <p className="flex items-center gap-2 text-sm font-semibold text-card-foreground">
+          {title}
+          {pendingReason ? <PendingBadge reason={pendingReason} /> : null}
+        </p>
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
-      <Switch defaultChecked={defaultChecked} aria-label={title} />
+      {pendingReason ? (
+        <Switch checked={false} disabled aria-label={`${title} — not available yet`} />
+      ) : (
+        <Switch defaultChecked={defaultChecked} aria-label={title} />
+      )}
     </div>
   );
 }

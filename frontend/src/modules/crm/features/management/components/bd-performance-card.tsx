@@ -10,10 +10,8 @@ import {
 import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
 import { ChartCard } from "@/modules/crm/components/shared/chart-card/chart-card";
 import { cn } from "@/modules/crm/lib/utils";
+import { useTableDensity } from "@/modules/crm/components/ui/table-density";
 import type { BdPerformanceRow } from "@/modules/crm/features/management/types/management-types";
-
-const th = "h-9 px-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground";
-const td = "px-3 py-3.5 text-sm text-secondary-foreground";
 
 // Display-only placeholder for Status — the one column with no approved definition. It is not
 // blocked by missing data: BD Ranking exists, but it yields an interim peer-relative INDEX, and
@@ -45,6 +43,13 @@ type BdPerformanceCardProps = {
 };
 
 export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPerformanceCardProps) {
+  const density = useTableDensity();
+  // A condensed HEADER over standard ROWS — this card's own pairing, and pre-existing. Preserved
+  // rather than normalised, so this refactor changes no pixels.
+  const th = cn(density.head.condensed, "px-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground");
+  const td = cn(density.row.standard, "px-3 text-sm text-secondary-foreground");
+  const tdTight = cn(density.row.condensed, "px-3");
+
   return (
     <ChartCard
       title="BD Performance Overview"
@@ -75,7 +80,7 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
           <TableBody>
             {rows?.map((r) => (
               <TableRow key={r.id} className="border-b border-border-subtle">
-                <TableCell className="px-3 py-3">
+                <TableCell className={tdTight}>
                   <div className="flex items-center gap-3">
                     <AvatarInitials src={r.avatarUrl} initials={r.initials} size="sm" />
                     <div>
@@ -91,7 +96,7 @@ export function BdPerformanceCard({ rows, isLoading, isError, className }: BdPer
                 <TableCell className={cn(td, "tabular-nums")}>
                   {r.rate === null ? <NoRate /> : `${r.rate.toFixed(1)}%`}
                 </TableCell>
-                <TableCell className="px-3 py-3.5"><Placeholder /></TableCell>
+                <TableCell className={cn(density.row.standard, "px-3")}><Placeholder /></TableCell>
               </TableRow>
             ))}
           </TableBody>

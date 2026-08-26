@@ -26,6 +26,7 @@ import {
 } from "@/modules/crm/features/settings/components/account-chips";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 import { cn } from "@/modules/crm/lib/utils";
+import { useTableDensity } from "@/modules/crm/components/ui/table-density";
 import type { TeamUser } from "@/modules/crm/features/settings/types/user-types";
 
 type Props = {
@@ -52,11 +53,17 @@ export function TeamAccountsTable({
   onToggleStatus,
   onDelete,
 }: Props) {
+  // Above the early returns — hooks must run on every render, including the loading/error paths.
+  const density = useTableDensity();
+
   if (isLoading) return <TableSkeleton />;
   if (isError) return <ErrorState message="Failed to load team accounts" onRetry={onRetry} />;
 
-  const th = "h-10 px-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
-  const td = "px-3 py-3.5 text-sm";
+  const th = cn(density.head.standard, "px-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground");
+  const td = cn(density.row.standard, "px-3 text-sm");
+  // Two cells sit a notch tighter than the rest of the row. Pre-existing drift, preserved
+  // deliberately: normalising it here would be a visual change dressed up as a refactor.
+  const tdTight = cn(density.row.condensed, "px-3");
 
   return (
     <div className="overflow-x-auto">
@@ -75,7 +82,7 @@ export function TeamAccountsTable({
           {users.length > 0 ? (
             users.map((u) => (
               <TableRow key={u.id} className="border-b border-border-subtle">
-                <TableCell className="px-3 py-3">
+                <TableCell className={tdTight}>
                   <div className="flex items-center gap-3">
                     <AvatarInitials src={u.avatarUrl} initials={initialsOf(u.name)} size="sm" />
                     <div className="min-w-0">
@@ -85,12 +92,12 @@ export function TeamAccountsTable({
                   </div>
                 </TableCell>
                 <TableCell className={cn(td, "text-secondary-foreground")}>{u.email}</TableCell>
-                <TableCell className="px-3 py-3.5"><RoleChip role={u.role} /></TableCell>
-                <TableCell className="px-3 py-3.5"><StatusPill status={u.status} /></TableCell>
+                <TableCell className={cn(density.row.standard, "px-3")}><RoleChip role={u.role} /></TableCell>
+                <TableCell className={cn(density.row.standard, "px-3")}><StatusPill status={u.status} /></TableCell>
                 <TableCell className={cn(td, "text-muted-foreground")}>
                   {formatActivityTimestamp(u.lastLoginAt)}
                 </TableCell>
-                <TableCell className="px-3 py-3">
+                <TableCell className={tdTight}>
                   <div className="flex items-center justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={() => onCredentials(u)}>
                       Credentials

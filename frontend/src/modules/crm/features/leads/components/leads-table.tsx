@@ -19,6 +19,8 @@ import { Download, Edit, Loader2, Trash2, UserPlus } from "lucide-react";
 import { TableSkeleton } from "@/modules/crm/features/dashboard/components/table-skeleton";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { formatDateLong } from "@/modules/crm/lib/formatters";
+import { cn } from "@/modules/crm/lib/utils";
+import { useTableDensity } from "@/modules/crm/components/ui/table-density";
 import { LeadsColumnFilter } from "@/modules/crm/features/leads/components/leads-column-filter";
 import type { ColumnFilterOption } from "@/modules/crm/features/leads/components/leads-column-filter";
 import {
@@ -266,11 +268,14 @@ export function LeadsTable({
     return () => observer.disconnect();
   }, [scrollable, rowCount, canAssign]);
 
+  // Above the early returns — hooks must run on every render, including the loading/error paths.
+  const density = useTableDensity();
+
   if (isLoading) return <TableSkeleton />;
   if (isError) return <ErrorState message="Failed to load leads" onRetry={onRetry} />;
 
-  const th = "h-10 px-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground";
-  const td = "px-3 py-3.5 text-sm";
+  const th = cn(density.head.standard, "px-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground");
+  const td = cn(density.row.standard, "px-3 text-sm");
 
   // Selection is scoped to the visible page: the header checkbox reflects the rows on screen.
   const selectedCount = leads.reduce((n, lead) => (selectedIds.has(lead.id) ? n + 1 : n), 0);
@@ -392,7 +397,7 @@ export function LeadsTable({
                   disabled={bulkBusy}
                 />
               </TableHead>
-              <TableHead colSpan={totalCols - 1} className="h-10 px-3">
+              <TableHead colSpan={totalCols - 1} className={cn(density.head.standard, "px-3")}>
                 <div className="flex flex-wrap items-center gap-3 text-sm normal-case tracking-normal">
                   <span className="font-semibold text-foreground">
                     {selectedCount} Lead{selectedCount === 1 ? "" : "s"} Selected
@@ -499,26 +504,26 @@ export function LeadsTable({
                   </TableCell>
                 ),
                 priority: (
-                  <TableCell className="px-3 py-3.5">
+                  <TableCell className={td}>
                     <PriorityChip priority={lead.priority} />
                   </TableCell>
                 ),
                 email: (
-                  <TableCell className="px-3 py-3.5">
+                  <TableCell className={td}>
                     <span className={chipClass + " " + emailConfig[lead.emailOutreach].className}>
                       {emailConfig[lead.emailOutreach].label}
                     </span>
                   </TableCell>
                 ),
                 call: (
-                  <TableCell className="px-3 py-3.5">
+                  <TableCell className={td}>
                     <span className={chipClass + " " + callConfig[lead.coldCalling].className}>
                       {callConfig[lead.coldCalling].label}
                     </span>
                   </TableCell>
                 ),
                 status: (
-                  <TableCell className="px-3 py-3.5">
+                  <TableCell className={td}>
                     <StatusChip status={lead.updateStatus} />
                   </TableCell>
                 ),
@@ -528,7 +533,7 @@ export function LeadsTable({
                   </TableCell>
                 ),
                 action: (
-                  <TableCell className="px-3 py-3.5">
+                  <TableCell className={td}>
                     <div className="flex items-center justify-center gap-0.5">
                       {canAssign ? (
                         <button
@@ -598,7 +603,7 @@ export function LeadsTable({
                   className="cursor-pointer border-b border-border-subtle transition-colors hover:bg-muted data-[selected]:bg-primary/5"
                   onClick={() => router.push(`/zerem/leads/${lead.id}`)}
                 >
-                  <TableCell className="px-3 py-3.5">
+                  <TableCell className={td}>
                     {/* stopPropagation so ticking a row doesn't trigger the row's navigation. */}
                     <span
                       className="inline-flex"
