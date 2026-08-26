@@ -79,8 +79,39 @@ export default function CalendarGridInner({
   }, [onApiReady]);
 
   // Switch views imperatively — changing `initialView` after mount is a no-op in FullCalendar.
+  //
+  // DEFERRED TO A MICROTASK, and that is the whole point of this block.
+  //
+  // React runs passive effects inside `flushPassiveEffects`, which sets CommitContext. Calling
+  // `changeView()` there makes FullCalendar re-render and request custom content for every node, and
+  // its React adapter then picks `flushSync` for that work (@fullcalendar/react 6.1.21, index.js
+  // ~46-60: it only avoids flushSync while mounting, updating, unmounting, or re-rendering within
+  // 100ms). `flushSync` during a commit is illegal, so React logged "flushSync was called from
+  // inside a lifecycle method" ONCE PER CUSTOM NODE — 48 errors for a month view with 42 day cells
+  // and 6 event pills, on every view switch, across all five views.
+  //
+  // The adapter is not at fault and neither is the config: the toolbar's prev/next/today drive the
+  // exact same re-render through the same adapter and log nothing, because they run from a click
+  // handler rather than a commit. Queueing to a microtask puts this call on that same footing — it
+  // runs once `flushPassiveEffects` has returned and `executionContext` is clear, so the adapter's
+  // `flushSync` becomes legal instead of being suppressed or worked around.
+  //
+  // Deliberately NOT `key={view}` on <FullCalendar>: remounting also silences it, at the cost of
+  // rebuilding the calendar and losing the visible date range on every switch.
   useEffect(() => {
-    ref.current?.getApi().changeView(VIEW_MAP[view]);
+    // Guards a stale microtask: the effect re-running (rapid view switching) or the component
+    // unmounting before the queued callback runs must not drive a view change for a `view` that is
+    // no longer current.
+    let cancelled = false;
+
+    queueMicrotask(() => {
+      if (cancelled) return;
+      ref.current?.getApi().changeView(VIEW_MAP[view]);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [view]);
 
   const handleEventClick = useCallback(
