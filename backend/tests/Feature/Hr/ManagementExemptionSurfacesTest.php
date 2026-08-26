@@ -86,7 +86,7 @@ class ManagementExemptionSurfacesTest extends HrTestCase
 
     public function test_a_holiday_reads_present_before_the_nightly_has_written_anything(): void
     {
-        $roster = collect(app(AttendanceService::class)->allForDate('2026-06-12'))
+        $roster = collect(app(AttendanceService::class)->allForDate('2026-06-12')->items())
             ->firstWhere('employee_id', $this->manager->id);
 
         // The row does not exist yet — the job runs at 23:55 — so this is the derived answer,
@@ -99,7 +99,7 @@ class ManagementExemptionSurfacesTest extends HrTestCase
     {
         $staff = $this->employee('E-001', false);
 
-        $roster = collect(app(AttendanceService::class)->allForDate('2026-06-12'))
+        $roster = collect(app(AttendanceService::class)->allForDate('2026-06-12')->items())
             ->firstWhere('employee_id', $staff->id);
 
         $this->assertSame('holiday', $roster['status']);

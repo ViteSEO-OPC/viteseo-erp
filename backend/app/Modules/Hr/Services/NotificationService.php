@@ -45,13 +45,50 @@ class NotificationService
             : $this->forEmployee($user);
     }
 
+    /**
+     * One source of the HR feed: the rows that could land on the page being asked for, and how
+     * many are outstanding in total.
+     *
+     * Each source used to be fetched WHOLE — every pending row of every type, with its eager
+     * loads — merged, sorted, then sliced down to twenty. That is twelve unbounded reads to render
+     * twenty lines, and the cost grew with the size of the queues rather than the size of the page.
+     *
+     * Bounding each source to the window is safe because every source is ordered on the same key
+     * the merge sorts by: the overall top N can only be drawn from each source's own top N.
+     * `count` is taken separately and BEFORE the window, because the bell and the sidebar badges
+     * describe the whole queue — a bell reading "3" beside nine outstanding requests is how work
+     * goes unreviewed.
+     *
+     * `$orderBy` is a raw fragment so a source can order on an expression; it is a literal at
+     * every call site and never carries request input.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<*>  $query
+     * @return array{rows: \Illuminate\Database\Eloquent\Collection<int, *>, count: int}
+     */
+    private function pending($query, string $orderBy, int $window): array
+    {
+        $rows = (clone $query)->orderByRaw("{$orderBy} desc")->limit($window)->get();
+
+        return [
+            'rows' => $rows,
+            // A page that came back SHORT has exhausted its queue, so those rows are the whole
+            // count and asking the database again is pure waste. Only a full page leaves the
+            // question open — which is exactly the case where the queue is big enough for the
+            // COUNT to be worth a round trip. Small deployments therefore pay nothing for this.
+            'count' => $rows->count() < $window ? $rows->count() : (clone $query)->count(),
+        ];
+    }
+
     private function forHr(int $limit, int $offset): array
     {
         $items = new Collection();
 
-        $pendingLeave = LeaveRequest::with(['employee.user', 'leaveType'])
-            ->where('status', 'pending')->latest()->get();
-        foreach ($pendingLeave as $l) {
+        // Only ever read enough of each queue to fill the page being asked for.
+        $window = $offset + $limit;
+
+        $pendingLeave = $this->pending(LeaveRequest::with(['employee.user', 'leaveType'])
+            ->where('status', 'pending'), 'created_at', $window);
+        foreach ($pendingLeave['rows'] as $l) {
             $items->push([
                 'id' => "leave-{$l->id}",
                 'title' => "Leave request · {$l->employee->user?->name}",
@@ -61,9 +98,9 @@ class NotificationService
             ]);
         }
 
-        $pendingHalfDay = HalfDayRequest::with('employee.user')
-            ->where('status', 'pending')->latest()->get();
-        foreach ($pendingHalfDay as $h) {
+        $pendingHalfDay = $this->pending(HalfDayRequest::with('employee.user')
+            ->where('status', 'pending'), 'created_at', $window);
+        foreach ($pendingHalfDay['rows'] as $h) {
             $items->push([
                 'id' => "halfday-{$h->id}",
                 'title' => "Half-day request · {$h->employee->user?->name}",
@@ -76,9 +113,9 @@ class NotificationService
         // Early-out and overtime were reviewable from the day they shipped and appeared in NO
         // aggregate: not here, not on the dashboard, not as a badge. The only way to find one was
         // to open its page and look. Same review page as leave and half-day.
-        $pendingEarlyOut = EarlyOutRequest::with('employee.user')
-            ->where('status', 'pending')->latest()->get();
-        foreach ($pendingEarlyOut as $e) {
+        $pendingEarlyOut = $this->pending(EarlyOutRequest::with('employee.user')
+            ->where('status', 'pending'), 'created_at', $window);
+        foreach ($pendingEarlyOut['rows'] as $e) {
             $items->push([
                 'id' => "earlyout-{$e->id}",
                 'title' => "Early-out request · {$e->employee->user?->name}",
@@ -88,9 +125,9 @@ class NotificationService
             ]);
         }
 
-        $pendingOvertime = OvertimeRequest::with('employee.user')
-            ->where('status', 'pending')->latest()->get();
-        foreach ($pendingOvertime as $o) {
+        $pendingOvertime = $this->pending(OvertimeRequest::with('employee.user')
+            ->where('status', 'pending'), 'created_at', $window);
+        foreach ($pendingOvertime['rows'] as $o) {
             $items->push([
                 'id' => "overtime-{$o->id}",
                 'title' => "Overtime request · {$o->employee->user?->name}",
@@ -102,9 +139,9 @@ class NotificationService
 
         // A loan sits at `requested` until HR decides. Approving does not start the deduction —
         // the employee still has to authorise it (Art. 113) — but nobody was being told to decide.
-        $requestedLoans = EmployeeLoan::with('employee.user')
-            ->where('status', 'requested')->latest()->get();
-        foreach ($requestedLoans as $loan) {
+        $requestedLoans = $this->pending(EmployeeLoan::with('employee.user')
+            ->where('status', 'requested'), 'coalesce(requested_at, created_at)', $window);
+        foreach ($requestedLoans['rows'] as $loan) {
             $items->push([
                 'id' => "loan-{$loan->id}",
                 'title' => ucfirst($loan->type) . " request · {$loan->employee->user?->name}",
@@ -116,9 +153,9 @@ class NotificationService
             ]);
         }
 
-        $pendingReimb = Reimbursement::with('employee.user')
-            ->where('status', 'pending')->latest()->get();
-        foreach ($pendingReimb as $r) {
+        $pendingReimb = $this->pending(Reimbursement::with('employee.user')
+            ->where('status', 'pending'), 'created_at', $window);
+        foreach ($pendingReimb['rows'] as $r) {
             $items->push([
                 'id' => "claim-{$r->id}",
                 'title' => "Reimbursement · {$r->employee->user?->name}",
@@ -130,9 +167,9 @@ class NotificationService
 
         // Off-site time-ins. These are the most time-critical thing in the list: the
         // employee is already working and isn't on the clock until HR decides.
-        $pendingCheckins = RemoteCheckin::with('employee.user')
-            ->where('status', RemoteCheckin::STATUS_PENDING)->latest()->get();
-        foreach ($pendingCheckins as $rc) {
+        $pendingCheckins = $this->pending(RemoteCheckin::with('employee.user')
+            ->where('status', RemoteCheckin::STATUS_PENDING), 'created_at', $window);
+        foreach ($pendingCheckins['rows'] as $rc) {
             $items->push([
                 'id' => "checkin-{$rc->id}",
                 'title' => "Field time-in · {$rc->employee->user?->name}",
@@ -142,9 +179,9 @@ class NotificationService
             ]);
         }
 
-        $pendingDocs = DocumentRequest::with('employee.user')
-            ->whereIn('status', ['pending', 'in_progress'])->latest()->get();
-        foreach ($pendingDocs as $d) {
+        $pendingDocs = $this->pending(DocumentRequest::with('employee.user')
+            ->whereIn('status', ['pending', 'in_progress']), 'created_at', $window);
+        foreach ($pendingDocs['rows'] as $d) {
             $items->push([
                 'id' => "doc-{$d->id}",
                 'title' => "Document request · {$d->employee->user?->name}",
@@ -154,9 +191,9 @@ class NotificationService
             ]);
         }
 
-        $pendingChanges = ChangeRequest::with('employee.user')
-            ->where('status', 'pending')->latest()->get();
-        foreach ($pendingChanges as $c) {
+        $pendingChanges = $this->pending(ChangeRequest::with('employee.user')
+            ->where('status', 'pending'), 'created_at', $window);
+        foreach ($pendingChanges['rows'] as $c) {
             $items->push([
                 'id' => "change-{$c->id}",
                 'title' => "Change request · {$c->employee->user?->name}",
@@ -166,9 +203,9 @@ class NotificationService
             ]);
         }
 
-        $pendingPayslipReqs = PayslipRequest::with('employee.user')
-            ->where('status', 'pending')->latest()->get();
-        foreach ($pendingPayslipReqs as $p) {
+        $pendingPayslipReqs = $this->pending(PayslipRequest::with('employee.user')
+            ->where('status', 'pending'), 'created_at', $window);
+        foreach ($pendingPayslipReqs['rows'] as $p) {
             $items->push([
                 'id' => "payslipreq-{$p->id}",
                 'title' => "Payslip request · {$p->employee->user?->name}",
@@ -178,9 +215,9 @@ class NotificationService
             ]);
         }
 
-        $openInquiries = PayrollInquiry::with('employee.user')
-            ->whereIn('status', ['pending', 'in_progress'])->latest()->get();
-        foreach ($openInquiries as $q) {
+        $openInquiries = $this->pending(PayrollInquiry::with('employee.user')
+            ->whereIn('status', ['pending', 'in_progress']), 'created_at', $window);
+        foreach ($openInquiries['rows'] as $q) {
             $items->push([
                 'id' => "inquiry-{$q->id}",
                 'title' => "Payroll inquiry · {$q->employee->user?->name}",
@@ -191,9 +228,9 @@ class NotificationService
         }
 
         // Concerns — never reveal the submitter for anonymous ones.
-        $openConcerns = Concern::with('employee.user')
-            ->whereIn('status', ['pending', 'under_review'])->latest('submitted_at')->get();
-        foreach ($openConcerns as $c) {
+        $openConcerns = $this->pending(Concern::with('employee.user')
+            ->whereIn('status', ['pending', 'under_review']), 'submitted_at', $window);
+        foreach ($openConcerns['rows'] as $c) {
             $items->push([
                 'id' => "concern-{$c->id}",
                 'title' => $c->is_anonymous ? 'Anonymous concern' : "Concern · {$c->employee->user?->name}",
@@ -204,7 +241,13 @@ class NotificationService
         }
 
         $sorted = $items->sortByDesc('at')->values();
-        $total = $sorted->count();
+        // Summed from the per-source COUNTS, not from `$sorted` — `$items` now holds only enough
+        // of each queue to fill the requested page, so counting it would report the page size and
+        // understate the work outstanding.
+        $total = $pendingLeave['count'] + $pendingHalfDay['count'] + $pendingEarlyOut['count']
+            + $pendingOvertime['count'] + $requestedLoans['count'] + $pendingReimb['count']
+            + $pendingCheckins['count'] + $pendingDocs['count'] + $pendingChanges['count']
+            + $pendingPayslipReqs['count'] + $openInquiries['count'] + $openConcerns['count'];
         $paged = $sorted->slice($offset, $limit)->values();
 
         return [
@@ -212,17 +255,17 @@ class NotificationService
             'items' => $paged->all(),
             'has_more' => ($offset + $limit) < $total,
             'nav' => [
-                '/teamora/attendance' => $pendingCheckins->count(),
+                '/teamora/attendance' => $pendingCheckins['count'],
                 // Keyed by NAV HREF, matched exactly by the sidebar (`navBadges[child.href]`).
                 // This said `/teamora/requests/leave`, which is not a nav item and not a page —
                 // leave and half-day are reviewed on the work-schedule page with early-out and
                 // overtime. Every count written here was therefore dropped on the floor.
-                self::WORK_SCHEDULE_REQUESTS => $pendingLeave->count() + $pendingHalfDay->count()
-                    + $pendingEarlyOut->count() + $pendingOvertime->count(),
-                '/teamora/finance/reimbursement' => $pendingReimb->count(),
-                '/teamora/requests/document' => $pendingDocs->count() + $pendingChanges->count(),
-                '/teamora/requests/payroll' => $pendingPayslipReqs->count() + $openInquiries->count(),
-                '/teamora/requests/concern' => $openConcerns->count(),
+                self::WORK_SCHEDULE_REQUESTS => $pendingLeave['count'] + $pendingHalfDay['count']
+                    + $pendingEarlyOut['count'] + $pendingOvertime['count'],
+                '/teamora/finance/reimbursement' => $pendingReimb['count'],
+                '/teamora/requests/document' => $pendingDocs['count'] + $pendingChanges['count'],
+                '/teamora/requests/payroll' => $pendingPayslipReqs['count'] + $openInquiries['count'],
+                '/teamora/requests/concern' => $openConcerns['count'],
             ],
         ];
     }

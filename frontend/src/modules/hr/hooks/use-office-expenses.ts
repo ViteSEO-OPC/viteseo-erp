@@ -1,9 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getOfficeExpenses,
+  getOfficeExpenseSummary,
   createOfficeExpense,
   updateOfficeExpense,
   approveOfficeExpense,
@@ -15,8 +17,26 @@ import type { OfficeExpenseInput } from "@/modules/hr/types/office-expense";
 
 const KEY = ["hr", "office-expenses"] as const;
 
-export function useOfficeExpenses() {
-  return useQuery({ queryKey: KEY, queryFn: getOfficeExpenses });
+/**
+ * The spend cards above the ledger. Given the SAME params as the table below them, so the two
+ * cannot end up describing different windows on the same screen.
+ */
+export function useOfficeExpenseSummary(params: QueueParams & { from?: string; to?: string }) {
+  return useQuery({
+    queryKey: [...KEY, "summary", params] as const,
+    queryFn: () => getOfficeExpenseSummary(params),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** One page of the office-expense queue, with the total. Filtered and ordered by the database. */
+export function useOfficeExpenses(params: QueueParams) {
+  return useQuery({
+    queryKey: [...KEY, params] as const,
+    queryFn: () => getOfficeExpenses(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useCreateOfficeExpense() {

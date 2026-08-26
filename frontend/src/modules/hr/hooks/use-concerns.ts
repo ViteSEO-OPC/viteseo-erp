@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getConcerns,
@@ -22,12 +23,24 @@ const CONCERNS_KEY = ["hr", "concerns"] as const;
 const MY_CONCERNS_KEY = ["hr", "me", "concerns"] as const;
 const MY_MEETINGS_KEY = ["hr", "me", "meetings"] as const;
 
-export function useConcerns() {
-  return useQuery({ queryKey: CONCERNS_KEY, queryFn: getConcerns });
+/** One page of the concern queue, with the total. Filtered and ordered by the database. */
+export function useConcerns(params: QueueParams) {
+  return useQuery({
+    queryKey: [...CONCERNS_KEY, params] as const,
+    queryFn: () => getConcerns(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
-export function useMyConcerns() {
-  return useQuery({ queryKey: MY_CONCERNS_KEY, queryFn: getMyConcerns });
+/** One page of the caller's own concern queue, with the total. Filtered and ordered by the database. */
+export function useMyConcerns(params: QueueParams) {
+  return useQuery({
+    queryKey: [...MY_CONCERNS_KEY, params] as const,
+    queryFn: () => getMyConcerns(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useCreateConcern() {

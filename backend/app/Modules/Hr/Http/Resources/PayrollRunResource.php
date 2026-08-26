@@ -12,6 +12,9 @@ class PayrollRunResource extends JsonResource
     /** @var array{gross: float, deductions: float, net: float}|null */
     private ?array $totalsMemo = null;
 
+    /** The whole-run counts from PayrollService::runTotals(). @var array<string, mixed>|null */
+    private ?array $runTotalsMemo = null;
+
     /**
      * @return array<string, mixed>
      */
@@ -51,10 +54,21 @@ class PayrollRunResource extends JsonResource
             'locked_by' => $this->locker?->name,
             'is_locked' => $this->locked_at !== null,
             // Whether every payslip has been paid out IN FULL — the precondition for locking.
-            'can_lock' => $this->whenLoaded('payslips', fn () => $this->locked_at === null
-                && $this->payslips->isNotEmpty()
-                && $this->payslips->every(fn (Payslip $p) => $p->status === 'disbursed'
-                    && $p->amountOutstanding() <= 0)),
+            //
+            // Counted by the database. This used to walk the loaded payslip collection, which was
+            // the whole run and is now one page: ten settled rows out of a company would have
+            // offered the button that seals a cycle permanently.
+            'can_lock' => $this->whenDetailed(fn () => $this->totals()['can_lock']),
+            // How many rows a correction left short or over, and by how much — the notices above
+            // the breakdown. Same reason as can_lock: these are statements about the RUN, and the
+            // screen holds ten of its rows.
+            'disbursed_count' => $this->whenDetailed(fn () => $this->totals()['disbursed_count']),
+            'owing_count' => $this->whenDetailed(fn () => $this->totals()['owing_count']),
+            'owing_total' => $this->whenDetailed(fn () => $this->totals()['owing_total']),
+            'overpaid_count' => $this->whenDetailed(fn () => $this->totals()['overpaid_count']),
+            'overpaid_total' => $this->whenDetailed(fn () => $this->totals()['overpaid_total']),
+            // What the breakdown below is a page of.
+            'breakdown_meta' => $this->resource->breakdownMeta,
             // An earlier period of this tax year was amended after this run computed its withholding,
             // so the run is settled against year-to-date figures that have since moved. Recomputing
             // it is the only thing that clears this — see PayrollService::flagTaxStaleRuns().
@@ -63,20 +77,19 @@ class PayrollRunResource extends JsonResource
             'tax_stale_reason' => $this->tax_stale_reason,
             // The rules in force when this run executed. Detail view only: it's a
             // sizeable blob and the runs LIST would carry one per row for no reason.
-            'policy_snapshot' => $this->whenLoaded('payslips', fn () => $this->policy_snapshot),
+            'policy_snapshot' => $this->whenDetailed(fn () => $this->policy_snapshot),
             // Which of those captured rules would price this cycle differently TODAY. Without
             // this the panel is silently stale: a rule changed after the run still applies to
             // the cycle (it is dated on or before cycle_end), so the frozen record and the
             // Company rules screen disagree and nothing explains why.
-            'rules_drift' => $this->whenLoaded(
-                'payslips',
+            'rules_drift' => $this->whenDetailed(
                 fn () => app(PayrollService::class)->snapshotDrift($this->resource),
             ),
             // Per-employee breakdown (only when payslips are eager-loaded). Each row is the same
             // three figures the employee's own payslip shows, so the register and the document
             // can be read side by side — which is the whole point of routing both through
             // Payslip::registerTotals().
-            'breakdown' => $this->whenLoaded('payslips', fn () => $this->payslips->map(function (Payslip $p) {
+            'breakdown' => $this->whenDetailed(fn () => $this->payslips->map(function (Payslip $p) {
                 $row = $p->registerTotals();
 
                 return [
@@ -99,6 +112,22 @@ class PayrollRunResource extends JsonResource
                 ];
             })),
         ];
+    }
+
+    /**
+     * Detail-view only. The signal is the breakdown stamp, not "are payslips loaded" — the runs
+     * LIST must not carry a policy snapshot or a lock verdict per row, and now that the detail
+     * view loads a page rather than the relation, "loaded" no longer distinguishes the two.
+     */
+    private function whenDetailed(\Closure $value): mixed
+    {
+        return $this->when($this->resource->breakdownMeta !== null, $value);
+    }
+
+    /** The whole-run figures, memoised so one response asks for them once. */
+    private function totals(): array
+    {
+        return $this->runTotalsMemo ??= app(PayrollService::class)->runTotals($this->resource);
     }
 
     /**
@@ -148,14 +177,10 @@ class PayrollRunResource extends JsonResource
             ];
         }
 
-        // Already in memory (the detail endpoint loads the rows to build the breakdown).
-        if ($this->resource->relationLoaded('payslips')) {
-            return $this->payslips->isEmpty() ? null : [
-                'gross' => (float) $this->payslips->sum(fn (Payslip $p) => (float) $p->gross),
-                'absence' => (float) $this->payslips->sum(fn (Payslip $p) => (float) $p->absence_deduction),
-                'net' => (float) $this->payslips->sum(fn (Payslip $p) => (float) $p->net_pay),
-            ];
-        }
+        // DELIBERATELY NOT summed from the loaded relation any more. The detail endpoint used to
+        // load every payslip, so adding them up here was the whole run; it now loads ONE PAGE,
+        // and the same code would have reported the register totals of ten employees as the
+        // totals of the payroll. Always ask the database.
 
         $row = Payslip::query()
             ->where('payroll_run_id', $this->id)

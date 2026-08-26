@@ -6,6 +6,8 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatusBadge } from "@/core/components/status-badge";
 import { RequestDetailDialog } from "@/modules/hr/components/request-detail-dialog";
 import { DataTable, type Column } from "@/core/components/data-table";
+import type { StatusFilterOption } from "@/core/components/status-filter";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { ClaimForm } from "@/modules/hr/components/claim-form";
 import { Button } from "@/components/ui/button";
@@ -38,8 +40,25 @@ function statusNote(status: string): string | null {
   }
 }
 
+/**
+ * The claim statuses, curated rather than derived. Server mode cannot read them off the rows —
+ * those are one page, so a status absent from it would have no pill at all.
+ */
+const CLAIM_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "approved", label: "Approved" },
+  { value: "scheduled", label: "Scheduled" },
+  { value: "paid", label: "Paid" },
+  { value: "rejected", label: "Rejected" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
 export default function ClaimsPage() {
-  const { data: claims, isLoading, isError } = useReimbursements();
+  // Server-paged. This is the employee's own claims queue, and it grows for as long as they
+  // work here — the browser used to receive every claim they had ever filed to show ten.
+  const table = useServerTable(10);
+  const { data, isLoading, isError, isFetching } = useReimbursements(table.params);
   // By id, then read back from the live list, so the modal follows an HR decision
   // that lands while it is open.
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -47,7 +66,7 @@ export default function ClaimsPage() {
   const [cancelTarget, setCancelTarget] = useState<Reimbursement | null>(null);
   const cancelMut = useCancelReimbursement();
 
-  const all = claims ?? [];
+  const all = data?.items ?? [];
   const detail = all.find((c) => c.id === detailId) ?? null;
 
   const columns: Column<Reimbursement>[] = [
@@ -92,9 +111,11 @@ export default function ClaimsPage() {
                 columns={columns}
                 rows={all}
                 rowKey={(c) => c.id}
-                pageSize={10}
+                pageSize={table.pageSize}
                 onRowClick={(c) => setDetailId(c.id)}
                 empty="No claims yet. File your first one."
+                searchPlaceholder="Search category or description…"
+                server={table.serverProps(data?.total ?? 0, isFetching, CLAIM_STATUS_OPTIONS)}
               />
             </>
           )}

@@ -18,9 +18,8 @@ import {
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { EmployeeCell } from "@/modules/hr/components/employee-cell";
 import { DataTable, type Column } from "@/core/components/data-table";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import {
-  StatusFilter,
-  filterByStatus,
   type StatusFilterOption,
 } from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
@@ -132,17 +131,19 @@ export default function PayrollRequestsPage() {
 // ---- Payslip requests ----
 
 function PayslipQueue() {
-  const { data: rows, isLoading, isError } = usePayslipRequests();
+  // Server-paged, like its neighbour on this page.
+  const table = useServerTable();
+  const { data, isLoading, isError, isFetching } = usePayslipRequests(table.params);
   const approveMut = useApprovePayslipRequest();
   const rejectMut = useRejectPayslipRequest();
   const reopenMut = useReopenPayslipRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: PayslipRequest } | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(rows ?? [], status);
+  // The status filter moved into the table, and from there into the query.
+  const visible = data?.items ?? [];
   // Kept as an id and read back from the live list so deciding inside the modal
   // moves the status shown there too.
   const [detailId, setDetailId] = useState<number | null>(null);
-  const detail = (rows ?? []).find((r) => r.id === detailId) ?? null;
+  const detail = visible.find((r) => r.id === detailId) ?? null;
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -206,13 +207,12 @@ function PayslipQueue() {
           rows={visible}
           rowKey={(r) => r.id}
           onRowClick={(r) => setDetailId(r.id)}
-          needsAction={(r) => r.status === "pending"}
-          getSearchText={(r) =>
-            `${r.employee.name ?? ""} ${r.payslip_cycle ?? ""} ${r.reason} ${r.status}`
-          }
-          searchPlaceholder="Search employee, period, reason…"
-          toolbar={<StatusFilter options={PAYSLIP_STATUS_OPTIONS} value={status} onChange={setStatus} />}
+          pageSize={table.pageSize}
+          searchPlaceholder="Search employee, reason…"
           empty="No hard-copy requests."
+          // `needsAction` and `getSearchText` are gone deliberately: both worked on the
+          // rows in hand. The query orders and searches the whole queue.
+          server={table.serverProps(data?.total ?? 0, isFetching, PAYSLIP_STATUS_OPTIONS)}
         />
       )}
       <ReviewDialog
@@ -251,20 +251,18 @@ function PayslipQueue() {
 // ---- Payroll inquiries ----
 
 function InquiryQueue() {
-  const { data: rows, isLoading, isError } = usePayrollInquiries();
+  // Server-paged, and ordered outstanding-then-urgent-then-newest by the query.
+  const table = useServerTable();
+  const { data, isLoading, isError, isFetching } = usePayrollInquiries(table.params);
   const progressMut = useProgressPayrollInquiry();
   const reopenMut = useReopenPayrollInquiry();
   const [resolving, setResolving] = useState<PayrollInquiry | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(rows ?? [], status);
+  // The status filter moved into the table, and from there into the query.
+  const visible = data?.items ?? [];
   // Kept as an id and read back from the live list: resolving from inside the modal
   // has to move it from "in progress" to "done" without closing it.
   const [detailId, setDetailId] = useState<number | null>(null);
-  const detail = (rows ?? []).find((r) => r.id === detailId) ?? null;
-
-  const hasHighPriority = (rows ?? []).some(
-    (r) => r.priority === "high" && r.status !== "done",
-  );
+  const detail = visible.find((r) => r.id === detailId) ?? null;
 
   async function onStart(r: PayrollInquiry) {
     try {
@@ -366,13 +364,12 @@ function InquiryQueue() {
           rows={visible}
           rowKey={(r) => r.id}
           onRowClick={(r) => setDetailId(r.id)}
-          needsAction={(r) => r.status !== "done"}
-          getSearchText={(r) =>
-            `${r.employee.name ?? ""} ${r.subject ?? r.topic ?? r.message ?? ""} ${r.status}`
-          }
+          pageSize={table.pageSize}
           searchPlaceholder="Search employee, topic…"
-          toolbar={<StatusFilter options={INQUIRY_STATUS_OPTIONS} value={status} onChange={setStatus} />}
           empty="No payroll inquiries."
+          // `needsAction` and `getSearchText` are gone deliberately: both worked on the rows in
+          // hand. The query does the ordering and the searching across the whole queue.
+          server={table.serverProps(data?.total ?? 0, isFetching, INQUIRY_STATUS_OPTIONS)}
         />
       )}
 

@@ -5,7 +5,9 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\EarlyOutRequest;
 use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
 use App\Modules\Hr\Models\Employee;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -19,6 +21,7 @@ use Illuminate\Validation\ValidationException;
 class EarlyOutRequestService
 {
     use CancelsOwnRequest;
+    use PagesQueues;
 
     public function __construct(
         private readonly AuditService $audit,
@@ -30,17 +33,32 @@ class EarlyOutRequestService
     ) {}
 
     /** HR sees all; an employee sees only their own. */
-    public function list(User $user): Collection
+    /**
+     * One page of the queue. HR sees everyone's; anybody else sees only their own, and that
+     * scope is applied BEFORE the filters so no search can widen it.
+     *
+     * Ordered by the day the request is ABOUT rather than the day it was filed — that is the
+     * column the screen shows and sorts were always meant to follow. Pending rows lead it,
+     * because paging is what decides whether a decision waiting three weeks is on page 1 or
+     * page 4.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function list(User $user, array $filters = []): LengthAwarePaginator
     {
-        $query = EarlyOutRequest::with(['employee.user', 'reviewer', 'canceller'])
-            ->orderByDesc('work_date')
-            ->latest();
+        $query = EarlyOutRequest::with(['employee.user', 'reviewer', 'canceller']);
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $query->where('employee_id', $user->employee?->id);
         }
 
-        return $query->get();
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            ['reason'],
+            priorityStatuses: ['pending'],
+            recencyColumn: 'work_date',
+        );
     }
 
     /** @param array<string, mixed> $data */

@@ -11,6 +11,7 @@ import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { StatusBadge } from "@/core/components/status-badge";
 import { formatDate } from "@/core/lib/format";
+import { useDebouncedValue } from "@/core/use-debounced-value";
 import { FaqFormDialog } from "@/modules/hr/components/faq-form-dialog";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
@@ -49,7 +50,10 @@ export default function FaqAdminPage() {
   const [category, setCategory] = useState("all");
   const [status, setStatus] = useState("all");
 
-  const { data: faqs, isLoading, isError } = useFaqs(search.trim() || undefined);
+  // The search runs SERVER-side, so an undebounced box is one request per keystroke —
+  // typing "leave" fired five. The input still binds the raw value, so it stays responsive.
+  const debouncedSearch = useDebouncedValue(search.trim(), 250);
+  const { data: faqs, isLoading, isError } = useFaqs(debouncedSearch || undefined);
   const deleteMut = useDeleteFaq();
   const statusMut = useSetFaqStatus();
   const pinMut = usePinFaq();

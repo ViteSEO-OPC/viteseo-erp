@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Reimbursement;
 use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
@@ -13,6 +15,7 @@ use Illuminate\Validation\ValidationException;
 class ReimbursementService
 {
     use CancelsOwnRequest;
+    use PagesQueues;
 
     /** Allowed expense categories (also enforced in the Form Request). */
     public const CATEGORIES = [
@@ -31,17 +34,59 @@ class ReimbursementService
     ) {}
 
     /** HR sees all claims; everyone else sees only their own. */
-    public function list(User $user): Collection
+    /**
+     * The six summary figures the finance screen shows above the queue — counts and peso totals
+     * per status.
+     *
+     * Item 5. These were computed in the browser by filtering the full list, which worked only
+     * while the full list was what arrived. Once the queue serves one page, the same code would
+     * describe THAT PAGE while looking exactly as authoritative: "₱12,400 pending" meaning
+     * "pending among the ten rows on screen". A wrong number nobody can tell is wrong.
+     *
+     * One grouped query rather than six, because the six are the same scan.
+     *
+     * @return array<string, array{count:int, amount:float}>
+     */
+    public function summary(): array
+    {
+        $rows = Reimbursement::query()
+            ->selectRaw('status, count(*) as claims, coalesce(sum(amount), 0) as total')
+            ->groupBy('status')
+            ->toBase()
+            ->get();
+
+        $summary = [];
+        foreach ($rows as $row) {
+            $summary[(string) $row->status] = [
+                'count' => (int) $row->claims,
+                'amount' => (float) $row->total,
+            ];
+        }
+
+        return $summary;
+    }
+
+    /**
+     * One page of the claims queue. HR sees everyone's; anybody else sees only their own, and
+     * that scope is applied BEFORE the filters so no search can widen it.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function list(User $user, array $filters = []): LengthAwarePaginator
     {
         $query = Reimbursement::query()
-            ->with(['employee.user', 'reviewer', 'canceller'])
-            ->latest();
+            ->with(['employee.user', 'reviewer', 'canceller']);
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $query->where('employee_id', $user->employee?->id);
         }
 
-        return $query->get();
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            ['category', 'description'],
+            priorityStatuses: ['pending'],
+        );
     }
 
     /**

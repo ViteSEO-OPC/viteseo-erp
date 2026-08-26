@@ -2,6 +2,8 @@
 
 namespace App\Modules\Hr\Services;
 
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
 /** Writes CSV rows with spreadsheet formula injection neutralised. */
 final class CsvWriter
 {
@@ -36,6 +38,44 @@ final class CsvWriter
         rewind($out);
 
         return (string) stream_get_contents($out);
+    }
+
+    /**
+     * The same CSV, written straight to the response as each row arrives.
+     *
+     * `render()` builds the whole file in memory before anything is sent, which is fine for a
+     * report bounded by headcount and fatal for one that is not: the audit trail grows forever,
+     * and an export of it materialised every row as an Eloquent model AND the finished string.
+     * Streaming holds one row at a time, so peak memory stops tracking the table's size.
+     *
+     * `$rows` should be a generator for that to mean anything — handing this a fully-built array
+     * streams the output but has already paid the memory.
+     *
+     * @param  iterable<int, array<int, mixed>>  $rows
+     */
+    public static function stream(iterable $rows, string $filename, bool $bom = true): StreamedResponse
+    {
+        return new StreamedResponse(function () use ($rows, $bom) {
+            $out = fopen('php://output', 'w');
+
+            if ($bom) {
+                fwrite($out, "\xEF\xBB\xBF");
+            }
+
+            // Deliberately no manual ob_flush()/flush() here. With no output buffering — the
+            // normal case for a streamed response — writes to php://output already go straight
+            // out, so flushing adds nothing. When a caller HAS buffered on purpose (a test
+            // capturing the file), flushing shoves the rows past their buffer and they lose the
+            // content they asked for.
+            foreach ($rows as $row) {
+                fputcsv($out, array_map([self::class, 'neutralise'], $row), ',', '"', '');
+            }
+
+            fclose($out);
+        }, 200, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+        ]);
     }
 
     /**

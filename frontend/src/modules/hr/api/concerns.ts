@@ -1,16 +1,17 @@
 import { apiClient } from "@/core/api-client";
+import { queueQuery, type QueueParams, type QueuePage } from "@/modules/hr/api/queue";
 import type { Concern, ConcernRevealRequest, Meeting } from "@/modules/hr/types/concern";
 
 // --- Concerns ---
 
-export async function getConcerns(): Promise<Concern[]> {
-  const res = await apiClient.get("/hr/concerns");
-  return res.data.data;
+export async function getConcerns(params: QueueParams): Promise<QueuePage<Concern>> {
+  const res = await apiClient.get("/hr/concerns", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
-export async function getMyConcerns(): Promise<Concern[]> {
-  const res = await apiClient.get("/hr/me/concerns");
-  return res.data.data;
+export async function getMyConcerns(params: QueueParams): Promise<QueuePage<Concern>> {
+  const res = await apiClient.get("/hr/me/concerns", { params: queueQuery(params) });
+  return { items: res.data.data, total: res.data.meta?.total ?? res.data.data.length };
 }
 
 // Sent as multipart/form-data so supporting documents can ride along.

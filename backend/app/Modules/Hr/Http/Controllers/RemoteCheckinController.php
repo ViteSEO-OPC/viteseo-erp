@@ -60,7 +60,10 @@ class RemoteCheckinController extends Controller
 
         return RemoteCheckinResource::collection(
             // ?status=all lifts the filter and returns the whole history.
-            $this->service->list($status === 'all' ? null : $status),
+            $this->service->list(
+                $status === 'all' ? null : $status,
+                $request->only(['search', 'per_page']),
+            ),
         )->response();
     }
 

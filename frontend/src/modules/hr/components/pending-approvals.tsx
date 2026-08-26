@@ -1,6 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { usePendingApprovals, PENDING_APPROVALS_KEY } from "@/modules/hr/hooks/use-approvals";
+import type { PendingApproval } from "@/modules/hr/api/approvals";
 import Link from "next/link";
 import { Check, ChevronRight, X } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
@@ -9,32 +13,19 @@ import { Button } from "@/components/ui/button";
 import { ReviewDialog } from "@/core/components/review-dialog";
 import { formatShortAge } from "@/core/lib/format";
 import {
-  useLeaveRequests,
   useApproveLeaveRequest,
   useRejectLeaveRequest,
 } from "@/modules/hr/hooks/use-leave";
 import {
-  useReimbursements,
   useApproveReimbursement,
   useRejectReimbursement,
 } from "@/modules/hr/hooks/use-reimbursements";
 import {
-  useDocumentRequests,
-  useChangeRequests,
   useApproveChangeRequest,
   useRejectChangeRequest,
-  usePayslipRequests,
   useApprovePayslipRequest,
   useRejectPayslipRequest,
-  usePayrollInquiries,
 } from "@/modules/hr/hooks/use-requests";
-import { useConcerns } from "@/modules/hr/hooks/use-concerns";
-import { useHalfDayRequests } from "@/modules/hr/hooks/use-half-day";
-import { useEarlyOutRequests } from "@/modules/hr/hooks/use-early-out";
-import { useOvertimeRequests } from "@/modules/hr/hooks/use-overtime";
-import { useWorkRequests } from "@/modules/hr/hooks/use-work-request";
-import { useAllLoans } from "@/modules/hr/hooks/use-employees";
-import { useRemoteCheckins } from "@/modules/hr/hooks/use-remote-checkins";
 
 type Kind =
   | "leave"
@@ -51,14 +42,11 @@ type Kind =
   | "concern"
   | "timein";
 
-interface Item {
-  key: string;
-  kind: Kind;
-  id: number;
-  name: string; // display name — "Anonymous" for anonymous concerns (never a real name)
-  createdAt: string;
-  href: string; // where clicking the row takes you to see the full details
-}
+/**
+ * A card row, as the server sends it. `PendingApproval` from the API with `kind` narrowed to the
+ * set this card knows how to badge and decide.
+ */
+type Item = Omit<PendingApproval, "kind"> & { kind: Kind };
 
 // Chip label = the *type of request* (so "Expense", not "supplies").
 const KIND_TAG: Record<Kind, string> = {
@@ -102,28 +90,20 @@ const REVIEWABLE = new Set<Kind>(["leave", "claim", "change", "payslip"]);
 const ACTION_BTN = "w-8 px-0 @[28rem]/approvals:w-auto @[28rem]/approvals:px-3";
 const ACTION_LABEL = "sr-only @[28rem]/approvals:not-sr-only";
 
+/** What the converted queues are asked for: outstanding rows, oldest-priority first, bounded. */
 export function PendingApprovals() {
-  const { data: leaves } = useLeaveRequests();
-  const { data: claims } = useReimbursements();
-  const { data: changes } = useChangeRequests();
-  const { data: payslips } = usePayslipRequests();
-  const { data: documents } = useDocumentRequests();
-  const { data: inquiries } = usePayrollInquiries();
-  const { data: concerns } = useConcerns();
-  // The four that were reviewable from the day they shipped and appeared in no aggregate:
-  // half-day, early-out and overtime (decided on the work-schedule page) and loan requests
-  // (decided on the employee's record). They are navigate-only here — see REVIEWABLE.
-  const { data: halfDays } = useHalfDayRequests();
-  const { data: earlyOuts } = useEarlyOutRequests();
-  const { data: overtimes } = useOvertimeRequests();
-  // Work requests (a rest day, or a suspended day HR is tracking). Navigate-only like the
-  // other three: approving one WRITES an attendance row stamped at the employee's punch, which
-  // is not a decision to take from a feed row that shows neither the day nor the time it would
-  // stamp.
-  const { data: workRequests } = useWorkRequests();
-  const { data: loans } = useAllLoans();
-  // Already filtered to pending by the endpoint's default.
-  const { data: checkins } = useRemoteCheckins();
+  // ONE request. This card is fed by thirteen queues — leave, half-day, early-out, overtime,
+  // work requests, loans, claims, field time-ins, document and profile-change requests, payslip
+  // requests, payroll inquiries and concerns — and it used to ask all thirteen endpoints itself,
+  // merge the answers and sort them by date here. Thirteen round trips and up to thirteen
+  // hundred rows travelling to draw twenty.
+  //
+  // Sorting thirteen lists by date to take the oldest twenty is a database's job, and the merge
+  // happens there now. The approve/reject buttons below still call each kind's own endpoint —
+  // deciding a leave request and deciding a loan are different acts with different rules, and
+  // that has not changed.
+  const { data: queue } = usePendingApprovals();
+  const qc = useQueryClient();
 
   const apL = useApproveLeaveRequest();
   const rjL = useRejectLeaveRequest();
@@ -136,140 +116,15 @@ export function PendingApprovals() {
 
   const [review, setReview] = useState<{ mode: "approve" | "reject"; item: Item } | null>(null);
 
-  const items: Item[] = [
-    ...(leaves ?? [])
-      .filter((l) => l.status === "pending")
-      .map((l) => ({
-        key: `leave-${l.id}`,
-        kind: "leave" as const,
-        id: l.id,
-        name: l.employee.name ?? "—",
-        createdAt: l.created_at,
-        href: "/teamora/requests/work-schedule",
-      })),
-    ...(halfDays ?? [])
-      .filter((h) => h.status === "pending")
-      .map((h) => ({
-        key: `half_day-${h.id}`,
-        kind: "half_day" as const,
-        id: h.id,
-        name: h.employee?.name ?? "—",
-        createdAt: h.created_at,
-        href: "/teamora/requests/work-schedule",
-      })),
-    ...(earlyOuts ?? [])
-      .filter((e) => e.status === "pending")
-      .map((e) => ({
-        key: `early_out-${e.id}`,
-        kind: "early_out" as const,
-        id: e.id,
-        name: e.employee?.name ?? "—",
-        createdAt: e.created_at,
-        href: "/teamora/requests/work-schedule",
-      })),
-    ...(overtimes ?? [])
-      .filter((o) => o.status === "pending")
-      .map((o) => ({
-        key: `overtime-${o.id}`,
-        kind: "overtime" as const,
-        id: o.id,
-        name: o.employee?.name ?? "—",
-        createdAt: o.created_at,
-        href: "/teamora/requests/work-schedule",
-      })),
-    ...(workRequests ?? [])
-      .filter((r) => r.status === "pending")
-      .map((r) => ({
-        key: `work_request-${r.id}`,
-        kind: "work_request" as const,
-        id: r.id,
-        name: r.employee?.name ?? "—",
-        createdAt: r.created_at,
-        href: "/teamora/requests/work-schedule",
-      })),
-    ...(loans ?? [])
-      .filter((l) => l.status === "requested")
-      .map((l) => ({
-        key: `loan-${l.id}`,
-        kind: "loan" as const,
-        id: l.id,
-        name: l.employee?.name ?? "—",
-        // `requested_at` is when the employee asked; `start_date` is the fallback for a
-        // loan HR issued directly, which has no request moment.
-        createdAt: l.requested_at ?? l.start_date,
-        // Decided on the record's Compensation tab, where the amounts and their consent state are.
-        href: `/teamora/people/employees/${l.employee?.id ?? ""}`,
-      })),
-    ...(claims ?? [])
-      .filter((c) => c.status === "pending")
-      .map((c) => ({
-        key: `claim-${c.id}`,
-        kind: "claim" as const,
-        id: c.id,
-        name: c.employee.name ?? "—",
-        createdAt: c.created_at,
-        href: "/teamora/finance/reimbursement",
-      })),
-    ...(changes ?? [])
-      .filter((c) => c.status === "pending")
-      .map((c) => ({
-        key: `change-${c.id}`,
-        kind: "change" as const,
-        id: c.id,
-        name: c.employee.name ?? "—",
-        createdAt: c.created_at,
-        href: "/teamora/requests/document",
-      })),
-    ...(payslips ?? [])
-      .filter((p) => p.status === "pending")
-      .map((p) => ({
-        key: `payslip-${p.id}`,
-        kind: "payslip" as const,
-        id: p.id,
-        name: p.employee.name ?? "—",
-        createdAt: p.created_at,
-        href: "/teamora/requests/payroll",
-      })),
-    ...(documents ?? [])
-      .filter((d) => d.status === "pending")
-      .map((d) => ({
-        key: `document-${d.id}`,
-        kind: "document" as const,
-        id: d.id,
-        name: d.employee.name ?? "—",
-        createdAt: d.created_at,
-        href: "/teamora/requests/document",
-      })),
-    ...(inquiries ?? [])
-      .filter((q) => q.status === "pending")
-      .map((q) => ({
-        key: `inquiry-${q.id}`,
-        kind: "inquiry" as const,
-        id: q.id,
-        name: q.employee.name ?? "—",
-        createdAt: q.created_at,
-        href: "/teamora/requests/payroll",
-      })),
-    ...(checkins ?? []).map((rc) => ({
-      key: `timein-${rc.id}`,
-      kind: "timein" as const,
-      id: rc.id,
-      name: rc.employee.name ?? "—",
-      createdAt: rc.submitted_at,
-      href: "/teamora/attendance",
-    })),
-    ...(concerns ?? [])
-      .filter((c) => c.status === "pending")
-      .map((c) => ({
-        key: `concern-${c.id}`,
-        kind: "concern" as const,
-        id: c.id,
-        // Anonymity invariant: never surface a name for an anonymous concern.
-        name: c.is_anonymous ? "Anonymous" : (c.employee?.name ?? "Employee"),
-        createdAt: c.created_at,
-        href: "/teamora/requests/concern",
-      })),
-  ].sort((a, b) => a.createdAt.localeCompare(b.createdAt)); // oldest (longest-waiting) first
+  // Already merged and ordered oldest-first by the server — the thing that has been waiting
+  // longest is the thing most worth doing.
+  // `kind` arrives as a plain string; narrowed here to the set this card can badge and decide.
+  // A row whose kind this build does not know about is skipped rather than rendered blank — the
+  // API and the UI can be deployed a moment apart.
+  const items: Item[] = (queue?.items ?? []).filter((i): i is Item =>
+    KIND_TAG[i.kind as Kind] !== undefined,
+  );
+
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -294,6 +149,11 @@ export function PendingApprovals() {
         await reject[item.kind as keyof typeof reject]();
         toast.error("Declined", "The requester has been notified by your note.");
       }
+
+      // The mutations invalidate their OWN queue, which this card no longer reads — it reads the
+      // merged one. Without this the decided row stays on screen until something else refetches:
+      // the card would keep offering Approve on a request already approved.
+      qc.invalidateQueries({ queryKey: PENDING_APPROVALS_KEY });
     } catch {
       toast.error("Action failed.");
     }
@@ -314,7 +174,7 @@ export function PendingApprovals() {
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-foreground">{item.name}</p>
           <p className="truncate text-caption text-muted-foreground">
-            Pending {formatShortAge(item.createdAt)}
+            Pending {formatShortAge(item.created_at)}
           </p>
         </div>
       </div>

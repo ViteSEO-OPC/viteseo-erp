@@ -26,9 +26,13 @@ class ConcernController extends Controller
     ) {}
 
     // GET /hr/concerns — HR/Admin queue (identity hidden for anonymous).
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        return ConcernResource::collection($this->service->listForHr())->response();
+        // Applied by the DATABASE. The search deliberately does not match the reporter's name
+        // on an anonymous concern — see ConcernService::concernSearch().
+        return ConcernResource::collection(
+            $this->service->listForHr($request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // GET /hr/me/concerns — the caller's own concerns.
@@ -39,7 +43,9 @@ class ConcernController extends Controller
             return response()->json(['data' => []]);
         }
 
-        return ConcernResource::collection($this->service->listForEmployee($employee))->response();
+        return ConcernResource::collection(
+            $this->service->listForEmployee($employee, $request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // POST /hr/me/concerns — submit a concern (named or anonymous).

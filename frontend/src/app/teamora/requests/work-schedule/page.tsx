@@ -19,11 +19,10 @@ import {
   DataTable,
   type Column,
 } from "@/core/components/data-table";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { AutoOvertimeReview } from "@/modules/hr/components/auto-overtime-review";
 import { OvertimeCorrectionDialog } from "@/modules/hr/components/overtime-correction-dialog";
 import {
-  StatusFilter,
-  filterByStatus,
   type StatusFilterOption,
 } from "@/core/components/status-filter";
 import { formatDate, formatTimeManila } from "@/core/lib/format";
@@ -88,15 +87,19 @@ function RowActions({ children }: { children: React.ReactNode }) {
 }
 
 export default function TimeLeavePage() {
-  const { data: requests, isLoading, isError } = useLeaveRequests();
+  // Server-paged. This queue holds every request of its kind anyone has ever filed.
+  const table = useServerTable();
+  const { data, isLoading, isError, isFetching } = useLeaveRequests(table.params);
+  const requests = data?.items ?? [];
   const approveMut = useApproveLeaveRequest();
   const rejectMut = useRejectLeaveRequest();
   const cancelMut = useCancelLeaveRequest();
   const reopenMut = useReopenLeaveRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: LeaveRequest } | null>(null);
   const [cancelTarget, setCancelTarget] = useState<LeaveRequest | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(requests ?? [], status);
+  // The status filter moved into the table, and from there into the query — filtering here
+  // would only narrow the ten rows already on screen.
+  const visible = requests;
   // Held by id, then read back from the live list, so deciding inside the modal
   // updates what the modal shows instead of leaving stale status on screen.
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -272,15 +275,13 @@ export default function TimeLeavePage() {
             rows={visible}
             rowKey={(r) => r.id}
             onRowClick={(r) => setDetailId(r.id)}
-            needsAction={(r) => r.status === "pending"}
-            getSearchText={(r) =>
-              `${r.employee.name ?? ""} ${r.leave_type.name} ${r.reason} ${r.status}`
-            }
+            pageSize={table.pageSize}
             searchPlaceholder="Search employee, type, reason…"
-            toolbar={
-              <StatusFilter options={REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
-            }
             empty="No leave requests yet."
+            // `needsAction` and `getSearchText` are gone deliberately: both worked on the
+            // rows in hand. The query sorts pending first and searches across the whole
+            // queue, so neither can be answered from a page any more.
+            server={table.serverProps(data?.total ?? 0, isFetching, REQUEST_STATUS_OPTIONS)}
           />
         )}
       </div>
@@ -381,13 +382,17 @@ function payLabel(r: WorkRequest) {
 }
 
 function WorkRequestSection() {
-  const { data: requests, isLoading } = useWorkRequests();
+  // Server-paged. This queue holds every request of its kind anyone has ever filed.
+  const table = useServerTable();
+  const { data, isLoading, isFetching } = useWorkRequests(table.params);
+  const requests = data?.items ?? [];
   const approveMut = useApproveWorkRequest();
   const rejectMut = useRejectWorkRequest();
   const reopenMut = useReopenWorkRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: WorkRequest } | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(requests ?? [], status);
+  // The status filter moved into the table, and from there into the query — filtering here
+  // would only narrow the ten rows already on screen.
+  const visible = requests;
   const [detailId, setDetailId] = useState<number | null>(null);
   const detail = (requests ?? []).find((r) => r.id === detailId) ?? null;
 
@@ -508,13 +513,13 @@ function WorkRequestSection() {
             rows={visible}
             rowKey={(r) => r.id}
             onRowClick={(r) => setDetailId(r.id)}
-            needsAction={(r) => r.status === "pending"}
-            getSearchText={(r) => `${r.employee.name ?? ""} ${r.reason ?? ""} ${dayLabel(r)} ${r.status}`}
+            pageSize={table.pageSize}
             searchPlaceholder="Search employee, reason…"
-            toolbar={
-              <StatusFilter options={WORK_REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
-            }
             empty="No work requests yet. They appear here when someone times in on a rest day, or on a suspended day that needs your permission."
+            // `needsAction` and `getSearchText` are gone deliberately: both worked on the
+            // rows in hand. The query sorts pending first and searches across the whole
+            // queue, so neither can be answered from a page any more.
+            server={table.serverProps(data?.total ?? 0, isFetching, WORK_REQUEST_STATUS_OPTIONS)}
           />
         )}
       </div>
@@ -563,13 +568,17 @@ function WorkRequestSection() {
 // ---- Half-day requests (separate from leave, always unpaid) ----
 
 function HalfDaySection() {
-  const { data: requests, isLoading } = useHalfDayRequests();
+  // Server-paged. This queue holds every request of its kind anyone has ever filed.
+  const table = useServerTable();
+  const { data, isLoading, isFetching } = useHalfDayRequests(table.params);
+  const requests = data?.items ?? [];
   const approveMut = useApproveHalfDayRequest();
   const rejectMut = useRejectHalfDayRequest();
   const reopenMut = useReopenHalfDayRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: HalfDayRequest } | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(requests ?? [], status);
+  // The status filter moved into the table, and from there into the query — filtering here
+  // would only narrow the ten rows already on screen.
+  const visible = requests;
   const [detailId, setDetailId] = useState<number | null>(null);
   const detail = (requests ?? []).find((r) => r.id === detailId) ?? null;
 
@@ -673,15 +682,13 @@ function HalfDaySection() {
             rows={visible}
             rowKey={(r) => r.id}
             onRowClick={(r) => setDetailId(r.id)}
-            needsAction={(r) => r.status === "pending"}
-            getSearchText={(r) =>
-              `${r.employee.name ?? ""} ${r.period} ${r.reason} ${r.status}`
-            }
+            pageSize={table.pageSize}
             searchPlaceholder="Search employee, reason…"
-            toolbar={
-              <StatusFilter options={REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
-            }
             empty="No half-day requests yet."
+            // `needsAction` and `getSearchText` are gone deliberately: both worked on the
+            // rows in hand. The query sorts pending first and searches across the whole
+            // queue, so neither can be answered from a page any more.
+            server={table.serverProps(data?.total ?? 0, isFetching, REQUEST_STATUS_OPTIONS)}
           />
         )}
       </div>
@@ -724,13 +731,17 @@ function HalfDaySection() {
 // ---- Early-out requests (undertime — separate from leave, always unpaid) ----
 
 function EarlyOutSection() {
-  const { data: requests, isLoading } = useEarlyOutRequests();
+  // Server-paged. This queue holds every request of its kind anyone has ever filed.
+  const table = useServerTable();
+  const { data, isLoading, isFetching } = useEarlyOutRequests(table.params);
+  const requests = data?.items ?? [];
   const approveMut = useApproveEarlyOutRequest();
   const rejectMut = useRejectEarlyOutRequest();
   const reopenMut = useReopenEarlyOutRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; r: EarlyOutRequest } | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(requests ?? [], status);
+  // The status filter moved into the table, and from there into the query — filtering here
+  // would only narrow the ten rows already on screen.
+  const visible = requests;
   const [detailId, setDetailId] = useState<number | null>(null);
   const detail = (requests ?? []).find((r) => r.id === detailId) ?? null;
 
@@ -814,15 +825,13 @@ function EarlyOutSection() {
             rows={visible}
             rowKey={(r) => r.id}
             onRowClick={(r) => setDetailId(r.id)}
-            needsAction={(r) => r.status === "pending"}
-            getSearchText={(r) =>
-              `${r.employee.name ?? ""} ${r.early_out_time} ${r.reason} ${r.status}`
-            }
+            pageSize={table.pageSize}
             searchPlaceholder="Search employee, reason…"
-            toolbar={
-              <StatusFilter options={REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
-            }
             empty="No early-out requests yet."
+            // `needsAction` and `getSearchText` are gone deliberately: both worked on the
+            // rows in hand. The query sorts pending first and searches across the whole
+            // queue, so neither can be answered from a page any more.
+            server={table.serverProps(data?.total ?? 0, isFetching, REQUEST_STATUS_OPTIONS)}
           />
         )}
       </div>
@@ -864,7 +873,10 @@ function EarlyOutSection() {
 // ---- Overtime requests (hours BEYOND the schedule — approving ADDS pay) ----
 
 function OvertimeSection() {
-  const { data: requests, isLoading } = useOvertimeRequests();
+  // Server-paged. This queue holds every request of its kind anyone has ever filed.
+  const table = useServerTable();
+  const { data, isLoading, isFetching } = useOvertimeRequests(table.params);
+  const requests = data?.items ?? [];
   const approveMut = useApproveOvertimeRequest();
   const rejectMut = useRejectOvertimeRequest();
   const cancelMut = useCancelOvertimeRequest();
@@ -873,8 +885,9 @@ function OvertimeSection() {
     mode: "approve" | "reject" | "cancel";
     r: OvertimeRequest;
   } | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(requests ?? [], status);
+  // The status filter moved into the table, and from there into the query — filtering here
+  // would only narrow the ten rows already on screen.
+  const visible = requests;
   const [detailId, setDetailId] = useState<number | null>(null);
   const detail = (requests ?? []).find((r) => r.id === detailId) ?? null;
 
@@ -1014,13 +1027,13 @@ function OvertimeSection() {
             rows={visible}
             rowKey={(r) => r.id}
             onRowClick={(r) => setDetailId(r.id)}
-            needsAction={(r) => r.status === "pending"}
-            getSearchText={(r) => `${r.employee.name ?? ""} ${r.hours} ${r.reason} ${r.status}`}
+            pageSize={table.pageSize}
             searchPlaceholder="Search employee, reason…"
-            toolbar={
-              <StatusFilter options={REQUEST_STATUS_OPTIONS} value={status} onChange={setStatus} />
-            }
             empty="No overtime requests yet."
+            // `needsAction` and `getSearchText` are gone deliberately: both worked on the
+            // rows in hand. The query sorts pending first and searches across the whole
+            // queue, so neither can be answered from a page any more.
+            server={table.serverProps(data?.total ?? 0, isFetching, REQUEST_STATUS_OPTIONS)}
           />
         )}
       </div>

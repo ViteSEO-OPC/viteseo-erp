@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Plus, Search, ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { EmployeeCard } from "@/modules/hr/components/employee-card";
 import { EmployeeFormDialog } from "@/modules/hr/components/employee-form-dialog";
-import { useEmployees } from "@/modules/hr/hooks/use-employees";
+import { useEmployeeDirectory } from "@/modules/hr/hooks/use-employees";
+import { useDebouncedValue } from "@/core/use-debounced-value";
 import { useDepartments } from "@/modules/hr/hooks/use-departments";
 import {
   EMPLOYMENT_STATUSES,
@@ -22,12 +23,11 @@ import { SimpleSelect } from "@/modules/hr/ui/select";
 const PAGE_SIZE = 12;
 
 export default function EmployeesPage() {
-  // Which roster to fetch. This is a SERVER-side switch, not one of the client filters
-  // below: a former employee is soft-deleted, so the default query cannot return them at all and
-  // there was no way to find somebody to rehire. Separate from the `status` filter, which is
-  // employment_status (regular / probationary / …) and a different question entirely.
+  // Which roster to fetch. A former employee is soft-deleted, so the default query cannot
+  // return them at all and there was no way to find somebody to rehire. Separate from the
+  // `status` filter, which is employment_status (regular / probationary / …) and a different
+  // question entirely.
   const [roster, setRoster] = useState<"active" | "former" | "all">("active");
-  const { data: employees, isLoading, isError } = useEmployees(roster);
   const { data: departments } = useDepartments();
 
   const [search, setSearch] = useState("");
@@ -36,26 +36,33 @@ export default function EmployeesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (employees ?? []).filter((e) => {
-      const matchesSearch =
-        !q ||
-        e.name.toLowerCase().includes(q) ||
-        e.job_title.toLowerCase().includes(q) ||
-        e.email.toLowerCase().includes(q);
-      const matchesDept = dept === "all" || e.department?.id === Number(dept);
-      const matchesStatus = status === "all" || e.employment_status === status;
-      return matchesSearch && matchesDept && matchesStatus;
-    });
-  }, [employees, search, dept, status]);
+  // The box stays responsive; the request waits for the typing to settle.
+  const debouncedSearch = useDebouncedValue(search, 250);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Every filter below goes to the DATABASE. This page used to receive the first hundred
+  // employees and do the searching, the department filter and the paging itself — so the
+  // hundred-and-first person was unreachable by any route, searching for them answered "no
+  // employees match your filters" rather than admitting it had only looked at a hundred, and
+  // the header counted the download rather than the company.
+  const { data, isLoading, isError, isFetching } = useEmployeeDirectory({
+    search: debouncedSearch.trim() || undefined,
+    status: roster,
+    department: dept,
+    employment_status: status,
+    page,
+    per_page: PAGE_SIZE,
+  });
+
+  const paged = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // The data can shrink under a reader who is deep in it. Clamping what the pager SHOWS keeps
+  // its arrows pointing somewhere real; every filter below already returns them to page 1.
+  const currentPage = Math.min(Math.max(1, page), totalPages);
   const pagesToShow: (number | "ellipsis")[] = (() => {
     const result: (number | "ellipsis")[] = [];
     for (let i = 1; i <= totalPages; i++) {
-      if (i === 1 || i === totalPages || (i >= page - 1 && i <= page + 1)) {
+      if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
         result.push(i);
       } else if (result[result.length - 1] !== "ellipsis") {
         result.push("ellipsis");
@@ -69,9 +76,7 @@ export default function EmployeesPage() {
       <PageHeader
         title="Employees"
         subtitle={
-          employees
-            ? `Showing ${paged.length} of ${filtered.length} employees`
-            : undefined
+          data ? `Showing ${paged.length} of ${total} employees` : undefined
         }
         actions={
           <Button onClick={() => setDialogOpen(true)}>
@@ -133,7 +138,14 @@ export default function EmployeesPage() {
           <p className="text-sm text-muted-foreground">No employees match your filters.</p>
         ) : (
           <>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div
+              className={cn(
+                "grid grid-cols-1 gap-3 transition-opacity md:grid-cols-2 xl:grid-cols-3",
+                // Dimmed rather than emptied: a page swap replaces every card, and blanking the
+                // grid for the round trip reads as the directory vanishing.
+                isFetching && "pointer-events-none opacity-60",
+              )}
+            >
               {paged.map((e) => (
                 <EmployeeCard key={e.id} employee={e} />
               ))}
@@ -143,14 +155,14 @@ export default function EmployeesPage() {
             {totalPages > 1 && (
               <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
                 <div className="text-caption text-muted-foreground">
-                  Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of{" "}
-                  {filtered.length}
+                  Showing {(currentPage - 1) * PAGE_SIZE + 1}–
+                  {Math.min(currentPage * PAGE_SIZE, total)} of {total}
                 </div>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1 || isFetching}
+                    onClick={() => setPage(Math.max(1, currentPage - 1))}
                     className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                     aria-label="Previous page"
                   >
@@ -166,7 +178,7 @@ export default function EmployeesPage() {
                         onClick={() => setPage(p)}
                         className={cn(
                           "inline-flex size-7 items-center justify-center rounded-md text-sm transition-colors",
-                          p === page
+                          p === currentPage
                             ? "bg-brand text-brand-foreground font-semibold"
                             : "text-foreground hover:bg-muted",
                         )}
@@ -177,8 +189,8 @@ export default function EmployeesPage() {
                   )}
                   <button
                     type="button"
-                    disabled={page >= totalPages}
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages || isFetching}
+                    onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
                     className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                     aria-label="Next page"
                   >

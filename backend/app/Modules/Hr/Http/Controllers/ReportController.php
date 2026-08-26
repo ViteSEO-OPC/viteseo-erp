@@ -17,7 +17,7 @@ class ReportController extends Controller
      * disagrees with the table it was downloaded from.
      */
     private const FILTERS = [
-        'action', 'from', 'to', 'department', 'months', 'page', 'per_page',
+        'action', 'from', 'to', 'department', 'months', 'page', 'per_page', 'search',
         'run', 'frequency', 'month',
         // The tax reconciliation is scoped to a whole tax year, not a date range.
         'year',

@@ -165,6 +165,34 @@ class PaymentService
      *
      * @return array{balanced: bool, batch_total: float, run_total: float, difference: float, unpaid_payslips: int}
      */
+    /**
+     * What a run has actually been paid, across EVERY batch.
+     *
+     * The batch dialog worked this out by summing the batches it had been handed and subtracting
+     * from the run's net — but the endpoint has always paged at twenty, so a run with more
+     * batches than that produced an outstanding balance computed from part of the payments. Not
+     * a truncated list: a wrong number, on a screen whose whole job is saying what is still
+     * owed, with nothing to indicate it was arithmetic over a page.
+     *
+     * Scoped to a run when given one, and over every batch when not — matching the list beside
+     * it, so the figure and the rows describe the same set.
+     *
+     * @return array{paid_total: float, batch_count: int}
+     */
+    public function paidTotals(?int $payrollRunId = null): array
+    {
+        $row = PaymentBatch::query()
+            ->when($payrollRunId, fn ($q, $runId) => $q->where('payroll_run_id', $runId))
+            ->selectRaw('coalesce(sum(total_amount), 0) as paid, count(*) as batches')
+            ->toBase()
+            ->first();
+
+        return [
+            'paid_total' => round((float) ($row->paid ?? 0), 2),
+            'batch_count' => (int) ($row->batches ?? 0),
+        ];
+    }
+
     public function reconcileWithRun(PaymentBatch $batch): array
     {
         $run = $batch->payrollRun;

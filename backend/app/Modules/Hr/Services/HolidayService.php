@@ -111,6 +111,8 @@ class HolidayService
 
         $this->audit->log('created', 'Holidays', "Loaded {$set->country_code} {$set->year} holidays", $set);
 
+        $this->recomputeFlagsForYear($set->year);
+
         return $set->load('holidays')->loadCount('holidays');
     }
 
@@ -143,6 +145,8 @@ class HolidayService
 
         $this->audit->log('updated', 'Holidays', "Refreshed {$set->country_code} {$set->year} holiday set", $set);
 
+        $this->recomputeFlagsForYear($set->year);
+
         return $set->load('holidays')->loadCount('holidays');
     }
 
@@ -153,11 +157,15 @@ class HolidayService
         // same dates from Nager. Soft-deleting would leave the (country_code, year)
         // unique row in place and block reloading that same country/year. The FK's
         // cascadeOnDelete removes the child holidays with it.
+        $year = $set->year; // read before the delete — the model is gone after it
+
         $set->forceDelete();
 
         $this->forgetMemo();
 
         $this->audit->log('removed', 'Holidays', "Removed the {$set->country_code} {$set->year} holiday set", $set);
+
+        $this->recomputeFlagsForYear($year);
     }
 
     /** @param array<string, mixed> $data */
@@ -175,12 +183,18 @@ class HolidayService
 
         $this->audit->log('created', 'Holidays', "Added holiday '{$holiday->name}'", $holiday);
 
+        $this->recomputeFlagsForDates([$holiday->date->toDateString()]);
+
         return $holiday;
     }
 
     /** @param array<string, mixed> $data */
     public function updateHoliday(Holiday $holiday, array $data): Holiday
     {
+        // An edit can MOVE the date. The month it left has to be rebuilt as well as the one it
+        // landed in, or the old date keeps behaving like a holiday.
+        $wasOn = $holiday->date->toDateString();
+
         $holiday->update([
             'name' => $data['name'],
             'date' => $data['date'],
@@ -192,16 +206,49 @@ class HolidayService
 
         $this->audit->log('updated', 'Holidays', "Updated holiday '{$holiday->name}'", $holiday);
 
+        $this->recomputeFlagsForDates([$wasOn, $holiday->date->toDateString()]);
+
         return $holiday;
     }
 
     public function deleteHoliday(Holiday $holiday): void
     {
+        $date = $holiday->date->toDateString();
+
         $holiday->delete();
 
         $this->forgetMemo();
 
         $this->audit->log('removed', 'Holidays', "Removed holiday '{$holiday->name}'", $holiday);
+
+        $this->recomputeFlagsForDates([$date]);
+    }
+
+    /**
+     * Item 11 — nobody is expected in on a non-working holiday, so adding, moving or removing
+     * one turns absences into non-events on that date and back. Rebuilt at the write; the
+     * attendance board that used to recompute on every read no longer does.
+     *
+     * Resolved lazily rather than injected: ViolationService takes this service as a
+     * constructor argument, so injecting it back would close a container cycle.
+     *
+     * @param  list<string>  $dates
+     */
+    private function recomputeFlagsForDates(array $dates): void
+    {
+        $violations = app(ViolationService::class);
+
+        foreach (array_unique(array_map(fn (string $d) => substr($d, 0, 7), $dates)) as $month) {
+            $violations->recompute($month);
+        }
+    }
+
+    /** A whole year's worth of months — set-level loads, refreshes and removals. */
+    private function recomputeFlagsForYear(int $year): void
+    {
+        // recompute() returns immediately for a month that has not started, so a set loaded
+        // for next year costs twelve cheap no-ops rather than twelve scans.
+        app(ViolationService::class)->recomputeRange("{$year}-01-01", "{$year}-12-31");
     }
 
     /**

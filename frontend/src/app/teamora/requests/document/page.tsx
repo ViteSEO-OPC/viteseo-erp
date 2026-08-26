@@ -6,9 +6,8 @@ import { notify as toast } from "@/core/lib/notify";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import {
-  StatusFilter,
-  filterByStatus,
   type StatusFilterOption,
 } from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
@@ -95,17 +94,20 @@ export default function RequestsPage() {
 // ---- Document requests queue ----
 
 function DocumentQueue() {
-  const { data: rows, isLoading, isError } = useDocumentRequests();
+  // Server-paged. Every document request ever filed used to arrive here to render ten.
+  const table = useServerTable();
+  const { data, isLoading, isError, isFetching } = useDocumentRequests(table.params);
   const fulfillMut = useFulfillDocumentRequest();
   const rejectMut = useRejectDocumentRequest();
   const reopenMut = useReopenDocumentRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: DocumentRequest } | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(rows ?? [], status);
+  // The status filter moved into the table (and from there into the query) — filtering here
+  // would only narrow the ten rows already on screen.
+  const visible = data?.items ?? [];
   // Kept as an id and read back from the live list so deciding inside the modal
   // moves the status shown there too.
   const [detailId, setDetailId] = useState<number | null>(null);
-  const detail = (rows ?? []).find((r) => r.id === detailId) ?? null;
+  const detail = visible.find((r) => r.id === detailId) ?? null;
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -205,13 +207,12 @@ function DocumentQueue() {
           rows={visible}
           rowKey={(r) => r.id}
           onRowClick={(r) => setDetailId(r.id)}
-          needsAction={(r) => r.status === "pending"}
-          getSearchText={(r) =>
-            `${r.employee.name ?? ""} ${r.type === "other" && r.other_detail ? r.other_detail : documentTypeLabel(r.type)} ${r.status}`
-          }
+          pageSize={table.pageSize}
           searchPlaceholder="Search employee, document…"
-          toolbar={<StatusFilter options={DOC_STATUS_OPTIONS} value={status} onChange={setStatus} />}
           empty="No document requests."
+          // `needsAction` and `getSearchText` are gone deliberately: both worked on the rows in
+          // hand. The query sorts pending first across the whole queue and searches it there.
+          server={table.serverProps(data?.total ?? 0, isFetching, DOC_STATUS_OPTIONS)}
         />
       )}
       <ReviewDialog
@@ -266,15 +267,17 @@ function DocumentQueue() {
 // ---- Profile change requests queue ----
 
 function ChangeQueue() {
-  const { data: rows, isLoading, isError } = useChangeRequests();
+  // Server-paged, like its neighbour on this page.
+  const table = useServerTable();
+  const { data, isLoading, isError, isFetching } = useChangeRequests(table.params);
   const approveMut = useApproveChangeRequest();
   const rejectMut = useRejectChangeRequest();
   const reopenMut = useReopenChangeRequest();
   const [review, setReview] = useState<{ mode: "approve" | "reject"; row: ChangeRequest } | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(rows ?? [], status);
+  // The status filter moved into the table, and from there into the query.
+  const visible = data?.items ?? [];
   const [detailId, setDetailId] = useState<number | null>(null);
-  const detail = (rows ?? []).find((r) => r.id === detailId) ?? null;
+  const detail = visible.find((r) => r.id === detailId) ?? null;
 
   async function onConfirm(reason: string) {
     if (!review) return;
@@ -347,13 +350,12 @@ function ChangeQueue() {
           rows={visible}
           rowKey={(r) => r.id}
           onRowClick={(r) => setDetailId(r.id)}
-          needsAction={(r) => r.status === "pending"}
-          getSearchText={(r) =>
-            `${r.field_label} ${r.old_value ?? ""} ${r.new_value ?? ""} ${r.status}`
-          }
-          searchPlaceholder="Search field, value…"
-          toolbar={<StatusFilter options={CHANGE_STATUS_OPTIONS} value={status} onChange={setStatus} />}
+          pageSize={table.pageSize}
+          searchPlaceholder="Search employee, field…"
           empty="No change requests."
+          // `needsAction` and `getSearchText` are gone deliberately: both worked on the
+          // rows in hand. The query orders and searches the whole queue.
+          server={table.serverProps(data?.total ?? 0, isFetching, CHANGE_STATUS_OPTIONS)}
         />
       )}
       <ReviewDialog

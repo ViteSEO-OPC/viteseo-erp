@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { MapPin, MapPinOff } from "lucide-react";
 import { notify as toast } from "@/core/lib/notify";
 
@@ -25,13 +26,18 @@ import type { RemoteCheckin } from "@/modules/hr/types/attendance";
 /** Off-site time-ins waiting on HR, above the day's roster. */
 export function FieldTimeInQueue() {
   const [status, setStatus] = useState("pending");
-  const { data: rows, isLoading } = useRemoteCheckins(status);
+  // Server-paged. This queue polls every minute, so an unbounded read here was a full-table
+  // scan on a timer for as long as anyone had the attendance page open.
+  const table = useServerTable();
+  const { data, isLoading, isFetching } = useRemoteCheckins(status, table.params);
   const [reviewing, setReviewing] = useState<RemoteCheckin | null>(null);
 
-  const items = rows ?? [];
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const page = table.params.page;
 
   // Nothing pending and no filter applied = nothing worth taking up space for.
-  if (status === "pending" && !isLoading && items.length === 0) return null;
+  if (status === "pending" && !isLoading && total === 0) return null;
 
   return (
     <div className="rounded-card border border-border bg-card p-4 sm:p-6">
@@ -98,6 +104,39 @@ export function FieldTimeInQueue() {
               </span>
             </button>
           ))
+        )}
+
+        {/*
+          * A pager, because this list is one page now. The count is the server's tally, not the
+          * rows on screen — an "n waiting" that only counted the page would understate a backlog
+          * on the queue whose whole purpose is showing how big the backlog is.
+          */}
+        {total > table.pageSize && (
+          <div className="flex items-center justify-between gap-3 pt-1">
+            <span className="text-caption text-muted-foreground">
+              Showing {items.length} of {total}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || isFetching}
+                onClick={() => table.setPage(page - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={page * table.pageSize >= total || isFetching}
+                onClick={() => table.setPage(page + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
         )}
       </div>
 

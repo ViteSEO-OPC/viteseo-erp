@@ -74,7 +74,7 @@ class AutoOvertimeFlagTest extends HrTestCase
     /** @return list<array<string, mixed>> */
     private function review(): array
     {
-        return app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15');
+        return app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15');
     }
 
     // --- the gap item 7 closes -------------------------------------------------------------------

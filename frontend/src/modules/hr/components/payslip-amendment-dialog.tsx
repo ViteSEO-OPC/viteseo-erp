@@ -175,7 +175,12 @@ function AmendmentForm({
   onClose: () => void;
 }) {
   const today = new Date().toISOString().slice(0, 10);
-  const { data: runs = [] } = usePayrollRuns();
+  // A period picker, not a table: it needs the runs it can offer, most recent first. Bounded
+  // rather than unbounded — a hundred cycles is over four years of semi-monthly payroll, and
+  // amending one older than that is not something this dialog is for.
+  const { data: runPage } = usePayrollRuns({ page: 1, per_page: 100, status: "all" });
+  // Memoised: it feeds a useMemo below, and a fresh [] on every render would re-run it forever.
+  const runs = useMemo(() => runPage?.items ?? [], [runPage]);
   const amendMut = useAmendPayrollRun();
   const correctMut = useCorrectRunLine();
 

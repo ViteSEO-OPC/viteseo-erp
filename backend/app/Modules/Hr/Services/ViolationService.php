@@ -6,6 +6,7 @@ use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\LeaveRequest;
 use App\Modules\Hr\Models\Violation;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 
@@ -19,6 +20,12 @@ use Illuminate\Support\Carbon;
  */
 class ViolationService
 {
+    /** Employees per scan chunk — bounds both round-trips and the attendance held in memory. */
+    private const SCAN_CHUNK = 500;
+
+    /** Rows per bulk violation upsert; keeps the statement (and its placeholder count) sane. */
+    private const UPSERT_CHUNK = 500;
+
     public function __construct(
         private readonly ScheduleService $schedule,
         private readonly AttendancePolicyService $policy,
@@ -29,8 +36,23 @@ class ViolationService
     /**
      * @param  string|null  $month  'YYYY-MM' — restrict to that calendar month (Manila).
      */
-    public function list(?int $employeeId = null, ?string $month = null): Collection
+    /**
+     * One page of the flag history, unresolved first and newest within that.
+     *
+     * The employee and month narrowing happen in the QUERY, which matters more here than it
+     * looks: the record dialog offers a month/year picker, and filtering the rows already in
+     * hand would search whichever page the reader happened to be on.
+     *
+     * Unresolved-first is the priority rung expressed on a boolean rather than a status string,
+     * so it is written out here rather than borrowed from PagesQueues — a flag HR has actioned
+     * sinks below one still waiting, whatever their dates.
+     *
+     * @param  array<string, mixed>  $filters  page, per_page
+     */
+    public function list(?int $employeeId = null, ?string $month = null, array $filters = []): LengthAwarePaginator
     {
+        $perPage = min(100, max(1, (int) ($filters['per_page'] ?? 10)));
+
         return Violation::with('employee.user')
             ->when($employeeId, fn ($q) => $q->where('employee_id', $employeeId))
             ->when($month, function ($q) use ($month) {
@@ -39,7 +61,11 @@ class ViolationService
             })
             ->orderBy('resolved') // unresolved (0) first, then resolved (1)
             ->orderByDesc('work_date')
-            ->get();
+            // A unique tiebreaker. Several flags can share a work_date — a late and a long
+            // break on the same day — and a tied ORDER BY has no defined answer, so without
+            // this a row could appear on two pages or on neither.
+            ->orderByDesc('id')
+            ->paginate($perPage);
     }
 
     public function resolve(Violation $violation): Violation
@@ -98,8 +124,15 @@ class ViolationService
      * which is what lets violation history accumulate across months.
      *
      * @param  string|null  $month  'YYYY-MM' — the month to (re)compute; null = current.
+     * @param  int|null  $employeeId  Narrow the scan to ONE employee; null = the whole roster.
+     *                                Employees are independent here — every streak counter
+     *                                resets per employee and no rung reads another person's
+     *                                record — so a scoped run produces exactly the rows a full
+     *                                run would produce for that employee, and touches nobody
+     *                                else's. This is what lets a clock-in recompute its own
+     *                                flags without dragging the roster through a rescan.
      */
-    public function recompute(?string $month = null): void
+    public function recompute(?string $month = null, ?int $employeeId = null): void
     {
         $tz = config('app.timezone_local');
         $today = now($tz)->startOfDay();
@@ -142,6 +175,7 @@ class ViolationService
         foreach (
             Violation::where('type', 'late')->where('resolved', true)
                 ->whereDate('work_date', '<=', $scanEnd->toDateString())
+                ->when($employeeId, fn ($q) => $q->where('employee_id', $employeeId))
                 ->get(['employee_id', 'work_date']) as $rv
         ) {
             $resolvedLate["{$rv->employee_id}|" . $rv->work_date->toDateString()] = true;
@@ -174,17 +208,24 @@ class ViolationService
         $leaves = LeaveRequest::where('status', 'approved')
             ->whereDate('end_date', '>=', $monthStart->toDateString())
             ->whereDate('start_date', '<=', $scanEnd->toDateString())
+            ->when($employeeId, fn ($q) => $q->where('employee_id', $employeeId))
             ->get(['employee_id', 'start_date', 'end_date'])
             ->groupBy('employee_id');
 
+        // The day loop below asks for each date's rule overrides once per employee-per-day. One
+        // range read up front turns that whole month of lookups into a single query.
+        $this->schedule->warmDailyOverrides($monthStart, $scanEnd);
+
         $computed = [];
 
-        foreach (Employee::with('workSchedule')->get() as $emp) {
-            $rows = Attendance::where('employee_id', $emp->id)
-                ->whereBetween('work_date', [$monthStart->toDateString(), $scanEnd->toDateString()])
-                ->get()
-                ->keyBy(fn ($r) => $r->work_date->toDateString());
-
+        foreach ($this->rosterWithAttendance(
+            $monthStart->toDateString(),
+            $scanEnd->toDateString(),
+            // Only pay for the carry-over seed when the carry-over is actually on.
+            $carryOver ? $monthStart->copy()->subDay()->toDateString() : null,
+            $trackingStart,
+            $employeeId,
+        ) as [$emp, $rows, $priorLateDates]) {
             $lateStreak = 0;
             $absentStreak = 0;
             $monthlyLate = 0;
@@ -197,12 +238,13 @@ class ViolationService
             // recomputing one month in isolation still reconstructs the running total.
             $carryFloor = max(array_filter([$emp->hire_date?->toDateString(), $trackingStart]));
             if ($carryOver && $carryFloor && $carryFloor < $monthStart->toDateString()) {
-                $priorLates = Attendance::where('employee_id', $emp->id)
-                    ->where('status', 'late')
-                    ->whereBetween('work_date', [$carryFloor, $monthStart->copy()->subDay()->toDateString()])
-                    ->pluck('work_date');
-                foreach ($priorLates as $wd) {
-                    $wdStr = $wd->toDateString();
+                foreach ($priorLateDates as $wdStr) {
+                    // The chunk's query used the earliest floor in the chunk, so trim to THIS
+                    // employee's own — anything earlier predates their hire or the tracking start.
+                    if ($wdStr < $carryFloor) {
+                        continue;
+                    }
+
                     // A stray 'late' row inside an exempt period is not a tardiness — the same
                     // rule the day loop applies, so the seed and the scan agree.
                     if ($emp->managementExemptOn($wdStr, $managementAuto)) {
@@ -376,7 +418,7 @@ class ViolationService
             }
         }
 
-        $this->sync($computed, $monthStart->toDateString(), $monthEnd->toDateString());
+        $this->sync($computed, $monthStart->toDateString(), $monthEnd->toDateString(), $employeeId);
     }
 
     /**
@@ -398,6 +440,33 @@ class ViolationService
 
         while ($month->lte($current)) {
             $this->recompute($month->format('Y-m'));
+            $month->addMonth();
+        }
+    }
+
+    /**
+     * Recompute every month a date range touches. Streak logic is per-month and self-contained,
+     * so a range that spans a boundary needs each of its months rebuilt — recomputing only the
+     * month the range STARTS in leaves the tail asserting the old answer.
+     *
+     * The caller passes the dates of the thing that changed (a leave's span, a suspension's
+     * span, a holiday's date), not a guess at "this month": approving a leave for last week
+     * after the month turned must move LAST month's flags, and the read path is no longer
+     * there to paper over it.
+     */
+    public function recomputeRange(string $from, string $to, ?int $employeeId = null): void
+    {
+        $tz = config('app.timezone_local');
+        $month = Carbon::parse($from, $tz)->startOfMonth();
+        $last = Carbon::parse($to, $tz)->startOfMonth();
+
+        // Guard a reversed range rather than looping forever on it.
+        if ($month->gt($last)) {
+            return;
+        }
+
+        while ($month->lte($last)) {
+            $this->recompute($month->format('Y-m'), $employeeId);
             $month->addMonth();
         }
     }
@@ -447,6 +516,116 @@ class ViolationService
     }
 
     /** @return array{employee_id:int, type:string, severity:string, work_date:string, details:string} */
+    /**
+     * The roster paired with its attendance for the scan window, walked in CHUNKS.
+     *
+     * Replaces one attendance query PER EMPLOYEE — which made a recompute O(headcount) in
+     * round-trips, and it runs on every read of the attendance board. Chunking rather than one
+     * big prefetch is deliberate: fetching every employee and every attendance row for the month
+     * in one go would trade those round-trips for an O(headcount × days) memory footprint, which
+     * is the worse failure at scale. Each chunk costs exactly two queries regardless of size.
+     *
+     * Keyed by RANGE, not per employee: a per-employee memo looks fine in isolation and still
+     * degrades to one query each in a full-roster run.
+     *
+     * Employees are independent here — every streak counter resets at the top of the loop — so
+     * the chunk boundary cannot affect the result.
+     *
+     * @return \Generator<int, array{0: Employee, 1: \Illuminate\Support\Collection<string, Attendance>}>
+     */
+    private function rosterWithAttendance(
+        string $from,
+        string $to,
+        ?string $priorLatesUntil = null,
+        ?string $trackingStart = null,
+        ?int $employeeId = null,
+    ): \Generator {
+        $lastId = 0;
+
+        while (true) {
+            $chunk = Employee::with('workSchedule')
+                ->where('id', '>', $lastId)
+                ->when($employeeId, fn ($q) => $q->whereKey($employeeId))
+                ->orderBy('id')
+                ->limit(self::SCAN_CHUNK)
+                ->get();
+
+            if ($chunk->isEmpty()) {
+                return;
+            }
+
+            $lastId = $chunk->last()->id;
+
+            $attendance = Attendance::whereIn('employee_id', $chunk->modelKeys())
+                ->whereBetween('work_date', [$from, $to])
+                ->get()
+                ->groupBy('employee_id');
+
+            yield from $this->pairWithAttendance(
+                $chunk,
+                $attendance,
+                $this->priorLateDates($chunk, $priorLatesUntil, $trackingStart),
+            );
+        }
+    }
+
+    /**
+     * Dates each employee in the chunk was late BEFORE the scanned month — the carry-over seed,
+     * in one query for the chunk instead of one per employee.
+     *
+     * Only fetched when the caller asks (carry-over is off by default, and then this costs
+     * nothing). The lower bound is the EARLIEST floor anyone in the chunk has; each employee's
+     * own floor is applied by the caller, so one query covers every individual window without
+     * dragging in history that predates the org's tracking start.
+     *
+     * Read through `toBase()`: this needs two columns to count with, not hydrated models, and a
+     * long-tenured roster's whole late history is a lot of objects to build and throw away.
+     *
+     * @param  \Illuminate\Database\Eloquent\Collection<int, Employee>  $chunk
+     * @return array<int, list<string>>
+     */
+    private function priorLateDates($chunk, ?string $until, ?string $trackingStart): array
+    {
+        if ($until === null) {
+            return [];
+        }
+
+        $floor = max(array_filter([
+            $chunk->min(fn (Employee $e) => $e->hire_date?->toDateString()),
+            $trackingStart,
+        ]));
+
+        $rows = Attendance::where('status', 'late')
+            ->whereIn('employee_id', $chunk->modelKeys())
+            ->where('work_date', '<=', $until)
+            ->when($floor, fn ($q) => $q->where('work_date', '>=', $floor))
+            ->toBase()
+            ->get(['employee_id', 'work_date']);
+
+        $dates = [];
+        foreach ($rows as $row) {
+            $dates[(int) $row->employee_id][] = substr((string) $row->work_date, 0, 10);
+        }
+
+        return $dates;
+    }
+
+    /**
+     * @param  \Illuminate\Database\Eloquent\Collection<int, Employee>  $chunk
+     * @param  array<int, list<string>>  $priorLates
+     */
+    private function pairWithAttendance($chunk, $attendance, array $priorLates): \Generator
+    {
+        foreach ($chunk as $emp) {
+            yield [
+                $emp,
+                ($attendance[$emp->id] ?? collect())
+                    ->keyBy(fn (Attendance $r) => $r->work_date->toDateString()),
+                $priorLates[$emp->id] ?? [],
+            ];
+        }
+    }
+
     private function incident(int $employeeId, string $type, string $severity, string $date, string $details): array
     {
         return compact('type', 'severity', 'details') + [
@@ -478,27 +657,42 @@ class ViolationService
      * cleanup is scoped to [$monthStart, $monthEnd] so recomputing one month never
      * deletes another month's history.
      *
+     * When $employeeId is set the sweep narrows to that person as well: a scoped scan only
+     * produced their incidents, so without the narrowing it would read every OTHER employee's
+     * flags for the month as "no longer produced" and withdraw the lot.
+     *
      * @param  array<int, array<string, mixed>>  $computed
      */
-    private function sync(array $computed, string $monthStart, string $monthEnd): void
+    private function sync(array $computed, string $monthStart, string $monthEnd, ?int $employeeId = null): void
     {
+        // Keyed as a SET, not a list: the survivor check below runs once per existing flag, and
+        // `in_array` over a list made that O(computed × existing) — quadratic on the two numbers
+        // that both grow with headcount.
         $keys = [];
         foreach ($computed as $c) {
-            Violation::updateOrCreate(
-                ['employee_id' => $c['employee_id'], 'type' => $c['type'], 'work_date' => $c['work_date']],
-                ['severity' => $c['severity'], 'details' => $c['details']],
-            );
-            $keys[] = "{$c['employee_id']}|{$c['type']}|{$c['work_date']}";
+            $keys["{$c['employee_id']}|{$c['type']}|{$c['work_date']}"] = true;
         }
 
-        Violation::where('resolved', false)
+        // One statement per batch instead of a SELECT + INSERT/UPDATE per incident. The unique
+        // index (employee_id, type, work_date) is the same constraint updateOrCreate matched on,
+        // and only severity/details are overwritten — so `resolved` survives a recompute exactly
+        // as it did before, which is what keeps an HR resolution from being undone.
+        foreach (array_chunk($computed, self::UPSERT_CHUNK) as $batch) {
+            Violation::upsert($batch, ['employee_id', 'type', 'work_date'], ['severity', 'details']);
+        }
+
+        // Flags the scan no longer produces are withdrawn in ONE statement rather than one
+        // delete per row. Violation has no observers, so nothing depended on the per-model
+        // delete events.
+        $stale = Violation::where('resolved', false)
             ->whereBetween('work_date', [$monthStart, $monthEnd])
-            ->get()
-            ->each(function (Violation $v) use ($keys) {
-                $key = "{$v->employee_id}|{$v->type}|" . $v->work_date->toDateString();
-                if (! in_array($key, $keys, true)) {
-                    $v->delete();
-                }
-            });
+            ->when($employeeId, fn ($q) => $q->where('employee_id', $employeeId))
+            ->get(['id', 'employee_id', 'type', 'work_date'])
+            ->reject(fn (Violation $v) => isset($keys["{$v->employee_id}|{$v->type}|" . $v->work_date->toDateString()]))
+            ->pluck('id');
+
+        if ($stale->isNotEmpty()) {
+            Violation::whereIn('id', $stale)->delete();
+        }
     }
 }

@@ -19,9 +19,25 @@ class DepartmentService
     {
         // High per-page so the employee-create dropdown gets the full list on
         // page 1, while still returning the paginated envelope (meta/links).
-        // Eager-load head + positions + members so the resource never lazy-loads
-        // per row (the modal needs each department's role assignments).
-        return Department::with(['head.user', 'positions', 'employees.user'])
+        //
+        // The departments themselves are bounded — a company has tens, not thousands — but the
+        // EAGER LOAD was not. `employees.user` pulled every employee in every department, with
+        // their user record, so a list of departments carried the entire company behind it and
+        // grew with headcount rather than with department count.
+        //
+        // DepartmentResource reads exactly one thing from that relation: the employees who hold
+        // a role, and only their id, name and role. So that is what it loads now — constrained
+        // by the same `filled()` rule the resource applies, and down to four columns plus the
+        // name. A department of four hundred with three role-holders now costs three rows.
+        return Department::with([
+            'head.user',
+            'positions',
+            'employees' => fn ($q) => $q
+                ->whereNotNull('employee_role')
+                ->where('employee_role', '!=', '')
+                ->select(['id', 'department_id', 'user_id', 'employee_role'])
+                ->with('user:id,name'),
+        ])
             ->orderBy('name')
             ->paginate(100);
     }

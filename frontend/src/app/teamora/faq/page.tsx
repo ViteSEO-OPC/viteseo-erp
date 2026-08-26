@@ -7,13 +7,17 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { StatusFilter, type StatusFilterOption } from "@/core/components/status-filter";
+import { useDebouncedValue } from "@/core/use-debounced-value";
 import { useFaqs, useViewFaq } from "@/modules/hr/hooks/use-faqs";
 import { FAQ_CATEGORIES, faqCategoryLabel, type Faq } from "@/modules/hr/types/faq";
 
 export default function FaqPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
-  const { data: faqs, isLoading } = useFaqs(search.trim() || undefined);
+  // The search runs SERVER-side, so an undebounced box is one request per keystroke —
+  // typing "leave" fired five. The input still binds the raw value, so it stays responsive.
+  const debouncedSearch = useDebouncedValue(search.trim(), 250);
+  const { data: faqs, isLoading } = useFaqs(debouncedSearch || undefined);
   const viewMut = useViewFaq();
 
   const [openId, setOpenId] = useState<number | null>(null);

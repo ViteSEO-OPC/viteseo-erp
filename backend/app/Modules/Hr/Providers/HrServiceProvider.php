@@ -3,6 +3,7 @@
 namespace App\Modules\Hr\Providers;
 
 use App\Modules\Hr\Console\Commands\GenerateManagementAttendance;
+use App\Modules\Hr\Console\Commands\RecomputeViolations;
 use App\Modules\Hr\Console\Commands\RunLeaveAccrual;
 use App\Modules\Hr\Services\AuditService;
 use Illuminate\Auth\Events\Login;
@@ -29,7 +30,11 @@ class HrServiceProvider extends ServiceProvider
         // Module console commands + their schedule live here rather than in the shared
         // routes/console.php, so HR owns its own jobs.
         if ($this->app->runningInConsole()) {
-            $this->commands([GenerateManagementAttendance::class, RunLeaveAccrual::class]);
+            $this->commands([
+                GenerateManagementAttendance::class,
+                RecomputeViolations::class,
+                RunLeaveAccrual::class,
+            ]);
 
             // Management is exempt from the time clock, so the platform writes their
             // rows instead — late enough in the Manila day that the shift is over.
@@ -37,6 +42,18 @@ class HrServiceProvider extends ServiceProvider
             // NOTE: needs `php artisan schedule:run` on a system cron to fire.
             Schedule::command(GenerateManagementAttendance::class)
                 ->dailyAt('23:55')
+                ->timezone(config('app.timezone_local'))
+                ->withoutOverlapping()
+                ->onOneServer();
+
+            // Item 11 — violations are maintained by the writes that change them, except for
+            // the one input no write can announce: the day ending, which is what turns a
+            // missed shift into an absence. This is that trigger, just after Manila midnight
+            // and after the 23:55 management run has written its rows. It rebuilds the day
+            // that just closed and the current month, so it also self-heals anything a write
+            // path missed rather than leaving it stale until someone notices.
+            Schedule::command(RecomputeViolations::class)
+                ->dailyAt('00:20')
                 ->timezone(config('app.timezone_local'))
                 ->withoutOverlapping()
                 ->onOneServer();

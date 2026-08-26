@@ -34,9 +34,25 @@ class PaymentBatchController extends Controller
                 fn ($q, $runId) => $q->where('payroll_run_id', $runId),
             )
             ->latest('id')
-            ->paginate(20);
+            // Bounded both ways. The screen used to read page one of this and show it as the
+            // whole list, so a run with more than twenty batches simply hid the rest.
+            ->paginate(min(100, max(1, $request->integer('per_page') ?: 20)));
 
         return PaymentBatchResource::collection($batches)->response();
+    }
+
+    /**
+     * GET /hr/payment-batches/summary — what the run has been paid across EVERY batch.
+     *
+     * Its own figure rather than a sum of the rows on screen: the list is paged, and an
+     * outstanding balance worked out from one page of the payments is simply wrong. See
+     * PaymentService::paidTotals().
+     */
+    public function summary(Request $request, PaymentService $payments): JsonResponse
+    {
+        return response()->json([
+            'data' => $payments->paidTotals($request->integer('payroll_run_id') ?: null),
+        ]);
     }
 
     /** GET /api/v1/hr/payment-batches/{paymentBatch} — the batch with every transfer in it. */

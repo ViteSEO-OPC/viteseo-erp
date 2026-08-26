@@ -54,6 +54,48 @@ function autoSearchText(row: unknown): string {
 }
 
 /**
+ * What the table needs from the caller to hand paging, searching and filtering to the SERVER.
+ *
+ * Without this the table does all three in the browser, which is correct only while the caller
+ * can hold every row in memory. It cannot, past a certain size: the browser filters the rows it
+ * was given, so a search over a page-one slice of a 40-page log reports "No matches" for a
+ * record that plainly exists, and the footer counts the slice rather than the data.
+ *
+ * In server mode the table stops deciding WHICH rows to show and only says what the reader
+ * asked for. It still owns the controls — the box, the pills, the pager — so the interaction is
+ * identical from the reader's side; `rows` is simply expected to be the page already chosen.
+ */
+export interface ServerTable {
+  /** Rows matching the current search and filter ACROSS ALL PAGES. Drives the footer and pager. */
+  total: number;
+  /**
+   * Which page is on screen — CONTROLLED, so the caller can move it. That matters because
+   * filters live outside the table too (a date range, a department select), and narrowing one
+   * while the reader sits on page 7 of a result that now has two would strand them on an empty
+   * table. Owning the number means the caller resets it in the same handler that changes the
+   * filter, where the reason is visible.
+   */
+  page: number;
+  /**
+   * The reader changed something — a keystroke, a status pill, a pager arrow. Always carries
+   * the complete new state, so a caller can keep one object rather than three.
+   *
+   * Fires on every keystroke, so DEBOUNCE `query` before it reaches the request — see
+   * `useDebouncedValue`. `page` is already 1 whenever the search or the status changed.
+   */
+  onParamsChange: (params: { page: number; query: string; status: string }) => void;
+  /**
+   * Status pills. Required in server mode when a filter is wanted: the options cannot be
+   * derived from the rows the way client mode derives them, because the rows are one page —
+   * the vocabulary would change as the reader pages, and a status absent from page 1 would
+   * have no pill at all.
+   */
+  statusOptions?: StatusFilterOption[];
+  /** A fetch is in flight. Dims the rows and disables the pager rather than flashing empty. */
+  loading?: boolean;
+}
+
+/**
  * Styled list table per the Style Guide: uppercase gray column headers (13px),
  * rows with a bold title + gray subtitle pattern (see PrimaryCell), right-aligned
  * action columns, wrapped in a white 21px card. Supports client-side pagination
@@ -80,6 +122,7 @@ export function DataTable<T>({
   searchPlaceholder = "Search…",
   filterable = true,
   toolbar,
+  server,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -120,16 +163,45 @@ export function DataTable<T>({
   filterable?: boolean;
   /** Controls rendered next to the search box; overrides the auto status filter. */
   toolbar?: React.ReactNode;
+  /**
+   * Hand paging, searching and filtering to the server. Omit for the client-side behaviour
+   * every existing caller has — this prop is purely additive and changes nothing when absent.
+   * See {@link ServerTable}.
+   */
+  server?: ServerTable;
 }) {
-  const [page, setPage] = useState(1);
+  const [clientPage, setClientPage] = useState(1);
   const [query, setQuery] = useState("");
   const [statusValue, setStatusValue] = useState("all");
 
+  // The table owns the search box and the status pills in both modes — only who ACTS on them
+  // differs. The page number is the exception: in server mode the caller holds it, so a filter
+  // living outside the table can reset it. See ServerTable.page.
+  const page = server ? server.page : clientPage;
+
+  /** Apply a control change and, in server mode, hand the caller the full new state. */
+  function applyParams(next: Partial<{ page: number; query: string; status: string }>) {
+    const p = { page, query, status: statusValue, ...next };
+    setQuery(p.query);
+    setStatusValue(p.status);
+    if (server) {
+      server.onParamsChange(p);
+    } else {
+      setClientPage(p.page);
+    }
+  }
+
   // Auto status filter: only when enabled, no explicit toolbar, and rows carry a
   // string `status`. Options are the distinct statuses in first-seen order.
+  //
+  // In server mode the caller supplies them instead — see ServerTable.statusOptions for why
+  // they cannot be derived from a single page of rows.
   const autoStatus = filterable && !toolbar;
+  const serverStatusOptions = server?.statusOptions;
   const autoStatusOptions = useMemo<StatusFilterOption[]>(() => {
     if (!autoStatus) return [];
+    if (serverStatusOptions) return serverStatusOptions;
+    if (server) return [];
     const seen = new Set<string>();
     const opts: StatusFilterOption[] = [{ value: "all", label: "All" }];
     for (const row of rows) {
@@ -140,13 +212,20 @@ export function DataTable<T>({
       }
     }
     return opts.length > 1 ? opts : [];
-  }, [autoStatus, rows]);
+  }, [autoStatus, rows, server, serverStatusOptions]);
   const showStatusFilter = autoStatusOptions.length > 1;
 
+  // Everything from here to `orderedRows` is the CLIENT-side pipeline. In server mode the rows
+  // handed in are already the chosen page — filtered, searched and sliced by the database — so
+  // each stage passes them straight through. Re-running any of them here would narrow a page to
+  // the subset that happens to match within it, which is precisely the bug server mode exists
+  // to remove.
+  const serverMode = !!server;
+
   const statusFilteredRows = useMemo(() => {
-    if (!showStatusFilter || statusValue === "all") return rows;
+    if (serverMode || !showStatusFilter || statusValue === "all") return rows;
     return rows.filter((row) => rowStatus(row) === statusValue);
-  }, [rows, showStatusFilter, statusValue]);
+  }, [rows, serverMode, showStatusFilter, statusValue]);
 
   // Text search: explicit getSearchText, else every visible field (autoSearchText).
   const searchText = useMemo(
@@ -155,33 +234,51 @@ export function DataTable<T>({
   );
   const searchedRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!searchText || !q) return statusFilteredRows;
+    if (serverMode || !searchText || !q) return statusFilteredRows;
     return statusFilteredRows.filter((row) => searchText(row).toLowerCase().includes(q));
-  }, [statusFilteredRows, searchText, query]);
+  }, [statusFilteredRows, serverMode, searchText, query]);
 
   // Float rows that still need action to the top (stable partition).
+  // Not applied in server mode: floating within a page reorders only the rows that happened to
+  // land on it, so the same record moves as the reader pages. Ordering is the query's job there
+  // — a server-mode caller wanting this sorts by it in the request.
   const orderedRows = useMemo(() => {
-    if (!needsAction) return searchedRows;
+    if (serverMode || !needsAction) return searchedRows;
     const need: T[] = [];
     const rest: T[] = [];
     for (const row of searchedRows) (needsAction(row) ? need : rest).push(row);
     return need.length && rest.length ? [...need, ...rest] : searchedRows;
-  }, [searchedRows, needsAction]);
+  }, [searchedRows, serverMode, needsAction]);
 
-  const totalRows = orderedRows.length;
+  // The count the footer speaks for. In server mode that is the whole matching set, not the
+  // rows in hand — saying "1–10 of 10" over page 3 of 40 is the silent-truncation bug in its
+  // most confident form.
+  const totalRows = serverMode ? server.total : orderedRows.length;
   const usePaging = pageSize > 0 && totalRows > pageSize;
 
   const { pageRows, totalPages } = useMemo(() => {
+    if (serverMode) {
+      return {
+        pageRows: rows,
+        totalPages: pageSize > 0 ? Math.max(1, Math.ceil(totalRows / pageSize)) : 1,
+      };
+    }
     if (!usePaging) return { pageRows: orderedRows, totalPages: 1 };
     const tp = Math.max(1, Math.ceil(totalRows / pageSize));
     const start = (Math.min(page, tp) - 1) * pageSize;
     return { pageRows: orderedRows.slice(start, start + pageSize), totalPages: tp };
-  }, [orderedRows, usePaging, page, pageSize, totalRows]);
+  }, [orderedRows, rows, serverMode, usePaging, page, pageSize, totalRows]);
 
   // Clamp page if rows shrink below current page.
-  if (usePaging && page > totalPages && totalPages > 0) {
-    setPage(totalPages);
+  if (!serverMode && usePaging && page > totalPages && totalPages > 0) {
+    setClientPage(totalPages);
   }
+
+  // What the pager SHOWS and steps from. In server mode the page is the caller's, and the data
+  // can shrink under a reader who is deep in it — another user deletes records, a background
+  // refetch narrows the set. Clamping the display (rather than correcting the caller's state)
+  // keeps the arrows pointing somewhere real without writing to anyone during a render.
+  const shownPage = Math.min(Math.max(1, page), Math.max(1, totalPages));
 
   return (
     <div
@@ -209,7 +306,7 @@ export function DataTable<T>({
               <input
                 type="search"
                 value={query}
-                onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+                onChange={(e) => applyParams({ query: e.target.value, page: 1 })}
                 placeholder={searchPlaceholder}
                 className="h-8 w-full rounded-lg border border-input bg-transparent pl-8 pr-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
               />
@@ -223,13 +320,20 @@ export function DataTable<T>({
             <StatusFilter
               options={autoStatusOptions}
               value={statusValue}
-              onChange={(v) => { setStatusValue(v); setPage(1); }}
+              onChange={(v) => applyParams({ status: v, page: 1 })}
             />
           ) : null}
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      <div
+        className={cn(
+          "overflow-x-auto transition-opacity",
+          // Dimmed rather than emptied: a page swap replaces every row, and blanking the table
+          // for the round trip makes a two-page hop read as "the records are gone".
+          server?.loading && "pointer-events-none opacity-60",
+        )}
+      >
         <table className="w-full border-collapse text-left">
           <thead>
             <tr className="border-b border-border">
@@ -290,26 +394,27 @@ export function DataTable<T>({
       {usePaging && (
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
           <div className="text-caption text-muted-foreground">
-            Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalRows)} of {totalRows}
+            Showing {totalRows === 0 ? 0 : (shownPage - 1) * pageSize + 1}–
+            {Math.min(shownPage * pageSize, totalRows)} of {totalRows}
           </div>
 
           <div className="flex items-center gap-1">
             <button
               type="button"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={shownPage <= 1 || server?.loading}
+              onClick={() => applyParams({ page: Math.max(1, shownPage - 1) })}
               className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Previous page"
             >
               <ChevronLeft className="size-4" />
             </button>
             <span className="px-2 text-caption text-foreground">
-              Page {page} of {totalPages}
+              Page {shownPage} of {totalPages}
             </span>
             <button
               type="button"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={shownPage >= totalPages || server?.loading}
+              onClick={() => applyParams({ page: Math.min(totalPages, shownPage + 1) })}
               className="inline-flex size-7 items-center justify-center rounded-md border border-input bg-card text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Next page"
             >

@@ -28,6 +28,41 @@ class DailyOverrideService
         return $this->cached($date);
     }
 
+    /**
+     * Warm the memo for a whole date RANGE in one query.
+     *
+     * The memo below already collapses repeat reads of the SAME date, but a scan that walks a
+     * month still pays one query per distinct day — the violation recompute walks ~30 days and
+     * spent ~25 queries here just answering "no override that day". Dates with no row are cached
+     * as null too, so the misses stop costing anything as well.
+     *
+     * Callers that walk a range should warm it first; everything else keeps working unchanged,
+     * because `cached()` still falls back to a single-date lookup on a miss.
+     */
+    public function warmRange(Carbon|string $from, Carbon|string $to): void
+    {
+        $start = Carbon::parse($this->key($from));
+        $end = Carbon::parse($this->key($to));
+
+        if ($start->gt($end)) {
+            return;
+        }
+
+        $found = DailyOverride::whereBetween('date', [$start->toDateString(), $end->toDateString()])
+            ->get()
+            ->keyBy(fn (DailyOverride $o) => $this->key($o->date));
+
+        for ($d = $start->copy(); $d->lte($end); $d->addDay()) {
+            $key = $d->toDateString();
+
+            // Never overwrite an entry already in the memo: a write during this request cleared
+            // it deliberately, and re-seeding from a stale read would undo that.
+            if (! array_key_exists($key, $this->cache)) {
+                $this->cache[$key] = $found->get($key);
+            }
+        }
+    }
+
     /** Get the grace_minutes override for a date, or null if none set. */
     public function graceForDate(Carbon|string $date): ?int
     {
