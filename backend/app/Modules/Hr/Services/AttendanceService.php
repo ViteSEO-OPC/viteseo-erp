@@ -3256,6 +3256,14 @@ class AttendanceService
                     $eoFrac = min(1.0, $eoFrac);
                 }
                 $unpaid += $eoFrac;
+                // Recorded in the ledger as well as in the total, exactly as the two half-day
+                // branches above do. Without the line, the early-out's money sits in
+                // `absence_deduction` with no days behind it, and deductionRows() apportions it
+                // out across the kinds that DO have days — inflating every other charge row on
+                // the payslip (a one-day Holiday Forfeited printing above the daily rate).
+                if ($eoFrac > 0) {
+                    $charge($dateStr, 'early_out', $eoFrac, 'Approved early-out');
+                }
 
                 if ($deductionsActive) {
                     $ded = $this->deduction->forDay(
