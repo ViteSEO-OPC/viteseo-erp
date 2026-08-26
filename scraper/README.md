@@ -39,11 +39,59 @@ business logic. The ingest payload physically cannot carry those fields.
                    Nearby Clients UI
 ```
 
-- `scraper/providers/` — `DiscoveryProvider` ABC + `OpenStreetMapProvider`; `get_provider()` selects
-  the provider from config. Nothing else in the codebase knows which provider is active.
+- `scraper/providers/` — `DiscoveryProvider` ABC + `OpenStreetMapProvider` + `OpenAiDiscoveryProvider`;
+  `get_provider()` selects the provider from config. Nothing else in the codebase knows which
+  provider is active.
+- `scraper/providers/osm_resolver.py` — proves a PROPOSED business name is a real OSM business. The
+  trust boundary for AI-assisted discovery.
+- `scraper/run_metrics.py` — per-run funnel telemetry, so providers can be compared on evidence.
 - `scraper/normalizer.py` — `RawBusiness` → `NormalizedBusiness` (incl. website detection).
 - `scraper/ingest.py` — the only channel into the CRM (the enrichment ingest endpoint).
 - `scraper/cli.py` — `python -m scraper discover ...`.
+
+## Discovery providers
+
+| Provider | Selector | Needs a key | What it does |
+|---|---|---|---|
+| **OpenStreetMap** (default) | `--provider osm` | no | Overpass tag search over 19 `CATEGORY_SELECTORS`. The safe baseline and the fallback. |
+| **OpenAI-assisted** | `--provider openai` | `CRM_TOKEN` only | The CRM holds the OpenAI key and makes the call; this tool asks it for candidate names, then OSM deterministically RESOLVES them. |
+
+**The provider is chosen in the CRM.** Settings -> Integrations -> Nearby Lead Generation (Admin /
+Super Admin only) selects it; the scraper obeys the CRM's EFFECTIVE provider, so "OpenAI selected but
+no key" already arrives resolved to OpenStreetMap with a reason. Precedence is
+`--provider` -> CRM setting -> `DISCOVERY_PROVIDER` -> `openstreetmap`, and an unreachable CRM falls
+back to the local configuration rather than stopping discovery.
+
+**A failed provider call is never reported as an empty result.** A rejected credential and a town
+with no matching businesses both yield zero candidates; the run metrics carry
+`provider_execution_status` and `error_reason` so the two can be told apart, and a failed execution
+exits non-zero instead of logging a quiet "nothing discovered".
+
+**The AI never becomes authoritative.** It proposes names and nothing else. `provider_id`,
+coordinates, phone, email and website all come from the resolved OSM element, so dedup and
+idempotency are unchanged and a hallucinated business cannot become a CRM prospect — a proposal OSM
+cannot confirm is dropped.
+
+**What it adds, and what it cannot.** Name lookup is deliberately NOT category-filtered, so it finds
+businesses OSM holds under a tag our selectors miss (a pharmacy mapped `shop=chemist`). A business
+absent from OSM entirely is still unreachable — that is Capability B (identity proven by the
+business's own website or Wikidata), designed but not built.
+
+### Comparing providers — always before importing
+
+```bash
+# Runs BOTH providers over the same target, contacts the CRM for NOTHING, and diffs the candidates:
+.venv/bin/python -m scraper compare --area "Makati City, Philippines" --category pharmacy --limit 20
+```
+
+Compare here, not on imported leads. The CRM dedups on `place_id`, so whichever provider commits
+first claims the businesses and the second is credited with nothing but duplicates — that measures
+run order, not provider quality. `compare` reads both candidate sets before either one writes.
+
+Every run (including `--print-only` and `compare`) appends a line to `.discovery-metrics.jsonl`:
+proposed, resolved, resolution rate, unmatched, ambiguous, website-discovery rate, the CRM's own
+ingest summary, duration, and token usage. Downstream outcomes — qualification and deals — are
+already answerable in the CRM by cohorting on `leads.source`.
 
 ## Setup
 

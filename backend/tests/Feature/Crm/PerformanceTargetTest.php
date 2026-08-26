@@ -3,6 +3,7 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
+use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Enums\PerformanceTargetMetric;
 use App\Modules\Crm\Enums\PerformanceTargetPeriod;
 use App\Modules\Crm\Jobs\RecomputeLeadScoresJob;
@@ -239,7 +240,9 @@ class PerformanceTargetTest extends TestCase
 
     public function test_an_inactive_bd_is_rejected(): void
     {
-        $inactive = $this->user('crm_bd', ['status' => 'inactive']);
+        // CRM suspension now lives in `crm_user_access`, not the shared `users.status` column.
+        $inactive = $this->user('crm_bd');
+        app(CrmAccessService::class)->suspend($inactive);
         Sanctum::actingAs($this->user('super_admin'));
 
         $this->postJson(self::URL, $this->payload($inactive))->assertStatus(422);

@@ -30,12 +30,16 @@ export type NearbyFilters = {
   status: string; // "" = all
   /** Derived prospecting priority label ("High" | "Medium" | "Low"); "" = all. */
   priority: string;
+  /** Discovery lane label ("OpenStreetMap" | "AI-assisted"); "" = all sources. */
+  foundBy: string;
 };
 
 /** Radius options (km), measured from the selected origin. */
 export const RADIUS_OPTIONS = [5, 10, 25, 50] as const;
 
-const INITIAL: NearbyFilters = { search: "", radiusKm: 10, niche: "", status: "", priority: "" };
+// `foundBy: ""` is what makes the default board identical to before this filter existed: an empty
+// value skips the predicate entirely rather than selecting a lane.
+const INITIAL: NearbyFilters = { search: "", radiusKm: 10, niche: "", status: "", priority: "", foundBy: "" };
 
 export type GeolocationStatus = "idle" | "locating" | "granted" | "denied" | "unavailable";
 
@@ -81,6 +85,10 @@ export function useNearbyClients() {
       // present to understand the axis and to keep the control stable as discovery adds records.
       // Deriving it from the data made the dropdown's shape depend on discovery timing.
       priorities: [...PRIORITY_ORDER],
+      // Closed set, always offered in full — for the same reason priorities are. A BD whose pool
+      // happens to hold no AI-found businesses still needs the option present to learn the axis
+      // exists, and the control must not change shape as discovery runs.
+      foundBy: [...FOUND_BY_ORDER],
     }),
     [all],
   );
@@ -93,10 +101,11 @@ export function useNearbyClients() {
       .filter((c) => (filters.niche ? c.niche === filters.niche : true))
       .filter((c) => (filters.status ? c.status === filters.status : true))
       .filter((c) => (filters.priority ? formatPriority(c.priority) === filters.priority : true))
+      .filter((c) => (filters.foundBy ? formatFoundBy(c.foundBy) === filters.foundBy : true))
       .filter((c) =>
         q ? c.business.toLowerCase().includes(q) || c.contact.toLowerCase().includes(q) : true,
       );
-  }, [all, filters.search, filters.niche, filters.status, filters.priority]);
+  }, [all, filters.search, filters.niche, filters.status, filters.priority, filters.foundBy]);
 
   // Final result set (list + map).
   //  - With an origin: businesses within `radiusKm` of that origin, nearest first.
@@ -198,6 +207,15 @@ const PRIORITY_ORDER = ["High", "Medium", "Low"] as const;
 /** Readable label for the derived prospecting priority ("high" → "High"). */
 function formatPriority(priority: string): string {
   return priority.charAt(0).toUpperCase() + priority.slice(1);
+}
+
+// Discovery lanes, baseline first. Like PRIORITY_ORDER this is a CLOSED vocabulary the server
+// decides, not a set derived from whatever the pool currently contains.
+const FOUND_BY_ORDER = ["OpenStreetMap", "AI-assisted"] as const;
+
+/** Readable label for a discovery lane ("openstreetmap" → "OpenStreetMap"). */
+function formatFoundBy(foundBy: string): string {
+  return foundBy === "ai-assisted" ? "AI-assisted" : "OpenStreetMap";
 }
 
 function distinct(values: (string | null)[]): string[] {

@@ -4,10 +4,14 @@ export type TeamUserStatus = "active" | "inactive";
 export type TeamUser = {
   id: string;
   name: string;
+  /** Shared avatar source (signed link from `users.avatar`); null → render initials. */
+  avatarUrl: string | null;
   email: string;
   /** Primary role slug (e.g. "crm_bd"), or null. */
   role: string | null;
   status: TeamUserStatus;
+  /** Leads currently assigned to them — drives "Reassign all leads (N)". Absent outside the list. */
+  leadCount: number | null;
   lastLoginAt: string | null;
   createdAt: string | null;
 };
@@ -39,7 +43,6 @@ export type CreateUserPayload = {
   email: string;
   role: string;
   name?: string;
-  status?: TeamUserStatus;
   /** Optional admin-supplied temp password; server generates one when omitted. New accounts only. */
   password?: string;
 };

@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Modules\Crm\Requests\StoreWebsiteEnrichmentRequest;
 use App\Modules\Crm\Resources\WebsiteEnrichmentResource;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\Website\LlmIdentityAdjudicator;
 use App\Modules\Crm\Services\WebsiteIdentityVerifier;
 use App\Modules\Crm\Services\WebsiteStatusDeriver;
 use Illuminate\Http\JsonResponse;
@@ -55,6 +56,7 @@ class WebsiteEnrichmentController extends Controller
         Lead $lead,
         WebsiteStatusDeriver $deriver,
         WebsiteIdentityVerifier $verifier,
+        LlmIdentityAdjudicator $adjudicator,
     ): JsonResponse {
         $data = $request->validated();
         $now = now();
@@ -65,13 +67,24 @@ class WebsiteEnrichmentController extends Controller
         // rather than an invisible enum flip.
         $verdict = $verifier->verify($lead, $data);
 
+        // Optional ADVISORY second opinion, for the ambiguous band only — one strong signal that
+        // nothing corroborated, which the lexical verifier must leave unconfirmed but a reader often
+        // would not. It is deliberately NOT allowed to change the verdict: `$verdict` is never
+        // reassigned, so `identity_verified`, `identity_confidence`, and the derived `website_status`
+        // below are exactly what they would be with this feature absent. `website_status` is a frozen
+        // Lead Score input, so promoting an identity here would move scores — the opinion is recorded
+        // as evidence for a human instead, and nothing downstream consumes it.
+        $aiEvidence = $adjudicator->evidenceFor($lead, $data, $verdict);
+
         $enrichment = $lead->websiteEnrichment()->updateOrCreate(
             ['lead_id' => $lead->id],
             [
                 ...$data,
                 'identity_verified' => $verdict->verified,
                 'identity_confidence' => $verdict->confidence,
-                'identity_signals' => $verdict->signals,
+                'identity_signals' => $aiEvidence === null
+                    ? $verdict->signals
+                    : [...$verdict->signals, 'ai_adjudication' => $aiEvidence],
                 'last_checked_at' => $now,
                 'enriched_at' => $now,
             ],

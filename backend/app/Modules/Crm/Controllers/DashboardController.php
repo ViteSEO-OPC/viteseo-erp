@@ -12,11 +12,13 @@ use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
 use App\Modules\Crm\Requests\PerformanceScopeRequest;
 use App\Modules\Crm\Resources\LeadResource;
+use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Services\Kpi\BdKpiService;
 use App\Modules\Crm\Services\Kpi\KpiMetric;
 use App\Modules\Crm\Services\Performance\PerformancePdfExporter;
 use App\Modules\Crm\Services\Performance\PerformanceSummaryService;
 use App\Modules\Crm\Services\Performance\PerformanceTargetService;
+use App\Modules\Crm\Services\ProfilePhotoService;
 use App\Modules\Crm\Services\Ranking\BdRankingRow;
 use App\Modules\Crm\Services\Ranking\BdRankingService;
 use Illuminate\Database\Eloquent\Builder;
@@ -201,13 +203,14 @@ class DashboardController extends Controller
      */
     public function bdPerformance(): JsonResponse
     {
-        // Active Business Development Managers, name-ordered. `whereHas('roles')` matches the
-        // same role slug the seeder + User Management use; `status = active` mirrors the sign-in gate.
-        $bds = User::query()
-            ->where('status', 'active')
+        // Business Development Managers with live Zerem access, name-ordered. `whereHas('roles')`
+        // matches the same role slug the seeder + User Management use. Suspension is read from
+        // `crm_user_access`, NOT the shared `users.status` column this once used — that column was
+        // never consulted at sign-in, so the "mirrors the sign-in gate" claim it carried was false.
+        $bds = app(CrmAccessService::class)->excludeSuspended(User::query())
             ->whereHas('roles', fn (Builder $q) => $q->where('name', 'crm_bd'))
             ->orderBy('name')
-            ->get(['id', 'name']);
+            ->get(['id', 'name', 'avatar']);
 
         if ($bds->isEmpty()) {
             return response()->json(['data' => []]);
@@ -269,6 +272,9 @@ class DashboardController extends Controller
                 'id' => (string) $bd->id,
                 'name' => $bd->name,
                 'initials' => $this->initialsFor($bd->name),
+                // Same single source as every other avatar in the CRM: a signed link derived from
+                // `users.avatar`, or null for a BD who has not uploaded one (renders initials).
+                'avatarUrl' => ProfilePhotoService::url($bd->avatar),
                 'assigned' => (int) ($assigned->get($bd->id) ?? 0),
                 // A COUNT has no zero-denominator, so 0 is a real measurement ("completed nothing
                 // this month") rather than an undefined one. It stays 0 and must not borrow the

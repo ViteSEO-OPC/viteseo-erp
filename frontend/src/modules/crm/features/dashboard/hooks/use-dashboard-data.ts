@@ -205,6 +205,8 @@ export type ActivityApi = {
     | "lead.won";
   description: string;
   actor: string | null;
+  /** Signed link for the causer's photo; null for system rows and users without one. */
+  actorAvatarUrl?: string | null;
   changes: { changed?: string[]; from?: string; from_name?: string } | null;
   timestamp: string;
   subject: { type: string; id: string; label: string | null } | null;
@@ -286,6 +288,10 @@ export function mapActivity(api: ActivityApi): ActivityItem {
     id: api.id,
     type: activityIcon(api.event),
     actor,
+    // Only a CRM causer has a photo. An inbound reply is attributed to an external contact above,
+    // who by definition has no CRM avatar — the server sends null there, and this keeps it null
+    // even if a causer is ever attached to such a row.
+    actorAvatarUrl: api.event === "email.received" ? null : api.actorAvatarUrl ?? null,
     action: activityAction(api),
     // Lead events always have a subject (fall back to a generic noun if unlabeled);
     // subject-less events (auth login/logout) render as "{actor} {action}" with no object.

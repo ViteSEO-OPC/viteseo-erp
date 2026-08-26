@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { FormField, FormFieldGrid } from "@/modules/crm/components/forms/form-field/form-field";
-import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
+import { ProfilePhotoField } from "@/modules/crm/features/profile/components/profile-photo-field";
 import { ROLE_LABELS } from "@/modules/crm/lib/rbac";
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
 import { useProfile, useUpdateProfile } from "@/modules/crm/features/profile/hooks/use-profile";
@@ -26,10 +26,14 @@ function initialsOf(name: string): string {
 
 /**
  * Business Development Manager self-service Settings — the signed-in BD's own profile only.
- * Editable: Full Name, Phone. Read-only: Email (login identity) and Role. There is intentionally
- * NO user management, roles/permissions, SMTP, API keys, integrations, or Gmail here — those are
- * the separate Admin Settings module. The avatar is initials-only: the CRM has no per-user Gmail
- * integration, so nothing here implies a synced profile photo or a Gmail connection.
+ * Editable: Full Name, Phone, profile photo. Read-only: Email (login identity) and Role. There is
+ * intentionally NO user management, roles/permissions, SMTP, API keys, integrations, or Gmail here
+ * — those are the separate Admin Settings module.
+ *
+ * The photo control is the SAME {@link ProfilePhotoField} the admin Settings page mounts, which is
+ * the point: a BD cannot reach /zerem/settings (it is `minRole: crm_admin`), so without it here the
+ * feature would be admin-only. It is an explicit upload and nothing more — the CRM still has no
+ * per-user Gmail integration, so no avatar on this page is synced from a Google account.
  */
 export function BdSettingsPage() {
   const { data: profile, isLoading } = useProfile();
@@ -89,14 +93,13 @@ export function BdSettingsPage() {
           </div>
         ) : (
           <>
-            <div className="mb-6 flex items-center gap-4">
-              <AvatarInitials initials={initialsOf(name)} size="md" />
-              <div>
+            <div className="mb-6">
+              <ProfilePhotoField initials={initialsOf(name)}>
                 <p className="text-sm font-semibold text-card-foreground">
                   {name || "Your account"}
                 </p>
-                <p className="text-xs text-muted-foreground">{profile.email}</p>
-              </div>
+                <p className="mb-2 text-xs text-muted-foreground">{profile.email}</p>
+              </ProfilePhotoField>
             </div>
 
             <div className="flex flex-col gap-5">

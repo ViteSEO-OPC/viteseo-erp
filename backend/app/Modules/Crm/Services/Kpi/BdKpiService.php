@@ -50,10 +50,15 @@ class BdKpiService
             ->engaged()
             ->count();
 
-        // M-06: scoped activities within the rolling window (effort proxy).
+        // M-06: activities this BD PERFORMED within the rolling window (effort proxy).
+        //
+        // `performedBy` (causer_id), NOT `visibleTo`. The visibility scope also matches activities on
+        // leads the user currently owns, so after a reassignment it credited the previous owner's work
+        // to the new owner as well — the same effort counted twice, and a departing BD's record
+        // silently transferred. Effort is attributed to whoever actually performed it.
         $windowStart = $now->copy()->subDays($this->config->activityWindowDays);
         $activityVolume = Activity::query()
-            ->visibleTo($user)
+            ->performedBy($user)
             ->forCrmReporting() // M-06 counts CRM activity only — prospect-pool activity is excluded
             ->where('created_at', '>=', $windowStart)
             ->count();

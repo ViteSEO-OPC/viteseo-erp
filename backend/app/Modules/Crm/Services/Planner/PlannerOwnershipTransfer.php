@@ -89,6 +89,47 @@ class PlannerOwnershipTransfer
     }
 
     /**
+     * Move a departing BD's STANDALONE open work — Planner events with no lead — to their replacement.
+     *
+     * WHY THIS IS SEPARATE FROM {@see self::transferOnReassignment()}. That method is keyed on a lead
+     * (`where('lead_id', $lead->id)`), because a single handover is a handover of ONE lead: moving
+     * the outgoing owner's unrelated personal tasks because one of their leads changed hands would be
+     * wrong. Standalone events are therefore structurally unreachable by it, and by
+     * {@see self::driftedOpenWork()}, which requires `lead_id IS NOT NULL`.
+     *
+     * That is correct per-lead and wrong for a resignation. A BD who has left keeps every undated
+     * task, unlinked meeting and personal follow-up on their board, open and owned by an account that
+     * can no longer sign in to Zerem — work nobody can see and nobody will do. So this exists, and is
+     * called ONLY by the resignation handover, never by a single-lead assign.
+     *
+     * `status != 'completed'` via {@see self::openWork()} — the same completed-history protection
+     * every path here shares, expressed once. A finished task stays with the BD who finished it.
+     *
+     * Each move is a normal `update()` so {@see \App\Modules\Crm\Observers\PlannerEventObserver}
+     * logs `planner-event.reassigned` with from/to. A bulk query-builder UPDATE would be faster and
+     * would produce no audit at all — exactly the invisible ownership change this class exists to end.
+     *
+     * @return int number of events transferred
+     */
+    public function transferStandaloneWork(int $fromUserId, int $toUserId): int
+    {
+        if ($fromUserId === $toUserId) {
+            return 0;
+        }
+
+        $events = $this->openWork(PlannerEvent::query())
+            ->whereNull('lead_id')
+            ->where('assigned_to', $fromUserId)
+            ->get();
+
+        foreach ($events as $event) {
+            $event->update(['assigned_to' => $toUserId]);
+        }
+
+        return $events->count();
+    }
+
+    /**
      * READ-ONLY. Every open Planner event whose owner disagrees with its lead's owner — the
      * historical drift left behind by reassignments that predate {@see transferOnReassignment()}.
      *

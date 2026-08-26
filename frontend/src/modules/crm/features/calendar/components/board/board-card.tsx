@@ -51,7 +51,7 @@ export function BoardCardContent({ event, dragging }: { event: PlannerEvent; dra
       )}
       {event.owner && (
         <div className="mt-2 flex items-center gap-1.5">
-          <AvatarInitials initials={event.owner.name} size="sm" />
+          <AvatarInitials src={event.owner.avatarUrl} initials={event.owner.name} size="sm" />
           <span className="text-xs text-secondary-foreground">{event.owner.name}</span>
         </div>
       )}

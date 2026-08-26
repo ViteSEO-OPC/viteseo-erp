@@ -1,5 +1,6 @@
 import { Globe, Check, X, ExternalLink } from "lucide-react";
 import { cn } from "@/modules/crm/lib/utils";
+import { WebsiteEvidenceSection } from "@/modules/crm/features/nearby-clients/components/website-evidence-section";
 import type {
   NearbyPriority,
   WebsiteSignals,
@@ -50,7 +51,17 @@ const PRIORITY_STYLE: Record<NearbyPriority, { label: string; dot: string; text:
   low: { label: "Low priority", dot: "bg-blue-500", text: "text-blue-600" },
 };
 
-export function WebsiteIntelPanel({ website, priority }: { website?: WebsiteSummary; priority: NearbyPriority }) {
+export function WebsiteIntelPanel({
+  leadId,
+  business,
+  website,
+  priority,
+}: {
+  leadId: string;
+  business: string;
+  website?: WebsiteSummary;
+  priority: NearbyPriority;
+}) {
   if (!website) return null;
 
   const s = website.signals;
@@ -128,6 +139,12 @@ export function WebsiteIntelPanel({ website, priority }: { website?: WebsiteSumm
         <p className="text-[11px] text-muted-foreground">
           Detailed signal audit pending — priority above reflects discovered website presence only.
         </p>
+      )}
+
+      {/* The unknown-vs-absent question, and the evidence behind whichever answer was reached. Not
+          offered for a business whose website is already confirmed — there is nothing to adjudicate. */}
+      {(website.status === "website-unknown" || website.status === "no-website" || !website.status) && (
+        <WebsiteEvidenceSection leadId={leadId} business={business} />
       )}
     </div>
   );

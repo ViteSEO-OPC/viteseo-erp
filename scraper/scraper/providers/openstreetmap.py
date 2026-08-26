@@ -10,7 +10,9 @@ request/second per the usage policy.
 
 from __future__ import annotations
 
+import re
 import time
+from dataclasses import dataclass, field
 from typing import Optional
 
 import httpx
@@ -44,6 +46,42 @@ CATEGORY_SELECTORS: dict[str, list[tuple[str, str]]] = {
 
 # OSM tag keys that describe what a business *is*, most specific first — used to derive `industry`.
 _CATEGORY_KEYS = ["shop", "amenity", "tourism", "office", "leisure", "craft", "healthcare"]
+
+#: OSM values that name INFRASTRUCTURE, not a business — refused by ``find_by_name`` only.
+#:
+#: WHY THIS EXISTS AND WHY ONLY THERE. ``discover()`` names the tags it wants, so it can never return
+#: one of these. ``find_by_name`` deliberately drops the category filter — that is the whole point of
+#: it — and matches on name prefix, which means a real business's name can be carried by a nearby map
+#: feature: a live measurement returned "Grandpa's Inn and Restaurant Customer Parking" as a
+#: candidate lead. A car park is not a prospect, and letting one become a lead with a real
+#: ``place_id`` would be a permanent wrong row.
+#:
+#: A FLOOR, NOT A TAXONOMY. This refuses the obvious non-businesses that share a business's name; it
+#: does not try to decide what counts as a good lead. A gift shop found while looking for restaurants
+#: is still a real business and still passes — judging that is the CRM's job, not this module's.
+_NON_BUSINESS_VALUES: dict[str, set[str]] = {
+    "amenity": {
+        "parking", "parking_space", "parking_entrance", "motorcycle_parking", "bicycle_parking",
+        "bench", "shelter", "toilets", "waste_basket", "waste_disposal", "drinking_water",
+        "fountain", "recycling", "post_box", "telephone", "clock", "grit_bin", "bbq",
+    },
+    "leisure": {"park", "playground", "pitch", "garden", "picnic_table", "slipway"},
+    "tourism": {"artwork", "picnic_site", "viewpoint", "information"},
+}
+
+
+def is_business_element(element: dict) -> bool:
+    """Whether a named OSM element plausibly represents a BUSINESS rather than a map feature.
+
+    Used by name-based lookup, where the category filter is deliberately absent. Returns True for
+    anything not positively identified as infrastructure — refusing only what is clearly not a
+    business, rather than trying to prove that something is one.
+    """
+    tags = element.get("tags") or {}
+    for key, excluded in _NON_BUSINESS_VALUES.items():
+        if str(tags.get(key) or "").strip().lower() in excluded:
+            return False
+    return True
 
 
 def category_selectors(category: str) -> list[tuple[str, str]]:
@@ -109,6 +147,25 @@ def parse_element(element: dict) -> Optional[RawBusiness]:
     )
 
 
+@dataclass
+class SelectorSweep:
+    """Businesses found by a selector sweep, plus WHICH selector found each one.
+
+    The attribution is the whole reason this is not a plain list. A sweep unions several selectors
+    into ONE Overpass query, so the response cannot say which selector matched what — but per-selector
+    net-new is exactly the number that decides whether a selector earns its place. Without it a tag
+    that duplicates the baseline entirely (measured: `healthcare=pharmacy` returns twelve businesses
+    and zero net-new) would justify itself forever on gross counts.
+
+    Derived from each element's own tags rather than from the query, so it is a fact about the
+    element and not a guess about the response.
+    """
+
+    businesses: list[RawBusiness] = field(default_factory=list)
+    #: "amenity=fast_food" -> the provider_ids that carried that tag.
+    by_selector: dict[str, list[str]] = field(default_factory=dict)
+
+
 def extract_admin_area(address: dict) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Map a Nominatim ``address`` object to (region, province, city) with sensible fallbacks."""
     region = address.get("region") or address.get("state")
@@ -164,7 +221,131 @@ class OpenStreetMapProvider(DiscoveryProvider):
                 break
         return businesses
 
+    def find_by_name(self, names: list[str], *, area: str, limit: int = 200) -> list[RawBusiness]:
+        """Look up businesses BY NAME within ``area``, deliberately without a category filter.
+
+        This is the deterministic half of AI-assisted discovery: something proposes names, this
+        proves whether OSM actually holds a business by that name in that area, and only proven ones
+        become RawBusiness records with a real ``provider_id`` and real coordinates.
+
+        MATCHING IS PREFIX-ANCHORED, NOT EXACT. See ``_overpass_by_name`` — a proposal retrieves any
+        OSM element whose name STARTS with it, which is what lets "Mercury Drug" reach the branch
+        rows. Deciding which of those retrieved elements actually correspond to the proposal is the
+        resolver's job, not this method's.
+
+        DELIBERATELY UNCONSTRAINED BY CATEGORY, and that is the entire point. Filtering by the same
+        CATEGORY_SELECTORS ``discover()`` uses could only ever return a subset of what ``discover()``
+        already returns, so the proposer would add exactly nothing. Dropping the constraint is what
+        finds the business OSM holds under a tag our 19 selectors do not cover — a pharmacy tagged
+        ``shop=chemist`` rather than ``amenity=pharmacy``.
+
+        ONE query for the whole batch, via regex alternation. A query per name would multiply load on
+        Overpass by the proposal count; Overpass is shared community infrastructure and this tool is
+        a guest on it, so batch cost stays the same order as a normal discover() run.
+
+        Additive: ``discover()`` and every function it calls are untouched by this method's existence.
+        """
+        wanted = [n.strip() for n in names if isinstance(n, str) and n.strip()]
+        if not wanted:
+            return []
+
+        bbox = self._geocode_area(area)
+        elements = self._overpass_by_name(wanted, bbox, limit)
+
+        businesses: list[RawBusiness] = []
+        for element in elements:
+            # Prefix matching lets a business's name reach nearby map features that merely quote it —
+            # a car park named after the restaurant beside it. Refused here, never in `discover()`,
+            # which names the tags it wants and cannot return one.
+            if not is_business_element(element):
+                continue
+            business = parse_element(element)
+            if business is None:
+                continue
+            # Identity came from a real OSM element, not from whoever proposed the name.
+            business.verification_source = "osm"
+            if self.reverse_geocode and business.latitude is not None and business.longitude is not None:
+                if not (business.region and business.province and business.city):
+                    self._fill_admin_area(business)
+            businesses.append(business)
+        return businesses
+
+    def find_by_selectors(
+        self, selectors: list[tuple[str, str]], *, area: str, limit: int = 200
+    ) -> SelectorSweep:
+        """Sweep ``area`` for businesses matching ADDITIONAL tag selectors, with attribution.
+
+        THE EXPANSION LANE'S ONLY OSM CALL. ``discover()`` sweeps the category's hand-written
+        selectors and is not touched by this method's existence; this sweeps a separate set and the
+        composite merges the two on ``provider_id``. Keeping them as two calls rather than one widened
+        call is what leaves the accepted default behaviour byte-identical.
+
+        ONE QUERY FOR EVERY SELECTOR. ``_overpass`` already unions them, so eight expanded tags cost a
+        single Overpass request rather than eight — the reason this lane adds about a second rather
+        than a minute.
+
+        NO BUSINESS FILTER, deliberately, and unlike ``find_by_name``. A selector sweep is defined by
+        its tags exactly as ``discover()`` is, so what it returns is what was asked for. The
+        equivalent protection lives one step earlier, where a non-business selector is refused before
+        it can be executed at all.
+        """
+        if not selectors:
+            return SelectorSweep()
+
+        bbox = self._geocode_area(area)
+        elements = self._overpass(selectors, bbox, limit)
+
+        sweep = SelectorSweep()
+        for element in elements:
+            business = parse_element(element)
+            if business is None:
+                continue
+            # Identity came from a real OSM element, exactly as on every other path.
+            business.verification_source = "osm"
+            if self.reverse_geocode and business.latitude is not None and business.longitude is not None:
+                if not (business.region and business.province and business.city):
+                    self._fill_admin_area(business)
+            sweep.businesses.append(business)
+
+            # Attribute from the element's OWN tags: which of the selectors this element satisfies.
+            tags = element.get("tags") or {}
+            for key, value in selectors:
+                if str(tags.get(key) or "").strip().lower() == value:
+                    sweep.by_selector.setdefault(f"{key}={value}", []).append(business.provider_id)
+        return sweep
+
     # -- OSM calls -----------------------------------------------------------------------------
+
+    def _overpass_by_name(
+        self, names: list[str], bbox: tuple[float, float, float, float], limit: int
+    ) -> list[dict]:
+        """One name-filtered Overpass query for a whole batch of names."""
+        south, west, north, east = bbox
+        bbox_str = f"{south},{west},{north},{east}"
+
+        # Escape regex metacharacters in the names (a business called "A+B Trading" must not compile
+        # into a quantifier), then escape the Overpass string literal itself.
+        #
+        # ANCHORED AT THE START ONLY, AND THAT ASYMMETRY IS THE POINT. Philippine OSM names routinely
+        # carry a branch qualifier the proposer has no way to guess — "Mercury Drug Vigan", "Rose
+        # Pharmacy - Quirino Blvd". A trailing `$` made those unretrievable: the element was never
+        # fetched, so the resolver never got to judge it, and the businesses a proposer is most likely
+        # to name were the ones structurally guaranteed to be missed.
+        #
+        # The LEADING `^` stays, and does the safety work: "Drug" still cannot match "Mercury Drug",
+        # so a short or generic word cannot sweep in unrelated businesses. Widening happens only in
+        # the direction real names actually vary — extra words on the END.
+        alternation = "|".join(re.escape(n) for n in names)
+        pattern = f"^({alternation})".replace("\\", "\\\\").replace('"', '\\"')
+
+        parts = []
+        for kind in ("node", "way"):
+            # `,i` = case-insensitive: OSM casing is inconsistent and a proposer's casing is a guess.
+            parts.append(f'{kind}["name"~"{pattern}",i]({bbox_str});')
+        query = f"[out:json][timeout:60];({''.join(parts)});out center {limit};"
+
+        resp = self._post_with_retry(query)
+        return resp.json().get("elements", [])
 
     def _geocode_area(self, area: str) -> tuple[float, float, float, float]:
         """Forward-geocode a place name to a bounding box (south, west, north, east)."""

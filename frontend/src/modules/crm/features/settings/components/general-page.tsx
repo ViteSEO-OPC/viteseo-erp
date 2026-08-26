@@ -3,8 +3,10 @@
 import { Card } from "@/modules/crm/components/ui/card";
 import { Button } from "@/modules/crm/components/ui/button";
 import { Switch } from "@/modules/crm/components/ui/switch";
+import { useTableDensityPreference } from "@/modules/crm/components/ui/table-density";
 import { FormField, FormFieldGrid } from "@/modules/crm/components/forms/form-field/form-field";
-import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
+import { PendingBadge } from "@/modules/crm/components/shared/pending-badge/pending-badge";
+import { ProfilePhotoField } from "@/modules/crm/features/profile/components/profile-photo-field";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 import { highestRole, ROLE_LABELS } from "@/modules/crm/lib/rbac";
 import { FIELD } from "@/modules/crm/features/settings/components/form-styles";
@@ -24,11 +26,16 @@ const cardClass = "border border-border bg-card p-6 shadow-card";
 
 /**
  * General settings — the signed-in user's own profile / security / preferences.
- * UI-first for this milestone: fields are prefilled from the current session but not
- * yet persisted (profile save, password change, 2FA, and preferences are deferred).
+ *
+ * UI-first for this milestone: the profile fields are prefilled from the session but not yet
+ * persisted. Password and 2FA are NOT deferred work — authentication is owned by the central
+ * account that signs a person in to TeamOra, Zerem and Sprintly, so this page only states where
+ * they are managed. Preferences are live.
  */
 export function GeneralPage() {
   const { user } = useAuth();
+  // Display-only preference, stored per browser — the same shape as the theme. No API call.
+  const { density, setDensity } = useTableDensityPreference();
   const role = highestRole(user?.roles);
   const roleLabel = role ? ROLE_LABELS[role] : "—";
 
@@ -48,16 +55,11 @@ export function GeneralPage() {
           Your details as they appear across the workspace.
         </p>
 
-        <div className="mb-6 flex items-center gap-4">
-          <AvatarInitials initials={initialsOf(user?.name)} size="md" />
-          <div>
+        <div className="mb-6">
+          <ProfilePhotoField initials={initialsOf(user?.name)}>
             <p className="text-sm font-semibold text-card-foreground">Profile photo</p>
             <p className="mb-2 text-xs text-muted-foreground">PNG or JPG, up to 4 MB.</p>
-            <div className="flex gap-2">
-              <Button variant="default" size="sm">Change photo</Button>
-              <Button variant="outline" size="sm">Remove</Button>
-            </div>
-          </div>
+          </ProfilePhotoField>
         </div>
 
         <div className="flex flex-col gap-5">
@@ -89,32 +91,30 @@ export function GeneralPage() {
       <Card className={cardClass}>
         <h3 className="text-base font-bold text-card-foreground">Login &amp; security</h3>
         <p className="mb-5 text-sm text-muted-foreground">
-          Manage your password and sign-in protection.
+          Sign-in is handled by your Vite SEO Systems account, not by Zerem.
         </p>
 
-        <div className="flex flex-col gap-5">
-          <FormField label="Current Password">
-            <input type="password" className={FIELD} placeholder="••••••••••" />
-          </FormField>
-          <FormFieldGrid>
-            <FormField label="New Password">
-              <input type="password" className={FIELD} placeholder="••••••••" />
-            </FormField>
-            <FormField label="Confirm New Password">
-              <input type="password" className={FIELD} placeholder="••••••••" />
-            </FormField>
-          </FormFieldGrid>
-          <div className="flex justify-end">
-            <Button variant="default" size="sm">Update password</Button>
-          </div>
+        <div className="rounded-lg border border-border bg-muted/40 px-4 py-3">
+          <p className="text-sm font-semibold text-card-foreground">Password</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            One account signs you in to TeamOra, Zerem and Sprintly, so your password is managed
+            centrally and cannot be changed from here. Contact your system administrator to
+            change it.
+          </p>
         </div>
 
         <div className="mt-6 flex items-center justify-between border-t border-border-subtle pt-5">
           <div>
             <p className="text-sm font-semibold text-card-foreground">Two-factor authentication</p>
-            <p className="text-sm text-muted-foreground">Require a code at sign-in for extra security.</p>
+            <p className="text-sm text-muted-foreground">
+              Not in use. Sign-in protection is managed by your Vite SEO Systems account.
+            </p>
           </div>
-          <Switch defaultChecked aria-label="Two-factor authentication" />
+          <Switch
+            checked={false}
+            disabled
+            aria-label="Two-factor authentication — managed by your Vite SEO Systems account"
+          />
         </div>
       </Card>
 
@@ -133,11 +133,13 @@ export function GeneralPage() {
           <PreferenceRow
             title="Compact tables"
             description="Reduce row height in data tables."
+            checked={density === "compact"}
+            onCheckedChange={(next) => setDensity(next ? "compact" : "normal")}
           />
           <PreferenceRow
             title="Email notifications"
-            description="Follow-up reminders and the weekly digest."
-            defaultChecked
+            description="Reply alerts to your work email. Configured per workspace, not per user."
+            pendingReason="There is no per-user email preference yet — reply alerts are switched on per environment, and nothing here changes what is sent"
           />
           <div className="flex items-center justify-between py-4">
             <div>
@@ -152,22 +154,47 @@ export function GeneralPage() {
   );
 }
 
+/**
+ * One preference row.
+ *
+ * `pendingReason` marks a preference whose backend does not exist yet: the switch is rendered
+ * OFF and disabled, with the shared PendingBadge carrying the reason. That combination is the
+ * point — a hardcoded `defaultChecked` previously showed Email notifications as ON, which read as
+ * "this preference is saved and enabled" when nothing stores or reads it. An inert control must
+ * never assert a state.
+ */
 function PreferenceRow({
   title,
   description,
   defaultChecked,
+  checked,
+  onCheckedChange,
+  pendingReason,
 }: {
   title: string;
   description: string;
   defaultChecked?: boolean;
+  /** Controlled mode — a preference that is actually wired to something. */
+  checked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  pendingReason?: string;
 }) {
   return (
     <div className="flex items-center justify-between py-4">
       <div>
-        <p className="text-sm font-semibold text-card-foreground">{title}</p>
+        <p className="flex items-center gap-2 text-sm font-semibold text-card-foreground">
+          {title}
+          {pendingReason ? <PendingBadge reason={pendingReason} /> : null}
+        </p>
         <p className="text-sm text-muted-foreground">{description}</p>
       </div>
-      <Switch defaultChecked={defaultChecked} aria-label={title} />
+      {pendingReason ? (
+        <Switch checked={false} disabled aria-label={`${title} — not available yet`} />
+      ) : onCheckedChange ? (
+        <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={title} />
+      ) : (
+        <Switch defaultChecked={defaultChecked} aria-label={title} />
+      )}
     </div>
   );
 }

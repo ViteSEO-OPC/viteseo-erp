@@ -207,3 +207,93 @@ def test_config_env_overrides_default(monkeypatch):
     monkeypatch.setenv("CRM_BASE_URL", "https://crm.example.test/api/v1/crm")
 
     assert Config.load().crm_base_url == "https://crm.example.test/api/v1/crm"
+
+
+class FailedProvider:
+    """A provider whose upstream call did not succeed — zero candidates, but NOT a successful run."""
+
+    name = "openai"
+
+    def __init__(self, status: str = "auth_failed", error: str = "http_401") -> None:
+        self._status = status
+        self._error = error
+
+    def discover(self, *, area, category, limit):
+        return []
+
+    def stats(self):
+        return {"execution_status": self._status, "error_reason": self._error}
+
+
+class EmptyButHealthyProvider:
+    """A provider that ran fine and legitimately found nothing."""
+
+    name = "openai"
+
+    def discover(self, *, area, category, limit):
+        return []
+
+    def stats(self):
+        return {"execution_status": "ok", "error_reason": None}
+
+
+def test_a_failed_provider_execution_is_not_reported_as_a_successful_empty_run(monkeypatch, tmp_path):
+    """The correction this phase exists for.
+
+    A rejected credential and a town with no pharmacies both yield zero candidates. If the CLI treated
+    them the same, a broken integration would log "Nothing discovered" night after night and nobody
+    would find out. A failed execution exits non-zero so a scheduler alarms.
+    """
+    monkeypatch.setattr(cli, "get_provider", lambda config: FailedProvider())
+    monkeypatch.setattr(cli, "CrmIngestClient", RecordingIngestClient)
+    RecordingIngestClient.calls = []
+
+    monkeypatch.setenv("CRM_TOKEN", "test-token-not-real")
+
+    rc = cli.main(["discover", "--provider", "openai", "--area", "A", "--category", "cafe", "--commit"])
+
+    assert rc != 0
+    # And nothing was sent to the CRM — a failed discovery must not reach the ingest at all.
+    assert RecordingIngestClient.calls == []
+
+
+def test_a_healthy_provider_that_found_nothing_is_still_a_successful_run(monkeypatch):
+    """The mirror image: an honest empty result must not be dressed up as a failure either."""
+    monkeypatch.setattr(cli, "get_provider", lambda config: EmptyButHealthyProvider())
+    monkeypatch.setattr(cli, "CrmIngestClient", RecordingIngestClient)
+    RecordingIngestClient.calls = []
+
+    monkeypatch.setenv("CRM_TOKEN", "test-token-not-real")
+
+    rc = cli.main(["discover", "--provider", "openai", "--area", "A", "--category", "cafe", "--commit"])
+
+    assert rc == 0
+    assert RecordingIngestClient.calls == []
+
+
+def test_run_metrics_records_the_provider_that_actually_ran(monkeypatch, tmp_path):
+    """`provider` is what ran; `provider_selected`/`provider_source` say what was asked for and why.
+
+    A reader who can only see one provider name cannot tell a healthy OSM run from an AI run that
+    fell back — which is exactly the ambiguity the comparison must not inherit.
+    """
+    from scraper import run_metrics
+
+    metrics_file = tmp_path / "metrics.jsonl"
+    monkeypatch.setenv(run_metrics.METRICS_FILE_ENV, str(metrics_file))
+    monkeypatch.setattr(cli, "get_provider", lambda config: FailedProvider())
+    monkeypatch.setattr(cli, "CrmIngestClient", RecordingIngestClient)
+
+    monkeypatch.setenv("CRM_TOKEN", "test-token-not-real")
+
+    cli.main(["discover", "--provider", "openai", "--area", "A", "--category", "cafe"])
+
+    records = run_metrics.load(metrics_file)
+    assert len(records) == 1
+    record = records[0]
+    assert record["provider"] == "openai"
+    assert record["provider_selected"] == "openai"
+    assert record["provider_source"] == "cli"
+    assert record["provider_execution_status"] == "auth_failed"
+    assert record["error_reason"] == "http_401"
+    assert record["succeeded"] is False

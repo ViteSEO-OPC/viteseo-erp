@@ -15,6 +15,7 @@ type NoteApi = {
   authorId: string | null;
   author: string;
   initials: string;
+  avatarUrl: string | null;
   body: string;
   self: boolean;
   createdAt: string | null;
@@ -25,6 +26,7 @@ function mapNote(api: NoteApi): Note {
     id: api.id,
     author: api.author,
     initials: api.initials,
+    avatarUrl: api.avatarUrl ?? null,
     timestamp: api.createdAt ?? "",
     text: api.body,
     self: api.self,

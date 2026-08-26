@@ -3,6 +3,7 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
+use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Models\Deal;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -156,7 +157,9 @@ class PerformancePdfExportTest extends TestCase
 
     public function test_an_inactive_bd_is_rejected(): void
     {
-        $inactive = $this->user('crm_bd', ['status' => 'inactive']);
+        // CRM suspension now lives in `crm_user_access`, not the shared `users.status` column.
+        $inactive = $this->user('crm_bd');
+        app(CrmAccessService::class)->suspend($inactive);
         Sanctum::actingAs($this->user('crm_admin'));
 
         $this->getJson(self::URL.'?user_id='.$inactive->id)->assertStatus(422);

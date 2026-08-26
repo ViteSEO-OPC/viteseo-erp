@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\CrmAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -65,6 +66,9 @@ class LeadResource extends JsonResource
             'assignedTo' => $this->whenLoaded('assignedTo', fn () => $this->assignedTo ? [
                 'id' => (string) $this->assignedTo->id,
                 'name' => $this->assignedTo->name,
+                // Drives the SUSPENDED marker beside the owner's name in the Leads table, so an Admin
+                // can see at a glance which leads sit with someone who can no longer work them.
+                'suspended' => app(CrmAccessService::class)->isSuspended($this->assignedTo),
             ] : null),
             // Won conversion projection — READ-ONLY. The Deal remains the single source of truth for
             // conversion and revenue; this exposes it so Lead Details can show a Won indicator without

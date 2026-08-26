@@ -1,4 +1,4 @@
-import { GmailIntegrationPage } from "@/modules/crm/features/settings/components/gmail-integration-page";
+import { IntegrationsPage } from "@/modules/crm/features/settings/components/integrations-page";
 
 // Landing target for the Google OAuth callback (`?gmail=connected` / `?gmail=error&reason=…`).
 // The params are read server-side with Next's async searchParams — the same choice the Follow-ups
@@ -12,5 +12,5 @@ export default async function SettingsIntegrations({
 }) {
   const { gmail, reason } = await searchParams;
 
-  return <GmailIntegrationPage callbackStatus={gmail} callbackReason={reason} />;
+  return <IntegrationsPage gmailCallbackStatus={gmail} gmailCallbackReason={reason} />;
 }
