@@ -11,6 +11,10 @@ import {
  * Pending follow-ups — LIVE. The team's action queue: scoped Planner follow-ups that aren't completed,
  * classified Overdue / Today / Upcoming by the Asia/Manila day boundary (server-side). Deliberately a
  * table, not a chart — it's a worklist. Company / description / due date come straight from the event.
+ *
+ * The server returns at most ten rows while the header counts the whole pending set, so a trailing
+ * "+N more not shown" row keeps the two from contradicting each other. This card is a summary, not
+ * the worklist of record — the cap stays, and the count stays truthful.
  */
 const STATUS_STYLE: Record<PendingFollowUpRow["status"], { label: string; className: string; dot: string }> = {
   overdue: { label: "Overdue", className: "bg-red-500/10 text-red-600", dot: "bg-red-500" },
@@ -34,6 +38,13 @@ export function PendingFollowUpsCard({ className }: { className?: string }) {
   const { data, isLoading, isError } = useReportsAnalytics();
   const rows = data?.pendingFollowUps.rows ?? [];
   const counts = data?.pendingFollowUps.counts;
+
+  // The server caps `rows` (10) but `counts` covers the WHOLE pending set, so the header could read
+  // "15 overdue" above ten rows with nothing saying the other five existed. The two numbers are both
+  // already in hand — the gap was only ever unrendered, so nothing extra is fetched to close it.
+  // The three buckets partition the pending set server-side, so their sum IS the total.
+  const total = counts ? counts.overdue + counts.today + counts.upcoming : rows.length;
+  const notShown = Math.max(0, total - rows.length);
 
   return (
     <ChartCard
@@ -84,6 +95,15 @@ export function PendingFollowUpsCard({ className }: { className?: string }) {
                 </tr>
               );
             })}
+            {notShown > 0 ? (
+              <tr>
+                {/* Spans the row's four columns. Muted and non-interactive on purpose: this states
+                    what the list is NOT showing, and is not itself a follow-up to act on. */}
+                <td colSpan={4} className="py-2.5 text-center text-xs text-muted-foreground">
+                  +{notShown} more not shown
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>
