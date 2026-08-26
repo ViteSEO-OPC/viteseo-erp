@@ -39,18 +39,39 @@ export function TeamAccountsPage() {
   // re-open the confirmation.
   const [reassignTarget, setReassignTarget] = useState<TeamUser | null>(null);
   const [reassignPickerOpen, setReassignPickerOpen] = useState(false);
+  const [suspendTarget, setSuspendTarget] = useState<TeamUser | null>(null);
 
   const bdOnly = assignable.length === 1 && assignable[0] === "crm_bd";
   const createLabel = bdOnly ? "Create BD Account" : "Create Account";
   const listLabel = isSuperAdmin ? "Team accounts" : "BD accounts";
 
+  /**
+     Suspending asks first; reactivating does not.
+
+     The asymmetry is the point: suspending cuts a working BD out of Zerem mid-day, and the button
+     sits one position away from Credentials in a row of otherwise harmless actions — the same
+     misclick risk Delete already guards against. Reactivating only restores access that was
+     deliberately removed, is visible immediately in the status pill, and is undone by clicking
+     again, so a second click there would be friction with nothing behind it.
+   */
   const handleToggleStatus = (u: TeamUser) => {
-    const nextStatus = u.status === "active" ? "inactive" : "active";
+    if (u.status === "active") {
+      setSuspendTarget(u);
+
+      return;
+    }
+
+    applyStatus(u, "active");
+  };
+
+  const applyStatus = (u: TeamUser, nextStatus: "active" | "inactive") => {
     updateUser.mutate(
       { id: u.id, payload: { status: nextStatus } },
       {
-        onSuccess: () =>
-          toast.success(nextStatus === "inactive" ? "Account suspended" : "Account reactivated"),
+        onSuccess: () => {
+          toast.success(nextStatus === "inactive" ? "Account suspended" : "Account reactivated");
+          setSuspendTarget(null);
+        },
       },
     );
   };
@@ -143,6 +164,22 @@ export function TeamAccountsPage() {
           user={credsUser}
         />
       ) : null}
+
+      {/* Suspend asks before it cuts access. Not `destructive`: the design reserves that treatment
+          for Delete, and a suspension is reversible from this same row. */}
+      <ConfirmDialog
+        open={suspendTarget !== null}
+        onOpenChange={(o) => { if (!o) setSuspendTarget(null); }}
+        title="Suspend Zerem access"
+        description={
+          suspendTarget
+            ? `Suspend ${suspendTarget.name}'s access to Zerem? They keep their account and their TeamOra and Sprintly access is unaffected. Their leads and open work stay with them until you reassign them.`
+            : ""
+        }
+        confirmLabel="Suspend"
+        loading={updateUser.isPending}
+        onConfirm={() => { if (suspendTarget) applyStatus(suspendTarget, "inactive"); }}
+      />
 
       {/* Step 1 of the resignation handover: confirm the intent before any picker or request. */}
       <ConfirmDialog
