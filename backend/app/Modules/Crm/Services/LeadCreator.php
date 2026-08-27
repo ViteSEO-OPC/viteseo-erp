@@ -6,6 +6,7 @@ namespace App\Modules\Crm\Services;
 
 use App\Models\User;
 use App\Modules\Crm\Models\Lead;
+use App\Modules\Crm\Services\Planner\FollowUpScheduler;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -19,10 +20,18 @@ use Illuminate\Support\Facades\DB;
  * created through the identical path as one added later from Lead Details — same relation, same author
  * association, same `note.created` Activity via the observer. Nothing about the note subsystem is
  * duplicated, and no note text is stored on `crm_leads`.
+ *
+ * Also mints the lead's first-touch Planner Todo (§4b) through
+ * {@see FollowUpScheduler::scheduleOnLeadCreation()}, in the SAME transaction, so a lead can never be
+ * persisted without the work it implies. This is the manual `POST /leads` path only — bulk import goes
+ * through LeadImportService and is deliberately unchanged.
  */
 class LeadCreator
 {
-    public function __construct(private readonly LeadNoteCreator $notes) {}
+    public function __construct(
+        private readonly LeadNoteCreator $notes,
+        private readonly FollowUpScheduler $followUps,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $attributes  Validated lead attributes (no note key).
@@ -47,6 +56,12 @@ class LeadCreator
             if ($body !== '') {
                 $this->notes->create($lead, $body, $creator);
             }
+
+            // §4b — the first touch this lead now owes. Runs AFTER Lead::create(), so a lead born
+            // `cold_calling = 'scheduled'` has already had its cold-call follow-up minted by
+            // LeadObserver and this call declines on the reused dedupe: exactly one event, never two.
+            // Returns null (harmlessly) for an unowned or prospect lead.
+            $this->followUps->scheduleOnLeadCreation($lead);
 
             return $lead;
         });
