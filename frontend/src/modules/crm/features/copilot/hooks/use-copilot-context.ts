@@ -16,6 +16,7 @@ import type {
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { STALE } from "@/modules/crm/lib/query-freshness";
 
 /**
  * The single frontend data source the Copilot reads for any dynamic CRM figure or record.
@@ -119,6 +120,10 @@ function useLeadStats(): CopilotLeadStats {
   const { data } = useQuery<KpiPayload>({
     queryKey: queryKeys.dashboard.kpis(),
     queryFn: () => apiClient.get("/dashboard/kpis").then((r) => r.data.data),
+    // Same key ⇒ same freshness as the dashboard's own observers, which is what keeps this from
+    // refetching the payload on every screen the Copilot renders on (i.e. all of them).
+    // See useDashboardKpis in use-dashboard-data.ts.
+    staleTime: STALE.standard,
   });
 
   // `available` false until the query resolves — the engine then says it has no figure rather than

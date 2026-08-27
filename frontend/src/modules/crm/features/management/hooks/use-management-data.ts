@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { STALE } from "@/modules/crm/lib/query-freshness";
 import {
   useMyPerformanceSummary,
   formatConversionRate,
@@ -51,6 +52,8 @@ function useDashboardKpis() {
   const query = useQuery<{ totalLeads: number; followUpsDue: number }>({
     queryKey: queryKeys.dashboard.kpis(),
     queryFn: () => apiClient.get("/dashboard/kpis").then((r) => r.data.data),
+    // Same key ⇒ same freshness. See useDashboardKpis in use-dashboard-data.ts.
+    staleTime: STALE.standard,
   });
   return query.data;
 }

@@ -5,6 +5,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { STALE } from "@/modules/crm/lib/query-freshness";
 import { highestRole, type Role } from "@/modules/crm/lib/rbac";
 import { useAuth } from "@/modules/crm/providers/auth-provider";
 
@@ -43,7 +44,12 @@ function mapProfile(data: ApiMe): Profile {
 }
 
 /** Authoritative current-user profile (GET /me) — includes `phone`, which the cached auth user
- *  (localStorage) does not carry. */
+ *  (localStorage) does not carry.
+ *
+ *  Shell-level: `useAvatarUrl` reads this for the topbar UserMenu, so it is mounted on every CRM
+ *  screen — see {@link STALE}. The window is well inside `ProfilePhotoService::LINK_TTL_MINUTES`
+ *  (30 min), so a cached `avatar_url` cannot outlive the signature it carries: any remount or
+ *  window focus more than 30s after the last read re-signs it. */
 export function useProfile() {
   return useQuery({
     queryKey: queryKeys.me.profile(),
@@ -51,6 +57,7 @@ export function useProfile() {
       const res = await apiClient.get("/me");
       return mapProfile(res.data.data as ApiMe);
     },
+    staleTime: STALE.standard,
   });
 }
 

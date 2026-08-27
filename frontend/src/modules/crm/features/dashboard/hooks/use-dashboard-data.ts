@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { STALE } from "@/modules/crm/lib/query-freshness";
 import { LEAD_STATUS_CONFIG, type LeadStatusKey } from "@/modules/crm/lib/lead-status";
 import {
   useMyPerformanceSummary,
@@ -47,10 +48,21 @@ type KpiApi = {
   completedOutreach: number;
 };
 
+/**
+ * Shell-level: the sidebar's "Leads N" badge calls this, so `/dashboard/kpis` is mounted on every
+ * CRM screen — see {@link STALE}.
+ *
+ * `staleTime` is set on EVERY observer of `queryKeys.dashboard.kpis()`, not just this one. TanStack
+ * resolves freshness per observer, so a sibling that left it at the default would still see the
+ * cache as stale and refetch the moment it mounted — which is exactly how a shared key ends up
+ * refetching on a route that already had the data. The other four live in `useLeadStatusBreakdown`
+ * below, `useLeadStatusSummary` (leads), `useLeadStats` (copilot) and `useManagementData`.
+ */
 export function useDashboardKpis() {
   const query = useQuery<KpiApi>({
     queryKey: queryKeys.dashboard.kpis(),
     queryFn: () => apiClient.get("/dashboard/kpis").then((r) => r.data.data),
+    staleTime: STALE.standard,
   });
   // Conversion Rate reuses the ownership-scoped GET /dashboard/performance-summary (converted ÷
   // engaged) — for a BD, their own portfolio. Shared query key → no duplicate request/computation.
@@ -97,6 +109,8 @@ export function useLeadStatusBreakdown() {
   const query = useQuery<{ statusCounts: StatusCounts }>({
     queryKey: queryKeys.dashboard.kpis(),
     queryFn: () => apiClient.get("/dashboard/kpis").then((r) => r.data.data),
+    // Same key ⇒ same freshness. See the note on useDashboardKpis above.
+    staleTime: STALE.standard,
   });
 
   const counts = query.data?.statusCounts;
