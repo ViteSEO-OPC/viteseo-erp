@@ -249,6 +249,98 @@ class ReportsAnalyticsTest extends TestCase
         $this->assertSame(4, $counts['overdue'] + $counts['today'] + $counts['upcoming']);
     }
 
+    /**
+     * The row list is CAPPED while the counts are not — and the card renders both, so the cap has to
+     * stay pinned. Without this, raising or dropping `limit()` changes what the UI claims with no
+     * test failing: the header would keep saying 14 while the table silently showed a different
+     * number of rows, or the payload would quietly become unbounded.
+     */
+    public function test_the_pending_follow_up_row_list_is_capped_at_ten(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+        $overdue = now('Asia/Manila')->startOfDay()->subDays(3)->utc();
+
+        // Fourteen pending items — comfortably over the cap.
+        PlannerEvent::factory()->count(14)->assignedTo($bd)->create([
+            'event_type' => 'follow-up',
+            'status' => 'scheduled',
+            'starts_at' => $overdue,
+        ]);
+
+        Sanctum::actingAs($admin);
+        $pending = $this->getJson('/api/v1/crm/dashboard/reports-analytics')
+            ->assertOk()
+            ->json('data.pendingFollowUps');
+
+        $this->assertCount(10, $pending['rows'], 'the row list is capped');
+        // The counts must still describe the WHOLE set — that gap is what the card renders as
+        // "+N more not shown", and it only works while the counts stay uncapped.
+        $this->assertSame(14, $pending['counts']['overdue']);
+        $this->assertSame(
+            14,
+            $pending['counts']['overdue'] + $pending['counts']['today'] + $pending['counts']['upcoming'],
+        );
+    }
+
+    /**
+     * Each row carries the lead it is owed to, so the card can send the reader there. Null when the
+     * event has no lead — that is not a defect, it is the case the card falls back to the Planner
+     * board for, and it must stay expressible rather than being coerced to 0.
+     */
+    public function test_pending_follow_up_rows_carry_their_lead_id(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+        $lead = Lead::factory()->create(['assigned_to' => $bd->id]);
+        $overdue = now('Asia/Manila')->startOfDay()->subDays(2)->utc();
+
+        PlannerEvent::factory()->assignedTo($bd)->create([
+            'event_type' => 'follow-up',
+            'status' => 'scheduled',
+            'starts_at' => $overdue,
+            'lead_id' => $lead->id,
+        ]);
+        PlannerEvent::factory()->assignedTo($bd)->create([
+            'event_type' => 'follow-up',
+            'status' => 'scheduled',
+            'starts_at' => $overdue,
+            'lead_id' => null,
+        ]);
+
+        Sanctum::actingAs($admin);
+        $rows = $this->getJson('/api/v1/crm/dashboard/reports-analytics')
+            ->assertOk()
+            ->json('data.pendingFollowUps.rows');
+
+        $leadIds = array_column($rows, 'leadId');
+        $this->assertContains($lead->id, $leadIds, 'a lead-linked row exposes its lead');
+        $this->assertContains(null, $leadIds, 'a lead-less row exposes null, not 0');
+    }
+
+    /** At or below the cap the two agree exactly, so the card shows no "+N more" row. */
+    public function test_counts_and_rows_agree_when_under_the_cap(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+
+        PlannerEvent::factory()->count(4)->assignedTo($bd)->create([
+            'event_type' => 'follow-up',
+            'status' => 'scheduled',
+            'starts_at' => now('Asia/Manila')->startOfDay()->subDays(2)->utc(),
+        ]);
+
+        Sanctum::actingAs($admin);
+        $pending = $this->getJson('/api/v1/crm/dashboard/reports-analytics')
+            ->assertOk()
+            ->json('data.pendingFollowUps');
+
+        $total = $pending['counts']['overdue'] + $pending['counts']['today'] + $pending['counts']['upcoming'];
+        $this->assertCount(4, $pending['rows']);
+        $this->assertSame(4, $total);
+        $this->assertSame($total, count($pending['rows']), 'no rows are hidden below the cap');
+    }
+
     public function test_bd_cannot_drill_into_another_bd(): void
     {
         $bd = $this->user('crm_bd');

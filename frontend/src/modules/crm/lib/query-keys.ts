@@ -9,8 +9,6 @@ export const queryKeys = {
   dashboard: {
     all: ["dashboard"] as const,
     kpis: () => [...queryKeys.dashboard.all, "kpis"] as const,
-    copilotSummary: () =>
-      [...queryKeys.dashboard.all, "copilot-summary"] as const,
     // `filters` keeps the Leads workspace's filtered buckets cached separately from the Dashboard's
     // unfiltered ones. The Dashboard passes nothing, so its key is unchanged.
     priorityBuckets: (filters: Record<string, string> = {}) =>

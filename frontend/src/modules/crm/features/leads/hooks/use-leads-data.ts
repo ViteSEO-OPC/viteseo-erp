@@ -5,6 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { STALE } from "@/modules/crm/lib/query-freshness";
 import type { Lead } from "@/modules/crm/features/leads/types/lead-types";
 
 /**
@@ -429,6 +430,12 @@ export function useLeadStatusSummary(scopeParams?: Record<string, string>) {
       scoped
         ? apiClient.get("/leads/status-summary", { params: scopeParams }).then((r) => r.data.data)
         : apiClient.get("/dashboard/kpis").then((r) => r.data.data),
+    // Freshness follows the key, exactly as the queryFn does. Unscoped, this is another observer of
+    // `queryKeys.dashboard.kpis()` — the shell-level query the sidebar badge and the Copilot already
+    // hold — so it must carry the same window, or mounting the Leads page would refetch a payload
+    // the CRM fetched seconds earlier. The scoped branch is a different endpoint
+    // (`/leads/status-summary`, Reports & Performance) and is deliberately left on the default.
+    staleTime: scoped ? undefined : STALE.standard,
   });
 
   const currentStatus = normalizeStatus(searchParams.get("status"));

@@ -1,0 +1,359 @@
+{
+  "_": "Snapshot of the intents that predate the live-CRM-context pass (commit 766cb7c7). GATE A asserts these still route to themselves.",
+  "intents": [
+    {
+      "id": "show-dashboard",
+      "keywords": [
+        "show my dashboard",
+        "open dashboard",
+        "go to dashboard",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "todays-kpis",
+      "keywords": [
+        "todays kpis",
+        "today kpis",
+        "kpis",
+        "kpi",
+        "key metrics"
+      ]
+    },
+    {
+      "id": "revenue-today",
+      "keywords": [
+        "revenue today",
+        "todays revenue"
+      ]
+    },
+    {
+      "id": "pipeline-summary",
+      "keywords": [
+        "pipeline summary",
+        "pipeline",
+        "summarize this week",
+        "weekly summary",
+        "summarize"
+      ]
+    },
+    {
+      "id": "lead-summary",
+      "keywords": [
+        "lead summary",
+        "leads summary",
+        "summarize leads"
+      ]
+    },
+    {
+      "id": "activity-today",
+      "keywords": [
+        "activity today",
+        "todays activity",
+        "recent activity",
+        "whats happening"
+      ]
+    },
+    {
+      "id": "show-hot-leads",
+      "keywords": [
+        "show hot leads",
+        "hot leads",
+        "hottest leads",
+        "who should i call today",
+        "who should i call",
+        "priority leads",
+        "which prospect should i contact first",
+        "which prospect should i contact",
+        "who should i contact",
+        "who should i contact first",
+        "who to contact first",
+        "who do i reach out to first",
+        "who should i reach out to",
+        "who to reach out to",
+        "which lead should i prioritize",
+        "who should i prioritize",
+        "who should i focus on",
+        "what should i work on first",
+        "what should i work on",
+        "who needs my attention today",
+        "who needs my attention",
+        "recommended contacts",
+        "top priority leads",
+        "prioritize leads"
+      ]
+    },
+    {
+      "id": "show-new-leads",
+      "keywords": [
+        "show new leads",
+        "new leads"
+      ]
+    },
+    {
+      "id": "latest-leads",
+      "keywords": [
+        "latest leads",
+        "most recent leads",
+        "newest leads"
+      ]
+    },
+    {
+      "id": "highest-score",
+      "keywords": [
+        "highest score",
+        "top score",
+        "highest scoring",
+        "best leads",
+        "top leads"
+      ]
+    },
+    {
+      "id": "needs-website",
+      "keywords": [
+        "needs website",
+        "no website",
+        "without a website",
+        "needs a website",
+        "leads with no website",
+        "leads without a website"
+      ]
+    },
+    {
+      "id": "needs-redesign",
+      "keywords": [
+        "needs redesign",
+        "redesign",
+        "outdated website",
+        "needs improvement"
+      ]
+    },
+    {
+      "id": "assigned-to-me",
+      "keywords": [
+        "assigned to me",
+        "my leads",
+        "my assigned leads",
+        "leads assigned to me"
+      ]
+    },
+    {
+      "id": "unassigned-leads",
+      "keywords": [
+        "unassigned leads",
+        "unassigned",
+        "no owner",
+        "leads with no owner"
+      ]
+    },
+    {
+      "id": "open-lead-details",
+      "keywords": [
+        "open lead details",
+        "open lead",
+        "lead details",
+        "open top lead",
+        "view lead"
+      ]
+    },
+    {
+      "id": "add-note",
+      "keywords": [
+        "add note",
+        "add a note",
+        "new note",
+        "write a note",
+        "log a note",
+        "leave a note"
+      ]
+    },
+    {
+      "id": "view-timeline",
+      "keywords": [
+        "view timeline",
+        "lead timeline",
+        "activity timeline",
+        "see the timeline",
+        "lead history"
+      ]
+    },
+    {
+      "id": "open-outreach",
+      "keywords": [
+        "open outreach",
+        "outreach",
+        "go to outreach",
+        "show outreach"
+      ]
+    },
+    {
+      "id": "show-drafts",
+      "keywords": [
+        "show drafts",
+        "my drafts",
+        "drafts",
+        "email drafts"
+      ]
+    },
+    {
+      "id": "show-followups",
+      "keywords": [
+        "show follow-ups",
+        "show followups",
+        "follow ups",
+        "followups",
+        "follow-ups due",
+        "due follow ups"
+      ]
+    },
+    {
+      "id": "show-all-emails",
+      "keywords": [
+        "show all emails",
+        "all emails",
+        "every email",
+        "email list"
+      ]
+    },
+    {
+      "id": "draft-followup",
+      "keywords": [
+        "draft follow-up",
+        "draft followup",
+        "draft a follow up",
+        "draft a follow-up email",
+        "draft email",
+        "draft an email"
+      ]
+    },
+    {
+      "id": "compose-email",
+      "keywords": [
+        "compose email",
+        "new email",
+        "write an email",
+        "write email"
+      ]
+    },
+    {
+      "id": "send-email",
+      "keywords": [
+        "send email",
+        "send the email",
+        "send this email"
+      ]
+    },
+    {
+      "id": "open-companies",
+      "keywords": [
+        "open companies",
+        "companies",
+        "go to companies",
+        "show companies"
+      ]
+    },
+    {
+      "id": "search-companies",
+      "keywords": [
+        "search companies",
+        "find company",
+        "company search",
+        "look up company"
+      ]
+    },
+    {
+      "id": "my-performance",
+      "keywords": [
+        "my performance",
+        "show my performance",
+        "performance",
+        "go to performance",
+        "my stats"
+      ]
+    },
+    {
+      "id": "revenue",
+      "keywords": [
+        "revenue",
+        "overall revenue",
+        "my revenue"
+      ]
+    },
+    {
+      "id": "conversion",
+      "keywords": [
+        "conversion",
+        "conversion rate",
+        "win rate",
+        "close rate"
+      ]
+    },
+    {
+      "id": "nav-planner",
+      "keywords": [
+        "go to planner",
+        "open planner",
+        "planner",
+        "my planner",
+        "show planner"
+      ]
+    },
+    {
+      "id": "nav-reports",
+      "keywords": [
+        "go to reports",
+        "open reports",
+        "show reports",
+        "reports page"
+      ]
+    },
+    {
+      "id": "nav-settings",
+      "keywords": [
+        "go to settings",
+        "open settings",
+        "show settings",
+        "settings page"
+      ]
+    },
+    {
+      "id": "nav-nearby-clients",
+      "keywords": [
+        "nearby clients",
+        "prospect pool",
+        "discovered businesses",
+        "discovery"
+      ]
+    },
+    {
+      "id": "nav-leads",
+      "keywords": [
+        "go to leads",
+        "open leads",
+        "leads page",
+        "show leads"
+      ]
+    },
+    {
+      "id": "score-leads",
+      "keywords": [
+        "score my new leads",
+        "score leads",
+        "score my leads",
+        "re-score leads",
+        "rescore leads"
+      ]
+    },
+    {
+      "id": "help",
+      "keywords": [
+        "help",
+        "what can you do",
+        "what can you do?",
+        "available commands",
+        "commands",
+        "options"
+      ]
+    }
+  ]
+}

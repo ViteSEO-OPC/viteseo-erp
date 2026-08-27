@@ -8,12 +8,16 @@ import type {
   SuggestedPrompt,
 } from "@/modules/crm/features/copilot/types/copilot-types";
 import type { Intent, IntentConfig, CopilotContext } from "@/modules/crm/features/copilot/engine/types";
-import { matchIntent, findIntent } from "@/modules/crm/features/copilot/engine/matcher";
+import { matchIntentWithEntity, findIntent, extractEntityPhrase } from "@/modules/crm/features/copilot/engine/matcher";
 import { buildResponse } from "@/modules/crm/features/copilot/engine/response-engine";
 import { runAction } from "@/modules/crm/features/copilot/engine/action-engine";
 import { useCopilotContext } from "@/modules/crm/features/copilot/hooks/use-copilot-context";
 import { useCopilotData } from "@/modules/crm/features/copilot/hooks/use-copilot-data";
 import { usePermissions } from "@/modules/crm/providers/permissions-provider";
+import { useCopilotLeadLookup } from "@/modules/crm/features/copilot/hooks/use-copilot-lead";
+import { useLeadActivityLookup } from "@/modules/crm/features/copilot/hooks/use-copilot-lead-activity";
+import { useOverdueFollowUpLookup } from "@/modules/crm/features/copilot/hooks/use-copilot-followups";
+import { useCopilotActivityFeed } from "@/modules/crm/features/copilot/hooks/use-copilot-activity-feed";
 import intentData from "@/modules/crm/features/copilot/data/intents.json";
 import quickActionData from "@/modules/crm/features/copilot/data/quick-actions.json";
 
@@ -98,6 +102,10 @@ export function useCopilot() {
   const seed = useCopilotData();
   const ctx = useCopilotContext();
   const { can, hasMinRole } = usePermissions();
+  const lookupLead = useCopilotLeadLookup();
+  const lookupLastActivity = useLeadActivityLookup();
+  const lookupOverdueFollowUps = useOverdueFollowUpLookup();
+  const lookupRecentActivity = useCopilotActivityFeed();
 
   const [messages, setMessages] = useState<Message[]>(seed.messages);
   const idCounter = useRef(seed.messages.length);
@@ -119,16 +127,59 @@ export function useCopilot() {
     [],
   );
 
-  // Shared turn: append the user's bubble + the engine's reply, then run any action.
+  /**
+   * Shared turn: append the user's bubble + the engine's reply, then run any action.
+   *
+   * Async ONLY for `lead_lookup`, which needs the named company resolved before a reply can be
+   * built. Resolution happens here rather than inside the engine so `buildResponse` stays a
+   * synchronous pure function of (config, context) — the property that makes every other handler
+   * trivially testable. Every other intent takes the same path it always did, with no await.
+   */
   const runTurn = useCallback(
-    (userText: string, intent: Intent) => {
-      const result = buildResponse(intent.response, ctx);
+    async (userText: string, intent: Intent, message: string) => {
+      let turnCtx = ctx;
+
+      // Canonical follow-up figure, fetched only for the question that asks for it.
+      if (intent.response.type === "followups_overdue") {
+        turnCtx = { ...ctx, overdueFollowUps: await lookupOverdueFollowUps() };
+      }
+
+      // The caller's own recent activity, fetched only for the question that asks for it.
+      if (intent.response.type === "recent_activity") {
+        turnCtx = { ...ctx, recentActivity: await lookupRecentActivity() };
+      }
+
+      if (intent.response.type === "lead_lookup") {
+        const term = extractEntityPhrase(message);
+        const matches = term ? await lookupLead(term) : [];
+        const only = matches.length === 1 ? matches[0] : null;
+
+        turnCtx = {
+          ...ctx,
+          leadResolution: {
+            term,
+            matches,
+            // Planner facts come from data already in hand and are BD-gated at the source, so an
+            // Admin/SA turn carries none regardless of which lead was named.
+            plannerForLead: only ? (ctx.plannerByLead[only.id] ?? []) : [],
+            plannerAvailable: ctx.schedule.available,
+            // Fetched only when the question actually asks for it, and only for an unambiguous lead —
+            // so no other turn pays for a request it will not read.
+            lastActivity:
+              only && intent.response.leadAsk === "last-contact"
+                ? await lookupLastActivity(only.id)
+                : null,
+          },
+        };
+      }
+
+      const result = buildResponse(intent.response, turnCtx);
       const userMessage = makeMessage("user", [{ type: "text", text: userText }]);
       const aiMessage = makeMessage("ai", result.segments);
       setMessages((prev) => [...prev, userMessage, aiMessage]);
       runAction(result.action, (href) => router.push(href));
     },
-    [ctx, makeMessage, router],
+    [ctx, makeMessage, router, lookupLead, lookupLastActivity, lookupOverdueFollowUps, lookupRecentActivity],
   );
 
   // Free-text entry from the input bar — resolve the intent via the matcher.
@@ -136,8 +187,8 @@ export function useCopilot() {
     (raw: string) => {
       const text = raw.trim();
       if (!text) return;
-      const { intent } = matchIntent(text, INTENT_CONFIG);
-      runTurn(text, intent);
+      const { intent } = matchIntentWithEntity(text, INTENT_CONFIG);
+      void runTurn(text, intent, text);
     },
     [runTurn],
   );
@@ -151,7 +202,7 @@ export function useCopilot() {
         send(prompt.label); // graceful fallback: treat the label as free text
         return;
       }
-      runTurn(prompt.label, intent);
+      void runTurn(prompt.label, intent, prompt.label);
     },
     [runTurn, send],
   );

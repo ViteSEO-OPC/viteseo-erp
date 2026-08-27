@@ -31,6 +31,8 @@ export type PendingFollowUpRow = {
   id: number;
   status: "overdue" | "today" | "upcoming";
   company: string;
+  /** The lead this work is owed to; null for an event with no lead. */
+  leadId: number | null;
   description: string;
   dueDate: string | null;
 };
