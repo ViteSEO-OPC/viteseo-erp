@@ -620,7 +620,8 @@
         "meeting ko this week",
         "meetings for the week",
         "meetings in the next 7 days",
-        "meetings next 7 days"
+        "meetings next 7 days",
+        "meeting sa linggo"
       ],
       "response": {
         "type": "schedule",
@@ -701,7 +702,8 @@
         "recent updates",
         "anong nangyari recently",
         "anong mga nangyari",
-        "ano ang mga bago"
+        "ano ang mga bago",
+        "ano nangyari sa leads"
       ],
       "response": {
         "type": "recent_activity"
