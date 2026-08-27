@@ -193,3 +193,102 @@ function resolveFallback(config: IntentConfig): Intent {
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
 }
+
+/**
+ * Words that carry the question, not the company — stripped so what remains is the entity.
+ *
+ * Both languages, because the CRM is used in Taglish: "kamusta yung ABC Company" and "how is ABC
+ * Company doing" must both leave "abc company". Deliberately a small closed list of question and
+ * filler words, NOT a general parser — anything it fails to strip is simply passed to the lead
+ * search, which is fuzzy server-side and policy-scoped, so a sloppy term costs a miss rather than a
+ * wrong answer.
+ */
+const ENTITY_STOPWORDS = new Set([
+  // English question/filler
+  "how","is","are","the","a","an","about","of","for","with","status","doing","what","whats","tell",
+  "me","my","do","i","have","any","meeting","meetings","follow","followup","followups","up","next",
+  "action","last","contact","contacted","spoke","talked","to","on","did","when","was","lead","leads",
+  // "last activity on X" / "recent activity on X" — question words, never part of a company name.
+  "activity","recent",
+  "company","update","updates","show","give",
+  // Taglish question/filler
+  "kamusta","kumusta","yung","yong","ang","si","kay","ba","ako","ko","may","meron","mayroon","ano",
+  "anong","na","ng","sa","kailan","huling","nakausap","kausap","susunod","gagawin","dapat","po",
+  "yan","ito","natin","namin",
+]);
+
+/**
+ * The company/lead phrase a message is asking about, or "" when there is none.
+ *
+ * Token-subtractive rather than pattern-based: normalize, drop the words that form the question, and
+ * whatever survives is the entity. That keeps every company name OUT of the client bundle — the
+ * alternative (indexing lead names for Fuse) would ship the whole book of business to every browser
+ * regardless of who may see it, and go stale on every new lead. Resolution belongs to the
+ * policy-scoped `GET /leads?search=`, which already answers per-caller.
+ */
+export function extractEntityPhrase(message: string): string {
+  return normalize(message)
+    .replace(/[?!.,]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !ENTITY_STOPWORDS.has(w))
+    .join(" ")
+    .trim();
+}
+
+/**
+ * The question WITHOUT the entity — "kamusta yung Heritage Designs Studio" → "kamusta yung".
+ *
+ * The complement of {@link extractEntityPhrase}, and the reason both exist. Fuse scores a whole
+ * message against each keyword, so a company name the keywords cannot possibly contain inflates the
+ * distance and pushes a genuine match past the 0.45 confidence bar — "kamusta yung X Y Z" scored
+ * worse than an unrelated knowledge article. Matching the frame alone restores the comparison the
+ * keywords were written for.
+ */
+export function questionFrame(message: string): string {
+  return normalize(message)
+    .replace(/[?!.,]/g, " ")
+    .split(/\s+/)
+    .filter((w) => ENTITY_STOPWORDS.has(w))
+    .join(" ")
+    .trim();
+}
+
+/**
+ * Intent matching for messages that may name a lead.
+ *
+ * Runs the ordinary {@link matchIntent} first, so every existing intent behaves exactly as before.
+ * Only when that produces no confident command AND the message contains something that looks like an
+ * entity does it retry against the {@link questionFrame} — and it accepts that second result ONLY if
+ * it is a lead intent. A question with no company in it can therefore never be re-routed by this
+ * path, and the 36 pre-existing intents are unaffected either way.
+ */
+export function matchIntentWithEntity(message: string, config: IntentConfig): MatchResult {
+  const primary = matchIntent(message, config);
+  if (primary.intent.response.type === "lead_lookup") return primary;
+
+  // A confident non-lead COMMAND wins outright — "go to leads" must not become a lead lookup.
+  //
+  // A knowledge answer does not, and the distinction matters: `searchKnowledge` is already the
+  // fallback for "no confident intent", and its MiniSearch relevance is unbounded, so an article
+  // that merely shares a word with the company name ("Heritage Designs *Studio*") outscores the real
+  // question. Synthesized knowledge intents are marked by a `knowledge:` id, so they stay
+  // overridable by a genuine entity match while real commands do not.
+  const primaryIsKnowledge = primary.intent.id.startsWith("knowledge:");
+  if (!primaryIsKnowledge && primary.score >= round(1 - INTENT_CONFIDENCE_MAX_SCORE)) return primary;
+
+  const entity = extractEntityPhrase(message);
+  const frame = questionFrame(message);
+  if (!entity || !frame) return primary;
+
+  const hits = getIntentIndex(config).search(frame);
+  const best = hits[0];
+  if (
+    best &&
+    (best.score ?? 1) <= INTENT_CONFIDENCE_MAX_SCORE &&
+    best.item.intent.response.type === "lead_lookup"
+  ) {
+    return { intent: best.item.intent, score: round(1 - (best.score ?? 1)) };
+  }
+
+  return primary;
+}

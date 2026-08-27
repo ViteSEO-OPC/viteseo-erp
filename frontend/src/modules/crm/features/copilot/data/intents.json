@@ -3,119 +3,246 @@
   "intents": [
     {
       "id": "show-dashboard",
-      "keywords": ["show my dashboard", "open dashboard", "go to dashboard", "dashboard"],
+      "keywords": [
+        "show my dashboard",
+        "open dashboard",
+        "go to dashboard",
+        "dashboard"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening your **Dashboard** — live lead totals, the status breakdown, and recent activity. (Admins see the Management Dashboard; BDMs see their own.)",
-        "action": { "type": "navigate", "target": "/zerem/dashboard" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/dashboard"
+        }
       }
     },
     {
       "id": "todays-kpis",
-      "keywords": ["todays kpis", "today kpis", "kpis", "kpi", "key metrics"],
+      "keywords": [
+        "todays kpis",
+        "today kpis",
+        "kpis",
+        "kpi",
+        "key metrics"
+      ],
       "response": {
         "type": "navigate",
         "text": "Your live KPIs — **Total Leads**, **High Priority**, **Interested**, and the *Leads by Status* breakdown — are on the **Dashboard**. (*Follow-ups Due* and *Completed Outreach* still show a dash: the data exists but those cards aren't wired yet.) Conversion Rate, Revenue and the rest are computed — ask me how any of them works. Opening the Dashboard…",
-        "action": { "type": "navigate", "target": "/zerem/dashboard" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/dashboard"
+        }
       }
     },
     {
       "id": "revenue-today",
-      "keywords": ["revenue today", "todays revenue"],
-      "response": { "type": "computation", "computationId": "overall-revenue" }
+      "keywords": [
+        "revenue today",
+        "todays revenue"
+      ],
+      "response": {
+        "type": "computation",
+        "computationId": "overall-revenue"
+      }
     },
     {
       "id": "pipeline-summary",
-      "keywords": ["pipeline summary", "pipeline", "summarize this week", "weekly summary", "summarize"],
+      "keywords": [
+        "pipeline summary",
+        "pipeline",
+        "summarize this week",
+        "weekly summary",
+        "summarize"
+      ],
       "response": {
         "type": "navigate",
         "text": "Your live weekly view is on the **Dashboard** — total leads, the *Leads by Status* breakdown, and recent activity. Opening it…",
-        "action": { "type": "navigate", "target": "/zerem/dashboard" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/dashboard"
+        }
       }
     },
     {
       "id": "lead-summary",
-      "keywords": ["lead summary", "leads summary", "summarize leads"],
+      "keywords": [
+        "lead summary",
+        "leads summary",
+        "summarize leads"
+      ],
       "response": {
         "type": "navigate",
         "text": "The live lead counts and *Leads by Status* breakdown live on the **Dashboard**, and the full list is on **Leads**. Opening the Dashboard…",
-        "action": { "type": "navigate", "target": "/zerem/dashboard" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/dashboard"
+        }
       }
     },
     {
       "id": "activity-today",
-      "keywords": ["activity today", "todays activity", "recent activity", "whats happening"],
+      "keywords": [
+        "activity today",
+        "todays activity",
+        "recent activity",
+        "whats happening"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **Activity Logs** — the live, append-only feed of lead changes, emails, notes, and sign-ins (scoped to what you can see).",
-        "action": { "type": "navigate", "target": "/zerem/activity-logs" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/activity-logs"
+        }
       }
     },
-
     {
       "id": "show-hot-leads",
-      "keywords": ["show hot leads", "hot leads", "hottest leads", "who should i call today", "who should i call", "priority leads", "which prospect should i contact first", "which prospect should i contact", "who should i contact", "who should i contact first", "who to contact first", "who do i reach out to first", "who should i reach out to", "who to reach out to", "which lead should i prioritize", "who should i prioritize", "who should i focus on", "what should i work on first", "what should i work on", "who needs my attention today", "who needs my attention", "recommended contacts", "top priority leads", "prioritize leads"],
+      "keywords": [
+        "show hot leads",
+        "hot leads",
+        "hottest leads",
+        "who should i call today",
+        "who should i call",
+        "priority leads",
+        "which prospect should i contact first",
+        "which prospect should i contact",
+        "who should i contact",
+        "who should i contact first",
+        "who to contact first",
+        "who do i reach out to first",
+        "who should i reach out to",
+        "who to reach out to",
+        "which lead should i prioritize",
+        "who should i prioritize",
+        "who should i focus on",
+        "what should i work on first",
+        "what should i work on",
+        "who needs my attention today",
+        "who needs my attention",
+        "recommended contacts",
+        "top priority leads",
+        "prioritize leads"
+      ],
       "response": {
         "type": "lead_priority",
-        "action": { "type": "navigate", "target": "/zerem/leads?priority=high" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads?priority=high"
+        }
       }
     },
     {
       "id": "show-new-leads",
-      "keywords": ["show new leads", "new leads"],
+      "keywords": [
+        "show new leads",
+        "new leads"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **Leads** filtered to the *New* status…",
-        "action": { "type": "navigate", "target": "/zerem/leads?status=new" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads?status=new"
+        }
       }
     },
     {
       "id": "latest-leads",
-      "keywords": ["latest leads", "most recent leads", "newest leads"],
+      "keywords": [
+        "latest leads",
+        "most recent leads",
+        "newest leads"
+      ],
       "response": {
         "type": "navigate",
         "text": "**Leads** is sorted newest-first by default — opening it…",
-        "action": { "type": "navigate", "target": "/zerem/leads" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads"
+        }
       }
     },
     {
       "id": "highest-score",
-      "keywords": ["highest score", "top score", "highest scoring", "best leads", "top leads"],
+      "keywords": [
+        "highest score",
+        "top score",
+        "highest scoring",
+        "best leads",
+        "top leads"
+      ],
       "response": {
         "type": "lead_priority",
-        "action": { "type": "navigate", "target": "/zerem/leads?sort=score-desc" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads?sort=score-desc"
+        }
       }
     },
     {
       "id": "needs-website",
-      "keywords": ["needs website", "no website", "without a website", "needs a website", "leads with no website", "leads without a website"],
+      "keywords": [
+        "needs website",
+        "no website",
+        "without a website",
+        "needs a website",
+        "leads with no website",
+        "leads without a website"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **Leads** filtered to *No Website* — businesses confirmed to have none. Businesses whose website simply has not been verified yet sit under *Not Verified*, not here…",
-        "action": { "type": "navigate", "target": "/zerem/leads?website_status=no-website" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads?website_status=no-website"
+        }
       }
     },
     {
       "id": "needs-redesign",
-      "keywords": ["needs redesign", "redesign", "outdated website", "needs improvement"],
+      "keywords": [
+        "needs redesign",
+        "redesign",
+        "outdated website",
+        "needs improvement"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **Leads** filtered to the *Needs Redesign* website status…",
-        "action": { "type": "navigate", "target": "/zerem/leads?website_status=needs-redesign" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads?website_status=needs-redesign"
+        }
       }
     },
     {
       "id": "assigned-to-me",
-      "keywords": ["assigned to me", "my leads", "my assigned leads", "leads assigned to me"],
+      "keywords": [
+        "assigned to me",
+        "my leads",
+        "my assigned leads",
+        "leads assigned to me"
+      ],
       "response": {
         "type": "navigate",
         "text": "As a BDM, **Leads** already shows only the leads assigned to you (Admins see everyone's). There's no separate *assigned to me* filter — opening **Leads**…",
-        "action": { "type": "navigate", "target": "/zerem/leads" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads"
+        }
       }
     },
     {
       "id": "unassigned-leads",
-      "keywords": ["unassigned leads", "unassigned", "no owner", "leads with no owner"],
+      "keywords": [
+        "unassigned leads",
+        "unassigned",
+        "no owner",
+        "leads with no owner"
+      ],
       "response": {
         "type": "text",
         "text": "Admins can list ownerless leads from the **Leads** table using the *Assigned BD* column filter's *Unassigned* option, and change an owner with **Reassign** on the lead. Business Developers don't hold the assign permission, so they only ever see their own leads — never unassigned ones. Ask me why a lead is unassigned for the full rules."
@@ -123,16 +250,32 @@
     },
     {
       "id": "open-lead-details",
-      "keywords": ["open lead details", "open lead", "lead details", "open top lead", "view lead"],
+      "keywords": [
+        "open lead details",
+        "open lead",
+        "lead details",
+        "open top lead",
+        "view lead"
+      ],
       "response": {
         "type": "navigate",
         "text": "Open any lead from the **Leads** table to see its detail page — the score ring, status, presence details, **Internal Notes**, **Quick Actions** (status · draft email · schedule follow-up · Won/Lose), the calling panel, and a tabbed **Activity Timeline** / **Call History**. Header actions cover Edit and **Export PDF**. Opening **Leads**…",
-        "action": { "type": "navigate", "target": "/zerem/leads" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads"
+        }
       }
     },
     {
       "id": "add-note",
-      "keywords": ["add note", "add a note", "new note", "write a note", "log a note", "leave a note"],
+      "keywords": [
+        "add note",
+        "add a note",
+        "new note",
+        "write a note",
+        "log a note",
+        "leave a note"
+      ],
       "response": {
         "type": "text",
         "text": "Add an internal note on a lead's detail page under **Discussion Notes** — it's saved for your team and recorded in **Activity Logs**."
@@ -140,73 +283,142 @@
     },
     {
       "id": "view-timeline",
-      "keywords": ["view timeline", "lead timeline", "activity timeline", "see the timeline", "lead history"],
+      "keywords": [
+        "view timeline",
+        "lead timeline",
+        "activity timeline",
+        "see the timeline",
+        "lead history"
+      ],
       "response": {
         "type": "navigate",
         "text": "Each lead's detail page has its own **Activity Timeline**. For every event across the CRM, opening **Activity Logs**…",
-        "action": { "type": "navigate", "target": "/zerem/activity-logs" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/activity-logs"
+        }
       }
     },
-
     {
       "id": "open-outreach",
-      "keywords": ["open outreach", "outreach", "go to outreach", "show outreach"],
+      "keywords": [
+        "open outreach",
+        "outreach",
+        "go to outreach",
+        "show outreach"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **Outreach** — your lead inbox where you compose and send emails.",
-        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/follow-ups"
+        }
       }
     },
     {
       "id": "show-drafts",
-      "keywords": ["show drafts", "my drafts", "drafts", "email drafts"],
+      "keywords": [
+        "show drafts",
+        "my drafts",
+        "drafts",
+        "email drafts"
+      ],
       "response": {
         "type": "navigate",
         "text": "Your saved **drafts** live on the *Drafts* tab in **Outreach**. A draft isn't a separate record — sending it transitions the same email, so you never end up with a duplicate. Opening Outreach…",
-        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/follow-ups"
+        }
       }
     },
     {
       "id": "show-followups",
-      "keywords": ["show follow-ups", "show followups", "follow ups", "followups", "follow-ups due", "due follow ups"],
+      "keywords": [
+        "show follow-ups",
+        "show followups",
+        "follow ups",
+        "followups",
+        "follow-ups due",
+        "due follow ups"
+      ],
       "response": {
         "type": "navigate",
         "text": "**Outreach** groups your leads by where the conversation stands — *Awaiting Reply*, *Call-back Req.*, and so on. Opening it…",
-        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/follow-ups"
+        }
       }
     },
     {
       "id": "show-all-emails",
-      "keywords": ["show all emails", "all emails", "every email", "email list"],
+      "keywords": [
+        "show all emails",
+        "all emails",
+        "every email",
+        "email list"
+      ],
       "response": {
         "type": "navigate",
         "text": "There's no combined sent-email history screen, and the per-lead email conversation panel was removed from Lead Details. Sent and received email surfaces in **Activity Logs** and on each lead's **Activity Timeline** instead. To write one, open **Outreach**…",
-        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/follow-ups"
+        }
       }
     },
     {
       "id": "draft-followup",
-      "keywords": ["draft follow-up", "draft followup", "draft a follow up", "draft a follow-up email", "draft email", "draft an email"],
-      "response": { "type": "draft_email" }
+      "keywords": [
+        "draft follow-up",
+        "draft followup",
+        "draft a follow up",
+        "draft a follow-up email",
+        "draft email",
+        "draft an email"
+      ],
+      "response": {
+        "type": "draft_email"
+      }
     },
     {
       "id": "compose-email",
-      "keywords": ["compose email", "new email", "write an email", "write email"],
-      "response": { "type": "draft_email" }
+      "keywords": [
+        "compose email",
+        "new email",
+        "write an email",
+        "write email"
+      ],
+      "response": {
+        "type": "draft_email"
+      }
     },
     {
       "id": "send-email",
-      "keywords": ["send email", "send the email", "send this email"],
+      "keywords": [
+        "send email",
+        "send the email",
+        "send this email"
+      ],
       "response": {
         "type": "navigate",
         "text": "Sending is real — you send from a lead's *Draft & send email* action or the **Outreach** composer, and it's logged to the activity feed. Opening **Outreach** so you can review and send…",
-        "action": { "type": "navigate", "target": "/zerem/follow-ups" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/follow-ups"
+        }
       }
     },
-
     {
       "id": "open-companies",
-      "keywords": ["open companies", "companies", "go to companies", "show companies"],
+      "keywords": [
+        "open companies",
+        "companies",
+        "go to companies",
+        "show companies"
+      ],
       "response": {
         "type": "text",
         "text": "There's no **Companies** module yet — it isn't part of the current app. Each company's details live on its **Lead** instead, over on the **Leads** page."
@@ -214,63 +426,120 @@
     },
     {
       "id": "search-companies",
-      "keywords": ["search companies", "find company", "company search", "look up company"],
+      "keywords": [
+        "search companies",
+        "find company",
+        "company search",
+        "look up company"
+      ],
       "response": {
         "type": "text",
         "text": "Company search isn't available — there's no Companies module yet. Use the search box on **Leads** to find a business by name."
       }
     },
-
     {
       "id": "my-performance",
-      "keywords": ["my performance", "show my performance", "performance", "go to performance", "my stats"],
+      "keywords": [
+        "my performance",
+        "show my performance",
+        "performance",
+        "go to performance",
+        "my stats"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **My Performance**. Live today: your *Assigned Leads* count and *Recent Activity*. Conversion, revenue, targets, and follow-up discipline are *Demo* placeholders until the KPI Engine ships.",
-        "action": { "type": "navigate", "target": "/zerem/my-performance" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/my-performance"
+        }
       }
     },
     {
       "id": "revenue",
-      "keywords": ["revenue", "overall revenue", "my revenue"],
-      "response": { "type": "computation", "computationId": "overall-revenue" }
+      "keywords": [
+        "revenue",
+        "overall revenue",
+        "my revenue"
+      ],
+      "response": {
+        "type": "computation",
+        "computationId": "overall-revenue"
+      }
     },
     {
       "id": "conversion",
-      "keywords": ["conversion", "conversion rate", "win rate", "close rate"],
-      "response": { "type": "computation", "computationId": "conversion-rate" }
+      "keywords": [
+        "conversion",
+        "conversion rate",
+        "win rate",
+        "close rate"
+      ],
+      "response": {
+        "type": "computation",
+        "computationId": "conversion-rate"
+      }
     },
-
     {
       "id": "nav-planner",
-      "keywords": ["go to planner", "open planner", "planner", "my planner", "show planner"],
+      "keywords": [
+        "go to planner",
+        "open planner",
+        "planner",
+        "my planner",
+        "show planner"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening the **Planner** — the CRM's single scheduling authority, holding every follow-up, call, meeting, task and consultation. It's a Business Developer workspace, so Admins don't have it.",
-        "action": { "type": "navigate", "target": "/zerem/planner" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/planner"
+        }
       }
     },
     {
       "id": "nav-reports",
-      "keywords": ["go to reports", "open reports", "show reports", "reports page"],
+      "keywords": [
+        "go to reports",
+        "open reports",
+        "show reports",
+        "reports page"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **Reports & Performance** — management analytics: the conversion funnel, status mix, outreach by channel, monthly acquisition and pending follow-ups. Admin and Super Admin only; a Business Developer is redirected to the Dashboard and should use *My Performance* instead.",
-        "action": { "type": "navigate", "target": "/zerem/reports" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/reports"
+        }
       }
     },
     {
       "id": "nav-settings",
-      "keywords": ["go to settings", "open settings", "show settings", "settings page"],
+      "keywords": [
+        "go to settings",
+        "open settings",
+        "show settings",
+        "settings page"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **Settings** — Team Accounts, the lead Archive, and Business Rules. Management only.",
-        "action": { "type": "navigate", "target": "/zerem/settings" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/settings"
+        }
       }
     },
     {
       "id": "nav-nearby-clients",
-      "keywords": ["nearby clients", "prospect pool", "discovered businesses", "discovery"],
+      "keywords": [
+        "nearby clients",
+        "prospect pool",
+        "discovered businesses",
+        "discovery"
+      ],
       "response": {
         "type": "text",
         "text": "**Nearby Clients** is the discovery surface holding the *Prospect Pool* — businesses found but not yet qualified. A prospect isn't a CRM lead yet: it's unscored and excluded from every dashboard and report until a Business Developer **qualifies** it into the pipeline. Open it from the sidebar (it's a BD workspace, so Admins don't have it)."
@@ -278,26 +547,358 @@
     },
     {
       "id": "nav-leads",
-      "keywords": ["go to leads", "open leads", "leads page", "show leads"],
+      "keywords": [
+        "go to leads",
+        "open leads",
+        "leads page",
+        "show leads"
+      ],
       "response": {
         "type": "navigate",
         "text": "Opening **Leads** — search, filter by priority / status / website status / niche, and add, import, assign, or export.",
-        "action": { "type": "navigate", "target": "/zerem/leads" }
+        "action": {
+          "type": "navigate",
+          "target": "/zerem/leads"
+        }
       }
     },
-
     {
       "id": "score-leads",
-      "keywords": ["score my new leads", "score leads", "score my leads", "re-score leads", "rescore leads"],
-      "response": { "type": "computation", "computationId": "lead-score" }
+      "keywords": [
+        "score my new leads",
+        "score leads",
+        "score my leads",
+        "re-score leads",
+        "rescore leads"
+      ],
+      "response": {
+        "type": "computation",
+        "computationId": "lead-score"
+      }
     },
-
     {
       "id": "help",
-      "keywords": ["help", "what can you do", "what can you do?", "available commands", "commands", "options"],
+      "keywords": [
+        "help",
+        "what can you do",
+        "what can you do?",
+        "available commands",
+        "commands",
+        "options"
+      ],
       "response": {
         "type": "text",
         "text": "I'm the **Vite AI Copilot** — a rule-based assistant (no external AI), answering from the CRM's own documented rules.\nI can:\n**Explain a computation** — ask *\"how is my conversion rate computed?\"* and I'll give you the formula, its numerator and denominator, and why it's defined that way\n**Explain the business rules** — lead scoring signals, the frozen status model, assignment, calling outcomes, outreach, Won vs Lost, permissions\n**Diagnose a number** — *\"why did my lead score change?\"*, *\"why is this lead unassigned?\"*, *\"why can't I access Reports?\"*\n**Walk you through workflows** — qualifying a prospect, working a lead, follow-ups, closing\n**Navigate** — Dashboard, Leads, Outreach, Planner, Reports, Activity Logs, My Performance\n\nIf the CRM doesn't define something, I'll say so rather than guess. What I can't do yet is quote *your* live figures.\nTap a suggested prompt or just ask."
+      }
+    },
+    {
+      "id": "schedule-meetings-today",
+      "keywords": [
+        "do i have a meeting today",
+        "meeting today",
+        "meetings today",
+        "any meetings today",
+        "may meeting ba ako today",
+        "may meeting ba ako ngayon",
+        "meron ba akong meeting today",
+        "meeting ko today",
+        "may meeting ako today"
+      ],
+      "response": {
+        "type": "schedule",
+        "scope": "meetings-today"
+      }
+    },
+    {
+      "id": "schedule-meetings-week",
+      "keywords": [
+        "do i have a meeting this week",
+        "meetings this week",
+        "any meetings this week",
+        "may meeting ba ako this week",
+        "meron ba akong meeting this week",
+        "meeting ko this week",
+        "meetings for the week",
+        "meetings in the next 7 days",
+        "meetings next 7 days"
+      ],
+      "response": {
+        "type": "schedule",
+        "scope": "meetings-week"
+      }
+    },
+    {
+      "id": "schedule-today",
+      "keywords": [
+        "what is my schedule today",
+        "my schedule today",
+        "schedule today",
+        "todays schedule",
+        "ano schedule ko today",
+        "ano ang schedule ko",
+        "schedule ko today",
+        "ano schedule ko ngayon",
+        "whats on today"
+      ],
+      "response": {
+        "type": "schedule",
+        "scope": "today"
+      }
+    },
+    {
+      "id": "schedule-meetings-upcoming",
+      "keywords": [
+        "what are my upcoming meetings",
+        "upcoming meetings",
+        "next meetings",
+        "my upcoming meetings",
+        "ano upcoming meetings ko",
+        "upcoming meetings ko",
+        "susunod na meeting"
+      ],
+      "response": {
+        "type": "schedule",
+        "scope": "meetings-upcoming"
+      }
+    },
+    {
+      "id": "schedule-overdue",
+      "keywords": [
+        "am i overdue",
+        "may overdue ba ako",
+        "overdue ko",
+        "late na ba ako",
+        "what is overdue",
+        "anything overdue"
+      ],
+      "response": {
+        "type": "schedule",
+        "scope": "overdue"
+      }
+    },
+    {
+      "id": "followups-overdue",
+      "keywords": [
+        "do i have overdue follow ups",
+        "overdue follow ups",
+        "overdue followups",
+        "how many overdue follow ups",
+        "may overdue follow up ba ako",
+        "ilang overdue follow ups",
+        "overdue follow up ko"
+      ],
+      "response": {
+        "type": "followups_overdue"
+      }
+    },
+    {
+      "id": "activity-recent",
+      "keywords": [
+        "what happened recently",
+        "what happened lately",
+        "latest activity",
+        "what has been happening",
+        "recent updates",
+        "anong nangyari recently",
+        "anong mga nangyari",
+        "ano ang mga bago"
+      ],
+      "response": {
+        "type": "recent_activity"
+      }
+    },
+    {
+      "id": "schedule-todo-today",
+      "keywords": [
+        "what do i need to do today",
+        "what should i do today",
+        "my tasks today",
+        "what do i have today",
+        "ano kailangan kong gawin today",
+        "ano gagawin ko today",
+        "ano dapat kong gawin",
+        "kailangan kong gawin ngayon",
+        "what needs doing today",
+        "what should i work on today"
+      ],
+      "response": {
+        "type": "schedule",
+        "scope": "todo-today"
+      }
+    },
+    {
+      "id": "schedule-upcoming",
+      "keywords": [
+        "what is coming up",
+        "whats coming up",
+        "my upcoming work",
+        "upcoming schedule",
+        "ano mga paparating",
+        "upcoming ko",
+        "what is next on my planner"
+      ],
+      "response": {
+        "type": "schedule",
+        "scope": "upcoming"
+      }
+    },
+    {
+      "id": "lead-count-mine",
+      "keywords": [
+        "how many leads do i have",
+        "how many leads",
+        "lead count",
+        "total leads",
+        "ilang leads ko",
+        "ilan leads ko",
+        "ilang lead ko",
+        "ilang leads meron ako",
+        "ilang leads"
+      ],
+      "response": {
+        "type": "lead_stats",
+        "stat": "total"
+      }
+    },
+    {
+      "id": "lead-high-priority",
+      "keywords": [
+        "high priority leads",
+        "my high priority leads",
+        "how many high priority",
+        "ano high priority leads ko",
+        "high priority leads ko",
+        "mga high priority ko"
+      ],
+      "response": {
+        "type": "lead_stats",
+        "stat": "high-priority"
+      }
+    },
+    {
+      "id": "lead-interested",
+      "keywords": [
+        "interested leads",
+        "how many interested",
+        "ilang interested leads",
+        "interested leads ko"
+      ],
+      "response": {
+        "type": "lead_stats",
+        "stat": "interested"
+      }
+    },
+    {
+      "id": "lead-status-mix",
+      "keywords": [
+        "lead status breakdown",
+        "status breakdown",
+        "my pipeline breakdown",
+        "breakdown ng leads",
+        "ano status ng leads ko",
+        "pipeline ko"
+      ],
+      "response": {
+        "type": "lead_stats",
+        "stat": "status-mix"
+      }
+    },
+    {
+      "id": "lead-followups-due",
+      "keywords": [
+        "how many follow ups are due",
+        "how many follow ups do i have",
+        "how many followups are due",
+        "ilang follow ups due",
+        "ilang follow up ang due",
+        "ilang follow ups ko",
+        "number of follow ups due",
+        "do i have follow ups"
+      ],
+      "response": {
+        "type": "lead_stats",
+        "stat": "follow-ups-due",
+        "action": { "type": "none" }
+      }
+    },
+    {
+      "id": "lead-about",
+      "keywords": [
+        "how is",
+        "how is doing",
+        "status of",
+        "tell me about",
+        "what about",
+        "kamusta yung",
+        "kamusta si",
+        "kamusta ang",
+        "kamusta na yung",
+        "ano status ng"
+      ],
+      "response": {
+        "type": "lead_lookup",
+        "leadAsk": "overview"
+      }
+    },
+    {
+      "id": "lead-followup-for",
+      "keywords": [
+        "do i have a follow up with",
+        "follow up with",
+        "any follow up for",
+        "may follow up ba ako kay",
+        "may followup ba ako kay",
+        "may follow up ako kay"
+      ],
+      "response": {
+        "type": "lead_lookup",
+        "leadAsk": "follow-up"
+      }
+    },
+    {
+      "id": "lead-meeting-for",
+      "keywords": [
+        "do i have a meeting with",
+        "meeting with",
+        "any meeting with",
+        "may meeting ba ako kay",
+        "may meeting ako kay"
+      ],
+      "response": {
+        "type": "lead_lookup",
+        "leadAsk": "meeting"
+      }
+    },
+    {
+      "id": "lead-next-action",
+      "keywords": [
+        "what is my next action with",
+        "next action with",
+        "next step with",
+        "ano next action ko kay",
+        "ano susunod kay",
+        "next action kay"
+      ],
+      "response": {
+        "type": "lead_lookup",
+        "leadAsk": "next-action"
+      }
+    },
+    {
+      "id": "lead-last-contact",
+      "keywords": [
+        "when did i last contact",
+        "when did i last talk to",
+        "last contacted",
+        "last activity on",
+        "recent activity on",
+        "kailan ko huling nakausap si",
+        "kailan ko huling kinausap",
+        "kailan huling activity ni"
+      ],
+      "response": {
+        "type": "lead_lookup",
+        "leadAsk": "last-contact"
       }
     }
   ]
