@@ -20,6 +20,10 @@ use Tests\TestCase;
  * originates that work directly, WITHOUT touching `cold_calling` — which is a scoring input and a
  * dashboard Consultation signal, and so must not be used as a shortcut.
  *
+ * THE RULE IS KEYED TO THE OWNER, NOT THE CREATOR: any manually created lead assigned to a BD gets
+ * exactly one first touch, whether the BD created it or an Admin/Super Admin did on their behalf.
+ * That is why this method has no actor-role gate, unlike scheduleFirstTouch() — see its docblock.
+ *
  * These tests pin the new behaviour AND the safeguards it reuses unchanged: ownership, prospect
  * exclusion, and dedupe. Bulk import is deliberately out of scope here and keeps its own behaviour.
  */
@@ -112,10 +116,58 @@ class LeadCreationFirstTouchTest extends TestCase
         $admin = $this->user('crm_admin');
 
         // An Admin creator is NOT force-assigned to self, so omitting assigned_to leaves it unowned.
+        // (POST /leads requires assigned_to for a non-BD; this exercises the service-level guard.)
         $lead = $this->createLead($admin);
 
         $this->assertNull($lead->assigned_to);
         $this->assertCount(0, $this->eventsFor($lead), 'Ownerless work must never be minted.');
+    }
+
+    /**
+     * The rule is keyed to the OWNER, not the creator. An Admin creating a lead on a BD's behalf must
+     * leave that BD exactly one first touch — gating on the actor would silently deny it.
+     */
+    public function test_an_admin_created_lead_assigned_to_a_bd_gets_exactly_one(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+
+        $lead = $this->createLead($admin, ['assigned_to' => $bd->id]);
+        $events = $this->eventsFor($lead);
+
+        $this->assertCount(1, $events, 'An Admin-created, BD-owned lead still owes a first touch.');
+        $this->assertSame($bd->id, $events->first()->assigned_to, 'The OWNING BD holds the work, not the Admin creator.');
+        $this->assertSame('todo', $events->first()->status);
+        $this->assertNull($events->first()->starts_at);
+        $this->assertSame('outreach', $events->first()->source);
+    }
+
+    /** Same rule for Super Admin — the actor's role is irrelevant; the lead's owner decides. */
+    public function test_a_super_admin_created_lead_assigned_to_a_bd_gets_exactly_one(): void
+    {
+        $superAdmin = $this->user('super_admin');
+        $bd = $this->user('crm_bd');
+
+        $lead = $this->createLead($superAdmin, ['assigned_to' => $bd->id]);
+        $events = $this->eventsFor($lead);
+
+        $this->assertCount(1, $events);
+        $this->assertSame($bd->id, $events->first()->assigned_to);
+    }
+
+    /** The creator is never the owner of the work unless they also own the lead. */
+    public function test_the_admin_creator_receives_no_work_of_their_own(): void
+    {
+        $admin = $this->user('crm_admin');
+        $bd = $this->user('crm_bd');
+
+        $this->createLead($admin, ['assigned_to' => $bd->id]);
+
+        $this->assertSame(
+            0,
+            PlannerEvent::query()->where('assigned_to', $admin->id)->count(),
+            'An Admin must never be handed Planner work — /zerem/planner is a BD workspace.',
+        );
     }
 
     public function test_a_lead_created_already_scheduled_still_gets_exactly_one(): void

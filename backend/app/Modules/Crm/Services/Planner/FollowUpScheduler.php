@@ -204,7 +204,7 @@ class FollowUpScheduler
     }
 
     /**
-     * BR-LC-01 (§4b) — the first-touch Todo a BD owes a lead they just created by hand.
+     * BR-LC-01 (§4b) — the first-touch Todo owed by a manually created lead that has a BD owner.
      *
      * THE SECOND PLACE THE SYSTEM ORIGINATES WORK, after {@see scheduleFirstTouch()}. Every other
      * creator in this class reconciles an intent the BD already recorded as `cold_calling =
@@ -221,6 +221,14 @@ class FollowUpScheduler
      * Management dashboard counts it as a Consultation ("a booked slot"). Buying the Todo that way
      * would inflate every new lead's score and report a call nobody scheduled. This mints the work
      * directly and MOVES NO LEAD COLUMN.
+     *
+     * KEYED TO THE OWNER, NOT THE CREATOR — and the absence of an actor-role gate is deliberate.
+     * {@see scheduleFirstTouch()} gates on `$actor->hasRole('crm_bd')` because it assigns the Todo to
+     * the ACTOR, so an Admin qualifying would mint work nobody can open (the Planner is a BD
+     * workspace). This method assigns to the LEAD'S OWNER, and StoreLeadRequest enforces
+     * MustBeBusinessDeveloper on `assigned_to`, so that owner is always a BD and the work is always
+     * openable. Gating on the actor here would silently deny a first touch to every lead an Admin
+     * creates on a BD's behalf — the opposite of the intent.
      *
      * SINGLE CREATION ONLY. Called from {@see LeadCreator::create()} — the manual POST /leads path —
      * not from LeadObserver. Both creation paths share `Lead::create()` and therefore the observer, so
