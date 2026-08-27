@@ -1,0 +1,60 @@
+{
+  "_": "Question fixtures for the Copilot regression gates. Data only — the runner holds the logic, the same split intents.json/knowledge.json already use. Add cases here without touching gates.ts.",
+
+  "matrix": [
+    { "q": "Ano mga kailangan kong asikasuhin today?", "expect": ["schedule-todo-today", "schedule-today"] },
+    { "q": "what do i need to work on today", "expect": ["schedule-todo-today", "schedule-today"] },
+    { "q": "anong dapat kong gawin ngayong araw", "expect": ["schedule-todo-today", "schedule-today"] },
+    { "q": "Ano ang pending sa akin?", "expect": ["lead-followups-due", "followups-overdue", "schedule-today", "schedule-todo-today"] },
+    { "q": "May follow-up ba akong overdue?", "expect": ["followups-overdue"] },
+    { "q": "ilang follow up ang hindi ko pa nagagawa", "expect": ["followups-overdue", "lead-followups-due"] },
+    { "q": "May meeting ba ako bukas?", "expect": ["schedule-meetings-upcoming", "schedule-meetings-today", "schedule-meetings-week"] },
+    { "q": "Ano ang schedule ko for the next few days?", "expect": ["schedule-upcoming", "schedule-meetings-week", "schedule-meetings-upcoming"] },
+    { "q": "may meeting ba ako sa susunod na linggo", "expect": ["schedule-meetings-week", "schedule-meetings-upcoming"] },
+    { "q": "Kumusta ang mga leads ko?", "expect": ["lead-count-mine", "lead-status-mix"] },
+    { "q": "how are my leads doing", "expect": ["lead-count-mine", "lead-status-mix"] },
+    { "q": "ilan ba ang leads na hawak ko", "expect": ["lead-count-mine"] },
+    { "q": "ano na ang nangyari sa mga lead ko", "expect": ["activity-recent"] },
+
+    { "q": "Sino kailangan kong balikan?", "deferred": "no canonical CRM definition of who to call back" },
+    { "q": "Ano ang kailangan kong unahin?", "deferred": "no canonical CRM definition of prioritisation" },
+    { "q": "May kailangan ba akong habulin?", "deferred": "no canonical CRM definition of what to chase" },
+    { "q": "sino ang dapat kong tawagan", "deferred": "no canonical CRM definition of who to call" },
+    { "q": "alin ang importante kong leads", "deferred": "no canonical CRM definition of an important lead" }
+  ],
+
+  "realistic": [
+    "what do i need to do today", "anong kailangan kong gawin ngayong araw", "ano ba dapat kong gawin today",
+    "may namiss ba ako", "ano ang overdue", "nakalimutan ko ba may follow up", "overdue follow ups ko",
+    "ilang overdue follow ups", "overdue follow ups", "may overdue follow up ba ako", "ilang follow ups due",
+    "do i have follow ups", "how many follow ups are due", "may meeting ba ako today", "upcoming meetings ko",
+    "meetings this week", "meetings in the next 7 days", "what happened recently", "recent activity",
+    "anong nangyari recently", "what has been happening", "ano ang mga bago", "kamusta yung Heritage Designs Studio",
+    "may follow-up ba ako kay Heritage Designs Studio", "kailan ko huling nakausap si Heritage Designs Studio",
+    "recent activity on Heritage Designs Studio", "ano susunod kay Heritage Designs Studio", "ilang leads ko",
+    "ilang high priority leads", "lead status breakdown", "pipeline ko"
+  ],
+  "realisticMinLive": 30,
+
+  "legitLeadQueries": [
+    { "q": "kamusta yung Heritage Designs Studio" }, { "q": "kamusta yung acme" }, { "q": "kamusta si Acme" },
+    { "q": "kamusta ang Acme" }, { "q": "kamusta na yung Acme" }, { "q": "how is Acme doing" },
+    { "q": "how is Silver Oak Consultancy doing" }, { "q": "tell me about Acme" },
+    { "q": "tell me about Silver Oak Consultancy" }, { "q": "what about Acme" }, { "q": "status of Acme" },
+    { "q": "ano status ng Acme", "knownIssue": "collides with lead-status-mix (portfolio breakdown); pre-existing, unfixed" },
+    { "q": "status ng Acme" }, { "q": "may follow-up ba ako kay Heritage Designs Studio" },
+    { "q": "may follow up ako kay Acme" }, { "q": "any follow up for Acme" }, { "q": "follow up with Acme" },
+    { "q": "do i have a follow up with Acme" }, { "q": "may meeting ba ako kay Acme" },
+    { "q": "may meeting ba ako kay Heritage Designs Studio" }, { "q": "ano susunod kay Acme" },
+    { "q": "next action with Acme" }, { "q": "next action kay Acme" }, { "q": "what is my next action with Acme" },
+    { "q": "kailan ko huling nakausap si Acme" }, { "q": "kailan ko huling kinausap Acme" },
+    { "q": "last activity on Acme" }, { "q": "recent activity on Acme" }, { "q": "when did i last contact Acme" },
+    { "q": "when did i last talk to Acme" }, { "q": "kailan huling activity ni Acme" }
+  ],
+
+  "roleQuestions": {
+    "schedule": ["may meeting ba ako today", "upcoming meetings ko", "my schedule today", "overdue ko"],
+    "leadStats": ["ilang leads ko", "ilang high priority leads", "lead status breakdown"],
+    "namedLead": ["kamusta yung Heritage Designs Studio", "may follow-up ba ako kay Heritage Designs Studio", "ano susunod kay Heritage Designs Studio"]
+  }
+}
