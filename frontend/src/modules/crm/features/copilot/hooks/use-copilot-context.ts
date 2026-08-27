@@ -169,8 +169,6 @@ export function useCopilotContext(): CopilotContext {
       topLeads: [],
       followUpsList: [],
       draftEmail: { to: "", subject: "", body: "" },
-      summary: { newLeads: 0, contacted: 0, followUps: 0, conversion: "" },
-      scoring: { scored: 0, movedToHigh: 0 },
     }),
     [plannerEvents, isBd, leadStats],
   );

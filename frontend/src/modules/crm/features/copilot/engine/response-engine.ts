@@ -125,29 +125,6 @@ function renderLeadPriority(config: ResponseConfig, ctx: CopilotContext): Engine
   return { segments, action: config.action };
 }
 
-function renderFollowups(config: ResponseConfig, ctx: CopilotContext): EngineResult {
-  // No follow-up data in the current frontend source → generic guidance, never invented records.
-  if (ctx.followUpsList.length === 0) {
-    return {
-      segments: toSegments(
-        "I don't have live follow-up data here yet. Open **Outreach** to see your leads grouped by conversation status and pick up the ones *Awaiting Reply* or with a *Call-back Req.*",
-      ),
-      action: config.action,
-    };
-  }
-
-  const segments: RichTextSegment[] = [
-    { type: "text", text: "You have " },
-    { type: "emphasis", text: `${ctx.metrics.followUps} follow-ups` },
-    { type: "text", text: " due:\n" },
-  ];
-  for (const item of ctx.followUpsList) {
-    segments.push({ type: "bold", text: item.name });
-    segments.push({ type: "text", text: ` · ${item.company} — ${item.status}\n` });
-  }
-  return { segments, action: config.action };
-}
-
 function renderDraftEmail(config: ResponseConfig, ctx: CopilotContext): EngineResult {
   const draft = ctx.draftEmail;
 
@@ -172,20 +149,6 @@ function renderDraftEmail(config: ResponseConfig, ctx: CopilotContext): EngineRe
   return { segments, action: config.action };
 }
 
-function renderSummary(config: ResponseConfig, ctx: CopilotContext): EngineResult {
-  const summary = ctx.summary;
-  const segments: RichTextSegment[] = [
-    { type: "text", text: "This week: " },
-    { type: "bold", text: `${summary.newLeads} new leads` },
-    { type: "text", text: `, ${summary.contacted} contacted, ` },
-    { type: "bold", text: `${summary.followUps} follow-ups` },
-    { type: "text", text: " pending. Conversion " },
-    { type: "emphasis", text: summary.conversion },
-    { type: "text", text: "." },
-  ];
-  return { segments, action: config.action };
-}
-
 // Resolves the ":id" placeholder in the target against the top mock lead, emitting a concrete
 // navigate action so the action engine stays agnostic to how the id was derived.
 function renderOpenLead(config: ResponseConfig, ctx: CopilotContext): EngineResult {
@@ -199,18 +162,6 @@ function renderOpenLead(config: ResponseConfig, ctx: CopilotContext): EngineResu
         { type: "text", text: "…" },
       ];
   return { segments, action: { type: "navigate", target } };
-}
-
-function renderScoreLeads(config: ResponseConfig, ctx: CopilotContext): EngineResult {
-  const scoring = ctx.scoring;
-  const segments: RichTextSegment[] = [
-    { type: "text", text: "I re-scored " },
-    { type: "emphasis", text: `${scoring.scored} new leads` },
-    { type: "text", text: ` — ${scoring.movedToHigh} moved to ` },
-    { type: "bold", text: "High priority" },
-    { type: "text", text: "." },
-  ];
-  return { segments, action: config.action };
 }
 
 /**
@@ -597,11 +548,8 @@ const HANDLERS: Record<ResponseType, Handler> = {
   template: renderText,
   navigate: renderNavigate,
   lead_priority: renderLeadPriority,
-  followups: renderFollowups,
   draft_email: renderDraftEmail,
-  summary: renderSummary,
   open_lead: renderOpenLead,
-  score_leads: renderScoreLeads,
   computation: renderComputation,
   schedule: renderSchedule,
   lead_stats: renderLeadStats,

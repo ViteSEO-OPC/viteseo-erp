@@ -13,11 +13,8 @@ export type ResponseType =
   | "template"
   | "navigate"
   | "lead_priority"
-  | "followups"
   | "draft_email"
-  | "summary"
   | "open_lead"
-  | "score_leads"
   // Explain Computation — renders one structured entry from data/computations.json as a consistent
   // formula / numerator / denominator / reasoning block. See ComputationEntry below.
   | "computation"
@@ -162,18 +159,6 @@ export type CopilotDraft = {
   body: string;
 };
 
-export type CopilotSummary = {
-  newLeads: number;
-  contacted: number;
-  followUps: number;
-  conversion: string;
-};
-
-export type CopilotScoring = {
-  scored: number;
-  movedToHigh: number;
-};
-
 /**
  * One Planner event, flattened for the Copilot.
  *
@@ -310,8 +295,6 @@ export type CopilotContext = {
   topLeads: CopilotLead[];
   followUpsList: CopilotFollowUp[];
   draftEmail: CopilotDraft;
-  summary: CopilotSummary;
-  scoring: CopilotScoring;
 };
 
 // ── Engine output ────────────────────────────────────────────────────────────────────────────

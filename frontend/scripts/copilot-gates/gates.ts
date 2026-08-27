@@ -194,7 +194,6 @@ function report(gate: string, ok: number, total: number, detail: string[] = [], 
       plannerByLead: isBd ? { "42": [event("7", "meeting", "3:00 PM")] } : {},
       metrics: { hotLeads: 0, followUps: 0, drafts: 0, todayCalls: 0, newLeads: 0, assignedLeads: 0 },
       topLeads: [], followUpsList: [], draftEmail: { to: "", subject: "", body: "" },
-      summary: { newLeads: 0, contacted: 0, followUps: 0, conversion: "" }, scoring: { scored: 0, movedToHigh: 0 },
     };
   };
 
