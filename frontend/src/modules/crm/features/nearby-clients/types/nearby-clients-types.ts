@@ -109,9 +109,6 @@ export type NearbyClient = {
   website?: WebsiteSummary;
 };
 
-export type VisitPurpose = "follow-up" | "intro" | "proposal" | "assessment";
-export type ReminderOption = "none" | "30m" | "1h" | "1d";
-
 // ── Website evidence chain (LIVE — GET /leads/{id}/website-evidence) ────────────────────────────
 // The trail behind a website conclusion: which candidate URLs a search proposed, which tier proposed
 // each, and why each was refused. Read by a BD before confirming that a business genuinely has no

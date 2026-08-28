@@ -176,10 +176,6 @@ export function accessRuleForPath(pathname: string): PageAccess | null {
   return best;
 }
 
-/** The minRole for the page a path belongs to, or null if ungated / allow-list-based. */
-export function minRoleForPath(pathname: string): Role | null {
-  return accessRuleForPath(pathname)?.minRole ?? null;
-}
 
 /** Whether the given roles may access a path. Ungated paths are always allowed. Honors both the
  *  `minRole` (inherit-upward) and `allowedRoles` (exact allow-list) strategies. */
