@@ -402,15 +402,23 @@ export function LeadsTable({
                   <span className="font-semibold text-foreground">
                     {selectedCount} Lead{selectedCount === 1 ? "" : "s"} Selected
                   </span>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    onClick={onBulkDelete}
-                    disabled={bulkBusy}
-                  >
-                    Delete Selected
-                  </Button>
+                  {/* Same `canAssign` gate as the per-row Delete directly below and as bulk
+                      Reassign beside it. Selection itself is open to every role, so without this a
+                      BD could tick rows, see a destructive button, and collect a 403 from each
+                      DELETE /leads/{id} — the server was never at risk, but the control should not
+                      have been offered. It arrived ungated with the RC3 sync (571866f1) and was
+                      simply missed when c59584d4 gated the bulk Reassign it was adding. */}
+                  {canAssign ? (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={onBulkDelete}
+                      disabled={bulkBusy}
+                    >
+                      Delete Selected
+                    </Button>
+                  ) : null}
                   {/* Bulk ownership assignment is Admin/SA only — same `canAssign` gate as the
                       per-row Assign action and the Assigned BD column, so a BD never sees it (and
                       the PATCH /leads/{id}/assign route would reject them anyway). */}
