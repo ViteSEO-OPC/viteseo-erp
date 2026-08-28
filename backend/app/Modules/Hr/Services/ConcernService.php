@@ -4,9 +4,11 @@ namespace App\Modules\Hr\Services;
 
 use App\Models\User;
 use App\Modules\Hr\Models\Concern;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
 use App\Modules\Hr\Services\Concerns\CancelsOwnRequest;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\Meeting;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -15,6 +17,8 @@ use Illuminate\Validation\ValidationException;
 
 class ConcernService
 {
+    use PagesQueues;
+
     use CancelsOwnRequest;
 
     public const CATEGORIES = ['conduct', 'harassment', 'safety', 'policy', 'other'];
@@ -22,20 +26,76 @@ class ConcernService
     public function __construct(private readonly AuditService $audit) {}
 
     /** HR/Admin queue — all concerns, newest first. */
-    public function listForHr(): Collection
+    /**
+     * One page of the concern queue, for HR.
+     *
+     * The search deliberately does NOT match the reporter's name in general — see
+     * concernSearch(). Everything else is the ordinary queue treatment.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function listForHr(array $filters = []): LengthAwarePaginator
     {
-        return Concern::with(['employee.user', 'meetings', 'canceller', 'revealRequests.requester'])
-            ->latest('submitted_at')
-            ->get();
+        $query = Concern::with(['employee.user', 'meetings', 'canceller', 'revealRequests.requester']);
+
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            ['reference_no', 'category', 'description', 'reported_person'],
+            searchEmployee: false,
+            priorityStatuses: ['pending'],
+            recencyColumn: 'submitted_at',
+            extraSearch: $this->concernSearch(),
+        );
+    }
+
+    /**
+     * Why the reporter's name is not an ordinary search column here.
+     *
+     * ConcernResource already hides who filed an anonymous concern. A search that matched the
+     * name would hand that back anyway, through the result rather than the payload: type a
+     * colleague's name into the box, and whichever anonymous concerns come back are theirs. The
+     * identity is inferred from WHICH ROWS MATCH, and nothing in the response has to name them
+     * for that to work.
+     *
+     * So the name is matchable only on concerns that are not anonymous at all. Deliberately not
+     * "anonymous but since revealed" either: identityVisibleTo() grants that to hr_officer
+     * specifically, and a query has no viewer — matching it would expose the reporter to a
+     * super_admin the resource itself would not name.
+     */
+    private function concernSearch(): \Closure
+    {
+        return function ($group, string $search) {
+            $group->orWhere(
+                fn ($q) => $q->where('is_anonymous', false)
+                    ->whereHas('employee', fn ($e) => $e->whereHas(
+                        'user',
+                        fn ($u) => $u->where('name', 'like', "%{$search}%"),
+                    )),
+            );
+        };
     }
 
     /** The employee's own concerns (named or anonymous). */
-    public function listForEmployee(Employee $employee): Collection
+    /**
+     * One page of the caller's own concerns. Scoped before the filters, so no search widens it
+     * — and the reporter is themselves, so the anonymity rule above has nothing to protect here.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function listForEmployee(Employee $employee, array $filters = []): LengthAwarePaginator
     {
-        return Concern::with(['meetings', 'canceller', 'revealRequests.requester'])
-            ->where('employee_id', $employee->id)
-            ->latest('submitted_at')
-            ->get();
+        $query = Concern::with(['meetings', 'canceller', 'revealRequests.requester'])
+            ->where('employee_id', $employee->id);
+
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            ['reference_no', 'category', 'description', 'reported_person'],
+            searchEmployee: false,
+            priorityStatuses: ['pending'],
+            recencyColumn: 'submitted_at',
+        );
     }
 
     /**

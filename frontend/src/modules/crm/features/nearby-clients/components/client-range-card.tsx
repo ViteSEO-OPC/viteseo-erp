@@ -62,7 +62,12 @@ export function ClientRangeCard({ client, selected, onSelect, onPlanVisit, onDir
 
       {client.website && (
         <div className="mt-3 border-t border-border-subtle pt-3">
-          <WebsiteIntelPanel website={client.website} priority={client.priority} />
+          <WebsiteIntelPanel
+            leadId={client.id}
+            business={client.business}
+            website={client.website}
+            priority={client.priority}
+          />
         </div>
       )}
 

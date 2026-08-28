@@ -6,6 +6,7 @@ namespace App\Modules\Crm\Enums;
 
 use App\Modules\Crm\Notifications\Presenters\InboundReplyPresenter;
 use App\Modules\Crm\Notifications\Presenters\LeadAssignedPresenter;
+use App\Modules\Crm\Notifications\Presenters\LeadsReassignedPresenter;
 use App\Modules\Crm\Notifications\Presenters\NotificationPresenter;
 use App\Modules\Crm\Notifications\Presenters\PlannerReminderPresenter;
 
@@ -42,6 +43,7 @@ enum NotificationType: string
     case INBOUND_REPLY = 'inbound_reply';
     case PLANNER_REMINDER = 'planner_reminder';
     case LEAD_ASSIGNED = 'lead_assigned';
+    case LEADS_REASSIGNED = 'leads_reassigned';
 
     /**
      * The presenter that turns this type's payload into title / message / deep-link.
@@ -54,6 +56,7 @@ enum NotificationType: string
             self::INBOUND_REPLY => new InboundReplyPresenter,
             self::PLANNER_REMINDER => new PlannerReminderPresenter,
             self::LEAD_ASSIGNED => new LeadAssignedPresenter,
+            self::LEADS_REASSIGNED => new LeadsReassignedPresenter,
         };
     }
 }

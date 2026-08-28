@@ -20,7 +20,10 @@ class WorkRequestController extends Controller
     // GET /api/v1/hr/work-requests — HR sees all; employees see their own.
     public function index(Request $request): JsonResponse
     {
-        return WorkRequestResource::collection($this->service->list($request->user()))->response();
+        // Applied by the DATABASE. In the browser they would only narrow the page on screen.
+        return WorkRequestResource::collection(
+            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     /** POST /api/v1/hr/work-requests — the caller asks to work today. */

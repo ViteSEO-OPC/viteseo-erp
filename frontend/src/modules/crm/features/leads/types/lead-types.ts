@@ -55,7 +55,7 @@ export type Lead = {
   otherMarketplace: string | null;
   // Ownership: the assigned BD. `assignedTo` is present when the API eager-loads it (list/detail).
   assignedToId: string | null;
-  assignedTo: { id: string; name: string } | null;
+  assignedTo: { id: string; name: string; suspended?: boolean } | null;
   lastActivity: string;
 };
 

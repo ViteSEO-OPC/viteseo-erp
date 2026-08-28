@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { STALE } from "@/modules/crm/lib/query-freshness";
 import { LEAD_STATUS_CONFIG, type LeadStatusKey } from "@/modules/crm/lib/lead-status";
 import {
   useMyPerformanceSummary,
@@ -23,8 +24,13 @@ import type {
 const KPI_BASE: KpiStat[] = [
   { id: "total-leads", label: "TOTAL LEADS", value: "0", valueVariant: "neutral", caption: "In your pipeline" },
   { id: "high-priority", label: "HIGH PRIORITY", value: "0", valueVariant: "neutral", caption: "Flagged high priority" },
-  // Planner-backed: the whole scoped pending follow-up set. An outbound email is NOT a follow-up
-  // (PO ruling) — only real Planner `follow-up` events count.
+  // Planner-backed: the whole scoped pending follow-up set — every channel of FOLLOW-UP WORK
+  // (`PlannerEvent::FOLLOW_UP_WORK_TYPES`: follow-up, email, call, meeting), not the bare
+  // `follow-up` type. A meeting or call a BD owes a lead is work due just as much as a follow-up.
+  //
+  // The PO ruling this used to cite is about something else and still holds: a SENT outbound email
+  // (a `crm_emails` row) is not a follow-up, and is counted separately by `completed-outreach`
+  // below. A Planner `email` TASK — work owed, not work done — does count here.
   { id: "follow-ups-due", label: "FOLLOW-UPS DUE", value: "0", valueVariant: "neutral", caption: "Overdue, today and upcoming" },
   // Outbound emails the system actually sent — an effort count, not lead coverage (coverage is
   // M-04 Engagement Coverage, a deliberately separate metric). Emailing one lead three times
@@ -42,10 +48,21 @@ type KpiApi = {
   completedOutreach: number;
 };
 
+/**
+ * Shell-level: the sidebar's "Leads N" badge calls this, so `/dashboard/kpis` is mounted on every
+ * CRM screen — see {@link STALE}.
+ *
+ * `staleTime` is set on EVERY observer of `queryKeys.dashboard.kpis()`, not just this one. TanStack
+ * resolves freshness per observer, so a sibling that left it at the default would still see the
+ * cache as stale and refetch the moment it mounted — which is exactly how a shared key ends up
+ * refetching on a route that already had the data. The other four live in `useLeadStatusBreakdown`
+ * below, `useLeadStatusSummary` (leads), `useLeadStats` (copilot) and `useManagementData`.
+ */
 export function useDashboardKpis() {
   const query = useQuery<KpiApi>({
     queryKey: queryKeys.dashboard.kpis(),
     queryFn: () => apiClient.get("/dashboard/kpis").then((r) => r.data.data),
+    staleTime: STALE.standard,
   });
   // Conversion Rate reuses the ownership-scoped GET /dashboard/performance-summary (converted ÷
   // engaged) — for a BD, their own portfolio. Shared query key → no duplicate request/computation.
@@ -92,6 +109,8 @@ export function useLeadStatusBreakdown() {
   const query = useQuery<{ statusCounts: StatusCounts }>({
     queryKey: queryKeys.dashboard.kpis(),
     queryFn: () => apiClient.get("/dashboard/kpis").then((r) => r.data.data),
+    // Same key ⇒ same freshness. See the note on useDashboardKpis above.
+    staleTime: STALE.standard,
   });
 
   const counts = query.data?.statusCounts;
@@ -205,6 +224,8 @@ export type ActivityApi = {
     | "lead.won";
   description: string;
   actor: string | null;
+  /** Signed link for the causer's photo; null for system rows and users without one. */
+  actorAvatarUrl?: string | null;
   changes: { changed?: string[]; from?: string; from_name?: string } | null;
   timestamp: string;
   subject: { type: string; id: string; label: string | null } | null;
@@ -286,6 +307,10 @@ export function mapActivity(api: ActivityApi): ActivityItem {
     id: api.id,
     type: activityIcon(api.event),
     actor,
+    // Only a CRM causer has a photo. An inbound reply is attributed to an external contact above,
+    // who by definition has no CRM avatar — the server sends null there, and this keeps it null
+    // even if a causer is ever attached to such a row.
+    actorAvatarUrl: api.event === "email.received" ? null : api.actorAvatarUrl ?? null,
     action: activityAction(api),
     // Lead events always have a subject (fall back to a generic noun if unlabeled);
     // subject-less events (auth login/logout) render as "{actor} {action}" with no object.
@@ -294,10 +319,16 @@ export function mapActivity(api: ActivityApi): ActivityItem {
   };
 }
 
-// NOTE: the "Copilot AI summary" row (GET /dashboard/copilot-summary) is intentionally NOT consumed.
-// That endpoint returns fixed placeholder counts for an AI-scoring run that does not exist yet, so
-// surfacing it would display fabricated business information. It stays hidden until a real AI scoring
-// run produces genuine metrics — Recent Activity shows only the real, ownership-scoped activity feed.
+// NOTE: there is no "Copilot AI summary" row. GET /dashboard/copilot-summary used to exist and
+// returned three hardcoded constants — a lead-rescoring count, a moved-to-High count and a fixed
+// timestamp — for an AI scoring run that has never run. This hook deliberately never consumed it, and
+// the endpoint has since been removed rather than left reachable behind that convention: a comment is
+// not a mechanism, and anything reading the route list or the API docs would have found fabricated
+// business figures with nothing marking them as such.
+//
+// Nothing replaces it until an AI scoring engine actually exists to compute from — the lead `score`
+// is a plain stored column today, with no re-score or priority-move tracking behind it. Recent
+// Activity shows only the real, ownership-scoped activity feed.
 
 /**
  * Shared live activity feed over the ownership-scoped `GET /activities` endpoint — the SAME

@@ -1,11 +1,13 @@
 <?php
 
+use App\Modules\Hr\Http\Controllers\ApprovalQueueController;
 use App\Modules\Hr\Http\Controllers\AttendanceController;
 use App\Modules\Hr\Http\Controllers\AttendancePolicyController;
 use App\Modules\Hr\Http\Controllers\RemoteCheckinController;
 use App\Modules\Hr\Http\Controllers\BenefitController;
 use App\Modules\Hr\Http\Controllers\BenefitProgramController;
 use App\Modules\Hr\Http\Controllers\ChangeRequestController;
+use App\Modules\Hr\Http\Controllers\CompanyProfileController;
 use App\Modules\Hr\Http\Controllers\ConcernController;
 use App\Modules\Hr\Http\Controllers\DailyOverrideController;
 use App\Modules\Hr\Http\Controllers\DeductionArrearsController;
@@ -46,6 +48,11 @@ use Illuminate\Support\Facades\Route;
 // All HR routes are auto-prefixed with /api/v1/hr (see HrServiceProvider).
 
 Route::middleware('auth:sanctum')->group(function () {
+    // The employer's own details (Company → Settings). Read is open to any authenticated
+    // user: the payslip on screen prints this letterhead for employees too. Writes are
+    // hr_officer-only, further down.
+    Route::get('company-profile', [CompanyProfileController::class, 'show']);
+
     // Departments — read is open to any authenticated user (employees need the
     // list for dropdowns); writes are hr_officer-only.
     Route::get('departments', [DepartmentController::class, 'index']);
@@ -179,9 +186,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::middleware('role:hr_officer|super_admin')->group(function () {
         Route::get('dashboard/stats', [DashboardController::class, 'hrStats']);
-        // The withholding-tax bands, readable. Read-only: tax rates come from statute, and
-        // an editable table would silently mis-withhold for everyone at once.
+        // The withholding-tax bands. Editable, because the schedule is statute that CHANGES
+        // (the BIR table has moved once already, and a bill to move it again is in the House
+        // as of Aug 2026) and a rate change should not need a migration and a deploy. The
+        // danger an editable table carries — one mistyped figure mis-withholding for everyone
+        // in a band at once — is answered by SaveTaxTableRequest, which refuses a table whose
+        // bands do not add up, not by keeping the numbers in code.
         Route::get('tax-table', [TaxTableController::class, 'show']);
+        Route::match(['put', 'patch'], 'tax-table', [TaxTableController::class, 'update']);
+        Route::delete('tax-versions/{taxVersion}', [TaxTableController::class, 'destroyVersion']);
         Route::get('reports/{key}', [ReportController::class, 'show']);
         Route::post('reports/{key}/export', [ReportController::class, 'export'])->middleware('throttle:10,1,report-export:');
         Route::get('attendance', [AttendanceController::class, 'index']);
@@ -225,6 +238,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('payroll/settings', [PayrollController::class, 'settings']);
         Route::put('payroll/settings', [PayrollController::class, 'updateSettings']);
         Route::get('payroll/runs', [PayrollController::class, 'runsIndex']);
+        // BEFORE any payroll/runs/{run} route, so 'for-cycle' is not read as an id.
+        Route::get('payroll/runs/for-cycle', [PayrollController::class, 'runForCycle']);
         Route::get('payroll/thirteenth-month', [PayrollController::class, 'thirteenthMonth']);
         Route::get('payroll/thirteenth-month/preview', [PayrollController::class, 'previewThirteenthMonth']);
         // Pay it, and withhold on what it pushes past the ₱90,000 exemption.
@@ -278,6 +293,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // the run that produced it; the bank file is an export and matches the export limit.
         Route::get('payment-batches', [PaymentBatchController::class, 'index']);
         Route::post('payment-batches', [PaymentBatchController::class, 'store'])->middleware('throttle:5,1,payment-batch:');
+        // BEFORE the {paymentBatch} route, or 'summary' is read as a batch id.
+        Route::get('payment-batches/summary', [PaymentBatchController::class, 'summary']);
         Route::get('payment-batches/{paymentBatch}', [PaymentBatchController::class, 'show']);
         Route::get('payment-batches/{paymentBatch}/bank-file', [PaymentBatchController::class, 'bankFile'])->middleware('throttle:10,1,bank-file:');
         // Reconciliation — what the bank says actually happened. The import moves payslips into
@@ -300,6 +317,10 @@ Route::middleware('auth:sanctum')->group(function () {
         // while keeping the tighter send limit.
         Route::post('candidates/{candidate}/email', [RecruitmentController::class, 'sendEmail'])->middleware('throttle:10,1,hr-email:');
         Route::post('candidates/{candidate}/reject', [RecruitmentController::class, 'reject']);
+        // Counts everybody's claims, so it sits inside the HR-only group.
+        // The dashboard's approvals card — thirteen queues merged server-side.
+        Route::get('approvals/pending', [ApprovalQueueController::class, 'index']);
+        Route::get('reimbursements/summary', [ReimbursementController::class, 'summary']);
         Route::post('reimbursements/{reimbursement}/approve', [ReimbursementController::class, 'approve']);
         Route::post('reimbursements/{reimbursement}/reject', [ReimbursementController::class, 'reject']);
         Route::post('reimbursements/{reimbursement}/mark-paid', [ReimbursementController::class, 'markPaid']);
@@ -330,6 +351,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // auto-mode overtime the caps held back, awaiting someone's yes. Derived on read:
         // it writes nothing, and an approval on the ordinary queue above makes an item disappear.
         Route::get('overtime-requests/auto-review', [OvertimeRequestController::class, 'autoReview']);
+        Route::get('overtime-requests/auto-review/totals', [OvertimeRequestController::class, 'autoReviewTotals']);
         Route::post('departments', [DepartmentController::class, 'store']);
         Route::match(['put', 'patch'], 'departments/{department}', [DepartmentController::class, 'update']);
         Route::delete('departments/{department}', [DepartmentController::class, 'destroy']);
@@ -343,6 +365,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // Deliberately not on the update below: an archived record is read-only (the record page
         // drops its edit affordances for a leaver), so a Save that resolved would be a Save the rest
         // of the record's endpoints could not honour anyway.
+        // BEFORE the {employee} route below, or 'options' is read as an employee id.
+        Route::get('employees/options', [EmployeeController::class, 'options']);
         Route::get('employees/{employee}', [EmployeeController::class, 'show'])->withTrashed();
         Route::match(['put', 'patch'], 'employees/{employee}', [EmployeeController::class, 'update']);
         Route::get('employees/{employee}/salary-history', [EmployeeController::class, 'salaryHistory']);
@@ -403,6 +427,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Documents tab: list / upload / delete.
         Route::get('employees/{employee}/documents', [EmployeeController::class, 'documentsIndex']);
         Route::post('employees/{employee}/documents', [EmployeeController::class, 'storeDocument'])->middleware('throttle:20,1,hr-upload:');
+        Route::patch('employees/{employee}/documents/{document}', [EmployeeController::class, 'renameDocument']);
         Route::delete('employees/{employee}/documents/{document}', [EmployeeController::class, 'destroyDocument']);
 
         // Company → Departments: archive/restore (HR only). CRUD is above.
@@ -458,7 +483,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'employees/{employee}/benefits', [BenefitController::class, 'updateEmployeeBenefits']);
         // What the rates would charge, beside any per-employee override.
 
-        // Company → Rules: work schedules + per-employee assignment + attendance policy.
+        // Company → Settings: work schedules + per-employee assignment + attendance policy.
         Route::get('work-schedules', [WorkScheduleController::class, 'index']);
         Route::post('work-schedules', [WorkScheduleController::class, 'store']);
         Route::match(['put', 'patch'], 'work-schedules/{workSchedule}', [WorkScheduleController::class, 'update']);
@@ -467,6 +492,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::match(['put', 'patch'], 'employees/{employee}/schedule', [WorkScheduleController::class, 'updateEmployeeSchedule']);
         Route::get('attendance-policy', [AttendancePolicyController::class, 'show']);
         Route::match(['put', 'patch'], 'attendance-policy', [AttendancePolicyController::class, 'update']);
+
+        // Company → Settings: who the employer is, as printed on every letterhead.
+        Route::match(['put', 'patch'], 'company-profile', [CompanyProfileController::class, 'update']);
+        Route::post('company-profile/logo', [CompanyProfileController::class, 'updateLogo'])->middleware('throttle:20,1,hr-upload:');
+        Route::delete('company-profile/logo', [CompanyProfileController::class, 'destroyLogo']);
 
         // Requests → Document + Profile-change queues (HR only).
         Route::get('document-requests', [DocumentRequestController::class, 'index']);
@@ -499,6 +529,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Finance → Office Expenses (HR only).
         Route::get('office-expenses', [OfficeExpenseController::class, 'index']);
+        Route::get('office-expenses/summary', [OfficeExpenseController::class, 'summary']);
         Route::post('office-expenses', [OfficeExpenseController::class, 'store'])->middleware('throttle:20,1,hr-upload:');
         Route::match(['put', 'patch'], 'office-expenses/{officeExpense}', [OfficeExpenseController::class, 'update']);
         Route::post('office-expenses/{officeExpense}/approve', [OfficeExpenseController::class, 'approve']);

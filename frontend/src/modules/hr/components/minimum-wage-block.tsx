@@ -41,7 +41,7 @@ export function MinimumWageBlock<T extends FieldValues>({
       </p>
       <p className="mb-4 text-caption text-muted-foreground">
         What this salary works out to per day — the figure a wage order applies to. Set in{" "}
-        <strong>Company &rarr; Rules</strong>.
+        <strong>Company &rarr; Settings</strong>.
       </p>
 
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">

@@ -20,9 +20,22 @@ class ReimbursementController extends Controller
     // GET /api/v1/hr/reimbursements — HR sees all; employees see their own.
     public function index(Request $request): JsonResponse
     {
-        $claims = $this->service->list($request->user());
+        // The three the queue tables send. `search` and `status` are applied by the DATABASE —
+        // applied in the browser they would only narrow the page already on screen.
+        $filters = $request->only(['search', 'status', 'per_page']);
+
+        $claims = $this->service->list($request->user(), $filters);
 
         return ReimbursementResource::collection($claims)->response();
+    }
+
+    /**
+     * GET /hr/reimbursements/summary — the queue's totals per status, for the cards above it.
+     * HR-only: it counts everybody's claims, which is not an employee's to see.
+     */
+    public function summary(): JsonResponse
+    {
+        return response()->json(['data' => $this->service->summary()]);
     }
 
     // POST /api/v1/hr/reimbursements — the caller files their own claim.

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { ChartCard } from "@/modules/crm/components/shared/chart-card/chart-card";
 import { cn } from "@/modules/crm/lib/utils";
 import {
@@ -11,6 +12,23 @@ import {
  * Pending follow-ups — LIVE. The team's action queue: scoped Planner follow-ups that aren't completed,
  * classified Overdue / Today / Upcoming by the Asia/Manila day boundary (server-side). Deliberately a
  * table, not a chart — it's a worklist. Company / description / due date come straight from the event.
+ *
+ * The server returns at most ten rows while the header counts the whole pending set, so a trailing
+ * "+N more not shown" row keeps the two from contradicting each other. This card is a summary, not
+ * the worklist of record — the cap stays, and the count stays truthful.
+ *
+ * Rows navigate to the LEAD the work is owed to. Not to the event itself: `/zerem/planner` takes no
+ * event id, so no existing route targets one, and inventing a deep link is a bigger change than this
+ * card. Navigation follows the Leads table's own pattern (`router.push` on the row), so no DOM
+ * structure is added.
+ *
+ * A row with NO lead is deliberately inert, and it is worth saying why the obvious fallback is
+ * wrong. The notification presenters fall back to `/zerem/planner`, but they address BDs; this card
+ * lives on Reports, which is `minRole: crm_admin`, and `/zerem/planner` is `allowedRoles: ["crm_bd"]`
+ * — BD-only at the route level ON PURPOSE. Every viewer of this card would be bounced to the
+ * dashboard. With nowhere useful to send them, a lead-less row simply is not a link, which is also
+ * what its "—" company column already says. The trailing "+N more" row is inert for its own reason:
+ * it is a note about the list, not work anyone can open.
  */
 const STATUS_STYLE: Record<PendingFollowUpRow["status"], { label: string; className: string; dot: string }> = {
   overdue: { label: "Overdue", className: "bg-red-500/10 text-red-600", dot: "bg-red-500" },
@@ -34,6 +52,14 @@ export function PendingFollowUpsCard({ className }: { className?: string }) {
   const { data, isLoading, isError } = useReportsAnalytics();
   const rows = data?.pendingFollowUps.rows ?? [];
   const counts = data?.pendingFollowUps.counts;
+
+  // The server caps `rows` (10) but `counts` covers the WHOLE pending set, so the header could read
+  // "15 overdue" above ten rows with nothing saying the other five existed. The two numbers are both
+  // already in hand — the gap was only ever unrendered, so nothing extra is fetched to close it.
+  // The three buckets partition the pending set server-side, so their sum IS the total.
+  const total = counts ? counts.overdue + counts.today + counts.upcoming : rows.length;
+  const notShown = Math.max(0, total - rows.length);
+  const router = useRouter();
 
   return (
     <ChartCard
@@ -59,8 +85,32 @@ export function PendingFollowUpsCard({ className }: { className?: string }) {
           <tbody>
             {rows.map((row) => {
               const style = STATUS_STYLE[row.status];
+              const href = row.leadId !== null ? `/zerem/leads/${row.leadId}` : null;
               return (
-                <tr key={row.id} className="border-b border-border/60 last:border-0">
+                <tr
+                  key={row.id}
+                  // Only a row with a lead is a link — see the note above on why the Planner
+                  // fallback is wrong here. `role`/`tabIndex`/`onKeyDown` go beyond the Leads
+                  // table's row pattern on purpose: a click handler with no keyboard path would
+                  // make this queue mouse-only.
+                  role={href ? "link" : undefined}
+                  tabIndex={href ? 0 : undefined}
+                  className={cn(
+                    "border-b border-border/60 transition-colors last:border-0",
+                    href && "cursor-pointer hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+                  )}
+                  onClick={href ? () => router.push(href) : undefined}
+                  onKeyDown={
+                    href
+                      ? (event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            router.push(href);
+                          }
+                        }
+                      : undefined
+                  }
+                >
                   <td className="py-2.5 pr-3 align-middle">
                     <span
                       className={cn(
@@ -84,6 +134,15 @@ export function PendingFollowUpsCard({ className }: { className?: string }) {
                 </tr>
               );
             })}
+            {notShown > 0 ? (
+              <tr>
+                {/* Spans the row's four columns. Muted and non-interactive on purpose: this states
+                    what the list is NOT showing, and is not itself a follow-up to act on. */}
+                <td colSpan={4} className="py-2.5 text-center text-xs text-muted-foreground">
+                  +{notShown} more not shown
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>

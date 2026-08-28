@@ -529,7 +529,7 @@
       "question": "What is the dashboard AI copilot summary?",
       "confidence": "not-defined",
       "measures": "AI-generated rescoring figures on the dashboard",
-      "whyNot": "The dashboard's copilot-summary endpoint returns hardcoded constants with a fixed timestamp and no computation behind it. The frontend deliberately does not consume it, and its values must never be quoted as measurements. There is no AI scoring engine in the CRM.",
+      "whyNot": "There is no AI scoring engine in the CRM, so there are no rescoring figures to report. The lead score is a plain stored column and nothing tracks re-scores or priority moves. A dashboard endpoint once returned hardcoded constants for this and has been removed; no such measurement exists to quote.",
       "keywords": "copilot summary rescored moved to high ai engine dashboard hardcoded placeholder"
     }
   ]

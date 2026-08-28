@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { notify as toast } from "@/core/lib/notify";
 import { notifyOverrideDrift } from "@/modules/hr/lib/override-drift";
 import { formatDate, formatPeso } from "@/core/lib/format";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { useRerunPayrollRun, useRerunPreview } from "@/modules/hr/hooks/use-payroll";
 import { payFrequencyLabel } from "@/modules/hr/types/employee";
@@ -78,7 +79,14 @@ function RerunBody({
   onClose: () => void;
 }) {
   const [reason, setReason] = useState("");
-  const { data: preview, isLoading, error } = useRerunPreview(run.id, open);
+  // Server-paged. The rows are one per PAYSLIP: this confirmation dialog used to render a whole
+  // company's payroll, unpaged, to ask a yes/no question. They arrive changed-first, so page one
+  // is what the reader came for, and every figure above the table is the server's.
+  const previewTable = useServerTable();
+  const { data: preview, isLoading, error } = useRerunPreview(run.id, open, {
+    page: previewTable.params.page,
+    per_page: previewTable.pageSize,
+  });
   const rerunMut = useRerunPayrollRun();
 
   const meta = preview?.meta;
@@ -211,10 +219,11 @@ function RerunBody({
                   columns={columns}
                   rows={rows}
                   rowKey={(r) => r.employee_id}
-                  pageSize={0}
+                  pageSize={previewTable.pageSize}
                   searchable={false}
                   filterable={false}
                   empty="This period has no payslips."
+                  server={previewTable.serverProps(meta?.total ?? 0, isLoading)}
                 />
               </div>
             </>

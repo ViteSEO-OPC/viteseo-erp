@@ -87,7 +87,7 @@ class MyAttendanceReportService
                 // Whether the exemption is actually IN FORCE — `is_management` alone is the
                 // person's flag, this is the flag AND the company rule. The page's "you don't
                 // clock in" notice follows this one, or it would keep promising an exemption
-                // that Company → Rules has switched off.
+                // that Company → Settings has switched off.
                 'attendance_exempt' => $employee->managementExemptOn(
                     $today->toDateString(),
                     (bool) $this->policy->get()->management_auto_attendance,

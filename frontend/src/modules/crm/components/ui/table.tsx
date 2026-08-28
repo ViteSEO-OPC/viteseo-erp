@@ -3,6 +3,7 @@
 import * as React from "react"
 
 import { cn } from "@/modules/crm/lib/utils"
+import { useTableDensity } from "@/modules/crm/components/ui/table-density"
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
@@ -66,11 +67,15 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
 }
 
 function TableHead({ className, ...props }: React.ComponentProps<"th">) {
+  // Only the HEIGHT comes from the preference. A table that sets its own height still wins, so the
+  // five tables carrying explicit density are unaffected by this line.
+  const density = useTableDensity()
   return (
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
+        density.primitive.head,
+        "px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0",
         className
       )}
       {...props}
@@ -79,11 +84,15 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
 }
 
 function TableCell({ className, ...props }: React.ComponentProps<"td">) {
+  // `p-2` split into its axes so only the VERTICAL half follows the preference — the horizontal
+  // 0.5rem is unchanged in both modes. Same computed padding as `p-2` in normal mode.
+  const density = useTableDensity()
   return (
     <td
       data-slot="table-cell"
       className={cn(
-        "p-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
+        density.primitive.cell,
+        "px-2 align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
         className
       )}
       {...props}

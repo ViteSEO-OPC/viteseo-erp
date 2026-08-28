@@ -32,19 +32,32 @@ interface MyRequestRow {
   at: string;
 }
 
+/** How many lines "My Requests" shows — and therefore how many each source needs to offer. */
+const RECENT_ACTIVITY = 6;
+
+/**
+ * What each paged source is asked for. The feed merges every kind, sorts by date and keeps the
+ * newest six, so six from each is all it can possibly use — these lists used to arrive whole to
+ * contribute at most six lines between them.
+ */
+const RECENT_PAGE = { page: 1, per_page: RECENT_ACTIVITY, status: "all" } as const;
+
 export default function EmployeeOverviewPage() {
   const { user } = useAuth();
   const { data: summary } = useMyLeaveSummary();
-  const { data: leaves } = useLeaveRequests();
-  const { data: claims } = useReimbursements();
+  const { data: leaves } = useLeaveRequests(RECENT_PAGE);
+  // The feed below merges every source, sorts by date and keeps the newest six — so six is all
+  // this needs. It used to receive every claim the employee had ever filed to contribute at
+  // most six lines to a list.
+  const { data: claims } = useReimbursements({ page: 1, per_page: RECENT_ACTIVITY, status: "all" });
   const { data: nextPayday } = useMyNextPayday();
   // "My Requests" merged leave + reimbursements only, so an employee who filed overtime, a
   // half-day, an early-out, or asked for a document, a profile change, a payslip or a payroll
   // correction saw no trace of it here — the one screen that is supposed to answer "what did I
   // file and where has it got to". Each of these is scoped to the caller server-side.
-  const { data: halfDays } = useHalfDayRequests();
-  const { data: earlyOuts } = useEarlyOutRequests();
-  const { data: overtimes } = useOvertimeRequests();
+  const { data: halfDays } = useHalfDayRequests(RECENT_PAGE);
+  const { data: earlyOuts } = useEarlyOutRequests(RECENT_PAGE);
+  const { data: overtimes } = useOvertimeRequests(RECENT_PAGE);
   const { data: docReqs } = useMyDocumentRequests();
   const { data: changeReqs } = useMyChangeRequests();
   const { data: payslipReqs } = useMyPayslipRequests();
@@ -58,7 +71,7 @@ export default function EmployeeOverviewPage() {
   // they have their own page, and one may be filed anonymously — surfacing it on a shared screen
   // beside somebody's name is exactly what that option exists to avoid.
   const requests: MyRequestRow[] = [
-    ...(leaves ?? []).map((l) => ({
+    ...(leaves?.items ?? []).map((l) => ({
       key: `l${l.id}`,
       type: l.leave_type.name,
       date:
@@ -68,28 +81,28 @@ export default function EmployeeOverviewPage() {
       status: l.status,
       at: l.created_at,
     })),
-    ...(claims ?? []).map((c) => ({
+    ...(claims?.items ?? []).map((c) => ({
       key: `c${c.id}`,
       type: `Reimbursement (${formatPeso(c.amount)})`,
       date: formatDate(c.created_at),
       status: c.status,
       at: c.created_at,
     })),
-    ...(halfDays ?? []).map((h) => ({
+    ...(halfDays?.items ?? []).map((h) => ({
       key: `hd${h.id}`,
       type: "Half-day",
       date: formatDate(h.work_date),
       status: h.status,
       at: h.created_at,
     })),
-    ...(earlyOuts ?? []).map((e) => ({
+    ...(earlyOuts?.items ?? []).map((e) => ({
       key: `eo${e.id}`,
       type: "Early-out",
       date: formatDate(e.work_date),
       status: e.status,
       at: e.created_at,
     })),
-    ...(overtimes ?? []).map((o) => ({
+    ...(overtimes?.items ?? []).map((o) => ({
       key: `ot${o.id}`,
       type: `Overtime (${o.hours}h)`,
       date: formatDate(o.work_date),
@@ -126,7 +139,7 @@ export default function EmployeeOverviewPage() {
     })),
   ]
     .sort((a, b) => +new Date(b.at) - +new Date(a.at))
-    .slice(0, 6);
+    .slice(0, RECENT_ACTIVITY);
 
   const columns: Column<MyRequestRow>[] = [
     {

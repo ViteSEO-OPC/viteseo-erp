@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getLeaveTypes,
@@ -27,8 +28,14 @@ export function useMyLeaveSummary() {
   return useQuery({ queryKey: BALANCES_KEY, queryFn: getMyLeaveSummary });
 }
 
-export function useLeaveRequests() {
-  return useQuery({ queryKey: REQUESTS_KEY, queryFn: getLeaveRequests });
+/** One page of the leave queue, with the total. Filtered and ordered by the database. */
+export function useLeaveRequests(params: QueueParams) {
+  return useQuery({
+    queryKey: [...REQUESTS_KEY, params] as const,
+    queryFn: () => getLeaveRequests(params),
+    // Turning a page swaps the rows rather than emptying the table and rebuilding it.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useCreateLeaveRequest() {

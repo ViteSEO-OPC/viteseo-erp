@@ -6,6 +6,8 @@ use App\Models\User;
 use App\Modules\Hr\Models\Attendance;
 use App\Modules\Hr\Models\Employee;
 use App\Modules\Hr\Models\RemoteCheckin;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
@@ -13,6 +15,8 @@ use Illuminate\Validation\ValidationException;
 /** Off-site time-ins: the employee submits a selfie, HR looks at it and decides. */
 class RemoteCheckinService
 {
+    use PagesQueues;
+
     /** Where selfies live on the public disk (served via /storage, like receipts). */
     private const PHOTO_DIR = 'hr-remote-checkins';
 
@@ -109,14 +113,28 @@ class RemoteCheckinService
      *
      * @return Collection<int, RemoteCheckin>
      */
-    public function list(?string $status = RemoteCheckin::STATUS_PENDING): Collection
+    /**
+     * One page of the remote check-in queue.
+     *
+     * OLDEST FIRST, and that is not the usual ordering — whoever has been waiting longest is
+     * reviewed first, because every minute of that wait is a minute the employee is already
+     * working and not yet clocked in. Passed as an explicit sort so the trait's newest-first
+     * default does not quietly invert it.
+     *
+     * There is nothing to search: a check-in is a photo and a pair of coordinates. The only
+     * filter that means anything here is the status, which the caller supplies.
+     *
+     * @param  array<string, mixed>  $filters  status, page, per_page
+     */
+    public function list(?string $status = RemoteCheckin::STATUS_PENDING, array $filters = []): LengthAwarePaginator
     {
-        return RemoteCheckin::with(['employee.user', 'reviewer'])
-            // Oldest first: whoever has been waiting longest is reviewed first, and every
-            // minute of that wait is a minute the employee is already working.
-            ->when($status !== null, fn ($q) => $q->where('status', $status))
-            ->orderBy('created_at')
-            ->get();
+        return $this->paginateQueue(
+            RemoteCheckin::with(['employee.user', 'reviewer'])
+                ->when($status !== null, fn ($q) => $q->where('status', $status)),
+            $filters,
+            searchEmployee: true,
+            sort: [['created_at', 'asc']],
+        );
     }
 
     /**

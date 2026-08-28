@@ -5,12 +5,16 @@ namespace App\Modules\Hr\Services;
 use App\Models\User;
 use App\Modules\Hr\Models\ChangeRequest;
 use App\Modules\Hr\Models\Employee;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class ChangeRequestService
 {
+    use PagesQueues;
+
     /**
      * Employee fields an employee may request a change to, with labels. All personal +
      * bank columns on hr_employees. (Email/login identity lives on the users row and is
@@ -28,8 +32,22 @@ class ChangeRequestService
         'nationality' => 'Nationality',
         'date_of_birth' => 'Date of birth',
         'place_of_birth' => 'Place of birth',
-        'address' => 'Home address',
-        'current_address' => 'Current address',
+        // The pre-split free-text values. Still resolvable so requests raised before the
+        // addresses were split can still be read and approved; no new ones are offered.
+        'address' => 'Home address (as previously recorded)',
+        'current_address' => 'Current address (as previously recorded)',
+        'address_house_no' => 'Home address — House / unit no.',
+        'address_street' => 'Home address — Street',
+        'address_barangay' => 'Home address — Barangay',
+        'address_city' => 'Home address — City / municipality',
+        'address_province' => 'Home address — Province',
+        'address_zip' => 'Home address — ZIP code',
+        'current_address_house_no' => 'Current address — House / unit no.',
+        'current_address_street' => 'Current address — Street',
+        'current_address_barangay' => 'Current address — Barangay',
+        'current_address_city' => 'Current address — City / municipality',
+        'current_address_province' => 'Current address — Province',
+        'current_address_zip' => 'Current address — ZIP code',
         'mothers_maiden_name' => "Mother's maiden name",
         'fathers_name' => "Father's name",
         'high_school' => 'High school',
@@ -49,15 +67,27 @@ class ChangeRequestService
 
     public function __construct(private readonly AuditService $audit) {}
 
-    public function list(User $user): Collection
+    /**
+     * One page of the queue. HR sees everyone's; anybody else sees only their own, and that
+     * scope is applied BEFORE the filters so no search can widen it.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function list(User $user, array $filters = []): LengthAwarePaginator
     {
-        $query = ChangeRequest::with(['employee.user', 'reviewer'])->latest();
+        $query = ChangeRequest::with(['employee.user', 'reviewer']);
 
         if (! $user->hasAnyRole(['hr_officer', 'super_admin'])) {
             $query->where('employee_id', $user->employee?->id);
         }
 
-        return $query->get();
+        return $this->paginateQueue(
+            $query,
+            $filters,
+            // No free-text reason on this queue — it records a field and the two values.
+            ['field', 'old_value', 'new_value'],
+            priorityStatuses: ['pending'],
+        );
     }
 
     /**

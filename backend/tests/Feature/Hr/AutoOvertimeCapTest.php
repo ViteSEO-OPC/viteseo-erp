@@ -44,7 +44,7 @@ class AutoOvertimeCapTest extends HrTestCase
     /** @param array<string, mixed> $attrs */
     private function policy(array $attrs = []): void
     {
-        app(AttendancePolicyService::class)->get()->update(array_merge([
+        $this->policyAlways(array_merge([
             'overtime_mode' => 'auto_after_threshold',
             'overtime_threshold_minutes' => 0,
             // Item 7's review flag OFF for this file. Every case here works a six-hour overrun,
@@ -267,7 +267,7 @@ class AutoOvertimeCapTest extends HrTestCase
         $this->policy(['auto_overtime_daily_cap_minutes' => 240]);
         $this->worked('2026-08-03', '23:00:00');
 
-        $rows = app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15');
+        $rows = app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15');
 
         $this->assertCount(1, $rows);
         $this->assertSame('2026-08-03', $rows[0]['work_date']);
@@ -288,7 +288,7 @@ class AutoOvertimeCapTest extends HrTestCase
             'reason' => 'Month-end close', 'status' => 'approved',
         ]);
 
-        $this->assertSame([], app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'));
+        $this->assertSame([], app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15'));
     }
 
     public function test_approving_only_the_held_tail_removes_the_item_from_the_queue(): void
@@ -302,7 +302,7 @@ class AutoOvertimeCapTest extends HrTestCase
             'reason' => 'Approved held tail', 'status' => 'approved',
         ]);
 
-        $this->assertSame([], app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'));
+        $this->assertSame([], app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15'));
     }
 
     public function test_a_non_overlapping_approval_leaves_the_review_item_unchanged(): void
@@ -316,7 +316,7 @@ class AutoOvertimeCapTest extends HrTestCase
             'reason' => 'Outside the actual punches', 'status' => 'approved',
         ]);
 
-        $rows = app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15');
+        $rows = app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15');
 
         $this->assertCount(1, $rows);
         $this->assertSame(120, $rows[0]['excess_minutes']);
@@ -336,7 +336,7 @@ class AutoOvertimeCapTest extends HrTestCase
             ]);
         }
 
-        $rows = app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15');
+        $rows = app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15');
 
         $this->assertCount(1, $rows);
         $this->assertSame(60, $rows[0]['excess_minutes']);
@@ -360,7 +360,7 @@ class AutoOvertimeCapTest extends HrTestCase
         ]);
 
         $this->assertSame(360, $this->payslipOvertimeMinutes());
-        $this->assertSame([], app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'));
+        $this->assertSame([], app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15'));
     }
 
     public function test_the_queue_is_empty_in_approved_only_mode(): void
@@ -370,7 +370,7 @@ class AutoOvertimeCapTest extends HrTestCase
 
         $this->assertSame(
             [],
-            app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'),
+            app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15'),
             'nothing is auto-paid in this mode, so nothing is being held back',
         );
     }
@@ -380,7 +380,7 @@ class AutoOvertimeCapTest extends HrTestCase
         $this->policy();
         $this->worked('2026-08-03', '23:00:00');
 
-        $this->assertSame([], app(AttendanceService::class)->autoOvertimeReview('2026-08-01', '2026-08-15'));
+        $this->assertSame([], app(AttendanceService::class)->autoOvertimeRows('2026-08-01', '2026-08-15'));
     }
 
     /** Read-only: opening the queue must not create requests or touch attendance (cf.). */
@@ -390,8 +390,8 @@ class AutoOvertimeCapTest extends HrTestCase
         $this->worked('2026-08-03', '23:00:00');
 
         $service = app(AttendanceService::class);
-        $service->autoOvertimeReview('2026-08-01', '2026-08-15');
-        $service->autoOvertimeReview('2026-08-01', '2026-08-15');
+        $service->autoOvertimeRows('2026-08-01', '2026-08-15');
+        $service->autoOvertimeRows('2026-08-01', '2026-08-15');
 
         $this->assertSame(0, OvertimeRequest::count(), 'no request was filed on the caller’s behalf');
         $this->assertSame(1, Attendance::count());

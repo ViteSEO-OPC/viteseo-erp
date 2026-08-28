@@ -16,8 +16,18 @@ import { TableSkeleton } from "@/modules/crm/features/dashboard/components/table
 import { EmptyState } from "@/modules/crm/components/shared/empty-state/empty-state";
 import { ErrorState } from "@/modules/crm/components/shared/error-state/error-state";
 import { useRecentLeads } from "@/modules/crm/features/dashboard/hooks/use-dashboard-data";
+import { cn } from "@/modules/crm/lib/utils";
+import { useTableDensity } from "@/modules/crm/components/ui/table-density";
 
 export function RecentLeadsTable() {
+  const density = useTableDensity();
+  // A standard HEADER over condensed ROWS — this table's own pairing, preserved as-is.
+  const th = cn(
+    "sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground",
+    density.head.standard,
+  );
+  const td = cn(density.row.condensed, "px-4");
+
   const router = useRouter();
   const { data: leads, total, isLoading, isError } = useRecentLeads();
 
@@ -36,19 +46,19 @@ export function RecentLeadsTable() {
           <Table>
             <TableHeader>
               <TableRow className="border-b border-border-subtle bg-surface-table-header">
-                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className={th}>
                   Business
                 </TableHead>
-                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className={th}>
                   Industry
                 </TableHead>
-                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className={cn(th, "text-center")}>
                   Score
                 </TableHead>
-                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className={cn(th, "text-center")}>
                   Priority
                 </TableHead>
-                <TableHead className="sticky top-0 z-10 border-b border-border-subtle bg-surface-table-header h-10 px-4 text-center text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                <TableHead className={cn(th, "text-center")}>
                   Status
                 </TableHead>
               </TableRow>
@@ -60,19 +70,19 @@ export function RecentLeadsTable() {
                   onClick={() => router.push(`/zerem/leads/${lead.id}`)}
                   className="cursor-pointer border-b border-border-subtle transition-colors hover:bg-muted"
                 >
-                  <TableCell className="px-4 py-3 text-sm font-semibold text-foreground">
+                  <TableCell className={cn(td, "text-sm font-semibold text-foreground")}>
                     {lead.business}
                   </TableCell>
-                  <TableCell className="px-4 py-3 text-sm text-secondary-foreground">
+                  <TableCell className={cn(td, "text-sm text-secondary-foreground")}>
                     {lead.industry}
                   </TableCell>
-                  <TableCell className="px-4 py-3 text-center text-sm font-bold text-foreground">
+                  <TableCell className={cn(td, "text-center text-sm font-bold text-foreground")}>
                     {lead.score}
                   </TableCell>
-                  <TableCell className="px-4 py-3 text-center">
+                  <TableCell className={cn(td, "text-center")}>
                     <PriorityChip priority={lead.priority} />
                   </TableCell>
-                  <TableCell className="px-4 py-3 text-center">
+                  <TableCell className={cn(td, "text-center")}>
                     <StatusChip status={lead.status} />
                   </TableCell>
                 </TableRow>

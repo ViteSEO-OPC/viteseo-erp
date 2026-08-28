@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getMyAttendance,
@@ -56,11 +57,16 @@ export function useToggleBreak() {
   });
 }
 
-export function useHrAttendance(date?: string) {
+/**
+ * One page of the roster for a date. Polled every minute — which is why the payload matters
+ * here more than the row count suggests.
+ */
+export function useHrAttendance(date: string | undefined, params: QueueParams & { timing?: string }) {
   return useQuery({
-    queryKey: ["hr", "attendance", date ?? "today"],
-    queryFn: () => getHrAttendance(date),
+    queryKey: ["hr", "attendance", date ?? "today", params] as const,
+    queryFn: () => getHrAttendance(date, params),
     refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -73,10 +79,12 @@ export function useAdjustAttendance() {
 }
 
 /** The stale-attendance review queue (item 6). */
-export function useOpenShifts(from?: string, to?: string) {
+/** One page of the stale-attendance review queue. */
+export function useOpenShifts(from: string | undefined, to: string | undefined, params: QueueParams) {
   return useQuery({
-    queryKey: ["hr", "attendance", "open-shifts", from ?? "", to ?? ""],
-    queryFn: () => getOpenShifts(from, to),
+    queryKey: ["hr", "attendance", "open-shifts", from ?? "", to ?? "", params] as const,
+    queryFn: () => getOpenShifts(from, to, params),
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -90,11 +98,16 @@ export function useAttendanceSummary(date?: string) {
 
 // A specific employee's violations for a given month (for the flag detail dialog).
 // `month` is 'YYYY-MM'; omitting it returns all months (unused by the dialog now).
-export function useViolations(employeeId: number | null, month?: string) {
+export function useViolations(
+  employeeId: number | null,
+  month: string | undefined,
+  params: QueueParams,
+) {
   return useQuery({
-    queryKey: ["hr", "violations", employeeId ?? "none", month ?? "all"],
-    queryFn: () => getViolations(employeeId as number, month),
+    queryKey: ["hr", "violations", employeeId ?? "none", month ?? "all", params] as const,
+    queryFn: () => getViolations(employeeId as number, month, params),
     enabled: employeeId != null,
+    placeholderData: keepPreviousData,
   });
 }
 

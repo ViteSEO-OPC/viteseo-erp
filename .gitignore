@@ -45,6 +45,9 @@ venv/
 # harmless. The target LIST itself (discovery-targets.json) IS version-controlled.
 /scraper/.discovery-state.json
 /scraper/.discovery.lock
+# Per-run discovery telemetry (provider comparison). Runtime exhaust, appended per run — the
+# numbers it holds are only meaningful for the environment that produced them.
+/scraper/.discovery-metrics.jsonl
 /scraper/logs/
 *.egg-info/
 __pycache__/

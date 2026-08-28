@@ -85,3 +85,34 @@ def test_payload_never_contains_forbidden_fields_when_fully_populated():
         source="openstreetmap",
     )
     assert FORBIDDEN_FIELDS.isdisjoint(business.to_payload().keys())
+
+
+# --- per-record provenance --------------------------------------------------------
+
+
+def test_a_record_naming_its_own_lane_overrides_the_run_source():
+    # A composite run has two lanes. Stamping one name across both would make it impossible to tell
+    # afterwards whether AI expansion added anything.
+    raw = RawBusiness(provider_id="node/1", name="Mercury Drug Vigan", discovered_by="openai")
+
+    assert normalize(raw, "openstreetmap").source == "openai"
+
+
+def test_a_record_with_no_lane_falls_back_to_the_run_source():
+    # Every existing single-provider caller must behave exactly as it did before this field existed.
+    raw = RawBusiness(provider_id="node/1", name="Vigan Pharmacy")
+
+    assert normalize(raw, "openstreetmap").source == "openstreetmap"
+
+
+def test_the_lane_never_carries_a_website_status_or_any_decision_field():
+    # Provenance is the ONLY thing this field changes. A provider still cannot state a website
+    # status, and the payload still carries no score, priority or ownership.
+    raw = RawBusiness(provider_id="node/1", name="Mercury Drug Vigan", discovered_by="openai")
+
+    payload = normalize(raw, "openstreetmap").to_payload()
+
+    assert payload["website_status"] == "website-unknown"
+    for forbidden in ("score", "priority", "assigned_to", "lead_score", "qualified_at"):
+        assert forbidden not in payload
+

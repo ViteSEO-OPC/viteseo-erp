@@ -14,12 +14,15 @@ use App\Modules\Hr\Models\SharedLeaveBalance;
 use App\Modules\Hr\Models\Payslip;
 use App\Modules\Hr\Models\SalaryHistory;
 use App\Modules\Hr\Models\PayslipAmendment;
+use App\Modules\Hr\Services\Concerns\PagesComputedRows;
+use App\Modules\Hr\Services\Concerns\PagesQueues;
 use App\Modules\Hr\Support\PayslipDocument;
 use App\Modules\Hr\Support\PayslipLines;
 use App\Modules\Hr\Models\PayslipRequest;
 use App\Modules\Hr\Models\Reimbursement;
 use App\Modules\Hr\Models\RetroFlag;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
@@ -39,6 +42,9 @@ use Illuminate\Validation\ValidationException;
  */
 class PayrollService
 {
+    use PagesComputedRows;
+    use PagesQueues;
+
     public function __construct(
         private readonly ContributionService $contributions,
         private readonly PayScheduleService $schedule,
@@ -51,6 +57,7 @@ class PayrollService
         private readonly LoanService $loans,
         private readonly TaxService $tax,
         private readonly AllowanceService $allowances,
+        private readonly CompanyProfileService $company,
     ) {}
 
     /**
@@ -1374,7 +1381,7 @@ class PayrollService
 
         // Management staff are on a FIXED salary, so by default a holiday they worked pays no
         // premium — the day was already inside the salary. `management_holiday_premium`
-        // (Company → Rules) buys that back: on, they earn the same statutory premium as
+        // (Company → Settings) buys that back: on, they earn the same statutory premium as
         // everyone else. Read off the CYCLE'S policy version, so a rule changed today cannot
         // reprice a period that has already been paid.
         if ($employee->isManagement() && ! $policy->management_holiday_premium) {
@@ -1434,7 +1441,7 @@ class PayrollService
                 'name' => $names[$date] ?? null,
                 'type' => (string) $type,
                 // The POLICY percentage as HR set it, not the add-on this method works in: "200%"
-                // is the figure in Company → Rules and the one the employee can look up.
+                // is the figure in Company → Settings and the one the employee can look up.
                 'rate_pct' => self::dayRateMultiplierPct($type, ! $onRestDay, $policy),
                 'rest_day' => $onRestDay,
                 'daily_rate' => round($dailyRate, 2),
@@ -1740,7 +1747,10 @@ class PayrollService
      */
     public function thirteenthMonthPreview(int $year): array
     {
-        $cap = (float) (PayrollSetting::current()->other_benefits_annual_cap ?? 0);
+        // The SAME dated cap runThirteenthMonth() will use, not the live row. A preview that
+        // resolves its rules differently from the run it is previewing is not a preview: for a
+        // past year, or a cap change already scheduled ahead, the two quietly disagreed.
+        $cap = (float) (PayrollSetting::asOf("{$year}-12-31")->other_benefits_annual_cap ?? 0);
         $rows = $this->computeThirteenthMonth($year, $cap);
 
         return [
@@ -3407,23 +3417,155 @@ class PayrollService
             ->sum(fn ($b) => max(0, (float) $b->entitled_days - (float) $b->used_days));
     }
 
-    public function listRuns(): Collection
+    /**
+     * One page of the run history, newest cycle first.
+     *
+     * Payroll runs are the slowest-growing list in the module — two a month — but they are also
+     * the most expensive row: each carries four aggregate subqueries over its payslips, so the
+     * cost per row scales with HEADCOUNT even though the row count scales with time. A decade of
+     * runs for a large company is a lot of summing to do in order to render ten lines.
+     *
+     * No priority rung: a run's status is a lifecycle (processing → completed), not a queue
+     * waiting on somebody, and floating one stage would be an opinion about payroll rather than
+     * about paging.
+     *
+     * @param  array<string, mixed>  $filters  search, status, page, per_page
+     */
+    public function listRuns(array $filters = []): LengthAwarePaginator
+    {
+        return $this->paginateQueue(
+            PayrollRun::withCount('payslips')
+                // The register states gross BEFORE the absence charge (see
+                // Payslip::registerTotals()), which the stored run columns do not hold. Summed
+                // here so a page of runs still costs one query rather than one per row.
+                ->withCount(['payslips as slips_count'])
+                ->withSum('payslips as slips_gross', 'gross')
+                ->withSum('payslips as slips_absence', 'absence_deduction')
+                ->withSum('payslips as slips_net', 'net_pay'),
+            $filters,
+            ['frequency', 'type', 'reason'],
+            searchEmployee: false,
+            recencyColumn: 'cycle_start',
+        );
+    }
+
+    /**
+     * The run for ONE specific cycle, or null if that period has not been run.
+     *
+     * Its own lookup rather than a search through the history, because of what the answer is
+     * used for: the screen asks "has this period already been run?" and offers the Run button
+     * when the answer is no. Deriving that from a page of the history means a run that happens
+     * not to be on the page reads as "not run yet" — and the button it puts back is the one that
+     * pays a whole company. The period is uniquely keyed, so this is an exact lookup.
+     */
+    public function runForCycle(string $frequency, string $cycleStart, string $cycleEnd): ?PayrollRun
     {
         return PayrollRun::withCount('payslips')
-            // The register states gross BEFORE the absence charge (see Payslip::registerTotals()),
-            // which the stored run columns do not hold. Summed here so a page of runs still costs
-            // one query rather than one per row.
             ->withCount(['payslips as slips_count'])
             ->withSum('payslips as slips_gross', 'gross')
             ->withSum('payslips as slips_absence', 'absence_deduction')
             ->withSum('payslips as slips_net', 'net_pay')
-            ->latest('cycle_start')
-            ->get();
+            ->where('frequency', $frequency)
+            ->whereDate('cycle_start', $cycleStart)
+            ->whereDate('cycle_end', $cycleEnd)
+            ->first();
     }
 
-    public function runWithBreakdown(PayrollRun $run): PayrollRun
+    /**
+     * A run with ONE PAGE of its per-employee breakdown attached.
+     *
+     * This used to load every payslip in the run, with each one's employee, user and department.
+     * For a run the size of the company that is the whole payroll held in memory and serialised
+     * into a single response, to draw a table showing ten rows of it.
+     *
+     * Everything the screen derives from the whole set — the register totals, whether the run can
+     * be locked, what corrections left owing — is answered by runTotals() below rather than by
+     * adding up the rows in hand. That separation is the point: a page is for READING, and no
+     * figure on that screen may be computed from it.
+     *
+     * @param  array<string, mixed>  $filters  page, per_page
+     */
+    public function runWithBreakdown(PayrollRun $run, array $filters = []): PayrollRun
     {
-        return $run->load(['payslips.employee.user', 'payslips.employee.department', 'runner', 'locker']);
+        $perPage = min(100, max(1, (int) ($filters['per_page'] ?? 10)));
+        $page = max(1, (int) ($filters['page'] ?? 1));
+
+        $run->load(['runner', 'locker']);
+
+        $search = trim((string) ($filters['search'] ?? ''));
+
+        // Searched in the QUERY, by the employee this payslip pays. A box that filtered the ten
+        // rows on screen would answer "no matches" for somebody four pages down — on a register
+        // whose whole use is finding one person's line in it.
+        $matching = fn ($q) => $q->when($search !== '', fn ($inner) => $inner->whereHas(
+            'employee',
+            fn ($e) => $e->whereHas('user', fn ($u) => $u->where('name', 'like', "%{$search}%"))
+                ->orWhere('employee_no', 'like', "%{$search}%"),
+        ));
+
+        $run->setRelation('payslips', $matching($run->payslips()
+            ->with(['employee.user', 'employee.department']))
+            ->orderBy('id')
+            ->forPage($page, $perPage)
+            ->get());
+
+        // Stamped on the run so the resource can state what the page is a page OF. Without this
+        // the screen has ten rows and no way to know whether that is the run.
+        //
+        // The total follows the SEARCH — a pager offering four pages of a one-row result is the
+        // same lie as a search that only looked at one page.
+        $run->breakdownMeta = [
+            'total' => $matching($run->payslips())->count(),
+            'page' => $page,
+            'per_page' => $perPage,
+        ];
+
+        return $run;
+    }
+
+    /**
+     * The whole-run facts the payroll screen states, counted by the DATABASE.
+     *
+     * Every one of these used to be derived from the fully-loaded payslip collection: how many
+     * were disbursed, what corrections left owing or overpaid, and whether the run may be locked.
+     * Once the breakdown is a page, each of them would silently describe those ten rows — and
+     * three of them are money, while the fourth gates the button that seals a payroll cycle
+     * permanently.
+     *
+     * `outstanding` mirrors Payslip::amountOutstanding(): net pay minus what was transferred.
+     * Compared against half a centavo rather than zero, so the SQL agrees with the PHP rounding
+     * instead of calling a 0.004 rounding artefact an unpaid balance.
+     *
+     * @return array{disbursed_count:int, owing_count:int, owing_total:float,
+     *               overpaid_count:int, overpaid_total:float, can_lock:bool}
+     */
+    public function runTotals(PayrollRun $run): array
+    {
+        $outstanding = 'round(net_pay - coalesce(disbursed_amount, 0), 2)';
+
+        $row = Payslip::query()
+            ->where('payroll_run_id', $run->id)
+            ->selectRaw("count(*) as slips")
+            ->selectRaw("sum(case when status = 'disbursed' then 1 else 0 end) as disbursed")
+            ->selectRaw("sum(case when disbursed_amount is not null and {$outstanding} > 0.005 then 1 else 0 end) as owing")
+            ->selectRaw("coalesce(sum(case when disbursed_amount is not null and {$outstanding} > 0.005 then {$outstanding} else 0 end), 0) as owing_total")
+            ->selectRaw("sum(case when disbursed_amount is not null and {$outstanding} < -0.005 then 1 else 0 end) as overpaid")
+            ->selectRaw("coalesce(sum(case when disbursed_amount is not null and {$outstanding} < -0.005 then -{$outstanding} else 0 end), 0) as overpaid_total")
+            ->selectRaw("sum(case when status != 'disbursed' or {$outstanding} > 0.005 then 1 else 0 end) as unsettled")
+            ->toBase()
+            ->first();
+
+        $slips = (int) ($row->slips ?? 0);
+
+        return [
+            'disbursed_count' => (int) ($row->disbursed ?? 0),
+            'owing_count' => (int) ($row->owing ?? 0),
+            'owing_total' => round((float) ($row->owing_total ?? 0), 2),
+            'overpaid_count' => (int) ($row->overpaid ?? 0),
+            'overpaid_total' => round((float) ($row->overpaid_total ?? 0), 2),
+            // The precondition for locking: at least one payslip, and none of them unsettled.
+            'can_lock' => $run->locked_at === null && $slips > 0 && (int) ($row->unsettled ?? 0) === 0,
+        ];
     }
 
     /**
@@ -3432,7 +3574,7 @@ class PayrollService
      * recomputed. Reversible via unlock(), which is audited: the lock is a safety catch
      * against an accidental re-run, not a legal seal.
      */
-    public function lock(PayrollRun $run, User $user): PayrollRun
+    public function lock(PayrollRun $run, User $user, bool $acknowledgeOverpayment = false): PayrollRun
     {
         if ($run->isLocked()) {
             throw ValidationException::withMessages([
@@ -3471,6 +3613,36 @@ class PayrollService
                     "{$owing} payslip(s) were amended after being paid and still have a balance outstanding. Pay it before locking the run.",
                 ],
             ]);
+        }
+
+        // AND NOT A PENNY OVERPAID EITHER. The mirror of the check above, and the one it was
+        // missing: a correction that LOWERS a paid payslip leaves the company out of pocket, and
+        // `net_pay > disbursed_amount` cannot see it because the inequality points the other way.
+        // Closing the books on a cycle while money is still unrecovered went through silently.
+        //
+        // A refusal rather than a block: wages already paid cannot be clawed back unilaterally
+        // (Labor Code art. 113 — recovery needs the employee's written consent), so there is no
+        // action that would clear this the way paying a balance clears the case above. A run with
+        // an overpayment on it would otherwise be unlockable for ever. So it asks, once, the same
+        // way a back-dated salary does (EmployeeService::assertSalaryDateIsSafe).
+        if (! $acknowledgeOverpayment) {
+            $overpaid = $run->payslips()
+                ->whereNotNull('disbursed_amount')
+                ->whereColumn('net_pay', '<', 'disbursed_amount')
+                ->get();
+
+            if ($overpaid->isNotEmpty()) {
+                $total = $overpaid->sum(fn (Payslip $p) => -$p->amountOutstanding());
+
+                throw ValidationException::withMessages([
+                    'acknowledge_overpayment' => [
+                        $overpaid->count() . ' payslip(s) in this run were corrected downward after '
+                            . 'being paid, so ' . '₱' . number_format((float) $total, 2) . ' was '
+                            . 'overpaid and has not been recovered. Nothing collects it back '
+                            . 'automatically. Confirm to lock the run anyway.',
+                    ],
+                ]);
+            }
         }
 
         $run->update(['locked_at' => now(), 'locked_by' => $user->id]);
@@ -3933,7 +4105,7 @@ class PayrollService
                 $workingDays = $this->attendance->scheduledWorkdaysFor($employee, $cycleStart, $cycleEnd);
                 // Management staff are on a FIXED salary — unpaidDaysDetailFor() returns 0 for
                 // them, so pay is never prorated by attendance. holidayPremiumFor() likewise
-                // pays them nothing UNLESS `management_holiday_premium` is on in Company → Rules.
+                // pays them nothing UNLESS `management_holiday_premium` is on in Company → Settings.
                 // $policy is passed EXPLICITLY. It always accepted one (the preview/dry-run
                 // override, step 6b) and this call never supplied it, so the late and undertime
                 // deductions re-read the live singleton instead of the policy resolved above.
@@ -4176,7 +4348,7 @@ class PayrollService
      *
      * @return array{rows: array<int, array<string, mixed>>, meta: array<string, mixed>}
      */
-    public function rerunPreview(PayrollRun $run, User $actor): array
+    public function rerunPreview(PayrollRun $run, User $actor, array $filters = []): array
     {
         $this->assertRerunnable($run);
 
@@ -4196,7 +4368,7 @@ class PayrollService
 
             // Read INSIDE the transaction, then keep only scalars: the models die with the rollback.
             $after = $fresh->payslips()->with('employee.user')->get()->keyBy('employee_id');
-            $result = $this->rerunDiff($before, $after, $run);
+            $result = $this->rerunDiff($before, $after, $run, $filters);
         } finally {
             DB::rollBack();
         }
@@ -4258,7 +4430,7 @@ class PayrollService
      * @param  \Illuminate\Support\Collection<int, Payslip>  $after
      * @return array{rows: array<int, array<string, mixed>>, meta: array<string, mixed>}
      */
-    private function rerunDiff($before, $after, PayrollRun $run): array
+    private function rerunDiff($before, $after, PayrollRun $run, array $filters = []): array
     {
         $figures = fn (?Payslip $p) => $p === null ? null : [
             'gross' => round((float) $p->gross, 2),
@@ -4307,9 +4479,21 @@ class PayrollService
         $netAfter = array_sum(array_map(fn ($r) => $r['after']['net'] ?? 0.0, $rows));
         $netBefore = array_sum(array_map(fn ($r) => $r['before']['net'] ?? 0.0, $rows));
 
+        // The rows are already ordered changed → added → removed → skipped → unchanged, so a
+        // page of them leads with everything the reader opened this dialog to see. Paged because
+        // the tail is one row per PAYSLIP: a confirmation dialog for a company-sized run was
+        // rendering the whole payroll, unpaged, to ask a yes/no question.
+        //
+        // Every figure in `meta` below is summed from the FULL $rows above, never from the page.
+        $page = $this->paginateComputed($rows, $filters);
+
         return [
-            'rows' => $rows,
+            'rows' => $page->items(),
             'meta' => [
+                'total' => $page->total(),
+                'current_page' => $page->currentPage(),
+                'per_page' => $page->perPage(),
+                'last_page' => $page->lastPage(),
                 'net_before' => round($netBefore, 2),
                 'net_after' => round($netAfter, 2),
                 'delta' => round($netAfter - $netBefore, 2),
@@ -4443,6 +4627,10 @@ class PayrollService
             'stamp' => fn ($d) => $d
                 ? Carbon::parse($d)->timezone(config('app.timezone_local'))->format('F d, Y · g:i A')
                 : '—',
+            // The letterhead, from Company → Settings. Renders the profile as it stands now:
+            // re-issuing an old payslip after a rename prints the new name, the same way a
+            // reprinted letter goes out on today's stationery.
+            'company' => $this->company->letterhead(),
         ];
     }
 
@@ -4641,6 +4829,7 @@ class PayrollService
                 'totals' => $totals,
             ],
             $this->registerRows($run),
+            $this->company->letterhead(),
         );
 
         $this->audit->log(
@@ -4652,11 +4841,29 @@ class PayrollService
 
         return [
             'path' => $path,
-            'name' => 'VITE_SEO_Payroll_Breakdown_' . Str::of($this->periodLabel($run))
+            // Named for whoever the employer currently is, like the letterhead inside it.
+            'name' => $this->companyFilePrefix() . 'Payroll_Breakdown_' . Str::of($this->periodLabel($run))
                 ->replace(['–', ' '], ['-', '_'])
                 ->replace(',', '')
                 ->toString() . '.xlsx',
         ];
+    }
+
+    /**
+     * The company name as a filename prefix — "VITE SEO DIGITAL ADVERTISING OPC" becomes
+     * "VITE_SEO_". Trimmed to the first two words so the name stays readable next to the
+     * period it is really identified by, and empty when there is nothing usable to prefix with.
+     */
+    private function companyFilePrefix(): string
+    {
+        // ascii() first, so "Açme" prefixes as "Acme" rather than losing the letter entirely.
+        $words = preg_split('/\s+/', trim(Str::ascii((string) $this->company->get()->legal_name))) ?: [];
+        $prefix = Str::of(implode('_', array_slice(array_filter($words), 0, 2)))
+            ->replaceMatches('/[^A-Za-z0-9_]/', '')
+            ->trim('_')
+            ->toString();
+
+        return $prefix === '' ? '' : $prefix . '_';
     }
 
     /**
@@ -4771,7 +4978,19 @@ class PayrollService
      *
      * @return array<int, array<string, mixed>>
      */
-    public function thirteenthMonth(int $year): array
+    /**
+     * The year's 13th-month accrual — ONE PAGE of it, plus the total it is a page of.
+     *
+     * A row per employee, so the report is as long as the company. It used to arrive whole and
+     * the screen added the column up itself; the total is stated here instead, because a
+     * "total accrued" summed from ten rows on a page of a payroll figure is a wrong number that
+     * looks exactly like a right one.
+     *
+     * @param  array<string, mixed>  $filters  search, page, per_page
+     * @return array{rows: list<array<string, mixed>>, total_accrued: float, count: int,
+     *               meta: array<string, int>}
+     */
+    public function thirteenthMonth(int $year, array $filters = []): array
     {
         // The same basis the run itself uses, so the accrual report and the payment
         // can never disagree. This used to filter status but not type, so last year's 13th-month
@@ -4786,7 +5005,7 @@ class PayrollService
             ->get()
             ->keyBy('id');
 
-        return $rows->map(function ($r) use ($employees) {
+        $accrual = $rows->map(function ($r) use ($employees) {
             $emp = $employees->get($r->employee_id);
             $basic = (float) $r->ytd_basic;
 
@@ -4802,5 +5021,24 @@ class PayrollService
             ->sortBy('employee', SORT_NATURAL | SORT_FLAG_CASE)
             ->values()
             ->all();
+
+        $accrual = $this->searchComputed($accrual, $filters['search'] ?? null, ['employee', 'department']);
+
+        // Summed over the WHOLE year's accrual, never over the page.
+        $totalAccrued = round(array_sum(array_column($accrual, 'thirteenth_month')), 2);
+
+        $page = $this->paginateComputed($accrual, $filters);
+
+        return [
+            'rows' => $page->items(),
+            'total_accrued' => $totalAccrued,
+            'count' => count($accrual),
+            'meta' => [
+                'total' => $page->total(),
+                'current_page' => $page->currentPage(),
+                'per_page' => $page->perPage(),
+                'last_page' => $page->lastPage(),
+            ],
+        ];
     }
 }

@@ -107,7 +107,6 @@ visible to them.
 | Method | Path | Guard | Purpose |
 |---|---|---|---|
 | GET | `/dashboard/kpis` | `crm.dashboard.view` | Headline KPIs. |
-| GET | `/dashboard/copilot-summary` | `crm.dashboard.view` | AI copilot summary. |
 | GET | `/dashboard/priority-buckets` | `crm.dashboard.view` | Leads grouped by priority. |
 | GET | `/dashboard/recent-leads` | `crm.dashboard.view` | Recent leads. |
 | GET | `/dashboard/lead-acquisition` | `crm.dashboard.view` | Lead acquisition trend. |

@@ -19,6 +19,7 @@ import {
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/modules/hr/components/page-header";
 import { PayslipCorrections } from "@/modules/hr/components/payslip-corrections";
+import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import { RunLineWaiverDialog } from "@/modules/hr/components/run-line-waiver-dialog";
 import { RunRulesSnapshot } from "@/modules/hr/components/run-rules-snapshot";
 import {
@@ -38,11 +39,14 @@ import { MinimumWageDialog } from "@/modules/hr/components/minimum-wage-dialog";
 import { StatCard } from "@/core/components/stat-card";
 import { MoneyStatCard } from "@/modules/hr/components/money-stat-card";
 import { StatusBadge } from "@/core/components/status-badge";
+import type { StatusFilterOption } from "@/core/components/status-filter";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import { formatPeso, formatDate } from "@/core/lib/format";
 import { downloadHrPayslipPdf, downloadPayrollRunCsv, downloadPayrollRunXlsx } from "@/modules/hr/api/payroll";
 import {
   usePayrollRuns,
+  usePayrollRunForCycle,
   usePayrollRun,
   useSetPayrollRunLock,
   useRunPayroll,
@@ -67,13 +71,29 @@ import { notifyOverrideDrift } from "@/modules/hr/lib/override-drift";
 /** The three headline totals, each with its own show/hide. */
 type MoneyTotal = "gross" | "deductions" | "net";
 
+/** Curated: server mode cannot read the vocabulary off one page of rows. */
+const RUN_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "processing", label: "Processing" },
+  { value: "completed", label: "Completed" },
+];
+
 export default function PayrollPage() {
   const { data: settings } = usePayrollSettings();
-  const { data: runs } = usePayrollRuns();
+  // Server-paged history for the modal below. Note this is NOT what answers "has this period
+  // been run?" — see `currentRun`.
+  const historyTable = useServerTable();
+  const { data: runPage, isFetching: historyFetching } = usePayrollRuns(historyTable.params);
   const runMut = useRunPayroll();
   const markDoneMut = useMarkPayslipDone();
   const reopenPayslipMut = useReopenPayslip();
-  const { data: thirteenth } = useThirteenthMonth();
+  // Server-paged, and the total comes from the server. This screen used to reduce the column
+  // itself — correct over the whole year, wrong the moment it is a page of a payroll figure.
+  const thirteenthTable = useServerTable();
+  const { data: thirteenth, isFetching: thirteenthFetching } = useThirteenthMonth(
+    undefined,
+    thirteenthTable.params,
+  );
   const runThirteenthMut = useRunThirteenthMonth();
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -120,7 +140,8 @@ export default function PayrollPage() {
 
   const { data: openPayslip } = useHrPayslip(payslipId ?? undefined);
   /** The period a whole-payroll waiver would apply to, in the words the dialog prints. */
-  const waiveRun = (runs ?? []).find((r) => r.id === waiveRunId);
+  // Picked from the history modal, so it is on the page the reader picked it from.
+  const waiveRun = (runPage?.items ?? []).find((r) => r.id === waiveRunId);
   const waiveRunLabel = waiveRun ? `${waiveRun.cycle_start} – ${waiveRun.cycle_end}` : "this period";
 
   // Masking is per-card now, so everything outside the three totals formats plainly.
@@ -196,23 +217,75 @@ export default function PayrollPage() {
   }
 
   // Has THIS group's current period been run yet?
-  const currentRun = cycle
-    ? runs?.find(
-        (r) =>
-          r.frequency === cycle.frequency &&
-          r.cycle_start === cycle.cycle_start &&
-          r.cycle_end === cycle.cycle_end,
-      )
-    : undefined;
+  //
+  // An EXACT lookup, deliberately. This used to search the run history the page happened to
+  // hold — which was fine while that was every run ever, and is a hazard the moment it is one
+  // page: a run that is not on the page reads as "not run yet", and the Run button that comes
+  // back pays a whole company a second time. The period is uniquely keyed, so this asks the
+  // database the question directly instead of inferring it.
+  const { data: cycleRun } = usePayrollRunForCycle(
+    cycle
+      ? {
+          frequency: cycle.frequency,
+          cycle_start: cycle.cycle_start,
+          cycle_end: cycle.cycle_end,
+        }
+      : undefined,
+  );
+  const currentRun = cycleRun ?? undefined;
   const alreadyRun = !!currentRun;
-  const { data: detail } = usePayrollRun(currentRun?.id);
-  // A re-run skips these, and a run can be locked once they are all disbursed.
-  const disbursedCount =
-    detail?.breakdown?.filter((r) => r.status === "disbursed").length ?? 0;
+  const breakdownTable = useServerTable();
+  const { data: detail, isFetching: breakdownFetching } = usePayrollRun(currentRun?.id, {
+    page: breakdownTable.params.page,
+    per_page: breakdownTable.pageSize,
+    search: breakdownTable.params.search,
+  });
+  // Counted by the DATABASE across the whole run. This used to filter the loaded breakdown —
+  // which is now ten rows, so it would have reported "10 disbursed" for a company of any size,
+  // and the lock precondition beside it reads the same figure.
+  const disbursedCount = detail?.disbursed_count ?? 0;
   const lockMut = useSetPayrollRunLock();
-  const history = (runs ?? []).filter((r) => r.id !== currentRun?.id);
+  /*
+   * Locking is refused while a correction has left a paid payslip overpaid — money the company
+   * is out and cannot take back without the employee's written consent. That refusal is a
+   * QUESTION (nothing HR does would ever clear it), so it becomes a confirmation rather than a
+   * dead menu item that does nothing when clicked.
+   */
+  const [overpaidLock, setOverpaidLock] = useState<{ id: number; message: string } | null>(null);
+
+  async function setLock(id: number, lock: boolean, acknowledgeOverpayment = false) {
+    try {
+      await lockMut.mutateAsync({ id, lock, acknowledgeOverpayment });
+      setOverpaidLock(null);
+      toast.success(lock ? "Run locked" : "Run unlocked");
+    } catch (err) {
+      const overpaid =
+        err instanceof AxiosError
+          ? err.response?.data?.errors?.acknowledge_overpayment?.[0]
+          : undefined;
+
+      if (overpaid) {
+        setOverpaidLock({ id, message: overpaid });
+        return;
+      }
+
+      toast.error(
+        err instanceof AxiosError
+          ? (err.response?.data?.message ?? "Could not change the lock.")
+          : "Could not change the lock.",
+      );
+    }
+  }
+  // The history modal shows past runs. The current one is excluded from the PAGE it appears on
+  // — it has its own panel above, and showing it twice reads as two runs for one period.
+  const history = (runPage?.items ?? []).filter((r) => r.id !== currentRun?.id);
   // A past run selected from the history modal → its per-employee breakdown.
-  const { data: viewRun } = usePayrollRun(viewRunId ?? undefined);
+  const viewTable = useServerTable();
+  const { data: viewRun, isFetching: viewFetching } = usePayrollRun(viewRunId ?? undefined, {
+    page: viewTable.params.page,
+    per_page: viewTable.pageSize,
+    search: viewTable.params.search,
+  });
 
   async function onRun() {
     if (!cycle) return;
@@ -431,7 +504,7 @@ export default function PayrollPage() {
     },
   ];
 
-  const thirteenthTotal = (thirteenth?.rows ?? []).reduce((s, r) => s + r.thirteenth_month, 0);
+  const thirteenthTotal = thirteenth?.totalAccrued ?? 0;
 
   return (
     <div className="p-4 sm:p-8">
@@ -450,26 +523,8 @@ export default function PayrollPage() {
             : "Loading pay schedule…"
         }
         actions={
-          /* THE TWO VERBS THAT CARRY THE WORKFLOW, then everything else behind `⋯`. */
+          /* Everything else behind `⋯`, then THE TWO VERBS THAT CARRY THE WORKFLOW. */
           <>
-            {/*
-             * The disbursement layer. Only a completed run has anything to pay,
-             * and the dialog is where the bank file comes from.
-             */}
-            <Button
-              variant="outline"
-              onClick={() => setPayOpen(true)}
-              disabled={!currentRun || currentRun.status !== "completed"}
-              title={
-                currentRun?.status === "completed"
-                  ? "Build the payment batch and bank file for this run"
-                  : "Run this period first — only a completed run can be paid"
-              }
-            >
-              <Banknote />
-              Pay run
-            </Button>
-
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" size="icon" title="More payroll tools">
@@ -534,7 +589,7 @@ export default function PayrollPage() {
                 {detail?.can_lock && (
                   <DropdownMenuItem
                     disabled={lockMut.isPending}
-                    onSelect={() => lockMut.mutate({ id: detail.id, lock: true })}
+                    onSelect={() => void setLock(detail.id, true)}
                   >
                     <Lock />
                     {lockMut.isPending ? "Locking…" : "Lock this run"}
@@ -543,7 +598,7 @@ export default function PayrollPage() {
                 {detail?.is_locked && (
                   <DropdownMenuItem
                     disabled={lockMut.isPending}
-                    onSelect={() => lockMut.mutate({ id: detail.id, lock: false })}
+                    onSelect={() => void setLock(detail.id, false)}
                   >
                     <LockOpen />
                     {lockMut.isPending ? "Unlocking…" : "Unlock this run"}
@@ -551,6 +606,24 @@ export default function PayrollPage() {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/*
+             * The disbursement layer. Only a completed run has anything to pay,
+             * and the dialog is where the bank file comes from.
+             */}
+            <Button
+              variant="outline"
+              onClick={() => setPayOpen(true)}
+              disabled={!currentRun || currentRun.status !== "completed"}
+              title={
+                currentRun?.status === "completed"
+                  ? "Build the payment batch and bank file for this run"
+                  : "Run this period first — only a completed run can be paid"
+              }
+            >
+              <Banknote />
+              Pay run
+            </Button>
 
             <Button
               className="bg-warning text-white hover:bg-warning/90 disabled:opacity-50"
@@ -742,8 +815,19 @@ export default function PayrollPage() {
             <DataTable
               columns={makeColumns(!!detail.is_locked)}
               rows={detail.breakdown}
-              rowKey={(_r, i) => i}
+              rowKey={(r) => r.id}
               onRowClick={(r) => setPayslipId(r.id)}
+              pageSize={breakdownTable.pageSize}
+              // The search reaches the QUERY — it matches the employee this payslip pays, by
+              // name or number, across the whole register. Status pills are off: a payslip's
+              // status is a lifecycle, not a queue, and the notices above already say what a
+              // correction left outstanding.
+              searchPlaceholder="Search employee, number…"
+              filterable={false}
+              server={breakdownTable.serverProps(
+                detail.breakdown_meta?.total ?? 0,
+                breakdownFetching,
+              )}
             />
             {/* What these amounts were computed with. */}
             <RunRulesSnapshot snapshot={detail.policy_snapshot} drift={detail.rules_drift} />
@@ -777,6 +861,13 @@ export default function PayrollPage() {
                 rows={history}
                 rowKey={(r) => r.id}
                 onRowClick={(r) => setViewRunId(r.id)}
+                pageSize={historyTable.pageSize}
+                searchPlaceholder="Search frequency, type, reason…"
+                server={historyTable.serverProps(
+                  runPage?.total ?? 0,
+                  historyFetching,
+                  RUN_STATUS_OPTIONS,
+                )}
               />
             </div>
           ) : (
@@ -844,10 +935,24 @@ export default function PayrollPage() {
                 <DataTable
                   columns={makeColumns(!!viewRun.is_locked)}
                   rows={viewRun.breakdown}
-                  rowKey={(_r, i) => i}
+                  rowKey={(r) => r.id}
                   onRowClick={(r) => setPayslipId(r.id)}
+                  pageSize={viewTable.pageSize}
+                  searchPlaceholder="Search employee, number…"
+                  filterable={false}
+                  server={viewTable.serverProps(
+                    viewRun.breakdown_meta?.total ?? 0,
+                    viewFetching,
+                  )}
                 />
               </div>
+              {/*
+               * What THIS period was priced with — the whole point of freezing a period's rules
+               * is being able to answer "why does June say that?" months later, and the current
+               * period was the only place that answer appeared. Deliberately outside the scroll
+               * box above, so opening it does not fight the table for the same few pixels.
+               */}
+              <RunRulesSnapshot snapshot={viewRun.policy_snapshot} drift={viewRun.rules_drift} />
             </>
           ) : (
             <p className="py-10 text-center text-sm text-muted-foreground">Loading breakdown…</p>
@@ -993,6 +1098,10 @@ export default function PayrollPage() {
                   columns={thirteenthColumns}
                   rows={thirteenth?.rows ?? []}
                   rowKey={(r) => r.employee_id}
+                  pageSize={thirteenthTable.pageSize}
+                  searchPlaceholder="Search employee, department…"
+                  filterable={false}
+                  server={thirteenthTable.serverProps(thirteenth?.total ?? 0, thirteenthFetching)}
                 />
               </div>
             </>
@@ -1194,6 +1303,23 @@ export default function PayrollPage() {
       {/* The queue of pay differences awaiting settlement. */}
       <TaxTableDialog open={taxTableOpen} onOpenChange={setTaxTableOpen} />
 
+      {/*
+       * The server names the money; repeating it here in our own words would be a second place
+       * for the figure to be wrong.
+       */}
+      <DeleteConfirmDialog
+        open={overpaidLock !== null}
+        onOpenChange={(next) => !next && setOverpaidLock(null)}
+        title="Lock this run anyway?"
+        question={overpaidLock?.message}
+        description="Locking closes the cycle to any further recompute. The overpayment stays on the payslip and on the record, so it can still be arranged with the employee afterwards. Unlocking is possible later, and is audited."
+        confirmLabel="Lock anyway"
+        isPending={lockMut.isPending}
+        onConfirm={() => {
+          if (overpaidLock) return setLock(overpaidLock.id, true, true);
+        }}
+      />
+
       {/* off-cycle correction. */}
       <PaymentBatchDialog
         open={payOpen}
@@ -1244,40 +1370,43 @@ function RunCorrectionNotices({
   /** Offered on the stale-tax notice, which is the one thing here a recompute actually fixes. */
   onRerun?: (run: PayrollRun) => void;
 }) {
-  const owing = (run.breakdown ?? []).filter((r) => r.disbursed != null && r.outstanding > 0);
-  const owed = owing.reduce((s, r) => s + r.outstanding, 0);
-  // The mirror image: corrections that TOOK money off payslips already paid out.
-  const overpaid = (run.breakdown ?? []).filter((r) => r.disbursed != null && r.outstanding < 0);
-  const overpaidTotal = overpaid.reduce((s, r) => s - r.outstanding, 0);
+  // Counted by the DATABASE across the whole run. These were filters and reductions over
+  // `run.breakdown` — which is now one page, so the notice that tells HR what a correction left
+  // unpaid would have been an arithmetic over ten rows, on the screen that exists to answer
+  // exactly that question.
+  const owingCount = run.owing_count ?? 0;
+  const owed = run.owing_total ?? 0;
+  const overpaidCount = run.overpaid_count ?? 0;
+  const overpaidTotal = run.overpaid_total ?? 0;
 
-  if (owing.length === 0 && overpaid.length === 0 && !run.is_tax_stale) return null;
+  if (owingCount === 0 && overpaidCount === 0 && !run.is_tax_stale) return null;
 
   return (
     <div className="mb-3 flex flex-col gap-2">
-      {overpaid.length > 0 && (
+      {overpaidCount > 0 && (
         <div className="rounded-card border border-warning/40 bg-warning/10 px-4 py-3">
           <p className="text-sm font-medium text-foreground">
-            {overpaid.length} payslip{overpaid.length === 1 ? "" : "s"} in this run{" "}
-            {overpaid.length === 1 ? "was" : "were"} overpaid by {formatPeso(overpaidTotal)}
+            {overpaidCount} payslip{overpaidCount === 1 ? "" : "s"} in this run{" "}
+            {overpaidCount === 1 ? "was" : "were"} overpaid by {formatPeso(overpaidTotal)}
           </p>
           <p className="text-caption text-muted-foreground">
-            A correction reduced what {overpaid.length === 1 ? "it" : "they"} should have paid, after
+            A correction reduced what {overpaidCount === 1 ? "it" : "they"} should have paid, after
             the money had already been transferred. Nothing collects it back automatically —
             recovering wages already paid needs the employee&rsquo;s written consent, so arrange it
-            with {overpaid.length === 1 ? "them" : "each of them"}.
+            with {overpaidCount === 1 ? "them" : "each of them"}.
           </p>
         </div>
       )}
-      {owing.length > 0 && (
+      {owingCount > 0 && (
         <div className="rounded-card border border-warning/40 bg-warning/10 px-4 py-3">
           <p className="text-sm font-medium text-foreground">
-            {owing.length} payslip{owing.length === 1 ? "" : "s"} in this run{" "}
-            {owing.length === 1 ? "was" : "were"} corrected after being paid —{" "}
+            {owingCount} payslip{owingCount === 1 ? "" : "s"} in this run{" "}
+            {owingCount === 1 ? "was" : "were"} corrected after being paid —{" "}
             {formatPeso(owed)} still to pay
           </p>
           <p className="text-caption text-muted-foreground">
             The correction did not change what was transferred. Pay the balance on{" "}
-            {owing.length === 1 ? "that row" : "those rows"}; the run cannot be locked until it is
+            {owingCount === 1 ? "that row" : "those rows"}; the run cannot be locked until it is
             settled.
           </p>
         </div>

@@ -218,9 +218,17 @@ export function RunRulesSnapshot({
   snapshot?: PolicySnapshot | null;
   drift?: RulesDriftEntry[];
 }) {
-  // Runs from before have no snapshot (or the flat v1 shape) — say so plainly
-  // rather than render a misleading empty panel.
-  if (!snapshot) return null;
+  // A run computed before the platform started recording this has nothing to show. Say so,
+  // rather than return null: on the run-history drill-in that silence is indistinguishable from
+  // "no rules applied", and this panel exists precisely to answer "what priced these payslips?".
+  if (!snapshot) {
+    return (
+      <p className="mt-6 rounded-card border border-dashed border-border bg-card p-4 text-caption text-muted-foreground">
+        This run was computed before the platform began recording the rules it used, so there is
+        nothing to show for it. Every run since carries its own copy.
+      </p>
+    );
+  }
 
   const policy = snapshot.attendance_policy ?? {};
   const setting = snapshot.payroll_setting ?? {};

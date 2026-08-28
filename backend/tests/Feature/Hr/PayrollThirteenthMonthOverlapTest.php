@@ -217,7 +217,7 @@ class PayrollThirteenthMonthOverlapTest extends HrTestCase
         $payroll = app(PayrollService::class);
         $preview = collect($payroll->thirteenthMonthPreview(self::YEAR)['rows'])
             ->firstWhere('employee_id', $employee->id);
-        $report = collect($payroll->thirteenthMonth(self::YEAR))
+        $report = collect($payroll->thirteenthMonth(self::YEAR)['rows'])
             ->firstWhere('employee_id', $employee->id);
         $ytd = $payroll->ytd($employee, self::YEAR);
 

@@ -8,7 +8,7 @@ use App\Modules\Hr\Http\Resources\AttendancePolicyResource;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use Illuminate\Http\JsonResponse;
 
-// Company → Rules (attendance policy + task format). hr_officer-only.
+// Company → Settings (attendance policy + task format). hr_officer-only.
 class AttendancePolicyController extends Controller
 {
     public function __construct(

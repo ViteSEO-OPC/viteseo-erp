@@ -124,9 +124,36 @@ class PayrollController extends Controller
     }
 
     // GET /api/v1/hr/payroll/runs — HR run history.
-    public function runsIndex(): JsonResponse
+    public function runsIndex(Request $request): JsonResponse
     {
-        return PayrollRunResource::collection($this->service->listRuns())->response();
+        // Applied by the DATABASE. Each run row carries four aggregate subqueries over its
+        // payslips, so the page size is what bounds the work, not the row count.
+        return PayrollRunResource::collection(
+            $this->service->listRuns($request->only(['search', 'status', 'per_page'])),
+        )->response();
+    }
+
+    /**
+     * GET /api/v1/hr/payroll/runs/for-cycle — the run for one exact period, or null.
+     *
+     * The screen offers "Run payroll" when this comes back empty, so it must be an exact lookup
+     * rather than a search through a page of history. See PayrollService::runForCycle().
+     */
+    public function runForCycle(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'frequency' => ['required', 'string'],
+            'cycle_start' => ['required', 'date'],
+            'cycle_end' => ['required', 'date'],
+        ]);
+
+        $run = $this->service->runForCycle(
+            $validated['frequency'],
+            $validated['cycle_start'],
+            $validated['cycle_end'],
+        );
+
+        return response()->json(['data' => $run ? PayrollRunResource::make($run) : null]);
     }
 
     /** GET /api/v1/hr/payroll/minimum-wage-check — who this run would pay below the floor. */
@@ -214,7 +241,11 @@ class PayrollController extends Controller
     /** GET /api/v1/hr/payroll/runs/{payrollRun}/rerun-preview — what recomputing would change. */
     public function rerunPreview(PayrollRun $payrollRun, Request $request): JsonResponse
     {
-        $preview = $this->service->rerunPreview($payrollRun, $request->user());
+        $preview = $this->service->rerunPreview(
+            $payrollRun,
+            $request->user(),
+            $request->only(['page', 'per_page']),
+        );
 
         return response()->json(['data' => $preview['rows'], 'meta' => $preview['meta']]);
     }
@@ -293,7 +324,10 @@ class PayrollController extends Controller
         $year = (int) ($request->query('year') ?: now(config('app.timezone_local'))->year);
 
         return response()->json([
-            'data' => $this->service->thirteenthMonth($year),
+            'data' => $this->service->thirteenthMonth(
+                $year,
+                $request->only(['search', 'page', 'per_page']),
+            ),
             'meta' => ['year' => $year],
         ]);
     }
@@ -332,11 +366,11 @@ class PayrollController extends Controller
         return response()->json(['data' => $this->service->runWithBreakdown($run)]);
     }
 
-    // GET /api/v1/hr/payroll/runs/{payrollRun} — run + per-employee breakdown.
-    public function show(PayrollRun $payrollRun): JsonResponse
+    // GET /api/v1/hr/payroll/runs/{payrollRun} — run + ONE PAGE of its per-employee breakdown.
+    public function show(Request $request, PayrollRun $payrollRun): JsonResponse
     {
         return PayrollRunResource::make(
-            $this->service->runWithBreakdown($payrollRun),
+            $this->service->runWithBreakdown($payrollRun, $request->only(['page', 'per_page', 'search'])),
         )->response();
     }
 
@@ -345,7 +379,13 @@ class PayrollController extends Controller
     public function lockRun(Request $request, PayrollRun $payrollRun): JsonResponse
     {
         return PayrollRunResource::make(
-            $this->service->lock($payrollRun, $request->user()),
+            // A run carrying an unrecovered overpayment is refused until HR confirms — see
+            // PayrollService::lock(). The flag arrives only from that confirmation.
+            $this->service->lock(
+                $payrollRun,
+                $request->user(),
+                $request->boolean('acknowledge_overpayment'),
+            ),
         )->response();
     }
 

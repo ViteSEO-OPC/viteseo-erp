@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Listeners;
 
 use App\Models\User;
+use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Events\InboundReplyReceived;
 use App\Modules\Crm\Models\Email;
 use App\Modules\Crm\Models\Lead;
@@ -57,9 +58,10 @@ class InboundReplyDeliveryDispatcher
      */
     private function deliverMail(Lead $lead, Email $email, User $recipient): void
     {
-        // A deactivated account must not receive lead data — the person may have left the company.
-        // `status` is the shared users column the CRM Team Accounts screen manages.
-        if ($recipient->status === 'inactive') {
+        // A suspended account must not receive lead data — the person may have left the company.
+        // Read from `crm_user_access`: losing Zerem must not depend on the shared `users.status`
+        // column, which other products also write.
+        if (app(CrmAccessService::class)->isSuspended($recipient)) {
             return;
         }
 

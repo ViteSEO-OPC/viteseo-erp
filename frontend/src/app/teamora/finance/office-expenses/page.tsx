@@ -12,6 +12,8 @@ import { notify as toast } from "@/core/lib/notify";
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import type { StatusFilterOption } from "@/core/components/status-filter";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, PrimaryCell, type Column } from "@/core/components/data-table";
 import { formatDate } from "@/core/lib/format";
 import { OfficeExpenseFormDialog } from "@/modules/hr/components/office-expense-form-dialog";
@@ -20,6 +22,7 @@ import { StatusBadge } from "@/core/components/status-badge";
 import { DeleteConfirmDialog } from "@/modules/hr/components/delete-confirm-dialog";
 import {
   useOfficeExpenses,
+  useOfficeExpenseSummary,
   useDeleteOfficeExpense,
 } from "@/modules/hr/hooks/use-office-expenses";
 import {
@@ -63,10 +66,11 @@ function manilaToday(): Date {
 }
 
 /** "YYYY-MM-DD" → local Date at midnight. */
-function parseYmd(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
+/** A Date back to the 'Y-m-d' the API filters on. */
+function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
 
 /** Inclusive [start, end] window for the chosen period, or null for "all". */
 function periodRange(period: Period, today: Date): { start: Date; end: Date } | null {
@@ -84,46 +88,50 @@ function periodRange(period: Period, today: Date): { start: Date; end: Date } | 
   return { start, end };
 }
 
+/** Curated: server mode cannot read the vocabulary off one page of rows. */
+const EXPENSE_STATUS_OPTIONS: StatusFilterOption[] = [
+  { value: "all", label: "All" },
+  { value: "recorded", label: "Recorded" },
+  { value: "approved", label: "Approved" },
+  { value: "rejected", label: "Rejected" },
+];
+
 export default function OfficeExpensesPage() {
-  const { data: rows, isLoading, isError } = useOfficeExpenses();
+  const [period, setPeriod] = useState<Period>("all");
+  const [sort, setSort] = useState<Sort>("date_desc");
+
+  // Server-paged, server-filtered, server-SORTED. The period picker and the sort control both
+  // reach the query now: applied in the browser they could only ever reorder or narrow the ten
+  // rows already on screen, which for a ledger that grows with every purchase is a different
+  // answer than the one the controls appear to give.
+  const table = useServerTable();
+  const window = periodRange(period, manilaToday());
+  const query = {
+    ...table.params,
+    sort,
+    ...(window ? { from: ymd(window.start), to: ymd(window.end) } : {}),
+  };
+  const { data, isLoading, isError, isFetching } = useOfficeExpenses(query);
+  // Counted by the database over the same window the table below is showing.
+  const { data: spend } = useOfficeExpenseSummary(query);
+  const sorted = data?.items ?? [];
   const deleteMut = useDeleteOfficeExpense();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<OfficeExpense | null>(null);
   const [deleting, setDeleting] = useState<OfficeExpense | null>(null);
-  const [period, setPeriod] = useState<Period>("all");
-  const [sort, setSort] = useState<Sort>("date_desc");
   // Which stat-card amounts are masked (privacy show/hide toggle).
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setHidden((h) => ({ ...h, [key]: !h[key] }));
 
-  // 1) filter by date period
-  const filtered = useMemo(() => {
-    const range = periodRange(period, manilaToday());
-    if (!range) return rows ?? [];
-    return (rows ?? []).filter((e) => {
-      const d = parseYmd(e.expense_date);
-      return d >= range.start && d <= range.end;
-    });
-  }, [rows, period]);
+  const total = spend?.total ?? 0;
 
-  // 2) sort (by amount either direction, or newest date by default)
-  const sorted = useMemo(() => {
-    const arr = [...filtered];
-    if (sort === "amount_desc") arr.sort((a, b) => b.amount - a.amount);
-    else if (sort === "amount_asc") arr.sort((a, b) => a.amount - b.amount);
-    else arr.sort((a, b) => b.expense_date.localeCompare(a.expense_date));
-    return arr;
-  }, [filtered, sort]);
-
-  const total = useMemo(() => filtered.reduce((s, e) => s + e.amount, 0), [filtered]);
-
-  // Top two categories by spend, for the summary cards.
-  const topCategories = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const e of filtered) m.set(e.category, (m.get(e.category) ?? 0) + e.amount);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2);
-  }, [filtered]);
+  // Top two categories by spend, from the server's own tally — the browser could only have
+  // added up the page.
+  const topCategories = useMemo<[string, number][]>(
+    () => Object.entries(spend?.by_category ?? {}).slice(0, 2) as [string, number][],
+    [spend],
+  );
 
   async function performDelete(e: OfficeExpense) {
     try {
@@ -229,7 +237,7 @@ export default function OfficeExpensesPage() {
         />
         <div className="rounded-card border border-border bg-card p-5">
           <p className="text-label font-bold uppercase tracking-wide text-muted-foreground">Entries</p>
-          <p className="mt-2 text-h2 font-bold text-foreground">{filtered.length}</p>
+          <p className="mt-2 text-h2 font-bold text-foreground">{data?.total ?? 0}</p>
           <p className="mt-1 text-caption text-muted-foreground">{PERIOD_LABELS[period]}</p>
         </div>
       </div>
@@ -263,8 +271,10 @@ export default function OfficeExpensesPage() {
             columns={columns}
             rows={sorted}
             rowKey={(e) => e.id}
-            pageSize={10}
+            pageSize={table.pageSize}
+            searchPlaceholder="Search description, category, vendor…"
             empty="No office expenses in this period."
+            server={table.serverProps(data?.total ?? 0, isFetching, EXPENSE_STATUS_OPTIONS)}
           />
         )}
       </div>

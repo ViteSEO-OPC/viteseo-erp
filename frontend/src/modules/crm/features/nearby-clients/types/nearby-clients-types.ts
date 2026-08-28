@@ -94,6 +94,12 @@ export type NearbyClient = {
   active: boolean;
   /** Lead status enum, e.g. "new". */
   status: string;
+  /**
+   * Which discovery LANE found this business — the deterministic OpenStreetMap sweep, or the
+   * AI-assisted expansion that runs beside it. A closed set decided server-side from per-record
+   * provenance; never a vendor name, and nothing in the UI branches on it beyond the filter.
+   */
+  foundBy: "openstreetmap" | "ai-assisted";
   /** Coordinate-derived distance in km — computed by the Interactive Map milestone (absent now). */
   distanceKm?: number;
   /** Coordinate-derived map layout position (%) — computed by the Interactive Map milestone (absent now). */
@@ -105,3 +111,60 @@ export type NearbyClient = {
 
 export type VisitPurpose = "follow-up" | "intro" | "proposal" | "assessment";
 export type ReminderOption = "none" | "30m" | "1h" | "1d";
+
+// ── Website evidence chain (LIVE — GET /leads/{id}/website-evidence) ────────────────────────────
+// The trail behind a website conclusion: which candidate URLs a search proposed, which tier proposed
+// each, and why each was refused. Read by a BD before confirming that a business genuinely has no
+// website — the ONE conclusion the system will not draw on its own.
+
+/** Which tier proposed a candidate. `manual` is a BD typing one in; the rest are automated. */
+export type WebsiteCandidateSource = "osm_tag" | "wikidata" | "search" | "ai" | "manual";
+
+/** Why a checked candidate was refused. Absent while a candidate is still verified or unchecked. */
+export type WebsiteCandidateRejection =
+  | "unreachable"
+  | "identity_mismatch"
+  | "insufficient_margin"
+  | "invalid_url";
+
+export type WebsiteCandidate = {
+  id: string;
+  url: string;
+  normalizedUrl: string | null;
+  source: WebsiteCandidateSource;
+  sourceDetail: string | null;
+  /** `null` = proposed but not yet checked; `false` = checked and refused; `true` = this lead's site. */
+  verified: boolean | null;
+  confidence: number | null;
+  rejectionReason: WebsiteCandidateRejection | null;
+  checkedAt: string | null;
+};
+
+export type WebsiteSearch = {
+  /** False when no search has ever run — different from a search that ran and found nothing. */
+  searched: boolean;
+  tiersRun: string[];
+  candidatesFound: number;
+  candidatesRejected: number;
+  lastSearchedAt: string | null;
+  /** Every available tier ran and nothing survived. EVIDENCE, not a verdict on its own. */
+  exhausted: boolean;
+  exhaustedAt: string | null;
+  confirmedAbsent: boolean;
+  confirmedAt: string | null;
+  confirmedBy: string | null;
+  note: string | null;
+  /** A confirmation that a later deterministically-verified website contradicted. */
+  confirmationWithdrawn: boolean;
+  withdrawnAt: string | null;
+  withdrawnReason: string | null;
+  /** The server's own answer to "may this be confirmed now?" — never re-derived in the UI. */
+  canConfirmAbsence: boolean;
+};
+
+export type WebsiteEvidence = {
+  leadId: string;
+  websiteStatus: WebsiteStatus | null;
+  search: WebsiteSearch;
+  candidates: WebsiteCandidate[];
+};

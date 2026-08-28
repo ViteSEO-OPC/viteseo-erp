@@ -26,7 +26,26 @@ WebsiteStatus = Literal["website-unknown"]
 
 class RawBusiness(BaseModel):
     """Provider-neutral discovery result. Providers populate this; nothing downstream knows the
-    provider's native format."""
+    provider's native format.
+
+    ``provider_id`` IS THE DEDUP CONTRACT. The CRM dedups discovered businesses on it (as
+    ``place_id``), so it must be a STABLE NATURAL KEY the provider re-derives identically on every
+    run — never a value a provider invents, and never anything a language model supplies.
+
+    Key namespacing, for the providers that come next: OpenStreetMap's keys stay in their historical
+    unprefixed form (``node/123``) because thousands of leads are already stored under it and
+    re-prefixing them would make every existing lead look new — a mass-duplication event. Providers
+    that resolve identity by some OTHER means namespace theirs (``wikidata/Q6818610``,
+    ``web/example.com``, ``places/ChIJ...``) so cross-provider keys can never collide.
+
+    A consequence worth stating: two providers that resolve the SAME OSM business produce the SAME
+    key, and the CRM correctly treats them as one lead. That is why AI-assisted OSM discovery
+    (Capability A) dedups cleanly against the plain OSM provider instead of doubling the pool.
+
+    The composite provider relies on exactly that property: it merges its two lanes on this key
+    alone, so a business the tag sweep already found cannot be counted twice just because the AI leg
+    named it too.
+    """
 
     provider_id: str = Field(description="Provider's stable natural key, e.g. OSM 'node/123'.")
     name: str
@@ -40,6 +59,34 @@ class RawBusiness(BaseModel):
     region: Optional[str] = None
     province: Optional[str] = None
     city: Optional[str] = None
+
+    # HOW this record's identity was established, and how strongly. Optional and defaulting to None
+    # so the OpenStreetMap provider's output is byte-identical to before these existed.
+    #
+    # Present for Capability B (AI-native discovery), where a candidate has no OSM node and identity
+    # must be proven some other way — its own website judged by the CRM's WebsiteIdentityVerifier, or
+    # Wikidata P856. Those paths need to carry HOW they were verified so the CRM can hold them to a
+    # stricter bar than an OSM lookup. Declared now, unused now: the alternative is discovering later
+    # that the contract cannot express non-OSM identity and having to reopen every provider.
+    #
+    # These deliberately do NOT reach the CRM. NormalizedBusiness does not carry them, and both the
+    # ingest FormRequest and LeadImportService::normalizeDiscovered are allowlists — so persisting
+    # them would take a deliberate, separate decision on both sides.
+    verification_source: Optional[str] = None       # "osm" | "wikidata" | "website" | ...
+    verification_confidence: Optional[int] = None   # 0-100, when a verifier actually scored it
+
+    # WHICH LANE OF A COMPOSITE RUN PRODUCED THIS RECORD, and unlike the two fields above this one
+    # DOES reach the CRM — the normalizer uses it as `source` when it is set.
+    #
+    # It exists because a composite run has two lanes with different trust stories: the OpenStreetMap
+    # tag sweep, and AI-assisted expansion. Stamping one provider name across the whole run would
+    # make it impossible to answer the only question that justifies the AI leg — "did it add coverage
+    # the baseline did not already have?" — because every lead would be labelled identically.
+    #
+    # Optional and defaulting to None so a plain OpenStreetMap run is byte-identical to before: the
+    # normalizer falls back to the run's provider name whenever this is unset, so nothing that does
+    # not set it can observe that it exists.
+    discovered_by: Optional[str] = None
 
 
 class NormalizedBusiness(BaseModel):

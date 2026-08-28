@@ -27,9 +27,12 @@ class RecruitmentController extends Controller
     ) {}
 
     // GET /api/v1/hr/requisitions
-    public function requisitionsIndex(): JsonResponse
+    public function requisitionsIndex(Request $request): JsonResponse
     {
-        return RequisitionResource::collection($this->service->listRequisitions())->response();
+        // Applied by the DATABASE. `status` filters the requisition's `stage` column.
+        return RequisitionResource::collection(
+            $this->service->listRequisitions($request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // POST /api/v1/hr/requisitions

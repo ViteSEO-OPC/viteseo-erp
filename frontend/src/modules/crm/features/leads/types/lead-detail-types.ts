@@ -52,6 +52,8 @@ export type Note = {
   id: string;
   author: string;
   initials: string;
+  /** Shared avatar source (signed link from `users.avatar`); null → render initials. */
+  avatarUrl: string | null;
   timestamp: string;
   text: string;
   self: boolean;

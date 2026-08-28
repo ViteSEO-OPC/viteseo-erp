@@ -18,10 +18,9 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { PageHeader } from "@/modules/hr/components/page-header";
+import { useServerTable } from "@/modules/hr/hooks/use-server-table";
 import { DataTable, type Column } from "@/core/components/data-table";
 import {
-  StatusFilter,
-  filterByStatus,
   type StatusFilterOption,
 } from "@/core/components/status-filter";
 import { StatusBadge } from "@/core/components/status-badge";
@@ -46,12 +45,15 @@ const CONCERN_STATUS_OPTIONS: StatusFilterOption[] = [
 ];
 
 export default function ConcernsPage() {
-  const { data: rows, isLoading, isError } = useConcerns();
+  // Server-paged. Concerns are kept forever, so this queue only ever grows.
+  const table = useServerTable();
+  const { data, isLoading, isError, isFetching } = useConcerns(table.params);
+  const rows = data?.items ?? [];
   // Track the id, not the row: the open modal then follows the list as HR marks the
   // concern under review, resolves it or undoes that, instead of freezing on click.
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [status, setStatus] = useState("all");
-  const visible = filterByStatus(rows ?? [], status);
+  // The status filter moved into the table, and from there into the query.
+  const visible = rows;
   const selected = (rows ?? []).find((c) => c.id === selectedId) ?? null;
   // The concern HR is asking about. Held at page level so the ask can be started from the
   // list row OR from inside the detail modal without two copies of the dialog.
@@ -104,16 +106,15 @@ export default function ConcernsPage() {
             rows={visible}
             rowKey={(c) => c.id}
             onRowClick={(c) => setSelectedId(c.id)}
-            needsAction={(c) => c.status !== "resolved"}
-            // `employee.name` is null for an anonymous concern unless its reporter has agreed
-            // to be named, so searching by name finds only the concerns HR is entitled to
-            // find. The 'anonymous' keyword still matches the rest.
-            getSearchText={(c) =>
-              `${c.reference_no} ${concernCategoryLabel(c.category)} ${c.status} ${c.employee?.name ?? ""} ${c.is_anonymous ? "anonymous" : ""}`
-            }
+            pageSize={table.pageSize}
             searchPlaceholder="Search ref, category…"
-            toolbar={<StatusFilter options={CONCERN_STATUS_OPTIONS} value={status} onChange={setStatus} />}
             empty="No concerns submitted."
+            // `needsAction` and `getSearchText` are gone deliberately: both worked on the rows
+            // in hand. The search now runs in the query — and it matches the reporter's name
+            // only on concerns that are not anonymous, because a search that matched an
+            // anonymous reporter would name them through WHICH ROWS COME BACK, whatever the
+            // payload withholds. See ConcernService::concernSearch().
+            server={table.serverProps(data?.total ?? 0, isFetching, CONCERN_STATUS_OPTIONS)}
           />
         )}
       </div>

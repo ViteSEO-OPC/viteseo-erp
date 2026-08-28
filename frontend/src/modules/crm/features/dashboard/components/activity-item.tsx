@@ -1,4 +1,5 @@
 import { ActivityIconTile } from "@/modules/crm/features/dashboard/components/activity-icon-tile";
+import { AvatarInitials } from "@/modules/crm/components/shared/avatar-initials/avatar-initials";
 import { formatActivityTimestamp } from "@/modules/crm/lib/formatters";
 import { cn } from "@/modules/crm/lib/utils";
 import type { ActivityItem as ActivityItemType } from "@/modules/crm/features/dashboard/types/dashboard-types";
@@ -47,7 +48,14 @@ export function ActivityItem({ item, variant = "widget" }: Props) {
         isPage ? "items-center" : "items-start",
       )}
     >
-      <ActivityIconTile type={item.type} />
+      {/* The actor's face when the row has a CRM user behind it, the event-type glyph otherwise.
+          Falling back rather than replacing keeps every system row, inbound reply and photo-less
+          user looking exactly as it does today. */}
+      {item.actorAvatarUrl ? (
+        <AvatarInitials src={item.actorAvatarUrl} initials={item.actor} size="sm" />
+      ) : (
+        <ActivityIconTile type={item.type} />
+      )}
       {isPage ? (
         <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
           {description}

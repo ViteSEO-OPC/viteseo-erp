@@ -3,6 +3,7 @@
 use App\Models\User;
 use App\Modules\Crm\Controllers\ActivityController;
 use App\Modules\Crm\Controllers\Auth\MeController;
+use App\Modules\Crm\Controllers\Auth\ProfilePhotoController;
 use App\Modules\Crm\Controllers\Auth\UpdateProfileController;
 use App\Modules\Crm\Controllers\AutomationEmailController;
 use App\Modules\Crm\Controllers\BusinessRuleController;
@@ -11,7 +12,9 @@ use App\Modules\Crm\Controllers\DashboardController;
 use App\Modules\Crm\Controllers\DeliveryMonitorController;
 use App\Modules\Crm\Controllers\EmailController;
 use App\Modules\Crm\Controllers\EmailTemplateController;
+use App\Modules\Crm\Controllers\DiscoveryConfigController;
 use App\Modules\Crm\Controllers\GmailOAuthController;
+use App\Modules\Crm\Controllers\NerbyProviderSettingController;
 use App\Modules\Crm\Controllers\LeadAttachmentController;
 use App\Modules\Crm\Controllers\LeadController;
 use App\Modules\Crm\Controllers\LeadFollowUpController;
@@ -27,6 +30,8 @@ use App\Modules\Crm\Controllers\PlannerEventController;
 use App\Modules\Crm\Controllers\ServiceAreaController;
 use App\Modules\Crm\Controllers\UserController;
 use App\Modules\Crm\Controllers\WebsiteEnrichmentController;
+use App\Modules\Crm\Controllers\WebsiteEvidenceController;
+use App\Modules\Crm\Http\Middleware\EnsureCrmAccessIsActive;
 use App\Modules\Crm\Http\Middleware\EnsurePerformanceManagement;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Models\PlannerEvent;
@@ -43,11 +48,25 @@ Route::prefix('v1/crm')->group(function (): void {
     // scheduled `outreach:sync` poll, so the CRM exposes no unauthenticated endpoint for it and
     // needs no Pub/Sub push subscription, OIDC verification, or public HTTPS callback.
 
-    Route::middleware('auth:sanctum')->group(function () {
+    // EnsureCrmAccessIsActive covers EVERY route below: CRM suspension is enforced per-request
+    // (403 + `crm_access_suspended`), never by revoking the shared Sanctum token, which also signs the
+    // user in to TeamOra and Sprintly. `GET /crm/me` is the single exemption — see the middleware.
+    Route::middleware(['auth:sanctum', EnsureCrmAccessIsActive::class])->group(function () {
         // CRM-shaped profile payload + self-service update (own name + phone only).
         // Not admin user management; the platform's /api/v1/auth/me still owns auth.
         Route::get('/me', MeController::class);
         Route::patch('/me', UpdateProfileController::class);
+
+        // The caller's own profile photo. Self-service like PATCH /me above — no user id is
+        // accepted, the account comes from the token, so neither route can touch another user's
+        // avatar. Bytes go on the PRIVATE disk and are read back through a short-lived signed URL
+        // (`avatar_url` on the resource), because an <img> tag carries no bearer token.
+        //
+        // Throttled: an upload writes a file, and the endpoint is reachable by every signed-in
+        // user. DELETE is idempotent and deliberately un-throttled — removing a photo you no
+        // longer want should never be rate-limited.
+        Route::post('/me/photo', [ProfilePhotoController::class, 'store'])->middleware('throttle:10,1');
+        Route::delete('/me/photo', [ProfilePhotoController::class, 'destroy']);
 
         // Generic, reusable activity feed (append-only Activity log). Powers Dashboard Recent
         // Activity now; reusable for the Activity Logs page, notifications, and future consumers.
@@ -90,6 +109,58 @@ Route::prefix('v1/crm')->group(function (): void {
         // data provider (same `import` permission); never touches Lead Status / score / ownership.
         Route::get('/website-enrichment/queue', [WebsiteEnrichmentController::class, 'queue'])->can('import', Lead::class);
         Route::put('/leads/{lead}/website-enrichment', [WebsiteEnrichmentController::class, 'update'])->can('import', Lead::class);
+
+        // Nearby discovery provider — the scraper's window onto the configuration an admin chose in
+        // Settings → Integrations. Same `import` permission as the two providers above, because it is
+        // the same service doing the same job; deliberately NOT gated on an admin role, since the
+        // scraper authenticates as a service account and should not need to be an administrator.
+        //
+        // `config` answers with the EFFECTIVE provider, never the merely-selected one. That keeps the
+        // fallback rule in exactly one place: "OpenAI selected but no key" resolves to OpenStreetMap
+        // here, so the scraper needs no fallback logic of its own and cannot disagree with the CRM.
+        //
+        // `proposals` makes the OpenAI call SERVER-SIDE and returns names only. The scraper never
+        // receives the API key — that is the whole point of the endpoint existing. Refused with 409
+        // unless AI is genuinely the effective provider, so a caller that skipped `config` cannot
+        // spend on a provider nobody enabled.
+        //
+        // IT CARRIES A ROLE GATE ON TOP OF THE PERMISSION, unlike its siblings, because it SPENDS
+        // MONEY. `crm.leads.import` is deliberately held by Business Development Managers too (their
+        // own spreadsheet imports), so permission alone would let any BD run up an OpenAI bill.
+        // Triggering paid AI work is closer to managing the integration than to importing a file, so
+        // it is gated like the Settings surface. The scraper's service account is an Admin/Super
+        // Admin token already, so this changes nothing operationally.
+        // Website candidate evidence — the chain that lets `website-unknown` legitimately become
+        // `no-website`. Two audiences on one trail.
+        //
+        // The DISCOVERY SERVICE (same `import` permission as the ingest and audit queue it sits
+        // beside) reads the search queue, submits the candidates a search pass produced — possibly
+        // none, which is itself evidence — and submits the crawler's findings per candidate. It can
+        // never set a status: adjudication reuses the unmodified WebsiteIdentityVerifier, at a
+        // stricter bar than the audit because these URLs were guessed rather than asserted.
+        //
+        // A BD reads the evidence and, only once the search is exhausted, confirms that no credible
+        // website exists. That confirmation is the ONLY path to `no-website` — WebsiteStatusDeriver
+        // still cannot produce it and is untouched. Guarded by the lead policy rather than a role, so
+        // a BD acts on leads they can already see; `confirmAbsence` additionally requires `update`,
+        // since it changes a field on the lead.
+        Route::get('/website-evidence/queue', [WebsiteEvidenceController::class, 'queue'])->can('import', Lead::class);
+        Route::post('/leads/{lead}/website-candidates', [WebsiteEvidenceController::class, 'storeCandidates'])->can('import', Lead::class);
+        Route::put('/leads/{lead}/website-candidates/{candidate}', [WebsiteEvidenceController::class, 'verifyCandidate'])->can('import', Lead::class);
+        Route::get('/leads/{lead}/website-evidence', [WebsiteEvidenceController::class, 'show'])->can('viewWebsiteEvidence', 'lead');
+        Route::post('/leads/{lead}/website-absence', [WebsiteEvidenceController::class, 'confirmAbsence'])->can('confirmWebsiteAbsence', 'lead');
+
+        Route::get('/discovery/config', [DiscoveryConfigController::class, 'config'])->can('import', Lead::class);
+        Route::post('/discovery/proposals', [DiscoveryConfigController::class, 'proposals'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
+        // Search STRATEGY, not business records: which OSM tags a category can hide under. Same
+        // guard and throttle as `proposals` because it reaches the same paid provider — though the
+        // answer is cached per category forever, so a healthy deployment calls it a handful of times
+        // in total.
+        Route::post('/discovery/tag-expansions', [DiscoveryConfigController::class, 'tagExpansions'])
+            ->can('import', Lead::class)
+            ->middleware(['role:super_admin|crm_admin', 'throttle:30,1']);
         Route::get('/leads/{lead}/activities', [LeadController::class, 'activities'])->can('view', 'lead');
         // One lead as a PDF profile. Authorized by `view` on the lead — the same ownership boundary as
         // reading it — so a BD can export their own leads and nobody can export a lead they cannot see.
@@ -298,6 +369,12 @@ Route::prefix('v1/crm')->group(function (): void {
         Route::post('/users', [UserController::class, 'store'])->can('create', User::class);
         Route::match(['put', 'patch'], '/users/{user}', [UserController::class, 'update'])->can('update', 'user');
         Route::delete('/users/{user}', [UserController::class, 'destroy'])->can('delete', 'user');
+        // Frozen performance readings for a BD who has left the pipeline — the only way to answer
+        // "what was their record?" once their leads have been handed on. Same policy as viewing them.
+        Route::get('/users/{user}/performance-snapshots', [UserController::class, 'performanceSnapshots']);
+        // Resignation handover: a departing BD's whole portfolio to one active BD. Runs through the
+        // same per-lead assignment logic as PATCH /leads/{lead}/assign — never a bulk UPDATE.
+        Route::post('/users/{user}/reassign-leads', [UserController::class, 'reassignLeads']);
 
         // Nearby Clients — discovered-business prospect pool. A shared prospecting surface of leads
         // landed by a discovery provider. Data only, and provider-agnostic (the supplying provider is
@@ -326,7 +403,6 @@ Route::prefix('v1/crm')->group(function (): void {
 
         Route::middleware('permission:crm.dashboard.view')->prefix('dashboard')->group(function () {
             Route::get('/kpis', [DashboardController::class, 'kpis']);
-            Route::get('/copilot-summary', [DashboardController::class, 'copilotSummary']);
             Route::get('/priority-buckets', [LeadController::class, 'websiteStatusBuckets']);
             Route::get('/recent-leads', [DashboardController::class, 'recentLeads']);
             Route::get('/lead-acquisition', [DashboardController::class, 'leadAcquisition']);
@@ -440,6 +516,48 @@ Route::prefix('v1/crm')->group(function (): void {
             Route::get('/settings/integrations/gmail', [GmailOAuthController::class, 'show']);
             Route::delete('/settings/integrations/gmail', [GmailOAuthController::class, 'destroy']);
             Route::post('/settings/integrations/gmail/authorization', [GmailOAuthController::class, 'store']);
+
+            // Settings → Integrations → Nearby Lead Generation: which engine fills the discovered-
+            // business pool. Gated identically to Gmail above, and for the same reason — this
+            // configures how the ORGANISATION generates leads, not a personal preference. A Business
+            // Development Manager is refused here at the route, so the UI hiding these controls is
+            // presentation rather than protection.
+            //
+            // GET returns configuration plus the EFFECTIVE provider and a reason code — never the
+            // API key, never its ciphertext, never its length. Selecting OpenAI without a usable
+            // credential falls back to OpenStreetMap, and the response says so rather than letting a
+            // client display "OpenAI" for a run that queried Overpass.
+            //
+            // PUT treats the API key as write-only: omitting it keeps the stored one, so changing a
+            // model or flipping the switch never sends a credential through a browser again. Clearing
+            // it is the separate DELETE, because a blank field usually means "I didn't retype it".
+            //
+            // POST .../test verifies the stored credential and records a status code. Throttled: the
+            // button spends money, so it must not be a load generator.
+            // Provider-KEYED, so a third engine (a structured Places provider is under evaluation)
+            // needs an enum case and nothing else — no new route, no new column, no migration.
+            //
+            // GET returns every provider's configuration plus the EFFECTIVE provider and a reason
+            // code — never a credential, never its ciphertext, never its length. Selecting a provider
+            // without a usable credential falls back to OpenStreetMap, and the response says so
+            // rather than letting a client display a provider that is not actually running.
+            //
+            // PUT /provider is SELECTION only: it never enables anything and never touches a
+            // credential, because choosing an engine and authorising it to spend money are different
+            // decisions and one mis-click must not do both.
+            //
+            // PUT /providers/{provider} configures one engine. The credential is write-only —
+            // omitting it keeps the stored one, so changing a model never sends a key through a
+            // browser again. Clearing it is the separate DELETE.
+            //
+            // POST .../test verifies one stored credential and records a status code. Throttled: the
+            // button spends money, so it must not be a load generator.
+            Route::get('/settings/integrations/nerby', [NerbyProviderSettingController::class, 'show']);
+            Route::put('/settings/integrations/nerby/provider', [NerbyProviderSettingController::class, 'select']);
+            Route::put('/settings/integrations/nerby/providers/{provider}', [NerbyProviderSettingController::class, 'update']);
+            Route::delete('/settings/integrations/nerby/providers/{provider}/credential', [NerbyProviderSettingController::class, 'destroyCredential']);
+            Route::post('/settings/integrations/nerby/providers/{provider}/test', [NerbyProviderSettingController::class, 'test'])
+                ->middleware('throttle:10,1');
         });
     });
 });

@@ -156,7 +156,7 @@ class HalfDayLatenessTest extends HrTestCase
         $this->approveHalfDay('AM');
         $this->clockInAt('13:00');
 
-        $row = collect(app(AttendanceService::class)->allForDate(self::DATE))
+        $row = collect(app(AttendanceService::class)->allForDate(self::DATE)->items())
             ->firstWhere('employee_id', $this->employee->id);
 
         $this->assertSame('present', $row['status']);
@@ -210,7 +210,7 @@ class HalfDayLatenessTest extends HrTestCase
         ]);
 
         $this->travelTo(Carbon::parse('2026-08-25 09:00', config('app.timezone_local')));
-        $review = app(AttendanceService::class)->openShiftReview(self::DATE, self::DATE);
+        $review = app(AttendanceService::class)->openShiftRows(self::DATE, self::DATE);
 
         $this->assertCount(1, $review);
         $this->assertSame('12:00', $review[0]['resolved_time_out']);
@@ -284,7 +284,7 @@ class HalfDayLatenessTest extends HrTestCase
         ]);
 
         $this->travelTo(Carbon::parse('2026-08-25 09:00', config('app.timezone_local')));
-        $row = app(AttendanceService::class)->openShiftReview(self::DATE, self::DATE)[0];
+        $row = app(AttendanceService::class)->openShiftRows(self::DATE, self::DATE)[0];
 
         // The reported window and the resolved end have to be the same story.
         $this->assertSame('08:00', $row['scheduled_start']);

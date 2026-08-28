@@ -2,6 +2,7 @@
 
 namespace App\Modules\Crm\Resources;
 
+use App\Modules\Crm\Enums\NerbyProvider;
 use App\Modules\Crm\Models\Lead;
 use App\Modules\Crm\Services\NicheCanonicalizer;
 use Illuminate\Http\Request;
@@ -12,10 +13,15 @@ use Illuminate\Support\Str;
  * A discovered business, shaped for the Nearby Clients UI. This is the live replacement for the
  * frontend's former demo dataset — the same shape, now sourced from real discovered leads.
  *
- * Deliberately **provider-agnostic**: it never exposes which discovery provider (`source`) supplied
- * the record — the CRM/UI must not depend on the provider. Coordinates are included (stored this
- * milestone); the distance/marker layout that consumes them is the next milestone, so this resource
- * emits no fabricated distance or map position.
+ * Still **vendor-agnostic**: it never exposes which company supplied a record, and no CRM behaviour
+ * depends on one. It does expose `foundBy` — which of the two discovery LANES produced the record,
+ * the deterministic OpenStreetMap sweep or the AI-assisted expansion beside it. That is a narrower
+ * disclosure than the original rule forbade, and it exists because a capability nobody can see on the
+ * board is a capability nobody can judge there: filtering to one lane is how a BD, or a reviewer,
+ * asks whether the expansion is actually contributing. Nothing downstream branches on it.
+ *
+ * Coordinates are included (stored this milestone); the distance/marker layout that consumes them is
+ * the next milestone, so this resource emits no fabricated distance or map position.
  *
  * @mixin Lead
  */
@@ -39,6 +45,15 @@ class NearbyClientResource extends JsonResource
             'area' => $this->city ?? $this->province ?? $this->region,
             'contact' => $this->contact_name,
             'status' => $this->status,
+            // WHICH DISCOVERY LANE FOUND THIS BUSINESS: the deterministic OpenStreetMap sweep, or the
+            // AI-assisted expansion that runs beside it. Read from the per-record provenance the
+            // composite provider stamps on every discovered lead — no second source system.
+            //
+            // A DELIBERATE TWO-WAY PARTITION. Only the AI lane's own value counts as `ai-assisted`;
+            // everything else falls in the deterministic bucket, including legacy `nearby` rows that
+            // predate the lane split. Erring this way means a lead can never be labelled deterministic
+            // when AI found it — the direction that would actually mislead.
+            'foundBy' => $this->source === NerbyProvider::OPENAI->value ? 'ai-assisted' : 'openstreetmap',
             // DERIVED prospecting priority — computed from Website Intelligence for the Nearby context
             // ONLY (see prospectingPriority). This is NOT the CRM `leads.priority` business field (which
             // stays a separate concern for qualified CRM leads); it is never read from or written to the

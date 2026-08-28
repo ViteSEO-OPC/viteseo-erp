@@ -1,13 +1,26 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getReport, exportReport } from "@/modules/hr/api/reports";
 
-export function useReport(key: string, params?: Record<string, string | number>) {
+/**
+ * One report.
+ *
+ * `keepPreviousData` is for the SERVER-PAGED reports: turning a page changes the query key, so
+ * without it the screen has no data for a moment and the whole table is replaced by its loading
+ * state — a page hop reads as the records vanishing and coming back. With it the previous page
+ * stays on screen (the caller dims it via `isFetching`) until the next one arrives.
+ */
+export function useReport(
+  key: string,
+  params?: Record<string, string | number>,
+  options?: { keepPreviousData?: boolean },
+) {
   return useQuery({
     queryKey: ["hr", "reports", key, params ?? {}],
     queryFn: () => getReport(key, params),
+    ...(options?.keepPreviousData ? { placeholderData: keepPreviousData } : {}),
   });
 }
 

@@ -26,6 +26,46 @@ export interface Sibling {
   gender: string | null;
 }
 
+/**
+ * What `GET /hr/employees` returns — the DIRECTORY projection, not the whole record.
+ *
+ * Kept as its own type rather than `Partial<Employee>` so the compiler is the thing that
+ * catches a screen reading a field the list does not carry, instead of the field arriving
+ * `undefined` at runtime and the UI quietly rendering a blank. Anything needing more than this
+ * should fetch the single employee (`useEmployee(id)`), which still returns the full record.
+ */
+export type EmployeeListItem = Pick<
+  Employee,
+  | "id"
+  | "employee_no"
+  | "photo_url"
+  | "name"
+  | "email"
+  | "job_title"
+  | "employment_status"
+  | "onboarding_status"
+  | "is_management"
+  | "hire_date"
+  | "separation_date"
+  | "is_separated"
+  | "department"
+>;
+
+/**
+ * One employee as a PICKER OPTION — what `GET /hr/employees/options` returns.
+ *
+ * Four fields: the two needed to render a choice, and the two the eligibility picker filters on.
+ * Its own type rather than a slice of `EmployeeListItem` because it comes from its own endpoint
+ * for its own reason — the dropdowns cannot page, so they must not be served a page of the
+ * directory. Anything a picker needs beyond this belongs in the directory or on the record.
+ */
+export interface EmployeeOption {
+  id: number;
+  name: string;
+  employment_status: string;
+  is_management: boolean;
+}
+
 export interface Employee {
   id: number;
   employee_no: string;
@@ -53,7 +93,14 @@ export interface Employee {
   is_management: boolean; // fixed salary + exempt from attendance
   management_since: string | null; // when that exemption started (read-only)
   phone: string | null;
-  address: string | null; // home address
+  /** The pre-split free-text home address. Read-only — shown as what was recorded before. */
+  address: string | null;
+  address_house_no: string | null;
+  address_street: string | null;
+  address_barangay: string | null;
+  address_city: string | null;
+  address_province: string | null;
+  address_zip: string | null;
   emergency_contact_name: string | null;
   emergency_contact_relationship: string | null;
   emergency_contact_phone: string | null;
@@ -101,7 +148,14 @@ export interface Employee {
   nationality: string | null;
   date_of_birth: string | null;
   place_of_birth: string | null;
+  /** The pre-split free-text current address. Read-only, as above. */
   current_address: string | null;
+  current_address_house_no: string | null;
+  current_address_street: string | null;
+  current_address_barangay: string | null;
+  current_address_city: string | null;
+  current_address_province: string | null;
+  current_address_zip: string | null;
   mothers_maiden_name: string | null;
   fathers_name: string | null;
   siblings: Sibling[];
@@ -143,8 +197,18 @@ export interface EmployeeInput {
   minimum_wage_exempt?: boolean;
   minimum_wage_exempt_reason?: string;
   phone?: string;
-  address?: string;
-  current_address?: string;
+  address_house_no?: string | null;
+  address_street?: string | null;
+  address_barangay?: string | null;
+  address_city?: string | null;
+  address_province?: string | null;
+  address_zip?: string | null;
+  current_address_house_no?: string | null;
+  current_address_street?: string | null;
+  current_address_barangay?: string | null;
+  current_address_city?: string | null;
+  current_address_province?: string | null;
+  current_address_zip?: string | null;
   gender?: string;
   civil_status?: string;
   nationality?: string;

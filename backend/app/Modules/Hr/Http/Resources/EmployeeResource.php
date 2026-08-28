@@ -23,11 +23,36 @@ class EmployeeResource extends JsonResource
     }
 
     /**
+     * Opt-in the other way: the DIRECTORY projection, carrying only the fields the employee list
+     * actually renders plus the ones its dropdowns filter on.
+     *
+     * The full record is 74 fields — every address line, every government number, the whole
+     * personal history — and the directory shows about eight of them. That is roughly 1.3 KB per
+     * row spent to draw a name, a job title and a department, and it puts every employee's
+     * personal record in the browser of anyone who opens the list. Neither is needed to render
+     * a directory.
+     *
+     * `is_hr_officer` is deliberately absent: computing it touches the roles relation, and
+     * dropping it is what lets `EmployeeService::list()` stop eager-loading `user.roles` for the
+     * whole directory. The single-employee view still carries it.
+     */
+    private bool $lean = false;
+
+    public function lean(): static
+    {
+        $this->lean = true;
+
+        return $this;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function toArray(Request $request): array
     {
-        return [
+        // What the directory renders: the card (name, photo, job title, department, the
+        // former/pending badges) and the filters over it (email search, status, management).
+        $summary = [
             'id' => $this->id,
             'employee_no' => $this->employee_no,
             // Browser-facing URL for the profile picture; null falls back to initials.
@@ -35,32 +60,49 @@ class EmployeeResource extends JsonResource
             // Identity comes from the linked user (relations are eager-loaded).
             'name' => $this->user?->name,
             'email' => $this->user?->email,
-            // Whether this person's account has HR-officer (admin) access.
-            'is_hr_officer' => (bool) $this->user?->hasRole('hr_officer'),
             'job_title' => $this->job_title,
             'employment_status' => $this->employment_status,
+            'onboarding_status' => $this->onboarding_status,
+            'is_management' => (bool) $this->is_management,
+            'hire_date' => $this->hire_date?->format('Y-m-d'),
+            'separation_date' => $this->separation_date?->format('Y-m-d'),
+            'is_separated' => $this->separation_date !== null || $this->deleted_at !== null,
+            'department' => $this->department ? [
+                'id' => $this->department->id,
+                'name' => $this->department->name,
+                'code' => $this->department->code,
+            ] : null,
+        ];
+
+        if ($this->lean) {
+            return $summary;
+        }
+
+        return $summary + [
+            // Whether this person's account has HR-officer (admin) access.
+            'is_hr_officer' => (bool) $this->user?->hasRole('hr_officer'),
             'employment_type' => $this->employment_type,
             'work_location' => $this->work_location,
             'employee_role' => $this->employee_role,
-            'onboarding_status' => $this->onboarding_status,
-            'hire_date' => $this->hire_date?->format('Y-m-d'),
             // The employment lifecycle, so the UI can tell an active employee from a former
             // one and offer the right action. `separation_date` is the last WORKING day (what payroll
             // prorates against); `deleted_at` is kept in sync with it by `EmployeeService::separate()`.
             'separation_type' => $this->separation_type,
-            'separation_date' => $this->separation_date?->format('Y-m-d'),
             'separated_at' => $this->deleted_at?->format('Y-m-d'),
-            'is_separated' => $this->separation_date !== null || $this->deleted_at !== null,
             // Set only by a rehire — the previous stint's start, so overwriting `hire_date` does not
             // erase when this person first joined.
             'previous_hire_date' => $this->previous_hire_date?->format('Y-m-d'),
             'base_salary' => $this->base_salary,
-            // Fixed-salary + attendance-exempt management flag.
-            'is_management' => (bool) $this->is_management,
             // WHEN that exemption started — read-only, stamped when the flag is switched on.
             'management_since' => $this->management_since?->format('Y-m-d'),
             'phone' => $this->phone,
             'address' => $this->address,
+            'address_house_no' => $this->address_house_no,
+            'address_street' => $this->address_street,
+            'address_barangay' => $this->address_barangay,
+            'address_city' => $this->address_city,
+            'address_province' => $this->address_province,
+            'address_zip' => $this->address_zip,
             'emergency_contact_name' => $this->emergency_contact_name,
             'emergency_contact_relationship' => $this->emergency_contact_relationship,
             'emergency_contact_phone' => $this->emergency_contact_phone,
@@ -102,6 +144,12 @@ class EmployeeResource extends JsonResource
             'date_of_birth' => $this->date_of_birth?->format('Y-m-d'),
             'place_of_birth' => $this->place_of_birth,
             'current_address' => $this->current_address,
+            'current_address_house_no' => $this->current_address_house_no,
+            'current_address_street' => $this->current_address_street,
+            'current_address_barangay' => $this->current_address_barangay,
+            'current_address_city' => $this->current_address_city,
+            'current_address_province' => $this->current_address_province,
+            'current_address_zip' => $this->current_address_zip,
             'mothers_maiden_name' => $this->mothers_maiden_name,
             'fathers_name' => $this->fathers_name,
             // One entry per named sibling; the count may exceed the names listed.
@@ -125,11 +173,6 @@ class EmployeeResource extends JsonResource
                 'status' => $h->status,
                 'reason' => $h->reason,
             ]), []),
-            'department' => $this->department ? [
-                'id' => $this->department->id,
-                'name' => $this->department->name,
-                'code' => $this->department->code,
-            ] : null,
             'manager' => $this->manager ? [
                 'id' => $this->manager->id,
                 'name' => $this->manager->user?->name,

@@ -5,6 +5,7 @@ namespace App\Modules\Crm\Services\Ranking;
 use App\Modules\Crm\Models\Lead;
 use App\Models\User;
 use App\Modules\Crm\Services\Kpi\BdKpiService;
+use App\Modules\Crm\Services\CrmAccessService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 
@@ -23,15 +24,16 @@ class BdRankingService
     public function __construct(
         private readonly BdRankingCalculator $calculator,
         private readonly BdKpiService $kpi,
+        private readonly CrmAccessService $access,
     ) {}
 
     public function rank(?Carbon $now = null): BdRankingResult
     {
         $now ??= Carbon::now();
 
-        // Active Business Development Managers (R-6), name-ordered — same selection as BD Performance.
-        $bds = User::query()
-            ->where('status', 'active')
+        // Business Development Managers with live Zerem access (R-6), name-ordered — same selection
+        // as BD Performance, now sharing one definition of "not suspended".
+        $bds = $this->access->excludeSuspended(User::query())
             ->whereHas('roles', fn (Builder $q) => $q->where('name', 'crm_bd'))
             ->orderBy('name')
             ->get(['id', 'name']);

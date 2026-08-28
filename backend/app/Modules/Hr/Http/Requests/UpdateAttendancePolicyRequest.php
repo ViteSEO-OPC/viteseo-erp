@@ -2,6 +2,7 @@
 
 namespace App\Modules\Hr\Http\Requests;
 
+use App\Modules\Hr\Rules\AppliesFromToday;
 use App\Modules\Hr\Services\AttendancePolicyService;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -24,9 +25,10 @@ class UpdateAttendancePolicyRequest extends FormRequest
         return [
             // The date this save counts from. Not a policy field — it dates the VERSION payroll
             // resolves against, so a cycle that ended before it keeps the old rules. Absent
-            // means today. Back-dated deliberately when correcting a cycle already run; no
-            // upper bound, because scheduling a rise ahead of time is legitimate too.
-            'effective_from' => ['sometimes', 'nullable', 'date'],
+            // means today, which is what the UI now sends. No upper bound, because scheduling a
+            // change ahead of time is legitimate; a PAST date is refused, because repricing a
+            // period already run is a payslip correction's job. See AppliesFromToday.
+            'effective_from' => ['sometimes', 'nullable', 'date', new AppliesFromToday],
 
             'monthly_late_reset' => ['sometimes', 'boolean'],
             // Per-time charging only. The per-N-lates penalty is now its own independent
@@ -40,7 +42,7 @@ class UpdateAttendancePolicyRequest extends FormRequest
             'late_tiers.*.hours' => ['required_with:late_tiers', 'numeric', 'min:0', 'max:24'],
             // Repeat the rung per whole block of `over` minutes instead of charging it once.
             // Cross-validated below: it only has a meaning for a SINGLE rung with a non-zero
-            // `over`, which is exactly the one-rung rule Company → Rules edits.
+            // `over`, which is exactly the one-rung rule Company → Settings edits.
             'late_tier_recurring' => ['sometimes', 'boolean'],
 
             'undertime_deduction_mode' => ['sometimes', 'in:none,per_hour'],

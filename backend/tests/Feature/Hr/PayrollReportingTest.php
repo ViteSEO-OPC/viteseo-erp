@@ -5,7 +5,6 @@ namespace Tests\Feature\Hr;
 use App\Models\User;
 use App\Modules\Hr\Database\Seeders\ContributionSettingSeeder;
 use App\Modules\Hr\Models\Attendance;
-use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\AuditLog;
 use App\Modules\Hr\Models\ContributionSetting;
 use App\Modules\Hr\Models\Department;
@@ -125,7 +124,7 @@ class PayrollReportingTest extends HrTestCase
 
     public function test_attendance_rule_changes_record_what_changed(): void
     {
-        app(AttendancePolicyService::class)->update(['overtime_ordinary_pct' => 150]);
+        $this->policyAlways(['overtime_ordinary_pct' => 150]);
 
         $this->assertDatabaseHas('hr_audit_logs', ['module' => 'Rules']);
 
@@ -224,7 +223,7 @@ class PayrollReportingTest extends HrTestCase
 
     public function test_the_late_penalty_is_reported_separately_from_absences(): void
     {
-        AttendancePolicy::query()->update(['late_penalty_enabled' => true, 'lates_per_deduction' => 1]);
+        $this->policyAlways(['late_penalty_enabled' => true, 'lates_per_deduction' => 1]);
 
         $tz = config('app.timezone_local');
         Attendance::create([
@@ -259,10 +258,10 @@ class PayrollReportingTest extends HrTestCase
     {
         $this->workedEveryDay();
         $run = $this->runPayroll();
-        $this->assertNotEmpty(app(PayrollService::class)->thirteenthMonth(2026));
+        $this->assertNotEmpty(app(PayrollService::class)->thirteenthMonth(2026)['rows']);
 
         $run->update(['status' => 'processing']);
 
-        $this->assertSame([], app(PayrollService::class)->thirteenthMonth(2026));
+        $this->assertSame([], app(PayrollService::class)->thirteenthMonth(2026)['rows']);
     }
 }

@@ -11,7 +11,7 @@ import {
   useEmployeeAllowances,
   useSetEmployeeAllowance,
 } from "@/modules/hr/hooks/use-benefit-programs";
-import { frequencyLabel, type EmployeeAllowance } from "@/modules/hr/types/benefits";
+import { type EmployeeAllowance } from "@/modules/hr/types/benefits";
 
 /** What this employee is paid per allowance, and the one place to give them a different amount — */
 export function EmployeeAllowancesBlock({ employeeId }: { employeeId: number }) {
@@ -81,8 +81,9 @@ function AllowanceRow({ employeeId, row }: { employeeId: number; row: EmployeeAl
           <div>
             <p className="text-sm font-semibold text-foreground">{row.name}</p>
             <p className="text-caption text-muted-foreground">
-              {frequencyLabel(row.frequency)}
-              {row.tax_treatment === "taxable" ? " · Taxable" : " · Tax-free"}
+              {/* No "Monthly" chip any more — an allowance amount IS monthly, so the label
+                  only ever restated the one option there was. */}
+              {row.tax_treatment === "taxable" ? "Taxable" : "Tax-free"}
               {overridden && ` · programme pays ${formatPeso(row.program_amount)}`}
             </p>
           </div>

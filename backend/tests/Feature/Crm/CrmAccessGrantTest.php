@@ -476,7 +476,10 @@ class CrmAccessGrantTest extends TestCase
             ->assertOk();
 
         $this->assertSame(['crm_bd', 'hr_employee', 'pm_member'], $this->roleNames($existing));
-        $this->assertSame('inactive', $existing->fresh()->status);
+        // The shared `users` row is NOT how CRM suspension is recorded any more — a Zerem-only
+        // decision must leave the row TeamOra and Sprintly also read completely untouched.
+        $this->assertSame('active', $existing->fresh()->status);
+        $this->assertTrue(app(CrmAccessService::class)->isSuspended($existing->fresh()));
     }
 
     // --- Lookup -------------------------------------------------------------

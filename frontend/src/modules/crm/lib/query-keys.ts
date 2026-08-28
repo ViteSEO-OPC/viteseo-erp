@@ -9,8 +9,6 @@ export const queryKeys = {
   dashboard: {
     all: ["dashboard"] as const,
     kpis: () => [...queryKeys.dashboard.all, "kpis"] as const,
-    copilotSummary: () =>
-      [...queryKeys.dashboard.all, "copilot-summary"] as const,
     // `filters` keeps the Leads workspace's filtered buckets cached separately from the Dashboard's
     // unfiltered ones. The Dashboard passes nothing, so its key is unchanged.
     priorityBuckets: (filters: Record<string, string> = {}) =>
@@ -97,6 +95,12 @@ export const queryKeys = {
     // Discovered-business prospect pool (GET /nearby-clients).
     list: () => [...queryKeys.nearbyClients.all, "list"] as const,
   },
+  websiteEvidence: {
+    all: ["website-evidence"] as const,
+    // The candidate/rejection trail behind one lead's website conclusion. Fetched lazily, per lead,
+    // only when a BD opens the evidence — the Nearby list must never fan out one request per card.
+    detail: (leadId: string) => [...queryKeys.websiteEvidence.all, leadId] as const,
+  },
   performance: {
     all: ["performance"] as const,
     // Personal / reporting KPI summary (GET /dashboard/performance-summary). `scope` separates My
@@ -179,6 +183,11 @@ export const queryKeys = {
     // another provider's status; `all` is the prefix for "refresh every integration card".
     all: ["integrations"] as const,
     gmail: () => [...queryKeys.integrations.all, "gmail"] as const,
+    // Nearby Lead Generation — the discovery-provider configuration. One key for the whole
+    // control centre rather than one per provider: the API answers with every provider plus the
+    // effective one in a single payload, and splitting it would let the switch and a provider's
+    // credential state be cached at different ages and disagree on screen.
+    nerby: () => [...queryKeys.integrations.all, "nerby"] as const,
   },
   businessRules: {
     // Settings → Business Rules (Business Rules Administration). Keyed by module so the reserved

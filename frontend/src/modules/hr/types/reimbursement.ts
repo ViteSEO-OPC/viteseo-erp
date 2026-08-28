@@ -46,3 +46,12 @@ export interface Reimbursement {
 export function categoryLabel(category: string): string {
   return category.charAt(0).toUpperCase() + category.slice(1);
 }
+
+/**
+ * The queue's figures per status, counted by the DATABASE — `{ pending: { count, amount } }`.
+ *
+ * A status nobody has filed is absent rather than zero, so read it through a helper that
+ * supplies the zero. Counted server-side because the screen holds one page: filtering the rows
+ * in hand would describe that page while looking exactly as authoritative.
+ */
+export type ReimbursementSummary = Record<string, { count: number; amount: number }>;

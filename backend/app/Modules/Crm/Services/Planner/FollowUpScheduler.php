@@ -204,6 +204,72 @@ class FollowUpScheduler
     }
 
     /**
+     * BR-LC-01 (§4b) — the first-touch Todo owed by a manually created lead that has a BD owner.
+     *
+     * THE SECOND PLACE THE SYSTEM ORIGINATES WORK, after {@see scheduleFirstTouch()}. Every other
+     * creator in this class reconciles an intent the BD already recorded as `cold_calling =
+     * 'scheduled'`. Manual creation records no such intent and structurally cannot: the Create Lead
+     * Wizard has never carried a Cold Calling field, so a wizard-created lead is born at the column
+     * default `not-called` and reaches no trigger. That left it owned, scored and active yet absent
+     * from Outreach — the same defect scheduleFirstTouch() exists to prevent, reached by a different
+     * route. Creation is the same kind of lifecycle crossing qualification is: it stamps ownership,
+     * so the obligation to make first contact is real from that instant.
+     *
+     * `cold_calling = 'scheduled'` WAS REJECTED AS THE MECHANISM, deliberately. Setting it would have
+     * been a one-line frontend change and StoreLeadRequest accepts the field, but that column is not
+     * an inert flag: it awards the Call Scheduled ENGAGEMENT signal in LeadScoreCalculator, and the
+     * Management dashboard counts it as a Consultation ("a booked slot"). Buying the Todo that way
+     * would inflate every new lead's score and report a call nobody scheduled. This mints the work
+     * directly and MOVES NO LEAD COLUMN.
+     *
+     * KEYED TO THE OWNER, NOT THE CREATOR — and the absence of an actor-role gate is deliberate.
+     * {@see scheduleFirstTouch()} gates on `$actor->hasRole('crm_bd')` because it assigns the Todo to
+     * the ACTOR, so an Admin qualifying would mint work nobody can open (the Planner is a BD
+     * workspace). This method assigns to the LEAD'S OWNER, and StoreLeadRequest enforces
+     * MustBeBusinessDeveloper on `assigned_to`, so that owner is always a BD and the work is always
+     * openable. Gating on the actor here would silently deny a first touch to every lead an Admin
+     * creates on a BD's behalf — the opposite of the intent.
+     *
+     * SINGLE CREATION ONLY. Called from {@see LeadCreator::create()} — the manual POST /leads path —
+     * not from LeadObserver. Both creation paths share `Lead::create()` and therefore the observer, so
+     * placing it there would have applied it to every imported row too; bulk import is deliberately
+     * left unchanged pending a separate decision.
+     *
+     * Reuses every existing safeguard unchanged: the ownership rule below, the prospect exclusion, and
+     * `coldCallFollowUpIsRedundant()`. A lead created already `cold_calling = 'scheduled'` therefore
+     * receives EXACTLY ONE event — the observer's cold-call follow-up fires first and this declines on
+     * dedupe.
+     */
+    public function scheduleOnLeadCreation(Lead $lead): ?PlannerEvent
+    {
+        // Same rule and same reason as scheduleForColdCall(): ownerless work is invisible to every BD
+        // and impossible to reclaim.
+        if ($lead->assigned_to === null) {
+            return null;
+        }
+
+        // A discovered prospect's first touch belongs to scheduleFirstTouch(), minted on qualification.
+        // Without this the two origination paths would both fire for an ingested prospect.
+        if ($lead->isProspect()) {
+            return null;
+        }
+
+        if ($this->coldCallFollowUpIsRedundant($lead)) {
+            return null;
+        }
+
+        return $this->create($lead, [
+            // Undated backlog, exactly like scheduleForColdCall() and scheduleFirstTouch():
+            // creation carries no deadline, and inventing one would fabricate urgency and pull the
+            // row into the "Follow-ups Due" card, whose query requires `starts_at IS NOT NULL`.
+            'status' => 'todo',
+            'starts_at' => null,
+            'source' => 'outreach',
+            'description' => 'First touch — new lead.',
+        ]);
+    }
+
+    /**
      * Complete every open (non-completed) follow-up for a lead. The single place follow-up completion
      * is triggered by an automated flow — the Inbound Email reply fan-out calls this when a prospect
      * replies (see {@see InboundReplyProcessor}). Planner remains the OWNER of

@@ -12,7 +12,7 @@ use App\Modules\Hr\Services\AttendancePolicyService;
 use App\Modules\Hr\Services\PayrollService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
-/** Company → Rules remembers what it used to say. */
+/** Company → Settings remembers what it used to say. */
 class AttendancePolicyHistoryTest extends HrTestCase
 {
     use RefreshDatabase;

@@ -26,6 +26,8 @@ export type PlannerEventLead = {
 export type PlannerEventOwner = {
   id: string;
   name: string;
+  /** Shared avatar source (signed link from `users.avatar`); null → render initials. */
+  avatarUrl: string | null;
 };
 
 export type PlannerEvent = {

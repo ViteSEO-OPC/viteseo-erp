@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { STALE } from "@/modules/crm/lib/query-freshness";
 import {
   scopeKey,
   scopeToParams,
@@ -45,6 +46,11 @@ export type PerformanceSummary = {
  * My Performance — the scope is `self`, so no param is sent and the endpoint returns the acting BD's own
  * portfolio (unchanged). Reports & Performance wraps its widgets in a scope provider, so the same hook
  * fetches the All-Reports aggregate or a specific BD via `?user_id`, cached separately per scope.
+ *
+ * Shell-level: the sidebar's lead badge calls `useDashboardKpis`, which calls this for the
+ * Conversion Rate card, so the `self` scope is mounted on every CRM screen — see {@link STALE}.
+ * Every write that moves these figures invalidates `queryKeys.performance.all`, and invalidation
+ * ignores `staleTime`, so the window never holds a stale number past a change.
  */
 export function useMyPerformanceSummary() {
   const scope = usePerformanceScope();
@@ -54,6 +60,7 @@ export function useMyPerformanceSummary() {
       apiClient
         .get("/dashboard/performance-summary", { params: scopeToParams(scope) })
         .then((r) => r.data.data),
+    staleTime: STALE.standard,
   });
 }
 

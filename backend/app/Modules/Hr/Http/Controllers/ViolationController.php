@@ -17,9 +17,7 @@ class ViolationController extends Controller
 
     /**
      * GET /hr/me/violations?month=YYYY-MM — the caller's own flags, resolved from
-     * the token. Read-only on purpose: unlike index(), it never triggers a
-     * recompute, so an employee opening their dashboard can't kick off a
-     * full-history rebuild.
+     * the token.
      */
     public function me(Request $request): JsonResponse
     {
@@ -34,7 +32,11 @@ class ViolationController extends Controller
         }
 
         return ViolationResource::collection(
-            $this->service->list($employee->id, $validated['month'] ?? null),
+            $this->service->list(
+                $employee->id,
+                $validated['month'] ?? null,
+                $request->only(['per_page']),
+            ),
         )->response();
     }
 
@@ -49,16 +51,17 @@ class ViolationController extends Controller
         $employeeId = $validated['employee'] ?? null;
         $month = $validated['month'] ?? null;
 
-        // A specific month → (re)build just that month. No month → build the full
-        // history so the "All time" view has every month's data, not only opened ones.
-        if ($month) {
-            $this->service->recompute($month);
-        } else {
-            $this->service->recomputeHistory();
-        }
-
+        // Item 11 — READ ONLY. This used to rebuild the requested month, and with no month
+        // rebuild EVERY month since the org started tracking, before serving a page of flags.
+        // Opening "All time" therefore cost a full-history rescan, and every reload paid it
+        // again. The flags are maintained by the writes that change them and by the nightly
+        // sweep; `POST /hr/violations/recompute` is still there to force one by hand.
         return ViolationResource::collection(
-            $this->service->list($employeeId ? (int) $employeeId : null, $month),
+            $this->service->list(
+                $employeeId ? (int) $employeeId : null,
+                $month,
+                $request->only(['per_page']),
+            ),
         )->response();
     }
 

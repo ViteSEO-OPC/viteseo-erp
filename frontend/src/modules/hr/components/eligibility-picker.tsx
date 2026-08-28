@@ -3,7 +3,7 @@
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { MultiCombobox } from "@/modules/hr/ui/multi-combobox";
-import { EMPLOYMENT_STATUSES, statusLabel, type Employee } from "@/modules/hr/types/employee";
+import { EMPLOYMENT_STATUSES, statusLabel, type EmployeeOption } from "@/modules/hr/types/employee";
 import { ELIGIBILITY_MODES, type EligibilityMode } from "@/modules/hr/types/benefits";
 
 /** Who an allowance is for — the same control on the add and the edit dialog (B8 follow-up). */
@@ -22,7 +22,7 @@ export function EligibilityPicker({
   /** Defaults to every mode. */
   modes?: readonly { value: EligibilityMode; label: string }[];
   employeeIds: number[];
-  employees: Employee[];
+  employees: EmployeeOption[];
   onModeChange: (mode: EligibilityMode) => void;
   onStatusesChange: (statuses: string[]) => void;
   onEmployeeIdsChange: (ids: number[]) => void;

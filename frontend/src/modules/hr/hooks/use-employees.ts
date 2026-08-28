@@ -1,9 +1,12 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getEmployees,
+  getEmployeeOptions,
+  type EmployeeDirectoryParams,
   getEmployee,
   createEmployee,
   updateEmployee,
@@ -15,6 +18,7 @@ import {
   getMyDocuments,
   uploadEmployeeDocument,
   deleteEmployeeDocument,
+  renameEmployeeDocument,
   uploadEmployeePhoto,
   deleteEmployeePhoto,
   getEmployeeLoans,
@@ -44,10 +48,36 @@ import type { EmployeeInput, EmployeeUpdateInput } from "@/modules/hr/types/empl
 
 const EMPLOYEES_KEY = ["hr", "employees"] as const;
 
-export function useEmployees(status: "active" | "former" | "all" = "active") {
+/**
+ * Every employee as a picker option — for the "who is the manager?" / "who heads this?"
+ * dropdowns and the eligibility picker.
+ *
+ * This used to be the directory endpoint, which meant the dropdowns silently received its first
+ * hundred people and employee 101 could not be selected at all. A picker cannot page, so it now
+ * reads a list built for it: four fields per person and no cap.
+ *
+ * Under the shared EMPLOYEES_KEY prefix on purpose — hiring somebody must refresh the pickers,
+ * and every mutation below already invalidates that prefix.
+ */
+export function useEmployees() {
   return useQuery({
-    queryKey: [...EMPLOYEES_KEY, { status }] as const,
-    queryFn: () => getEmployees(undefined, status),
+    queryKey: [...EMPLOYEES_KEY, "options"] as const,
+    queryFn: getEmployeeOptions,
+  });
+}
+
+/**
+ * One page of the directory, with the total. Search, department, employment status, roster and
+ * paging are all applied by the database — see EmployeeService::list() for why.
+ *
+ * `keepPreviousData` so turning a page swaps the cards rather than emptying the grid and
+ * rebuilding it, which read as the directory blinking out on every click.
+ */
+export function useEmployeeDirectory(params: EmployeeDirectoryParams) {
+  return useQuery({
+    queryKey: [...EMPLOYEES_KEY, "directory", params] as const,
+    queryFn: () => getEmployees(params),
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -230,6 +260,15 @@ export function useUploadEmployeeDocument(id: number) {
   });
 }
 
+export function useRenameEmployeeDocument(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ documentId, name }: { documentId: number; name: string }) =>
+      renameEmployeeDocument(id, documentId, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [...EMPLOYEES_KEY, id, "documents"] }),
+  });
+}
+
 export function useDeleteEmployeeDocument(id: number) {
   const qc = useQueryClient();
   return useMutation({
@@ -313,10 +352,12 @@ export function useReopenEmployeeLoan(id: number) {
 const MY_LOANS_KEY = ["hr", "me", "loans"] as const;
 
 /** Every employee's loans, for the approvals queue. HR only. */
-export function useAllLoans(status = "requested") {
+/** One page of every employee's loans. The last unbounded source the approvals card read. */
+export function useAllLoans(status: string | undefined, params: QueueParams) {
   return useQuery({
-    queryKey: ["hr", "loans", { status }] as const,
-    queryFn: () => getAllLoans(status),
+    queryKey: ["hr", "loans", { status }, params] as const,
+    queryFn: () => getAllLoans(status, params),
+    placeholderData: keepPreviousData,
   });
 }
 

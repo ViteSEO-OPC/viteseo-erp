@@ -72,6 +72,27 @@ class Activity extends Model
     }
 
     /**
+     * Activities this user PERFORMED — the attribution scope, as opposed to {@see scopeVisibleTo()},
+     * which is the ACCESS scope.
+     *
+     * The distinction is the whole point. `scopeVisibleTo` is `causer_id = user` OR `subject is a
+     * lead the user currently owns`, which is correct for "what may they see" and wrong for "what did
+     * they do": once a lead is reassigned, the previous owner's activities keep matching their own
+     * `causer_id` clause AND start matching the new owner's ownership clause, so a performance metric
+     * built on it credits the same work to two people — and hands a departing BD's effort to whoever
+     * inherits the portfolio.
+     *
+     * Performance must follow provenance, and `causer_id` is provenance: it is stamped at write time
+     * and never rewritten by a reassignment.
+     *
+     * @param  Builder<Activity>  $query
+     */
+    public function scopePerformedBy(Builder $query, User $user): void
+    {
+        $query->where('causer_id', $user->id);
+    }
+
+    /**
      * CRM-reporting filter — the single source of truth for which activities participate in CRM
      * reporting and KPIs (Dashboard "Recent Activity", Activity Logs, M-06 Activity Volume, and any
      * future notification/audit-report surface built on this feed).

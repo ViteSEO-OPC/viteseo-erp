@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-query";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { STALE } from "@/modules/crm/lib/query-freshness";
 import {
   NOTIFICATION_INBOX_WINDOW_DAYS,
   type NotificationDto,
@@ -177,7 +178,13 @@ function patchCachedDismissed(qc: QueryClient, id: string): void {
  * order of how often they matter: a realtime arrival patching this key directly
  * (use-notification-realtime), the optimistic deltas below, and invalidation of
  * `queryKeys.notifications.all` on every settle. Window-focus refetch is the backstop for
- * anything all three missed, which is why it opts back in against the CRM client default.
+ * anything all three missed, and is left explicit here so it survives any future change to the
+ * module's defaults.
+ *
+ * Shell-level: the topbar bell mounts this on every CRM screen, so it carries {@link STALE}. The
+ * three sources above all bypass `staleTime` — a realtime patch and an optimistic delta write the
+ * cache directly, and invalidation refetches regardless of freshness — so the window only ever
+ * suppresses a focus refetch of a count nothing has reported a change to.
  *
  * SCOPED, and the scope is not cosmetic. The bell asks for `inbox` so its number counts
  * the same rows its dropdown lists — count everything and the badge advertises
@@ -196,6 +203,7 @@ export function useUnreadCount(scope: UnreadCountScope = "all") {
       });
       return res.data.count;
     },
+    staleTime: STALE.standard,
     refetchOnWindowFocus: true,
   });
 }

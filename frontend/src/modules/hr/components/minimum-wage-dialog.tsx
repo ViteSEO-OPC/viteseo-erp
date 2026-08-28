@@ -123,7 +123,7 @@ export function MinimumWageDialog({
                 Against {formatPeso(minimum)} a day, for{" "}
                 {data?.meta.cycle.start ? formatDate(data.meta.cycle.start) : ""} –{" "}
                 {data?.meta.cycle.end ? formatDate(data.meta.cycle.end) : ""}. The daily rate is
-                derived from the salary and the basis in Company &rarr; Rules, so it is only ever as
+                derived from the salary and the basis in Company &rarr; Settings, so it is only ever as
                 right as that setting.
               </>
             )}

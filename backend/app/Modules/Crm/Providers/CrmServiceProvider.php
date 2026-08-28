@@ -30,6 +30,7 @@ use App\Modules\Crm\Listeners\EscalateUnansweredFollowUp;
 use App\Modules\Crm\Listeners\BroadcastCrmNotification;
 use App\Modules\Crm\Listeners\InboundReplyDeliveryDispatcher;
 use App\Modules\Crm\Listeners\ReminderDeliveryDispatcher;
+use App\Modules\Crm\Listeners\StampLastLoginAt;
 use App\Modules\Crm\Listeners\SendDueScheduledEmail;
 use App\Modules\Crm\Listeners\SyncLeadEngagementOnCompletion;
 use App\Modules\Crm\Models\Call;
@@ -46,6 +47,10 @@ use App\Modules\Crm\Policies\NotePolicy;
 use App\Modules\Crm\Policies\PlannerEventPolicy;
 use App\Modules\Crm\Policies\UserPolicy;
 use App\Modules\Crm\Services\BusinessRules\ScoringConfigProvider;
+use App\Modules\Crm\Services\Discovery\Contracts\ProposalGenerator;
+use App\Modules\Crm\Services\Discovery\Contracts\TagExpander;
+use App\Modules\Crm\Services\Discovery\OpenAiProposalGenerator;
+use App\Modules\Crm\Services\Discovery\OpenAiTagExpander;
 use App\Modules\Crm\Services\Kpi\KpiConfig;
 use App\Modules\Crm\Services\NicheCanonicalizer;
 use App\Modules\Crm\Services\Mail\Contracts\EmailProvider;
@@ -59,6 +64,7 @@ use App\Modules\Crm\Services\Scoring\ScoringConfig;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Notifications\Events\NotificationSent;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
@@ -95,6 +101,14 @@ class CrmServiceProvider extends ServiceProvider
             ScoringConfig::class,
             fn ($app): ScoringConfig => $app->make(ScoringConfigProvider::class)->resolve(),
         );
+
+        // Nearby candidate-name generation. Bound to an interface so the OpenAI credential stays on
+        // the server side of one seam: the scraper asks the CRM for names and never sees a key, and a
+        // different model vendor (or a fake in tests) swaps in here without the scraper learning
+        // anything. Not a singleton — it reads the stored configuration per call, so an admin's key
+        // or model change takes effect on the next request rather than after a restart.
+        $this->app->bind(ProposalGenerator::class, OpenAiProposalGenerator::class);
+        $this->app->bind(TagExpander::class, OpenAiTagExpander::class);
 
         // Business Niche registry lookup for the Nearby Clients surface. SCOPED (one instance per
         // request) on purpose: the canonicalizer memoizes the registry, so serializing a whole
@@ -182,6 +196,10 @@ class CrmServiceProvider extends ServiceProvider
         // enumerate super_admin in every branch. Returning null (not false) lets normal
         // policy/permission checks run for everyone else. Only ADDS access for super_admin.
         Gate::before(fn (User $user, string $ability): ?bool => $user->hasRole('super_admin') ? true : null);
+
+        // `users.last_login_at` is stamped by observing Laravel's own Login event rather than by
+        // editing the SHARED AuthController — see StampLastLoginAt for why the write belongs here.
+        Event::listen(Login::class, StampLastLoginAt::class);
 
         // RC3 Send-Later: a due scheduled email is delivered through the single outbound pipeline.
         Event::listen(ScheduledEmailDue::class, SendDueScheduledEmail::class);

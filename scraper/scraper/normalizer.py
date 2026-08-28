@@ -30,6 +30,12 @@ def normalize(raw: RawBusiness, source: str) -> NormalizedBusiness:
     carried when the provider supplied a usable one; it is the audit's input, not a verdict.
     ``contact_name`` is left unset — discovery rarely exposes a contact person, and the CRM defaults it
     to the business name (a documented normalization, not fabrication).
+
+    ``source`` PREFERS THE RECORD'S OWN LANE over the run's provider name. A composite run has two
+    lanes — the OpenStreetMap tag sweep and AI-assisted expansion — and labelling both with a single
+    run-level name would make it impossible to tell afterwards whether the AI leg contributed
+    anything. A record that does not name its own lane falls back to ``source``, so every existing
+    single-provider caller behaves exactly as it did before.
     """
     has_url = bool(raw.website and _looks_like_url(raw.website))
 
@@ -48,5 +54,5 @@ def normalize(raw: RawBusiness, source: str) -> NormalizedBusiness:
         latitude=raw.latitude,
         longitude=raw.longitude,
         place_id=raw.provider_id or None,
-        source=source,
+        source=raw.discovered_by or source,
     )

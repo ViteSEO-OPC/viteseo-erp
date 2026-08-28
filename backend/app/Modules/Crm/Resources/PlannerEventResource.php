@@ -3,6 +3,7 @@
 namespace App\Modules\Crm\Resources;
 
 use App\Modules\Crm\Models\PlannerEvent;
+use App\Modules\Crm\Services\ProfilePhotoService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -54,6 +55,8 @@ class PlannerEventResource extends JsonResource
             'owner' => $this->whenLoaded('owner', fn () => $this->owner ? [
                 'id' => (string) $this->owner->id,
                 'name' => $this->owner->name,
+                // Owner photo from the one shared avatar source. Null → initials on the card.
+                'avatarUrl' => ProfilePhotoService::url($this->owner->avatar),
             ] : null),
 
             'description' => $this->description,

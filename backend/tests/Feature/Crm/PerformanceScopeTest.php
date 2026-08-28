@@ -3,6 +3,7 @@
 namespace Tests\Feature\Crm;
 
 use App\Models\User;
+use App\Modules\Crm\Services\CrmAccessService;
 use App\Modules\Crm\Models\Lead;
 use Database\Seeders\RolesAndPermissionsSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -94,7 +95,10 @@ class PerformanceScopeTest extends TestCase
         $this->getJson("/api/v1/crm/dashboard/performance-summary?user_id={$anotherAdmin->id}")
             ->assertStatus(422)->assertJsonValidationErrors('user_id');
 
-        $inactiveBd = User::factory()->create(['status' => 'inactive']);
+        // CRM suspension now lives in `crm_user_access`, not the shared `users.status` column.
+        $inactiveBd = User::factory()->create(['status' => 'active']);
+        $inactiveBd->assignRole('crm_bd');
+        app(CrmAccessService::class)->suspend($inactiveBd);
         $inactiveBd->assignRole('crm_bd');
         $this->getJson("/api/v1/crm/dashboard/performance-summary?user_id={$inactiveBd->id}")
             ->assertStatus(422)->assertJsonValidationErrors('user_id');

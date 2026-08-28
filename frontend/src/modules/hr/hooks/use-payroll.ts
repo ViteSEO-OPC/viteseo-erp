@@ -1,9 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   getPayrollRuns,
+  getPayrollRunForCycle,
   getPayrollRun,
   runPayroll,
   markPayslipDone,
@@ -30,6 +32,7 @@ import {
   resolveRetroFlag,
   createPaymentBatch,
   getPaymentBatches,
+  getPaymentBatchTotals,
   getPaymentBatch,
   settlePayment,
   reconcilePaymentBatch,
@@ -58,8 +61,32 @@ export function useUpdatePayrollSettings() {
   });
 }
 
-export function usePayrollRuns() {
-  return useQuery({ queryKey: RUNS_KEY, queryFn: getPayrollRuns });
+/**
+ * Whether one exact period has already been run. `undefined` while loading, `null` when it has
+ * not been. See getPayrollRunForCycle() for why this is not a lookup through the history.
+ */
+export function usePayrollRunForCycle(
+  cycle?: { frequency: string; cycle_start: string; cycle_end: string },
+) {
+  return useQuery({
+    queryKey: [...RUNS_KEY, "for-cycle", cycle ?? "none"] as const,
+    queryFn: () => getPayrollRunForCycle(cycle!),
+    enabled: !!cycle,
+  });
+}
+
+/**
+ * One page of the run history, with the total.
+ *
+ * Each run row carries four aggregate subqueries over its own payslips, so the page size bounds
+ * work that scales with HEADCOUNT — not just the number of rows drawn.
+ */
+export function usePayrollRuns(params: QueueParams) {
+  return useQuery({
+    queryKey: [...RUNS_KEY, params] as const,
+    queryFn: () => getPayrollRuns(params),
+    placeholderData: keepPreviousData,
+  });
 }
 
 /**
@@ -106,11 +133,22 @@ export function useApplyMinimumWage() {
   });
 }
 
-export function usePayrollRun(id: number | undefined) {
+/**
+ * One run, with ONE PAGE of its per-employee breakdown.
+ *
+ * Everything the screen states about the run — the register totals, the correction notices,
+ * whether it can be locked — arrives as its own field, counted by the database. None of it may
+ * be derived from `breakdown`, which is ten rows of a payroll.
+ */
+export function usePayrollRun(
+  id: number | undefined,
+  breakdown?: { page: number; per_page: number; search?: string },
+) {
   return useQuery({
-    queryKey: ["hr", "payroll", "run", id],
-    queryFn: () => getPayrollRun(id!),
+    queryKey: ["hr", "payroll", "run", id, breakdown ?? "all"] as const,
+    queryFn: () => getPayrollRun(id!, breakdown),
     enabled: !!id,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -163,8 +201,16 @@ export function useReopenPayslip() {
 export function useSetPayrollRunLock() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, lock }: { id: number; lock: boolean }) =>
-      lock ? lockPayrollRun(id) : unlockPayrollRun(id),
+    mutationFn: ({
+      id,
+      lock,
+      acknowledgeOverpayment,
+    }: {
+      id: number;
+      lock: boolean;
+      /** Confirms locking over an unrecovered overpayment. See lockPayrollRun. */
+      acknowledgeOverpayment?: boolean;
+    }) => (lock ? lockPayrollRun(id, acknowledgeOverpayment) : unlockPayrollRun(id)),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["hr", "payroll", "run"] });
       qc.invalidateQueries({ queryKey: RUNS_KEY });
@@ -172,10 +218,12 @@ export function useSetPayrollRunLock() {
   });
 }
 
-export function useThirteenthMonth(year?: number) {
+/** One page of the 13th-month accrual, with the year's real total beside it. */
+export function useThirteenthMonth(year: number | undefined, params: QueueParams) {
   return useQuery({
-    queryKey: ["hr", "payroll", "thirteenth-month", year ?? "current"],
-    queryFn: () => getThirteenthMonth(year),
+    queryKey: ["hr", "payroll", "thirteenth-month", year ?? "current", params] as const,
+    queryFn: () => getThirteenthMonth(year, params),
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -309,10 +357,15 @@ export function useAmendPayrollRun() {
 }
 
 /** What recomputing a period would change. */
-export function useRerunPreview(runId: number | undefined, enabled = true) {
+/** One page of a re-run preview. Never cached — it recomputes a period to answer. */
+export function useRerunPreview(
+  runId: number | undefined,
+  enabled: boolean,
+  params: { page: number; per_page: number },
+) {
   return useQuery({
-    queryKey: ["hr", "payroll", "rerun-preview", runId],
-    queryFn: () => getRerunPreview(runId!),
+    queryKey: ["hr", "payroll", "rerun-preview", runId, params] as const,
+    queryFn: () => getRerunPreview(runId!, params),
     enabled: !!runId && enabled,
     staleTime: 0,
     gcTime: 0,
@@ -354,10 +407,29 @@ export function useResolveRetroFlag() {
 // --- Disbursement ------------------------------------------------------------------
 
 /** Every payment batch, newest first. Pass a run id to narrow it to one payroll. */
-export function usePaymentBatches(payrollRunId?: number) {
+/**
+ * What the run has been paid, across every batch.
+ *
+ * Its own query rather than a sum of the rows on screen: the list is paged, so an outstanding
+ * balance worked out from one page of the payments is simply a wrong number.
+ */
+export function usePaymentBatchTotals(payrollRunId?: number) {
   return useQuery({
-    queryKey: [...BATCHES_KEY, payrollRunId ?? "all"],
-    queryFn: () => getPaymentBatches(payrollRunId),
+    queryKey: [...BATCHES_KEY, "totals", payrollRunId ?? "all"] as const,
+    queryFn: () => getPaymentBatchTotals(payrollRunId),
+  });
+}
+
+/**
+ * One page of a run's payment batches, with the total. The endpoint always paged at twenty; the
+ * screen read page one and showed it as the whole list, so anything past the twentieth batch was
+ * invisible with nothing to say so.
+ */
+export function usePaymentBatches(payrollRunId: number | undefined, params: QueueParams) {
+  return useQuery({
+    queryKey: [...BATCHES_KEY, payrollRunId ?? "all", params] as const,
+    queryFn: () => getPaymentBatches(payrollRunId, params),
+    placeholderData: keepPreviousData,
   });
 }
 

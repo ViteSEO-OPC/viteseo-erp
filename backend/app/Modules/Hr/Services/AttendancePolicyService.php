@@ -6,12 +6,18 @@ use App\Modules\Hr\Models\AttendancePolicy;
 use App\Modules\Hr\Models\AttendancePolicyVersion;
 
 /**
- * The single attendance-policy row (Company → Rules). 's violation engine
+ * The single attendance-policy row (Company → Settings). 's violation engine
  * reads these thresholds; the task-format rule governs the time-in task checklist.
  */
 class AttendancePolicyService
 {
     public function __construct(private readonly AuditService $audit) {}
+
+    /**
+     * The date the opening version is filed under — far enough back that no pay cycle
+     * predates it, so `asOf()` can always find a version and never has to fall back.
+     */
+    public const OPENING_DATE = '2000-01-01';
 
     /**
      * Every editable field, with its current-behaviour default. The deduction-policy
@@ -144,7 +150,53 @@ class AttendancePolicyService
 
     public function get(): AttendancePolicy
     {
-        return $this->memo ??= AttendancePolicy::firstOrCreate([], self::DEFAULTS);
+        if ($this->memo !== null) {
+            return $this->memo;
+        }
+
+        $policy = AttendancePolicy::firstOrCreate([], self::DEFAULTS);
+
+        // The row coming into existence is itself the first thing worth remembering. Without
+        // this the opening version was never written on a fresh install — the migration below
+        // runs while this table is still empty, so its backfill always took the early return —
+        // and every `asOf()` for a date before the first EDIT fell through to the live row.
+        // Re-running an old cycle then priced it at today's rules, undoing the versioning.
+        if ($policy->wasRecentlyCreated) {
+            $this->writeVersion($policy, self::OPENING_DATE, null);
+        }
+
+        return $this->memo = $policy;
+    }
+
+    /**
+     * File the opening version — what the rules said before anyone ever changed them.
+     *
+     * Idempotent, so both callers can run freely: `get()` covers a fresh install, and the
+     * backfill migration covers a database that predates this. It snapshots DEFAULTS rather than
+     * the live row on purpose — the live row is whatever it has since been edited TO, and
+     * claiming those were the rules in force since 2000 is the exact error being fixed here.
+     *
+     * @return bool whether a row was written (false = one was already there)
+     */
+    public function ensureOpeningVersion(): bool
+    {
+        $exists = AttendancePolicyVersion::query()
+            ->whereDate('effective_from', '<=', self::OPENING_DATE)
+            ->exists();
+
+        if ($exists) {
+            return false;
+        }
+
+        // forceFill() runs the cast MUTATORS, so the attributes come out in database shape —
+        // arrays encoded — which is what asOf()'s newFromBuilder() expects to rehydrate.
+        $this->writeVersion(
+            (new AttendancePolicy)->forceFill(self::DEFAULTS),
+            self::OPENING_DATE,
+            null,
+        );
+
+        return true;
     }
 
     /**
@@ -251,6 +303,19 @@ class AttendancePolicyService
             $after ?: null,
         );
 
+        // Item 11 — the ladder, the graces and the carry-over switch are all inputs to the
+        // violation scan, so saving them re-judges history. Rebuilt from the date the version
+        // takes effect up to today; a save that changed nothing rebuilds nothing.
+        //
+        // Resolved lazily rather than injected: ViolationService takes this service as a
+        // constructor argument, so injecting it back would close a container cycle.
+        if ($before !== []) {
+            app(ViolationService::class)->recomputeRange(
+                $effectiveFrom,
+                now(config('app.timezone_local'))->toDateString(),
+            );
+        }
+
         return $policy;
     }
 
@@ -263,6 +328,18 @@ class AttendancePolicyService
     {
         $date = $effectiveFrom ?: now(config('app.timezone_local'))->toDateString();
 
+        $this->writeVersion($policy, $date, auth()->id());
+
+        return $date;
+    }
+
+    /**
+     * The single writer for this table, so the payload is shaped identically however it got here.
+     *
+     * @param  ?int  $createdBy  null for the opening version — nobody authored the stock state
+     */
+    private function writeVersion(AttendancePolicy $policy, string $date, ?int $createdBy): void
+    {
         // getAttributes() is already in database shape — array columns encoded, booleans as
         // 0/1 — which is exactly what asOf() expects to rehydrate through newFromBuilder().
         $payload = $policy->getAttributes();
@@ -275,11 +352,9 @@ class AttendancePolicyService
 
         AttendancePolicyVersion::updateOrCreate(
             ['effective_from' => $date],
-            ['payload' => $payload, 'created_by' => auth()->id()],
+            ['payload' => $payload, 'created_by' => $createdBy],
         );
 
         $this->asOfMemo = [];
-
-        return $date;
     }
 }

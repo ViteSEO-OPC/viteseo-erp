@@ -82,10 +82,12 @@ class StoreUserRequest extends FormRequest
             // beyond `crm_bd`, on BOTH the create and the grant path.
             'role' => ['required', Rule::in($this->user()->assignableRoles())],
 
-            // A grant never activates or suspends the existing account.
-            'status' => $granting
-                ? ['prohibited']
-                : ['sometimes', Rule::in(['active', 'inactive'])],
+            // Prohibited on BOTH branches. `status` is a column on the SHARED `users` row that
+            // TeamOra and Sprintly also read, and CRM no longer owns it: Zerem access lives in
+            // `crm_user_access` and is set by PATCH /users/{user}, never at creation. Accepting it
+            // here would write a value nothing in the CRM reads — an account that looked suspended
+            // in the shared column while Zerem, correctly, let it straight in.
+            'status' => ['prohibited'],
 
             // A grant never sets, resets, or generates a password — the person keeps the
             // credentials they already sign in to TeamOra/Sprintly with.
@@ -100,7 +102,9 @@ class StoreUserRequest extends FormRequest
     {
         return [
             'name.prohibited' => 'This email already belongs to a Vite SEO account — granting CRM access cannot change their name.',
-            'status.prohibited' => 'This email already belongs to a Vite SEO account — granting CRM access cannot change their status.',
+            // Not grant-specific, unlike the two around it: `status` is prohibited on BOTH branches,
+            // so this message must be true for a brand-new account as well.
+            'status.prohibited' => 'Account status is not set from the CRM. Zerem access is managed on the account after it exists.',
             'password.prohibited' => 'This email already belongs to a Vite SEO account — granting CRM access never changes their password.',
 
             // `email.unique` is only ever evaluated on the CREATE path, and a LIVE account can never

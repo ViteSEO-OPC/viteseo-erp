@@ -57,8 +57,11 @@ export function CandidateFormDialog({
   requisitionId: number;
 }) {
   const createMut = useCreateCandidate();
-  const { data: requisitions } = useRequisitions();
-  const activeReqs = (requisitions ?? []).filter((r) => r.stage === "active");
+  // A picker, so it asks the database for the ACTIVE requisitions rather than filtering a page
+  // of all of them — under the old version an active requisition past the first hundred simply
+  // could not be chosen for a new candidate.
+  const { data: requisitions } = useRequisitions({ page: 1, per_page: 100, status: "active" });
+  const activeReqs = requisitions?.items ?? [];
 
   const [resume, setResume] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);

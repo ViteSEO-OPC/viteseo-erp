@@ -31,6 +31,9 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
  */
 class ReportService
 {
+    /** Audit rows fetched per batch while streaming an export. */
+    private const AUDIT_STREAM_CHUNK = 500;
+
     public const KEYS = [
         'headcount', 'attrition', 'leave', 'compensation', 'payroll',
         'recruitment', 'diversity', 'health_safety', 'audit',
@@ -58,6 +61,8 @@ class ReportService
         // The reconciliation recomputes each employee's annual tax from the same dated
         // table payroll used, rather than trusting the figure payroll happened to withhold.
         private readonly TaxService $tax,
+        // Who the employer is, for the PDF letterhead.
+        private readonly CompanyProfileService $companyProfile,
     ) {}
 
     /** @param array<string, mixed> $filters */
@@ -123,6 +128,17 @@ class ReportService
      */
     public function download(string $key, array $filters = []): HttpResponse
     {
+        // The audit trail is the one report whose table has no natural ceiling — it grows for as
+        // long as the platform is used. Building it the ordinary way materialises every row twice
+        // (as Eloquent models, then as the finished CSV string), which is a guaranteed
+        // out-of-memory at a few hundred thousand rows. It streams instead, one row at a time.
+        // The rest are bounded by headcount × period and are cheaper to leave alone.
+        if ($key === 'audit') {
+            $date = now(config('app.timezone_local'))->format('Y-m-d');
+
+            return CsvWriter::stream($this->auditCsvRows($filters), "audit-trail-{$date}.csv");
+        }
+
         // An export carries EVERY row in range, not the first page. A file named after the
         // whole period that contains page 1 of 4 is the same silent truncation the old 300-row cap
         // was, moved into a filename.
@@ -142,6 +158,8 @@ class ReportService
         return Pdf::loadView('hr::report', [
             'r' => $report,
             'generatedAt' => now(config('app.timezone_local'))->format('M j, Y g:i A'),
+            // The letterhead, from Company → Settings — the same one the payslip prints.
+            'company' => $this->companyProfile->letterhead(),
         ])->download("{$slug}-{$date}.pdf");
     }
 
@@ -267,7 +285,7 @@ class ReportService
 
         return [
             'title' => 'Headcount & Movement',
-            'description' => 'Joiners, leavers, transfers; net change by department and month; filterable by department, location, date range.',
+            'description' => 'Onboard, off-board, transfers; net change by department and month; filterable by department, location, date range.',
             'mock' => false,
             'summary' => [
                 ['label' => 'Total headcount', 'value' => (string) $total],
@@ -508,16 +526,19 @@ class ReportService
                     array_values($byDepartment),
                 ),
             ],
-            'table' => [
-                'columns' => ['Employee', 'Department', 'Unused days', 'Daily rate', 'Liability'],
-                'rows' => array_map(fn (array $r) => [
+            // One row per employee, so paged. The summary above is computed from $byDepartment,
+            // not from these rows — see pagedTable().
+            'table' => $this->pagedTable(
+                ['Employee', 'Department', 'Unused days', 'Daily rate', 'Liability'],
+                array_map(fn (array $r) => [
                     $r['name'],
                     $r['department'],
                     number_format($r['days'], 1),
                     $this->peso($r['daily_rate']),
                     $this->peso($r['amount']),
                 ], $rows),
-            ],
+                $filters,
+            ),
             'departments' => $departments,
             'note' => 'An estimate at today\'s salaries and today\'s balances. Only PAID leave types count '
                 . 'toward it, valued on the same basis final pay uses to convert unused leave to cash. '
@@ -698,10 +719,13 @@ class ReportService
                 ['label' => 'Tax withheld', 'value' => $this->pesoExact($totalWithheld)],
             ],
             'bars' => null,
-            'table' => [
-                'columns' => ['Employee', 'Department', 'Payslips', 'Taxable pay', 'Tax due', 'Tax withheld', 'Difference', 'Status'],
-                'rows' => $rows,
-            ],
+            // One row per employee, so paged. The four figures above come from their own
+            // running totals, not from these rows — see pagedTable().
+            'table' => $this->pagedTable(
+                ['Employee', 'Department', 'Payslips', 'Taxable pay', 'Tax due', 'Tax withheld', 'Difference', 'Status'],
+                $rows,
+                $filters,
+            ),
             'years' => $this->reconciliationYears(),
             'selected_year' => $year,
             'note' => $this->reconciliationNote(count($rows), $short, $over, $unsettled, $year),
@@ -801,12 +825,18 @@ class ReportService
         $rows = [];
         $running = $this->blankTotals();
 
+        // Built as BLOCKS — a department's staff and the subtotal that closes them, kept
+        // together. The register is paged, and a page boundary between a group and its subtotal
+        // would put a total at the top of a page with nothing above it to be the total of.
+        $blocks = [];
+
         foreach ($slips->groupBy(fn (Payslip $p) => $p->employee?->department?->name ?? 'Unassigned') as $department => $group) {
             $subtotal = $this->blankTotals();
+            $block = [];
 
             foreach ($group as $slip) {
                 $line = $this->registerLine($slip);
-                $rows[] = array_merge([$slip->employee?->user?->name ?? '—', $department], $line['display']);
+                $block[] = array_merge([$slip->employee?->user?->name ?? '—', $department], $line['display']);
 
                 foreach ($line['figures'] as $key => $value) {
                     $subtotal[$key] = round($subtotal[$key] + $value, 2);
@@ -816,10 +846,13 @@ class ReportService
 
             // A subtotal row rather than a separate table: it belongs where the eye already is, in
             // the sequence it summarises. Marked with an em dash so it reads as a rule, not a person.
-            $rows[] = array_merge(["— {$department} subtotal —", (string) $group->count() . ' staff'], array_map(
+            $block[] = array_merge(["— {$department} subtotal —", (string) $group->count() . ' staff'], array_map(
                 fn (float $v) => $this->pesoExact($v),
                 array_values($subtotal),
             ));
+
+            $blocks[] = $block;
+            $rows = array_merge($rows, $block);
         }
 
         // --- variance against the previous run of the SAME pay group -----------------------------
@@ -882,10 +915,13 @@ class ReportService
                 ['label' => 'Employees', 'value' => (string) $slips->count()],
             ],
             'bars' => null,
-            'table' => [
-                'columns' => array_merge(['Employee', 'Department'], array_values($this->registerColumns())),
-                'rows' => $rows,
-            ],
+            // One row per PAYSLIP, so as long as the run. The headline totals above are summed
+            // from $slips and $running, never from these rows — see pagedTable().
+            'table' => $this->pagedBlocks(
+                array_merge(['Employee', 'Department'], array_values($this->registerColumns())),
+                $blocks,
+                $filters,
+            ),
             'variance' => $variance,
             'departments' => $departments,
             // So the UI can offer a run picker rather than only ever showing the latest.
@@ -1386,14 +1422,167 @@ class ReportService
         ];
     }
 
+    /**
+     * The window the audit trail covers. Shared by the screen and its export so the two cannot
+     * drift into disagreeing about which rows are "in range".
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    /**
+     * One page of a report's table, in the shape the report envelope already uses.
+     *
+     * Three of the report tables carry a row per EMPLOYEE — leave liability, the tax
+     * reconciliation, the payroll register — so each is as long as the company. They were served
+     * whole so that a screen could draw ten lines of them.
+     *
+     * The rows are built first and paged after, which is the same order the attendance views use
+     * and for the same reason: a report row is a formatted derivation, not a database row, and
+     * there is nothing to put a LIMIT on until it exists. What this bounds is the payload.
+     *
+     * The `summary` cards above each table are NOT touched by this. Every one of them is computed
+     * from the source collection rather than from `rows` — which is what makes paging the rows
+     * safe, and is worth stating because the opposite would be invisible: a register whose
+     * headline total quietly described ten payslips.
+     *
+     * @param  list<string>  $columns
+     * @param  list<list<string>>  $rows
+     * @param  array<string, mixed>  $filters  page, per_page
+     * @return array{columns: list<string>, rows: list<list<string>>, meta: array<string, int>}
+     */
+    private function pagedTable(array $columns, array $rows, array $filters): array
+    {
+        return $this->pagedBlocks($columns, array_map(fn (array $row) => [$row], $rows), $filters);
+    }
+
+    /**
+     * The same, for a table whose rows come in BLOCKS that must not be split.
+     *
+     * The payroll register is not a flat list — it interleaves a subtotal row after each
+     * department's staff. Paging it by row would put a subtotal at the top of a page with the
+     * rows it summarises on the one before, or strand a department's last two people alone. So
+     * whole blocks are paged, and `per_page` becomes a target rather than an exact count: a page
+     * takes blocks until it reaches the target, and always takes at least one.
+     *
+     * `meta.total` still counts ROWS, because that is the number a reader is asking about when
+     * they look at "showing 25 of 400".
+     *
+     * @param  list<string>  $columns
+     * @param  list<list<list<string>>>  $blocks
+     * @param  array<string, mixed>  $filters  page, per_page
+     * @return array{columns: list<string>, rows: list<list<string>>, meta: array<string, int>}
+     */
+    private function pagedBlocks(array $columns, array $blocks, array $filters): array
+    {
+        $perPage = min(200, max(1, (int) ($filters['per_page'] ?? 25)));
+
+        // Blocks grouped into pages, each page taking blocks until it reaches the target.
+        $pages = [];
+        $current = [];
+        $currentRows = 0;
+
+        foreach ($blocks as $block) {
+            if ($currentRows > 0 && $currentRows + count($block) > $perPage) {
+                $pages[] = $current;
+                $current = [];
+                $currentRows = 0;
+            }
+
+            $current = array_merge($current, $block);
+            $currentRows += count($block);
+        }
+
+        if ($current !== []) {
+            $pages[] = $current;
+        }
+
+        $lastPage = max(1, count($pages));
+        $page = min($lastPage, max(1, (int) ($filters['page'] ?? 1)));
+
+        return [
+            'columns' => $columns,
+            'rows' => array_values($pages[$page - 1] ?? []),
+            'meta' => [
+                'total' => array_sum(array_map('count', $blocks)),
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'last_page' => $lastPage,
+            ],
+        ];
+    }
+
+
+    /**
+     * The audit query both the screen and the export read from — ONE builder, deliberately.
+     * A search honoured on screen and dropped on export produces a file that disagrees with
+     * the table it was downloaded from, which is the same trap the shared FILTERS list in
+     * ReportController exists to avoid.
+     *
+     * The search is server-side because the table is not: the screen holds one page of a log
+     * that grows forever, so a filter applied in the browser would only ever search the page
+     * already on it and report "no matches" for a record sitting on page 40.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function auditQuery(array $filters): \Illuminate\Database\Eloquent\Builder
+    {
+        $search = trim((string) ($filters['search'] ?? ''));
+
+        return AuditLog::with('user')
+            ->where('created_at', '>=', $this->auditSince($filters))
+            ->when($search !== '', function ($q) use ($search) {
+                // Grouped: these branches are OR'd, and AND binds tighter, so ungrouped the
+                // date floor above would guard only the first of them.
+                $q->where(function ($group) use ($search) {
+                    $group->where('description', 'like', "%{$search}%")
+                        ->orWhere('action', 'like', "%{$search}%")
+                        ->orWhere('module', 'like', "%{$search}%")
+                        ->orWhereHas('user', fn ($u) => $u->where('name', 'like', "%{$search}%"));
+                });
+            });
+    }
+
+    private function auditSince(array $filters): Carbon
+    {
+        $months = (int) ($filters['months'] ?? 9);
+
+        return now(config('app.timezone_local'))->startOfMonth()->subMonths(max(0, $months - 1));
+    }
+
+    /**
+     * The audit trail as CSV rows, pulled a batch at a time and yielded one row at a time, so an
+     * export never holds more than a batch in memory however long the log has grown.
+     *
+     * Walked by descending ID rather than `latest()`: an append-only log's id order and its
+     * created_at order agree, and id-keyed batching is stable against rows being written while
+     * the export runs. LIMIT/OFFSET paging is not — a concurrent insert shifts every later page,
+     * which duplicates or drops rows. That is a bad outcome in any export and a worse one in the
+     * compliance record.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return \Generator<int, array<int, string>>
+     */
+    private function auditCsvRows(array $filters): \Generator
+    {
+        yield ['Timestamp', 'User', 'Module', 'Action', 'Details'];
+
+        $logs = $this->auditQuery($filters)->lazyByIdDesc(self::AUDIT_STREAM_CHUNK);
+
+        foreach ($logs as $entry) {
+            yield [
+                $entry->created_at?->format('Y-m-d H:i') ?? '—',
+                $entry->user?->name ?? 'System',
+                $entry->module ?? '—',
+                $entry->action,
+                $entry->description ?? '—',
+            ];
+        }
+    }
+
     /** @param array<string, mixed> $filters */
     private function audit(array $filters): array
     {
-        $months = (int) ($filters['months'] ?? 9);
-        $since = now(config('app.timezone_local'))->startOfMonth()->subMonths(max(0, $months - 1));
-
         // PAGINATED, and it states the total.
-        $query = AuditLog::with('user')->where('created_at', '>=', $since)->latest();
+        $query = $this->auditQuery($filters)->latest();
 
         $total = $query->clone()->count();
         $exportAll = (bool) ($filters['all'] ?? false);

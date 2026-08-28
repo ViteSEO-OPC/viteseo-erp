@@ -1,6 +1,7 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueueParams } from "@/modules/hr/api/queue";
 
 import {
   submitRemoteCheckin,
@@ -22,11 +23,19 @@ export function useMyRemoteCheckin(enabled = true) {
 }
 
 /** HR's queue. Polls, because a submission arrives without HR doing anything. */
-export function useRemoteCheckins(status = "pending") {
+/**
+ * One page of the remote check-in queue, OLDEST first.
+ *
+ * Polled every minute, which is why paging it matters more than the row count suggests: an
+ * unbounded read on a timer is the shape that hurts. The order is deliberate — whoever has been
+ * waiting longest is reviewed first.
+ */
+export function useRemoteCheckins(status: string, params: QueueParams) {
   return useQuery({
-    queryKey: [...QUEUE_KEY, status],
-    queryFn: () => getRemoteCheckins(status),
+    queryKey: [...QUEUE_KEY, status, params] as const,
+    queryFn: () => getRemoteCheckins(status, params),
     refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
   });
 }
 

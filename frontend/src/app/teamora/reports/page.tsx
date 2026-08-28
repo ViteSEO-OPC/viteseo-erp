@@ -28,7 +28,7 @@ const REPORTS: {
   {
     key: "headcount",
     title: "Headcount & Movement",
-    description: "Joiners, leavers, transfers; net change by department and month; filterable by department, location, date range.",
+    description: "Onboard, off-board, transfers; net change by department and month; filterable by department, location, date range.",
     icon: Users,
   },
   {

@@ -106,7 +106,28 @@ export interface PayrollRun {
    * Present on the response to a run that just executed; null when a run is merely read back.
    */
   override_notes?: string[] | null;
+  /**
+   * ONE PAGE of the per-employee breakdown. Read `breakdown_meta.total` for how many rows the
+   * run actually has — `breakdown.length` is the page, and every figure the screen states about
+   * the run comes from its own field below rather than from summing these.
+   */
   breakdown?: PayrollBreakdownRow[];
+  /** What the page above is a page of. Detail view only. */
+  breakdown_meta?: { total: number; page: number; per_page: number } | null;
+  /**
+   * Whole-run counts, from the DATABASE. Detail view only.
+   *
+   * These exist because the breakdown is paged: the screen used to derive each of them by
+   * filtering the loaded rows, which would now describe ten employees while looking exactly as
+   * authoritative — and three of them are money.
+   */
+  disbursed_count?: number;
+  /** Payslips a correction left short after payment, and the total still to pay. */
+  owing_count?: number;
+  owing_total?: number;
+  /** The mirror image: corrected downward after the money had already gone out. */
+  overpaid_count?: number;
+  overpaid_total?: number;
 }
 
 /**
@@ -624,6 +645,11 @@ export interface RerunPreviewRow {
 }
 
 export interface RerunPreviewMeta {
+  /** What the page above is a page of — the run, not the rows in hand. */
+  total: number;
+  current_page: number;
+  per_page: number;
+  last_page: number;
   net_before: number;
   net_after: number;
   delta: number;
@@ -801,7 +827,7 @@ export interface DeductionArrear {
 /**
  * The withholding-tax table, exposed so it can be checked against the BIR schedule.
  *
- * `max_annual` is derived server-side (the next band's floor − 0.01) because the table stores only
+ * `max_annual` is derived server-side (the next band's floor) because the table stores only
  * floors, while the BIR prints ranges — and a range is what makes it checkable. Null on the top band.
  */
 export interface TaxBand {
@@ -819,7 +845,18 @@ export interface TaxTable {
   /** True when `as_of` precedes every version and the earliest table was used instead. */
   is_fallback: boolean;
   bands: TaxBand[];
-  versions: { effective_from: string | null; note: string | null }[];
+  versions: { id: number; effective_from: string | null; note: string | null }[];
+  /** Today in Manila — the date the editor publishes for. There is no date to choose. */
+  today: string;
+  /** True when a table was already published today, so saving replaces it rather than adding one. */
+  has_version_today: boolean;
+}
+
+/** One band as the editor sends it. Floors and money in pesos; the rate as a decimal (0.15 = 15%). */
+export interface TaxBandInput {
+  min_annual: number;
+  base_tax: number;
+  rate_on_excess: number;
 }
 
 /** One employee this run would pay below the regional minimum daily wage. */

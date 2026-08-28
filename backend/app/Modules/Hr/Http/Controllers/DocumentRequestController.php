@@ -19,7 +19,11 @@ class DocumentRequestController extends Controller
     // GET /hr/document-requests — HR queue (all). GET /hr/me/document-requests — own.
     public function index(Request $request): JsonResponse
     {
-        return DocumentRequestResource::collection($this->service->list($request->user()))->response();
+        // The three the queue tables send. `search` and `status` are applied by the DATABASE —
+        // applied in the browser they would only narrow the page already on screen.
+        return DocumentRequestResource::collection(
+            $this->service->list($request->user(), $request->only(['search', 'status', 'per_page'])),
+        )->response();
     }
 
     // POST /hr/me/document-requests — the caller requests a document.
