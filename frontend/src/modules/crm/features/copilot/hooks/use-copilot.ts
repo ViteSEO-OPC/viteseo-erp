@@ -70,7 +70,7 @@ function computeCapabilities(
       ctx.metrics.hotLeads > 0 || ctx.topLeads.some((lead) => lead.priority.toLowerCase() === "high"),
     hasNewLeads: ctx.metrics.newLeads > 0,
     hasFollowUps: ctx.metrics.followUps > 0 || ctx.followUpsList.length > 0,
-    canEmail: can("follow-ups.create"),
+    canEmail: can("crm.follow-ups.create"),
     isManager,
   };
 }
