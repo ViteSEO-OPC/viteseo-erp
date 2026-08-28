@@ -109,6 +109,12 @@
   /* Copilot tokens — ⚠ sampled values, pending designer confirmation */
   --copilot-fab-open-bg: #2F3E3E;
   --copilot-fab-open-hover: #253333;
+  /* FAB elevation. Light keeps the original --shadow-fab drop shadow (a teal-900 cast against a
+     pale page); dark swaps it for a teal glow below, because a dark shadow on #141414 is invisible
+     and the FAB reads as a flat disc. Separate tokens rather than overriding --shadow-fab so the
+     Dashboard FAB, which shares that token, is untouched. */
+  --copilot-fab-shadow: 0 6px 16px rgba(12, 98, 96, 0.30);
+  --copilot-fab-shadow-hover: 0 8px 22px rgba(12, 98, 96, 0.38);
   --copilot-header-gradient-from: #E3F9F2;
   --copilot-header-gradient-to: #F5F7F2;
   --copilot-top-accent: #DFF9F1;
@@ -371,6 +377,17 @@
   --copilot-header-gradient-to: var(--dark-card);
   --copilot-chip-bg: rgba(79, 216, 215, 0.10);
   --copilot-chip-border: rgba(79, 216, 215, 0.30);
+  /* Teal glow, same brand hue as the FAB itself (teal-400). Three layers: a hairline rim that
+     separates the disc from the page, a short drop that keeps it sitting on the surface, and a
+     wide soft bloom that carries the visibility. */
+  --copilot-fab-shadow:
+    0 0 0 1px rgba(79, 216, 215, 0.35),
+    0 4px 14px rgba(79, 216, 215, 0.30),
+    0 0 30px rgba(79, 216, 215, 0.22);
+  --copilot-fab-shadow-hover:
+    0 0 0 1px rgba(79, 216, 215, 0.55),
+    0 4px 16px rgba(79, 216, 215, 0.42),
+    0 0 40px rgba(79, 216, 215, 0.34);
 
   /* Priority / lead / calendar / chart accents kept as brand hues (read on dark). */
 
