@@ -158,6 +158,8 @@ type LeadsTableProps = {
   onBulkDelete: () => void;
   /** Download the ticked rows as CSV. Client-side and read-only, so it is not role-gated. */
   onBulkExport: () => void;
+  /** Open the status picker for the ticked rows. Rendered only for a BD (see the bar below). */
+  onBulkStatus: () => void;
   /** True while a bulk delete is in flight — locks the checkboxes + bar. */
   bulkDeleting: boolean;
   /** Open the Assign BD confirmation for the selected leads. Rendered only when `canAssign`. */
@@ -209,6 +211,7 @@ export function LeadsTable({
   onClearSelection,
   onBulkDelete,
   onBulkExport,
+  onBulkStatus,
   bulkDeleting,
   onBulkAssign,
   bulkAssigning,
@@ -405,6 +408,23 @@ export function LeadsTable({
                   <span className="font-semibold text-foreground">
                     {selectedCount} Lead{selectedCount === 1 ? "" : "s"} Selected
                   </span>
+                  {/* BD ONLY, and the inverse of the two gates below it: a BD's bulk bar was
+                      Export and Clear alone, so working a batch of leads through a calling or
+                      emailing session meant opening each one. Admin/SA are excluded on purpose —
+                      this task did not touch their bar, and they keep Delete and Reassign in the
+                      exact positions they already know. Every PATCH is still authorized per lead
+                      (crm.leads.edit + ownership), so this widens no one's reach. */}
+                  {!canAssign ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={onBulkStatus}
+                      disabled={bulkBusy}
+                    >
+                      Status
+                    </Button>
+                  ) : null}
                   {/* Same `canAssign` gate as the per-row Delete directly below and as bulk
                       Reassign beside it. Selection itself is open to every role, so without this a
                       BD could tick rows, see a destructive button, and collect a 403 from each

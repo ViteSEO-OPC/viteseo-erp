@@ -6,6 +6,7 @@ import { notify as toast } from "@/core/lib/notify";
 import { apiClient } from "@/modules/crm/lib/axios";
 import { getApiErrorMessage } from "@/modules/crm/lib/api-error";
 import { queryKeys } from "@/modules/crm/lib/query-keys";
+import { EDITABLE_STATUS_OPTIONS } from "@/modules/crm/lib/lead-status";
 import type {
   ImportResult,
   Lead,
@@ -314,6 +315,71 @@ export function useAssignLeadsToNiche() {
  * the caches the single assign does, plus each reassigned lead's own detail. One combined success /
  * error toast replaces the per-lead toasts.
  */
+/**
+ * Set ONE status on every selected lead — a single logical action that fans out over the SAME
+ * authoritative `PATCH /leads/{id}` route (once per lead) with `{ status }`. This is exactly what
+ * the Lead Detail quick-change already sends, so it introduces no new endpoint and no new business
+ * logic; the options come from the frozen taxonomy (`EDITABLE_STATUS_OPTIONS`).
+ *
+ * The per-lead fan-out is deliberate, not a missing bulk endpoint: `LeadObserver::updated` treats
+ * `status` as a SCORING_INPUT, so each PATCH re-runs `LeadScorer::refresh` and writes its own
+ * `updated` Activity. Doing this N times is the POINT — a bulk change must leave exactly the same
+ * scores and audit trail as changing the leads one at a time. Nothing is bypassed or batched away.
+ *
+ * `Promise.all` + per-request try/catch lets one failure NOT abort the rest; the caller keeps the
+ * failed ids selected. Authorization is unchanged and enforced per lead: `LeadPolicy@update` is
+ * `crm.leads.edit` + `isVisibleTo`, so a BD can only ever write their own leads even if an id were
+ * forged. Status feeds the funnel, the status mix and the dashboard counts, so those caches are
+ * refreshed alongside the list on completion.
+ */
+export function useBulkUpdateLeadStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids, status }: { ids: string[]; status: string }): Promise<BulkAssignResult> => {
+      const outcomes = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            await apiClient.patch(`/leads/${id}`, { status });
+            return { id, ok: true as const };
+          } catch (reason) {
+            return { id, ok: false as const, reason };
+          }
+        }),
+      );
+      const succeeded = outcomes.filter((o) => o.ok).map((o) => o.id);
+      const failed = outcomes
+        .filter((o) => !o.ok)
+        .map((o) => ({ id: o.id, reason: "reason" in o ? o.reason : undefined }));
+      return { succeeded, failed };
+    },
+    onSuccess: ({ succeeded, failed }, { status }) => {
+      if (succeeded.length > 0) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.leads.lists() });
+        queryClient.invalidateQueries({ queryKey: queryKeys.reports.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.performance.all });
+        queryClient.invalidateQueries({ queryKey: queryKeys.activityLogs.all });
+        const label =
+          EDITABLE_STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status;
+        toast.success(
+          `${succeeded.length} lead${succeeded.length === 1 ? "" : "s"} set to "${label}"`,
+        );
+      }
+      if (failed.length > 0) {
+        toast.error(
+          getApiErrorMessage(
+            failed[0]?.reason,
+            `Failed to update ${failed.length} lead${failed.length === 1 ? "" : "s"}`,
+          ),
+        );
+      }
+    },
+    onError: (err) => {
+      toast.error(getApiErrorMessage(err, "Failed to update leads"));
+    },
+  });
+}
+
 export function useBulkAssignLeads() {
   const queryClient = useQueryClient();
   return useMutation({

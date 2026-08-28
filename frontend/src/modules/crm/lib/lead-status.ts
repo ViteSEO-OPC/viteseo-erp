@@ -24,3 +24,16 @@ export const LEAD_STATUS_CONFIG = [
 
 /** Union of the status enum keys, derived from the config above (stays in sync automatically). */
 export type LeadStatusKey = (typeof LEAD_STATUS_CONFIG)[number]["value"];
+
+/**
+ * The statuses a user may SET, in the same order as the taxonomy above — the full enum minus the
+ * create-only "new", which a lead leaves on first contact and can never be returned to.
+ *
+ * Derived from LEAD_STATUS_CONFIG rather than retyped, so a change to the taxonomy cannot leave the
+ * two disagreeing. This list moved here from quick-actions-card.tsx when the Leads bulk bar needed
+ * the same options: a component is the wrong home for a vocabulary two surfaces share, and this
+ * file already declares itself the single source of truth for status order and labels.
+ */
+export const EDITABLE_STATUS_OPTIONS = LEAD_STATUS_CONFIG.filter(
+  (status) => status.value !== "new",
+).map(({ value, label }) => ({ value, label }));

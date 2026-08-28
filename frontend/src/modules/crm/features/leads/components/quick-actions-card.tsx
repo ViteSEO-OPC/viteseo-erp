@@ -9,6 +9,9 @@ import {
 import { StatusChip } from "@/modules/crm/components/shared/status-badge/status-chip";
 import { LeadOutcomeChip } from "@/modules/crm/features/leads/components/lead-outcome-chip";
 import { formatDateLong } from "@/modules/crm/lib/formatters";
+// The four editable statuses now live beside the taxonomy itself — the Leads bulk bar
+// needs the same list, and a component is the wrong home for a shared vocabulary.
+import { EDITABLE_STATUS_OPTIONS } from "@/modules/crm/lib/lead-status";
 import type { LeadStatus } from "@/modules/crm/features/dashboard/types/dashboard-types";
 import type { LeadDeal, QuickAction, QuickActionKey } from "@/modules/crm/features/leads/types/lead-detail-types";
 
@@ -20,14 +23,6 @@ const iconToneStyles: Record<string, string> = {
   teal: "bg-[var(--qa-tile-teal)] text-[var(--qa-icon-teal)]",
   amber: "bg-[var(--qa-tile-amber)] text-[var(--qa-icon-orange)]",
 };
-
-// The four editable lead statuses (the frozen enum minus the create-only "new").
-const STATUS_OPTIONS: { value: LeadStatus; label: string }[] = [
-  { value: "interested", label: "Interested" },
-  { value: "awaiting-reply", label: "Awaiting Reply" },
-  { value: "call-back-req", label: "Call-back Req." },
-  { value: "declined", label: "Declined" },
-];
 
 type Props = {
   /** Row actions: "email" (redirect to Outreach) and "follow-up" (Schedule modal). */
@@ -80,7 +75,7 @@ export function QuickActionsCard({
             <StatusChip status={status} />
           </SelectTrigger>
           <SelectContent>
-            {STATUS_OPTIONS.map((s) => (
+            {EDITABLE_STATUS_OPTIONS.map((s) => (
               <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
             ))}
           </SelectContent>
